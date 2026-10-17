@@ -668,6 +668,91 @@ public class HistoryStoreMergerTests
         Assert.Equal("active", live.ReceivedQueries[0].CarrySeed?.Json?.GetString());
     }
 
+    // Delta reading ---------------------------------------------------------------------------
+
+    [Fact]
+    public async Task WhenDeltaSpansTwoStores_ThenEachSegmentStartsFromTheNewestReadingBeforeIt()
+    {
+        // Arrange: the durable store covers [0,20) and holds 100 at 5; the live store covers [20,40) and holds 130 at 25.
+        var durable = new FakeHistoryStore { Priority = 10, CurrentCoverage = new(At(0), At(20)) }.AddSample(At(5), 100);
+        var live = new FakeHistoryStore { Priority = 100, CurrentCoverage = new(At(20), At(40)) }.AddSample(At(25), 130);
+        var query = new HistoryQuery("/a/Energy", At(0), At(40), TimeSpan.FromMinutes(20), HistoryAggregations.Delta);
+
+        // Act
+        await new[] { durable, live }.QueryHistoryAsync(query, CancellationToken.None);
+
+        // Assert: the live store's segment was seeded with the durable store's reading.
+        var liveQuery = Assert.Single(live.ReceivedQueries);
+        Assert.Equal(100d, liveQuery.CarrySeed?.Number);
+    }
+
+    [Fact]
+    public async Task WhenDeltaSegmentFollowsAGap_ThenTheSeedStillBridgesIt()
+    {
+        // Arrange: nothing covers [20,30); the live store covers [30,40).
+        var durable = new FakeHistoryStore { Priority = 10, CurrentCoverage = new(At(0), At(20)) }.AddSample(At(5), 100);
+        var live = new FakeHistoryStore { Priority = 100, CurrentCoverage = new(At(30), At(40)) }.AddSample(At(35), 130);
+        var query = new HistoryQuery("/a/Energy", At(0), At(40), TimeSpan.FromMinutes(10), HistoryAggregations.Delta);
+
+        // Act
+        await new[] { durable, live }.QueryHistoryAsync(query, CancellationToken.None);
+
+        // Assert
+        var liveQuery = Assert.Single(live.ReceivedQueries);
+        Assert.Equal(100d, liveQuery.CarrySeed?.Number);
+    }
+
+    [Fact]
+    public async Task WhenDeltaHandsOverInsideTheLastBucket_ThenTheNextSegmentStartsFromTheReadingThePreviousConsumed()
+    {
+        // Arrange: the durable store covers [0,27) and owns [20,30) (7 of 10 minutes); the live store covers [24,40)
+        // and owns [30,40). The live reading at 29 lies inside the durable store's bucket, which never consumed it.
+        var durable = new FakeHistoryStore { Priority = 10, CurrentCoverage = new(At(0), At(27)) }.AddSample(At(22), 120);
+        var live = new FakeHistoryStore { Priority = 100, CurrentCoverage = new(At(24), At(40)) }.AddSample(At(29), 128).AddSample(At(35), 130);
+        var query = new HistoryQuery("/a/Energy", At(0), At(40), TimeSpan.FromMinutes(10), HistoryAggregations.Delta);
+
+        // Act
+        await new[] { durable, live }.QueryHistoryAsync(query, CancellationToken.None);
+
+        // Assert: seeding from 128 would lose the increase from 120 to 128.
+        var liveQuery = Assert.Single(live.ReceivedQueries);
+        Assert.Equal(At(30), liveQuery.From);
+        Assert.Equal(120d, liveQuery.CarrySeed?.Number);
+    }
+
+    [Fact]
+    public async Task WhenDeltaSegmentConsumedNoReadingOfItsOwn_ThenTheNextSegmentKeepsItsSeed()
+    {
+        // Arrange: the live store owns [30,40) and holds 128 at 29 only, which lies in the durable store's bucket.
+        // The archive store owns [40,50).
+        var durable = new FakeHistoryStore { Priority = 10, CurrentCoverage = new(At(0), At(27)) }.AddSample(At(22), 120);
+        var live = new FakeHistoryStore { Priority = 100, CurrentCoverage = new(At(24), At(40)) }.AddSample(At(29), 128);
+        var archive = new FakeHistoryStore { Priority = 50, CurrentCoverage = new(At(40), At(50)) }.AddSample(At(45), 140);
+        var query = new HistoryQuery("/a/Energy", At(0), At(50), TimeSpan.FromMinutes(10), HistoryAggregations.Delta);
+
+        // Act
+        await new[] { durable, live, archive }.QueryHistoryAsync(query, CancellationToken.None);
+
+        // Assert: the live segment consumed only its seed 120, so the archive segment starts from 120, not 128.
+        Assert.Equal(120d, Assert.Single(live.ReceivedQueries).CarrySeed?.Number);
+        Assert.Equal(120d, Assert.Single(archive.ReceivedQueries).CarrySeed?.Number);
+    }
+
+    [Fact]
+    public async Task WhenDeltaFirstSegmentIsSeeded_ThenTheNewestReadingAcrossStoresWins()
+    {
+        // Arrange: the higher-priority store holds an older reading (90 at 2) than the lower-priority one (100 at 15).
+        var lowPriority = new FakeHistoryStore { Priority = 10, CurrentCoverage = new(At(0), At(20)) }.AddSample(At(15), 100);
+        var highPriority = new FakeHistoryStore { Priority = 100, CurrentCoverage = new(At(20), At(40)) }.AddSample(At(2), 90);
+        var query = new HistoryQuery("/a/Energy", At(20), At(40), TimeSpan.FromMinutes(10), HistoryAggregations.Delta);
+
+        // Act
+        await new[] { lowPriority, highPriority }.QueryHistoryAsync(query, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(100d, Assert.Single(highPriority.ReceivedQueries).CarrySeed?.Number);
+    }
+
     // Eligibility -----------------------------------------------------------------------------
 
     [Fact]
@@ -857,6 +942,62 @@ public class HistoryStoreMergerTests
     }
 
     [Fact]
+    public async Task WhenABucketedQueryStartsInsideItsFirstBucket_ThenCoverageStartsAtThatBucketStart()
+    {
+        // Arrange
+        var store = new FakeHistoryStore
+        {
+            Priority = 100,
+            CurrentCoverage = new HistoryCoverage(At(0), At(180))
+        }.AddSample(At(45), 1);
+        var query = new HistoryQuery(
+            "temp", At(23), At(143), TimeSpan.FromHours(1), HistoryAggregations.Count, MaxPoints: 100);
+
+        // Act
+        var series = await new[] { store }.QueryHistoryAsync(query, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(new[] { new HistoryCoverage(At(0), At(143)) }, series.CoverageRanges.ToArray());
+    }
+
+    [Fact]
+    public async Task WhenCoverageStartsBetweenTheFirstBucketStartAndFrom_ThenCoverageStartsAtTheCoverageStart()
+    {
+        // Arrange
+        var store = new FakeHistoryStore
+        {
+            Priority = 100,
+            CurrentCoverage = new HistoryCoverage(At(10), At(180))
+        }.AddSample(At(12), 1);
+        var query = new HistoryQuery(
+            "temp", At(23), At(143), TimeSpan.FromHours(1), HistoryAggregations.Count, MaxPoints: 100);
+
+        // Act
+        var series = await new[] { store }.QueryHistoryAsync(query, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(new[] { new HistoryCoverage(At(10), At(143)) }, series.CoverageRanges.ToArray());
+    }
+
+    [Fact]
+    public async Task WhenARawQueryStartsInsideTheCoverage_ThenCoverageStartsAtFrom()
+    {
+        // Arrange
+        var store = new FakeHistoryStore
+        {
+            Priority = 100,
+            CurrentCoverage = new HistoryCoverage(At(0), At(180))
+        }.AddSample(At(45), 1);
+        var query = new HistoryQuery("temp", At(23), At(143));
+
+        // Act
+        var series = await new[] { store }.QueryHistoryAsync(query, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(new[] { new HistoryCoverage(At(23), At(143)) }, series.CoverageRanges.ToArray());
+    }
+
+    [Fact]
     public async Task WhenTheOwnerHasAGapInsideABucket_ThenCoverageKeepsTheGap()
     {
         // Arrange
@@ -932,6 +1073,33 @@ public class HistoryStoreMergerTests
         // Assert
         Assert.Equal(2, seriesList.Count);
         Assert.All(seriesList, series => Assert.Empty(series.Points));
+    }
+
+    [Fact]
+    public async Task WhenACalendarDayIsSkipped_ThenTheQueryCompletes()
+    {
+        // Arrange - Fakaofo skipped 2011-12-30; its zero-width day bucket used to spin the planner forever.
+        var bucket = HistoryBucket.Calendar(
+            HistoryCalendarUnit.Day, TimeZoneInfo.FindSystemTimeZoneById("Pacific/Fakaofo"));
+        var query = new HistoryQuery(
+            "/X",
+            new DateTimeOffset(2011, 12, 28, 0, 0, 0, TimeSpan.Zero),
+            new DateTimeOffset(2012, 1, 2, 0, 0, 0, TimeSpan.Zero),
+            bucket,
+            HistoryAggregations.Last);
+        var store = new FakeHistoryStore
+        {
+            Priority = 100,
+            CurrentCoverage = new HistoryCoverage(query.From, query.To)
+        };
+
+        // Act - the timeout fails the test instead of hanging the suite if the grid stops advancing.
+        var series = await Task.Run(() => new[] { store }.QueryHistoryAsync(query, CancellationToken.None))
+            .WaitAsync(TimeSpan.FromSeconds(30));
+
+        // Assert - local days 12-27 (partly), 12-28, 12-29, 12-31, 01-01 and 01-02 (partly); 12-30 never happened.
+        Assert.Equal(6, series.Points.Length);
+        Assert.Equal(series.Points.Select(point => point.Timestamp).Distinct().Count(), series.Points.Length);
     }
 
     // Held value lookup -------------------------------------------------------------------------

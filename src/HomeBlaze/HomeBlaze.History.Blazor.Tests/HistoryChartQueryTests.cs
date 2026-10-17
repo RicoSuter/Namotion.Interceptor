@@ -14,6 +14,44 @@ public class HistoryChartQueryTests
     private static TestHistoryStore CreateStore() => new(new HistoryCoverage(At(-60), At(120)));
 
     [Fact]
+    public async Task WhenACountBucketIsOnlyPartlyCovered_ThenTheLineLeavesAGapThere()
+    {
+        // Arrange - coverage starts at minute 5, so the first ten-minute bucket is covered only in part.
+        var store = new TestHistoryStore(new HistoryCoverage(At(5), At(120)))
+            .Add("/door/Openings", At(0), 3)
+            .Add("/door/Openings", At(10), 4)
+            .Add("/door/Openings", At(20), 5);
+        var request = new HistoryChartSeriesRequest("/door/Openings", "Openings", typeof(int), IsBand: false, HistoryAggregations.Count);
+
+        // Act
+        var result = await HistoryChartQuery.QueryAsync(
+            [store], [request], At(0), At(30), TimeSpan.FromMinutes(10), CancellationToken.None);
+
+        // Assert - the partial bucket would draw a too-low count, so it is a gap like a bucket without coverage.
+        var drawn = Assert.Single(result.Data.Lines).Runs.SelectMany(run => run).Select(point => point.Timestamp);
+        Assert.Equal([At(10), At(20)], drawn);
+    }
+
+    [Fact]
+    public async Task WhenCoverageStartsBetweenTheOldestBucketStartAndTheWindowStart_ThenThatCountIsAGap()
+    {
+        // Arrange - the store started at 10:10 and the window starts at 10:23, so the 10:00 bucket counts only from 10:10.
+        var store = new TestHistoryStore(new HistoryCoverage(At(610), At(780)))
+            .Add("/door/Openings", At(600), 3)
+            .Add("/door/Openings", At(660), 2)
+            .Add("/door/Openings", At(720), 1);
+        var request = new HistoryChartSeriesRequest("/door/Openings", "Openings", typeof(int), IsBand: false, HistoryAggregations.Count);
+
+        // Act
+        var result = await HistoryChartQuery.QueryAsync(
+            [store], [request], At(623), At(743), TimeSpan.FromHours(1), CancellationToken.None);
+
+        // Assert
+        var drawn = Assert.Single(result.Data.Lines).Runs.SelectMany(run => run).Select(point => point.Timestamp);
+        Assert.Equal([At(660), At(720)], drawn);
+    }
+
+    [Fact]
     public async Task WhenSeriesUseTwoAggregations_ThenEachIsQueriedWithItsOwnAndTheResultKeepsTheRequestOrder()
     {
         // Arrange

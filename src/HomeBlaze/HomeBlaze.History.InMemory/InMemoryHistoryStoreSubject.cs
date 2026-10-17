@@ -185,6 +185,14 @@ public partial class InMemoryHistoryStoreSubject :
         return new ValueTask<HistoryPoint?>(_engine?.GetSampleAtOrBefore(propertyPath, asOf));
     }
 
+    /// <inheritdoc />
+    public ValueTask<HistoryPoint?> GetLastNumericSampleBeforeAsync(
+        string propertyPath, DateTimeOffset before, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return new ValueTask<HistoryPoint?>(_engine?.GetLastNumericSampleBefore(propertyPath, before));
+    }
+
     // BackgroundService
 
     /// <inheritdoc />

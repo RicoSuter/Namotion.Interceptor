@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Globalization;
 using System.Text.Json;
 using HomeBlaze.History.Abstractions;
@@ -17,6 +18,13 @@ public static class PropertyHistoryChartModel
     /// than the query will ever return, which the chart then reports as truncated history.
     /// </summary>
     public const int MaxPoints = 1000;
+
+    /// <summary>
+    /// The aggregations a chart offers and accepts: every one of <see cref="HistoryAggregations.All"/> except
+    /// <see cref="HistoryAggregations.Delta"/>, which is for agents reading cumulative counters.
+    /// </summary>
+    internal static readonly ImmutableArray<string> ChartAggregations =
+        HistoryAggregations.All.Remove(HistoryAggregations.Delta);
 
     // "Nice" bucket sizes in ascending order; auto-bucket picks the smallest >= range/200.
     private static readonly TimeSpan[] Ladder =
@@ -113,7 +121,7 @@ public static class PropertyHistoryChartModel
     internal const string AverageAlias = "Average";
 
     /// <summary>
-    /// Finds an aggregation of <see cref="HistoryAggregations.All"/> by its name, or the time-weighted average by
+    /// Finds an aggregation of <see cref="ChartAggregations"/> by its name, or the time-weighted average by
     /// <see cref="AverageAlias"/>, ignoring case.
     /// </summary>
     internal static bool TryGetAggregation(string? name, out string aggregation)
@@ -124,7 +132,7 @@ public static class PropertyHistoryChartModel
             return true;
         }
 
-        foreach (var candidate in HistoryAggregations.All)
+        foreach (var candidate in ChartAggregations)
         {
             if (string.Equals(candidate, name, StringComparison.OrdinalIgnoreCase))
             {
@@ -367,7 +375,7 @@ public static class PropertyHistoryChartModel
             }
             : isDiscrete || column == ValueColumn.Json
                 ? new[] { HistoryAggregations.Last, HistoryAggregations.First, HistoryAggregations.Count }
-                : HistoryAggregations.All;
+                : ChartAggregations;
 
         var allowed = new HashSet<string>(storeUnion, StringComparer.Ordinal);
         allowed.UnionWith(HistoryAggregations.AlwaysAvailable);
@@ -527,6 +535,50 @@ public static class PropertyHistoryChartModel
         }
 
         return type == typeof(bool) ? (number != 0 ? "Yes" : "No") : number.ToString(CultureInfo.CurrentCulture);
+    }
+
+    /// <summary>
+    /// Returns <paramref name="points"/> with the <c>Count</c> or <c>Sum</c> of every bucket that <paramref name="coverage"/>
+    /// covers only partly replaced by a gap, so a total over part of a bucket does not draw as a too-low value (partial
+    /// buckets: history.md). Returns <paramref name="points"/> itself for any other aggregation or a raw query.
+    /// </summary>
+    /// <param name="points">The bucket points, ascending.</param>
+    /// <param name="aggregation">The aggregation of the points.</param>
+    /// <param name="bucket">The bucket size, or null for raw samples.</param>
+    /// <param name="to">The end of the window, where the newest bucket is cut.</param>
+    /// <param name="coverage">The normalized coverage of the series.</param>
+    internal static IReadOnlyList<HistoryPoint> HidePartialTotals(
+        IReadOnlyList<HistoryPoint> points,
+        string aggregation,
+        TimeSpan? bucket,
+        DateTimeOffset to,
+        ImmutableArray<HistoryCoverage> coverage)
+    {
+        if (bucket is not { } size || aggregation is not (HistoryAggregations.Count or HistoryAggregations.Sum))
+        {
+            return points;
+        }
+
+        HistoryPoint[]? shown = null;
+        for (var index = 0; index < points.Count; index++)
+        {
+            var point = points[index];
+            if (point.Number is null)
+            {
+                continue;
+            }
+
+            var bucketEnd = BucketAlignment.Next(point.Timestamp, size);
+            var window = new HistoryCoverage(point.Timestamp, bucketEnd < to ? bucketEnd : to);
+            var covered = HistoryCoverage.CoveredDuration(coverage, window);
+            if (covered > TimeSpan.Zero && covered < window.To - window.From)
+            {
+                shown ??= points.ToArray();
+                shown[index] = point with { Number = null };
+            }
+        }
+
+        return shown ?? points;
     }
 
     /// <summary>

@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using HomeBlaze.History.Abstractions;
 using HomeBlaze.History.Blazor;
 using Xunit;
@@ -314,6 +315,69 @@ public class PropertyHistoryChartModelTests
         Assert.All(runs[0], point => Assert.Equal(1d, point.Number));
         Assert.Equal(2, runs[1].Count);
         Assert.Equal(3d, runs[1][0].Number);
+    }
+
+    [Theory]
+    [InlineData(HistoryAggregations.Count)]
+    [InlineData(HistoryAggregations.Sum)]
+    public void WhenATotalBucketIsPartlyCovered_ThenItIsHiddenAsAGap(string aggregation)
+    {
+        // Arrange - 10 s buckets up to 35 s; coverage [5,12) and [15,40): [0,10) and [10,20) are partial, [20,30) is
+        // full, and [30,35) ends at the query end, which is not a gap.
+        var start = new DateTimeOffset(2026, 6, 22, 12, 0, 0, TimeSpan.Zero);
+        HistoryPoint[] points =
+        [
+            new(start, 1d, null), new(start.AddSeconds(10), 2d, null),
+            new(start.AddSeconds(20), 3d, null), new(start.AddSeconds(30), 4d, null)
+        ];
+        ImmutableArray<HistoryCoverage> coverage =
+        [
+            new(start.AddSeconds(5), start.AddSeconds(12)),
+            new(start.AddSeconds(15), start.AddSeconds(40))
+        ];
+
+        // Act
+        var shown = PropertyHistoryChartModel.HidePartialTotals(
+            points, aggregation, TimeSpan.FromSeconds(10), start.AddSeconds(35), coverage);
+
+        // Assert
+        Assert.Equal(new double?[] { null, null, 3d, 4d }, shown.Select(point => point.Number));
+        Assert.Equal(points.Select(point => point.Timestamp), shown.Select(point => point.Timestamp));
+    }
+
+    [Theory]
+    [InlineData(0, 1d)]
+    [InlineData(4, null)]
+    public void WhenTheOldestBucketStartsBeforeTheWindow_ThenItIsMeasuredFromItsOwnStart(int coverageStartSeconds, double? expected)
+    {
+        // Arrange - a window starting at 4 s; the series coverage of a bucketed query starts at the oldest bucket start
+        // when that bucket is covered, and later when it is covered only partly.
+        var start = new DateTimeOffset(2026, 6, 22, 12, 0, 0, TimeSpan.Zero);
+        HistoryPoint[] points = [new(start, 1d, null), new(start.AddSeconds(10), 2d, null)];
+        ImmutableArray<HistoryCoverage> coverage = [new(start.AddSeconds(coverageStartSeconds), start.AddSeconds(20))];
+
+        // Act
+        var shown = PropertyHistoryChartModel.HidePartialTotals(
+            points, HistoryAggregations.Count, TimeSpan.FromSeconds(10), start.AddSeconds(20), coverage);
+
+        // Assert
+        Assert.Equal(new double?[] { expected, 2d }, shown.Select(point => point.Number));
+    }
+
+    [Fact]
+    public void WhenTheAggregationIsNotATotal_ThenPartlyCoveredBucketsAreShown()
+    {
+        // Arrange
+        var start = new DateTimeOffset(2026, 6, 22, 12, 0, 0, TimeSpan.Zero);
+        HistoryPoint[] points = [new(start, 1d, null), new(start.AddSeconds(10), 2d, null)];
+        ImmutableArray<HistoryCoverage> coverage = [new(start.AddSeconds(5), start.AddSeconds(20))];
+
+        // Act
+        var shown = PropertyHistoryChartModel.HidePartialTotals(
+            points, HistoryAggregations.Maximum, TimeSpan.FromSeconds(10), start.AddSeconds(20), coverage);
+
+        // Assert
+        Assert.Same(points, shown);
     }
 
     [Fact]
@@ -668,6 +732,7 @@ public class PropertyHistoryChartModelTests
     [InlineData(null)]
     [InlineData("")]
     [InlineData("Median")]
+    [InlineData("Delta")]
     public void WhenAnAggregationNameIsUnknown_ThenTryGetAggregationFails(string? name)
     {
         // Act

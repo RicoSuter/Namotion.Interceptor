@@ -15,7 +15,8 @@ public static class HistoryStoreMerger
 {
     /// <summary>
     /// Queries the store set for a single property path, merging the results across stores.
-    /// Higher-priority stores win overlapping ranges and identical timestamps.
+    /// Higher-priority stores win overlapping ranges and identical timestamps. The coverage of a
+    /// bucketed result starts at its first bucket start rather than at <see cref="HistoryQuery.From"/>.
     /// </summary>
     public static async Task<HistorySeries> QueryHistoryAsync(
         this IEnumerable<IHistoryStore> stores, HistoryQuery query, CancellationToken cancellationToken)
@@ -33,7 +34,7 @@ public static class HistoryStoreMerger
             .ToArray();
         var plan = query.Bucket is null
             ? HistoryDispatchPlanner.PlanRaw(snapshots, query)
-            : HistoryDispatchPlanner.PlanBucketed(snapshots, query);
+            : HistoryDispatchPlanner.PlanBucketed(snapshots, query, cancellationToken);
         return await ExecuteWithBudget(ordered, plan, query, cancellationToken).ConfigureAwait(false);
     }
 
@@ -86,7 +87,7 @@ public static class HistoryStoreMerger
         IReadOnlyList<string> propertyPaths,
         DateTimeOffset from,
         DateTimeOffset to,
-        TimeSpan? bucket,
+        HistoryBucket? bucket,
         string aggregation,
         int maxPoints,
         CancellationToken cancellationToken)
@@ -111,7 +112,7 @@ public static class HistoryStoreMerger
         IReadOnlyList<string> propertyPaths,
         DateTimeOffset from,
         DateTimeOffset to,
-        TimeSpan? bucket,
+        HistoryBucket? bucket,
         string aggregation,
         int maxPoints,
         CancellationToken cancellationToken) =>
@@ -133,6 +134,8 @@ public static class HistoryStoreMerger
     /// segment and thread the carry oldest-to-newest, with at most one at-or-before lookup per segment
     /// for its ending raw event. Only raw queries can actually exhaust the budget, and those run newest-first
     /// in a single pass, shrinking it by each returned count.
+    ///
+    /// Bucketed <c>Delta</c> also serves every segment oldest-to-newest (see <see cref="ExecuteDeltaThreaded"/>).
     /// </summary>
     internal static Task<HistorySeries> ExecuteWithBudget(
         IReadOnlyList<IHistoryStore> ordered,
@@ -140,6 +143,11 @@ public static class HistoryStoreMerger
         HistoryQuery query,
         CancellationToken cancellationToken)
     {
+        if (query.Bucket is not null && query.Aggregation == HistoryAggregations.Delta)
+        {
+            return ExecuteDeltaThreaded(ordered, segments, query, cancellationToken);
+        }
+
         var carryDependent = query.Bucket is not null &&
             query.Aggregation is HistoryAggregations.Last or HistoryAggregations.TimeWeightedAverage;
 
@@ -230,6 +238,68 @@ public static class HistoryStoreMerger
         return MergeResults(segments, query, budgetExhaustedBeforeAllPlanned: false);
     }
 
+    /// <summary>
+    /// Bucketed <c>Delta</c>: serves every planned segment oldest to newest. The first segment is seeded with the newest
+    /// numeric reading any store holds before it; each later segment with the last reading the previous segment
+    /// consumed: its store's newest reading inside the previous segment, else the previous segment's seed. A reading
+    /// another store holds inside the previous segment was never consumed, so seeding from it would lose the increase
+    /// up to it. The reading survives coverage gaps (see <see cref="HistoryAggregations.Delta"/>). The bucketed grid is
+    /// clipped to the budget before planning, so serving every segment cannot exceed it.
+    /// </summary>
+    private static async Task<HistorySeries> ExecuteDeltaThreaded(
+        IReadOnlyList<IHistoryStore> ordered,
+        IReadOnlyList<PlannedSegment> segments,
+        HistoryQuery query,
+        CancellationToken cancellationToken)
+    {
+        HistoryPoint? seed = null;
+        PlannedSegment? previousSegment = null;
+        foreach (var segment in segments)
+        {
+            if (previousSegment is not null)
+            {
+                var lastOfPrevious = await previousSegment.Store
+                    .GetLastNumericSampleBeforeAsync(query.PropertyPath, segment.From, cancellationToken)
+                    .ConfigureAwait(false);
+                if (lastOfPrevious is not null && lastOfPrevious.Timestamp >= previousSegment.From)
+                {
+                    seed = lastOfPrevious;
+                }
+            }
+
+            seed ??= await ResolveLastNumericBeforeAsync(ordered, query.PropertyPath, segment.From, cancellationToken)
+                .ConfigureAwait(false);
+            segment.Result = await QuerySegment(segment, query, query.MaxPoints, seed, cancellationToken)
+                .ConfigureAwait(false);
+            previousSegment = segment;
+        }
+
+        return MergeResults(segments, query, budgetExhaustedBeforeAllPlanned: false);
+    }
+
+    // The newest numeric reading strictly before the instant across all stores: the stores cover different times, so
+    // the first hit in priority order can be older than another store's.
+    private static async Task<HistoryPoint?> ResolveLastNumericBeforeAsync(
+        IReadOnlyList<IHistoryStore> ordered,
+        string propertyPath,
+        DateTimeOffset before,
+        CancellationToken cancellationToken)
+    {
+        HistoryPoint? newest = null;
+        foreach (var store in ordered)
+        {
+            var sample = await store
+                .GetLastNumericSampleBeforeAsync(propertyPath, before, cancellationToken)
+                .ConfigureAwait(false);
+            if (sample is not null && (newest is null || sample.Timestamp > newest.Timestamp))
+            {
+                newest = sample;
+            }
+        }
+
+        return newest;
+    }
+
     // The newest sample at or before asOf across the ordered stores, taking the first hit. Serves both
     // the carry seed and the public held-value lookup: the two differed only in who ordered the stores.
     private static async Task<HistoryPoint?> ResolveHeldValueAsync(
@@ -306,46 +376,57 @@ public static class HistoryStoreMerger
         }
 
         ImmutableArray<HistoryPoint> points;
+        HistoryCoverage coverageWindow;
         if (query.Bucket is { } bucket)
         {
             // The same clipped grid the planners walked: the newest MaxPoints buckets of the range.
             var bucketStart = BucketAlignment.FirstBucketStart(query.From, query.To, bucket, query.MaxPoints);
-            truncated |= bucketStart > BucketAlignment.BucketStart(query.From, bucket);
+            truncated |= bucketStart > BucketAlignment.Start(query.From, bucket);
+            coverageWindow = new HistoryCoverage(bucketStart, query.To);
 
-            var builder = ImmutableArray.CreateBuilder<HistoryPoint>(
-                checked((int)(1L + ((query.To - bucketStart).Ticks - 1L) / bucket.Ticks)));
+            var builder = bucket.FixedSize is { } size
+                ? ImmutableArray.CreateBuilder<HistoryPoint>(checked((int)(1L + ((query.To - bucketStart).Ticks - 1L) / size.Ticks)))
+                : ImmutableArray.CreateBuilder<HistoryPoint>();
             while (bucketStart < query.To)
             {
                 builder.Add(byTimestamp.TryGetValue(bucketStart, out var point)
                     ? point
                     : new HistoryPoint(bucketStart, null, null));
-                bucketStart += bucket;
+                var bucketEnd = BucketAlignment.Next(bucketStart, bucket);
+                if (bucketEnd <= bucketStart)
+                {
+                    throw new InvalidOperationException($"The {bucket} bucket starting at {bucketStart:O} does not advance.");
+                }
+
+                bucketStart = bucketEnd;
             }
 
-            points = builder.MoveToImmutable();
+            points = builder.DrainToImmutable();
         }
         else
         {
             points = byTimestamp.Values
                 .OrderBy(point => point.Timestamp)
                 .ToImmutableArray();
+            coverageWindow = new HistoryCoverage(query.From, query.To);
         }
 
         return new HistorySeries(
             query.PropertyPath,
             points,
             truncated,
-            EffectiveCoverage(served, query));
+            EffectiveCoverage(served, coverageWindow));
     }
 
     /// <summary>
     /// The coverage the returned series actually stands behind: only the segments that were served,
-    /// and within each of those, only the part the returned points can vouch for.
+    /// and within each of those, only the part the returned points can vouch for, clipped to
+    /// <paramref name="window"/> (the grid of a bucketed query, the requested range of a raw one).
     /// A budget shortfall drops the oldest planned segments without querying them, and reporting
     /// those as covered would tell a caller "no samples here" for a range that was never read.
     /// </summary>
     private static ImmutableArray<HistoryCoverage> EffectiveCoverage(
-        IReadOnlyList<PlannedSegment> served, HistoryQuery query)
+        IReadOnlyList<PlannedSegment> served, HistoryCoverage window)
     {
         var ranges = new List<HistoryCoverage>(served.Count);
         foreach (var segment in served)
@@ -353,7 +434,7 @@ public static class HistoryStoreMerger
             AddSegmentCoverage(ranges, segment);
         }
 
-        return HistoryCoverage.Clip(ranges, new HistoryCoverage(query.From, query.To));
+        return HistoryCoverage.Clip(ranges, window);
     }
 
     /// <summary>

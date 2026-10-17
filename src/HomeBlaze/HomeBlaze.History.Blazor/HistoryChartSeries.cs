@@ -27,17 +27,18 @@ public partial class HistoryChartSeries : IConfigurable
     public partial string? Label { get; set; }
 
     /// <summary>
-    /// The CSS color of a line, for example "#E4572E". Defaults to the next color of the chart.
-    /// A state band has one color per state and ignores it.
+    /// The CSS color of a line, for example "#E4572E", a word of letters such as a color name, or rgb(), rgba(), hsl()
+    /// or hsla() with plain numbers. Defaults to the next color of the chart, which is also used for a value of another
+    /// form. A word that the browser does not know as a color leaves the line without a color. A state band has one
+    /// color per state and ignores it.
     /// </summary>
-    // Media, so that an agent may not set it: the value is written into CSS, where it can load content with url().
     [Configuration]
-    [MediaAddress]
     public partial string? Color { get; set; }
 
     /// <summary>
     /// The aggregation of a line in place of the one of the chart, a name of
-    /// <see cref="HomeBlaze.History.Abstractions.HistoryAggregations"/>. Null or empty for the one of the chart.
+    /// <see cref="HomeBlaze.History.Abstractions.HistoryAggregations"/> other than Delta, or Average for the time-weighted
+    /// average. Null or empty for the one of the chart.
     /// A band ignores it.
     /// </summary>
     [Configuration]

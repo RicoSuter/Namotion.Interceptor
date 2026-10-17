@@ -61,6 +61,7 @@ Key conventions:
 - **Collapsed collection:** `Name/ (Nx ItemType)` or `Name/ (N children)`
 - **Collapsed child subject:** `Name/ (ItemType)` for a single subject property beyond the depth limit (omitted when the property is null)
 - **Footer:** `[N subjects]` or `[N subjects, truncated]`
+- **Warning:** `# warning: <text>` before the footer, see [Unknown property names](#unknown-property-names)
 - Special values: `null` for null, `""` for empty strings, `...` for truncated strings (>100 chars)
 - Collection values (arrays, lists, dictionaries of plain values) render as compact JSON, such as `[{"Title":"Radio","IsContainer":false}]`. Whole items are shown up to about 500 characters and the rest as `... +N more`; `get_property` returns the full value. Byte arrays render as their length, such as `<16 bytes>`.
 
@@ -146,6 +147,7 @@ Browse the subject tree starting at a path. Use `text` format (default) for over
 | `includeAttributes` | false | Include registry attributes on properties |
 | `includeMethods` | false | Include `$methods` in subject nodes |
 | `includeInterfaces` | false | Include `$interfaces` in subject nodes |
+| `properties` | (all) | Return only these properties, e.g. `["IsConnected", "BatteryLevel"]`; implies `includeProperties` |
 | `excludeTypes` | (none) | Exclude subjects matching these type/interface names |
 | `maxSubjects` | server limit | Maximum subjects to return |
 
@@ -190,12 +192,49 @@ Search across all subjects. Use `text` format (default) for overview, `json` for
 | `query` | (none) | Filter by path and enrichment values (e.g. `$title`, `$icon`); does not match types, interfaces, or property names |
 | `types` | all | Filter subjects by type/interface full names |
 | `path` | (none) | Scope search to a subtree path prefix |
+| `where` | (none) | Filter by property values, see [Filtering by value](#filtering-by-value) |
+| `properties` | (all) | Return only these properties, e.g. `["IsConnected", "BatteryLevel"]`; implies `includeProperties` |
 | `includeProperties` | false | Include property values |
 | `includeAttributes` | false | Include registry attributes on properties |
 | `includeMethods` | false | Include `$methods` in subject nodes |
 | `includeInterfaces` | false | Include `$interfaces` in subject nodes |
 | `excludeTypes` | (none) | Exclude subjects matching these type/interface names |
 | `maxSubjects` | server limit | Maximum subjects to return |
+
+#### Filtering by value
+
+`where` takes one C#-style expression over the subject's properties:
+
+```text
+IsConnected == false || BatteryLevel < 0.2 && Status != "Running"
+```
+
+- Comparisons: `==`, `!=`, `<`, `<=`, `>`, `>=` between a property name and a number, `true`, `false`, `null` or a string in double or single quotes. A bare word on the right, as in `Status != Running`, is read as a string.
+- Combine comparisons with `&&` (or `and`) and `||` (or `or`); `&&` binds tighter, and parentheses group.
+- Numbers compare numerically whatever their CLR type. Enums compare by name and strings case-insensitively for `==` and `!=`; strings order by ordinal. `DateTime` and `DateTimeOffset` values compare against an ISO 8601 string, a string without an offset read as UTC.
+- A subject without the property, with a null value compared to a non-null literal, with a NaN value, or with a value of an incompatible type does not match, for every operator including `!=`. `== null` and `!= null` test whether the value is null; the other operators never match `null`. Properties holding subjects and attributes never match.
+- Only properties the path provider exposes can be filtered on.
+- An expression may be at most 1000 characters long and nest parentheses at most 32 levels deep.
+- An invalid expression returns an error naming the zero-based position, for example `where: use '==' for equality at position 12`.
+
+`browse` has no `where`; to filter a subtree, use `search` with `path` and `where`. Combine `where` with `properties` to return only the values the question needs.
+
+#### Unknown property names
+
+A name in `where` or `properties` that no subject has is not an error, because subjects of different types have different properties. So that an empty answer is not mistaken for a negative one, `search` and `browse` add a warning for each name that no subject in scope has as a property the path provider exposes and that holds no subjects. For `search` the scope is every subject that passes `types`, `excludeTypes`, `path` and `query`, before `where` is applied; for `browse` it is every subject in the returned tree. A truncated result has no warnings, because it did not look at every subject.
+
+In JSON, the warnings are a `warnings` array of strings, omitted when there are none:
+
+```json
+{
+  "results": {},
+  "subjectCount": 0,
+  "truncated": false,
+  "warnings": ["No subject in scope has a property named 'IsOnline'."]
+}
+```
+
+In text, each warning is a `# warning: ` line before the footer, or after the "no subjects found" message of an empty search.
 
 ### `get_property`
 

@@ -34,7 +34,9 @@ internal class SearchTool
             maxSubjects = new { type = "integer", description = "Maximum subjects to return (default: server limit)" },
             excludeTypes = new { type = "array", items = new { type = "string" }, description = "Exclude subjects matching these type/interface names (short or full)" },
             path = new { type = "string", description = "Scope search to a subtree path prefix" },
-            query = new { type = "string", description = "Filter by path and enrichment values (e.g. $title, $icon) ONLY — does NOT match types, interfaces, or property names. Use list_types + types parameter for capability filtering" }
+            query = new { type = "string", description = "Filter by path and enrichment values (e.g. $title, $icon) ONLY — does NOT match types, interfaces, or property names. Use list_types + types parameter for capability filtering" },
+            properties = new { type = "array", items = new { type = "string" }, description = "Return only these properties, e.g. [\"IsConnected\",\"BatteryLevel\"]. Implies includeProperties." },
+            where = new { type = "string", description = "Filter by property values, C#-style: comparisons (== != < <= > >=) of a property against a number, true, false, null or a string, combined with && (and), || (or) and parentheses. Example: IsConnected == false || BatteryLevel < 0.2. Enums compare by name, dates against ISO 8601 strings. A subject without the property does not match." }
         }
     });
 
@@ -44,6 +46,7 @@ internal class SearchTool
         Description = "Find subjects by type/interface names or by enrichments (e.g. title, path). " +
                       "IMPORTANT: query only matches path and enrichment values (e.g. $title, $icon) — NOT types, interfaces, capabilities, or property names. " +
                       "To find subjects by capability, call list_types first to get the interface name, then pass it to types. " +
+                      "Use where to filter by property values and properties to return only the values you need, e.g. where='IsConnected == false' with properties=['IsConnected']. " +
                       "Use format=json for structured data, text (default) for overview.",
         InputSchema = Schema,
         Handler = HandleSearchAsync,
@@ -86,6 +89,28 @@ internal class SearchTool
         var pathPrefix = input.TryGetProperty("path", out var pathPrefixElement) ? pathPrefixElement.GetString() : null;
         var query = input.TryGetProperty("query", out var queryElement) ? queryElement.GetString() : null;
 
+        if (McpToolHelper.TryReadPropertyNames(input, out var propertyNames) is { } propertiesError)
+        {
+            return Task.FromResult<object?>(propertiesError);
+        }
+
+        SubjectFilterExpression? filter = null;
+        if (input.TryGetProperty("where", out var whereElement) && whereElement.ValueKind != JsonValueKind.Null)
+        {
+            if (whereElement.ValueKind != JsonValueKind.String)
+            {
+                return Task.FromResult<object?>(new { error = "Parameter 'where' must be a string." });
+            }
+
+            var whereText = whereElement.GetString()!;
+            if (!string.IsNullOrWhiteSpace(whereText) &&
+                !SubjectFilterExpression.TryParse(whereText, out filter, out var whereError))
+            {
+                return Task.FromResult<object?>(new { error = whereError });
+            }
+        }
+
+        var unseenPropertyNames = UnseenPropertyNames.TryCreate(filter?.PropertyNames, propertyNames);
         var subjects = new Dictionary<string, SubjectNode>();
         var truncated = false;
         var rootSubject = _rootSubjectProvider();
@@ -120,6 +145,13 @@ internal class SearchTool
                 continue;
             }
 
+            unseenPropertyNames?.Observe(registered, pathProvider);
+
+            if (filter is not null && !filter.Matches(registered, pathProvider))
+            {
+                continue;
+            }
+
             if (subjects.Count >= maxSubjects)
             {
                 truncated = true;
@@ -129,7 +161,7 @@ internal class SearchTool
             // Build full DTO only for subjects that pass all filters
             var node = McpToolHelper.BuildSubjectNodeDto(
                 registered, pathProvider, rootSubject, _configuration,
-                includeProperties, includeAttributes, includeMethods, includeInterfaces);
+                includeProperties, includeAttributes, includeMethods, includeInterfaces, propertyNames);
 
             subjects[path] = node;
         }
@@ -138,7 +170,9 @@ internal class SearchTool
         {
             Results = subjects,
             SubjectCount = subjects.Count,
-            Truncated = truncated
+            Truncated = truncated,
+            // A truncated scan stopped before seeing every subject in scope.
+            Warnings = truncated ? null : unseenPropertyNames?.CreateWarnings()
         };
 
         if (format == "json")

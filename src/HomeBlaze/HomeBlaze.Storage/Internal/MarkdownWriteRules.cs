@@ -77,7 +77,7 @@ internal static partial class MarkdownWriteRules
         "references to existing subjects, with single values of their configuration on the head line or in the json block " +
         "(the Cell, Node, Column, Series, Value and Case blocks of a grid, a canvas, a table, a chart, a value list and a " +
         "value map follow the same rules), links only to " +
-        "http, https, mailto or relative addresses, no picture and no color of a chart series. Control blocks such as " +
+        "http, https, mailto or relative addresses, and no picture. Control blocks such as " +
         "Switch, Slider, Select, Control and OperationButton are no layout blocks. Every other block, and each " +
         "old subject(name) code block, " +
         "must stay exactly as ReadRawContent shows it, with *** where it hides a secret value, inside the same blocks and " +
