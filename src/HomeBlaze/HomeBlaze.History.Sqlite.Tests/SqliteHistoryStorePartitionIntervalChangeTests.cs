@@ -101,24 +101,79 @@ public sealed class SqliteHistoryStorePartitionIntervalChangeTests : IDisposable
         Assert.Equal(new double?[] { 120, 120, 130 }, Numbers(last));
     }
 
+    [Theory]
+    [MemberData(nameof(CoarserIntervals))]
+    public async Task WhenTypeChangesFromStringToDoubleWithTheIntervalChange_ThenNumericAggregationReadsTheDoubles(
+        PartitionInterval before, PartitionInterval after)
+    {
+        // Arrange
+        using var store = await RecordAcrossIntervalChangeAsync(
+            before, after, ("on", "off"), typeof(string), (120d, 130d), typeof(double));
+        var wednesday = Monday.AddDays(2);
+
+        // Act
+        var series = store.Query(new HistoryQuery(
+            "/a/Energy", wednesday, wednesday.AddDays(2), Day, HistoryAggregations.Maximum, MaxPoints: 100));
+
+        // Assert - the Tuesday file still describes the path as a string, but the newest row is a double.
+        Assert.Equal(new double?[] { 120, 130 }, Numbers(series));
+    }
+
+    [Theory]
+    [MemberData(nameof(CoarserIntervals))]
+    public async Task WhenTypeChangesFromDoubleToStringWithTheIntervalChange_ThenNumericAggregationIsRejected(
+        PartitionInterval before, PartitionInterval after)
+    {
+        // Arrange
+        using var store = await RecordAcrossIntervalChangeAsync(
+            before, after, (100d, 110d), typeof(double), ("on", "off"), typeof(string));
+
+        // Act & Assert
+        Assert.Throws<HistoryAggregationNotSupportedException>(
+            () => store.Query(DailyQuery(Monday, HistoryAggregations.Maximum)));
+    }
+
+    [Theory]
+    [MemberData(nameof(CoarserIntervals))]
+    public async Task WhenTypeChangesFromLongToUlongWithTheIntervalChange_ThenRawQueryReadsTheOverflowAsANumber(
+        PartitionInterval before, PartitionInterval after)
+    {
+        // Arrange - a ulong above long.MaxValue is stored in value_json and only reads back as a number when
+        // the stored flag says the property is ulong.
+        using var store = await RecordAcrossIntervalChangeAsync(
+            before, after, (7L, 8L), typeof(long), (ulong.MaxValue, ulong.MaxValue - 1), typeof(ulong));
+
+        // Act
+        var series = store.Query(new HistoryQuery("/a/Energy", Monday, Monday.AddDays(5)));
+
+        // Assert
+        Assert.Equal(new double?[] { 7, 8, ulong.MaxValue, ulong.MaxValue - 1 }, Numbers(series));
+    }
+
     // Monday and Tuesday noon are recorded under the first interval, then the store is reopened at Wednesday
     // midnight under the second interval and records Wednesday and Thursday noon. Coverage is continuous across
     // the reopen.
+    private Task<SqliteHistoryStore> RecordAcrossIntervalChangeAsync(
+        PartitionInterval before, PartitionInterval after) =>
+        RecordAcrossIntervalChangeAsync(before, after, (100d, 110d), typeof(double), (120d, 130d), typeof(double));
+
     private async Task<SqliteHistoryStore> RecordAcrossIntervalChangeAsync(
-        PartitionInterval before, PartitionInterval after)
+        PartitionInterval before, PartitionInterval after,
+        (object Monday, object Tuesday) beforeValues, Type beforeType,
+        (object Wednesday, object Thursday) afterValues, Type afterType)
     {
         var now = Monday.AddYears(-1);
         using (var first = NewStore(before, () => now))
         {
-            first.Record("/a/Energy", Monday.AddHours(12), 100d, typeof(double));
-            first.Record("/a/Energy", Monday.AddDays(1).AddHours(12), 110d, typeof(double));
+            first.Record("/a/Energy", Monday.AddHours(12), beforeValues.Monday, beforeType);
+            first.Record("/a/Energy", Monday.AddDays(1).AddHours(12), beforeValues.Tuesday, beforeType);
             now = Monday.AddDays(2);
             await first.FlushAsync(CancellationToken.None);
         }
 
         var second = NewStore(after, () => now);
-        second.Record("/a/Energy", Monday.AddDays(2).AddHours(12), 120d, typeof(double));
-        second.Record("/a/Energy", Monday.AddDays(3).AddHours(12), 130d, typeof(double));
+        second.Record("/a/Energy", Monday.AddDays(2).AddHours(12), afterValues.Wednesday, afterType);
+        second.Record("/a/Energy", Monday.AddDays(3).AddHours(12), afterValues.Thursday, afterType);
         now = Monday.AddYears(1);
         await second.FlushAsync(CancellationToken.None);
         return second;

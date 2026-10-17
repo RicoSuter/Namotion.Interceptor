@@ -362,17 +362,34 @@ internal static class SqliteHistoryReader
         return command.ExecuteScalar() is long id ? id : null;
     }
 
+    private const string ColumnMetaSql =
+        "SELECT p.value_column, p.is_ulong, " +
+        "(SELECT h.ts FROM history h WHERE h.path_id = p.id ORDER BY h.ts DESC LIMIT 1) " +
+        "FROM paths p WHERE p.path = @path;";
+
     // The stored column kind and ulong flag for a single path, read from the paths table (written at
     // flush time). Returns null when the path has never been written.
     //
-    // Newest partition first, and stops at the first hit. Directory enumeration order is not specified,
-    // so scanning in that order let an arbitrary partition answer: after a property's type changed, the
-    // reader could pick up the superseded column kind and route a numeric read at the wrong column.
-    // Newest-first also means the common case opens one partition instead of every one of them.
+    // Each file stores the kind of the newest sample it holds, so the file holding the path's newest row
+    // answers. Walked like the look-backs, latest end first: once a file holds a row, the walk stops at the
+    // first file ending at or before it, so a single-interval store reads one file. A file that knows the
+    // path but holds no row for it only answers when no file holds a row, and then the first one walked wins.
     private static ColumnMeta? ResolveColumnMetaForPath(SqliteReadContext context, string propertyPath)
     {
-        foreach (var key in context.EnumeratePartitionFileKeys().OrderByDescending(key => key, StringComparer.Ordinal))
+        ColumnMeta? newest = null;
+        var newestTicks = long.MinValue;
+        foreach (var (key, endTicks) in context.PartitionsAtOrBeforeByEndDescending(DateTimeOffset.MaxValue))
         {
+            if (endTicks <= newestTicks)
+            {
+                break; // this file and every later one only hold rows before the newest found
+            }
+
+            if (!context.PartitionFileExists(key))
+            {
+                continue;
+            }
+
             var connection = context.OpenPartition(key);
             if (connection is null)
             {
@@ -380,16 +397,27 @@ internal static class SqliteHistoryReader
             }
 
             using var command = connection.CreateCommand();
-            command.CommandText = "SELECT value_column, is_ulong FROM paths WHERE path = @path;";
+            command.CommandText = ColumnMetaSql;
             command.Parameters.AddWithValue("@path", propertyPath);
             using var reader = command.ExecuteReader();
-            if (reader.Read())
+            if (!reader.Read())
             {
-                return new ColumnMeta((ValueColumn)reader.GetInt64(0), reader.GetInt64(1) != 0);
+                continue; // a partition that never saw the path
+            }
+
+            var meta = new ColumnMeta((ValueColumn)reader.GetInt64(0), reader.GetInt64(1) != 0);
+            if (reader.IsDBNull(2))
+            {
+                newest ??= meta;
+            }
+            else if (reader.GetInt64(2) > newestTicks)
+            {
+                newest = meta;
+                newestTicks = reader.GetInt64(2);
             }
         }
 
-        return null;
+        return newest;
     }
 
     private static bool ResolveIsUlong(SqliteReadContext context, string propertyPath) =>
