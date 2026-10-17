@@ -116,7 +116,7 @@
    the card higher. A card fills a cell or a node when it is its child, as in a layout of a configuration file, or the
    only block of its content on a page. A block that shows nothing has an empty wrapper, which the page hides, so only
    the wrappers that are not empty count, unlike with :only-child. The padding of the content that such a card fills is
-   left out in MarkdownFilePageComponent.razor.css, with the same selector. */
+   left out in MarkdownFilePageComponent.razor.css, for every place-filler. */
 ::deep .card-widget.card-widget-sized,
 ::deep :is(:is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper, :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty))) > .card-widget {
     min-height: 0;
@@ -134,17 +134,18 @@
     overflow-y: auto;
 }
 
-/* A card in a grid cell or a canvas node is as high as it, unless the card has a height of its own, which the inline
-   style gives. It ignores its aspect ratio, which the inline style also gives, so it is as wide as the cell or the node
-   too. The cell or the node is the frame, so the card draws none. */
-::deep :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper:has(> .card-widget),
-::deep :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper:has(> .markdown-fragment > .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty)) > .card-widget),
-::deep :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .markdown-fragment:has(> .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty)) > .card-widget),
-::deep :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty)):has(> .card-widget) {
+/* A widget that fills its place (a card, a tile: the class place-filler) in a grid cell or a canvas node is as high as
+   it, unless a card has a height of its own, which the inline style gives. It ignores an aspect ratio, which the inline
+   style also gives, so it is as wide as the cell or the node too. The cell or the node is the frame, so the widget draws
+   none. */
+::deep :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper:has(> .place-filler),
+::deep :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper:has(> .markdown-fragment > .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty)) > .place-filler),
+::deep :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .markdown-fragment:has(> .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty)) > .place-filler),
+::deep :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty)):has(> .place-filler) {
     height: 100%;
 }
 
-::deep :is(:is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper, :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty))) > .card-widget {
+::deep :is(:is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper, :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty))) > .place-filler {
     height: 100%;
     aspect-ratio: auto !important;
     border: 0;
