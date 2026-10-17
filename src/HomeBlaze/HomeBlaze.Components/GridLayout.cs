@@ -28,6 +28,13 @@ public partial class GridLayout : IConfigurable, ITitleProvider
     public partial int Columns { get; set; }
 
     /// <summary>
+    /// The width and the height of a cell in the form W:H, for example 1:1 for square cells. With it, a row is as high as
+    /// a column is wide times H/W, so the grid follows the width of the page. Without it, the rows share the height.
+    /// </summary>
+    [Configuration]
+    public partial string? CellAspectRatio { get; set; }
+
+    /// <summary>
     /// The cells of the grid. On a page one <c>Cell</c> block each, in a configuration file a list.
     /// </summary>
     [Configuration, State, Slot("Cell")]

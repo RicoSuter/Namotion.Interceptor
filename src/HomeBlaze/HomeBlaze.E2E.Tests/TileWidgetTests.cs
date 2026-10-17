@@ -182,4 +182,22 @@ public class TileWidgetTests
         GetMotor().IsPowered = false;
         await Assertions.Expect(tile).ToBeEnabledAsync(new() { Timeout = Timeout });
     }
+
+    [Theory]
+    [InlineData(1280)]
+    [InlineData(800)]
+    public async Task WhenGridHasASquareCellAspectRatio_ThenItsCellsAreSquareAtEveryWidth(int width)
+    {
+        // Arrange
+        var page = await OpenPageAsync();
+        await page.SetViewportSizeAsync(width, 900);
+        var tile = page.GetByTestId("switch-tile").Filter(new() { Has = GetSwitchTile(page, "Square") });
+        await Assertions.Expect(tile).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Act
+        var cell = await PageGeometry.GetBoxAsync(tile.Locator("xpath=ancestor::div[contains(@class,'grid-cell')][1]"));
+
+        // Assert
+        Assert.InRange(Math.Abs(cell.Width - cell.Height), 0, 1.5);
+    }
 }

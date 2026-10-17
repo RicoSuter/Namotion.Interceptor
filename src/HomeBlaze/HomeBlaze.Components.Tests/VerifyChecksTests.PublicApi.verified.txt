@@ -307,6 +307,8 @@ namespace HomeBlaze.Components
         public GridLayout() { }
         public GridLayout(Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string? CellAspectRatio { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
         [HomeBlaze.Abstractions.Attributes.Slot("Cell")]
         [HomeBlaze.Abstractions.Attributes.State]
         public HomeBlaze.Components.GridCell[] Cells { get; set; }

@@ -1,3 +1,4 @@
+@using HomeBlaze.Components.Controls
 @using HomeBlaze.Components.Dialogs
 
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(GridLayout))]
@@ -9,13 +10,20 @@
 @inject RootManager RootManager
 @inject ISnackbar Snackbar
 
-<div class="grid-layout-container"
+@{
+    var rows = Grid?.Rows ?? 1;
+    var columns = Grid?.Columns ?? 1;
+    var cellAspectRatio = Grid?.CellAspectRatio;
+    var hasAspectRatio = !string.IsNullOrWhiteSpace(cellAspectRatio);
+    var rowTemplate = GridRows.GetTemplate(rows, columns, cellAspectRatio, out var ratioError);
+
+    RenderFragment grid = @<div class="grid-layout-container"
      style="display: grid;
-            grid-template-rows: repeat(@(Grid?.Rows ?? 1), 1fr);
-            grid-template-columns: repeat(@(Grid?.Columns ?? 1), 1fr);
-            gap: 16px;
+            grid-template-rows: @rowTemplate;
+            grid-template-columns: repeat(@columns, 1fr);
+            gap: @(GridRows.Gap)px;
             width: 100%;
-            min-height: 400px;
+            @(hasAspectRatio ? null : "min-height: 400px;")
             position: relative;">
 
     @* Render cells *@
@@ -50,7 +58,25 @@
             </div>
         }
     }
-</div>
+</div>;
+}
+
+@if (ratioError is not null)
+{
+    <WidgetArgumentError Message="@ratioError" />
+}
+else if (hasAspectRatio)
+{
+    @* The sizer is the container that 100cqw of a row template with an aspect ratio refers to. A grid without a ratio
+       needs none and stays a direct child of its widget, where the styles and the tests of the layouts expect it. *@
+    <div class="grid-layout-sizer" style="container-type: inline-size; width: 100%;">
+        @grid
+    </div>
+}
+else
+{
+    @grid
+}
 
 <style>
     .grid-cell {

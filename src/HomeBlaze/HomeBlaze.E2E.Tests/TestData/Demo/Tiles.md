@@ -37,3 +37,8 @@ This page is changed by the tile widget tests.
 ::: Cell Row=0 Column=1
 :::: HomeBlaze.Components.Switch#casetexttile Kind=Tile Path=tilemotor/IsPowered Map=powered Label="Case text"
 ::
+
+:: HomeBlaze.Components.GridLayout#squaregrid Rows=2 Columns=3 CellAspectRatio=1:1
+::: Cell Row=0 Column=0
+:::: HomeBlaze.Components.Switch#squaretile Kind=Tile Path=tilemotor/IsPowered Label="Square"
+::
