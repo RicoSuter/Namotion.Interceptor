@@ -194,9 +194,7 @@ internal static class HistoryChartQuery
                     (bucket is null || request.Aggregation != HistoryAggregations.Count);
                 var points = PropertyHistoryChartModel.HidePartialTotals(
                     result.Points, request.Aggregation, bucket, to, result.CoverageRanges);
-                var runs = HasNumber(points)
-                    ? PropertyHistoryChartModel.SplitIntoGapRuns(points, bucket, to)
-                    : [];
+                var runs = PropertyHistoryChartModel.SplitIntoGapRuns(points, bucket, to);
                 lines.Add(new HistoryChartLine(
                     request.Label, request.Color ?? HistoryChartPalette.GetLineColor(lines.Count), runs, isPercent));
             }
@@ -243,11 +241,9 @@ internal static class HistoryChartQuery
     }
 
     /// <summary>Gets whether a point of the series holds a number.</summary>
-    public static bool HasNumber(HistorySeries series) => HasNumber(series.Points);
-
-    private static bool HasNumber(IReadOnlyList<HistoryPoint> points)
+    public static bool HasNumber(HistorySeries series)
     {
-        foreach (var point in points)
+        foreach (var point in series.Points)
         {
             if (point.Number is not null)
             {

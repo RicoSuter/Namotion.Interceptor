@@ -451,8 +451,8 @@ public class HistoryMcpToolProvider : IMcpToolProvider
         return payload;
     }
 
-    // A calendar point is labeled with its period. Values an aggregation computes carry floating point noise that is
-    // rounded away; raw samples and the aggregations that pick a recorded sample are returned as recorded.
+    // Values an aggregation computes carry floating point noise that is rounded away; raw samples and the aggregations
+    // that pick a recorded sample are returned as recorded.
     private static bool ComputesNewValue(string aggregation) =>
         aggregation is HistoryAggregations.SampleAverage or HistoryAggregations.TimeWeightedAverage
             or HistoryAggregations.Sum or HistoryAggregations.StandardDeviation or HistoryAggregations.Delta;
