@@ -23,9 +23,10 @@ internal sealed class PropertyHistoryViewer : IPropertyHistoryViewer
         _rootContext = rootContext;
     }
 
-    // Only whether the property is recorded: looking for a store would walk every known subject on every render of every
-    // widget, and without a store the dialog shows an empty history.
-    public bool CanShow(RegisteredSubjectProperty property) => property.HasHistory();
+    // Whether the property is recorded under a path, which the dialog queries. Looking for a store would walk every known
+    // subject on every render of every widget, and without a store the dialog shows an empty history.
+    public bool CanShow(RegisteredSubjectProperty property) =>
+        property.HasHistory() && property.GetHistoryPath(_pathResolver) is not null;
 
     public async Task ShowAsync(RegisteredSubjectProperty property, string displayName)
     {

@@ -299,4 +299,21 @@ public class ValueTileWidgetTests
             Assert.InRange(overflow, 0, 0.5);
         }
     }
+
+    [Fact]
+    public async Task WhenPageIsEdited_ThenValueWidgetsOfferNoHistory()
+    {
+        // Arrange
+        var page = await OpenPageAsync();
+        var tile = GetValueTile(page, "Target");
+        await Assertions.Expect(tile.GetByRole(AriaRole.Button)).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetByTestId("history-label-button").First).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Act
+        await page.SelectEditModeAsync("Inline");
+
+        // Assert: a click selects the widget instead, so neither the tile nor a label is a button of its own.
+        await Assertions.Expect(tile.GetByRole(AriaRole.Button)).ToHaveCountAsync(0, new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetByTestId("history-label-button")).ToHaveCountAsync(0, new() { Timeout = Timeout });
+    }
 }

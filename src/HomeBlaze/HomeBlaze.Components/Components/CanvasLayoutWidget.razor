@@ -26,7 +26,7 @@
     var drawnWidth = designWidth * factor;
     // A canvas held at its least width is wider than the frame, which then scrolls it. A transform leaves the layout box
     // at the design width, so the sizer gives the frame the drawn size to scroll and to be as high as.
-    var frameStyle = isScaled && drawnWidth > _availableWidth + 0.5
+    var frameStyle = isScaled && _availableWidth > 0 && drawnWidth > _availableWidth + 0.5
         ? "width: 100%; overflow-x: auto; overflow-y: hidden;"
         : isScaled ? "width: 100%; overflow: hidden;" : "width: 100%; overflow-x: auto;";
     var sizerStyle = isScaled
@@ -91,8 +91,9 @@
 else if (scale == CanvasScale.FitWidth)
 {
     @* The frame is the width the canvas fits. While viewed it cuts off the space that the scaled canvas no longer takes
-       and scrolls a canvas held at its MinWidth, while edited it scrolls a canvas that is wider than the page. A canvas that does not fit the width needs none and
-       stays a direct child of its widget, where the styles and the tests of the layouts expect it. *@
+       and scrolls a canvas held at its MinWidth, while edited it scrolls a canvas that is wider than the page. A canvas
+       that does not fit the width needs none and stays a direct child of its widget, where the styles and the tests of
+       the layouts expect it. *@
     <div class="canvas-scale-frame" @ref="_frame" style="@frameStyle" data-testid="canvas-scale-frame">
         @* Always rendered, also unstyled while edited, so that entering edit mode keeps the diagram. *@
         <div style="@sizerStyle">

@@ -27,10 +27,7 @@
         {
             // The value is the large line and the label the small one below it, so that a row of tiles reads as numbers.
             // The tile is a button only while it can show the history of the property.
-            var property = reading.Property;
-            var canShowHistory = _viewer.CanShow(property, IsEditing);
-            _shownProperty = property;
-            _shownLabel = label;
+            var canShowHistory = _viewer.CanShow(reading.Property, IsEditing);
             <TileView TestId="value-tile"
                       Label="@reading.Text"
                       Subtitle="@label"
@@ -59,9 +56,6 @@
 @code {
     private IPropertyHistoryViewer? _viewer;
     private EventCallback<MouseEventArgs> _showHistoryCallback;
-    // The property and the label of the last render, which a click on the tile shows the history of.
-    private RegisteredSubjectProperty? _shownProperty;
-    private string _shownLabel = string.Empty;
 
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
@@ -78,7 +72,15 @@
 
     private Task ShowHistoryAsync()
     {
-        var property = _shownProperty;
-        return _viewer.CanShow(property, IsEditing) ? _viewer.ShowAsync(property, _shownLabel) : Task.CompletedTask;
+        if (Subject is not ValueTile tile)
+        {
+            return Task.CompletedTask;
+        }
+
+        var path = tile.Path;
+        var property = ValueReader.ResolveProperty(PathResolver, tile, path);
+        return _viewer.CanShow(property, IsEditing)
+            ? _viewer.ShowAsync(property, ValueReader.GetLabel(property, tile.Label, path))
+            : Task.CompletedTask;
     }
 }
