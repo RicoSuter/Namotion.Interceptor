@@ -355,6 +355,49 @@ public class HistoryChartSeriesResolverTests
         Assert.Equal(["#2979FF", null, "#123456", null, "#F6A609"], colors.AsEnumerable());
     }
 
+    [Theory]
+    [InlineData("#abc")]
+    [InlineData("#ABCD")]
+    [InlineData("#E4572E")]
+    [InlineData("#E4572E80")]
+    [InlineData("teal")]
+    [InlineData("rgb(228, 87, 46)")]
+    [InlineData("rgba(228 87 46 / 50%)")]
+    [InlineData("hsl(12, 76%, 54%)")]
+    [InlineData("hsla(12.5, 76%, 54%, 0.5)")]
+    public void WhenALineAsksForAPlainColor_ThenItKeepsIt(string color)
+    {
+        // Arrange
+        HistoryChartSeriesInfo[] series = [Line("A", color: color)];
+
+        // Act
+        var colors = HistoryChartSeriesResolver.AssignLineColors(series);
+
+        // Assert
+        Assert.Equal(color, colors[0]);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("url(https://example.com/x)")]
+    [InlineData("red;background:url(x)")]
+    [InlineData("expression(alert(1))")]
+    [InlineData("#12345")]
+    [InlineData("var(--x)")]
+    [InlineData("rgb(1, 2, 3); background:url(x)")]
+    [InlineData("red\n")]
+    public void WhenALineAsksForAnythingButAPlainColor_ThenItTakesThePaletteColor(string color)
+    {
+        // Arrange
+        HistoryChartSeriesInfo[] series = [Line("A"), Line("B", color: color)];
+
+        // Act
+        var colors = HistoryChartSeriesResolver.AssignLineColors(series);
+
+        // Assert
+        Assert.Equal(HistoryChartPalette.GetLineColor(1), colors[1]);
+    }
+
     [Fact]
     public void WhenTheFirstRecordedLineIsSearched_ThenBandsMissingSeriesAndLinesWithoutHistoryAreSkipped()
     {

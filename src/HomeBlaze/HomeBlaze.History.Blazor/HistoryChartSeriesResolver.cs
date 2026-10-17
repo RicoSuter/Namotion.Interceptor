@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.RegularExpressions;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
@@ -26,7 +27,7 @@ internal enum HistoryChartSeriesKind
 /// A series of a <see cref="HistoryChart"/> with the property its path leads to.
 /// </summary>
 /// <param name="Label">The label in the legend.</param>
-/// <param name="Color">The color the series asks for, or null.</param>
+/// <param name="Color">The color the series asks for as written, or null. Not checked, see <see cref="HistoryChartSeriesResolver.AssignLineColors"/>.</param>
 /// <param name="Property">The property, or null when the path leads nowhere.</param>
 /// <param name="Kind">How the series is drawn.</param>
 /// <param name="Unit">The unit of the property.</param>
@@ -62,7 +63,7 @@ internal readonly record struct HistoryChartSeriesConfiguration(string? Path, st
 /// <summary>
 /// Resolves and checks the series of a <see cref="HistoryChart"/>.
 /// </summary>
-internal static class HistoryChartSeriesResolver
+internal static partial class HistoryChartSeriesResolver
 {
     private static readonly string AggregationChoices = string.Join(", ", HistoryAggregations.All.SelectMany(aggregation =>
         aggregation == HistoryAggregations.TimeWeightedAverage
@@ -217,9 +218,9 @@ internal static class HistoryChartSeriesResolver
     }
 
     /// <summary>
-    /// Gets the color of every recorded line, in series order: its own, otherwise the next of
-    /// <see cref="HistoryChartPalette.LineColors"/> by its position among the recorded lines. Null for
-    /// everything else.
+    /// Gets the color of every recorded line, in series order: its own when <see cref="IsPlainColor"/> accepts it,
+    /// otherwise the next of <see cref="HistoryChartPalette.LineColors"/> by its position among the recorded lines.
+    /// Null for everything else.
     /// </summary>
     public static string?[] AssignLineColors(IReadOnlyList<HistoryChartSeriesInfo> series)
     {
@@ -233,12 +234,19 @@ internal static class HistoryChartSeriesResolver
                 continue;
             }
 
-            colors[index] = !string.IsNullOrEmpty(entry.Color) ? entry.Color : HistoryChartPalette.GetLineColor(lineIndex);
+            colors[index] = entry.Color is { } color && IsPlainColor(color) ? color : HistoryChartPalette.GetLineColor(lineIndex);
             lineIndex++;
         }
 
         return colors;
     }
+
+    /// <summary>
+    /// Gets whether <paramref name="color"/> is a plain CSS color that is safe to write into a style: "#" with 3, 4, 6
+    /// or 8 hex digits, a name of ASCII letters, or rgb(), rgba(), hsl() or hsla() with only digits, ".", ",", "%",
+    /// spaces and "/" inside the parentheses.
+    /// </summary>
+    private static bool IsPlainColor(string color) => PlainColorRegex().IsMatch(color);
 
     /// <summary>
     /// Gets the index of the first recorded line, the series a click on the lines shows the history of, or -1.
@@ -353,6 +361,9 @@ internal static class HistoryChartSeriesResolver
 
         return !string.IsNullOrEmpty(metadata?.Title) ? metadata.Title : property.Name;
     }
+
+    [GeneratedRegex(@"^(?:#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})|[a-zA-Z]+|(?:rgba?|hsla?)\([0-9., %/]*\))\z", RegexOptions.CultureInvariant)]
+    private static partial Regex PlainColorRegex();
 
     private static StateUnit GetCheckedUnit(StateUnit unit, bool isCount) => isCount ? StateUnit.Default : unit;
 

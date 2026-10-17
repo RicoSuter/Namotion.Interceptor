@@ -747,6 +747,7 @@ public class MarkdownFileWriteTests : IDisposable
     [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.Responsive From=Md\nWide windows only.\n::")]
     [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.SubjectTable Source=motor\n::: Column Property=CurrentSpeed Label=Speed\n:::\n::")]
     [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.History.Blazor.HistoryChart Range=6h\n::: Series Path=motor/CurrentSpeed Label=Speed\n:::\n::")]
+    [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.History.Blazor.HistoryChart\n::: Series Path=motor/CurrentSpeed Color=\"#E4572E\"\n:::\n::")]
     public async Task WhenAnAgentMayEditPageLayoutAndChangesLayoutBlocks_ThenThePageIsWritten(string oldText, string newText)
     {
         // Arrange
@@ -813,7 +814,6 @@ public class MarkdownFileWriteTests : IDisposable
     [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.Switch Path=motor/IsAtTargetSpeed\n::", "With the permission to edit page layout")]
     [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.Slider Path=motor/TargetSpeed\n::", "With the permission to edit page layout")]
     [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.OperationButton Path=motor/EmergencyStop\n::", "With the permission to edit page layout")]
-    [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.History.Blazor.HistoryChart\n::: Series Path=motor/CurrentSpeed Color=\"url(https://tracker.example.com/pixel.png)\"\n:::\n::", "With the permission to edit page layout")]
     [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.SubjectTable Source=motor\n::: Column Property=CurrentSpeed Map=missing\n:::\n::", "leads to no existing subject")]
     public async Task WhenAnAgentMayEditPageLayoutAndChangesAnythingElse_ThenItIsRejected(string oldText, string newText, string expectedMessage)
     {
