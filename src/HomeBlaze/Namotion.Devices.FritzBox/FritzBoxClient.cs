@@ -15,9 +15,12 @@ namespace Namotion.Devices.FritzBox;
 [InterceptorSubject]
 public partial class FritzBoxClient : IPresenceSensor, INetworkAdapter, ITitleProvider, IIconProvider
 {
+    private readonly bool _isPrivateMacAddress;
+
     public FritzBoxClient(string macAddress)
     {
         MacAddress = macAddress;
+        _isPrivateMacAddress = MacAddresses.IsLocallyAdministered(macAddress);
         HostName = null;
         IsPresent = null;
         IpAddress = null;
@@ -101,6 +104,20 @@ public partial class FritzBoxClient : IPresenceSensor, INetworkAdapter, ITitlePr
     [SubjectPath(typeof(IInterceptorSubject))]
     public partial string? DevicePath { get; internal set; }
 
+    /// <summary>
+    /// Whether <see cref="MacAddress"/> is locally administered: a private address, which a phone or computer may
+    /// replace with a new one, or the address of a virtual adapter.
+    /// </summary>
+    [Derived]
+    [State(Position = 409)]
+    [Category("Network")]
+    public bool IsPrivateMacAddress => _isPrivateMacAddress;
+
+    /// <summary>
+    /// Whether the router no longer lists the device, see <see cref="Depart"/>.
+    /// </summary>
+    internal bool IsDeparted { get; private set; }
+
     [Derived]
     public string? Title => HostName ?? IpAddress ?? MacAddress;
 
@@ -114,6 +131,8 @@ public partial class FritzBoxClient : IPresenceSensor, INetworkAdapter, ITitlePr
     {
         var interfaceType = FritzBoxInterfaceTypes.Parse(host.InterfaceType);
 
+        IsDeparted = false;
+
         HostName = StringValues.NullIfBlank(host.HostName);
         IpAddress = StringValues.NullIfBlank(host.IpAddress);
         IsPresent = host.IsActive;
@@ -125,6 +144,21 @@ public partial class FritzBoxClient : IPresenceSensor, INetworkAdapter, ITitlePr
         Band = position?.Band;
         Port = GetPort(host, position);
         LinkSpeed = GetLinkSpeed(host, position);
+    }
+
+    /// <summary>
+    /// Marks the device as no longer listed by the router. It becomes absent like a listed absent device and keeps its
+    /// last host name and IP address.
+    /// </summary>
+    internal void Depart()
+    {
+        IsDeparted = true;
+        IsPresent = false;
+        AccessPointName = null;
+        AccessPointMacAddress = null;
+        Band = null;
+        Port = null;
+        LinkSpeed = null;
     }
 
     private static bool? GetIsWireless(FritzBoxInterfaceType interfaceType, ClientPosition? position)

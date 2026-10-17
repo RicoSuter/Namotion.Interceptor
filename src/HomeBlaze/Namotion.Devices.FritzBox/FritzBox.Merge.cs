@@ -128,10 +128,15 @@ public partial class FritzBox
         return selected;
     }
 
+    /// <summary>
+    /// Applies the hosts to the clients. A client whose host is no longer listed stays for one more poll as absent and
+    /// is removed on the next, so that its final absence is recorded: history resolves the path of a change only after
+    /// the change is written, and skips a subject that is detached by then.
+    /// </summary>
     private void ApplyClients(Dictionary<string, HostEntry> hosts, MeshTopology? mesh)
     {
         var current = Clients;
-        var isChanged = !HasSameKeys(current, hosts);
+        var isChanged = HasClientKeyChange(current, hosts);
         var next = isChanged ? new Dictionary<string, FritzBoxClient>(hosts.Count, StringComparer.Ordinal) : current;
         foreach (var (macAddress, host) in hosts)
         {
@@ -147,6 +152,21 @@ public partial class FritzBox
             }
 
             client.Update(host, position);
+            if (isChanged)
+            {
+                next[macAddress] = client;
+            }
+        }
+
+        foreach (var (macAddress, client) in current)
+        {
+            // A client that departed in the previous poll is left out of next and so removed.
+            if (hosts.ContainsKey(macAddress) || client.IsDeparted)
+            {
+                continue;
+            }
+
+            client.Depart();
             if (isChanged)
             {
                 next[macAddress] = client;
@@ -300,6 +320,29 @@ public partial class FritzBox
 
     private static string? GetIpAddress(string macAddress, Dictionary<string, HostEntry> hosts) =>
         hosts.TryGetValue(macAddress, out var host) ? StringValues.NullIfBlank(host.IpAddress) : null;
+
+    /// <returns>Whether applying <paramref name="hosts"/> adds a client or removes one that departed in the previous
+    /// poll; a client that departs now is kept and so changes nothing.</returns>
+    private static bool HasClientKeyChange(Dictionary<string, FritzBoxClient> current, Dictionary<string, HostEntry> hosts)
+    {
+        foreach (var macAddress in hosts.Keys)
+        {
+            if (!current.ContainsKey(macAddress))
+            {
+                return true;
+            }
+        }
+
+        foreach (var (macAddress, client) in current)
+        {
+            if (client.IsDeparted && !hosts.ContainsKey(macAddress))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     private static bool HasSameKeys<TCurrent, TNext>(Dictionary<string, TCurrent> current, Dictionary<string, TNext> next)
     {
