@@ -215,7 +215,8 @@ public record HistoryPoint(DateTimeOffset Timestamp, double? Number, JsonElement
 /// <summary>
 /// The result of a history query: the points for a property path, ascending by timestamp,
 /// whether the result was truncated to fit the point cap, and the effective store coverage
-/// within the requested range.
+/// within the requested range. A bucketed result of the merger reports the coverage from the
+/// start of its first bucket instead, so it spans what the oldest bucket aggregated (history.md).
 /// </summary>
 public record HistorySeries(
     string PropertyPath,

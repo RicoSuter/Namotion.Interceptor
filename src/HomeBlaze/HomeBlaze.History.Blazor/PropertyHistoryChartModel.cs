@@ -539,18 +539,20 @@ public static class PropertyHistoryChartModel
 
     /// <summary>
     /// Returns <paramref name="points"/> with the <c>Count</c> or <c>Sum</c> of every bucket that <paramref name="coverage"/>
-    /// covers only partly replaced by a gap, so a total over part of a bucket does not draw as a too-low value. A bucket is
-    /// measured within [<paramref name="from"/>, <paramref name="to"/>), the window the coverage speaks for, so the
-    /// oldest and newest buckets reaching past it are not partial for that alone. Returns
-    /// <paramref name="points"/> itself for any other aggregation or a raw query. Both lists must be ascending.
+    /// covers only partly replaced by a gap, so a total over part of a bucket does not draw as a too-low value (partial
+    /// buckets: history.md). Returns <paramref name="points"/> itself for any other aggregation or a raw query.
     /// </summary>
-    public static IReadOnlyList<HistoryPoint> HidePartialTotals(
+    /// <param name="points">The bucket points, ascending.</param>
+    /// <param name="aggregation">The aggregation of the points.</param>
+    /// <param name="bucket">The bucket size, or null for raw samples.</param>
+    /// <param name="to">The end of the window, where the newest bucket is cut.</param>
+    /// <param name="coverage">The normalized coverage of the series.</param>
+    internal static IReadOnlyList<HistoryPoint> HidePartialTotals(
         IReadOnlyList<HistoryPoint> points,
         string aggregation,
         TimeSpan? bucket,
-        DateTimeOffset from,
         DateTimeOffset to,
-        IReadOnlyList<HistoryCoverage> coverage)
+        ImmutableArray<HistoryCoverage> coverage)
     {
         if (bucket is not { } size || aggregation is not (HistoryAggregations.Count or HistoryAggregations.Sum))
         {
@@ -558,29 +560,18 @@ public static class PropertyHistoryChartModel
         }
 
         HistoryPoint[]? shown = null;
-        var coverageIndex = 0;
         for (var index = 0; index < points.Count; index++)
         {
             var point = points[index];
-            var bucketStart = point.Timestamp;
-            var bucketEnd = BucketAlignment.Next(bucketStart, size);
-            var window = new HistoryCoverage(bucketStart > from ? bucketStart : from, bucketEnd < to ? bucketEnd : to);
-
-            while (coverageIndex < coverage.Count && coverage[coverageIndex].To <= bucketStart)
+            if (point.Number is null)
             {
-                coverageIndex++;
+                continue;
             }
 
-            var covered = TimeSpan.Zero;
-            for (var rangeIndex = coverageIndex; rangeIndex < coverage.Count && coverage[rangeIndex].From < window.To; rangeIndex++)
-            {
-                if (coverage[rangeIndex].Intersect(window) is { } overlap)
-                {
-                    covered += overlap.To - overlap.From;
-                }
-            }
-
-            if (point.Number is not null && covered > TimeSpan.Zero && covered < window.To - window.From)
+            var bucketEnd = BucketAlignment.Next(point.Timestamp, size);
+            var window = new HistoryCoverage(point.Timestamp, bucketEnd < to ? bucketEnd : to);
+            var covered = HistoryCoverage.CoveredDuration(coverage, window);
+            if (covered > TimeSpan.Zero && covered < window.To - window.From)
             {
                 shown ??= points.ToArray();
                 shown[index] = point with { Number = null };

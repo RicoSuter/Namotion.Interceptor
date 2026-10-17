@@ -193,7 +193,7 @@ internal static class HistoryChartQuery
                 var isPercent = request.Unit == StateUnit.Percent &&
                     (bucket is null || request.Aggregation != HistoryAggregations.Count);
                 var points = PropertyHistoryChartModel.HidePartialTotals(
-                    result.Points, request.Aggregation, bucket, from, to, result.CoverageRanges);
+                    result.Points, request.Aggregation, bucket, to, result.CoverageRanges);
                 var runs = HasNumber(points)
                     ? PropertyHistoryChartModel.SplitIntoGapRuns(points, bucket, to)
                     : [];

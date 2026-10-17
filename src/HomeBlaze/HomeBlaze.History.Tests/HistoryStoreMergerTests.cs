@@ -942,6 +942,62 @@ public class HistoryStoreMergerTests
     }
 
     [Fact]
+    public async Task WhenABucketedQueryStartsInsideItsFirstBucket_ThenCoverageStartsAtThatBucketStart()
+    {
+        // Arrange
+        var store = new FakeHistoryStore
+        {
+            Priority = 100,
+            CurrentCoverage = new HistoryCoverage(At(0), At(180))
+        }.AddSample(At(45), 1);
+        var query = new HistoryQuery(
+            "temp", At(23), At(143), TimeSpan.FromHours(1), HistoryAggregations.Count, MaxPoints: 100);
+
+        // Act
+        var series = await new[] { store }.QueryHistoryAsync(query, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(new[] { new HistoryCoverage(At(0), At(143)) }, series.CoverageRanges.ToArray());
+    }
+
+    [Fact]
+    public async Task WhenCoverageStartsBetweenTheFirstBucketStartAndFrom_ThenCoverageStartsAtTheCoverageStart()
+    {
+        // Arrange
+        var store = new FakeHistoryStore
+        {
+            Priority = 100,
+            CurrentCoverage = new HistoryCoverage(At(10), At(180))
+        }.AddSample(At(12), 1);
+        var query = new HistoryQuery(
+            "temp", At(23), At(143), TimeSpan.FromHours(1), HistoryAggregations.Count, MaxPoints: 100);
+
+        // Act
+        var series = await new[] { store }.QueryHistoryAsync(query, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(new[] { new HistoryCoverage(At(10), At(143)) }, series.CoverageRanges.ToArray());
+    }
+
+    [Fact]
+    public async Task WhenARawQueryStartsInsideTheCoverage_ThenCoverageStartsAtFrom()
+    {
+        // Arrange
+        var store = new FakeHistoryStore
+        {
+            Priority = 100,
+            CurrentCoverage = new HistoryCoverage(At(0), At(180))
+        }.AddSample(At(45), 1);
+        var query = new HistoryQuery("temp", At(23), At(143));
+
+        // Act
+        var series = await new[] { store }.QueryHistoryAsync(query, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(new[] { new HistoryCoverage(At(23), At(143)) }, series.CoverageRanges.ToArray());
+    }
+
+    [Fact]
     public async Task WhenTheOwnerHasAGapInsideABucket_ThenCoverageKeepsTheGap()
     {
         // Arrange

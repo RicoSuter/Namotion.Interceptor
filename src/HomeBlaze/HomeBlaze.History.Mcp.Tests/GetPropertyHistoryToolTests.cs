@@ -248,6 +248,36 @@ public class GetPropertyHistoryToolTests
     }
 
     [Fact]
+    public async Task WhenCoverageStartsBetweenTheOldestBucketStartAndFrom_ThenThatBucketIsPartialAndTheSummaryStaysInsideTheRange()
+    {
+        // Arrange - the store started at 10:10 and the query starts at 10:23, so the 10:00 bucket counts only from 10:10.
+        void Configure(TestHistoryStore store)
+        {
+            store.Coverage = [new HistoryCoverage(Start.AddHours(10).AddMinutes(10), DateTimeOffset.MaxValue)];
+            store.Points =
+            [
+                new HistoryPoint(Start.AddHours(10), 3, null),
+                new HistoryPoint(Start.AddHours(11), 2, null),
+                new HistoryPoint(Start.AddHours(12), 1, null)
+            ];
+        }
+
+        // Act
+        var json = await InvokeAsync(
+            new { paths = new[] { "/Power" }, from = "2026-06-24T10:23:00Z", to = "2026-06-24T12:23:00Z", bucket = "1h", time_zone = "UTC", aggregation = "Count", coverage = "ranges" },
+            Configure);
+
+        // Assert
+        var coverage = json.GetProperty("coverage");
+        Assert.Equal(["2026-06-24T10:00:00Z"], coverage.GetProperty("partial").EnumerateArray().Select(entry => entry.GetString()));
+        Assert.Equal(1, coverage.GetProperty("ratio").GetDouble());
+        Assert.Equal(0, coverage.GetProperty("gaps").GetInt32());
+        var ranges = coverage.GetProperty("ranges").EnumerateArray()
+            .Select(range => $"{range[0].GetString()}/{range[1].GetString()}");
+        Assert.Equal(["2026-06-24T10:23:00Z/2026-06-24T12:23:00Z"], ranges);
+    }
+
+    [Fact]
     public async Task WhenNoBucketIsPartlyCoveredOrTheQueryIsRaw_ThenCoverageHasNoPartialList()
     {
         // Act

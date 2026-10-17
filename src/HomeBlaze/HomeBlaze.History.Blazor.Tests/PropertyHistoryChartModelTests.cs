@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using HomeBlaze.History.Abstractions;
 using HomeBlaze.History.Blazor;
 using Xunit;
@@ -329,7 +330,7 @@ public class PropertyHistoryChartModelTests
             new(start, 1d, null), new(start.AddSeconds(10), 2d, null),
             new(start.AddSeconds(20), 3d, null), new(start.AddSeconds(30), 4d, null)
         ];
-        HistoryCoverage[] coverage =
+        ImmutableArray<HistoryCoverage> coverage =
         [
             new(start.AddSeconds(5), start.AddSeconds(12)),
             new(start.AddSeconds(15), start.AddSeconds(40))
@@ -337,27 +338,30 @@ public class PropertyHistoryChartModelTests
 
         // Act
         var shown = PropertyHistoryChartModel.HidePartialTotals(
-            points, aggregation, TimeSpan.FromSeconds(10), start, start.AddSeconds(35), coverage);
+            points, aggregation, TimeSpan.FromSeconds(10), start.AddSeconds(35), coverage);
 
         // Assert
         Assert.Equal(new double?[] { null, null, 3d, 4d }, shown.Select(point => point.Number));
         Assert.Equal(points.Select(point => point.Timestamp), shown.Select(point => point.Timestamp));
     }
 
-    [Fact]
-    public void WhenTheWindowStartsInsideTheOldestBucket_ThenItIsMeasuredFromTheWindowStart()
+    [Theory]
+    [InlineData(0, 1d)]
+    [InlineData(4, null)]
+    public void WhenTheOldestBucketStartsBeforeTheWindow_ThenItIsMeasuredFromItsOwnStart(int coverageStartSeconds, double? expected)
     {
-        // Arrange - the window starts at 4 s, and the series coverage is clipped to it, which is not a gap.
+        // Arrange - a window starting at 4 s; the series coverage of a bucketed query starts at the oldest bucket start
+        // when that bucket is covered, and later when it is covered only partly.
         var start = new DateTimeOffset(2026, 6, 22, 12, 0, 0, TimeSpan.Zero);
         HistoryPoint[] points = [new(start, 1d, null), new(start.AddSeconds(10), 2d, null)];
-        HistoryCoverage[] coverage = [new(start.AddSeconds(4), start.AddSeconds(20))];
+        ImmutableArray<HistoryCoverage> coverage = [new(start.AddSeconds(coverageStartSeconds), start.AddSeconds(20))];
 
         // Act
         var shown = PropertyHistoryChartModel.HidePartialTotals(
-            points, HistoryAggregations.Count, TimeSpan.FromSeconds(10), start.AddSeconds(4), start.AddSeconds(20), coverage);
+            points, HistoryAggregations.Count, TimeSpan.FromSeconds(10), start.AddSeconds(20), coverage);
 
         // Assert
-        Assert.Equal(new double?[] { 1d, 2d }, shown.Select(point => point.Number));
+        Assert.Equal(new double?[] { expected, 2d }, shown.Select(point => point.Number));
     }
 
     [Fact]
@@ -366,11 +370,11 @@ public class PropertyHistoryChartModelTests
         // Arrange
         var start = new DateTimeOffset(2026, 6, 22, 12, 0, 0, TimeSpan.Zero);
         HistoryPoint[] points = [new(start, 1d, null), new(start.AddSeconds(10), 2d, null)];
-        HistoryCoverage[] coverage = [new(start.AddSeconds(5), start.AddSeconds(20))];
+        ImmutableArray<HistoryCoverage> coverage = [new(start.AddSeconds(5), start.AddSeconds(20))];
 
         // Act
         var shown = PropertyHistoryChartModel.HidePartialTotals(
-            points, HistoryAggregations.Maximum, TimeSpan.FromSeconds(10), start, start.AddSeconds(20), coverage);
+            points, HistoryAggregations.Maximum, TimeSpan.FromSeconds(10), start.AddSeconds(20), coverage);
 
         // Assert
         Assert.Same(points, shown);

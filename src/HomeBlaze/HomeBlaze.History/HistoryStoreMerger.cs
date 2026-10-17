@@ -15,7 +15,8 @@ public static class HistoryStoreMerger
 {
     /// <summary>
     /// Queries the store set for a single property path, merging the results across stores.
-    /// Higher-priority stores win overlapping ranges and identical timestamps.
+    /// Higher-priority stores win overlapping ranges and identical timestamps. The coverage of a
+    /// bucketed result starts at its first bucket start rather than at <see cref="HistoryQuery.From"/>.
     /// </summary>
     public static async Task<HistorySeries> QueryHistoryAsync(
         this IEnumerable<IHistoryStore> stores, HistoryQuery query, CancellationToken cancellationToken)
@@ -375,11 +376,13 @@ public static class HistoryStoreMerger
         }
 
         ImmutableArray<HistoryPoint> points;
+        HistoryCoverage coverageWindow;
         if (query.Bucket is { } bucket)
         {
             // The same clipped grid the planners walked: the newest MaxPoints buckets of the range.
             var bucketStart = BucketAlignment.FirstBucketStart(query.From, query.To, bucket, query.MaxPoints);
             truncated |= bucketStart > BucketAlignment.Start(query.From, bucket);
+            coverageWindow = new HistoryCoverage(bucketStart, query.To);
 
             var builder = bucket.FixedSize is { } size
                 ? ImmutableArray.CreateBuilder<HistoryPoint>(checked((int)(1L + ((query.To - bucketStart).Ticks - 1L) / size.Ticks)))
@@ -405,23 +408,25 @@ public static class HistoryStoreMerger
             points = byTimestamp.Values
                 .OrderBy(point => point.Timestamp)
                 .ToImmutableArray();
+            coverageWindow = new HistoryCoverage(query.From, query.To);
         }
 
         return new HistorySeries(
             query.PropertyPath,
             points,
             truncated,
-            EffectiveCoverage(served, query));
+            EffectiveCoverage(served, coverageWindow));
     }
 
     /// <summary>
     /// The coverage the returned series actually stands behind: only the segments that were served,
-    /// and within each of those, only the part the returned points can vouch for.
+    /// and within each of those, only the part the returned points can vouch for, clipped to
+    /// <paramref name="window"/> (the grid of a bucketed query, the requested range of a raw one).
     /// A budget shortfall drops the oldest planned segments without querying them, and reporting
     /// those as covered would tell a caller "no samples here" for a range that was never read.
     /// </summary>
     private static ImmutableArray<HistoryCoverage> EffectiveCoverage(
-        IReadOnlyList<PlannedSegment> served, HistoryQuery query)
+        IReadOnlyList<PlannedSegment> served, HistoryCoverage window)
     {
         var ranges = new List<HistoryCoverage>(served.Count);
         foreach (var segment in served)
@@ -429,7 +434,7 @@ public static class HistoryStoreMerger
             AddSegmentCoverage(ranges, segment);
         }
 
-        return HistoryCoverage.Clip(ranges, new HistoryCoverage(query.From, query.To));
+        return HistoryCoverage.Clip(ranges, window);
     }
 
     /// <summary>

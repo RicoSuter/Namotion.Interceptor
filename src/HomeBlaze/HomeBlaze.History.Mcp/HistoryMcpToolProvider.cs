@@ -106,7 +106,7 @@ public class HistoryMcpToolProvider : IMcpToolProvider
                           "and a 'series' map keyed by path, each with a value_type hint, a unit when the property declares one " +
                           "(a StateUnit name such as WattHour), and points as [timestamp, value] pairs " +
                           "(a null value means no coverage or no known value). For bucketed queries, coverage.partial lists " +
-                          "the buckets the coverage covers only partly (measured within the requested range), in the form of the points' first element; their Count " +
+                          "the buckets the coverage covers only partly, in the form of the points' first element; their Count " +
                           "and Sum are lower bounds over the covered part. The point limit keeps the newest points and drops " +
                           "the oldest: a cut series carries truncated and complete_from, the timestamp from which it is complete; " +
                           "narrow from and to, or use a coarser bucket, to see older data. A series whose coverage differs " +
@@ -307,15 +307,29 @@ public class HistoryMcpToolProvider : IMcpToolProvider
             .ConfigureAwait(false);
 
         // The response coverage is the first served series'. In the normal case every series shares it, and
-        // repeating it per series dominated the response size.
+        // repeating it per series dominated the response size. A bucketed series covers its whole oldest bucket,
+        // which can start before from, but the summary and the listed ranges describe the requested range.
+        var requested = new HistoryCoverage(from, to);
         var responseCoverage = results.FirstOrDefault(result => result.Series is not null)?.Series!.CoverageRanges;
+        var requestedCoverage = responseCoverage is { } shared ? HistoryCoverage.Clip(shared, requested) : default;
 
         var series = new Dictionary<string, object?>(StringComparer.Ordinal);
         foreach (var result in results)
         {
-            series[result.Path] = result.Series is { } served
-                ? BuildSeriesPayload(result.ValueType, result.Unit, served, timeZone, bucket, aggregation, includeRanges && responseCoverage is { } shared && !served.CoverageRanges.SequenceEqual(shared))
-                : result.ErrorPayload;
+            if (result.Series is not { } served)
+            {
+                series[result.Path] = result.ErrorPayload;
+                continue;
+            }
+
+            ImmutableArray<HistoryCoverage>? ownRanges = null;
+            if (includeRanges)
+            {
+                var clipped = HistoryCoverage.Clip(served.CoverageRanges, requested);
+                ownRanges = clipped.SequenceEqual(requestedCoverage) ? null : clipped;
+            }
+
+            series[result.Path] = BuildSeriesPayload(result.ValueType, result.Unit, served, timeZone, bucket, aggregation, ownRanges);
         }
 
         // Nested rather than returned as the top-level map: a path is caller-supplied, so a bare map
@@ -329,7 +343,7 @@ public class HistoryMcpToolProvider : IMcpToolProvider
 
         if (responseCoverage is { } coverage)
         {
-            response["coverage"] = BuildCoveragePayload(coverage, from, to, timeZone, bucket, maxPoints, includeRanges);
+            response["coverage"] = BuildCoveragePayload(coverage, requestedCoverage, from, to, timeZone, bucket, maxPoints, includeRanges);
         }
 
         response["series"] = series;
@@ -338,6 +352,7 @@ public class HistoryMcpToolProvider : IMcpToolProvider
 
     private static Dictionary<string, object?> BuildCoveragePayload(
         ImmutableArray<HistoryCoverage> ranges,
+        ImmutableArray<HistoryCoverage> requestedRanges,
         DateTimeOffset from,
         DateTimeOffset to,
         TimeZoneInfo timeZone,
@@ -345,7 +360,7 @@ public class HistoryMcpToolProvider : IMcpToolProvider
         int maxPoints,
         bool includeRanges)
     {
-        var summary = HistoryToolFormatting.Summarize(ranges, from, to);
+        var summary = HistoryToolFormatting.Summarize(requestedRanges, from, to);
         var payload = new Dictionary<string, object?>(StringComparer.Ordinal)
         {
             ["ratio"] = summary.Ratio,
@@ -359,7 +374,7 @@ public class HistoryMcpToolProvider : IMcpToolProvider
 
         if (includeRanges)
         {
-            payload["ranges"] = FormatRanges(ranges, timeZone);
+            payload["ranges"] = FormatRanges(requestedRanges, timeZone);
         }
 
         if (bucket is { } grid && FindPartialBuckets(ranges, from, to, grid, maxPoints, timeZone) is { } partial)
@@ -372,8 +387,7 @@ public class HistoryMcpToolProvider : IMcpToolProvider
 
     /// <summary>
     /// Labels the buckets of the returned grid that <paramref name="ranges"/> covers only partly, or returns null when
-    /// there are none. A bucket is measured within [<paramref name="from"/>, <paramref name="to"/>), the window the
-    /// coverage speaks for, so the oldest and newest buckets reaching past it are not partial for that alone.
+    /// there are none (partial buckets: history.md).
     /// </summary>
     private static List<string>? FindPartialBuckets(
         ImmutableArray<HistoryCoverage> ranges,
@@ -384,26 +398,12 @@ public class HistoryMcpToolProvider : IMcpToolProvider
         TimeZoneInfo timeZone)
     {
         List<string>? partial = null;
-        var rangeIndex = 0;
         var bucketStart = BucketAlignment.FirstBucketStart(from, to, bucket, maxPoints);
         while (bucketStart < to)
         {
             var bucketEnd = BucketAlignment.Next(bucketStart, bucket);
-            var window = new HistoryCoverage(bucketStart > from ? bucketStart : from, bucketEnd < to ? bucketEnd : to);
-            while (rangeIndex < ranges.Length && ranges[rangeIndex].To <= window.From)
-            {
-                rangeIndex++;
-            }
-
-            var covered = TimeSpan.Zero;
-            for (var index = rangeIndex; index < ranges.Length && ranges[index].From < window.To; index++)
-            {
-                if (ranges[index].Intersect(window) is { } overlap)
-                {
-                    covered += overlap.To - overlap.From;
-                }
-            }
-
+            var window = new HistoryCoverage(bucketStart, bucketEnd < to ? bucketEnd : to);
+            var covered = HistoryCoverage.CoveredDuration(ranges, window);
             if (covered > TimeSpan.Zero && covered < window.To - window.From)
             {
                 (partial ??= []).Add(FormatPointTime(bucketStart, timeZone, bucket));
@@ -416,7 +416,8 @@ public class HistoryMcpToolProvider : IMcpToolProvider
     }
 
     private static Dictionary<string, object?> BuildSeriesPayload(
-        string? valueType, string? unit, HistorySeries series, TimeZoneInfo timeZone, HistoryBucket? bucket, string aggregation, bool includeOwnRanges)
+        string? valueType, string? unit, HistorySeries series, TimeZoneInfo timeZone, HistoryBucket? bucket, string aggregation,
+        ImmutableArray<HistoryCoverage>? ownRanges)
     {
         var payload = new Dictionary<string, object?>(StringComparer.Ordinal) { ["value_type"] = valueType };
         if (unit is not null)
@@ -434,9 +435,9 @@ public class HistoryMcpToolProvider : IMcpToolProvider
             }
         }
 
-        if (includeOwnRanges)
+        if (ownRanges is { } ranges)
         {
-            payload["ranges"] = FormatRanges(series.CoverageRanges, timeZone);
+            payload["ranges"] = FormatRanges(ranges, timeZone);
         }
 
         var roundNumbers = bucket is not null && ComputesNewValue(aggregation);

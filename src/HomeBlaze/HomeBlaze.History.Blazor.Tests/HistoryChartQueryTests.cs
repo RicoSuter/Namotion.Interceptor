@@ -33,6 +33,25 @@ public class HistoryChartQueryTests
     }
 
     [Fact]
+    public async Task WhenCoverageStartsBetweenTheOldestBucketStartAndTheWindowStart_ThenThatCountIsAGap()
+    {
+        // Arrange - the store started at 10:10 and the window starts at 10:23, so the 10:00 bucket counts only from 10:10.
+        var store = new TestHistoryStore(new HistoryCoverage(At(610), At(780)))
+            .Add("/door/Openings", At(600), 3)
+            .Add("/door/Openings", At(660), 2)
+            .Add("/door/Openings", At(720), 1);
+        var request = new HistoryChartSeriesRequest("/door/Openings", "Openings", typeof(int), IsBand: false, HistoryAggregations.Count);
+
+        // Act
+        var result = await HistoryChartQuery.QueryAsync(
+            [store], [request], At(623), At(743), TimeSpan.FromHours(1), CancellationToken.None);
+
+        // Assert
+        var drawn = Assert.Single(result.Data.Lines).Runs.SelectMany(run => run).Select(point => point.Timestamp);
+        Assert.Equal([At(660), At(720)], drawn);
+    }
+
+    [Fact]
     public async Task WhenSeriesUseTwoAggregations_ThenEachIsQueriedWithItsOwnAndTheResultKeepsTheRequestOrder()
     {
         // Arrange
