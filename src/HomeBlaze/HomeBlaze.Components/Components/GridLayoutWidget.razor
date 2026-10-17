@@ -14,10 +14,10 @@
     var rows = Grid?.Rows ?? 1;
     var columns = Grid?.Columns ?? 1;
     var cellAspectRatio = Grid?.CellAspectRatio;
-    var hasAspectRatio = !string.IsNullOrWhiteSpace(cellAspectRatio);
     var rowTemplate = GridRows.GetTemplate(rows, columns, cellAspectRatio, out var ratioError);
+    var hasAspectRatio = rowTemplate is not null && !string.IsNullOrWhiteSpace(cellAspectRatio);
 
-    RenderFragment grid = @<div class="grid-layout-container"
+    RenderFragment grid = @<div class="@(hasAspectRatio ? "grid-layout-container has-cell-aspect-ratio" : "grid-layout-container")"
      style="display: grid;
             grid-template-rows: @rowTemplate;
             grid-template-columns: repeat(@columns, 1fr);
@@ -100,6 +100,11 @@ else
     .grid-cell-content {
         width: 100%;
         height: 100%;
+    }
+
+    /* The rows of the grid are as high as a column is wide times the ratio, which a minimum height would exceed. */
+    .grid-layout-container.has-cell-aspect-ratio > .grid-cell {
+        min-height: 0;
     }
 
     .grid-cell.empty {

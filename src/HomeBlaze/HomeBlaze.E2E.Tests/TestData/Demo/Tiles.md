@@ -42,3 +42,8 @@ This page is changed by the tile widget tests.
 ::: Cell Row=0 Column=0
 :::: HomeBlaze.Components.Switch#squaretile Kind=Tile Path=tilemotor/IsPowered Label="Square"
 ::
+
+:: HomeBlaze.Components.GridLayout#widegrid Rows=1 Columns=9 CellAspectRatio=1:1
+::: Cell Row=0 Column=0
+:::: HomeBlaze.Components.Switch#narrowtile Kind=Tile Path=tilemotor/IsPowered Label="Narrow"
+::
