@@ -37,8 +37,14 @@ public class TileWidgetTests
     private static ILocator GetSwitchTile(IPage page, string label) =>
         page.GetByRole(AriaRole.Switch, new() { Name = label, Exact = true });
 
+    // The root of a tile holds the style of the tile and the badge, next to the button.
+    private static ILocator GetTileRoot(ILocator tileButton) => tileButton.Locator("xpath=..");
+
+    private static ILocator GetGridCell(ILocator tile) =>
+        tile.Locator("xpath=ancestor::div[contains(@class,'grid-cell')][1]");
+
     private static Task<string> GetBackgroundAsync(ILocator tileButton) =>
-        tileButton.Locator("xpath=..").EvaluateAsync<string>("element => getComputedStyle(element).backgroundColor");
+        GetTileRoot(tileButton).EvaluateAsync<string>("element => getComputedStyle(element).backgroundColor");
 
     [Fact]
     public async Task WhenPageRenders_ThenItShowsNoBlockErrors()
@@ -71,7 +77,7 @@ public class TileWidgetTests
         Assert.False(GetMotor().IsPowered);
         var surface = await page.ResolveColorAsync("var(--mud-palette-surface)");
         Assert.Equal(surface, await GetBackgroundAsync(tile));
-        await Assertions.Expect(page.GetByTestId("switch-tile").Filter(new() { Has = tile }).GetByTestId("tile-subtitle")).ToHaveTextAsync("Hall");
+        await Assertions.Expect(tile.GetByTestId("tile-subtitle")).ToHaveTextAsync("Hall");
     }
 
     [Fact]
@@ -82,7 +88,7 @@ public class TileWidgetTests
         var page = await OpenPageAsync();
         var tile = GetSwitchTile(page, "Motor");
         await Assertions.Expect(tile).ToBeCheckedAsync(new() { Timeout = Timeout });
-        var badge = page.GetByTestId("switch-tile").Filter(new() { Has = tile }).GetByTestId("tile-badge");
+        var badge = GetTileRoot(tile).GetByTestId("tile-badge");
 
         // Act: the badge takes no pointer input, so Playwright's actionability check would wait forever; a forced click
         // goes to the point, where the tile below receives it, which is what a user's click does.
@@ -92,29 +98,15 @@ public class TileWidgetTests
         await Assertions.Expect(tile).Not.ToBeCheckedAsync(new() { Timeout = Timeout });
     }
 
-    [Fact]
-    public async Task WhenSwitchTileHasNoMap_ThenItIsFilledWithThePrimaryColorWhileTrue()
+    [Theory]
+    [InlineData("Plain")] // no map
+    [InlineData("No case")] // a map without a case for true
+    public async Task WhenSwitchTileHasNoCaseForTheValue_ThenItIsFilledWithThePrimaryColorWhileTrue(string label)
     {
         // Arrange
         GetMotor().IsPowered = true;
         var page = await OpenPageAsync();
-        var tile = GetSwitchTile(page, "Plain");
-
-        // Act
-        await Assertions.Expect(tile).ToBeCheckedAsync(new() { Timeout = Timeout });
-
-        // Assert
-        var primary = await page.ResolveColorAsync("var(--mud-palette-primary)");
-        Assert.Equal(primary, await GetBackgroundAsync(tile));
-    }
-
-    [Fact]
-    public async Task WhenSwitchTileMapHasNoCaseForTheValue_ThenItIsFilledWithThePrimaryColorWhileTrue()
-    {
-        // Arrange
-        GetMotor().IsPowered = true;
-        var page = await OpenPageAsync();
-        var tile = GetSwitchTile(page, "No case");
+        var tile = GetSwitchTile(page, label);
 
         // Act
         await Assertions.Expect(tile).ToBeCheckedAsync(new() { Timeout = Timeout });
@@ -185,12 +177,12 @@ public class TileWidgetTests
     {
         // Arrange & Act
         var page = await OpenPageAsync();
-        var tile = page.GetByTestId("switch-tile").Filter(new() { Has = GetSwitchTile(page, "Plain") });
+        var tile = GetTileRoot(GetSwitchTile(page, "Plain"));
         await Assertions.Expect(tile).ToBeVisibleAsync(new() { Timeout = Timeout });
 
         // Assert
         var tileBox = await PageGeometry.GetBoxAsync(tile);
-        var cellBox = await PageGeometry.GetBoxAsync(tile.Locator("xpath=ancestor::div[contains(@class,'grid-cell')][1]"));
+        var cellBox = await PageGeometry.GetBoxAsync(GetGridCell(tile));
         Assert.InRange(cellBox.Width - tileBox.Width, 0, 2.5);
         Assert.InRange(cellBox.Height - tileBox.Height, 0, 2.5);
     }
@@ -213,40 +205,24 @@ public class TileWidgetTests
     }
 
     [Theory]
-    [InlineData(1280)]
-    [InlineData(800)]
-    public async Task WhenGridHasASquareCellAspectRatio_ThenItsCellsAreSquareAtEveryWidth(int width)
+    [InlineData("Square", 1280)]
+    [InlineData("Square", 800)]
+    // The columns of this grid are narrower than the 96 pixel minimum height of a tile at 800 pixels.
+    [InlineData("Narrow", 1280)]
+    [InlineData("Narrow", 800)]
+    public async Task WhenGridHasASquareCellAspectRatio_ThenItsCellsAreSquareAndTheTileFillsThemAtEveryWidth(string label, int width)
     {
         // Arrange
         var page = await OpenPageAsync();
         await page.SetViewportSizeAsync(width, 900);
-        var tile = page.GetByTestId("switch-tile").Filter(new() { Has = GetSwitchTile(page, "Square") });
+        var tile = GetTileRoot(GetSwitchTile(page, label));
         await Assertions.Expect(tile).ToBeVisibleAsync(new() { Timeout = Timeout });
 
         // Act
-        var cell = await PageGeometry.GetBoxAsync(tile.Locator("xpath=ancestor::div[contains(@class,'grid-cell')][1]"));
-
-        // Assert
-        Assert.InRange(Math.Abs(cell.Width - cell.Height), 0, 1.5);
-    }
-
-    [Theory]
-    [InlineData(1280)]
-    [InlineData(800)]
-    public async Task WhenColumnsOfASquareGridAreNarrowerThanTheMinimumCellHeight_ThenItsCellsAreStillSquare(int width)
-    {
-        // Arrange
-        var page = await OpenPageAsync();
-        await page.SetViewportSizeAsync(width, 900);
-        var tile = page.GetByTestId("switch-tile").Filter(new() { Has = GetSwitchTile(page, "Narrow") });
-        await Assertions.Expect(tile).ToBeVisibleAsync(new() { Timeout = Timeout });
-
-        // Act
-        var cell = await PageGeometry.GetBoxAsync(tile.Locator("xpath=ancestor::div[contains(@class,'grid-cell')][1]"));
+        var cell = await PageGeometry.GetBoxAsync(GetGridCell(tile));
         var tileBox = await PageGeometry.GetBoxAsync(tile);
 
-        // Assert: the tile is not taller than the cell although its own minimum height is 96 pixels, which is more than
-        // the cell is wide at 800 pixels.
+        // Assert
         Assert.InRange(Math.Abs(cell.Width - cell.Height), 0, 1.5);
         Assert.InRange(Math.Abs(cell.Width - tileBox.Width), 0, 2.5);
         Assert.InRange(Math.Abs(cell.Height - tileBox.Height), 0, 2.5);
@@ -259,14 +235,9 @@ public class TileWidgetTests
     public async Task WhenCanvasFitsTheWidth_ThenItsNodesScaleWithTheWidthOfThePage(int width)
     {
         // Arrange
-        var page = await OpenPageAsync();
-        await page.SetViewportSizeAsync(width, 900);
-        var frame = GetCanvasFrame(page);
-        var node = GetCanvasNode(page);
-        await Assertions.Expect(node).ToBeVisibleAsync(new() { Timeout = Timeout });
+        var (_, frame, node) = await OpenScaledCanvasAsync(width, 900);
 
-        // Act: the node is half of the 400 pixel design width, so it is half of the frame once the frame is measured.
-        await WaitForScaledNodeAsync(page, frame, node);
+        // Act
         var frameBox = await PageGeometry.GetBoxAsync(frame);
         var nodeBox = await PageGeometry.GetBoxAsync(node);
 
@@ -282,12 +253,7 @@ public class TileWidgetTests
     public async Task WhenTileIsTheOnlyContentOfACanvasNodeThatFitsTheWidth_ThenItFillsTheNode(int width)
     {
         // Arrange
-        var page = await OpenPageAsync();
-        await page.SetViewportSizeAsync(width, 900);
-        var frame = GetCanvasFrame(page);
-        var node = GetCanvasNode(page);
-        await Assertions.Expect(node).ToBeVisibleAsync(new() { Timeout = Timeout });
-        await WaitForScaledNodeAsync(page, frame, node);
+        var (page, _, node) = await OpenScaledCanvasAsync(width, 900);
         var tile = node.GetByTestId("switch-tile");
 
         // Act: the node has a border of 1 pixel on each side, which is scaled with the canvas (the node is 200 pixels wide),
@@ -312,44 +278,28 @@ public class TileWidgetTests
     public async Task WhenCanvasThatFitsTheWidthIsEdited_ThenItIsDrawnUnscaled()
     {
         // Arrange: the node is drawn at the factor of the 1008 pixel frame first, about 504 pixels wide.
-        var page = await OpenPageAsync();
-        await page.SetViewportSizeAsync(1280, 900);
-        var frame = GetCanvasFrame(page);
-        var node = GetCanvasNode(page);
-        await Assertions.Expect(node).ToBeVisibleAsync(new() { Timeout = Timeout });
-        await WaitForScaledNodeAsync(page, frame, node);
+        var (page, _, node) = await OpenScaledCanvasAsync(1280, 900);
         Assert.True((await PageGeometry.GetBoxAsync(node)).Width > 300);
 
         // Act
         await page.SelectEditModeAsync("Inline");
 
         // Assert
-        await page.WaitForFunctionAsync(
-            "node => Math.abs(node.getBoundingClientRect().width - 200) < 3",
-            await node.ElementHandleAsync(),
-            new() { Timeout = Timeout });
+        await WaitForUnscaledNodeAsync(page, node);
     }
 
     [Fact]
     public async Task WhenCanvasThatFitsTheWidthIsEditedOnANarrowPage_ThenItScrollsHorizontally()
     {
         // Arrange: the node is drawn at the factor of the narrow frame first, below 200 pixels wide.
-        var page = await OpenPageAsync();
-        await page.SetViewportSizeAsync(375, 812);
-        var frame = GetCanvasFrame(page);
-        var node = GetCanvasNode(page);
-        await Assertions.Expect(node).ToBeVisibleAsync(new() { Timeout = Timeout });
-        await WaitForScaledNodeAsync(page, frame, node);
+        var (page, frame, node) = await OpenScaledCanvasAsync(375, 812);
         Assert.True((await PageGeometry.GetBoxAsync(node)).Width < 190);
 
         // Act
         await page.SelectEditModeAsync("Inline");
 
         // Assert: the 400 pixel design width is wider than the frame, which scrolls instead of scaling the node.
-        await page.WaitForFunctionAsync(
-            "node => Math.abs(node.getBoundingClientRect().width - 200) < 3",
-            await node.ElementHandleAsync(),
-            new() { Timeout = Timeout });
+        await WaitForUnscaledNodeAsync(page, node);
         var scrollLeft = await frame.EvaluateAsync<double>(
             "frame => getComputedStyle(frame).overflowX === 'auto' ? (frame.scrollLeft = 50, frame.scrollLeft) : -1");
         Assert.True(scrollLeft > 0, $"The frame did not scroll: {scrollLeft}");
@@ -360,12 +310,7 @@ public class TileWidgetTests
     {
         // Arrange
         var path = _fixture.GetDemoPagePath(PageName);
-        var page = await OpenPageAsync();
-        var frame = GetCanvasFrame(page);
-        var node = GetCanvasNode(page);
-        await Assertions.Expect(node).ToBeVisibleAsync(new() { Timeout = Timeout });
-        await page.SetViewportSizeAsync(1280, 900);
-        await WaitForScaledNodeAsync(page, frame, node);
+        var (page, frame, node) = await OpenScaledCanvasAsync(1280, 900);
         var contentBefore = await _fixture.ReadFileAsync(path);
         var writeTimeBefore = File.GetLastWriteTimeUtc(path);
 
@@ -381,6 +326,18 @@ public class TileWidgetTests
         Assert.Equal(writeTimeBefore, File.GetLastWriteTimeUtc(path));
     }
 
+    // Opens the page at the size and waits until the canvas that fits the width is drawn at the factor of its frame.
+    private async Task<(IPage Page, ILocator Frame, ILocator Node)> OpenScaledCanvasAsync(int width, int height)
+    {
+        var page = await OpenPageAsync();
+        await page.SetViewportSizeAsync(width, height);
+        var frame = GetCanvasFrame(page);
+        var node = GetCanvasNode(page);
+        await Assertions.Expect(node).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await WaitForScaledNodeAsync(page, frame, node);
+        return (page, frame, node);
+    }
+
     private static ILocator GetCanvasFrame(IPage page) => page.GetByTestId("canvas-scale-frame").Last;
 
     private static ILocator GetCanvasNode(IPage page) =>
@@ -391,5 +348,12 @@ public class TileWidgetTests
         await page.WaitForFunctionAsync(
             "([frame, node]) => Math.abs(node.getBoundingClientRect().width - frame.getBoundingClientRect().width / 2) < 2",
             new object[] { await frame.ElementHandleAsync(), await node.ElementHandleAsync() },
+            new() { Timeout = Timeout });
+
+    // Unscaled, the node is drawn at its own width of 200 pixels.
+    private static async Task WaitForUnscaledNodeAsync(IPage page, ILocator node) =>
+        await page.WaitForFunctionAsync(
+            "node => Math.abs(node.getBoundingClientRect().width - 200) < 3",
+            await node.ElementHandleAsync(),
             new() { Timeout = Timeout });
 }
