@@ -57,6 +57,7 @@ internal static class SubjectPathSelection
         foreach (var valueType in valueTypes)
         {
             if (valueType == typeof(INumber<>) ? NumberValues.IsNumberType(type) :
+                valueType == typeof(Enum) ? type.IsEnum :
                 valueType.IsGenericTypeDefinition ? IsClosedFormOf(type, valueType) : valueType.IsAssignableFrom(type))
             {
                 return true;

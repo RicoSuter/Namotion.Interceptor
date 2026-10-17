@@ -337,6 +337,7 @@ public class SubjectPathSelectionTests
     [InlineData(typeof(string), typeof(INumber<>), false)]
     [InlineData(typeof(PathTargetMode?), typeof(Enum), true)]
     [InlineData(typeof(int), typeof(Enum), false)]
+    [InlineData(typeof(Enum), typeof(Enum), false)]
     [InlineData(typeof(bool?), typeof(bool), true)]
     [InlineData(typeof(int), typeof(bool), false)]
     [InlineData(typeof(List<int>), typeof(List<>), true)]
