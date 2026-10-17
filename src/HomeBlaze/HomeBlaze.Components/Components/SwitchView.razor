@@ -14,7 +14,9 @@
     var property = Property;
     var value = property?.GetValue();
     var isOn = value as bool? ?? false;
-    var matched = value is not null ? ValueMap?.FindCase(RawValueFormatter.Format(value)) : null;
+    // A pending toggle shows the state it goes to, boxed only then, and is read back from the property when it ends.
+    var shown = _pending is { } target ? target : value;
+    var matched = shown is not null ? ValueMap?.FindCase(RawValueFormatter.Format(shown)) : null;
     var canToggle = false;
     if (property is not null && (property.Type == typeof(bool) || property.Type == typeof(bool?)))
     {
@@ -38,11 +40,11 @@
 {
     // The case itself decides the fill: a case without a color is drawn on the surface, while a value without a case
     // is filled with the primary color when true.
-    var fill = matched?.Color ?? (value is true ? Color.Primary : Color.Default);
+    var fill = matched?.Color ?? (shown is true ? Color.Primary : Color.Default);
     var subtitle = !string.IsNullOrEmpty(Subtitle)
         ? Subtitle
-        : ValueMap is not null && property is not null && value is not null ? ValueReader.GetText(property, value, matched, TimeZone) : null;
-    var icon = value is null
+        : ValueMap is not null && property is not null && shown is not null ? ValueReader.GetText(property, shown, matched, TimeZone) : null;
+    var icon = shown is null
         ? Icons.Material.Filled.QuestionMark
         : MudBlazorIconResolver.ResolveOrNull(string.IsNullOrEmpty(matched?.Icon) ? Icon : matched.Icon);
     @* The label alone is the accessible name, as for the toggle switch: the subtitle is the state, which aria-checked gives. *@
