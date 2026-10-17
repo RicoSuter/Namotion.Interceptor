@@ -129,14 +129,14 @@ public abstract partial class LlmAgentBase
 
     /// <summary>
     /// Ends a turn; <paramref name="isIdle"/> reports the idle status once the agent is no longer busy, as does a
-    /// configuration change that the turn left to report.
+    /// configuration change or the end of a pause that the turn left to report.
     /// </summary>
     private void EndTurn(bool isIdle)
     {
         ClearStreamingText();
 
-        // Cleared before the pending idle report is read, so a configuration change either sees the agent idle and
-        // reports itself or leaves its report to this turn.
+        // Cleared before the pending idle report is read, so a configuration change or the end of a pause either sees
+        // the agent idle and reports itself or leaves its report to this turn.
         IsBusy = false;
         lock (_stateLock)
         {

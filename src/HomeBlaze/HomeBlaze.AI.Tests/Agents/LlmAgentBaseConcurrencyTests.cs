@@ -5,6 +5,7 @@ using System.Text.Json;
 using HomeBlaze.Abstractions;
 using HomeBlaze.AI.Agents;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Mcp;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
@@ -230,6 +231,49 @@ public class LlmAgentBaseConcurrencyTests
     }
 
     [Fact]
+    public async Task WhenAUsageLimitOfAChatEndsAfterItsFailureIsRecordedButBeforeTheTurnEnds_ThenTheAgentEndsIdle()
+    {
+        // Arrange
+        var time = new ManualTimeProvider(new DateTimeOffset(2026, 10, 10, 12, 0, 0, TimeSpan.Zero));
+        await using var test = await AgentTestContext<FakeAgent>.StartAsync(
+            services => new FakeAgent(services),
+            agent =>
+            {
+                // The loop then waits on a timer, and creates a new one once it handled the failure or the end of the pause.
+                agent.PollInterval = TimeSpan.FromHours(1);
+                agent.TurnTimeout = TimeSpan.Zero;
+                agent.Handler = (_, _, _) => throw new AgentTurnException(
+                    AgentFailureKind.UsageLimit, "Usage limit reached", retryAfter: time.GetUtcNow().AddMinutes(1));
+            },
+            timeProvider: time);
+        await AsyncTestHelpers.WaitUntilAsync(() => time.PendingTimerCount == 1);
+        var createdTimerCount = time.CreatedTimerCount;
+        var hasLoopHandledThePause = false;
+        ServiceStatus? statusBeforeTheTurnEnded = null;
+        var interceptor = new BeforeTurnEndInterceptor(test.Agent, () =>
+        {
+            // The failure status is written; the loop waits for the end of the pause, which comes before the agent is
+            // no longer busy.
+            var hasLoopHandledTheFailure = SpinWait.SpinUntil(() => time.CreatedTimerCount > createdTimerCount, TimeSpan.FromSeconds(30));
+            statusBeforeTheTurnEnded = test.Agent.Status;
+            var pauseTimerCount = time.CreatedTimerCount;
+            time.Advance(TimeSpan.FromMinutes(1));
+            hasLoopHandledThePause = hasLoopHandledTheFailure &&
+                SpinWait.SpinUntil(() => time.CreatedTimerCount > pauseTimerCount, TimeSpan.FromSeconds(30));
+        });
+        ((IInterceptorSubject)test.Agent).Context.AddService(interceptor);
+
+        // Act
+        await test.Agent.SendMessageAsync("Hello", CancellationToken.None);
+
+        // Assert
+        Assert.True(hasLoopHandledThePause);
+        Assert.Equal(ServiceStatus.Unavailable, statusBeforeTheTurnEnded);
+        Assert.Equal(ServiceStatus.Running, test.Agent.Status);
+        Assert.Equal("Idle", test.Agent.StatusMessage);
+    }
+
+    [Fact]
     public async Task WhenAnAgentWithoutStorageRestarts_ThenItKeepsItsTimelineAndMemoryInstances()
     {
         // Arrange
@@ -336,6 +380,33 @@ public class LlmAgentBaseConcurrencyTests
     {
         await Task.Delay(Timeout.Infinite, cancellationToken);
         return new AgentTurnResult(string.Empty, null, null);
+    }
+}
+
+/// <summary>Runs a callback once, before the agent's <see cref="LlmAgentBase.IsBusy"/> is written false at the end of a turn.</summary>
+internal sealed class BeforeTurnEndInterceptor : IWriteInterceptor
+{
+    private readonly LlmAgentBase _agent;
+    private readonly Action _callback;
+    private int _isCalled;
+
+    public BeforeTurnEndInterceptor(LlmAgentBase agent, Action callback)
+    {
+        _agent = agent;
+        _callback = callback;
+    }
+
+    public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+    {
+        if (ReferenceEquals(context.Property.Subject, _agent) &&
+            context.Property.Name == nameof(LlmAgentBase.IsBusy) &&
+            context.NewValue is false &&
+            Interlocked.Exchange(ref _isCalled, 1) == 0)
+        {
+            _callback();
+        }
+
+        next(ref context);
     }
 }
 
