@@ -1,9 +1,11 @@
+using System.Collections.Immutable;
 using System.ComponentModel;
 using System.Text;
 using FluentStorage;
 using FluentStorage.Blobs;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Components.Abstractions.Pages;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Internal;
@@ -32,7 +34,7 @@ namespace HomeBlaze.Storage;
 [InterceptorSubject]
 public partial class FluentStorageContainer :
     BackgroundService,
-    IStorageContainer, IConfigurationWriter, ITitleProvider, IIconProvider, IConfigurable
+    IStorageContainer, IConfigurationWriter, ITitleProvider, IIconProvider, IConfigurable, IMetadataContainer
 {
     private static readonly IReadOnlySet<string> NoPaths = new HashSet<string>();
 
@@ -119,6 +121,15 @@ public partial class FluentStorageContainer :
     public partial StorageStatus Status { get; set; }
 
     /// <inheritdoc />
+    public partial ImmutableArray<string> ChildOrder { get; private set; }
+
+    /// <inheritdoc />
+    public bool HasOwnMetadata => false;
+
+    /// <inheritdoc />
+    public FolderMetadata? Metadata => null;
+
+    /// <inheritdoc />
     public IReadOnlyCollection<string> ChildNames => [.. Children.Keys];
 
     public string Title => string.IsNullOrEmpty(ConnectionString)
@@ -151,6 +162,7 @@ public partial class FluentStorageContainer :
         ReconcileIntervalSeconds = 300;
         Children = new Dictionary<string, IInterceptorSubject>();
         Status = StorageStatus.Disconnected;
+        ChildOrder = [];
     }
         
     /// <summary>
@@ -486,6 +498,31 @@ public partial class FluentStorageContainer :
 
         return outcome;
     }
+
+    /// <summary>
+    /// Takes the order from the <c>.metadata.json</c> in the root of the storage, or none without one. The root has no
+    /// metadata of its own, so the other keys are ignored. Called on the worker.
+    /// </summary>
+    internal void ApplyMetadata(StorageMetadataDocument? document)
+    {
+        var childOrder = document?.ToChildOrder() ?? [];
+        if (!childOrder.SequenceEqual(ChildOrder))
+        {
+            ChildOrder = childOrder;
+        }
+    }
+
+    /// <inheritdoc />
+    public Task WriteMetadataAsync(FolderMetadata? metadata, CancellationToken cancellationToken)
+        => throw new NotImplementedException();
+
+    /// <inheritdoc />
+    public Task WriteChildMetadataAsync(IInterceptorSubject child, SubjectMetadata? metadata, CancellationToken cancellationToken)
+        => throw new NotImplementedException();
+
+    /// <inheritdoc />
+    public Task MoveChildAsync(string name, string neighborName, CancellationToken cancellationToken)
+        => throw new NotImplementedException();
 
     /// <summary>
     /// IConfigurationWriter - Saves the file of the subject, or of the subject it is nested in through

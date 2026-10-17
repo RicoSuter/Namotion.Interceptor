@@ -1,6 +1,9 @@
+using System.Collections.Immutable;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Components.Abstractions.Pages;
 using HomeBlaze.Storage.Abstractions;
+using HomeBlaze.Storage.Internal;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry.Attributes;
@@ -11,7 +14,7 @@ namespace HomeBlaze.Storage;
 /// Hierarchical grouping for virtual folders. Implements IStorageContainer by delegation to parent.
 /// </summary>
 [InterceptorSubject]
-public partial class VirtualFolder : ITitleProvider, IIconProvider, IStorageContainer
+public partial class VirtualFolder : ITitleProvider, IIconProvider, IStorageContainer, IMetadataContainer
 {
     /// <summary>
     /// Reference to the root storage.
@@ -30,9 +33,20 @@ public partial class VirtualFolder : ITitleProvider, IIconProvider, IStorageCont
     [State]
     public partial Dictionary<string, IInterceptorSubject> Children { get; set; }
 
-    public string Title => Path.GetFileName(RelativePath.TrimEnd('/'));
+    /// <inheritdoc />
+    public partial FolderMetadata? Metadata { get; private set; }
 
-    public string IconName => "Folder";
+    /// <inheritdoc />
+    public partial ImmutableArray<string> ChildOrder { get; private set; }
+
+    /// <inheritdoc />
+    public bool HasOwnMetadata => true;
+
+    [Derived]
+    public string Title => Metadata?.Title ?? Path.GetFileName(RelativePath.TrimEnd('/'));
+
+    [Derived]
+    public string IconName => Metadata?.Icon ?? "Folder";
 
     public StorageStatus Status => Storage.Status;
 
@@ -44,7 +58,39 @@ public partial class VirtualFolder : ITitleProvider, IIconProvider, IStorageCont
         Storage = storage;
         RelativePath = relativePath;
         Children = new Dictionary<string, IInterceptorSubject>();
+        ChildOrder = [];
     }
+
+    /// <summary>
+    /// Takes the metadata and the order from the <c>.metadata.json</c> of the folder, or none without one. Called by
+    /// the storage on its worker.
+    /// </summary>
+    internal void ApplyMetadata(StorageMetadataDocument? document)
+    {
+        var metadata = document?.ToFolderMetadata();
+        if (metadata != Metadata)
+        {
+            Metadata = metadata;
+        }
+
+        var childOrder = document?.ToChildOrder() ?? [];
+        if (!childOrder.SequenceEqual(ChildOrder))
+        {
+            ChildOrder = childOrder;
+        }
+    }
+
+    /// <inheritdoc />
+    public Task WriteMetadataAsync(FolderMetadata? metadata, CancellationToken cancellationToken)
+        => throw new NotImplementedException();
+
+    /// <inheritdoc />
+    public Task WriteChildMetadataAsync(IInterceptorSubject child, SubjectMetadata? metadata, CancellationToken cancellationToken)
+        => throw new NotImplementedException();
+
+    /// <inheritdoc />
+    public Task MoveChildAsync(string name, string neighborName, CancellationToken cancellationToken)
+        => throw new NotImplementedException();
 
     /// <summary>
     /// Gets metadata about a blob. Path is relative to the storage root.

@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 using FluentStorage.Blobs;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Services;
@@ -119,7 +120,14 @@ internal sealed class StorageReconciler
             {
                 var isChanged = !_index.TryGet(listed.Path, out var entry) || entry.Version != listed.Version ||
                                 isEveryFileNamed || namedPaths.Contains(listed.Path);
-                if (entry?.Subject != null)
+                if (StorageMetadataPath.IsMetadataFile(listed.Path))
+                {
+                    if (isChanged)
+                    {
+                        await LoadMetadataAsync(listed, entry, cancellationToken);
+                    }
+                }
+                else if (entry?.Subject != null)
                 {
                     if (isChanged)
                     {
@@ -157,8 +165,9 @@ internal sealed class StorageReconciler
         };
 
     /// <summary>
-    /// Builds the children of every folder from the index and assigns those that changed. Does nothing when no
-    /// entry was added, replaced or removed since the last time it completed.
+    /// Builds the children of every folder from the index and assigns those that changed, then passes the content
+    /// of the metadata files on to what they describe. Does nothing when no entry was added, replaced or removed
+    /// since the last time it completed.
     /// </summary>
     public void Apply()
     {
@@ -271,11 +280,59 @@ internal sealed class StorageReconciler
                     _subjectFactory.Release(entry.Subject);
                 }
             }
+
+            // After the assignment, so that every subject it placed is registered and can take its metadata.
+            ApplyMetadata();
         }
 
         // Only here: an assignment that throws leaves the rest of the tree to the next call.
         _index.MarkApplied();
         _hasUnappliedMove = false;
+    }
+
+    /// <summary>
+    /// Gives every placed folder the metadata of its <c>.metadata.json</c> and the root the order in its own, and
+    /// every placed subject of a JSON file the metadata of the file beside it, or none.
+    /// </summary>
+    private void ApplyMetadata()
+    {
+        var folderMetadata = new Dictionary<string, StorageMetadataDocument>(StringComparer.Ordinal);
+        var subjectMetadata = new Dictionary<(string Folder, string Name), StorageMetadataDocument>();
+        foreach (var entry in _index.Entries)
+        {
+            if (entry is not { IsMetadata: true, Metadata: { } metadata })
+            {
+                continue;
+            }
+
+            var name = StorageMetadataPath.GetDescribedName(entry.Path);
+            if (name.Length == 0)
+            {
+                folderMetadata[entry.Parent] = metadata;
+            }
+            else
+            {
+                subjectMetadata[(entry.Parent, name)] = metadata;
+            }
+        }
+
+        _storage.ApplyMetadata(folderMetadata.GetValueOrDefault(string.Empty));
+        foreach (var entry in _index.Entries)
+        {
+            if (!entry.IsPlaced)
+            {
+                continue;
+            }
+
+            if (entry.Subject is VirtualFolder folder)
+            {
+                folder.ApplyMetadata(folderMetadata.GetValueOrDefault(entry.Path));
+            }
+            else if (entry.Subject is IConfigurable && StoragePath.IsJson(entry.Path))
+            {
+                entry.Subject.SetSubjectMetadata(subjectMetadata.GetValueOrDefault((entry.Parent, entry.Key!))?.ToSubjectMetadata());
+            }
+        }
     }
 
     /// <summary>
@@ -512,6 +569,43 @@ internal sealed class StorageReconciler
         _index.Set(entry);
     }
 
+    /// <summary>
+    /// Reads a metadata file into its entry. A file that is not a metadata file is logged and recorded with no
+    /// metadata, so that the next pass waits for another change of it.
+    /// </summary>
+    private async Task LoadMetadataAsync(StorageListing listed, StorageEntry? entry, CancellationToken cancellationToken)
+    {
+        var content = await ReadAsync(listed.Path, cancellationToken);
+        var hash = StorageHash.Compute(content);
+        if (entry is { IsMetadata: true } && entry.Hash == hash)
+        {
+            entry.Version = listed.Version;
+            return;
+        }
+
+        StorageMetadataDocument? metadata;
+        try
+        {
+            metadata = StorageMetadataDocument.Parse(content);
+        }
+        catch (JsonException exception)
+        {
+            _logger?.LogWarning(exception, "Ignoring a metadata file that is not valid: {Path}", listed.Path);
+            metadata = null;
+        }
+
+        // Replaced rather than changed: the index then marks the tree as unapplied, and Apply passes the metadata on.
+        _index.Set(new StorageEntry
+        {
+            Path = listed.Path,
+            IsFolder = false,
+            IsMetadata = true,
+            Version = listed.Version,
+            Hash = hash,
+            Metadata = metadata
+        });
+    }
+
     private IInterceptorSubject CreateFromJson(string path, string json, StorageVersion version)
     {
         var subject = _subjectFactory.CreateFromJson(_storage, StoragePath.ToFullPath(path), json);
@@ -640,8 +734,8 @@ internal sealed class StorageReconciler
         // pass. Not after an IO error: that is often over by the next pass, such as a file its writer still holds.
         var version = exception is IOException ? default : listed.Version;
 
-        // A subject that is in the tree stays there with what it has.
-        if (_index.TryGet(listed.Path, out var entry) && entry.Subject != null)
+        // A subject that is in the tree stays there with what it has, and so does metadata that was read before.
+        if (_index.TryGet(listed.Path, out var entry) && (entry.Subject != null || entry.IsMetadata))
         {
             entry.Version = version;
             return;

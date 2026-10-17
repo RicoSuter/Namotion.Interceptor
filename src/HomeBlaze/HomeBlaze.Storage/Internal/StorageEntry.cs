@@ -41,6 +41,12 @@ internal sealed class StorageEntry
     /// </summary>
     public string? Key { get; set; }
 
+    /// <summary>True for a metadata file, which never has a subject and holds <see cref="Metadata"/> instead.</summary>
+    public bool IsMetadata { get; init; }
+
+    /// <summary>The content of a metadata file, null when the file could not be read as one.</summary>
+    public StorageMetadataDocument? Metadata { get; set; }
+
     /// <summary>True when the subject is in the tree under <see cref="Key"/>.</summary>
     public bool IsPlaced => Key != null && Subject != null;
 
