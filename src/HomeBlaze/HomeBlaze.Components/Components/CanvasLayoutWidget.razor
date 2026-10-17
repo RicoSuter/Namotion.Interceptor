@@ -22,7 +22,7 @@
     var height = canvas?.MinHeight ?? 400;
     var designWidth = CanvasExtent.GetDesignWidth(canvas?.Width, nodes);
     var factor = CanvasExtent.GetFactor(scale, IsEditing, designWidth, _availableWidth);
-    var isScaled = scale == CanvasScale.FitWidth && !IsEditing && designWidth > 0;
+    var isScaled = CanvasExtent.IsScaled(scale, IsEditing, designWidth);
     var frameStyle = isScaled
         ? string.Create(CultureInfo.InvariantCulture, $"width: 100%; height: {height * factor}px; overflow: hidden;")
         : "width: 100%; overflow-x: auto;";
@@ -288,13 +288,10 @@ else
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         // The frame is observed from the first render that has one, and again when it is rendered anew (after the scale
-        // or the width was changed); a canvas that never fits the width loads no module. The id is taken before the first
-        // await, so that a render while the module loads does not observe the frame a second time.
-        var canvas = Canvas;
-        if (canvas is not { Scale: CanvasScale.FitWidth } ||
-            CanvasExtent.Validate(canvas.Width) is not null ||
-            _frame.Id is null ||
-            _frame.Id == _observedFrameId)
+        // or the width was changed); a canvas that never fits the width renders no frame and loads no module. A frame
+        // that is no longer rendered keeps the id that is observed. The id is taken before the first await, so that a
+        // render while the module loads does not observe the frame a second time.
+        if (_frame.Id is null || _frame.Id == _observedFrameId)
         {
             return;
         }
@@ -302,27 +299,22 @@ else
         _observedFrameId = _frame.Id;
         try
         {
-            if (_widthObserver is not null)
-            {
-                var previous = _widthObserver;
-                _widthObserver = null;
-                await previous.InvokeVoidAsync("dispose");
-                await previous.DisposeAsync();
-            }
+            var previous = _widthObserver;
+            _widthObserver = null;
+            await DisposeObserverAsync(previous);
 
             _dotNetReference ??= DotNetObjectReference.Create(this);
             _module ??= await JsRuntime.InvokeAsync<IJSObjectReference>("import", ModulePath);
             var observer = await _module.InvokeAsync<IJSObjectReference>("observeWidth", _frame, _dotNetReference);
             if (_isDisposed)
             {
-                await observer.InvokeVoidAsync("dispose");
-                await observer.DisposeAsync();
+                await DisposeObserverAsync(observer);
                 return;
             }
 
             _widthObserver = observer;
         }
-        catch (Exception exception) when (exception is JSException or JSDisconnectedException or TaskCanceledException or ObjectDisposedException)
+        catch (Exception exception) when (IsInteropFailure(exception))
         {
             // Without the width the canvas is drawn unscaled.
         }
@@ -360,24 +352,32 @@ else
         _isDisposed = true;
         try
         {
-            if (_widthObserver is not null)
-            {
-                await _widthObserver.InvokeVoidAsync("dispose");
-                await _widthObserver.DisposeAsync();
-            }
-
+            await DisposeObserverAsync(_widthObserver);
             if (_module is not null)
             {
                 await _module.DisposeAsync();
             }
         }
-        catch (Exception exception) when (exception is JSException or JSDisconnectedException or TaskCanceledException or ObjectDisposedException)
+        catch (Exception exception) when (IsInteropFailure(exception))
         {
             // The circuit is gone, and the observer with it.
         }
 
         _dotNetReference?.Dispose();
     }
+
+    private static async ValueTask DisposeObserverAsync(IJSObjectReference? observer)
+    {
+        if (observer is not null)
+        {
+            await observer.InvokeVoidAsync("dispose");
+            await observer.DisposeAsync();
+        }
+    }
+
+    // A call into the module fails like this when the circuit or the module is gone, which the canvas outlives.
+    private static bool IsInteropFailure(Exception exception) =>
+        exception is JSException or JSDisconnectedException or TaskCanceledException or ObjectDisposedException;
 
     // The diagram selects the node that a press is on, and none for a press on the empty canvas, which is how a click on
     // the canvas knows whether it was on a node. The node stays selected in the diagram, which does not report a press
