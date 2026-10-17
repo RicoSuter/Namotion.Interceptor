@@ -37,7 +37,7 @@ public class ChangeQueueProcessor : IDisposable
     private readonly Func<CancellationToken, ValueTask>? _completionHandler;
     private readonly Func<int, bool>? _mergedDeliveryAdmission;
 
-    // Use a concurrent, lock-free queue for collecting changes from the subscription thread.
+    // Use a concurrent, lock-free queue for collecting changes from the dequeue loop.
     private readonly ConcurrentQueue<SubjectPropertyChange> _changes = new();
 
     private readonly int? _maxQueueDepth;
@@ -306,8 +306,10 @@ public class ChangeQueueProcessor : IDisposable
         {
             using var periodicTimer = _bufferTime > TimeSpan.Zero ? new PeriodicTimer(_bufferTime) : null;
 
+            // PreferFairness queues globally: this pool thread runs the dequeue loop next, and an item in its
+            // local queue waits for that loop to go idle or for a steal, which a busy global queue prevents.
             var flushTask = periodicTimer is not null
-                ? Task.Run(async () =>
+                ? Task.Factory.StartNew(async () =>
                 {
                     var flushFailureReported = false;
                     try
@@ -331,7 +333,7 @@ public class ChangeQueueProcessor : IDisposable
                     {
                         ReportFlushFailure(exception, ref flushFailureReported);
                     }
-                })
+                }, CancellationToken.None, TaskCreationOptions.PreferFairness | TaskCreationOptions.DenyChildAttach, TaskScheduler.Default).Unwrap()
                 : Task.CompletedTask;
 
             if (periodicTimer is null)
@@ -345,8 +347,20 @@ public class ChangeQueueProcessor : IDisposable
 
             try
             {
-                while (_subscription.TryDequeue(out var change, processingToken))
+                // Checked before every dequeue so stopping is observed while producers keep the queue fed.
+                while (!processingToken.IsCancellationRequested)
                 {
+                    if (!_subscription.TryDequeueImmediate(out var change))
+                    {
+                        // Awaited rather than blocking, so an idle processor holds no thread-pool thread.
+                        if (!await _subscription.WaitToDequeueAsync(processingToken).ConfigureAwait(false))
+                        {
+                            break;
+                        }
+
+                        continue;
+                    }
+
                     if (ReferenceEquals(change.Origin.Source, _source) && !ChangeDeliveryFilter.NeedsWriteBack(in change))
                     {
                         continue;
