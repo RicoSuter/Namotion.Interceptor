@@ -1,7 +1,6 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Storage.Abstractions;
-using HomeBlaze.Storage.Internal;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry.Attributes;
@@ -111,5 +110,5 @@ public partial class VirtualFolder : ITitleProvider, IIconProvider, IStorageCont
     public Task CreateMarkdownFileAsync(string name, string content, CancellationToken cancellationToken)
         => Storage is FluentStorageContainer storage
             ? storage.CreateMarkdownFileAsync(RelativePath, name, content, cancellationToken)
-            : throw MarkdownWriteRules.CreateNotLocalException();
+            : throw new ArgumentException("Markdown files can only be created in the folders of a storage.");
 }

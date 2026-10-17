@@ -45,7 +45,6 @@ namespace HomeBlaze.Services
     }
     public static class DataDirectorySeeder
     {
-        public const string DocumentationDirectory = "Files/Docs";
         public const string SeedRootFileName = "Root.json";
         public static int ReplaceDocumentation(string rootConfigurationPath, string? seedDirectory) { }
         public static int SeedIfMissing(string rootConfigurationPath, string? seedDirectory) { }
