@@ -331,18 +331,9 @@
     [Parameter]
     public EventCallback OnDelete { get; set; }
 
-    protected override void OnInitialized()
-    {
-        base.OnInitialized();
-        TimeZone.Changed += OnTimeZoneChanged;
-    }
-
-    private void OnTimeZoneChanged() => InvokeAsync(StateHasChanged);
-
     public async ValueTask DisposeAsync()
     {
         _isDisposed = true;
-        TimeZone.Changed -= OnTimeZoneChanged;
         _lifetime.Cancel();
         _lifetime.Dispose();
         _dotNetReference?.Dispose();

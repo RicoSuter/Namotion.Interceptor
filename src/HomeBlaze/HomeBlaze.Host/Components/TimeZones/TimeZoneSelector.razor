@@ -3,7 +3,6 @@
 @using Microsoft.JSInterop
 @using Microsoft.Extensions.Logging
 @using HomeBlaze.Components.Abstractions.TimeZones
-@implements IDisposable
 
 @inject ITimeZoneDisplay TimeZone
 @inject TimeZoneInterop Interop
@@ -61,10 +60,6 @@
     private string SelectedZoneId =>
         TimeZone.Preference.ZoneId
         ?? (TimeZone.Zone is { } zone ? TimeZoneCatalog.CreateOption(zone)?.Id ?? zone.Id : string.Empty);
-
-    protected override void OnInitialized() => TimeZone.Changed += OnTimeZoneChanged;
-
-    private void OnTimeZoneChanged() => InvokeAsync(StateHasChanged);
 
     private bool IsZoneSelected(string id) =>
         !TimeZone.Preference.IsAutomatic && TimeZone.IsResolved &&
@@ -153,6 +148,4 @@
             await _menu.CloseMenuAsync();
         }
     }
-
-    public void Dispose() => TimeZone.Changed -= OnTimeZoneChanged;
 }

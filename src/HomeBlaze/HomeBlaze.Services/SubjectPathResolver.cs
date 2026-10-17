@@ -30,18 +30,6 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
     private readonly SubjectPathsVersion _pathsVersion = new(InterceptorSubjectContext.Create().WithFullPropertyTracking().WithReadPropertyRecorder());
     private long _pathsVersionValue;
 
-    /// <summary>
-    /// Raised when a subject was attached to or detached from the graph: a path may lead to another subject than
-    /// before or to none, and a subject may have other paths. Whoever shows something that was resolved from a path
-    /// resolves it again.
-    /// </summary>
-    /// <remarks>
-    /// Raised once per attached or detached reference, on the thread that changes the graph and inside the lock of the
-    /// lifecycle interceptor: a handler must return at once, must not throw and must not change the graph. A component
-    /// reads <see cref="PathsVersion"/> in its render instead.
-    /// </remarks>
-    public event Action? PathsChanged;
-
     /// <param name="getRoot">
     /// Resolves the current graph root. A delegate rather than the RootManager itself, because
     /// RootManager needs this resolver registered in the context before it loads the graph, and taking
@@ -182,13 +170,12 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
     }
 
     /// <summary>
-    /// Invalidates caches when subject graph changes and raises <see cref="PathsChanged"/>.
+    /// Invalidates caches when subject graph changes and changes <see cref="PathsVersion"/>.
     /// </summary>
     public void HandleLifecycleChange(SubjectLifecycleChange change)
     {
         ClearCaches();
         IncrementPathsVersion();
-        PathsChanged?.Invoke();
     }
 
     // A property added to or removed from a subject at run time changes what a path to a property resolves to.
