@@ -14,54 +14,45 @@
             <MudStack Spacing="3">
                 @foreach (var parameter in Method.Parameters.Where(p => p.RequiresInput))
                 {
-                    @if (!ParameterConverter.IsSupported(parameter.Type))
+                    @switch (GetInputKind(parameter))
                     {
-                        <MudAlert Severity="Severity.Error">
-                            Parameter '@parameter.Name' (type @parameter.Type.Name) cannot be provided via UI
-                        </MudAlert>
-                        continue;
-                    }
+                        case InputKind.Simple:
+                            <div>@RenderField(CreateParameterField(parameter))</div>
+                            break;
 
-                    <div>
-                        @if (parameter.Type == typeof(bool) || Nullable.GetUnderlyingType(parameter.Type) == typeof(bool))
-                        {
-                            <MudCheckBox T="bool"
-                                         Label="@GetParameterLabel(parameter)"
-                                         Value="@GetBoolValue(parameter.Name)"
-                                         ValueChanged="@(v => SetValue(parameter.Name, v))" />
-                        }
-                        else if (parameter.Type.IsEnum || (Nullable.GetUnderlyingType(parameter.Type)?.IsEnum ?? false))
-                        {
-                            var enumType = Nullable.GetUnderlyingType(parameter.Type) ?? parameter.Type;
-                            <MudSelect T="string"
-                                       Label="@GetParameterLabel(parameter)"
-                                       Value="@GetStringValue(parameter.Name)"
-                                       ValueChanged="@(v => SetValue(parameter.Name, v))">
-                                @if (Nullable.GetUnderlyingType(parameter.Type) != null)
+                        case InputKind.Members:
+                            <MudPaper Outlined="true" Class="pa-3">
+                                <MudText Typo="Typo.subtitle2" Class="mb-2">@GetLabel(parameter.Name, !parameter.IsNullable)</MudText>
+                                <MudStack Spacing="2">
+                                    @foreach (var field in CreateMemberFields(parameter))
+                                    {
+                                        <div>@RenderField(field)</div>
+                                    }
+                                </MudStack>
+                                @if (HasError(parameter.Name))
                                 {
-                                    <MudSelectItem Value="@((string?)null)">(None)</MudSelectItem>
+                                    <MudText Typo="Typo.caption" Color="Color.Error" Class="mt-2">@GetError(parameter.Name)</MudText>
                                 }
-                                @foreach (var enumValue in Enum.GetNames(enumType))
-                                {
-                                    <MudSelectItem Value="@enumValue">@enumValue</MudSelectItem>
-                                }
-                            </MudSelect>
-                        }
-                        else
-                        {
-                            var unitSuffix = GetUnitSuffix(parameter.Unit);
+                            </MudPaper>
+                            break;
+
+                        case InputKind.Json:
                             <MudTextField T="string"
-                                          Label="@GetParameterLabel(parameter)"
+                                          Label="@($"{GetLabel(parameter.Name, !parameter.IsNullable)} (JSON)")"
                                           Value="@GetStringValue(parameter.Name)"
                                           ValueChanged="@(v => SetValue(parameter.Name, v))"
+                                          Lines="6"
                                           Error="@HasError(parameter.Name)"
                                           ErrorText="@GetError(parameter.Name)"
-                                          Required="@(!parameter.IsNullable)"
-                                          Immediate="true"
-                                          Adornment="@(unitSuffix != null ? Adornment.End : Adornment.None)"
-                                          AdornmentText="@unitSuffix" />
-                        }
-                    </div>
+                                          Immediate="true" />
+                            break;
+
+                        default:
+                            <MudAlert Severity="Severity.Error">
+                                Parameter '@parameter.Name' (type @parameter.Type.Name) cannot be provided via UI
+                            </MudAlert>
+                            break;
+                    }
                 }
             </MudStack>
         }
@@ -80,121 +71,191 @@
 
     [Parameter] public MethodMetadata? Method { get; set; }
 
-    private Dictionary<string, string?> _inputValues = new();
-    private Dictionary<string, string?> _errors = new();
+    private readonly Dictionary<string, string?> _inputValues = new();
+    private readonly Dictionary<string, string?> _errors = new();
+
+    private enum InputKind
+    {
+        Unsupported,
+        Simple,
+        Members,
+        Json
+    }
+
+    // One entered value: a simple parameter is keyed by its name, a member of an object parameter by
+    // "parameter.Member", so the two never collide.
+    private sealed record InputField(string Key, string Label, Type Type, StateUnit? Unit, bool IsRequired);
+
+    private IEnumerable<MethodParameter> InputParameters =>
+        Method?.Parameters.Where(p => p.RequiresInput) ?? [];
 
     protected override void OnParametersSet()
     {
-        if (Method != null)
+        if (Method == null)
         {
-            foreach (var parameter in Method.Parameters.Where(p => p.RequiresInput))
-            {
-                if (!_inputValues.ContainsKey(parameter.Name))
-                {
-                    _inputValues[parameter.Name] = GetDefaultValue(parameter);
-                }
-            }
-
-            ValidateAll();
+            return;
         }
+
+        foreach (var parameter in InputParameters)
+        {
+            if (GetInputKind(parameter) == InputKind.Simple && !_inputValues.ContainsKey(parameter.Name))
+            {
+                _inputValues[parameter.Name] = parameter.Type == typeof(bool) ? "false" : null;
+            }
+        }
+
+        ValidateAll();
+    }
+
+    private static InputKind GetInputKind(MethodParameter parameter) =>
+        ParameterConverter.IsSupported(parameter.Type) ? InputKind.Simple
+        : ParameterConverter.IsSupportedObject(parameter.Type) ? InputKind.Members
+        : ParameterConverter.IsJsonObject(parameter.Type) ? InputKind.Json
+        : InputKind.Unsupported;
+
+    private static InputField CreateParameterField(MethodParameter parameter) =>
+        new(parameter.Name, GetLabel(parameter.Name, !parameter.IsNullable), parameter.Type, parameter.Unit, !parameter.IsNullable);
+
+    private static IEnumerable<InputField> CreateMemberFields(MethodParameter parameter) =>
+        ParameterConverter.GetObjectMembers(parameter.Type).Select(member =>
+            new InputField(GetMemberKey(parameter, member), GetLabel(member.Name, member.IsRequired), member.Type, null, member.IsRequired));
+
+    private static string GetMemberKey(MethodParameter parameter, ObjectParameterMember member) =>
+        $"{parameter.Name}.{member.Name}";
+
+    private static string GetLabel(string name, bool isRequired)
+    {
+        var label = char.ToUpperInvariant(name[0]) + name.Substring(1);
+        return isRequired ? $"{label} *" : label;
+    }
+
+    private RenderFragment RenderField(InputField field) => __builder =>
+    {
+        var valueType = Nullable.GetUnderlyingType(field.Type) ?? field.Type;
+        if (valueType == typeof(bool))
+        {
+            <MudCheckBox T="bool"
+                         Label="@field.Label"
+                         Value="@GetBoolValue(field.Key)"
+                         ValueChanged="@(v => SetValue(field.Key, v))" />
+        }
+        else if (valueType.IsEnum)
+        {
+            <MudSelect T="string"
+                       Label="@field.Label"
+                       Value="@GetStringValue(field.Key)"
+                       ValueChanged="@(v => SetValue(field.Key, v))">
+                @if (!field.IsRequired)
+                {
+                    <MudSelectItem Value="@((string?)null)">(None)</MudSelectItem>
+                }
+                @foreach (var enumValue in Enum.GetNames(valueType))
+                {
+                    <MudSelectItem Value="@enumValue">@enumValue</MudSelectItem>
+                }
+            </MudSelect>
+        }
+        else
+        {
+            var unitSuffix = field.Unit.HasValue ? StateUnitExtensions.GetUnitSuffix(field.Unit.Value) : null;
+            <MudTextField T="string"
+                          Label="@field.Label"
+                          Value="@GetStringValue(field.Key)"
+                          ValueChanged="@(v => SetValue(field.Key, v))"
+                          Error="@HasError(field.Key)"
+                          ErrorText="@GetError(field.Key)"
+                          Required="@field.IsRequired"
+                          Immediate="true"
+                          Adornment="@(unitSuffix != null ? Adornment.End : Adornment.None)"
+                          AdornmentText="@unitSuffix" />
+        }
+    };
+
+    private bool GetBoolValue(string key) =>
+        _inputValues.TryGetValue(key, out var value) && (value?.Equals("true", StringComparison.OrdinalIgnoreCase) ?? false);
+
+    private string? GetStringValue(string key) => _inputValues.GetValueOrDefault(key);
+
+    private void SetValue(string key, object? value)
+    {
+        _inputValues[key] = value?.ToString();
+        ValidateAll();
     }
 
     private void ValidateAll()
     {
-        if (Method == null)
-            return;
-
-        foreach (var parameter in Method.Parameters.Where(p => p.RequiresInput))
+        _errors.Clear();
+        foreach (var parameter in InputParameters)
         {
-            ValidateParameter(parameter.Name);
+            switch (GetInputKind(parameter))
+            {
+                case InputKind.Simple:
+                    ValidateField(CreateParameterField(parameter));
+                    break;
+
+                case InputKind.Members:
+                    var fields = CreateMemberFields(parameter).ToArray();
+                    foreach (var field in fields)
+                    {
+                        ValidateField(field);
+                    }
+
+                    if (fields.All(field => !_errors.ContainsKey(field.Key)) && !TryCreateMembersValue(parameter, out _, out var membersError))
+                    {
+                        _errors[parameter.Name] = membersError;
+                    }
+                    break;
+
+                case InputKind.Json:
+                    if (!ParameterConverter.TryParseJson(GetStringValue(parameter.Name), parameter.Type, parameter.IsNullable, out _, out var jsonError))
+                    {
+                        _errors[parameter.Name] = jsonError;
+                    }
+                    break;
+            }
         }
     }
 
-    private string GetParameterLabel(MethodParameter parameter)
+    private void ValidateField(InputField field)
     {
-        var label = char.ToUpperInvariant(parameter.Name[0]) + parameter.Name.Substring(1);
-        return parameter.IsNullable ? label : $"{label} *";
-    }
-
-    private static string? GetUnitSuffix(StateUnit? unit) =>
-        unit.HasValue ? StateUnitExtensions.GetUnitSuffix(unit.Value) : null;
-
-    private string? GetDefaultValue(MethodParameter parameter)
-    {
-        if (parameter.Type == typeof(bool))
-            return "false";
-        return null;
-    }
-
-    private bool GetBoolValue(string name)
-    {
-        if (_inputValues.TryGetValue(name, out var value))
-        {
-            return value?.Equals("true", StringComparison.OrdinalIgnoreCase) ?? false;
-        }
-        return false;
-    }
-
-    private string? GetStringValue(string name)
-    {
-        _inputValues.TryGetValue(name, out var value);
-        return value;
-    }
-
-    private void SetValue(string name, object? value)
-    {
-        _inputValues[name] = value?.ToString();
-        ValidateParameter(name);
-    }
-
-    private void ValidateParameter(string name)
-    {
-        _errors.Remove(name);
-        var parameter = Method?.Parameters.FirstOrDefault(p => p.Name == name);
-        if (parameter == null)
-            return;
-
-        var input = _inputValues.GetValueOrDefault(name);
-
+        var input = _inputValues.GetValueOrDefault(field.Key);
         if (string.IsNullOrEmpty(input))
         {
-            if (!parameter.IsNullable)
+            if (field.IsRequired)
             {
-                _errors[name] = "This field is required";
+                _errors[field.Key] = "This field is required";
             }
             return;
         }
 
-        if (!ParameterConverter.TryConvert(input, parameter.Type, parameter.Unit, out _))
+        if (!ParameterConverter.TryConvert(input, field.Type, field.Unit, out _))
         {
-            _errors[name] = $"Invalid value for {parameter.Type.Name}";
+            _errors[field.Key] = $"Invalid value for {(Nullable.GetUnderlyingType(field.Type) ?? field.Type).Name}";
         }
     }
 
-    private bool HasError(string name) => _errors.ContainsKey(name);
-
-    private string? GetError(string name) => _errors.GetValueOrDefault(name);
-
-    private bool IsValid
+    private bool TryCreateMembersValue(MethodParameter parameter, out object? value, out string? error)
     {
-        get
+        var members = ParameterConverter.GetObjectMembers(parameter.Type);
+        var inputs = members.ToDictionary(member => member.Name, member => GetStringValue(GetMemberKey(parameter, member)));
+        if (parameter.IsNullable && inputs.Values.All(string.IsNullOrEmpty))
         {
-            if (Method == null)
-            {
-                return false;
-            }
-
-            foreach (var parameter in Method.Parameters.Where(p => p.RequiresInput))
-            {
-                if (!ParameterConverter.IsSupported(parameter.Type))
-                {
-                    return false;
-                }
-            }
-
-            return !_errors.Any();
+            value = null;
+            error = null;
+            return true;
         }
+
+        return ParameterConverter.TryCreateObject(parameter.Type, inputs, out value, out error);
     }
+
+    private bool HasError(string key) => _errors.ContainsKey(key);
+
+    private string? GetError(string key) => _errors.GetValueOrDefault(key);
+
+    private bool IsValid =>
+        Method != null &&
+        InputParameters.All(parameter => GetInputKind(parameter) != InputKind.Unsupported) &&
+        _errors.Count == 0;
 
     private void Cancel() => MudDialog?.Cancel();
 
@@ -205,15 +266,34 @@
             return;
         }
 
-        var inputParameters = Method.Parameters.Where(p => p.RequiresInput).ToArray();
+        var inputParameters = InputParameters.ToArray();
         var parameters = new object?[inputParameters.Length];
         for (var i = 0; i < inputParameters.Length; i++)
         {
-            var input = _inputValues.GetValueOrDefault(inputParameters[i].Name);
-            // A percent is entered from 0 to 100 next to the % adornment, but the operation takes a fraction.
-            if (ParameterConverter.TryConvert(input, inputParameters[i].Type, inputParameters[i].Unit, out var value))
+            var parameter = inputParameters[i];
+            switch (GetInputKind(parameter))
             {
-                parameters[i] = value;
+                case InputKind.Simple:
+                    // A percent is entered from 0 to 100 next to the % adornment, but the operation takes a fraction.
+                    if (ParameterConverter.TryConvert(GetStringValue(parameter.Name), parameter.Type, parameter.Unit, out var simpleValue))
+                    {
+                        parameters[i] = simpleValue;
+                    }
+                    break;
+
+                case InputKind.Members:
+                    if (TryCreateMembersValue(parameter, out var membersValue, out _))
+                    {
+                        parameters[i] = membersValue;
+                    }
+                    break;
+
+                case InputKind.Json:
+                    if (ParameterConverter.TryParseJson(GetStringValue(parameter.Name), parameter.Type, parameter.IsNullable, out var jsonValue, out _))
+                    {
+                        parameters[i] = jsonValue;
+                    }
+                    break;
             }
         }
 
