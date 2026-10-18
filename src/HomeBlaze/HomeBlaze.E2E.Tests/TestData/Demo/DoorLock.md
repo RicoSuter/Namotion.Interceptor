@@ -15,3 +15,8 @@ The door lock tile tests change the lock at runtime and reset it after each test
 ::: Cell Row=0 Column=1
 :::: HomeBlaze.Components.DoorLock#missinglocktile Path=doesnotexist Label="Missing"
 ::
+
+:: HomeBlaze.Components.GridLayout#smalllockgrid Rows=1 Columns=4 CellAspectRatio=1:1
+::: Cell Row=0 Column=0
+:::: HomeBlaze.Components.DoorLock#smalllocktile Path=frontdoor Label="Small front door"
+::
