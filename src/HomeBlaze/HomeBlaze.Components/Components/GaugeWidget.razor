@@ -10,7 +10,7 @@
 
 @if (gauge is not null)
 {
-    // Read once per render and never kept: the reads are what the tracking scope records.
+    // Read once per render and never kept: its render records the reads, so that it renders again when one changes.
     var path = gauge.Path;
     var reading = ValueReader.Read(PathResolver, gauge, path, gauge.Map, TimeZone);
     var state = ValueRangeResolver.GetState(reading.Property, reading.Value, gauge.Minimum, gauge.Maximum);
@@ -23,27 +23,29 @@
     else
     {
         var label = ValueReader.GetLabel(reading.Property, gauge.Label, path);
-        // A meter must have a value, so without one the gauge is a named group; Blazor leaves out the null attributes.
+        // A meter must have a value, so without one the ring is a named group; Blazor leaves out the null attributes.
         var isMeter = state.AriaValue is not null;
 
-        <div class="d-inline-flex flex-column align-center gap-1"
-             role="@(isMeter ? "meter" : "group")"
-             aria-label="@label"
-             aria-valuenow="@GaugeDisplay.FormatNumber(state.AriaValue)"
-             aria-valuemin="@GaugeDisplay.FormatNumber(isMeter ? state.Range?.Minimum : null)"
-             aria-valuemax="@GaugeDisplay.FormatNumber(isMeter ? state.Range?.Maximum : null)"
-             aria-valuetext="@(isMeter ? reading.Text : null)"
-             data-testid="gauge"
-             data-percent="@(state.Percent?.ToString("0.##", CultureInfo.InvariantCulture))">
-            <div class="gauge-ring" style="@GaugeDisplay.GetRingStyle(size)">
+        @* The ring is the meter, and the label is next to it rather than inside, because a meter hides what is inside it
+           from screen readers and the label can be a button. *@
+        <div class="gauge-widget place-centered" style="@GaugeDisplay.GetSizeStyle(size)" data-testid="gauge">
+            <div class="gauge-ring"
+                 role="@(isMeter ? "meter" : "group")"
+                 aria-label="@label"
+                 aria-valuenow="@GaugeDisplay.FormatNumber(state.AriaValue)"
+                 aria-valuemin="@GaugeDisplay.FormatNumber(isMeter ? state.Range?.Minimum : null)"
+                 aria-valuemax="@GaugeDisplay.FormatNumber(isMeter ? state.Range?.Maximum : null)"
+                 aria-valuetext="@(isMeter ? reading.Text : null)"
+                 data-testid="gauge-meter"
+                 data-percent="@(state.Percent?.ToString("0.##", CultureInfo.InvariantCulture))">
                 @* The full ring in a faint color is the track, so that an empty ring is still seen. The inline size overrides the fixed sizes of MudBlazor. *@
                 <MudProgressCircular Value="100" Min="0" Max="100" StrokeWidth="4" Class="gauge-track" Style="width: 100%; height: 100%;" aria-hidden="true" />
                 <MudProgressCircular Value="@(state.Percent ?? 0)" Min="0" Max="100" StrokeWidth="4" Rounded="true" Color="@GaugeDisplay.GetColor(reading)" Class="gauge-value" Style="width: 100%; height: 100%;" aria-hidden="true" />
                 <div class="gauge-text">
-                    <ValueText Reading="@reading" Path="@path" Typo="@GaugeDisplay.GetValueTypo(size)" />
+                    <ValueText Reading="@reading" Path="@path" />
                 </div>
             </div>
-            <MudText Typo="Typo.caption" Class="ma-0" data-testid="value-label">@label</MudText>
+            <HistoryLabel Property="@reading.Property" Text="@label" Class="ma-0 gauge-label" IsNamedElsewhere="true" />
         </div>
     }
 }

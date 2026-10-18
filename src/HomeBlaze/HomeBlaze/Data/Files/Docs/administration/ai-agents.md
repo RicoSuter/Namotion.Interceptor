@@ -210,6 +210,7 @@ The header has a status chip, **Run now** and **New conversation** (disabled whi
 | Memory | The entries with update times and a size bar, see [Memory](#memory) |
 | Settings | A summary of the settings; change them with the subject's Edit action |
 
+- Replies render as Markdown while they stream in. A link to an http, https or mailto address opens in a new tab, a link to a HomeBlaze path such as `/browser/Devices` or `/pages/Dashboard.md` opens in the same tab, and any other target, such as a relative path or a script, is shown as text.
 - The run count on the Activity tab also includes older runs and survives restarts and new conversations.
 - Enter sends and Shift+Enter adds a line; on touch devices Enter adds a line and the button sends.
 - While a background run or an `AnthropicAgent` summary holds the agent, the status shows Waiting and your message is answered after it.

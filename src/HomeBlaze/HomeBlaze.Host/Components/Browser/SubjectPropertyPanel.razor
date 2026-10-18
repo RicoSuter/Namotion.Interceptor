@@ -11,7 +11,6 @@
 
 @inject IDialogService DialogService
 @inject SubjectComponentRegistry ComponentRegistry
-@inject DeveloperModeService DeveloperMode
 @inject SubjectPathResolver PathResolver
 @inject IServiceProvider ServiceProvider
 @inject ITimeZoneDisplay TimeZone
@@ -20,199 +19,196 @@
 
 @if (Subject != null)
 {
-    @* The header stays in place and the content below it scrolls. The grid cell gives the column its height through
-       the element the tracking scope adds around it in developer mode. *@
+    @* The header stays in place and the content below it scrolls. *@
     <div @ref="_rootElement" style="display: grid; grid-template: minmax(0, 1fr) / minmax(0, 1fr); height: 100%;">
-        <TrackingScope Context="Subject.Context" ShowDebugInfo="DeveloperMode.IsEnabled">
-            <div style="display: flex; flex-direction: column; height: 100%;">
-                <MudListSubheader Class="d-flex align-center gap-1" Style="flex-shrink: 0;">
-                    @{
-                        var canEdit = CanEdit();
-                        var canDelete = Subject is IStorageFile or IConfigurable;
+        <div style="display: flex; flex-direction: column; height: 100%;">
+            <MudListSubheader Class="d-flex align-center gap-1" Style="flex-shrink: 0;">
+                @{
+                    var canEdit = CanEdit();
+                    var canDelete = Subject is IStorageFile or IConfigurable;
+                }
+
+                @* Stays an h1: the page focuses the first h1 after navigation. *@
+                <MudText Typo="Typo.h6" HtmlTag="h1" Class="flex-grow-1 mud-typography-nowrap">
+                    <MudIcon Size="Size.Small" Icon="@GetSubjectIcon(Subject)" Color="@GetSubjectIconColor(Subject)" Class="mr-2" Style="vertical-align: middle;" />
+                    @GetSubjectTitle()
+                </MudText>
+
+                @if (canEdit)
+                {
+                    <MudTooltip Text="Edit">
+                        <MudIconButton OnClick="@OpenEditDialog"
+                                       Icon="@Icons.Material.Filled.Edit"
+                                       Variant="Variant.Text"
+                                       Size="Size.Small"
+                                       aria-label="Edit"
+                                       data-testid="edit-subject-button" />
+                    </MudTooltip>
+                }
+                @if (canDelete)
+                {
+                    <MudTooltip Text="Delete">
+                        <MudIconButton OnClick="@(() => OnDelete.InvokeAsync())"
+                                       Icon="@Icons.Material.Filled.Delete"
+                                       Variant="Variant.Text"
+                                       Size="Size.Small"
+                                       aria-label="Delete" />
+                    </MudTooltip>
+                }
+                @if (CanClose)
+                {
+                    @if (canEdit || canDelete)
+                    {
+                        <MudDivider Vertical="true" FlexItem="true" Class="mx-1 my-1" />
                     }
 
-                    @* Stays an h1: the page focuses the first h1 after navigation. *@
-                    <MudText Typo="Typo.h6" HtmlTag="h1" Class="flex-grow-1 mud-typography-nowrap">
-                        <MudIcon Size="Size.Small" Icon="@GetSubjectIcon(Subject)" Color="@GetSubjectIconColor(Subject)" Class="mr-2" Style="vertical-align: middle;" />
-                        @GetSubjectTitle()
-                    </MudText>
+                    @* The color comes from the root of the tooltip: its class on the button loses to that of an icon button. *@
+                    <MudTooltip Text="Close" RootClass="mud-text-primary">
+                        <MudIconButton OnClick="@(() => OnClose.InvokeAsync())"
+                                       Icon="@Icons.Material.Filled.Close"
+                                       Variant="Variant.Text"
+                                       Color="Color.Inherit"
+                                       Size="Size.Medium"
+                                       Class="pa-1"
+                                       aria-label="Close"
+                                       data-testid="close-pane-button" />
+                    </MudTooltip>
+                }
+            </MudListSubheader>
 
-                    @if (canEdit)
-                    {
-                        <MudTooltip Text="Edit">
-                            <MudIconButton OnClick="@OpenEditDialog"
-                                           Icon="@Icons.Material.Filled.Edit"
-                                           Variant="Variant.Text"
-                                           Size="Size.Small"
-                                           aria-label="Edit"
-                                           data-testid="edit-subject-button" />
-                        </MudTooltip>
-                    }
-                    @if (canDelete)
-                    {
-                        <MudTooltip Text="Delete">
-                            <MudIconButton OnClick="@(() => OnDelete.InvokeAsync())"
-                                           Icon="@Icons.Material.Filled.Delete"
-                                           Variant="Variant.Text"
-                                           Size="Size.Small"
-                                           aria-label="Delete" />
-                        </MudTooltip>
-                    }
-                    @if (CanClose)
-                    {
-                        @if (canEdit || canDelete)
-                        {
-                            <MudDivider Vertical="true" FlexItem="true" Class="mx-1 my-1" />
-                        }
+            @* Each block gets the gap above it from GetGapClass, by the block before it. *@
+            <div data-testid="subject-pane-content" style="flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;">
+                @{
+                    var members = GetMemberGroups();
+                    var previousBlock = PaneBlock.None;
+                }
+                @* Child Collections *@
+                @foreach (var section in GetChildSections())
+                {
+                    var sectionGapClass = GetGapClass(previousBlock, PaneBlock.Section);
+                    previousBlock = PaneBlock.Section;
 
-                        @* The colour comes from the root of the tooltip: its class on the button loses to that of an icon button. *@
-                        <MudTooltip Text="Close" RootClass="mud-text-primary">
-                            <MudIconButton OnClick="@(() => OnClose.InvokeAsync())"
-                                           Icon="@Icons.Material.Filled.Close"
-                                           Variant="Variant.Text"
-                                           Color="Color.Inherit"
-                                           Size="Size.Medium"
-                                           Class="pa-1"
-                                           aria-label="Close"
-                                           data-testid="close-pane-button" />
-                        </MudTooltip>
-                    }
-                </MudListSubheader>
-
-                @* Each block gets the gap above it from GetGapClass, by the block before it. *@
-                <div data-testid="subject-pane-content" style="flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;">
-                    @* Primitive properties and methods (operations and queries) without a category *@
-                    @{
-                        var members = GetMemberGroups();
-                        var previousBlock = PaneBlock.None;
-                    }
-                    @if (members.UncategorizedValues.Count > 0)
+                    @if (section.CollectionProperty is null)
                     {
-                        @RenderValues(members.UncategorizedValues, GetGapClass(previousBlock, PaneBlock.Values))
-                        previousBlock = PaneBlock.Values;
-                    }
-                    @if (members.UncategorizedMethods.Count > 0)
-                    {
-                        @RenderMethods(members.UncategorizedMethods, GetGapClass(previousBlock, PaneBlock.Methods))
-                        previousBlock = PaneBlock.Methods;
-                    }
-
-                    @* Categories: the values of a category and its methods below them *@
-                    @foreach (var category in members.Categories)
-                    {
-                        <div class="@GetGapClass(previousBlock, PaneBlock.Category)" data-testid="subject-pane-category">
-                            <MudText Typo="Typo.subtitle2" Color="Color.Primary" HtmlTag="h2" Class="px-4"
-                                     data-testid="subject-pane-category-title">@category.Name</MudText>
-                            @if (category.Values.Count > 0)
+                        @* Consecutive single child references share one list *@
+                        <MudList T="object" SelectedValue="SelectedChild" Color="Color.Primary" Dense="true" Class="@sectionGapClass">
+                            @foreach (var (property, child) in section.SingleChildren)
                             {
-                                @RenderValues(category.Values, GetGapClass(PaneBlock.CategoryTitle, PaneBlock.Values))
-                            }
-                            @if (category.Methods.Count > 0)
-                            {
-                                @RenderMethods(category.Methods, GetGapClass(
-                                    category.Values.Count > 0 ? PaneBlock.Values : PaneBlock.CategoryTitle, PaneBlock.Methods))
-                            }
-                        </div>
-                        previousBlock = PaneBlock.Category;
-                    }
+                                var isSelected = child.Subject == SelectedChild;
+                                var childCount = GetChildCount(child);
 
-                    @* Child Collections *@
-                    @foreach (var section in GetChildSections())
+                                <MudListItem Value="@child.Subject"
+                                             OnClick="@(() => OnPropertyClick.InvokeAsync(new PropertyClickEventArgs(property.Name, child.Index, child.Subject)))"
+                                             Icon="@GetSubjectIcon(child.Subject)"
+                                             IconColor="@(isSelected ? Color.Primary : GetSubjectIconColor(child.Subject))"
+                                             Class="@(isSelected ? "mud-primary-text" : "")">
+                                    @if (isSelected)
+                                    {
+                                        <div style="float: right; line-height: 0">
+                                            <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Color="Color.Primary" />
+                                        </div>
+                                    }
+                                    <span class="subject-pane-child-name" style="word-break: break-word;">@property.GetChildDisplayName(child)</span>
+                                    @if (childCount > 0)
+                                    {
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Dark" Class="ml-4 my-0">@childCount</MudChip>
+                                    }
+                                </MudListItem>
+                                <MudDivider />
+                            }
+                        </MudList>
+                    }
+                    else
                     {
-                        var sectionGapClass = GetGapClass(previousBlock, PaneBlock.Section);
-                        previousBlock = PaneBlock.Section;
-
-                        @if (section.CollectionProperty is null)
-                        {
-                            @* Consecutive single child references share one list *@
-                            <MudList T="object" SelectedValue="SelectedChild" Color="Color.Primary" Dense="true" Class="@sectionGapClass">
-                                @foreach (var (property, child) in section.SingleChildren)
-                                {
-                                    var isSelected = child.Subject == SelectedChild;
-                                    var childCount = GetChildCount(child);
-
-                                    <MudListItem Value="@child.Subject"
-                                                 OnClick="@(() => OnPropertyClick.InvokeAsync(new PropertyClickEventArgs(property.Name, child.Index, child.Subject)))"
-                                                 Icon="@GetSubjectIcon(child.Subject)"
-                                                 IconColor="@(isSelected ? Color.Primary : GetSubjectIconColor(child.Subject))"
-                                                 Class="@(isSelected ? "mud-primary-text" : "")">
-                                        @if (isSelected)
-                                        {
-                                            <div style="float: right; line-height: 0">
-                                                <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Color="Color.Primary" />
-                                            </div>
-                                        }
-                                        <span class="subject-pane-child-name" style="word-break: break-word;">@property.GetChildDisplayName(child)</span>
-                                        @if (childCount > 0)
-                                        {
-                                            <MudChip T="string" Size="Size.Small" Color="Color.Dark" Class="ml-4 my-0">@childCount</MudChip>
-                                        }
-                                    </MudListItem>
-                                    <MudDivider />
-                                }
-                            </MudList>
-                        }
-                        else
-                        {
-                            var property = section.CollectionProperty;
-                            var children = section.CollectionChildren;
-                            @* mb-0, as MudBlazor gives an expanded panel a margin of 16px above and below. *@
-                            <MudExpansionPanel Gutters="false" Dense="true" Expanded="true" Class="@($"{sectionGapClass} mb-0")" HeaderClass="px-4 subject-pane-section-header">
-                                <TitleContent>
-                                    @GetPropertyDisplayName(property)
-                                    <MudChip T="string" Size="Size.Small" Color="Color.Dark" Class="my-0">@children.Length</MudChip>
-                                </TitleContent>
-                                <ChildContent>
-                                    <MudList T="object" SelectedValue="SelectedChild" Color="Color.Primary" Dense="true">
-                                        @foreach (var child in children)
-                                        {
-                                            var isSelected = child.Subject == SelectedChild;
-                                            var childCount = GetChildCount(child);
-
-                                            <MudListItem Value="@child.Subject"
-                                                         OnClick="@(() => OnPropertyClick.InvokeAsync(new PropertyClickEventArgs(property.Name, child.Index, child.Subject)))"
-                                                         Icon="@GetSubjectIcon(child.Subject)"
-                                                         IconColor="@(isSelected ? Color.Primary : GetSubjectIconColor(child.Subject))"
-                                                         Class="@(isSelected ? "mud-primary-text" : "")">
-                                                @if (isSelected)
-                                                {
-                                                    <div style="float: right; line-height: 0">
-                                                        <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Color="Color.Primary" />
-                                                    </div>
-                                                }
-                                                <span class="subject-pane-child-name" style="word-break: break-word;">@property.GetChildDisplayName(child)</span>
-                                                @if (childCount > 0)
-                                                {
-                                                    <MudChip T="string" Size="Size.Small" Color="Color.Dark" Class="ml-4 my-0">@childCount</MudChip>
-                                                }
-                                            </MudListItem>
-                                            <MudDivider />
-                                        }
-                                    </MudList>
-                                </ChildContent>
-                            </MudExpansionPanel>
-                        }
-                    }
-
-                    @* Details Accordion *@
-                    <MudExpansionPanels MultiExpansion="true" Elevation="0" Gutters="false" Dense="true" Class="@GetGapClass(previousBlock, PaneBlock.Section)" Style="overflow: hidden;">
-                        <MudExpansionPanel Expanded="false" Gutters="false" Class="px-4" HeaderClass="subject-pane-section-header">
+                        var property = section.CollectionProperty;
+                        var children = section.CollectionChildren;
+                        @* mb-0, as MudBlazor gives an expanded panel a margin of 16px above and below. *@
+                        <MudExpansionPanel Gutters="false" Dense="true" Expanded="true" Class="@($"{sectionGapClass} mb-0")" HeaderClass="px-4 subject-pane-section-header">
                             <TitleContent>
-                                Details
+                                @GetPropertyDisplayName(property)
+                                <MudChip T="string" Size="Size.Small" Color="Color.Dark" Class="my-0">@children.Length</MudChip>
                             </TitleContent>
                             <ChildContent>
-                                <div class="mb-4">
-                                    <small style="word-break: break-all;">
-                                        <p class="my-1"><strong>ID:</strong> @GetPath()</p>
-                                        <p class="my-1"><strong>Type:</strong> @Subject.GetType().FullName</p>
-                                    </small>
-                                </div>
+                                <MudList T="object" SelectedValue="SelectedChild" Color="Color.Primary" Dense="true">
+                                    @foreach (var child in children)
+                                    {
+                                        var isSelected = child.Subject == SelectedChild;
+                                        var childCount = GetChildCount(child);
+
+                                        <MudListItem Value="@child.Subject"
+                                                     OnClick="@(() => OnPropertyClick.InvokeAsync(new PropertyClickEventArgs(property.Name, child.Index, child.Subject)))"
+                                                     Icon="@GetSubjectIcon(child.Subject)"
+                                                     IconColor="@(isSelected ? Color.Primary : GetSubjectIconColor(child.Subject))"
+                                                     Class="@(isSelected ? "mud-primary-text" : "")">
+                                            @if (isSelected)
+                                            {
+                                                <div style="float: right; line-height: 0">
+                                                    <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Color="Color.Primary" />
+                                                </div>
+                                            }
+                                            <span class="subject-pane-child-name" style="word-break: break-word;">@property.GetChildDisplayName(child)</span>
+                                            @if (childCount > 0)
+                                            {
+                                                <MudChip T="string" Size="Size.Small" Color="Color.Dark" Class="ml-4 my-0">@childCount</MudChip>
+                                            }
+                                        </MudListItem>
+                                        <MudDivider />
+                                    }
+                                </MudList>
                             </ChildContent>
                         </MudExpansionPanel>
-                    </MudExpansionPanels>
-                </div>
+                    }
+                }
+
+                @* Primitive properties and methods (operations and queries) without a category *@
+                @if (members.UncategorizedValues.Count > 0)
+                {
+                    @RenderValues(members.UncategorizedValues, GetGapClass(previousBlock, PaneBlock.Values))
+                    previousBlock = PaneBlock.Values;
+                }
+                @if (members.UncategorizedMethods.Count > 0)
+                {
+                    @RenderMethods(members.UncategorizedMethods, GetGapClass(previousBlock, PaneBlock.Methods))
+                    previousBlock = PaneBlock.Methods;
+                }
+
+                @* Categories: the values of a category and its methods below them *@
+                @foreach (var category in members.Categories)
+                {
+                    <div class="@GetGapClass(previousBlock, PaneBlock.Category)" data-testid="subject-pane-category">
+                        <MudText Typo="Typo.subtitle2" Color="Color.Primary" HtmlTag="h2" Class="px-4"
+                                 data-testid="subject-pane-category-title">@category.Name</MudText>
+                        @if (category.Values.Count > 0)
+                        {
+                            @RenderValues(category.Values, GetGapClass(PaneBlock.CategoryTitle, PaneBlock.Values))
+                        }
+                        @if (category.Methods.Count > 0)
+                        {
+                            @RenderMethods(category.Methods, GetGapClass(
+                                category.Values.Count > 0 ? PaneBlock.Values : PaneBlock.CategoryTitle, PaneBlock.Methods))
+                        }
+                    </div>
+                    previousBlock = PaneBlock.Category;
+                }
+
+                @* Details Accordion *@
+                <MudExpansionPanels MultiExpansion="true" Elevation="0" Gutters="false" Dense="true" Class="@GetGapClass(previousBlock, PaneBlock.Section)" Style="overflow: hidden;">
+                    <MudExpansionPanel Expanded="false" Gutters="false" Class="px-4" HeaderClass="subject-pane-section-header">
+                        <TitleContent>
+                            Details
+                        </TitleContent>
+                        <ChildContent>
+                            <div class="mb-4">
+                                <small style="word-break: break-all;">
+                                    <p class="my-1"><strong>ID:</strong> @GetPath()</p>
+                                    <p class="my-1"><strong>Type:</strong> @Subject.GetType().FullName</p>
+                                </small>
+                            </div>
+                        </ChildContent>
+                    </MudExpansionPanel>
+                </MudExpansionPanels>
             </div>
-        </TrackingScope>
+        </div>
     </div>
 }
 
@@ -335,18 +331,9 @@
     [Parameter]
     public EventCallback OnDelete { get; set; }
 
-    protected override void OnInitialized()
-    {
-        base.OnInitialized();
-        TimeZone.Changed += OnTimeZoneChanged;
-    }
-
-    private void OnTimeZoneChanged() => InvokeAsync(StateHasChanged);
-
     public async ValueTask DisposeAsync()
     {
         _isDisposed = true;
-        TimeZone.Changed -= OnTimeZoneChanged;
         _lifetime.Cancel();
         _lifetime.Dispose();
         _dotNetReference?.Dispose();
@@ -367,8 +354,7 @@
     {
         await base.OnAfterRenderAsync(firstRender);
 
-        // The listener sits on the root, as the tracking scope replaces everything inside it on every change in
-        // developer mode. The root is new only when the pane showed no subject in between.
+        // The listener sits on the root, which is new only when the pane showed no subject in between.
         if (Subject is null || _rootElement.Id is null || _rootElement.Id == _copyButtonsElementId)
         {
             return;
@@ -463,6 +449,8 @@
         if (_registeredSubject == null)
             return [];
 
+        // Read in the render, so that a property added at run time, which increments the version, renders the panel again.
+        _ = PathResolver.PathsVersion;
         return _registeredSubject.Properties
             .Where(p =>
                 p.GetStateMetadata() != null
@@ -476,6 +464,8 @@
         if (_registeredSubject == null)
             return [];
 
+        // Read in the render, so that a property added at run time, which increments the version, renders the panel again.
+        _ = PathResolver.PathsVersion;
         return _registeredSubject.Properties
             .Where(p => p is { IsAttribute: false, CanContainSubjects: true })
             .OrderBy(p => p.GetDisplayPosition());
@@ -515,6 +505,9 @@
 
     private static SubjectPropertyChild[] GetVisibleChildren(RegisteredSubjectProperty property)
     {
+        // The children come from the registry, which is not a tracked read. Reading the property is, so the pane renders
+        // again when a child is added, replaced or removed.
+        _ = property.GetValue();
         return property.Children
             .Where(child => !Attribute.IsDefined(child.Subject.GetType(), typeof(ExcludeFromBrowsingAttribute), true))
             .ToArray();
@@ -693,7 +686,12 @@
 
         return registered.Properties
             .Where(p => p is { IsAttribute: false, CanContainSubjects: true })
-            .Sum(p => p.Children.Length);
+            .Sum(p =>
+            {
+                // Read for the same reason as in GetVisibleChildren.
+                _ = p.GetValue();
+                return p.Children.Length;
+            });
     }
 
     public record PropertyClickEventArgs(string PropertyName, object? Index, IInterceptorSubject Subject);
@@ -758,14 +756,14 @@
         Section
     }
 
-    // 16px around a category, 12px around a row of method buttons, 8px otherwise. The category arm comes first: a
-    // category after a row of buttons is 16px away.
+    // 16px around a category and between the children and the values below them, 12px around a row of method
+    // buttons, 8px otherwise. The category arm comes first: a category after a row of buttons is 16px away.
     private static string GetGapClass(PaneBlock previousBlock, PaneBlock block) => (previousBlock, block) switch
     {
         (PaneBlock.None, _) => "mt-2",
         (PaneBlock.CategoryTitle, PaneBlock.Values) => "mt-1",
         (PaneBlock.CategoryTitle, _) => "mt-2",
-        (PaneBlock.Category, _) or (_, PaneBlock.Category) => "mt-4",
+        (PaneBlock.Category, _) or (_, PaneBlock.Category) or (PaneBlock.Section, PaneBlock.Values) => "mt-4",
         (PaneBlock.Methods, _) or (_, PaneBlock.Methods) => "mt-3",
         _ => "mt-2"
     };
@@ -780,7 +778,7 @@
             }
             @foreach (var property in values)
             {
-                // Read here also for a value that gets no row: the tracking scope records the read, so the pane is
+                // Read here also for a value that gets no row: the render records the read, so the pane is
                 // rendered again once the value is set.
                 var value = property.GetValue();
                 if (value is null && !HasDetails(property))

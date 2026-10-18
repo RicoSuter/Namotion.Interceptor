@@ -55,7 +55,7 @@ internal sealed record HistoryChartSeriesInfo(
 /// </summary>
 internal readonly record struct HistoryChartSeriesConfiguration(string? Path, string? Label, string? Color, string? Aggregation)
 {
-    /// <summary>Reads the arguments of a series, so a caller in a tracking scope renders again when one changes.</summary>
+    /// <summary>Reads the arguments of a series, so a component that calls it in its render renders again when one changes.</summary>
     public static HistoryChartSeriesConfiguration Read(HistoryChartSeries series) =>
         new(series.Path, series.Label, series.Color, series.Aggregation);
 }

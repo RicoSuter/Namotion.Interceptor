@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 
 namespace HomeBlaze.Components;
@@ -41,6 +42,38 @@ public partial class Switch : IConfigurable, ITitleProvider
     [Configuration]
     [SubjectPath(Kind = SubjectPathKind.Operation)]
     public partial string? Off { get; set; }
+
+    /// <summary>
+    /// Whether the switch is a toggle switch or a tile.
+    /// </summary>
+    [Configuration]
+    public partial SwitchKind Kind { get; set; }
+
+    /// <summary>
+    /// Name or path of the <see cref="ValueMap"/> that gives a state its color, icon and text. A tile is filled with the
+    /// color of the matched case, a toggle switch takes it as its color. Without a map, true has the primary color.
+    /// </summary>
+    [Configuration]
+    [SubjectPath(typeof(ValueMap))]
+    public partial string? Map { get; set; }
+
+    /// <summary>
+    /// A second, smaller line below the label of a tile. Without it, a tile with a map shows the text of the value.
+    /// </summary>
+    [Configuration]
+    public partial string? Subtitle { get; set; }
+
+    /// <summary>
+    /// Name of the icon of a tile, for example "Lightbulb". The icon of a matched case of the map replaces it.
+    /// </summary>
+    [Configuration]
+    public partial string? Icon { get; set; }
+
+    /// <summary>
+    /// Content drawn over the top right corner of a tile, such as an indicator. A click on it reaches the tile.
+    /// </summary>
+    [Slot]
+    public partial IInterceptorSubject? Badge { get; set; }
 
     public string? Title => null;
 

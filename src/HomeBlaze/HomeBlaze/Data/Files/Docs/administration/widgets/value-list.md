@@ -86,6 +86,7 @@ A row with content and without a path, and a row with a `Progress` as content. T
 
 - **Aligned labels**: When at least one row has an icon, the rows without one keep the room of an icon, so that all labels line up. An icon that comes from a case of a map counts as well. In a card with an icon, a list in which at least one row has an icon lines up the icons of its rows with the icon of the header and its labels with the title.
 - **Color and icon of a case**: A matching case gives the value text its color and the row its icon, see [ValueMap](value-map.md).
+- **History**: The label of a row opens the history of a property that has one, see [Value Widgets](basics.md#value-widgets).
 - **Content and value**: Content and a value can stand in the same row. The content takes the room between the label and the value: a `Progress` fills it, and a text stands at the right end of it, right before the value.
 
 ## Related
