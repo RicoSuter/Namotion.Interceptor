@@ -393,8 +393,49 @@ public class NavigationMetadataTests
         }
     }
 
-    [Fact]
-    public async Task WhenTheHandleIsDraggedByTouch_ThenTheRowMoves()
+    // Drags the handle of a row by touch to a point of the target row, given as a fraction of its height. Playwright
+    // taps but does not swipe, so the touches go through the protocol of Chromium.
+    private static async Task DragHandleByTouchAsync(
+        IPage page, ILocator rows, int index, int targetIndex, float targetFraction, bool isLongPressed)
+    {
+        var handle = rows.Nth(index).Locator(".subject-pane-reorder-handle");
+        var handleBox = await handle.BoundingBoxAsync() ?? throw new InvalidOperationException("The handle is not shown.");
+        var target = await rows.Nth(targetIndex).BoundingBoxAsync() ?? throw new InvalidOperationException("The target row is not shown.");
+        var session = await page.Context.NewCDPSessionAsync(page);
+        Task TouchAsync(string type, double x, double y) => session.SendAsync("Input.dispatchTouchEvent", new Dictionary<string, object>
+        {
+            ["type"] = type,
+            ["touchPoints"] = type == "touchEnd" ? Array.Empty<object>() : new object[] { new Dictionary<string, object> { ["x"] = x, ["y"] = y } }
+        });
+
+        var x = handleBox.X + handleBox.Width / 2;
+        var y = handleBox.Y + handleBox.Height / 2;
+        var targetY = target.Y + target.Height * targetFraction;
+
+        await TouchAsync("touchStart", x, y);
+        if (isLongPressed)
+        {
+            // The hold is part of the gesture, longer than the long press delay of Android. Chrome there opens the
+            // context menu then, which headless Chromium does not do for touches of the protocol, so the test sends it.
+            await Task.Delay(800);
+            var isContextMenuSuppressed = await handle.EvaluateAsync<bool>(
+                "element => !element.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))");
+            Assert.True(isContextMenuSuppressed, "The context menu of the long press was not suppressed.");
+        }
+
+        for (var step = 1; step <= 10; step++)
+        {
+            await TouchAsync("touchMove", x, y + (targetY - y) * step / 10);
+        }
+
+        await Assertions.Expect(page.Locator(".subject-pane-reorder-preview")).ToBeVisibleAsync();
+        await TouchAsync("touchEnd", x, targetY);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenTheHandleIsDraggedByTouch_ThenTheRowMoves(bool isLongPressed)
     {
         // Arrange
         var metadataPath = _fixture.GetDemoPagePath(".metadata.json");
@@ -412,32 +453,9 @@ public class NavigationMetadataTests
             var rows = await StartReorderingAsync(pane);
             var shownNames = await rows.Locator(".subject-pane-child-name").AllInnerTextsAsync();
             var names = GetShownChildNames(folder);
-            var handle = await rows.Nth(0).Locator(".subject-pane-reorder-handle").BoundingBoxAsync()
-                ?? throw new InvalidOperationException("The handle is not shown.");
-            var target = await rows.Nth(2).BoundingBoxAsync()
-                ?? throw new InvalidOperationException("The target row is not shown.");
-
-            // Playwright taps but does not swipe, so the touches go through the protocol of Chromium.
-            var session = await page.Context.NewCDPSessionAsync(page);
-            Task TouchAsync(string type, double x, double y) => session.SendAsync("Input.dispatchTouchEvent", new Dictionary<string, object>
-            {
-                ["type"] = type,
-                ["touchPoints"] = type == "touchEnd" ? Array.Empty<object>() : new object[] { new Dictionary<string, object> { ["x"] = x, ["y"] = y } }
-            });
-
-            var x = handle.X + handle.Width / 2;
-            var y = handle.Y + handle.Height / 2;
-            var targetY = target.Y + target.Height * 0.75f;
 
             // Act
-            await TouchAsync("touchStart", x, y);
-            for (var step = 1; step <= 10; step++)
-            {
-                await TouchAsync("touchMove", x, y + (targetY - y) * step / 10);
-            }
-
-            await Assertions.Expect(page.Locator(".subject-pane-reorder-preview")).ToBeVisibleAsync();
-            await TouchAsync("touchEnd", x, targetY);
+            await DragHandleByTouchAsync(page, rows, index: 0, targetIndex: 2, targetFraction: 0.75f, isLongPressed);
 
             // Assert
             string[] expectedShownNames = [shownNames[1], shownNames[2], shownNames[0], .. shownNames.Skip(3)];

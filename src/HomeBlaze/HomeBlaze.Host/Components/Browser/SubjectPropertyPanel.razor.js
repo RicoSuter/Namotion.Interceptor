@@ -97,6 +97,7 @@ class RowDrag {
         this.row = row;
         this.dotNetReference = dotNetReference;
         this.pointerId = event.pointerId;
+        this.pointerType = event.pointerType;
         this.startX = event.clientX;
         this.startY = event.clientY;
         this.pointerX = event.clientX;
@@ -108,6 +109,7 @@ class RowDrag {
         this.onPointerCancel = this.onPointerCancel.bind(this);
         this.onKeyDown = this.onKeyDown.bind(this);
         this.onInterruption = this.onInterruption.bind(this);
+        this.onContextMenu = this.onContextMenu.bind(this);
         this.onScroll = this.onScroll.bind(this);
         this.onLostPointerCapture = this.onLostPointerCapture.bind(this);
         this.onAnimationFrame = this.onAnimationFrame.bind(this);
@@ -117,7 +119,7 @@ class RowDrag {
 
         // A context menu or a switch to another window can swallow the release of the button, after which the next
         // click would drop the row.
-        document.addEventListener('contextmenu', this.onInterruption);
+        document.addEventListener('contextmenu', this.onContextMenu);
         window.addEventListener('blur', this.onInterruption);
     }
 
@@ -308,6 +310,15 @@ class RowDrag {
         this.end();
     }
 
+    // A long press, the usual start of a drag by touch or by pen, opens the context menu as well, which is suppressed.
+    onContextMenu(event) {
+        if (this.pointerType === 'mouse') {
+            this.end();
+        } else {
+            event.preventDefault();
+        }
+    }
+
     // The event bubbles, and the element that a touch started on loses its own capture to the row.
     onLostPointerCapture(event) {
         if (event.target === this.row) {
@@ -343,7 +354,7 @@ class RowDrag {
         document.removeEventListener('pointermove', this.onPointerMove);
         document.removeEventListener('pointerup', this.onPointerUp);
         document.removeEventListener('pointercancel', this.onPointerCancel);
-        document.removeEventListener('contextmenu', this.onInterruption);
+        document.removeEventListener('contextmenu', this.onContextMenu);
         window.removeEventListener('blur', this.onInterruption);
         this.row.removeEventListener('lostpointercapture', this.onLostPointerCapture);
         document.removeEventListener('keydown', this.onKeyDown, true);
