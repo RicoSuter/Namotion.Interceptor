@@ -24,11 +24,5 @@ public interface IDoorSensor
     [Derived]
     [State(Position = 231)]
     [Category("Door")]
-    bool? IsClosed => DoorState switch
-    {
-        // Qualified: the property of the same name hides the enum in this scope.
-        Sensors.DoorState.Closed => true,
-        null => null,
-        _ => false
-    };
+    bool? IsClosed => DoorState is null ? null : DoorState == Sensors.DoorState.Closed;
 }
