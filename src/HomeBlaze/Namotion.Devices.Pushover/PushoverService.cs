@@ -1,0 +1,218 @@
+using System.ComponentModel;
+using System.Text;
+using HomeBlaze.Abstractions;
+using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Abstractions.Messaging;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Namotion.Devices.Pushover.Client;
+using Namotion.Interceptor.Attributes;
+
+namespace Namotion.Devices.Pushover;
+
+/// <summary>
+/// A Pushover application that sends notifications to its targets. Only the targets are notification publishers, so
+/// sending to all publishers reaches each recipient once.
+/// </summary>
+[Category("Notifications")]
+[Description("Pushover push notifications to phones and desktops, one target per user or group")]
+[DisplayName("Pushover")]
+[SubjectIcon("NotificationsActive")]
+[InterceptorSubject]
+public partial class PushoverService : BackgroundService, IConfigurable, IMonitoredService, ITitleProvider, IIconProvider
+{
+    private readonly PushoverClient _client;
+    private readonly ILogger<PushoverService> _logger;
+    private readonly SemaphoreSlim _signal = new(0, 1);
+    private volatile bool _isValidationRequested = true;
+
+    [Configuration]
+    public partial string Name { get; set; }
+
+    /// <summary>
+    /// The Pushover application API token.
+    /// </summary>
+    [Configuration(IsSecret = true)]
+    public partial string? ApplicationToken { get; set; }
+
+    /// <summary>
+    /// The targets by a key that stays the same when the target is renamed.
+    /// </summary>
+    [Configuration]
+    [State]
+    public partial Dictionary<string, PushoverTarget> Targets { get; set; }
+
+    [State(IsDiscrete = true)]
+    public partial ServiceStatus Status { get; internal set; }
+
+    [State]
+    public partial string? StatusMessage { get; internal set; }
+
+    [Derived]
+    public string Title => string.IsNullOrEmpty(Name) ? "Pushover" : Name;
+
+    public string IconName => "NotificationsActive";
+
+    [Derived]
+    public string? IconColor => Status switch
+    {
+        ServiceStatus.Running => "Success",
+        ServiceStatus.Error => "Error",
+        _ => null
+    };
+
+    // Not intercepted, so tests can poll faster than the five seconds the receipts API allows.
+    internal TimeSpan ReceiptPollingInterval { get; set; } = TimeSpan.FromSeconds(10);
+
+    internal TimeSpan RetryInterval { get; set; } = TimeSpan.FromSeconds(30);
+
+    public PushoverService(IHttpClientFactory httpClientFactory, ILogger<PushoverService> logger)
+    {
+        _client = new PushoverClient(httpClientFactory);
+        _logger = logger;
+
+        Name = string.Empty;
+        ApplicationToken = null;
+        Targets = new Dictionary<string, PushoverTarget>();
+        Status = ServiceStatus.Stopped;
+        StatusMessage = null;
+    }
+
+    [Operation(Title = "Send to all targets", Icon = "Send", Position = 1)]
+    public async Task SendToAllTargetsAsync(Notification notification, CancellationToken cancellationToken)
+    {
+        var targets = Targets.Values.ToArray();
+        if (targets.Length == 0)
+        {
+            throw new InvalidOperationException("No Pushover targets are configured.");
+        }
+
+        var sends = Array.ConvertAll(targets, target => target.SendNotificationAsync(notification, cancellationToken));
+        try
+        {
+            await Task.WhenAll(sends);
+        }
+        catch (Exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            var failures = targets
+                .Zip(sends)
+                .Where(pair => !pair.Second.IsCompletedSuccessfully)
+                .Select(pair => $"{pair.First.Title}: {pair.Second.Exception?.InnerException?.Message ?? "canceled"}")
+                .ToArray();
+
+            throw new PushoverException($"Sending to {failures.Length} of {targets.Length} targets failed. {string.Join(" ", failures)}");
+        }
+    }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
+    {
+        RequestValidation();
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Creates a key for a new target from its name: lowercase letters, digits and dashes, unique among the existing
+    /// keys. The key is kept when the target is renamed, so paths to the target stay valid.
+    /// </summary>
+    public static string CreateTargetKey(string name, IReadOnlyCollection<string> existingKeys)
+    {
+        var builder = new StringBuilder(name.Length);
+        foreach (var character in name.Trim().ToLowerInvariant())
+        {
+            if (char.IsAsciiLetterOrDigit(character))
+            {
+                builder.Append(character);
+            }
+            else if (builder.Length > 0 && builder[^1] != '-')
+            {
+                builder.Append('-');
+            }
+        }
+
+        var key = builder.ToString().TrimEnd('-');
+        if (key.Length == 0)
+        {
+            key = "target";
+        }
+
+        var uniqueKey = key;
+        var suffix = 2;
+        while (existingKeys.Contains(uniqueKey))
+        {
+            uniqueKey = $"{key}-{suffix}";
+            suffix++;
+        }
+
+        return uniqueKey;
+    }
+
+    internal async Task SendAsync(PushoverTarget target, Notification notification, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(notification);
+
+        var token = ApplicationToken;
+        if (string.IsNullOrEmpty(token))
+        {
+            throw new InvalidOperationException("The Pushover application token is not configured.");
+        }
+
+        var userKey = target.UserKey;
+        if (string.IsNullOrEmpty(userKey))
+        {
+            throw new InvalidOperationException($"The user key of the Pushover target '{target.Title}' is not configured.");
+        }
+
+        var request = PushoverMessageMapping.Create(token, userKey, notification, target.EmergencyRetry, target.EmergencyExpire, _logger);
+        var response = await _client.SendMessageAsync(request, cancellationToken);
+
+        var now = DateTimeOffset.UtcNow;
+        target.LastSentAt = now;
+        if (response.Receipt is { } receipt)
+        {
+            target.StartEmergency(receipt, now);
+            Signal();
+        }
+    }
+
+    internal async Task CancelReceiptAsync(string receipt, CancellationToken cancellationToken)
+    {
+        var token = ApplicationToken;
+        if (string.IsNullOrEmpty(token))
+        {
+            throw new InvalidOperationException("The Pushover application token is not configured.");
+        }
+
+        await _client.CancelReceiptAsync(token, receipt, cancellationToken);
+    }
+
+    internal void RequestValidation()
+    {
+        _isValidationRequested = true;
+        Signal();
+    }
+
+    private void Signal()
+    {
+        try
+        {
+            _signal.Release();
+        }
+        catch (SemaphoreFullException)
+        {
+            // A signal is already pending; the loop handles every request when it wakes.
+        }
+    }
+
+    partial void OnTargetsChanging(ref Dictionary<string, PushoverTarget> newValue, ref bool cancel) =>
+        newValue ??= new Dictionary<string, PushoverTarget>();
+
+    partial void OnTargetsChanged(Dictionary<string, PushoverTarget> newValue)
+    {
+        foreach (var target in newValue.Values)
+        {
+            target.Service = this;
+        }
+
+        RequestValidation();
+    }
+}
