@@ -4,6 +4,7 @@ using System.Text;
 using System.Web;
 using Namotion.Devices.Nuki.Client;
 using Namotion.Devices.Nuki.Tests.Testing;
+using Namotion.Interceptor.Testing;
 using Xunit;
 
 namespace Namotion.Devices.Nuki.Tests;
@@ -160,17 +161,36 @@ public class NukiBridgeClientTests
     }
 
     [Fact]
-    public async Task WhenTheRequestIsCanceledForAReasonOtherThanCallerCancellation_ThenTimeoutExceptionWrapsIt()
+    public async Task WhenTheHttpClientIsDisposedDuringLockAction_ThenOperationCanceledExceptionIsThrownInsteadOfTimeoutException()
     {
         // Arrange
-        var innerException = new TaskCanceledException();
-        var bridge = new FakeNukiBridge { OnAction = () => throw innerException };
-        var client = CreateClient(bridge, NukiTokenMode.Plain);
+        var bridge = new FakeNukiBridge { ActionGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously) };
+        var httpClient = bridge.CreateClient(string.Empty);
+        var client = new NukiBridgeClient(httpClient, "192.168.1.50", Token, NukiTokenMode.Plain);
+        var lockActionTask = client.LockActionAsync(nukiId: 1, deviceType: 0, action: 1, CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => bridge.CountRequests("lockAction") == 1, message: "The action was not sent.");
 
-        // Act & Assert
-        var exception = await Assert.ThrowsAsync<TimeoutException>(
-            () => client.LockActionAsync(nukiId: 1, deviceType: 0, action: 1, CancellationToken.None));
-        Assert.Same(innerException, exception.InnerException);
+        // Act
+        httpClient.Dispose();
+
+        // Assert
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => lockActionTask);
+    }
+
+    [Fact]
+    public async Task WhenTheHttpClientIsDisposed_ThenARequestThrowsObjectDisposedException()
+    {
+        // Arrange
+        var bridge = new FakeNukiBridge();
+        var httpClient = bridge.CreateClient(string.Empty);
+        var client = new NukiBridgeClient(httpClient, "192.168.1.50", Token, NukiTokenMode.Plain);
+
+        // Act
+        httpClient.Dispose();
+
+        // Assert
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => client.GetListAsync(CancellationToken.None));
+        Assert.Empty(bridge.Requests);
     }
 
     [Fact]

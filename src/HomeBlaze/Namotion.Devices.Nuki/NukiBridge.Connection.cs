@@ -129,12 +129,9 @@ public partial class NukiBridge
             // The HTTP client is disposed when this method returns, which cancels a request still in flight, such as
             // a lock action waiting for the motor. Before a reconnect, wait once for the gate so that the last request
             // finishes first; no new request takes the cleared client, and the request's own timeout bounds the wait.
-            // On stop the device goes away and the motor finishes anyway, so stopping does not wait.
-            if (!stoppingToken.IsCancellationRequested)
-            {
-                await _requestGate.WaitAsync(CancellationToken.None);
-                _requestGate.Release();
-            }
+            // A stop cancels the wait, also when it is already running: the motor finishes anyway.
+            await _requestGate.WaitAsync(stoppingToken);
+            _requestGate.Release();
         }
     }
 

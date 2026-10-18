@@ -135,7 +135,8 @@ internal sealed class NukiBridgeClient
                 return await response.Content.ReadFromJsonAsync(typeInfo, timeoutSource.Token)
                     ?? throw new InvalidDataException($"The bridge answered /{path} without content.");
             }
-            catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
+            // A request that the disposal of the HTTP client cancels, on a reconnect or a stop, did not time out.
+            catch (OperationCanceledException exception) when (timeoutSource.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
             {
                 throw new TimeoutException($"The bridge did not answer /{path} within {timeout.TotalSeconds:0} seconds.", exception);
             }

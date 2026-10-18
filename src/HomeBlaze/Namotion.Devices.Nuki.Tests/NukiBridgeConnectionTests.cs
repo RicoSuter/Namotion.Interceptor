@@ -155,8 +155,7 @@ public class NukiBridgeConnectionTests
 
         // Act
         await test.Bridge.ApplyConfigurationAsync(CancellationToken.None);
-        // The action completing early means its request was canceled by the reconnect.
-        await AsyncTestHelpers.WaitUntilAsync(() => !test.Bridge.IsConnected || action.IsCompleted, message: "The bridge did not disconnect.");
+        await AsyncTestHelpers.WaitUntilAsync(() => !test.Bridge.IsConnected, message: "The bridge did not disconnect.");
         gate.SetResult();
         await action;
 
@@ -185,7 +184,32 @@ public class NukiBridgeConnectionTests
         // Assert
         Assert.Equal(ServiceStatus.Stopped, test.Bridge.Status);
         gate.TrySetResult();
-        await Assert.ThrowsAnyAsync<Exception>(() => action);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => action);
+        Assert.Null(test.Lock.LockState);
+    }
+
+    [Fact]
+    public async Task WhenBridgeStopsWhileAReconnectWaitsForAnAction_ThenItStopsWithoutWaitingForTheAction()
+    {
+        // Arrange
+        var fake = new FakeNukiBridge { ListJson = NukiFixtures.SmartLock(state: 3) };
+        await using var test = new TestBridge(fake);
+        await test.StartAsync();
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        fake.ActionGate = gate;
+        var action = test.Lock.LockAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => fake.CountRequests("lockAction") == 1, message: "The action was not sent.");
+        await test.Bridge.ApplyConfigurationAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => !test.Bridge.IsConnected, message: "The bridge did not disconnect.");
+
+        // Act
+        var stop = test.Bridge.StopAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => stop.IsCompleted, message: "The bridge waited for the action to stop.");
+
+        // Assert
+        Assert.Equal(ServiceStatus.Stopped, test.Bridge.Status);
+        gate.TrySetResult();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => action);
         Assert.Null(test.Lock.LockState);
     }
 
