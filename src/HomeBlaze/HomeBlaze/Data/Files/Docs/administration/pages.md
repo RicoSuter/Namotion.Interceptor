@@ -56,7 +56,7 @@ icon: Dashboard
 | `title` | string | Full page title displayed in the header |
 | `navTitle` | string | Short title for navigation menu (optional, defaults to `title`) |
 | `icon` | string | MudBlazor icon name (e.g., `Dashboard`, `Settings`, `Article`) |
-| `location` | string | Where to show in navigation: `NavBar` (sidebar, default) or `AppBar` (top bar) |
+| `location` | string | Where to show in navigation: `NavBar` (sidebar, default) or `AppBar` (top bar). A page in any folder can be in the top bar |
 | `alignment` | string | AppBar alignment: `Left` (default) or `Right`. Only used when `location` is `AppBar` |
 
 ---
@@ -86,6 +86,8 @@ Keys are read without regard to upper or lower case, and the file may have comme
 A name in `order` is the name of a child as the browser shows it in its address: a subject file without `.json` (`Motor` for `Motor.json`), any other file with its extension (`Readme.md`) and a folder by its name. Children that are not listed follow the listed ones: `readme` first, `index` second, then by navigation title. A name of a child that no longer exists is ignored.
 
 The `.metadata.json` in the data folder itself only holds the `order` of the top level.
+
+The top bar collects its items from the whole tree, not only from the top level: every page with `location: AppBar`, and every subject with a page whose `X.metadata.json` sets `location` to `AppBar`, appears there, in whichever folder it is. The items follow the navigation order: the folders are walked in their order, and the items inside a folder come in the order of that folder. **Reorder** in the folder of an item moves it among the items of that folder, and the place of the folder in its parent moves its items with it. Each item goes to the left or the right of the top bar by its `alignment`, set in the frontmatter of a page or in the **Metadata** dialog of a subject, and each side keeps the navigation order. A folder whose pages are all in the top bar does not appear in the sidebar.
 
 A metadata file left with every key blank is deleted rather than kept empty on disk. A metadata file that cannot be read, because its JSON is invalid, is ignored with a warning: the folder or subject then shows no metadata, and saving or moving a child is refused with an error until the file is fixed or deleted by hand.
 
@@ -176,12 +178,12 @@ A picture is shown in a size that fits the page, and it always keeps its proport
 
 The navigation follows pages that are added, removed or changed while a browser tab is open:
 
-- **Sidebar.** The menu re-reads its items every 5 seconds, including the contents of every expanded folder. A folder appears once it contains a page.
-- **Top bar.** Pages with `location: AppBar` are read when the layout renders, which happens on navigation. Only pages at the top level of the data folder appear there.
+- **Sidebar.** The menu re-reads its items every 5 seconds, including the contents of every expanded folder. A folder appears once it contains a page for the sidebar, at any depth.
+- **Top bar.** Pages with `location: AppBar` are read from every folder when the layout renders, which happens on navigation.
 
 ### Known Limitations and Follow-ups
 
-- A page with `location: AppBar` that is added or removed while a tab is open appears in or disappears from the top bar only after the next navigation in that tab. The 5 second refresh re-renders the sidebar menu, not the layout that owns the top bar.
+- A page or subject in the top bar that is added, removed or moved to or from it while a tab is open, through its frontmatter or the **Metadata** dialog, appears in or disappears from the top bar only after the next navigation in that tab. The 5 second refresh re-renders the sidebar menu, not the layout that owns the top bar.
 
 ---
 

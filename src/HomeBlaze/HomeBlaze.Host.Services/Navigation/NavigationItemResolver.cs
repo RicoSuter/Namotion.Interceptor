@@ -29,10 +29,46 @@ public class NavigationItemResolver
     /// </summary>
     public IEnumerable<NavigationItem> GetChildItems(IInterceptorSubject parent)
     {
-        var items = new List<(NavigationItem Item, string Key)>();
+        return GetChildItemList(parent);
+    }
+
+    /// <summary>
+    /// Gets every page of the tree below <paramref name="root"/> that appears in the top bar, in navigation order:
+    /// depth first, each level in the order of <see cref="GetChildItems"/>. A subject that is reached more than once
+    /// is listed once, at its first place.
+    /// </summary>
+    public IReadOnlyList<NavigationItem> GetAppBarItems(IInterceptorSubject root)
+    {
+        var items = new List<NavigationItem>();
+        var visited = new HashSet<IInterceptorSubject>(ReferenceEqualityComparer.Instance) { root };
+        CollectAppBarItems(root, items, visited);
+        return items;
+    }
+
+    private void CollectAppBarItems(
+        IInterceptorSubject parent, List<NavigationItem> items, HashSet<IInterceptorSubject> visited)
+    {
+        foreach (var item in GetChildItemList(parent))
+        {
+            if (!visited.Add(item.Subject))
+                continue;
+
+            if (item is { IsPage: true, Location: NavigationLocation.AppBar })
+                items.Add(item);
+
+            if (item.IsFolder)
+                CollectAppBarItems(item.Subject, items, visited);
+        }
+    }
+
+    private List<NavigationItem> GetChildItemList(IInterceptorSubject parent)
+    {
         var registered = parent.TryGetRegisteredSubject();
         if (registered == null)
             return [];
+
+        var items = new List<(NavigationItem Item, string Key)>();
+        Dictionary<IInterceptorSubject, bool>? visited = null;
 
         foreach (var prop in registered.Properties)
         {
@@ -56,10 +92,14 @@ public class NavigationItemResolver
                     continue;
 
                 var isPage = _componentRegistry.HasComponent(child.GetType(), SubjectComponentType.Page);
-                var isFolder = HasPageDescendants(child);
+
+                visited ??= new Dictionary<IInterceptorSubject, bool>(ReferenceEqualityComparer.Instance);
+                visited.Clear();
+                var descendantPages = new DescendantPages();
+                FindDescendantPages(child, isInNavigationBar: true, visited, ref descendantPages);
 
                 // Only include if it's a page or has page descendants
-                if (isPage || isFolder)
+                if (isPage || descendantPages.HasAny)
                 {
                     items.Add((new NavigationItem
                     {
@@ -68,7 +108,8 @@ public class NavigationItemResolver
                         Icon = child.GetNavigationIconName(),
                         Path = path,
                         IsPage = isPage,
-                        IsFolder = isFolder,
+                        IsFolder = descendantPages.HasAny,
+                        HasNavigationBarPages = descendantPages.HasInNavigationBar,
                         Location = child.GetNavigationLocation(),
                         Alignment = child.GetAppBarAlignment()
                     }, key));
@@ -94,22 +135,34 @@ public class NavigationItemResolver
         return false;
     }
 
-    /// <summary>
-    /// Recursively checks if subject has any descendant that is a page.
-    /// </summary>
-    private bool HasPageDescendants(IInterceptorSubject subject)
+    private struct DescendantPages
     {
-        return HasPageDescendants(subject, []);
+        public bool HasAny;
+
+        public bool HasInNavigationBar;
     }
 
-    private bool HasPageDescendants(IInterceptorSubject subject, HashSet<IInterceptorSubject> visited)
+    /// <summary>
+    /// Walks the descendants of a subject for pages, and for pages that the sidebar shows: those reached only
+    /// through subjects whose location is the sidebar. Stops as soon as the answer to both is known. Each subject in
+    /// <paramref name="visited"/> maps to whether it was walked as part of the sidebar.
+    /// </summary>
+    private void FindDescendantPages(
+        IInterceptorSubject subject,
+        bool isInNavigationBar,
+        Dictionary<IInterceptorSubject, bool> visited,
+        ref DescendantPages result)
     {
-        if (!visited.Add(subject))
-            return false;
+        // A subject first walked outside the sidebar is walked again when it is reached through the sidebar,
+        // as only that walk can find the pages of the sidebar.
+        if (visited.TryGetValue(subject, out var wasInNavigationBar) && (wasInNavigationBar || !isInNavigationBar))
+            return;
+
+        visited[subject] = isInNavigationBar;
 
         var registered = subject.TryGetRegisteredSubject();
         if (registered == null)
-            return false;
+            return;
 
         foreach (var prop in registered.Properties)
         {
@@ -119,15 +172,30 @@ public class NavigationItemResolver
             foreach (var childInfo in prop.Children)
             {
                 var child = childInfo.Subject;
+                if (child == null)
+                    continue;
+
+                var isChildInNavigationBar = isInNavigationBar &&
+                    child.GetNavigationLocation() == NavigationLocation.NavBar;
 
                 if (_componentRegistry.HasComponent(child.GetType(), SubjectComponentType.Page))
-                    return true;
+                {
+                    result.HasAny = true;
+                    if (isChildInNavigationBar)
+                    {
+                        result.HasInNavigationBar = true;
+                        return;
+                    }
+                }
 
-                if (HasPageDescendants(child, visited))
-                    return true;
+                // Once a page is found, only a walk through the sidebar can learn anything new.
+                if (result.HasAny && !isChildInNavigationBar)
+                    continue;
+
+                FindDescendantPages(child, isChildInNavigationBar, visited, ref result);
+                if (result.HasInNavigationBar)
+                    return;
             }
         }
-
-        return false;
     }
 }

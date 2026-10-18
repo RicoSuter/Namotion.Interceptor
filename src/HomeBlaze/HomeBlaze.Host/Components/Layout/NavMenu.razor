@@ -12,17 +12,17 @@
     {
         @foreach (var item in GetRootItems().Where(i => i.Location == NavigationLocation.NavBar))
         {
-            @if (item.IsPage && !item.IsFolder)
+            @if (item.HasNavigationBarPages)
+            {
+                <NavFolder @key="item.Path" Item="item" NavigationResolver="NavigationResolver" CurrentPath="@_currentPath" />
+            }
+            else if (item.IsPage)
             {
                 <MudNavLink Href="@item.PageUrl"
                             Match="NavLinkMatch.All"
                             Icon="@SubjectIconExtensions.ResolveMudBlazorIcon(item.Icon)">
                     @item.Title
                 </MudNavLink>
-            }
-            else if (item.IsFolder)
-            {
-                <NavFolder @key="item.Path" Item="item" NavigationResolver="NavigationResolver" CurrentPath="@_currentPath" />
             }
         }
     }

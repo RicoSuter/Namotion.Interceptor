@@ -4,6 +4,7 @@ using HomeBlaze.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Playwright;
 using Namotion.Interceptor.Testing;
+using NavigationLocation = HomeBlaze.Components.Abstractions.Pages.NavigationLocation;
 
 namespace HomeBlaze.E2E.Tests;
 
@@ -502,6 +503,41 @@ public class NavigationMetadataTests
         finally
         {
             await RestoreDemoMetadataAsync(metadataPath, originalMetadata);
+        }
+    }
+
+    [Fact]
+    public async Task WhenSubjectInFolderIsMovedToTheTopBar_ThenTheTopBarShowsIt()
+    {
+        // Arrange
+        var root = (FluentStorageContainer)_fixture.ServerServices.GetRequiredService<RootManager>().Root!;
+        var folder = (VirtualFolder)root.Children["Agents"];
+        var agent = folder.Children["TestAgent"];
+        try
+        {
+            var (page, pane) = await OpenPaneAsync("Agents/TestAgent");
+            await pane.GetByTestId("edit-metadata-button").ClickAsync();
+
+            // MudDialog puts its test id on its content, which does not hold the actions.
+            var dialog = page.Locator(".mud-dialog").Filter(new() { Has = page.GetByTestId("metadata-edit-dialog") });
+            await dialog.GetByTestId("metadata-location").ClickAsync();
+            await page.Locator(".mud-popover-open").GetByText("Top bar", new() { Exact = true }).ClickAsync();
+
+            // Act
+            await dialog.GetByTestId("metadata-save").ClickAsync();
+            await Assertions.Expect(dialog).ToHaveCountAsync(0, new() { Timeout = PageLoadTimeout });
+
+            // The layout reads the top bar when it renders, which a navigation does.
+            await page.GotoAsync($"{_fixture.ServerAddress}pages/Dashboard.md");
+
+            // Assert
+            await Assertions.Expect(page.GetByRole(AriaRole.Banner).Locator("a[href='pages/Agents/TestAgent']"))
+                .ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
+            Assert.Equal(NavigationLocation.AppBar, agent.GetNavigationLocation());
+        }
+        finally
+        {
+            await folder.WriteChildMetadataAsync(agent, null, CancellationToken.None);
         }
     }
 }

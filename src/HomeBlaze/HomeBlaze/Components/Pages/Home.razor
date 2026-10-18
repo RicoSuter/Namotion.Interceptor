@@ -19,13 +19,9 @@
         if (Root == null)
             return;
 
-        var items = NavigationResolver.GetChildItems(Root).Where(i => i.IsPage).ToList();
-
-        // Try first AppBar page (left aligned first, then right); the items are already in navigation order.
-        var appBarPage = items
-            .Where(i => i.Location == NavigationLocation.AppBar)
-            .OrderBy(i => i.Alignment == AppBarAlignment.Left ? 0 : 1)
-            .FirstOrDefault();
+        // The first page of the top bar as it shows it: left aligned first, then right, each in navigation order.
+        var appBarItems = NavigationResolver.GetAppBarItems(Root);
+        var appBarPage = appBarItems.FirstOrDefault(i => i.Alignment == AppBarAlignment.Left) ?? appBarItems.FirstOrDefault();
 
         if (appBarPage != null)
         {
@@ -34,7 +30,8 @@
         }
 
         // Try first NavBar page
-        var navBarPage = items.FirstOrDefault(i => i.Location == NavigationLocation.NavBar);
+        var navBarPage = NavigationResolver.GetChildItems(Root)
+            .FirstOrDefault(i => i is { IsPage: true, Location: NavigationLocation.NavBar });
 
         if (navBarPage != null)
         {

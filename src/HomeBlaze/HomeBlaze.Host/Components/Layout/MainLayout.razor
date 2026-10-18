@@ -11,6 +11,10 @@
 
 @implements IDisposable
 
+@{
+    var appBarItems = GetAppBarItems();
+}
+
 <MudThemeProvider Theme="@_theme" IsDarkMode="_isDarkMode"/>
 
 @* MudBlazor marks no element with the mode, so styles that differ by mode beyond the palette (MainLayout.razor.css) scope to
@@ -27,20 +31,26 @@
             <MudAppBar Elevation="1">
                 <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start"
                                OnClick="@(_ => DrawerToggle())"/>
-                @foreach (var item in GetAppBarItems(AppBarAlignment.Left))
+                @foreach (var item in appBarItems)
                 {
-                    <MudIconButton Icon="@SubjectIconExtensions.ResolveMudBlazorIcon(item.Icon)"
-                                   Href="@item.PageUrl"
-                                   Color="@(IsActive(item) ? Color.Primary : Color.Inherit)"
-                                   title="@item.Title"/>
+                    @if (item.Alignment == AppBarAlignment.Left)
+                    {
+                        <MudIconButton Icon="@SubjectIconExtensions.ResolveMudBlazorIcon(item.Icon)"
+                                       Href="@item.PageUrl"
+                                       Color="@(IsActive(item) ? Color.Primary : Color.Inherit)"
+                                       title="@item.Title"/>
+                    }
                 }
                 <MudSpacer/>
-                @foreach (var item in GetAppBarItems(AppBarAlignment.Right))
+                @foreach (var item in appBarItems)
                 {
-                    <MudIconButton Icon="@SubjectIconExtensions.ResolveMudBlazorIcon(item.Icon)"
-                                   Href="@item.PageUrl"
-                                   Color="@(IsActive(item) ? Color.Primary : Color.Inherit)"
-                                   title="@item.Title"/>
+                    @if (item.Alignment == AppBarAlignment.Right)
+                    {
+                        <MudIconButton Icon="@SubjectIconExtensions.ResolveMudBlazorIcon(item.Icon)"
+                                       Href="@item.PageUrl"
+                                       Color="@(IsActive(item) ? Color.Primary : Color.Inherit)"
+                                       title="@item.Title"/>
+                    }
                 }
                 <MudIconButton Icon="@(DeveloperModeIcon)"
                                Color="@(DeveloperMode.IsEnabled ? Color.Success : Color.Inherit)"
@@ -226,13 +236,12 @@
         InvokeAsync(StateHasChanged);
     }
 
-    private IEnumerable<NavigationItem> GetAppBarItems(AppBarAlignment alignment)
+    private IReadOnlyList<NavigationItem> GetAppBarItems()
     {
         if (RootManager.Root == null)
-            return Enumerable.Empty<NavigationItem>();
+            return [];
 
-        return NavigationResolver.GetChildItems(RootManager.Root)
-            .Where(item => item.Location == NavigationLocation.AppBar && item.IsPage && item.Alignment == alignment);
+        return NavigationResolver.GetAppBarItems(RootManager.Root);
     }
 
     // The error page is shown exactly when the system is unhealthy, so it must render even if the

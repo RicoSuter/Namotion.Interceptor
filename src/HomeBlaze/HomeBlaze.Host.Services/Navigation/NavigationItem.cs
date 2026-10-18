@@ -39,6 +39,13 @@ public class NavigationItem
     public bool IsFolder { get; init; }
 
     /// <summary>
+    /// Whether the sidebar shows this item as a folder: it has a descendant page whose location is
+    /// <see cref="NavigationLocation.NavBar"/>, reached only through descendants whose location is that as well.
+    /// Implies <see cref="IsFolder"/>.
+    /// </summary>
+    public bool HasNavigationBarPages { get; init; }
+
+    /// <summary>
     /// Where this item should appear (NavBar or AppBar).
     /// </summary>
     public NavigationLocation Location { get; init; }
