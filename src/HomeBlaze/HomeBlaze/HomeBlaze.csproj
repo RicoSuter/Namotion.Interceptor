@@ -9,6 +9,8 @@
         <ProjectReference Include="..\Namotion.Devices.Luxtronik.HomeBlaze\Namotion.Devices.Luxtronik.HomeBlaze.csproj" />
         <ProjectReference Include="..\Namotion.Devices.MyStrom\Namotion.Devices.MyStrom.csproj" />
         <ProjectReference Include="..\Namotion.Devices.MyStrom.HomeBlaze\Namotion.Devices.MyStrom.HomeBlaze.csproj" />
+        <ProjectReference Include="..\Namotion.Devices.Nuki\Namotion.Devices.Nuki.csproj" />
+        <ProjectReference Include="..\Namotion.Devices.Nuki.HomeBlaze\Namotion.Devices.Nuki.HomeBlaze.csproj" />
         <ProjectReference Include="..\Namotion.Devices.Shelly\Namotion.Devices.Shelly.csproj" />
         <ProjectReference Include="..\Namotion.Devices.Shelly.HomeBlaze\Namotion.Devices.Shelly.HomeBlaze.csproj" />
         <ProjectReference Include="..\Namotion.Devices.Sonos\Namotion.Devices.Sonos.csproj" />
