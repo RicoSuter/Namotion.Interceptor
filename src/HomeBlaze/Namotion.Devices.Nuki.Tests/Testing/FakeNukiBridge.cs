@@ -25,6 +25,8 @@ internal sealed class FakeNukiBridge : HttpMessageHandler, IHttpClientFactory
     public volatile Action? OnAction = null;
 
     /// <summary>When set, a /lockAction request waits for it, like a bridge waits for the motor.</summary>
+    /// <remarks>Create it with <see cref="TaskCreationOptions.RunContinuationsAsynchronously"/>, otherwise whatever
+    /// completes the gate runs the waiting request's continuation inline.</remarks>
     public volatile TaskCompletionSource? ActionGate = null;
 
     public Uri[] Requests => _requests.ToArray();

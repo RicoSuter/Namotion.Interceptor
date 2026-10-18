@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
@@ -9,12 +10,14 @@ using Namotion.Devices.Nuki.Model;
 namespace Namotion.Devices.Nuki.Client;
 
 /// <summary>
-/// Sends requests to the HTTP API of a Nuki bridge. Not thread-safe toward the bridge: the bridge handles one request at
-/// a time, so callers serialize their requests.
+/// Sends requests to the HTTP API of a Nuki bridge. Thread-safe, but the bridge handles one request at a time, so
+/// callers serialize their requests.
 /// </summary>
 internal sealed class NukiBridgeClient
 {
     public const int DefaultPort = 8080;
+
+    private const int StackAllocTokenBytes = 256;
 
     private static readonly TimeSpan ReadTimeout = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan ActionTimeout = TimeSpan.FromSeconds(60);
@@ -23,7 +26,7 @@ internal sealed class NukiBridgeClient
     private readonly HttpClient _httpClient;
     private readonly string _baseAddress;
     private readonly string? _token;
-    private readonly byte[]? _secretKey;
+    private readonly NukiTokenMode _tokenMode;
     private readonly TimeSpan _busyRetryDelay;
 
     public NukiBridgeClient(HttpClient httpClient, string hostAddress, string? token, NukiTokenMode tokenMode, TimeSpan? busyRetryDelay = null)
@@ -31,7 +34,7 @@ internal sealed class NukiBridgeClient
         _httpClient = httpClient;
         _baseAddress = "http://" + NormalizeHostAddress(hostAddress) + "/";
         _token = token;
-        _secretKey = tokenMode == NukiTokenMode.Encrypted && token is not null ? SHA256.HashData(Encoding.UTF8.GetBytes(token)) : null;
+        _tokenMode = tokenMode;
         _busyRetryDelay = busyRetryDelay ?? TimeSpan.FromSeconds(1);
     }
 
@@ -41,6 +44,12 @@ internal sealed class NukiBridgeClient
     public static string NormalizeHostAddress(string hostAddress)
     {
         var trimmed = hostAddress.Trim();
+        if (trimmed.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
+        {
+            trimmed = trimmed["http://".Length..];
+        }
+
+        trimmed = trimmed.TrimEnd('/');
         return trimmed.Contains(':') ? trimmed : trimmed + ":" + DefaultPort.ToString(CultureInfo.InvariantCulture);
     }
 
@@ -96,9 +105,9 @@ internal sealed class NukiBridgeClient
                 return await response.Content.ReadFromJsonAsync(typeInfo, timeoutSource.Token)
                     ?? throw new InvalidDataException($"The bridge answered /{path} without content.");
             }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
             {
-                throw new TimeoutException($"The bridge did not answer /{path} within {timeout.TotalSeconds:0} seconds.");
+                throw new TimeoutException($"The bridge did not answer /{path} within {timeout.TotalSeconds:0} seconds.", exception);
             }
         }
     }
@@ -124,31 +133,57 @@ internal sealed class NukiBridgeClient
 
     private void AppendAuthentication(StringBuilder builder)
     {
-        if (_secretKey is null)
+        if (_tokenMode != NukiTokenMode.Encrypted || _token is null)
         {
             builder.Append("token=").Append(Uri.EscapeDataString(_token ?? string.Empty));
             return;
         }
 
+        AppendEncryptedToken(builder, _token);
+    }
+
+    // The secret key (SHA256 of the token) is derived fresh per request instead of cached, so it never outlives this
+    // call; both the UTF-8 token bytes and the key are zeroed below regardless of the token's length.
+    private static void AppendEncryptedToken(StringBuilder builder, string token)
+    {
         var plaintext = Encoding.ASCII.GetBytes(string.Create(
             CultureInfo.InvariantCulture,
             $"{DateTime.UtcNow:yyyy-MM-dd'T'HH:mm:ss'Z'},{RandomNumberGenerator.GetInt32(ushort.MaxValue + 1)}"));
         Span<byte> nonce = stackalloc byte[SecretBox.NonceSize];
         RandomNumberGenerator.Fill(nonce);
-        var ctoken = SecretBox.Seal(plaintext, nonce, _secretKey);
 
-        builder.Append("ctoken=").Append(Convert.ToHexStringLower(ctoken))
-            .Append("&nonce=").Append(Convert.ToHexStringLower(nonce));
+        var maxTokenBytes = Encoding.UTF8.GetMaxByteCount(token.Length);
+        var rented = maxTokenBytes > StackAllocTokenBytes ? ArrayPool<byte>.Shared.Rent(maxTokenBytes) : null;
+        Span<byte> tokenBytes = rented ?? stackalloc byte[StackAllocTokenBytes];
+        Span<byte> secretKey = stackalloc byte[SHA256.HashSizeInBytes];
+        try
+        {
+            var tokenByteCount = Encoding.UTF8.GetBytes(token, tokenBytes);
+            SHA256.HashData(tokenBytes[..tokenByteCount], secretKey);
+            var ctoken = SecretBox.Seal(plaintext, nonce, secretKey);
+
+            builder.Append("ctoken=").Append(Convert.ToHexStringLower(ctoken))
+                .Append("&nonce=").Append(Convert.ToHexStringLower(nonce));
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(tokenBytes);
+            CryptographicOperations.ZeroMemory(secretKey);
+            if (rented is not null)
+            {
+                ArrayPool<byte>.Shared.Return(rented);
+            }
+        }
     }
 
     private static HttpRequestException CreateException(string path, HttpStatusCode statusCode) => new(statusCode switch
     {
         HttpStatusCode.Unauthorized =>
-            "Token rejected. Check the token, the bridge clock (encrypted tokens are valid for 60 seconds) " +
+            $"/{path}: Token rejected. Check the token, the bridge clock (encrypted tokens are valid for 60 seconds) " +
             "and the token mode (software bridges only accept Plain).",
-        HttpStatusCode.Forbidden => "The HTTP API of the bridge is disabled. Enable it in the Nuki app.",
-        HttpStatusCode.NotFound => "The bridge does not know the device.",
-        HttpStatusCode.ServiceUnavailable => "The bridge is busy or the device is offline.",
-        _ => string.Create(CultureInfo.InvariantCulture, $"The bridge answered /{path} with {(int)statusCode} {statusCode}.")
+        HttpStatusCode.Forbidden => $"/{path}: The HTTP API of the bridge is disabled. Enable it in the Nuki app.",
+        HttpStatusCode.NotFound => $"/{path}: The bridge does not know the device or the endpoint.",
+        HttpStatusCode.ServiceUnavailable => $"/{path}: The bridge is busy or the device is offline.",
+        _ => string.Create(CultureInfo.InvariantCulture, $"/{path}: the bridge answered with {(int)statusCode} {statusCode}.")
     }, inner: null, statusCode);
 }

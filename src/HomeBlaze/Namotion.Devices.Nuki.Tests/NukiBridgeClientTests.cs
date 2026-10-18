@@ -68,6 +68,20 @@ public class NukiBridgeClientTests
     }
 
     [Fact]
+    public async Task WhenHostAddressHasASchemeAndTrailingSlash_ThenTheyAreNormalizedAway()
+    {
+        // Arrange
+        var bridge = new FakeNukiBridge();
+        var client = CreateClient(bridge, NukiTokenMode.Plain, hostAddress: "http://192.168.1.50/");
+
+        // Act
+        await client.GetInfoAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal("http://192.168.1.50:8080/info?token=123456", Assert.Single(bridge.Requests).ToString());
+    }
+
+    [Fact]
     public async Task WhenTwoRequestsAreSent_ThenEachHasItsOwnNonce()
     {
         // Arrange
@@ -98,6 +112,24 @@ public class NukiBridgeClientTests
         // Assert
         Assert.Equal(2, devices.Length);
         Assert.Equal(2, bridge.CountRequests("list"));
+    }
+
+    [Fact]
+    public async Task WhenBridgeIsBusyOnceInEncryptedMode_ThenTheRetryUsesADifferentNonce()
+    {
+        // Arrange
+        var bridge = new FakeNukiBridge();
+        var calls = 0;
+        bridge.StatusOverride = path => Interlocked.Increment(ref calls) == 1 ? HttpStatusCode.ServiceUnavailable : null;
+        var client = CreateClient(bridge, NukiTokenMode.Encrypted);
+
+        // Act
+        await client.GetInfoAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(2, bridge.CountRequests("info"));
+        var nonces = bridge.Requests.Select(uri => HttpUtility.ParseQueryString(uri.Query)["nonce"]).ToArray();
+        Assert.NotEqual(nonces[0], nonces[1]);
     }
 
     [Fact]
@@ -145,6 +177,52 @@ public class NukiBridgeClientTests
         Assert.Equal("4", query["deviceType"]);
         Assert.Equal("2", query["action"]);
         Assert.Equal("0", query["nowait"]);
+    }
+
+    [Fact]
+    public async Task WhenCallerCancelsDuringLockAction_ThenOperationCanceledExceptionIsThrownInsteadOfTimeoutException()
+    {
+        // Arrange
+        var bridge = new FakeNukiBridge { ActionGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously) };
+        var client = CreateClient(bridge, NukiTokenMode.Plain);
+        using var cancellationSource = new CancellationTokenSource();
+
+        // Act
+        var lockActionTask = client.LockActionAsync(nukiId: 1, deviceType: 0, action: 1, cancellationSource.Token);
+        await cancellationSource.CancelAsync();
+
+        // Assert
+        var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => lockActionTask);
+        Assert.IsNotType<TimeoutException>(exception);
+    }
+
+    [Fact]
+    public async Task WhenTheRequestIsCanceledForAReasonOtherThanCallerCancellation_ThenTimeoutExceptionWrapsIt()
+    {
+        // Arrange
+        var innerException = new TaskCanceledException();
+        var bridge = new FakeNukiBridge { OnAction = () => throw innerException };
+        var client = CreateClient(bridge, NukiTokenMode.Plain);
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<TimeoutException>(
+            () => client.LockActionAsync(nukiId: 1, deviceType: 0, action: 1, CancellationToken.None));
+        Assert.Same(innerException, exception.InnerException);
+    }
+
+    [Fact]
+    public async Task WhenListIsRequested_ThenTheResponseMapsTheRenamedFields()
+    {
+        // Arrange
+        var bridge = new FakeNukiBridge();
+        var client = CreateClient(bridge, NukiTokenMode.Plain);
+
+        // Act
+        var devices = await client.GetListAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(2, devices.Single(device => device.NukiId == 1).LastKnownState!.DoorSensorState);
+        Assert.NotNull(devices.Single(device => device.NukiId == 2).LastKnownState!.RingActionTimestamp);
     }
 
     [Fact]
