@@ -65,7 +65,7 @@ A device is a child of its bridge, so its path is the path of the bridge, then `
 |----------|-------------|
 | `LockState` | Locked, Locking, Unlocked, Unlocking, Unlatched, Unlatching or Jammed (motor blocked). Unknown while uncalibrated |
 | `IsLocked` | True when locked, false in every other known state, also while the lock moves or is jammed, unknown while `LockState` is unknown |
-| `DoorState`, `IsClosed` | State of the door sensor: Open or Closed, unknown without a calibrated sensor |
+| `DoorState`, `IsDoorClosed` | State of the door sensor: Open or Closed, unknown without a calibrated sensor |
 | `BatteryLevel` | Charge of the batteries |
 | `IsBatteryCritical`, `IsBatteryCharging`, `IsKeypadBatteryCritical` | Battery flags of the lock and its keypad |
 

@@ -902,7 +902,7 @@ namespace HomeBlaze.Abstractions.Sensors
         [HomeBlaze.Abstractions.Attributes.State(Position=231)]
         [Namotion.Interceptor.Attributes.Derived]
         [System.ComponentModel.Category("Door")]
-        bool? IsClosed { get; }
+        bool? IsDoorClosed { get; }
     }
     [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
     [System.ComponentModel.Description("Reports electrical current in amperes.")]

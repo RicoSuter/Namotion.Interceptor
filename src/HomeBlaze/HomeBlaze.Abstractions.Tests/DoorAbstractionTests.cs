@@ -12,16 +12,16 @@ public class DoorAbstractionTests
     [InlineData(DoorState.Opening, false)]
     [InlineData(DoorState.Closing, false)]
     [InlineData(null, null)]
-    public void WhenDoorStateIsSet_ThenIsClosedFollowsIt(DoorState? doorState, bool? expected)
+    public void WhenDoorStateIsSet_ThenIsDoorClosedFollowsIt(DoorState? doorState, bool? expected)
     {
         // Arrange
         IDoorSensor sensor = new TestDoorSensor { DoorState = doorState };
 
         // Act
-        var isClosed = sensor.IsClosed;
+        var isDoorClosed = sensor.IsDoorClosed;
 
         // Assert
-        Assert.Equal(expected, isClosed);
+        Assert.Equal(expected, isDoorClosed);
     }
 
     [Theory]

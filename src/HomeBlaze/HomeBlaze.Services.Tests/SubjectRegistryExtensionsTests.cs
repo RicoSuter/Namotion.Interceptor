@@ -307,7 +307,7 @@ public class SubjectRegistryExtensionsTests
         // Arrange
         var context = CreateContext();
         var subject = new DoorSensorTestSubject(context);
-        var property = subject.TryGetRegisteredSubject()!.TryGetProperty(nameof(IDoorSensor.IsClosed))!;
+        var property = subject.TryGetRegisteredSubject()!.TryGetProperty(nameof(IDoorSensor.IsDoorClosed))!;
 
         // Act
         subject.DoorState = DoorState.Closed;
