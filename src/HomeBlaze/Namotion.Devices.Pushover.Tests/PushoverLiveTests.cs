@@ -122,7 +122,7 @@ public class PushoverLiveTests
         await using var running = await PushoverTestFactory.StartAsync(service);
 
         // Act
-        await target.SendNotificationAsync(new Notification
+        var result = await target.SendNotificationAsync(new Notification
         {
             Message = "Acknowledge this emergency test on your phone.",
             Title = "Namotion emergency test",
@@ -131,7 +131,8 @@ public class PushoverLiveTests
 
         // Assert
         var acknowledgedEvent = await acknowledged.Task.WaitAsync(TimeSpan.FromMinutes(5));
-        Assert.True(target.IsEmergencyAcknowledged);
+        Assert.Equal(result.Id, acknowledgedEvent.Id);
+        Assert.Equal(PushoverEmergencyStatus.Acknowledged, acknowledgedEvent.Emergency.Status);
         Assert.False(string.IsNullOrEmpty(acknowledgedEvent.AcknowledgedByDevice));
     }
 
@@ -146,17 +147,18 @@ public class PushoverLiveTests
         // Arrange
         var service = CreateService(UserKey!);
         var target = service.Targets["live"];
-        await target.SendNotificationAsync(new Notification
+        var result = await target.SendNotificationAsync(new Notification
         {
             Message = "This emergency test is canceled at once.",
             Title = "Namotion cancel test",
             Priority = NotificationPriority.Emergency
         }, CancellationToken.None);
+        var emergency = target.Emergencies[result.Id!];
 
         // Act
-        await target.CancelEmergencyAsync(CancellationToken.None);
+        await emergency.CancelAsync(CancellationToken.None);
 
         // Assert
-        Assert.False(target.IsEmergencyActive);
+        Assert.Equal(PushoverEmergencyStatus.Canceled, emergency.Status);
     }
 }

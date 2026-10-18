@@ -23,7 +23,7 @@ public class PushoverServiceTests
         Assert.Equal(TimeSpan.FromHours(1), target.EmergencyExpire);
         Assert.Equal(ServiceStatus.Stopped, target.Status);
         Assert.Empty(target.Devices);
-        Assert.False(target.IsEmergencyActive);
+        Assert.Empty(target.Emergencies);
     }
 
     [Fact]
@@ -72,23 +72,47 @@ public class PushoverServiceTests
     }
 
     [Fact]
-    public async Task WhenEmergencyIsSent_ThenRetryAndExpireAreSentAndEmergencyIsActive()
+    public async Task WhenEmergencyIsSent_ThenRetryAndExpireAreSentAndAnActiveEmergencyIsTrackedUnderItsReceipt()
     {
         // Arrange
         var (service, handler) = PushoverTestFactory.CreateService("rico");
-        handler.Respond = _ => (HttpStatusCode.OK, """{"status":1,"receipt":"receipt1"}""");
+        handler.Respond = _ => (HttpStatusCode.OK, """{"status":1,"request":"request1","receipt":"receipt1"}""");
         var target = service.Targets["rico"];
+        var notification = new Notification { Message = "Smoke in the kitchen", Title = "Smoke", Priority = NotificationPriority.Emergency };
 
         // Act
-        await target.SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
+        var result = await target.SendNotificationAsync(notification, CancellationToken.None);
 
         // Assert
         var request = Assert.Single(handler.RequestsTo(MessagesPath));
         Assert.Equal("2", request.Form["priority"]);
         Assert.Equal("60", request.Form["retry"]);
         Assert.Equal("3600", request.Form["expire"]);
-        Assert.True(target.IsEmergencyActive);
-        Assert.Equal("receipt1", target.EmergencyReceipt);
+        Assert.Equal("receipt1", result.Id);
+
+        var (receipt, emergency) = Assert.Single(target.Emergencies);
+        Assert.Equal("receipt1", receipt);
+        Assert.Equal("receipt1", emergency.Receipt);
+        Assert.Equal("Smoke", emergency.Title);
+        Assert.Equal("Smoke in the kitchen", emergency.Message);
+        Assert.Equal(target.LastSentAt, emergency.SentAt);
+        Assert.Equal(PushoverEmergencyStatus.Active, emergency.Status);
+        Assert.Same(target, emergency.Target);
+    }
+
+    [Fact]
+    public void WhenAnEmergencyHasNoTitle_ThenItsDisplayTitleIsEmergency()
+    {
+        // Arrange
+        var target = new PushoverTarget();
+
+        // Act
+        var emergency = target.AddEmergency("receipt1", title: null, "Fire", DateTimeOffset.UtcNow);
+
+        // Assert
+        Assert.Null(emergency.Title);
+        Assert.Equal("Emergency", ((ITitleProvider)emergency).Title);
+        Assert.Equal("Error", emergency.IconColor);
     }
 
     [Fact]
@@ -176,15 +200,15 @@ public class PushoverServiceTests
     }
 
     [Fact]
-    public async Task WhenATargetInstanceIsReplacedForTheSameKey_ThenTheOpenEmergencyIsAdoptedByTheNewInstance()
+    public async Task WhenATargetInstanceIsReplacedForTheSameKey_ThenItsEmergenciesMoveToTheNewInstance()
     {
         // Arrange
         var (service, handler) = PushoverTestFactory.CreateService("rico");
-        handler.Respond = request => request.Path == MessagesPath
-            ? (HttpStatusCode.OK, """{"status":1,"receipt":"receipt1"}""")
-            : (HttpStatusCode.OK, FakePushoverHandler.Success);
+        handler.Respond = RespondWithNumberedReceipts();
         var oldTarget = service.Targets["rico"];
         await oldTarget.SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
+        await oldTarget.SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
+        var emergencies = oldTarget.Emergencies;
 
         var newTarget = new PushoverTarget { Name = "Rico", UserKey = "user-rico" };
 
@@ -192,38 +216,68 @@ public class PushoverServiceTests
         service.Targets = new Dictionary<string, PushoverTarget> { ["rico"] = newTarget };
 
         // Assert
-        Assert.True(newTarget.IsEmergencyActive);
-        Assert.Equal("receipt1", newTarget.EmergencyReceipt);
+        Assert.Same(emergencies["receipt1"], newTarget.Emergencies["receipt1"]);
+        Assert.Same(emergencies["receipt2"], newTarget.Emergencies["receipt2"]);
+        Assert.All(newTarget.Emergencies.Values, emergency => Assert.Same(newTarget, emergency.Target));
+        Assert.Empty(oldTarget.Emergencies);
 
-        // Act: the new instance can still cancel the emergency the old instance started.
-        await newTarget.CancelEmergencyAsync(CancellationToken.None);
+        // Act: the moved emergency can still be canceled through the new instance.
+        await newTarget.Emergencies["receipt1"].CancelAsync(CancellationToken.None);
 
         // Assert
         Assert.Single(handler.RequestsTo("/1/receipts/receipt1/cancel.json"));
-        Assert.Null(newTarget.EmergencyReceipt);
+        Assert.Equal(PushoverEmergencyStatus.Canceled, newTarget.Emergencies["receipt1"].Status);
+        Assert.Equal(PushoverEmergencyStatus.Active, newTarget.Emergencies["receipt2"].Status);
     }
 
     [Fact]
-    public async Task WhenATargetWithAnOpenEmergencyIsRemoved_ThenItsReceiptIsCanceledInTheBackgroundAndItsServiceReferenceIsCleared()
+    public async Task WhenATargetWithActiveEmergenciesIsRemoved_ThenTheyAreCanceledInTheBackgroundAndItsServiceReferenceIsCleared()
     {
         // Arrange
         var (service, handler) = PushoverTestFactory.CreateService("rico");
-        handler.Respond = request => request.Path == MessagesPath
-            ? (HttpStatusCode.OK, """{"status":1,"receipt":"receipt1"}""")
-            : (HttpStatusCode.OK, FakePushoverHandler.Success);
+        handler.Respond = RespondWithNumberedReceipts();
         var target = service.Targets["rico"];
+        await target.SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
         await target.SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
 
         // Act
         service.Targets = new Dictionary<string, PushoverTarget>();
 
         // Assert
-        await AsyncTestHelpers.WaitUntilAsync(() => handler.RequestsTo("/1/receipts/receipt1/cancel.json").Length == 1);
+        await AsyncTestHelpers.WaitUntilAsync(() =>
+            handler.RequestsTo("/1/receipts/receipt1/cancel.json").Length == 1 &&
+            handler.RequestsTo("/1/receipts/receipt2/cancel.json").Length == 1);
         Assert.Null(target.Service);
     }
 
     [Fact]
-    public void WhenATargetWithoutAnOpenEmergencyIsRemoved_ThenNoCancelRequestIsMade()
+    public async Task WhenCancelingAnEmergencyOfARemovedTargetFails_ThenAWarningIsLoggedAndTheOthersAreStillCanceled()
+    {
+        // Arrange
+        var handler = new FakePushoverHandler();
+        var logger = new RecordingLogger<PushoverService>();
+        var service = new PushoverService(new TestHttpClientFactory(handler), logger) { ApplicationToken = "app-token" };
+        var target = new PushoverTarget { Name = "Rico", UserKey = "user-rico" };
+        service.Targets = new Dictionary<string, PushoverTarget> { ["rico"] = target };
+
+        var respondWithReceipts = RespondWithNumberedReceipts();
+        handler.Respond = request => request.Path == "/1/receipts/receipt1/cancel.json"
+            ? (HttpStatusCode.BadRequest, """{"status":0,"errors":["receipt not found"]}""")
+            : respondWithReceipts(request);
+        await target.SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
+        await target.SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
+        var second = target.Emergencies["receipt2"];
+
+        // Act
+        service.Targets = new Dictionary<string, PushoverTarget>();
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => second.Status == PushoverEmergencyStatus.Canceled);
+        await AsyncTestHelpers.WaitUntilAsync(() => logger.Warnings.Any(warning => warning.Contains("removed target", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public void WhenATargetWithoutActiveEmergenciesIsRemoved_ThenNoCancelRequestIsMade()
     {
         // Arrange
         var (service, handler) = PushoverTestFactory.CreateService("rico");
@@ -264,6 +318,14 @@ public class PushoverServiceTests
         // Assert
         Assert.Equal(TimeSpan.FromSeconds(30), target.EmergencyRetry);
         Assert.Equal(TimeSpan.FromHours(3), target.EmergencyExpire);
+    }
+
+    private static Func<RecordedRequest, (HttpStatusCode StatusCode, string Body)> RespondWithNumberedReceipts()
+    {
+        var receiptNumber = 0;
+        return request => request.Path == MessagesPath
+            ? (HttpStatusCode.OK, $$"""{"status":1,"receipt":"receipt{{Interlocked.Increment(ref receiptNumber)}}"}""")
+            : (HttpStatusCode.OK, FakePushoverHandler.Success);
     }
 
     [Theory]

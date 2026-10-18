@@ -52,20 +52,64 @@ public class PushoverOperationTests
     }
 
     [Fact]
-    public async Task WhenAnEmergencyIsActive_ThenCancelEmergencyIsEnabled()
+    public void WhenServiceIsRegistered_ThenItOffersCancelAllEmergencies()
+    {
+        // Arrange
+        var (service, _) = CreateRegisteredService("rico");
+
+        // Act
+        var registered = service.TryGetRegisteredSubject()!;
+
+        // Assert
+        Assert.NotNull(registered.TryGetProperty("CancelAllEmergencies")?.TryGetMethodMetadata());
+    }
+
+    [Fact]
+    public async Task WhenAnEmergencyIsActive_ThenCancelAllEmergenciesOfTheTargetIsEnabledUntilItEnds()
     {
         // Arrange
         var (service, handler) = CreateRegisteredService("rico");
-        handler.Respond = _ => (HttpStatusCode.OK, """{"status":1,"receipt":"receipt1"}""");
+        handler.Respond = request => request.Path == "/1/messages.json"
+            ? (HttpStatusCode.OK, """{"status":1,"receipt":"receipt1"}""")
+            : (HttpStatusCode.OK, FakePushoverHandler.Success);
         var target = service.Targets["rico"];
-        var cancelEmergency = target.TryGetRegisteredSubject()!.TryGetProperty("CancelEmergency")!;
-        Assert.False(cancelEmergency.IsMethodEnabled());
+        var cancelAllEmergencies = target.TryGetRegisteredSubject()!.TryGetProperty("CancelAllEmergencies")!;
+        Assert.False(cancelAllEmergencies.IsMethodEnabled());
 
         // Act
         await target.SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
 
         // Assert
-        Assert.True(cancelEmergency.IsMethodEnabled());
+        Assert.True(cancelAllEmergencies.IsMethodEnabled());
+
+        // Act
+        await target.CancelAllEmergenciesAsync(CancellationToken.None);
+
+        // Assert
+        Assert.False(cancelAllEmergencies.IsMethodEnabled());
+    }
+
+    [Fact]
+    public async Task WhenAnEmergencyIsCanceled_ThenItsCancelOperationIsDisabled()
+    {
+        // Arrange
+        var (service, handler) = CreateRegisteredService("rico");
+        handler.Respond = request => request.Path == "/1/messages.json"
+            ? (HttpStatusCode.OK, """{"status":1,"receipt":"receipt1"}""")
+            : (HttpStatusCode.OK, FakePushoverHandler.Success);
+        var target = service.Targets["rico"];
+        await target.SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
+        var emergency = target.Emergencies["receipt1"];
+        var cancel = emergency.TryGetRegisteredSubject()!.TryGetProperty("Cancel")!;
+        Assert.True(cancel.IsMethodEnabled());
+
+        // Act
+        await cancel.TryGetMethodMetadata()!.InvokeAsync([], serviceProvider: null, CancellationToken.None);
+
+        // Assert
+        Assert.Single(handler.RequestsTo("/1/receipts/receipt1/cancel.json"));
+        Assert.Equal(PushoverEmergencyStatus.Canceled, emergency.Status);
+        Assert.False(cancel.IsMethodEnabled());
     }
 
     private static (PushoverService Service, FakePushoverHandler Handler) CreateRegisteredService(params string[] targetKeys)

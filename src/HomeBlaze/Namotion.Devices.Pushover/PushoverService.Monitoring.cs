@@ -32,8 +32,9 @@ public partial class PushoverService
                 StatusMessage = null;
                 Status = ServiceStatus.Running;
 
-                var hasOpenEmergencies = await PollReceiptsAsync(token, stoppingToken);
-                await WaitForSignalAsync(hasOpenEmergencies ? ReceiptPollingInterval : Timeout.InfiniteTimeSpan, stoppingToken);
+                var hasActiveEmergencies = await PollReceiptsAsync(token, stoppingToken);
+                var nextRemovalAt = RemoveFinishedEmergencies();
+                await WaitForSignalAsync(GetWaitTimeout(hasActiveEmergencies, nextRemovalAt), stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -100,12 +101,11 @@ public partial class PushoverService
 
     private async Task<bool> PollReceiptsAsync(string token, CancellationToken cancellationToken)
     {
-        var hasOpenEmergencies = false;
+        var hasActiveEmergencies = false;
         var now = DateTimeOffset.UtcNow;
         foreach (var target in Targets.Values)
         {
-            var receipt = target.TryStartReceiptPoll(now, MinimumReceiptPollingInterval);
-            if (receipt is not null)
+            foreach (var receipt in target.StartReceiptPolls(now, MinimumReceiptPollingInterval))
             {
                 try
                 {
@@ -114,15 +114,53 @@ public partial class PushoverService
                 }
                 catch (PushoverException exception)
                 {
-                    _logger.LogWarning(exception, "Reading the emergency receipt of Pushover target {Target} failed", target.Title);
+                    _logger.LogWarning(exception, "Reading an emergency receipt of Pushover target {Target} failed", target.Title);
                     target.ApplyReceiptError(receipt, DateTimeOffset.UtcNow);
                 }
             }
 
-            hasOpenEmergencies |= target.IsEmergencyActive;
+            hasActiveEmergencies |= target.HasActiveEmergencies;
         }
 
-        return hasOpenEmergencies;
+        return hasActiveEmergencies;
+    }
+
+    private DateTimeOffset? RemoveFinishedEmergencies()
+    {
+        DateTimeOffset? nextRemovalAt = null;
+        var now = DateTimeOffset.UtcNow;
+        foreach (var target in Targets.Values)
+        {
+            if (target.RemoveFinishedEmergencies(now, FinishedEmergencyRetention) is { } removalAt &&
+                (nextRemovalAt is null || removalAt < nextRemovalAt))
+            {
+                nextRemovalAt = removalAt;
+            }
+        }
+
+        return nextRemovalAt;
+    }
+
+    // The earlier of the next receipt poll and the next removal of a finished emergency; with neither pending, the
+    // loop waits for a signal only.
+    private TimeSpan GetWaitTimeout(bool hasActiveEmergencies, DateTimeOffset? nextRemovalAt)
+    {
+        var timeout = hasActiveEmergencies ? ReceiptPollingInterval : Timeout.InfiniteTimeSpan;
+        if (nextRemovalAt is { } removalAt)
+        {
+            var untilRemoval = removalAt - DateTimeOffset.UtcNow;
+            if (untilRemoval < TimeSpan.Zero)
+            {
+                untilRemoval = TimeSpan.Zero;
+            }
+
+            if (timeout == Timeout.InfiniteTimeSpan || untilRemoval < timeout)
+            {
+                timeout = untilRemoval;
+            }
+        }
+
+        return timeout;
     }
 
     private async Task WaitForSignalAsync(TimeSpan timeout, CancellationToken cancellationToken)

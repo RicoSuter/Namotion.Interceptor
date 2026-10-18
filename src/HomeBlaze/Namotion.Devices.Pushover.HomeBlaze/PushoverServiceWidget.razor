@@ -26,19 +26,36 @@
 
         @foreach (var target in targets?.Values ?? Enumerable.Empty<PushoverTarget>())
         {
+            // Emergencies is replaced as a whole, never changed in place, so the read instance can be enumerated.
+            var emergencies = target.Emergencies.Values;
+            var latestAcknowledged = emergencies
+                .Where(emergency => emergency.Status == PushoverEmergencyStatus.Acknowledged)
+                .MaxBy(emergency => emergency.AcknowledgedAt);
+
             <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
                 <MudIcon Icon="@Icons.Material.Filled.Person" Size="Size.Small" Color="@GetStatusColor(target.Status)" />
                 <MudText>@target.Title</MudText>
-                <MudSpacer />
-                @if (target.IsEmergencyActive)
-                {
-                    <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Filled">Emergency open</MudChip>
-                }
-                else if (target.IsEmergencyAcknowledged)
-                {
-                    <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined">Acknowledged</MudChip>
-                }
             </MudStack>
+
+            @foreach (var emergency in emergencies.Where(emergency => emergency.Status == PushoverEmergencyStatus.Active).OrderBy(emergency => emergency.SentAt))
+            {
+                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="ml-6">
+                    <MudIcon Icon="@Icons.Material.Filled.NotificationImportant" Size="Size.Small" Color="Color.Error" />
+                    <MudText Typo="Typo.body2">@GetTitle(emergency)</MudText>
+                    <MudSpacer />
+                    <MudText Typo="Typo.caption">@emergency.SentAt.ToLocalTime().ToString("g")</MudText>
+                </MudStack>
+            }
+
+            @if (latestAcknowledged is not null)
+            {
+                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="ml-6">
+                    <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Size="Size.Small" Color="Color.Success" />
+                    <MudText Typo="Typo.body2">@GetTitle(latestAcknowledged)</MudText>
+                    <MudSpacer />
+                    <MudText Typo="Typo.caption">Acknowledged @latestAcknowledged.AcknowledgedAt?.ToLocalTime().ToString("g")</MudText>
+                </MudStack>
+            }
         }
 
         @if (targets?.Count == 0)
@@ -53,6 +70,8 @@
     public IInterceptorSubject? Subject { get; set; }
 
     private PushoverService? Service => Subject as PushoverService;
+
+    private static string? GetTitle(PushoverEmergency emergency) => ((ITitleProvider)emergency).Title;
 
     private static Color GetStatusColor(ServiceStatus? status) => status switch
     {

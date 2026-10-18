@@ -30,9 +30,13 @@ navTitle: Pushover
 
 | Subject | Operation | Description |
 |---------|-----------|-------------|
-| Target | `SendNotification` | Sends a notification to this recipient |
-| Target | `CancelEmergency` | Stops the repeats of the open emergency notification, enabled while one is open |
+| Target | `SendNotification` | Sends a notification to this recipient and returns its id: the receipt of an emergency notification, otherwise the Pushover request id |
+| Target | `CancelAllEmergencies` | Stops the repeats of every active emergency notification of this recipient, enabled while one is active |
+| Emergency | `Cancel` | Stops the repeats of this emergency notification, enabled while it is active |
 | Service | `SendToAllTargets` | Sends a notification to every target at once. If some fail, the others are still sent and the error names the failed targets |
+| Service | `CancelAllEmergencies` | Stops the repeats of the active emergency notifications of every target |
+
+When canceling several emergency notifications, a failure of one does not stop the others; the error names the failed ones.
 
 ## Priorities
 
@@ -43,7 +47,7 @@ navTitle: Pushover
 | `High` | 1 | Alerts also during quiet hours |
 | `Emergency` | 2 | Repeats every `EmergencyRetry` until acknowledged or until `EmergencyExpire` |
 
-Sending a new emergency notification to a target that already has one open cancels the previous one before the new one starts repeating.
+Each emergency notification is tracked on its own, so several can repeat at once, for example one for smoke and one for water, and each is acknowledged or canceled independently. See [Emergencies](#emergencies).
 
 Pushover limits the message to 1024 characters, the title to 250, the url to 512 and the url title to 100. The message, title and url title are shortened with an ellipsis and a warning in the log. A url over the limit is left out instead, together with its url title, since shortening a url would break the link it points to.
 
@@ -63,17 +67,36 @@ Pushover limits the message to 1024 characters, the title to 250, the url to 512
 | `Status` | `Running` when Pushover accepted the key, `Error` with the reason otherwise. Keys are checked at start and after each configuration change |
 | `Devices` | The devices of the user, as reported by Pushover |
 | `LastSentAt` | When the last notification was accepted by Pushover |
-| `IsEmergencyActive` | An emergency notification repeats and waits for acknowledgement |
-| `IsEmergencyAcknowledged` | The last emergency notification was acknowledged |
-| `EmergencyAcknowledgedAt` | When it was acknowledged |
-| `EmergencyAcknowledgedByDevice` | The device it was acknowledged on |
-| `IsEmergencyExpired` | The last emergency notification expired without acknowledgement |
+| `Emergencies` | The emergency notifications by receipt, see [Emergencies](#emergencies) |
 
-While an emergency notification is open, the service reads its receipt every 10 seconds; otherwise it makes no requests.
+## Emergencies
+
+Sending an `Emergency` notification adds a Pushover emergency subject to the target's `Emergencies`, keyed by the receipt Pushover returned. The receipt is also the `Id` of the `NotificationResult` the send returns and of the acknowledgement event, so a caller can tell which acknowledgement belongs to its send. The emergency is reachable at a path such as `/Devices/Pushover/Targets[rico]/Emergencies[r1a2b3]`.
+
+| Property | Description |
+|----------|-------------|
+| `Receipt` | The receipt of the notification |
+| `Title` | The title of the notification, or null when it had none; the subject is shown as "Emergency" then |
+| `Message` | The message of the notification |
+| `SentAt` | When Pushover accepted the notification |
+| `Status` | `Active`, `Acknowledged`, `Expired` or `Canceled` |
+| `AcknowledgedAt` | When it was acknowledged |
+| `AcknowledgedByDevice` | The device it was acknowledged on |
+
+| Status | Meaning |
+|--------|---------|
+| `Active` | The notification repeats and waits for acknowledgement |
+| `Acknowledged` | The recipient acknowledged it |
+| `Expired` | It stopped repeating after `EmergencyExpire` without acknowledgement |
+| `Canceled` | It was canceled with `Cancel` or `CancelAllEmergencies`, or because its target was removed |
+
+While an emergency notification is active, the service reads its receipt every 10 seconds; otherwise it makes no requests. An emergency that is no longer active is removed from `Emergencies` 24 hours after it ended.
+
+When a configuration reload replaces a target but keeps its key, its emergencies move to the new target and can still be canceled. When a target is removed, its active emergencies are canceled.
 
 ## Events
 
-A target implements `IObservable<PushoverEmergencyAcknowledgedEvent>` and emits one event when an emergency notification is acknowledged. Until the system-wide message bus exists, subscribe on the target directly.
+A target implements `IObservable<PushoverEmergencyAcknowledgedEvent>` and emits one event per emergency notification when it is acknowledged. The event carries the `Target`, the `Emergency`, its `Id` (the receipt, the same as the `NotificationResult.Id` of the send), the `Timestamp` of the acknowledgement and the `AcknowledgedByDevice`. Until the system-wide message bus exists, subscribe on the target directly.
 
 ## Interfaces
 
@@ -81,6 +104,7 @@ A target implements `IObservable<PushoverEmergencyAcknowledgedEvent>` and emits 
 |---------|------------|
 | Service | `IConfigurable`, `IMonitoredService`, `ITitleProvider`, `IIconProvider` |
 | Target | `INotificationPublisher`, `IObservable<PushoverEmergencyAcknowledgedEvent>`, `IConfigurable`, `IMonitoredService`, `ITitleProvider`, `IIconProvider` |
+| Emergency | `ITitleProvider`, `IIconProvider` |
 
 ## JSON Configuration Example
 
@@ -122,7 +146,7 @@ A message can carry an image of up to 5 MB, for example a camera snapshot.
 
 ### Emergency Callback and Tags
 
-Pushover can call a URL when an emergency notification is acknowledged, instead of being polled, which needs HomeBlaze reachable from the internet. Tags allow canceling several emergency notifications at once.
+Pushover can call a URL when an emergency notification is acknowledged, instead of being polled, which needs HomeBlaze reachable from the internet. Tags allow canceling a chosen group of emergency notifications at once.
 
 ### Message Timestamp
 
