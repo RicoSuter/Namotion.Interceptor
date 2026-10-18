@@ -1,16 +1,18 @@
+@using global::HomeBlaze.Abstractions.Sensors
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(NukiSmartLock))]
 @implements ISubjectComponent
 
 @if (Subject is NukiSmartLock smartLock)
 {
     var lockState = smartLock.LockState;
+    var iconColor = GetColor(smartLock.IconColor);
     <MudPaper Class="pa-4">
         <MudStack Spacing="2">
             <MudStack Row="true" AlignItems="AlignItems.Center">
-                <MudIcon Icon="@GetIcon(lockState)" Class="mr-2" />
+                <MudIcon Icon="@GetIcon(lockState)" Color="@iconColor" Class="mr-2" />
                 <MudText Typo="Typo.h6">@smartLock.Title</MudText>
                 <MudSpacer />
-                <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="@GetColor(smartLock.IconColor)">
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="@iconColor">
                     @(lockState?.ToString() ?? "Unknown")
                 </MudChip>
             </MudStack>
@@ -20,7 +22,7 @@
             <MudStack Row="true" Spacing="4">
                 <MudStack Spacing="0">
                     <MudText Typo="Typo.caption">Door</MudText>
-                    <MudText Typo="Typo.h6">@(smartLock.DoorState?.ToString() ?? "–")</MudText>
+                    <MudText Typo="Typo.h6">@GetDoorText(smartLock.DoorState)</MudText>
                 </MudStack>
                 <MudStack Spacing="0">
                     <MudText Typo="Typo.caption">Battery</MudText>
@@ -53,6 +55,16 @@
         DoorLockState.Locked => Icons.Material.Filled.Lock,
         DoorLockState.Jammed => Icons.Material.Filled.LockReset,
         _ => Icons.Material.Filled.LockOpen
+    };
+
+    private static string GetDoorText(DoorState? doorState) => doorState switch
+    {
+        DoorState.Open => "Open",
+        DoorState.Opening => "Opening",
+        DoorState.PartiallyOpen => "Partially open",
+        DoorState.Closing => "Closing",
+        DoorState.Closed => "Closed",
+        _ => "–"
     };
 
     private static Color GetColor(string? iconColor) =>

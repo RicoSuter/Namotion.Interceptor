@@ -6,7 +6,8 @@
     <MudPaper Class="pa-4">
         <MudStack Spacing="2">
             <MudStack Row="true" AlignItems="AlignItems.Center">
-                <MudIcon Icon="@Icons.Material.Filled.Hub" Class="mr-2" />
+                <MudIcon Icon="@(bridge.IsConnected ? Icons.Material.Filled.Hub : Icons.Material.Outlined.Hub)"
+                         Color="@GetColor(bridge.IconColor)" Class="mr-2" />
                 <MudText Typo="Typo.h6">@bridge.Title</MudText>
                 <MudSpacer />
                 <MudChip T="string" Size="Size.Small" Variant="Variant.Filled"
@@ -41,4 +42,7 @@
 @code {
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
+
+    private static Color GetColor(string? iconColor) =>
+        Enum.TryParse<Color>(iconColor, out var color) ? color : Color.Default;
 }

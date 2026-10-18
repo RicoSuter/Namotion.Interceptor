@@ -9,24 +9,20 @@
         <MudStack Spacing="2">
             <MudStack Row="true" AlignItems="AlignItems.Center">
                 <MudIcon Icon="@(isRinging ? Icons.Material.Filled.NotificationsActive : Icons.Material.Filled.Notifications)"
-                         Color="@(Enum.TryParse<Color>(opener.IconColor, out var iconColor) ? iconColor : Color.Default)" Class="mr-2" />
+                         Color="@GetColor(opener.IconColor)" Class="mr-2" />
                 <MudText Typo="Typo.h6">@opener.Title</MudText>
                 <MudSpacer />
-                <MudChip T="string" Size="Size.Small" Variant="Variant.Filled">@(opener.OpenerState?.ToString() ?? "Unknown")</MudChip>
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Filled">@GetStateText(opener.OpenerState)</MudChip>
             </MudStack>
 
             <MudDivider />
 
-            <MudStack Row="true" Spacing="2">
-                @if (opener.OpenerState == NukiOpenerState.RingToOpenActive)
-                {
-                    <MudChip T="string" Size="Size.Small" Color="Color.Warning">Ring to open</MudChip>
-                }
-                @if (opener.IsContinuousModeActive == true)
-                {
+            @if (opener.IsContinuousModeActive == true)
+            {
+                <MudStack Row="true" Spacing="2">
                     <MudChip T="string" Size="Size.Small" Color="Color.Warning">Continuous mode</MudChip>
-                }
-            </MudStack>
+                </MudStack>
+            }
 
             @if (opener.LastRingTime is { } lastRingTime)
             {
@@ -41,4 +37,18 @@
 @code {
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
+
+    private static string GetStateText(NukiOpenerState? state) => state switch
+    {
+        NukiOpenerState.Untrained => "Untrained",
+        NukiOpenerState.Online => "Online",
+        NukiOpenerState.RingToOpenActive => "Ring to open",
+        NukiOpenerState.Open => "Open",
+        NukiOpenerState.Opening => "Opening",
+        NukiOpenerState.BootRun => "Booting",
+        _ => "Unknown"
+    };
+
+    private static Color GetColor(string? iconColor) =>
+        Enum.TryParse<Color>(iconColor, out var color) ? color : Color.Default;
 }
