@@ -29,9 +29,9 @@ public class DoorAbstractionTests
     [InlineData(DoorLockState.Unlocked, false)]
     [InlineData(DoorLockState.Unlatched, false)]
     [InlineData(DoorLockState.Unlatching, false)]
-    [InlineData(DoorLockState.Locking, null)]
-    [InlineData(DoorLockState.Unlocking, null)]
-    [InlineData(DoorLockState.Jammed, null)]
+    [InlineData(DoorLockState.Locking, false)]
+    [InlineData(DoorLockState.Unlocking, false)]
+    [InlineData(DoorLockState.Jammed, false)]
     [InlineData(null, null)]
     public void WhenLockStateIsSet_ThenIsLockedFollowsIt(DoorLockState? lockState, bool? expected)
     {
