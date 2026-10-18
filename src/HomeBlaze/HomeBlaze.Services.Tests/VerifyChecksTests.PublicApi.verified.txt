@@ -85,6 +85,7 @@ namespace HomeBlaze.Services
         public static bool TryConvert(string? input, System.Type targetType, out object? value) { }
         public static bool TryConvert(string? input, System.Type targetType, HomeBlaze.Abstractions.Attributes.StateUnit? unit, out object? value) { }
         public static bool TryCreateObject(System.Type type, System.Collections.Generic.IReadOnlyDictionary<string, string?> inputs, out object? value, out string? error) { }
+        public static bool TryCreateObject(System.Type type, System.Collections.Generic.IReadOnlyDictionary<string, string?> inputs, bool isNullable, out object? value, out string? error) { }
         public static bool TryParseJson(string? input, System.Type type, bool isNullable, out object? value, out string? error) { }
     }
     public static class RegisteredSubjectMethodExtensions

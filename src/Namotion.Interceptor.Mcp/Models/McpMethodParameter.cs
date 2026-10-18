@@ -98,7 +98,24 @@ public sealed record McpMethodParameter
         };
     }
 
+    // Weak, so that the types of an unloaded plugin are not kept alive. Only the depth-0, empty-visitedTypes call
+    // (the public entry point) is a pure function of the type, so only that result is cached; nested recursion
+    // below depth 0 depends on the ancestor chain in visitedTypes and is computed every time.
+    private static readonly ConditionalWeakTable<Type, StrongBox<McpMethodParameter[]?>> PropertiesByTypeAtDepthZero = new();
+
     private static McpMethodParameter[]? CreateProperties(Type type, int depth, HashSet<Type> visitedTypes)
+    {
+        if (depth > 0)
+        {
+            return CreatePropertiesCore(type, depth, visitedTypes);
+        }
+
+        return PropertiesByTypeAtDepthZero
+            .GetValue(type, cachedType => new StrongBox<McpMethodParameter[]?>(CreatePropertiesCore(cachedType, depth, visitedTypes)))
+            .Value;
+    }
+
+    private static McpMethodParameter[]? CreatePropertiesCore(Type type, int depth, HashSet<Type> visitedTypes)
     {
         if (type == typeof(object) || type.IsAbstract || type.IsInterface || depth >= MaximumPropertyDepth
             || typeof(System.Collections.IEnumerable).IsAssignableFrom(type) || typeof(IInterceptorSubject).IsAssignableFrom(type)
@@ -116,9 +133,11 @@ public sealed record McpMethodParameter
                 .Where(property => property.GetMethod?.IsPublic == true && property.SetMethod?.IsPublic == true &&
                                    property.GetIndexParameters().Length == 0 &&
                                    property.GetCustomAttribute<JsonIgnoreAttribute>()?.Condition != JsonIgnoreCondition.Always)
-                // A derived type may hide a same-named base member with `new`; GetProperties returns both, so keep the most derived one.
+                // A derived type may hide a same-named base member with `new`; GetProperties returns both, so keep the
+                // most derived one. Same member rules as ParameterConverter.BuildObjectMembers in HomeBlaze.Services
+                // (see that file); kept as two copies because the project boundary prevents sharing code.
                 .GroupBy(property => property.Name)
-                .Select(group => group.OrderByDescending(property => GetInheritanceDepth(property.DeclaringType)).First())
+                .Select(group => group.Aggregate((best, next) => next.DeclaringType!.IsSubclassOf(best.DeclaringType!) ? next : best))
                 .Select(property => Create(
                     property.GetCustomAttribute<JsonPropertyNameAttribute>()?.Name ?? JsonNamingPolicy.CamelCase.ConvertName(property.Name),
                     property.PropertyType,
@@ -135,17 +154,5 @@ public sealed record McpMethodParameter
         {
             visitedTypes.Remove(type);
         }
-    }
-
-    private static int GetInheritanceDepth(Type? type)
-    {
-        var depth = 0;
-        while (type is not null)
-        {
-            depth++;
-            type = type.BaseType;
-        }
-
-        return depth;
     }
 }

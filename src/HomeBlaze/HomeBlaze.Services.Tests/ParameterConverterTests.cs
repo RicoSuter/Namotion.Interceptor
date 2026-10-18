@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 using HomeBlaze.Abstractions.Attributes;
+using Namotion.Interceptor.Attributes;
 
 namespace HomeBlaze.Services.Tests;
 
@@ -440,13 +441,21 @@ public class ParameterConverterTests
     }
 
     [Fact]
-    public void WhenDerivedMemberHidingBaseIsJsonIgnored_ThenTheMemberIsExcludedEntirely()
+    public void WhenDerivedMemberHidingBaseIsJsonIgnored_ThenTheBaseMemberIsListed()
     {
         // Act
         var members = ParameterConverter.GetObjectMembers(typeof(TestDerivedHidingWithIgnoredMember));
 
         // Assert
-        Assert.DoesNotContain(members, member => member.Name == "Code");
+        var member = Assert.Single(members, candidate => candidate.Name == "Code");
+        Assert.Equal(typeof(int), member.Type);
+    }
+
+    [Fact]
+    public void WhenTypeIsAnInterceptorSubject_ThenItIsNotJsonObject()
+    {
+        // Act & Assert
+        Assert.False(ParameterConverter.IsJsonObject(typeof(TestInterceptorSubject)));
     }
 
     [Fact]
@@ -585,7 +594,7 @@ public class ParameterConverterTests
 
     // The hiding member has a different type than the base member so that GetProperties returns both (see
     // TestDerivedWithHiddenMember above); a same-type "new" hide collapses to a single PropertyInfo and would not
-    // exercise the filter-after-grouping behavior this type is meant to test.
+    // exercise the filter-before-grouping behavior this type is meant to test.
     public sealed class TestDerivedHidingWithIgnoredMember : TestBaseWithIgnoredMember
     {
         [JsonIgnore]
@@ -613,4 +622,9 @@ public class ParameterConverterTests
             set => _text = value.Length > 0 ? value : throw new ArgumentException("Text must not be empty");
         }
     }
+}
+
+[InterceptorSubject]
+public partial class TestInterceptorSubject
+{
 }

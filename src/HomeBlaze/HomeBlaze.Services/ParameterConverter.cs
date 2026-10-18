@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using HomeBlaze.Abstractions.Attributes;
+using Namotion.Interceptor;
 
 namespace HomeBlaze.Services;
 
@@ -80,7 +81,8 @@ public static class ParameterConverter
     {
         var actualType = Nullable.GetUnderlyingType(type) ?? type;
         return !IsSupported(actualType) && actualType != typeof(object) && !actualType.IsPrimitive &&
-               !actualType.IsAbstract && !actualType.IsInterface && !typeof(Delegate).IsAssignableFrom(actualType);
+               !actualType.IsAbstract && !actualType.IsInterface && !typeof(Delegate).IsAssignableFrom(actualType) &&
+               !typeof(IInterceptorSubject).IsAssignableFrom(actualType);
     }
 
     /// <summary>
@@ -96,13 +98,13 @@ public static class ParameterConverter
         return type
             .GetProperties(BindingFlags.Public | BindingFlags.Instance)
             .Where(property => property.GetMethod?.IsPublic == true && property.SetMethod?.IsPublic == true &&
-                               property.GetIndexParameters().Length == 0)
-            // A derived type may hide a same-named base member with `new`; GetProperties returns both, so keep the most derived one.
+                               property.GetIndexParameters().Length == 0 &&
+                               property.GetCustomAttribute<JsonIgnoreAttribute>()?.Condition != JsonIgnoreCondition.Always)
+            // A derived type may hide a same-named base member with `new`; GetProperties returns both, so keep the
+            // most derived one. Same member rules as McpMethodParameter.CreatePropertiesCore in Namotion.Interceptor.Mcp
+            // (see that file); kept as two copies because the project boundary prevents sharing code.
             .GroupBy(property => property.Name)
-            .Select(group => group.OrderByDescending(property => GetInheritanceDepth(property.DeclaringType)).First())
-            // Applied after the hiding member is picked, so an always-ignored derived member drops the whole name
-            // instead of falling back to the base member it hides.
-            .Where(property => property.GetCustomAttribute<JsonIgnoreAttribute>()?.Condition != JsonIgnoreCondition.Always)
+            .Select(group => group.Aggregate((best, next) => next.DeclaringType!.IsSubclassOf(best.DeclaringType!) ? next : best))
             .Select(property => new ObjectParameterMember(
                 property.Name,
                 property.GetCustomAttribute<JsonPropertyNameAttribute>()?.Name ?? property.Name,
@@ -117,16 +119,34 @@ public static class ParameterConverter
     /// Tries to create an object from the string inputs of its members, keyed by <see cref="ObjectParameterMember.Name"/>.
     /// A member without input keeps its default value; a required member without input fails.
     /// </summary>
-    public static bool TryCreateObject(Type type, IReadOnlyDictionary<string, string?> inputs, out object? value, out string? error)
+    public static bool TryCreateObject(Type type, IReadOnlyDictionary<string, string?> inputs, out object? value, out string? error) =>
+        TryCreateObject(type, inputs, isNullable: false, out value, out error);
+
+    /// <summary>
+    /// Tries to create an object from the string inputs of its members, keyed by <see cref="ObjectParameterMember.Name"/>.
+    /// A member without input keeps its default value; a required member without input fails, except a required
+    /// <see cref="bool"/> member, whose default (false) applies instead, since a checkbox always has a value. When
+    /// <paramref name="isNullable"/> and no member has any input, the object itself was not provided and this
+    /// returns true with a null value instead of applying members' defaults.
+    /// </summary>
+    public static bool TryCreateObject(
+        Type type, IReadOnlyDictionary<string, string?> inputs, bool isNullable, out object? value, out string? error)
     {
         value = null;
+        var members = GetObjectMembers(type);
+        if (isNullable && members.All(member => string.IsNullOrEmpty(inputs.GetValueOrDefault(member.Name))))
+        {
+            error = null;
+            return true;
+        }
+
         var json = new JsonObject();
-        foreach (var member in GetObjectMembers(type))
+        foreach (var member in members)
         {
             var input = inputs.GetValueOrDefault(member.Name);
             if (string.IsNullOrEmpty(input))
             {
-                if (member.IsRequired)
+                if (member.IsRequired && member.Type != typeof(bool))
                 {
                     error = $"{member.Name} is required";
                     return false;
@@ -190,28 +210,13 @@ public static class ParameterConverter
             error = null;
             return true;
         }
-        // This is a Try method facing free-form UI input: besides malformed JSON (JsonException), a constructor or
-        // property setter invoked during deserialization can throw any exception (for example ArgumentException),
-        // and an ambiguous binding can throw InvalidOperationException. None of these may escape into the caller's
-        // event handler, so every non-fatal exception is caught and reported as the failure message.
+        // Setters and constructors run during deserialization and may throw anything; a Try method must not let it escape.
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
             value = null;
             error = exception.Message;
             return false;
         }
-    }
-
-    private static int GetInheritanceDepth(Type? type)
-    {
-        var depth = 0;
-        while (type is not null)
-        {
-            depth++;
-            type = type.BaseType;
-        }
-
-        return depth;
     }
 
     /// <summary>
