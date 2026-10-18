@@ -63,11 +63,11 @@ public partial class NukiSmartLock : NukiDevice, IDoorLock, IDoorLatchController
 
     [Derived]
     [PropertyAttribute("Lock", KnownAttributes.IsEnabled)]
-    public bool Lock_IsEnabled => IsConnected && LockState is DoorLockState.Unlocked or DoorLockState.Unlatched;
+    public bool Lock_IsEnabled => IsConnected && LockState is DoorLockState.Unlocked or DoorLockState.Unlatched or DoorLockState.Jammed;
 
     [Derived]
     [PropertyAttribute("Unlock", KnownAttributes.IsEnabled)]
-    public bool Unlock_IsEnabled => IsConnected && LockState is DoorLockState.Locked;
+    public bool Unlock_IsEnabled => IsConnected && LockState is DoorLockState.Locked or DoorLockState.Jammed;
 
     [Derived]
     [PropertyAttribute("ToggleLock", KnownAttributes.IsEnabled)]
@@ -79,11 +79,11 @@ public partial class NukiSmartLock : NukiDevice, IDoorLock, IDoorLatchController
 
     [Derived]
     [PropertyAttribute("LockNGo", KnownAttributes.IsEnabled)]
-    public bool LockNGo_IsEnabled => Unlock_IsEnabled;
+    public bool LockNGo_IsEnabled => IsConnected && LockState is DoorLockState.Locked;
 
     [Derived]
     [PropertyAttribute("LockNGoWithUnlatch", KnownAttributes.IsEnabled)]
-    public bool LockNGoWithUnlatch_IsEnabled => Unlock_IsEnabled;
+    public bool LockNGoWithUnlatch_IsEnabled => LockNGo_IsEnabled;
 
     public Task LockAsync(CancellationToken cancellationToken) =>
         RunLockActionAsync(NukiLockAction.Lock, DoorLockState.Locking, "The lock could not lock the door.", cancellationToken);
@@ -94,7 +94,12 @@ public partial class NukiSmartLock : NukiDevice, IDoorLock, IDoorLatchController
     public Task UnlatchAsync(CancellationToken cancellationToken) =>
         RunLockActionAsync(NukiLockAction.Unlatch, DoorLockState.Unlatching, "The lock could not unlatch the door.", cancellationToken);
 
-    [Operation(Title = "Lock 'n' Go", Description = "Unlocks the door and locks it again after a short time.", Icon = "Timer", Position = 10)]
+    [Operation(
+        Title = "Lock 'n' Go",
+        Description = "Unlocks the door and locks it again after a short time.",
+        Icon = "Timer",
+        RequiresConfirmation = true,
+        Position = 10)]
     [Category("Lock")]
     public Task LockNGoAsync(CancellationToken cancellationToken) =>
         RunLockActionAsync(NukiLockAction.LockNGo, DoorLockState.Unlocking, "The lock could not run lock 'n' go.", cancellationToken);

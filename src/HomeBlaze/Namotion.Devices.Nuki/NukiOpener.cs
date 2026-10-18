@@ -64,11 +64,13 @@ public partial class NukiOpener : NukiDevice
 
     [Derived]
     [PropertyAttribute("ActivateContinuousMode", KnownAttributes.IsEnabled)]
-    public bool ActivateContinuousMode_IsEnabled => IsConnected && IsContinuousModeActive == false;
+    public bool ActivateContinuousMode_IsEnabled =>
+        IsConnected && IsContinuousModeActive == false && OpenerState is not NukiOpenerState.Opening;
 
     [Derived]
     [PropertyAttribute("DeactivateContinuousMode", KnownAttributes.IsEnabled)]
-    public bool DeactivateContinuousMode_IsEnabled => IsConnected && IsContinuousModeActive == true;
+    public bool DeactivateContinuousMode_IsEnabled =>
+        IsConnected && IsContinuousModeActive == true && OpenerState is not NukiOpenerState.Opening;
 
     [Operation(Title = "Open door", Description = "Actuates the electric strike so that the door can be pushed open.", Icon = "MeetingRoom", RequiresConfirmation = true, Position = 1)]
     [Category("Opener")]

@@ -15,19 +15,24 @@ public class NukiOperationEnabledTests
     [InlineData(5, "Lock", true)]
     [InlineData(1, "Lock", false)]
     [InlineData(4, "Lock", false)]
+    [InlineData(254, "Lock", true)]
     [InlineData(1, "Unlock", true)]
     [InlineData(3, "Unlock", false)]
     [InlineData(2, "Unlock", false)]
+    [InlineData(254, "Unlock", true)]
     [InlineData(1, "Unlatch", true)]
     [InlineData(3, "Unlatch", true)]
     [InlineData(254, "Unlatch", false)]
     [InlineData(1, "LockNGo", true)]
     [InlineData(3, "LockNGo", false)]
+    [InlineData(254, "LockNGo", false)]
     [InlineData(1, "LockNGoWithUnlatch", true)]
     [InlineData(3, "LockNGoWithUnlatch", false)]
+    [InlineData(254, "LockNGoWithUnlatch", false)]
     [InlineData(1, "ToggleLock", true)]
     [InlineData(3, "ToggleLock", true)]
     [InlineData(7, "ToggleLock", false)]
+    [InlineData(254, "ToggleLock", false)]
     public async Task WhenLockIsInAState_ThenOnlyItsPossibleOperationsAreEnabled(int state, string operation, bool expected)
     {
         // Arrange
@@ -67,6 +72,10 @@ public class NukiOperationEnabledTests
     [InlineData(1, 2, "ActivateContinuousMode", true)]
     [InlineData(1, 3, "ActivateContinuousMode", false)]
     [InlineData(3, 3, "DeactivateContinuousMode", true)]
+    [InlineData(7, 2, "ActivateRingToOpen", false)]
+    [InlineData(7, 2, "DeactivateRingToOpen", false)]
+    [InlineData(7, 2, "ActivateContinuousMode", false)]
+    [InlineData(7, 3, "DeactivateContinuousMode", false)]
     public async Task WhenOpenerIsInAState_ThenOnlyItsPossibleOperationsAreEnabled(int state, int mode, string operation, bool expected)
     {
         // Arrange
@@ -83,7 +92,9 @@ public class NukiOperationEnabledTests
 
     [Theory]
     [InlineData("Unlock")]
+    [InlineData("ToggleLock")]
     [InlineData("Unlatch")]
+    [InlineData("LockNGo")]
     [InlineData("LockNGoWithUnlatch")]
     public async Task WhenAnOperationLetsSomeoneIn_ThenItRequiresConfirmation(string operation)
     {
