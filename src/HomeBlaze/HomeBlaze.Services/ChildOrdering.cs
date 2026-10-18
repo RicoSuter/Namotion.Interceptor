@@ -41,7 +41,7 @@ public static class ChildOrdering
             entries.Add(new Entry<T>(child, name, position, GetDefaultRank(name), entries.Count));
         }
 
-        var titles = new string?[entries.Count];
+        string?[]? titles = null;
         var span = CollectionsMarshal.AsSpan(entries);
         span.Sort((left, right) =>
         {
@@ -79,7 +79,7 @@ public static class ChildOrdering
 
         return ordered;
 
-        string GetTitle(Entry<T> entry) => titles[entry.Index] ??= getTitle(entry.Child);
+        string GetTitle(Entry<T> entry) => (titles ??= new string?[entries.Count])[entry.Index] ??= getTitle(entry.Child);
     }
 
     private static int GetDefaultRank(string name)
