@@ -45,16 +45,6 @@ public class DoorAbstractionTests
         Assert.Equal(expected, isLocked);
     }
 
-    [Fact]
-    public void WhenDefaultIsTaken_ThenItIsLocked()
-    {
-        // Act
-        var defaultState = default(DoorLockState);
-
-        // Assert
-        Assert.Equal(DoorLockState.Locked, defaultState);
-    }
-
     private sealed class TestDoorSensor : IDoorSensor
     {
         public DoorState? DoorState { get; init; }

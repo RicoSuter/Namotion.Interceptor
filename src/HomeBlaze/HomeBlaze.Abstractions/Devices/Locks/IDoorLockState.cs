@@ -13,7 +13,7 @@ namespace HomeBlaze.Abstractions.Devices.Locks;
 public interface IDoorLockState
 {
     /// <summary>
-    /// The current lock state.
+    /// The current lock state, or null when it is unknown.
     /// </summary>
     [State(Position = 130)]
     DoorLockState? LockState { get; }
