@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Namotion.Interceptor;
 using Namotion.Interceptor.Mcp.Tools;
 
 namespace Namotion.Interceptor.Mcp.Models;
@@ -99,7 +100,9 @@ public sealed record McpMethodParameter
 
     private static McpMethodParameter[]? CreateProperties(Type type, int depth, HashSet<Type> visitedTypes)
     {
-        if (type == typeof(object) || type.IsAbstract || type.IsInterface || depth >= MaximumPropertyDepth || !visitedTypes.Add(type))
+        if (type == typeof(object) || type.IsAbstract || type.IsInterface || depth >= MaximumPropertyDepth
+            || typeof(System.Collections.IEnumerable).IsAssignableFrom(type) || typeof(IInterceptorSubject).IsAssignableFrom(type)
+            || !visitedTypes.Add(type))
         {
             return null;
         }
@@ -111,7 +114,11 @@ public sealed record McpMethodParameter
             var properties = type
                 .GetProperties(BindingFlags.Public | BindingFlags.Instance)
                 .Where(property => property.GetMethod?.IsPublic == true && property.SetMethod?.IsPublic == true &&
-                                   property.GetIndexParameters().Length == 0 && !property.IsDefined(typeof(JsonIgnoreAttribute)))
+                                   property.GetIndexParameters().Length == 0 &&
+                                   property.GetCustomAttribute<JsonIgnoreAttribute>()?.Condition != JsonIgnoreCondition.Always)
+                // A derived type may hide a same-named base member with `new`; GetProperties returns both, so keep the most derived one.
+                .GroupBy(property => property.Name)
+                .Select(group => group.OrderByDescending(property => GetInheritanceDepth(property.DeclaringType)).First())
                 .Select(property => Create(
                     property.GetCustomAttribute<JsonPropertyNameAttribute>()?.Name ?? JsonNamingPolicy.CamelCase.ConvertName(property.Name),
                     property.PropertyType,
@@ -128,5 +135,17 @@ public sealed record McpMethodParameter
         {
             visitedTypes.Remove(type);
         }
+    }
+
+    private static int GetInheritanceDepth(Type? type)
+    {
+        var depth = 0;
+        while (type is not null)
+        {
+            depth++;
+            type = type.BaseType;
+        }
+
+        return depth;
     }
 }

@@ -1,4 +1,6 @@
+using System.Collections;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Namotion.Interceptor.Mcp.Models;
 using Namotion.Interceptor.Mcp.Tools;
 
@@ -153,6 +155,94 @@ public class McpMethodParameterTests
         public string? Name { get; set; }
 
         public TestNode? Next { get; set; }
+    }
+
+    [Fact]
+    public void WhenDerivedTypeHidesABaseMember_ThenOnlyTheMostDerivedMemberIsListed()
+    {
+        // Act
+        var parameter = McpMethodParameter.Create("value", typeof(HidingDerived));
+
+        // Assert
+        var member = Assert.Single(parameter.Properties!, property => property.Name == "v");
+        Assert.Equal("string", member.Type);
+    }
+
+    [Fact]
+    public void WhenAMemberIsAlwaysIgnored_ThenItIsExcludedButConditionallyIgnoredMembersAreListed()
+    {
+        // Act
+        var parameter = McpMethodParameter.Create("value", typeof(JsonIgnoreFixture));
+
+        // Assert
+        Assert.Equal(["visible"], parameter.Properties!.Select(property => property.Name));
+    }
+
+    [Fact]
+    public void WhenParameterIsACollectionType_ThenHasNoProperties()
+    {
+        // Act
+        var parameter = McpMethodParameter.Create("items", typeof(ArrayList));
+
+        // Assert
+        Assert.Null(parameter.Properties);
+    }
+
+    [Fact]
+    public void WhenNestingReachesTheDepthLimit_ThenTheDeepestMemberHasNoProperties()
+    {
+        // Act
+        var parameter = McpMethodParameter.Create("level1", typeof(Level1));
+
+        // Assert
+        var next1 = Assert.Single(parameter.Properties!, property => property.Name == "next");
+        Assert.NotNull(next1.Properties);
+
+        var next2 = Assert.Single(next1.Properties!, property => property.Name == "next");
+        Assert.NotNull(next2.Properties);
+
+        var next3 = Assert.Single(next2.Properties!, property => property.Name == "next");
+        Assert.Equal("object", next3.Type);
+        Assert.Null(next3.Properties);
+    }
+
+    public class HidingBase
+    {
+        public int V { get; set; }
+    }
+
+    public sealed class HidingDerived : HidingBase
+    {
+        public new string V { get; set; } = string.Empty;
+    }
+
+    public sealed class JsonIgnoreFixture
+    {
+        [JsonIgnore]
+        public string? Hidden { get; set; }
+
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Visible { get; set; }
+    }
+
+    public sealed class Level1
+    {
+        public Level2? Next { get; set; }
+    }
+
+    public sealed class Level2
+    {
+        public Level3? Next { get; set; }
+    }
+
+    public sealed class Level3
+    {
+        public Level4? Next { get; set; }
+    }
+
+    public sealed class Level4
+    {
+        public string? Name { get; set; }
     }
 
     public enum TestMode
