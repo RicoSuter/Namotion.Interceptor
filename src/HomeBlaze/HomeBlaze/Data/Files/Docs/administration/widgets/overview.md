@@ -50,6 +50,7 @@ Every other type that can be configured works as a block as well, see [Widgets](
 | [Select](select.md) | `HomeBlaze.Components.Select` | Picks a value of an enum |
 | [OperationButton](operation-button.md) | `HomeBlaze.Components.OperationButton` | Runs an operation or a query |
 | [Control](control.md) | `HomeBlaze.Components.Control` | Shows the matching widget for what its path leads to |
+| [DoorLock](door-lock.md) | `HomeBlaze.Components.DoorLock` | A tile that shows a lock and its door, and locks or unlocks it |
 
 ## History
 
