@@ -1,4 +1,3 @@
-@using global::HomeBlaze.Abstractions.Sensors
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(NukiSmartLock))]
 @implements ISubjectComponent
 
@@ -22,7 +21,7 @@
             <MudStack Row="true" Spacing="4">
                 <MudStack Spacing="0">
                     <MudText Typo="Typo.caption">Door</MudText>
-                    <MudText Typo="Typo.h6">@GetDoorText(smartLock.DoorState)</MudText>
+                    <MudText Typo="Typo.h6">@(smartLock.DoorState?.ToString() ?? "–")</MudText>
                 </MudStack>
                 <MudStack Spacing="0">
                     <MudText Typo="Typo.caption">Battery</MudText>
@@ -55,12 +54,5 @@
         DoorLockState.Locked => Icons.Material.Filled.Lock,
         DoorLockState.Jammed => Icons.Material.Filled.LockReset,
         _ => Icons.Material.Filled.LockOpen
-    };
-
-    private static string GetDoorText(DoorState? doorState) => doorState switch
-    {
-        DoorState.Open => "Open",
-        DoorState.Closed => "Closed",
-        _ => "–"
     };
 }

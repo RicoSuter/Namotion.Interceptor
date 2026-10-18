@@ -16,7 +16,11 @@
         @if (_bridges.Count > 0)
         {
             <MudText Typo="Typo.body1">Select a bridge, or enter its address below.</MudText>
-            <MudList T="NukiDiscoveredBridge" SelectedValue="_selectedBridge" SelectedValueChanged="OnBridgeSelected" SelectionMode="SelectionMode.SingleSelection" Disabled="_pairing">
+            <MudList T="NukiDiscoveredBridge"
+                     @bind-SelectedValue="_selectedBridge"
+                     @bind-SelectedValue:after="OnBridgeSelected"
+                     SelectionMode="SelectionMode.SingleSelection"
+                     Disabled="_pairing">
                 @foreach (var bridge in _bridges)
                 {
                     <MudListItem T="NukiDiscoveredBridge" Value="bridge">
@@ -121,12 +125,11 @@
         }
     }
 
-    private void OnBridgeSelected(NukiDiscoveredBridge? bridge)
+    private void OnBridgeSelected()
     {
-        _selectedBridge = bridge;
-        if (bridge is not null)
+        if (_selectedBridge is not null)
         {
-            _hostAddress = bridge.HostAddress;
+            _hostAddress = _selectedBridge.HostAddress;
         }
 
         ResetPairing();

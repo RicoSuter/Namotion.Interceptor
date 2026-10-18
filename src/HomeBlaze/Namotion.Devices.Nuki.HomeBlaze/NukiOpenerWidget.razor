@@ -19,9 +19,7 @@
 
             @if (opener.IsContinuousModeActive == true)
             {
-                <MudStack Row="true" Spacing="2">
-                    <MudChip T="string" Size="Size.Small" Color="Color.Warning">Continuous mode</MudChip>
-                </MudStack>
+                <MudChip T="string" Size="Size.Small" Color="Color.Warning">Continuous mode</MudChip>
             }
 
             @if (opener.LastRingTime is { } lastRingTime)
@@ -40,12 +38,9 @@
 
     private static string GetStateText(NukiOpenerState? state) => state switch
     {
-        NukiOpenerState.Untrained => "Untrained",
-        NukiOpenerState.Online => "Online",
         NukiOpenerState.RingToOpenActive => "Ring to open",
-        NukiOpenerState.Open => "Open",
-        NukiOpenerState.Opening => "Opening",
         NukiOpenerState.BootRun => "Booting",
-        _ => "Unknown"
+        { } other => other.ToString(),
+        null => "Unknown"
     };
 }

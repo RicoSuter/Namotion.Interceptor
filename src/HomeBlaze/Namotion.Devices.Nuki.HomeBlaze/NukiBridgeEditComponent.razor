@@ -14,7 +14,7 @@
     <MudTextField @bind-Value="_token" @bind-Value:after="OnFieldChanged"
                   Label="Token"
                   InputType="InputType.Password"
-                  Placeholder="@(KeepsToken ? "Unchanged" : null)"
+                  UserAttributes="_tokenAttributes"
                   HelperText="@TokenHelperText"
                   Immediate="true"
                   Class="mt-4" />
@@ -59,6 +59,9 @@
     private NukiTokenMode _originalTokenMode;
     private int _originalPollingIntervalSeconds;
     private int _originalRetryIntervalSeconds;
+
+    // Keeps the browser from autofilling a stored password into the token.
+    private readonly Dictionary<string, object?> _tokenAttributes = new() { ["autocomplete"] = "new-password" };
 
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
