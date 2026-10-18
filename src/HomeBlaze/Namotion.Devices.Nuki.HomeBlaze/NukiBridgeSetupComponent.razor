@@ -40,12 +40,14 @@
                       Label="Host address"
                       Placeholder="192.168.1.50:8080"
                       HelperText="IP address of the bridge with its port, 8080 by default"
+                      Error="@(HostAddressError is not null)"
+                      ErrorText="@HostAddressError"
                       Immediate="true" />
 
         <MudButton Variant="Variant.Filled"
                    Color="Color.Primary"
                    OnClick="PairAsync"
-                   Disabled="@(string.IsNullOrWhiteSpace(_hostAddress) || _pairing || _token is not null)">
+                   Disabled="@(string.IsNullOrWhiteSpace(_hostAddress) || HostAddressError is not null || _pairing || _token is not null)">
             @if (_pairing)
             {
                 <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
@@ -93,6 +95,8 @@
     public bool IsCreating { get; set; }
 
     private NukiBridge? BridgeSubject => Subject as NukiBridge;
+
+    private string? HostAddressError => string.IsNullOrWhiteSpace(_hostAddress) ? null : NukiBridge.ValidateHostAddress(_hostAddress);
 
     public bool IsValid => _token is not null;
 
@@ -145,7 +149,7 @@
         // Captured once: _lifetime is disposed with the component, possibly while a request is awaited.
         var cancellationToken = _lifetime.Token;
         var hostAddress = _hostAddress?.Trim();
-        if (string.IsNullOrEmpty(hostAddress))
+        if (string.IsNullOrEmpty(hostAddress) || HostAddressError is not null)
         {
             return;
         }

@@ -165,7 +165,9 @@ public partial class NukiBridge : BackgroundService,
     public decimal? TotalConsumedEnergy => null;
 
     [Derived]
-    public string? IpAddress => string.IsNullOrWhiteSpace(HostAddress) ? null : NukiBridgeClient.GetHost(NukiBridgeClient.NormalizeHostAddress(HostAddress));
+    public string? IpAddress => NukiBridgeClient.TryNormalizeHostAddress(HostAddress, out var normalizedHostAddress, out _)
+        ? NukiBridgeClient.GetHost(normalizedHostAddress)
+        : null;
 
     public string? MacAddress => null;
 

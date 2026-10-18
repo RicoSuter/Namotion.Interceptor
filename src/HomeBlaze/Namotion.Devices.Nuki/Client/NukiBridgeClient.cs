@@ -1,3 +1,5 @@
+using System.Buffers;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
@@ -18,6 +20,13 @@ internal sealed class NukiBridgeClient
 
     /// <summary>The default delay before a request that the bridge answered with 503 is sent again.</summary>
     public static readonly TimeSpan DefaultBusyRetryDelay = TimeSpan.FromSeconds(1);
+
+    /// <summary>The largest response accepted from the bridge or the discovery service, in bytes.</summary>
+    public const int MaxResponseSize = 1024 * 1024;
+
+    private const int InvalidBrackets = -2;
+
+    private static readonly SearchValues<char> InvalidHostAddressCharacters = SearchValues.Create("/?#@\\");
 
     private static readonly TimeSpan ReadTimeout = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan ActionTimeout = TimeSpan.FromSeconds(60);
@@ -42,9 +51,41 @@ internal sealed class NukiBridgeClient
     /// Gets the host and port of a bridge without scheme and trailing slash, with the default port when none is given.
     /// An IPv6 address is enclosed in brackets.
     /// </summary>
-    public static string NormalizeHostAddress(string hostAddress)
+    /// <exception cref="ArgumentException">The host address is not a host with an optional port.</exception>
+    public static string NormalizeHostAddress(string hostAddress) =>
+        TryNormalizeHostAddress(hostAddress, out var normalizedHostAddress, out var errorMessage)
+            ? normalizedHostAddress
+            : throw new ArgumentException(errorMessage, nameof(hostAddress));
+
+    /// <summary>
+    /// Gets the host and port of a bridge as <see cref="NormalizeHostAddress"/> does, or a message that describes why
+    /// the host address is invalid.
+    /// </summary>
+    public static bool TryNormalizeHostAddress(
+        string? hostAddress,
+        [NotNullWhen(true)] out string? normalizedHostAddress,
+        [NotNullWhen(false)] out string? errorMessage)
     {
-        var address = hostAddress.AsSpan().Trim();
+        normalizedHostAddress = null;
+        var address = TrimSchemeAndTrailingSlash(hostAddress.AsSpan().Trim());
+        if (ContainsInvalidCharacter(address))
+        {
+            errorMessage = "The host address must be a host name or IP address with an optional port, without a path, query, user name or spaces.";
+            return false;
+        }
+
+        errorMessage = SplitHostAndPort(address, out var host, out var port);
+        if (errorMessage is not null)
+        {
+            return false;
+        }
+
+        normalizedHostAddress = string.Concat(host, ":", port.ToString(CultureInfo.InvariantCulture));
+        return true;
+    }
+
+    private static ReadOnlySpan<char> TrimSchemeAndTrailingSlash(ReadOnlySpan<char> address)
+    {
         var schemeEnd = address.IndexOf("://", StringComparison.Ordinal);
         if (schemeEnd >= 0 && (address[..schemeEnd].Equals("http", StringComparison.OrdinalIgnoreCase) ||
                                address[..schemeEnd].Equals("https", StringComparison.OrdinalIgnoreCase)))
@@ -52,22 +93,79 @@ internal sealed class NukiBridgeClient
             address = address[(schemeEnd + "://".Length)..];
         }
 
-        address = address.TrimEnd('/');
-        var defaultPort = DefaultPort.ToString(CultureInfo.InvariantCulture);
-        if (address.StartsWith('['))
+        return address.TrimEnd('/');
+    }
+
+    private static bool ContainsInvalidCharacter(ReadOnlySpan<char> address)
+    {
+        foreach (var character in address)
         {
-            var bracketEnd = address.IndexOf(']');
-            var hasPort = bracketEnd >= 0 && address[(bracketEnd + 1)..].StartsWith(':');
-            return hasPort ? address.ToString() : string.Concat(address, ":", defaultPort);
+            if (char.IsWhiteSpace(character) || InvalidHostAddressCharacters.Contains(character))
+            {
+                return true;
+            }
         }
 
-        return address.Count(':') switch
-        {
-            0 => string.Concat(address, ":", defaultPort),
-            1 => address.ToString(),
-            _ => string.Concat("[", address, "]:", defaultPort)
-        };
+        return false;
     }
+
+    // Returns null and the host with the port (the default port when none is given), or a message why it is invalid.
+    private static string? SplitHostAndPort(ReadOnlySpan<char> address, out string host, out int port)
+    {
+        host = string.Empty;
+        port = DefaultPort;
+        if (!address.StartsWith('[') && address.Count(':') > 1)
+        {
+            // An IPv6 address without brackets, which cannot carry a port.
+            host = string.Concat("[", address, "]");
+            return null;
+        }
+
+        var portSeparator = FindPortSeparator(address);
+        if (portSeparator == InvalidBrackets)
+        {
+            return "An IPv6 address must be enclosed in brackets, optionally followed by a colon and the port.";
+        }
+
+        var hostPart = portSeparator >= 0 ? address[..portSeparator] : address;
+        if (hostPart.IsEmpty || hostPart.SequenceEqual("[]"))
+        {
+            return "The host address must contain a host name or IP address.";
+        }
+
+        if (portSeparator >= 0 && !TryParsePort(address[(portSeparator + 1)..], out port))
+        {
+            return "The port of the host address must be a number from 1 to 65535.";
+        }
+
+        host = hostPart.ToString();
+        return null;
+    }
+
+    // Gets the index of the colon before the port, -1 when there is no port, or InvalidBrackets.
+    private static int FindPortSeparator(ReadOnlySpan<char> address)
+    {
+        if (!address.StartsWith('['))
+        {
+            return address.IndexOf(':');
+        }
+
+        var afterBracket = address.IndexOf(']') + 1;
+        if (afterBracket == 0)
+        {
+            return InvalidBrackets;
+        }
+
+        if (afterBracket == address.Length)
+        {
+            return -1;
+        }
+
+        return address[afterBracket] == ':' ? afterBracket : InvalidBrackets;
+    }
+
+    private static bool TryParsePort(ReadOnlySpan<char> text, out int port) =>
+        int.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out port) && port is >= 1 and <= 65535;
 
     /// <summary>
     /// Gets the host of a <see cref="NormalizeHostAddress">normalized host address</see>, without brackets and port.
@@ -81,13 +179,14 @@ internal sealed class NukiBridgeClient
     }
 
     public Task<NukiInfoResponse> GetInfoAsync(CancellationToken cancellationToken) =>
-        GetAsync("info", null, ReadTimeout, NukiJsonContext.Default.NukiInfoResponse, authenticate: true, cancellationToken);
+        GetAsync("info", null, ReadTimeout, NukiJsonContext.Default.NukiInfoResponse, RequestKind.Read, cancellationToken);
 
     public Task<NukiDeviceResponse[]> GetListAsync(CancellationToken cancellationToken) =>
-        GetAsync("list", null, ReadTimeout, NukiJsonContext.Default.NukiDeviceResponseArray, authenticate: true, cancellationToken);
+        GetAsync("list", null, ReadTimeout, NukiJsonContext.Default.NukiDeviceResponseArray, RequestKind.Read, cancellationToken);
 
     /// <summary>
-    /// Runs a lock action and waits until the device has finished it.
+    /// Runs a lock action and waits until the device has finished it. Not sent again when the bridge answers 503, as
+    /// the device may run the action late.
     /// </summary>
     public Task<NukiActionResponse> LockActionAsync(long nukiId, int deviceType, int action, CancellationToken cancellationToken) =>
         GetAsync(
@@ -95,17 +194,17 @@ internal sealed class NukiBridgeClient
             string.Create(CultureInfo.InvariantCulture, $"nukiId={nukiId}&deviceType={deviceType}&action={action}&nowait=0"),
             ActionTimeout,
             NukiJsonContext.Default.NukiActionResponse,
-            authenticate: true,
+            RequestKind.Action,
             cancellationToken);
 
     /// <summary>
     /// Asks the bridge for its token. The bridge answers once its button is pressed, within 30 seconds.
     /// </summary>
     public Task<NukiAuthResponse> AuthAsync(CancellationToken cancellationToken) =>
-        GetAsync("auth", null, AuthTimeout, NukiJsonContext.Default.NukiAuthResponse, authenticate: false, cancellationToken);
+        GetAsync("auth", null, AuthTimeout, NukiJsonContext.Default.NukiAuthResponse, RequestKind.Auth, cancellationToken);
 
     private async Task<T> GetAsync<T>(
-        string path, string? query, TimeSpan timeout, JsonTypeInfo<T> typeInfo, bool authenticate, CancellationToken cancellationToken)
+        string path, string? query, TimeSpan timeout, JsonTypeInfo<T> typeInfo, RequestKind kind, CancellationToken cancellationToken)
     {
         var attempt = 1;
         while (true)
@@ -115,9 +214,9 @@ internal sealed class NukiBridgeClient
             try
             {
                 // Built per attempt: an encrypted token is valid for one request only.
-                var address = BuildAddress(path, query, authenticate);
-                using var response = await _httpClient.GetAsync(address, timeoutSource.Token);
-                if (response.StatusCode == HttpStatusCode.ServiceUnavailable && attempt == 1)
+                var address = BuildAddress(path, query, authenticate: kind != RequestKind.Auth);
+                using var response = await _httpClient.GetAsync(address, HttpCompletionOption.ResponseHeadersRead, timeoutSource.Token);
+                if (response.StatusCode == HttpStatusCode.ServiceUnavailable && kind != RequestKind.Action && attempt == 1)
                 {
                     attempt++;
                     await Task.Delay(_busyRetryDelay, cancellationToken);
@@ -129,6 +228,7 @@ internal sealed class NukiBridgeClient
                     throw CreateException(path, response.StatusCode);
                 }
 
+                await response.Content.LoadIntoBufferAsync(MaxResponseSize, timeoutSource.Token);
                 return await response.Content.ReadFromJsonAsync(typeInfo, timeoutSource.Token)
                     ?? throw new InvalidDataException($"The bridge answered /{path} without content.");
             }
@@ -175,7 +275,7 @@ internal sealed class NukiBridgeClient
     {
         var plaintext = Encoding.ASCII.GetBytes(string.Create(
             CultureInfo.InvariantCulture,
-            $"{DateTime.UtcNow:yyyy-MM-dd'T'HH:mm:ss'Z'},{RandomNumberGenerator.GetInt32(ushort.MaxValue + 1)}"));
+            $"{DateTime.UtcNow:yyyy-MM-dd'T'HH:mm:ss'Z'},{RandomNumberGenerator.GetInt32(1, 65536)}"));
         Span<byte> nonce = stackalloc byte[SecretBox.NonceSize];
         RandomNumberGenerator.Fill(nonce);
 
@@ -206,4 +306,16 @@ internal sealed class NukiBridgeClient
         HttpStatusCode.ServiceUnavailable => $"/{path}: The bridge is busy or the device is offline.",
         _ => string.Create(CultureInfo.InvariantCulture, $"/{path}: the bridge answered with {(int)statusCode} {statusCode}.")
     }, inner: null, statusCode);
+
+    private enum RequestKind
+    {
+        /// <summary>Reads state with the token; sent once more when the bridge is busy.</summary>
+        Read,
+
+        /// <summary>Runs a lock action with the token; never sent twice.</summary>
+        Action,
+
+        /// <summary>Asks for the token, so carries none; sent once more when the bridge is busy.</summary>
+        Auth
+    }
 }

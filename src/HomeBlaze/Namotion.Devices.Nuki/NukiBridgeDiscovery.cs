@@ -32,9 +32,12 @@ public static class NukiBridgeDiscovery
         timeoutSource.CancelAfter(timeout);
         try
         {
-            var response = await httpClient.GetFromJsonAsync(DiscoveryAddress, NukiJsonContext.Default.NukiDiscoveryResponse, timeoutSource.Token);
-            return response?.Bridges?
-                .Where(bridge => !string.IsNullOrEmpty(bridge.Ip) && bridge.Ip != "0.0.0.0" && bridge.Port > 0)
+            using var response = await httpClient.GetAsync(DiscoveryAddress, HttpCompletionOption.ResponseHeadersRead, timeoutSource.Token);
+            response.EnsureSuccessStatusCode();
+            await response.Content.LoadIntoBufferAsync(NukiBridgeClient.MaxResponseSize, timeoutSource.Token);
+            var discovery = await response.Content.ReadFromJsonAsync(NukiJsonContext.Default.NukiDiscoveryResponse, timeoutSource.Token);
+            return discovery?.Bridges?
+                .Where(bridge => IsReachable(bridge.Ip, bridge.Port))
                 .Select(bridge => new NukiDiscoveredBridge(bridge.BridgeId, bridge.Ip!, bridge.Port))
                 .ToArray() ?? [];
         }
@@ -43,6 +46,10 @@ public static class NukiBridgeDiscovery
             throw new TimeoutException($"The Nuki discovery service did not answer within {timeout.TotalSeconds:0} seconds.", exception);
         }
     }
+
+    // The service lists 0.0.0.0 and port 0 for a bridge with discovery disabled.
+    private static bool IsReachable(string? ipAddress, int port) =>
+        IPAddress.TryParse(ipAddress, out var address) && !address.Equals(IPAddress.Any) && port is >= 1 and <= 65535;
 
     /// <summary>
     /// Asks the bridge for its API token. The bridge lights its LED and answers once its button is pressed, within

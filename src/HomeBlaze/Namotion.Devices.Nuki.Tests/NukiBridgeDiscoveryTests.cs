@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using Namotion.Devices.Nuki.Client;
 using Namotion.Devices.Nuki.Tests.Testing;
 using Xunit;
 
@@ -8,13 +9,19 @@ namespace Namotion.Devices.Nuki.Tests;
 public class NukiBridgeDiscoveryTests
 {
     [Fact]
-    public async Task WhenDiscoveryServiceListsBridges_ThenBridgesWithAnAddressAreReturned()
+    public async Task WhenDiscoveryServiceListsBridges_ThenOnlyBridgesWithAnIpAddressAndAValidPortAreReturned()
     {
         // Arrange
         const string json = """
             {"bridges": [
               {"bridgeId": 2117604523, "ip": "192.168.1.50", "port": 8080, "dateUpdated": "2017-06-14T06:53:44Z"},
-              {"bridgeId": 42, "ip": "0.0.0.0", "port": 0, "dateUpdated": "2017-06-14T06:53:44Z"}],
+              {"bridgeId": 7, "ip": "fe80::1", "port": 8081, "dateUpdated": "2017-06-14T06:53:44Z"},
+              {"bridgeId": 42, "ip": "0.0.0.0", "port": 0, "dateUpdated": "2017-06-14T06:53:44Z"},
+              {"bridgeId": 43, "ip": "192.168.1.51/path", "port": 8080, "dateUpdated": "2017-06-14T06:53:44Z"},
+              {"bridgeId": 44, "ip": "nuki.local", "port": 8080, "dateUpdated": "2017-06-14T06:53:44Z"},
+              {"bridgeId": 45, "ip": "192.168.1.52", "port": 65536, "dateUpdated": "2017-06-14T06:53:44Z"},
+              {"bridgeId": 46, "ip": "192.168.1.53", "port": -1, "dateUpdated": "2017-06-14T06:53:44Z"},
+              {"bridgeId": 47, "port": 8080, "dateUpdated": "2017-06-14T06:53:44Z"}],
              "errorCode": 0}
             """;
         var handler = new JsonHandler(json);
@@ -24,10 +31,19 @@ public class NukiBridgeDiscoveryTests
         var bridges = await NukiBridgeDiscovery.DiscoverAsync(httpClient, CancellationToken.None);
 
         // Assert
-        var bridge = Assert.Single(bridges);
-        Assert.Equal(2117604523, bridge.BridgeId);
-        Assert.Equal("192.168.1.50:8080", bridge.HostAddress);
+        Assert.Equal(["192.168.1.50:8080", "[fe80::1]:8081"], bridges.Select(bridge => bridge.HostAddress));
+        Assert.Equal(2117604523, bridges[0].BridgeId);
         Assert.Equal(new Uri(NukiBridgeDiscovery.DiscoveryAddress), handler.RequestUri);
+    }
+
+    [Fact]
+    public async Task WhenTheDiscoveryResponseIsLargerThanTheLimit_ThenTheDiscoveryFails()
+    {
+        // Arrange
+        using var httpClient = new HttpClient(new JsonHandler("{" + new string(' ', NukiBridgeClient.MaxResponseSize) + "}"));
+
+        // Act & Assert
+        await Assert.ThrowsAsync<HttpRequestException>(() => NukiBridgeDiscovery.DiscoverAsync(httpClient, CancellationToken.None));
     }
 
     [Fact]

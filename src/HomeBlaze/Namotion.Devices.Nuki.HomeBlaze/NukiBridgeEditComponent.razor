@@ -7,13 +7,15 @@
                   Placeholder="192.168.1.50:8080"
                   Required="true"
                   RequiredError="The host address is required"
+                  Error="@(HostAddressError is not null)"
+                  ErrorText="@HostAddressError"
                   Immediate="true" />
 
     <MudTextField @bind-Value="_token" @bind-Value:after="OnFieldChanged"
                   Label="Token"
                   InputType="InputType.Password"
-                  Placeholder="@(_hasToken ? "Unchanged" : null)"
-                  HelperText="@(_hasToken ? "Leave empty to keep the current token" : "The API token from pairing or the Nuki app")"
+                  Placeholder="@(KeepsToken ? "Unchanged" : null)"
+                  HelperText="@TokenHelperText"
                   Immediate="true"
                   Class="mt-4" />
 
@@ -66,8 +68,21 @@
 
     private NukiBridge? BridgeSubject => Subject as NukiBridge;
 
+    // The stored token is kept only for the host it was stored with, so that it is never sent to another host.
+    private bool KeepsToken => _hasToken && string.Equals(_hostAddress?.Trim(), _originalHostAddress, StringComparison.Ordinal);
+
+    private string? HostAddressError => string.IsNullOrWhiteSpace(_hostAddress) ? null : NukiBridge.ValidateHostAddress(_hostAddress);
+
+    private string TokenHelperText => (KeepsToken, _hasToken) switch
+    {
+        (true, _) => "Leave empty to keep the current token",
+        (false, true) => "Enter the token again: the host address has changed",
+        _ => "The API token from pairing or the Nuki app"
+    };
+
     public bool IsValid => !string.IsNullOrWhiteSpace(_hostAddress) &&
-                           (_hasToken || !string.IsNullOrEmpty(_token)) &&
+                           HostAddressError is null &&
+                           (KeepsToken || !string.IsNullOrEmpty(_token)) &&
                            _pollingIntervalSeconds is >= NukiBridge.MinimumIntervalSeconds and <= NukiBridge.MaximumIntervalSeconds &&
                            _retryIntervalSeconds is >= NukiBridge.MinimumIntervalSeconds and <= NukiBridge.MaximumIntervalSeconds;
 

@@ -46,6 +46,15 @@ public partial class NukiBridge
                 MinimumIntervalSeconds * TimeSpan.TicksPerSecond,
                 MaximumIntervalSeconds * TimeSpan.TicksPerSecond));
 
+    /// <summary>
+    /// Checks a <see cref="HostAddress"/>: a host name or IP address with an optional port from 1 to 65535, optionally
+    /// with an http or https scheme and a trailing slash. An IPv6 address with a port is enclosed in brackets.
+    /// </summary>
+    /// <param name="hostAddress">The host address to check.</param>
+    /// <returns>Null when the host address is valid, otherwise a message that describes the problem.</returns>
+    public static string? ValidateHostAddress(string? hostAddress) =>
+        NukiBridgeClient.TryNormalizeHostAddress(hostAddress, out _, out var errorMessage) ? null : errorMessage;
+
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -58,9 +67,13 @@ public partial class NukiBridge
                 var token = Token;
                 if (string.IsNullOrWhiteSpace(hostAddress) || string.IsNullOrEmpty(token))
                 {
-                    StatusMessage = "Host address and token are required.";
-                    Status = ServiceStatus.Error;
-                    await _configurationChangedSignal.WaitAsync(stoppingToken);
+                    await WaitForConfigurationChangeAsync("Host address and token are required.", stoppingToken);
+                    continue;
+                }
+
+                if (ValidateHostAddress(hostAddress) is { } hostAddressError)
+                {
+                    await WaitForConfigurationChangeAsync(hostAddressError, stoppingToken);
                     continue;
                 }
 
@@ -77,6 +90,13 @@ public partial class NukiBridge
 
         StatusMessage = null;
         Status = ServiceStatus.Stopped;
+    }
+
+    private async Task WaitForConfigurationChangeAsync(string statusMessage, CancellationToken stoppingToken)
+    {
+        StatusMessage = statusMessage;
+        Status = ServiceStatus.Error;
+        await _configurationChangedSignal.WaitAsync(stoppingToken);
     }
 
     /// <summary>

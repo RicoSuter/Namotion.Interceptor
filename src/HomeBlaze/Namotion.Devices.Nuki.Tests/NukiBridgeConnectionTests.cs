@@ -213,6 +213,28 @@ public class NukiBridgeConnectionTests
         Assert.Null(test.Lock.LockState);
     }
 
+    [Theory]
+    [InlineData("192.168.1.50/path")]
+    [InlineData("user@192.168.1.50")]
+    [InlineData("192.168.1.50:0")]
+    [InlineData("192.168.1.50:65536")]
+    public async Task WhenHostAddressIsInvalid_ThenStatusNamesTheProblemAndNothingIsSent(string hostAddress)
+    {
+        // Arrange
+        await using var test = new TestBridge();
+        test.Bridge.HostAddress = hostAddress;
+
+        // Act
+        await test.Bridge.StartAsync(CancellationToken.None);
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => test.Bridge.Status == ServiceStatus.Error);
+        Assert.Equal(NukiBridge.ValidateHostAddress(hostAddress), test.Bridge.StatusMessage);
+        Assert.NotNull(test.Bridge.StatusMessage);
+        Assert.Empty(test.Fake.Requests);
+        Assert.Null(test.Bridge.IpAddress);
+    }
+
     [Fact]
     public async Task WhenBridgePolls_ThenInfoIsReadOnlyEveryFewPolls()
     {
@@ -238,7 +260,9 @@ public class NukiBridgeConnectionTests
     [InlineData("[fe80::1]", "fe80::1")]
     [InlineData("[fe80::1]:8081", "fe80::1")]
     [InlineData("fe80::1", "fe80::1")]
-    public void WhenHostAddressIsSet_ThenIpAddressIsTheHostWithoutSchemeBracketsAndPort(string hostAddress, string expectedIpAddress)
+    [InlineData("192.168.1.50:http", null)]
+    [InlineData(null, null)]
+    public void WhenHostAddressIsSet_ThenIpAddressIsTheHostWithoutSchemeBracketsAndPort(string? hostAddress, string? expectedIpAddress)
     {
         // Arrange
         using var bridge = new NukiBridge(new FakeNukiBridge(), NullLogger<NukiBridge>.Instance);

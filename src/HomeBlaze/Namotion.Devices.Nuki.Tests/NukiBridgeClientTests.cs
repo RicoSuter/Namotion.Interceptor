@@ -57,6 +57,7 @@ public class NukiBridgeClientTests
 
         var plaintext = Encoding.ASCII.GetString(NaClReference.Open(ctoken, nonce, SHA256.HashData(Encoding.UTF8.GetBytes(Token))));
         Assert.Matches(@"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z,\d{1,5}$", plaintext);
+        Assert.InRange(int.Parse(plaintext.Split(',')[1], System.Globalization.CultureInfo.InvariantCulture), 1, 65535);
         var timestamp = DateTimeOffset.Parse(plaintext.Split(',')[0], System.Globalization.CultureInfo.InvariantCulture);
         Assert.InRange(DateTimeOffset.UtcNow - timestamp, TimeSpan.FromSeconds(-1), TimeSpan.FromMinutes(1));
     }
@@ -205,5 +206,70 @@ public class NukiBridgeClientTests
         // Assert
         Assert.Equal("abc123", result.Token);
         Assert.Equal("http://192.168.1.50:8080/auth", Assert.Single(bridge.Requests).ToString());
+    }
+
+    [Fact]
+    public async Task WhenBridgeIsBusyDuringALockAction_ThenTheActionIsNotSentAgain()
+    {
+        // Arrange
+        var bridge = new FakeNukiBridge { StatusOverride = _ => HttpStatusCode.ServiceUnavailable };
+        var client = CreateClient(bridge, NukiTokenMode.Plain);
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<HttpRequestException>(
+            () => client.LockActionAsync(nukiId: 1, deviceType: 0, action: 2, CancellationToken.None));
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, exception.StatusCode);
+        Assert.Equal(1, bridge.CountRequests("lockAction"));
+    }
+
+    [Fact]
+    public async Task WhenTheResponseIsLargerThanTheLimit_ThenTheRequestFails()
+    {
+        // Arrange
+        var bridge = new FakeNukiBridge { ListJson = "[" + new string(' ', NukiBridgeClient.MaxResponseSize) + "]" };
+        var client = CreateClient(bridge, NukiTokenMode.Plain);
+
+        // Act & Assert
+        await Assert.ThrowsAsync<HttpRequestException>(() => client.GetListAsync(CancellationToken.None));
+    }
+
+    [Theory]
+    [InlineData("192.168.1.50:8081", "192.168.1.50:8081")]
+    [InlineData(" http://nuki.local/ ", "nuki.local:8080")]
+    [InlineData("[fe80::1]:65535", "[fe80::1]:65535")]
+    [InlineData("fe80::1", "[fe80::1]:8080")]
+    public void WhenHostAddressIsValid_ThenItIsNormalized(string hostAddress, string expected)
+    {
+        // Act
+        var normalized = NukiBridgeClient.NormalizeHostAddress(hostAddress);
+
+        // Assert
+        Assert.Equal(expected, normalized);
+        Assert.Null(NukiBridge.ValidateHostAddress(hostAddress));
+    }
+
+    [Theory]
+    [InlineData("192.168.1.50/info", "without a path")]
+    [InlineData("192.168.1.50?token=1", "without a path")]
+    [InlineData("192.168.1.50#top", "without a path")]
+    [InlineData("user@192.168.1.50", "without a path")]
+    [InlineData("192.168.1.50\\share", "without a path")]
+    [InlineData("nuki local", "without a path")]
+    [InlineData("192.168.1.50:0", "from 1 to 65535")]
+    [InlineData("192.168.1.50:65536", "from 1 to 65535")]
+    [InlineData("192.168.1.50:", "from 1 to 65535")]
+    [InlineData("192.168.1.50:+80", "from 1 to 65535")]
+    [InlineData("[fe80::1]:0", "from 1 to 65535")]
+    [InlineData("[fe80::1", "brackets")]
+    [InlineData("[fe80::1]8080", "brackets")]
+    [InlineData(":8080", "host name or IP address")]
+    [InlineData("[]", "host name or IP address")]
+    [InlineData("", "host name or IP address")]
+    public void WhenHostAddressIsInvalid_ThenNormalizingThrowsWithTheReason(string hostAddress, string expectedReason)
+    {
+        // Act & Assert
+        var exception = Assert.Throws<ArgumentException>(() => NukiBridgeClient.NormalizeHostAddress(hostAddress));
+        Assert.Contains(expectedReason, exception.Message);
+        Assert.Contains(expectedReason, NukiBridge.ValidateHostAddress(hostAddress));
     }
 }
