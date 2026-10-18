@@ -352,14 +352,7 @@ public class StorageMetadataWriteTests : StorageTestBase
         Context!.AddService<ILifecycleHandler>(new CancelOnDetach(motor, cancellation));
 
         // Act
-        try
-        {
-            await storage.DeleteSubjectAsync(motor, cancellation.Token);
-        }
-        catch (OperationCanceledException)
-        {
-            // The caller gave up after the file of the subject was deleted.
-        }
+        await storage.DeleteSubjectAsync(motor, cancellation.Token);
 
         // Assert
         Assert.True(cancellation.IsCancellationRequested);

@@ -296,7 +296,7 @@ internal sealed class StorageReconciler
     /// </summary>
     private void ApplyMetadata()
     {
-        _storage.ApplyMetadata(GetMetadataDocument(StorageMetadataPath.GetFolderFilePath(string.Empty)));
+        _storage.ApplyMetadata(FindMetadata(StorageMetadataPath.GetFolderFilePath(string.Empty)));
         foreach (var entry in _index.Entries)
         {
             if (!entry.IsPlaced)
@@ -306,17 +306,17 @@ internal sealed class StorageReconciler
 
             if (entry.Subject is VirtualFolder folder)
             {
-                folder.ApplyMetadata(GetMetadataDocument(StorageMetadataPath.GetFolderFilePath(entry.Path)));
+                folder.ApplyMetadata(FindMetadata(StorageMetadataPath.GetFolderFilePath(entry.Path)));
             }
             else if (entry.HasSidecar)
             {
-                entry.Subject!.SetSubjectMetadata(GetMetadataDocument(StorageMetadataPath.GetSubjectFilePath(entry.Path))?.ToSubjectMetadata());
+                entry.Subject!.SetSubjectMetadata(FindMetadata(StorageMetadataPath.GetSubjectFilePath(entry.Path))?.ToSubjectMetadata());
             }
         }
     }
 
     // What the index holds for the metadata file at the path; null without one, and for one that could not be read.
-    private StorageMetadataDocument? GetMetadataDocument(string path)
+    private StorageMetadataDocument? FindMetadata(string path)
         => _index.TryGet(path, out var entry) ? entry.Metadata : null;
 
     /// <summary>

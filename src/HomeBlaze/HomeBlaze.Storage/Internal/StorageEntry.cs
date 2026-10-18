@@ -55,8 +55,7 @@ internal sealed class StorageEntry
     public bool IsMetadata { get; private init; }
 
     /// <summary>
-    /// True for a JSON file, whatever its subject is, also a plain JSON file: the metadata file beside it describes
-    /// its subject.
+    /// True for a JSON file, which has a metadata file beside it (see <see cref="StorageMetadataPath.GetSubjectFilePath"/>).
     /// </summary>
     public bool HasSidecar => !IsFolder && !IsMetadata && StoragePath.IsJson(Path);
 
