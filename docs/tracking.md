@@ -88,7 +88,7 @@ while (!cancellationToken.IsCancellationRequested)
     }
     else if (!await subscription.WaitToDequeueAsync(cancellationToken).ConfigureAwait(false))
     {
-        break; // cancelled, or disposed and drained
+        break; // canceled, or disposed and drained
     }
 }
 ```
@@ -101,9 +101,9 @@ while (!cancellationToken.IsCancellationRequested)
 - The implementation is deadlock-free and never loses an enqueued item.
 - The queue is unbounded with no backpressure or overflow policy, so a slow consumer causes unbounded memory growth.
 - Disposal returns immediately: it wakes a waiting consumer and stops future enqueues but does not wait for buffered items, which the consumer may still drain (`TryDequeue` returns the remaining items, then `false`; `WaitToDequeueAsync` returns `false` once they are drained). An enqueue already in flight may finish after `Dispose` returns.
-- Cancellation takes priority over buffered items: `TryDequeue` and `WaitToDequeueAsync` check the token first, so a cancelled call returns `false` even when items are available.
-- `WaitToDequeueAsync` returning `true` means an item may be available, not that one is reserved for the caller, so the loop re-checks with `TryDequeueImmediate`. A waiting consumer never resumes on the writing thread: the wake-up is queued to the thread pool's global queue, so a writer that blocks right after its write does not hold the consumer back.
-- `TryDequeueImmediate` takes no token, so the asynchronous loop checks cancellation before each dequeue. Otherwise a steadily fed queue never lets it reach the wait, and a cancelled loop keeps draining.
+- Cancellation takes priority over buffered items: `TryDequeue` and `WaitToDequeueAsync` check the token first, so a canceled call returns `false` even when items are available.
+- `WaitToDequeueAsync` returning `true` means an item may be available, not that one is reserved for the caller, so the loop re-checks with `TryDequeueImmediate`. A waiting consumer never resumes on the writing thread, so a writer that blocks right after its write does not hold the consumer back. Waking an idle consumer is a thread-pool dispatch, so under a busy pool its latency follows the pool's queue.
+- `TryDequeueImmediate` takes no token, so check cancellation before each dequeue, as the sample does; otherwise a steadily fed queue keeps a canceled loop draining.
 
 ### Per-Property Subscriptions
 

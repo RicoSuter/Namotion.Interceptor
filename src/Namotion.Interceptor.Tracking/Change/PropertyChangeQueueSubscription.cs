@@ -101,7 +101,7 @@ public sealed class PropertyChangeQueueSubscription : IDisposable
     /// <param name="item">The dequeued property change if available.</param>
     /// <param name="cancellationToken">Cancellation token to abort the wait.</param>
     /// <returns>True if an item was dequeued; false when cancellation is requested, or when the
-    /// subscription is completed and its queue is empty.</returns>
+    /// subscription is disposed and its queue is empty.</returns>
     public bool TryDequeue(out SubjectPropertyChange item, CancellationToken cancellationToken)
     {
         while (true)
@@ -114,7 +114,6 @@ public sealed class PropertyChangeQueueSubscription : IDisposable
                 return false;
             }
 
-            // Fast path: dequeue if available
             if (_queue.TryDequeue(out item))
             {
                 return true;
@@ -147,7 +146,6 @@ public sealed class PropertyChangeQueueSubscription : IDisposable
                 item = default!;
                 return false;
             }
-            // loop and try dequeuing again
         }
     }
 
@@ -158,13 +156,13 @@ public sealed class PropertyChangeQueueSubscription : IDisposable
     /// next wait starts.
     /// </summary>
     /// <remarks>
-    /// The continuation never runs on the writing thread: the wake-up is queued to the thread pool, which
-    /// then resumes the consumer or posts to its captured context. <see cref="TryDequeueImmediate"/> takes
-    /// no token, so a drain loop checks cancellation before each dequeue.
+    /// The continuation never runs on the writing thread. <see cref="TryDequeueImmediate"/> takes no token,
+    /// so a drain loop checks cancellation before each dequeue.
     /// </remarks>
     /// <param name="cancellationToken">Cancellation token to abort the wait.</param>
     /// <returns>True when a change may be available, so the caller re-checks; false when cancellation is
-    /// requested, or when the subscription is completed and its queue is empty.</returns>
+    /// requested, or when the subscription is disposed and its queue is empty.</returns>
+    /// <exception cref="InvalidOperationException">The task of the previous wait has not been awaited.</exception>
     public ValueTask<bool> WaitToDequeueAsync(CancellationToken cancellationToken)
     {
         if (cancellationToken.IsCancellationRequested || (_completed && _queue.IsEmpty))
@@ -172,10 +170,11 @@ public sealed class PropertyChangeQueueSubscription : IDisposable
             return new ValueTask<bool>(false);
         }
 
-        // Best effort: resetting a pending wait would leave its awaiter hanging silently.
-        if (Volatile.Read(ref _waiter) == AsyncWaiter)
+        // Resetting a wait whose task is still unconsumed would hang its awaiter, or let its queued
+        // completion end this wait and then complete the source twice on the pool, crashing the process.
+        if (_asyncWaiter.IsHandedOut)
         {
-            throw new InvalidOperationException("The previous wait has not completed; await it before waiting again.");
+            throw new InvalidOperationException("The previous wait has not been awaited; await it before waiting again.");
         }
 
         var version = _asyncWaiter.Reset();
@@ -185,10 +184,10 @@ public sealed class PropertyChangeQueueSubscription : IDisposable
             // A failed disarm means a waker already claimed the wait and is completing it.
             return Interlocked.CompareExchange(ref _waiter, NoWaiter, AsyncWaiter) == AsyncWaiter
                 ? new ValueTask<bool>(true)
-                : new ValueTask<bool>(_asyncWaiter, version);
+                : _asyncWaiter.HandOut(version);
         }
 
-        // Registered after arming, so a token cancelled in between still claims the waiter (inline).
+        // Registered after arming, so a token canceled in between still claims the waiter (inline).
         _asyncWaiter.SetCancellationRegistration(cancellationToken.UnsafeRegister(
             static state =>
             {
@@ -200,7 +199,7 @@ public sealed class PropertyChangeQueueSubscription : IDisposable
             },
             this));
 
-        return new ValueTask<bool>(_asyncWaiter, version);
+        return _asyncWaiter.HandOut(version);
     }
 
     public void Dispose()
@@ -226,6 +225,15 @@ public sealed class PropertyChangeQueueSubscription : IDisposable
         private CancellationTokenRegistration _cancellation;
         private bool _pendingResult;
 
+        // Consumer-only: set when a task over this source is returned, cleared when its result is read.
+        public bool IsHandedOut { get; private set; }
+
+        public ValueTask<bool> HandOut(short version)
+        {
+            IsHandedOut = true;
+            return new ValueTask<bool>(this, version);
+        }
+
         public short Reset()
         {
             _core.Reset();
@@ -234,9 +242,8 @@ public sealed class PropertyChangeQueueSubscription : IDisposable
 
         public void SetCancellationRegistration(CancellationTokenRegistration cancellation) => _cancellation = cancellation;
 
-        // Completed from a property write, a cancellation callback or Dispose. Queued globally rather than
-        // to the waking thread's local queue: a pool thread that blocks after its write would otherwise
-        // hold the consumer until another thread steals it, which a busy global queue can delay for seconds.
+        // Queued globally, not to the waking thread's local queue, so a writer that blocks after its
+        // write cannot hold the consumer.
         public void SetResult(bool result)
         {
             _pendingResult = result;
@@ -249,6 +256,7 @@ public sealed class PropertyChangeQueueSubscription : IDisposable
         {
             // Validated first: a stale or pending task must not release the live wait's registration.
             var result = _core.GetResult(token);
+            IsHandedOut = false;
 
             // Dispose waits out a running callback, so no stale callback can complete the next wait.
             _cancellation.Dispose();

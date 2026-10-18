@@ -306,34 +306,10 @@ public class ChangeQueueProcessor : IDisposable
         {
             using var periodicTimer = _bufferTime > TimeSpan.Zero ? new PeriodicTimer(_bufferTime) : null;
 
-            // PreferFairness queues globally: this pool thread runs the dequeue loop next, and an item in its
-            // local queue waits for that loop to go idle or for a steal, which a busy global queue prevents.
+            // Not Task.Run: that queues to this thread's local queue, behind the dequeue loop below.
+            // Called directly, it suspends at the first tick and every tick resumes from the timer.
             var flushTask = periodicTimer is not null
-                ? Task.Factory.StartNew(async () =>
-                {
-                    var flushFailureReported = false;
-                    try
-                    {
-                        while (await periodicTimer.WaitForNextTickAsync(processingToken).ConfigureAwait(false))
-                        {
-                            // Catch per tick so a consumer callback cannot permanently stop delivery while dequeueing continues.
-                            try
-                            {
-                                await TryFlushAsync(processingToken).ConfigureAwait(false);
-                                flushFailureReported = false;
-                            }
-                            catch (Exception exception) when (exception is not OperationCanceledException)
-                            {
-                                ReportFlushFailure(exception, ref flushFailureReported);
-                            }
-                        }
-                    }
-                    catch (OperationCanceledException) { }
-                    catch (Exception exception)
-                    {
-                        ReportFlushFailure(exception, ref flushFailureReported);
-                    }
-                }, CancellationToken.None, TaskCreationOptions.PreferFairness | TaskCreationOptions.DenyChildAttach, TaskScheduler.Default).Unwrap()
+                ? RunFlushLoopAsync(periodicTimer, processingToken)
                 : Task.CompletedTask;
 
             if (periodicTimer is null)
@@ -435,6 +411,32 @@ public class ChangeQueueProcessor : IDisposable
             {
                 DisposeMerger();
             }
+        }
+    }
+
+    private async Task RunFlushLoopAsync(PeriodicTimer periodicTimer, CancellationToken processingToken)
+    {
+        var flushFailureReported = false;
+        try
+        {
+            while (await periodicTimer.WaitForNextTickAsync(processingToken).ConfigureAwait(false))
+            {
+                // Catch per tick so a consumer callback cannot permanently stop delivery while dequeueing continues.
+                try
+                {
+                    await TryFlushAsync(processingToken).ConfigureAwait(false);
+                    flushFailureReported = false;
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    ReportFlushFailure(exception, ref flushFailureReported);
+                }
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception exception)
+        {
+            ReportFlushFailure(exception, ref flushFailureReported);
         }
     }
 

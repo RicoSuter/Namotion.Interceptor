@@ -48,7 +48,7 @@ public class PropertyChangeQueueSubscriptionWaitTests
     }
 
     [Fact]
-    public async Task WhenCancelledWhileWaiting_ThenWaitCompletesWithFalse()
+    public async Task WhenCanceledWhileWaiting_ThenWaitCompletesWithFalse()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
@@ -65,7 +65,7 @@ public class PropertyChangeQueueSubscriptionWaitTests
     }
 
     [Fact]
-    public async Task WhenTokenAlreadyCancelled_ThenWaitReturnsFalseEvenWithBufferedChanges()
+    public async Task WhenTokenAlreadyCanceled_ThenWaitReturnsFalseEvenWithBufferedChanges()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
@@ -136,21 +136,20 @@ public class PropertyChangeQueueSubscriptionWaitTests
 
         var consumer = awaitableWait
             ? Task.Run(() => ConsumeWithAwaitableWaitAsync(subscription, received, stop.Token))
-            : Task.Factory.StartNew(
-                () => ConsumeWithBlockingWait(subscription, received, stop.Token),
-                CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+            : DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(
+                () => ConsumeWithBlockingWait(subscription, received, stop.Token));
 
         // Act
         var completedExchanges = 0;
-        for (var i = 1; i <= exchangeCount; i++)
+        for (var exchange = 1; exchange <= exchangeCount; exchange++)
         {
-            person.FirstName = $"Name{i}";
-            if (!SpinWait.SpinUntil(() => Volatile.Read(ref received.Value) == i, WaitTimeout))
+            person.FirstName = $"Name{exchange}";
+            if (!SpinWait.SpinUntil(() => Volatile.Read(ref received.Value) == exchange, WaitTimeout))
             {
                 break;
             }
 
-            completedExchanges = i;
+            completedExchanges = exchange;
         }
 
         await stop.CancelAsync();
@@ -165,7 +164,7 @@ public class PropertyChangeQueueSubscriptionWaitTests
     {
         // Arrange: each round starts with the consumer waiting on an empty queue and releases all writers
         // together, so they race to wake it. Exactly one may complete the wait; a second completion would
-        // throw from inside a writer's property setter and fail its thread.
+        // throw on the thread pool and crash the test host.
         const int writerCount = 4;
         const int roundCount = 2_000;
         var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
@@ -210,26 +209,26 @@ public class PropertyChangeQueueSubscriptionWaitTests
     public async Task WhenCancellationAndAWriteRaceToEndAWait_ThenItEndsOnceAndTheNextWaitStillWakes()
     {
         // Arrange: the cancellation callback and the writer both try to end the same wait. Only one may
-        // complete it; a second completion would throw from the writer's setter or from the cancellation.
+        // complete it; a second completion would throw on the thread pool and crash the test host.
         const int iterations = 2_000;
         var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         var person = new Person(context);
         using var subscription = context.CreatePropertyChangeQueueSubscription();
 
-        for (var i = 0; i < iterations; i++)
+        for (var iteration = 0; iteration < iterations; iteration++)
         {
             using var cancellation = new CancellationTokenSource();
             var racedWait = subscription.WaitToDequeueAsync(cancellation.Token);
 
             // Act
             var cancel = Task.Run(() => cancellation.CancelAsync(), CancellationToken.None);
-            person.FirstName = $"raced{i}";
+            person.FirstName = $"raced{iteration}";
             await cancel.WaitAsync(WaitTimeout);
             await racedWait.AsTask().WaitAsync(WaitTimeout);
             Assert.Equal(1, DrainImmediately(subscription));
 
             var nextWait = subscription.WaitToDequeueAsync(CancellationToken.None);
-            person.FirstName = $"next{i}";
+            person.FirstName = $"next{iteration}";
 
             // Assert
             Assert.True(await nextWait.AsTask().WaitAsync(WaitTimeout));
@@ -238,7 +237,7 @@ public class PropertyChangeQueueSubscriptionWaitTests
     }
 
     [Fact]
-    public async Task WhenACompletedWaitsTokenIsCancelledLater_ThenTheNextWaitIsNotEndedByIt()
+    public async Task WhenACompletedWaitsTokenIsCanceledLater_ThenTheNextWaitIsNotEndedByIt()
     {
         // Arrange: the first wait is completed by a write, so its cancellation registration must have
         // been released; a later wait with another token is still pending when the first token cancels.
@@ -279,13 +278,32 @@ public class PropertyChangeQueueSubscriptionWaitTests
     }
 
     [Fact]
+    public async Task WhenAWokenWaitHasNotBeenAwaited_ThenStartingAnotherThrows()
+    {
+        // Arrange: the write claims the wait and queues its completion, so the wait is no longer armed
+        // but its task is still unconsumed. Re-arming here would let that queued completion end the next
+        // wait and then complete the source twice.
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
+        var person = new Person(context);
+        using var subscription = context.CreatePropertyChangeQueueSubscription();
+        var wokenWait = subscription.WaitToDequeueAsync(CancellationToken.None);
+        person.FirstName = "John";
+
+        // Act & Assert
+        Assert.Throws<InvalidOperationException>(StartAnotherWait);
+        Assert.True(await wokenWait.AsTask().WaitAsync(WaitTimeout));
+
+        void StartAnotherWait() => _ = subscription.WaitToDequeueAsync(CancellationToken.None);
+    }
+
+    [Fact]
     public async Task WhenDisposeRacesAWait_ThenTheWaitCompletesAndCompletionIsReported()
     {
         // Arrange
         const int iterations = 2_000;
         var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
 
-        for (var i = 0; i < iterations; i++)
+        for (var iteration = 0; iteration < iterations; iteration++)
         {
             var subscription = context.CreatePropertyChangeQueueSubscription();
 
