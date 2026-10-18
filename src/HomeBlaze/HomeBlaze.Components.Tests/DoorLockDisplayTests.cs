@@ -31,6 +31,29 @@ public class DoorLockDisplayTests
     }
 
     [Theory]
+    [InlineData(DoorLockState.Locked, DoorState.Closed, "Locked, unlocks on click")]
+    [InlineData(DoorLockState.Locked, DoorState.Open, "Locked · open, unlocks on click")]
+    [InlineData(DoorLockState.Unlocked, DoorState.Closed, "Unlocked, locks on click")]
+    [InlineData(DoorLockState.Unlocked, DoorState.Open, "Unlocked · open, locks on click")]
+    [InlineData(DoorLockState.Unlatched, DoorState.Closed, "Unlatched, locks on click")]
+    [InlineData(DoorLockState.Unlatched, DoorState.Open, "Unlatched · open, locks on click")]
+    [InlineData(DoorLockState.Locking, DoorState.Closed, "Locking…")]
+    [InlineData(DoorLockState.Unlocking, DoorState.Open, "Unlocking… · open")]
+    [InlineData(DoorLockState.Unlatching, DoorState.Closed, "Unlatching…")]
+    [InlineData(DoorLockState.Jammed, DoorState.Closed, "Jammed")]
+    [InlineData(DoorLockState.Jammed, DoorState.Open, "Jammed · open")]
+    [InlineData(null, DoorState.Closed, "Unknown")]
+    [InlineData(null, DoorState.Open, "Unknown · open")]
+    public void WhenLockIsInAState_ThenTheDescriptionIsTheStateAndWhatAClickDoes(DoorLockState? lockState, DoorState doorState, string description)
+    {
+        // Act
+        var appearance = DoorLockDisplay.Get(lockState, doorState);
+
+        // Assert
+        Assert.Equal(description, appearance.Description);
+    }
+
+    [Theory]
     [InlineData(DoorState.Closed, Icons.Material.Filled.DoorFront, "Unlocked")]
     [InlineData(DoorState.Open, Icons.Material.Filled.MeetingRoom, "Unlocked · open")]
     [InlineData(null, Icons.Material.Filled.DoorFront, "Unlocked")]

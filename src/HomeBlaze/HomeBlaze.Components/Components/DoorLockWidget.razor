@@ -23,17 +23,18 @@
         ? widget.Label
         : (target is null ? null : SubjectNames.TryGetTitle(target)) ?? path ?? string.Empty;
     var subtitle = !string.IsNullOrEmpty(widget.Subtitle) ? widget.Subtitle : target is null ? null : appearance.Subtitle;
+    var disabled = IsEditing || _isRunning || operation is null;
 
-    @* The label is the accessible name, which hides the subtitle, so the state is the description; the tooltip names what a click does. *@
+    @* The label is the accessible name, which hides the subtitle, so the description carries the state, also under a custom subtitle. *@
     <TileView TestId="door-lock-tile"
               AccessibleName="@label"
-              AccessibleDescription="@subtitle"
+              AccessibleDescription="@(target is null ? null : disabled ? appearance.Subtitle : appearance.Description)"
               Tooltip="@operation?.Title"
               Label="@label"
               Subtitle="@subtitle"
               Icon="@appearance.DoorIcon"
               Color="@appearance.Fill"
-              Disabled="@(IsEditing || _isRunning || operation is null)"
+              Disabled="@disabled"
               IsBusy="@_isRunning"
               BadgeIcon="@appearance.BadgeIcon"
               OnClick="_clickCallback" />

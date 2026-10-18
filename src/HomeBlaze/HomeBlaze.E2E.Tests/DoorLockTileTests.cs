@@ -90,7 +90,7 @@ public class DoorLockTileTests : IDisposable
     }
 
     [Fact]
-    public async Task WhenLockIsLocked_ThenTheStateIsTheAccessibleDescriptionAndTheTooltipNamesTheClick()
+    public async Task WhenLockIsLocked_ThenTheAccessibleDescriptionNamesTheStateAndTheClickAndTheTooltipNamesTheOperation()
     {
         // Arrange & Act
         SetLockState(DoorLockState.Locked, DoorState.Closed);
@@ -98,7 +98,7 @@ public class DoorLockTileTests : IDisposable
         var tile = GetTile(page, "Front door");
 
         // Assert
-        await Assertions.Expect(tile).ToHaveAccessibleDescriptionAsync("Locked", new() { Timeout = Timeout });
+        await Assertions.Expect(tile).ToHaveAccessibleDescriptionAsync("Locked, unlocks on click", new() { Timeout = Timeout });
         await Assertions.Expect(tile).ToHaveAttributeAsync("title", "Unlock");
     }
 
