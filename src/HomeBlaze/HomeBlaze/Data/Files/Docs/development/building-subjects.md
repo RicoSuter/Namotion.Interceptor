@@ -550,7 +550,7 @@ public void SetTargetSpeed(int speed) { /* ... */ }
 ```
 
 - Categories are ordered by the lowest `Position` of their state properties. Categories with only methods come last, and names break ties.
-- A `[Category]` on an interface member applies to the class member that implements it. One on the class member wins, and `[Category("")]` there removes the category. The shared interfaces in `HomeBlaze.Abstractions` carry "Device", "Network", "Light", "Playback", "Volume" and "Track" this way.
+- A `[Category]` on an interface member applies to the class member that implements it. One on the class member wins, and `[Category("")]` there removes the category. The shared interfaces in `HomeBlaze.Abstractions` carry "Device", "Network", "Light", "Playback", "Volume", "Track", "Lock" and "Door" this way.
 - Names are case-sensitive. .NET shows "Default" as "Misc", "Config" as "Configurations", "DragDrop" as "Drag Drop" and "WindowStyle" as "Window Style".
 
 ## Background Services

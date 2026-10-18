@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Common;
@@ -37,10 +38,12 @@ public abstract partial class NukiDevice :
 
     /// <summary>The ID of the device at the bridge.</summary>
     [State(Position = 1)]
+    [Category("Device")]
     public long NukiId { get; }
 
     /// <summary>The type of the device.</summary>
     [State(Position = 2)]
+    [Category("Device")]
     public NukiDeviceType DeviceType { get; }
 
     internal partial string? Name { get; set; }
@@ -51,6 +54,7 @@ public abstract partial class NukiDevice :
 
     /// <summary>Whether the batteries of the device are at a critical level.</summary>
     [State(Position = 341)]
+    [Category("Battery")]
     public partial bool? IsBatteryCritical { get; internal set; }
 
     [State(Position = 950)]

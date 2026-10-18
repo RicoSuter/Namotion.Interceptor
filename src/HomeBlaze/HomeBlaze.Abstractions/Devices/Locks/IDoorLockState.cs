@@ -16,6 +16,7 @@ public interface IDoorLockState
     /// The current lock state, or null when it is unknown.
     /// </summary>
     [State(Position = 130)]
+    [Category("Lock")]
     DoorLockState? LockState { get; }
 
     /// <summary>
@@ -23,6 +24,7 @@ public interface IDoorLockState
     /// </summary>
     [Derived]
     [State(Position = 131)]
+    [Category("Lock")]
     bool? IsLocked => LockState switch
     {
         Locks.DoorLockState.Locked => true,

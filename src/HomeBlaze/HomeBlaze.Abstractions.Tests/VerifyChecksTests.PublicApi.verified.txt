@@ -448,6 +448,7 @@ namespace HomeBlaze.Abstractions.Devices.Locks
     public interface IDoorLatchController
     {
         [HomeBlaze.Abstractions.Attributes.Operation(RequiresConfirmation=true)]
+        [System.ComponentModel.Category("Lock")]
         System.Threading.Tasks.Task UnlatchAsync(System.Threading.CancellationToken cancellationToken);
     }
     [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
@@ -458,10 +459,13 @@ namespace HomeBlaze.Abstractions.Devices.Locks
     public interface IDoorLockController
     {
         [HomeBlaze.Abstractions.Attributes.Operation]
+        [System.ComponentModel.Category("Lock")]
         System.Threading.Tasks.Task LockAsync(System.Threading.CancellationToken cancellationToken);
         [HomeBlaze.Abstractions.Attributes.Operation(RequiresConfirmation=true)]
+        [System.ComponentModel.Category("Lock")]
         System.Threading.Tasks.Task ToggleLockAsync(System.Threading.CancellationToken cancellationToken);
         [HomeBlaze.Abstractions.Attributes.Operation(RequiresConfirmation=true)]
+        [System.ComponentModel.Category("Lock")]
         System.Threading.Tasks.Task UnlockAsync(System.Threading.CancellationToken cancellationToken);
     }
     [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
@@ -470,8 +474,10 @@ namespace HomeBlaze.Abstractions.Devices.Locks
     {
         [HomeBlaze.Abstractions.Attributes.State(Position=131)]
         [Namotion.Interceptor.Attributes.Derived]
+        [System.ComponentModel.Category("Lock")]
         bool? IsLocked { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=130)]
+        [System.ComponentModel.Category("Lock")]
         HomeBlaze.Abstractions.Devices.Locks.DoorLockState? LockState { get; }
     }
 }
@@ -891,9 +897,11 @@ namespace HomeBlaze.Abstractions.Sensors
     public interface IDoorSensor
     {
         [HomeBlaze.Abstractions.Attributes.State(Position=230)]
+        [System.ComponentModel.Category("Door")]
         HomeBlaze.Abstractions.Sensors.DoorState? DoorState { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=231)]
         [Namotion.Interceptor.Attributes.Derived]
+        [System.ComponentModel.Category("Door")]
         bool? IsClosed { get; }
     }
     [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]

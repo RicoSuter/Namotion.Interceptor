@@ -15,6 +15,7 @@ public interface IDoorSensor
     /// The current door state, or null when it is unknown.
     /// </summary>
     [State(Position = 230)]
+    [Category("Door")]
     DoorState? DoorState { get; }
 
     /// <summary>
@@ -22,6 +23,7 @@ public interface IDoorSensor
     /// </summary>
     [Derived]
     [State(Position = 231)]
+    [Category("Door")]
     bool? IsClosed => DoorState switch
     {
         // Qualified: the property of the same name hides the enum in this scope.

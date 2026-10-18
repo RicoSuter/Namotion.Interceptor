@@ -77,6 +77,7 @@ public partial class SimulatedDoorLock : IConfigurable, IDoorLock, IDoorLatchCon
         TransitionAsync(DoorLockState.Unlatching, DoorLockState.Unlatched, cancellationToken);
 
     [Operation(Title = "Set door state", Description = "Sets the state of the simulated door.", Position = 10)]
+    [Category("Door")]
     public void SetDoorState(DoorState? doorState) => DoorState = doorState;
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;

@@ -14,5 +14,6 @@ public interface IDoorLatchController
     /// Unlocks the door when needed and pulls the latch, so that the door can be pushed open.
     /// </summary>
     [Operation(RequiresConfirmation = true)]
+    [Category("Lock")]
     Task UnlatchAsync(CancellationToken cancellationToken);
 }

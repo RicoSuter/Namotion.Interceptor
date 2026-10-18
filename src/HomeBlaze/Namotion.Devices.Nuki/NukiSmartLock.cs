@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Devices.Energy;
@@ -31,14 +32,17 @@ public partial class NukiSmartLock : NukiDevice, IDoorLock, IDoorLatchController
 
     public partial DoorState? DoorState { get; internal set; }
 
+    [Category("Battery")]
     public partial decimal? BatteryLevel { get; internal set; }
 
     /// <summary>Whether the batteries of the lock are charging.</summary>
     [State(Position = 342)]
+    [Category("Battery")]
     public partial bool? IsBatteryCharging { get; internal set; }
 
     /// <summary>Whether the batteries of the paired keypad are at a critical level.</summary>
     [State(Position = 343)]
+    [Category("Battery")]
     public partial bool? IsKeypadBatteryCritical { get; internal set; }
 
     [Derived]
@@ -91,6 +95,7 @@ public partial class NukiSmartLock : NukiDevice, IDoorLock, IDoorLatchController
         RunLockActionAsync(NukiLockAction.Unlatch, DoorLockState.Unlatching, "The lock could not unlatch the door.", cancellationToken);
 
     [Operation(Title = "Lock 'n' Go", Description = "Unlocks the door and locks it again after a short time.", Icon = "Timer", Position = 10)]
+    [Category("Lock")]
     public Task LockNGoAsync(CancellationToken cancellationToken) =>
         RunLockActionAsync(NukiLockAction.LockNGo, DoorLockState.Unlocking, "The lock could not run lock 'n' go.", cancellationToken);
 
@@ -100,6 +105,7 @@ public partial class NukiSmartLock : NukiDevice, IDoorLock, IDoorLatchController
         Icon = "Timer",
         RequiresConfirmation = true,
         Position = 11)]
+    [Category("Lock")]
     public Task LockNGoWithUnlatchAsync(CancellationToken cancellationToken) =>
         RunLockActionAsync(NukiLockAction.LockNGoWithUnlatch, DoorLockState.Unlatching, "The lock could not run lock 'n' go with unlatch.", cancellationToken);
 
