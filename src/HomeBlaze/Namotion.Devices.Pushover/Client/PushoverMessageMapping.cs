@@ -10,11 +10,13 @@ internal static class PushoverMessageMapping
     internal const int MaximumUrlLength = 512;
     internal const int MaximumUrlTitleLength = 100;
 
+    private const int EmergencyPriority = 2;
+
     public static PushoverMessageRequest Create(
         string token, string userKey, Notification notification, TimeSpan emergencyRetry, TimeSpan emergencyExpire, ILogger logger)
     {
         var priority = ToPushoverPriority(notification.Priority);
-        var isEmergency = notification.Priority == NotificationPriority.Emergency;
+        var isEmergency = priority == EmergencyPriority;
         var (url, urlTitle) = CreateUrl(notification, logger);
 
         return new PushoverMessageRequest
@@ -32,23 +34,16 @@ internal static class PushoverMessageMapping
     }
 
     /// <summary>
-    /// Throws if <paramref name="priority"/> is not one of the defined <see cref="NotificationPriority"/> members,
-    /// for example a value cast from an integer an agent supplied directly.
+    /// Maps <paramref name="priority"/> to the Pushover priority level; throws for a value that is no defined member,
+    /// for example one cast from an integer.
     /// </summary>
-    public static void ValidatePriority(NotificationPriority priority)
-    {
-        if (!Enum.IsDefined(priority))
-        {
-            throw new ArgumentOutOfRangeException(nameof(priority), priority, "The notification priority is not a defined NotificationPriority member.");
-        }
-    }
-
     public static int ToPushoverPriority(NotificationPriority priority) => priority switch
     {
         NotificationPriority.Low => -1,
+        NotificationPriority.Normal => 0,
         NotificationPriority.High => 1,
-        NotificationPriority.Emergency => 2,
-        _ => 0
+        NotificationPriority.Emergency => EmergencyPriority,
+        _ => throw new ArgumentOutOfRangeException(nameof(priority), priority, "The notification priority is not a defined NotificationPriority member.")
     };
 
     internal static string? Shorten(string? value, int maximumLength, string field, ILogger logger)
@@ -89,6 +84,15 @@ internal static class PushoverMessageMapping
             return (null, null);
         }
 
+        if (!string.IsNullOrEmpty(url) && !IsHttpUrl(url))
+        {
+            logger.LogWarning("The Pushover url is not an absolute http or https address and is omitted.");
+            return (null, null);
+        }
+
         return (url, Shorten(notification.UrlTitle, MaximumUrlTitleLength, "url title", logger));
     }
+
+    private static bool IsHttpUrl(string url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var uri) && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
 }

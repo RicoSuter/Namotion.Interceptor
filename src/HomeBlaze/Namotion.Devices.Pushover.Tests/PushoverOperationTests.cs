@@ -32,6 +32,7 @@ public class PushoverOperationTests
         Assert.Equal(typeof(Notification), parameter.Type);
         Assert.Equal(typeof(NotificationResult), method.ResultType);
         Assert.False(method.RequiresConfirmation);
+        Assert.Contains("safety-critical", method.Description);
         Assert.Equal("From the UI", Assert.Single(handler.Requests).Form["message"]);
         Assert.Equal("test", Assert.IsType<NotificationResult>(result).Id);
     }

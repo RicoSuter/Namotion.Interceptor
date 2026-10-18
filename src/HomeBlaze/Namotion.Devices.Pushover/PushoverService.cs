@@ -91,6 +91,7 @@ public partial class PushoverService : BackgroundService, IConfigurable, IMonito
     [Operation(Title = "Send to all targets", Icon = "Send", Position = 1)]
     public async Task SendToAllTargetsAsync(Notification notification, CancellationToken cancellationToken)
     {
+        ValidateNotification(notification);
         var targets = Targets.Values.ToArray();
         if (targets.Length == 0)
         {
@@ -162,8 +163,7 @@ public partial class PushoverService : BackgroundService, IConfigurable, IMonito
     /// </summary>
     internal async Task<string?> SendAsync(PushoverTarget target, Notification notification, CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(notification);
-        PushoverMessageMapping.ValidatePriority(notification.Priority);
+        ValidateNotification(notification);
 
         var token = GetRequiredApplicationToken();
         var userKey = target.UserKey;
@@ -187,6 +187,13 @@ public partial class PushoverService : BackgroundService, IConfigurable, IMonito
         _emergencyTracker.Add(targetKey, receipt, request.Title, request.Message, now, now + expire);
         Signal();
         return receipt;
+    }
+
+    private static void ValidateNotification(Notification notification)
+    {
+        ArgumentNullException.ThrowIfNull(notification);
+        ArgumentException.ThrowIfNullOrWhiteSpace(notification.Message);
+        _ = PushoverMessageMapping.ToPushoverPriority(notification.Priority);
     }
 
     internal async Task CancelReceiptAsync(string receipt, CancellationToken cancellationToken)

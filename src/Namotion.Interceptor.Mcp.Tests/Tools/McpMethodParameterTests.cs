@@ -1,4 +1,5 @@
 using System.Collections;
+using System.ComponentModel;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Namotion.Interceptor.Mcp.Models;
@@ -126,6 +127,18 @@ public class McpMethodParameterTests
     }
 
     [Fact]
+    public void WhenAMemberHasADescriptionAttribute_ThenItsDescriptionIsListed()
+    {
+        // Act
+        var parameter = McpMethodParameter.Create("value", typeof(DescribedFixture));
+
+        // Assert
+        var properties = parameter.Properties!;
+        Assert.Equal("The text shown to the reader.", Assert.Single(properties, property => property.Name == "text").Description);
+        Assert.Null(Assert.Single(properties, property => property.Name == "count").Description);
+    }
+
+    [Fact]
     public void WhenParameterIsObject_ThenHasNoProperties()
     {
         // Act
@@ -214,6 +227,14 @@ public class McpMethodParameterTests
     public sealed class HidingDerived : HidingBase
     {
         public new string V { get; set; } = string.Empty;
+    }
+
+    public sealed class DescribedFixture
+    {
+        [Description("The text shown to the reader.")]
+        public string? Text { get; set; }
+
+        public int Count { get; set; }
     }
 
     public sealed class JsonIgnoreFixture

@@ -365,6 +365,47 @@ public class PushoverServiceTests
         Assert.Empty(handler.Requests);
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData(null)]
+    public async Task WhenMessageIsBlank_ThenSendingFailsWithAnArgumentExceptionWithoutARequest(string? message)
+    {
+        // Arrange
+        var (service, handler) = PushoverTestFactory.CreateService("rico");
+        var notification = new Notification { Message = message! };
+
+        // Act & Assert
+        await Assert.ThrowsAnyAsync<ArgumentException>(
+            () => service.Targets["rico"].SendNotificationAsync(notification, CancellationToken.None));
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task WhenSendingToAllTargetsWithAnUndefinedPriority_ThenTheArgumentErrorReachesTheCallerWithoutARequest()
+    {
+        // Arrange
+        var (service, handler) = PushoverTestFactory.CreateService("rico", "anna");
+        var notification = new Notification { Message = "Hello", Priority = (NotificationPriority)7 };
+
+        // Act & Assert
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+            () => service.SendToAllTargetsAsync(notification, CancellationToken.None));
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task WhenSendingToAllTargetsWithABlankMessage_ThenTheArgumentErrorReachesTheCallerWithoutARequest()
+    {
+        // Arrange
+        var (service, handler) = PushoverTestFactory.CreateService("rico", "anna");
+
+        // Act & Assert
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => service.SendToAllTargetsAsync(new Notification { Message = " " }, CancellationToken.None));
+        Assert.Empty(handler.Requests);
+    }
+
     [Fact]
     public void WhenEmergencyTimesAreOutOfRange_ThenTheyAreClamped()
     {

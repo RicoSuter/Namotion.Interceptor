@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
@@ -70,7 +71,8 @@ public sealed record McpMethodParameter
 
     /// <summary>
     /// Describes a parameter of the given CLR type. A <see cref="Nullable{T}"/> type is always nullable. An object type
-    /// lists its public settable members, by their JSON name in camel case.
+    /// lists its public settable members, by their JSON name in camel case, each with the text of its
+    /// <see cref="DescriptionAttribute"/> as its description.
     /// </summary>
     /// <param name="name">The parameter name.</param>
     /// <param name="type">The CLR parameter type.</param>
@@ -145,7 +147,7 @@ public sealed record McpMethodParameter
                     property.PropertyType,
                     nullabilityContext.Create(property).WriteState == NullabilityState.Nullable,
                     property.IsDefined(typeof(RequiredMemberAttribute)),
-                    description: null,
+                    property.GetCustomAttribute<DescriptionAttribute>()?.Description,
                     depth + 1,
                     visitedTypes))
                 .ToArray();

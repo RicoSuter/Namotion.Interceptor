@@ -45,11 +45,13 @@ When canceling several emergency notifications, a failure of one does not stop t
 | `Low` | -1 | No sound or vibration |
 | `Normal` | 0 | The recipient's default alert |
 | `High` | 1 | Alerts also during quiet hours |
-| `Emergency` | 2 | Repeats every `EmergencyRetry` until acknowledged or until `EmergencyExpire` |
+| `Emergency` | 2 | Repeats every `EmergencyRetry` until acknowledged or until `EmergencyExpire`. Use it only for safety-critical events |
 
 Each emergency notification is tracked on its own, so several can repeat at once, for example one for smoke and one for water, and each is acknowledged or canceled independently. See [Emergencies](#emergencies).
 
-Pushover limits the message to 1024 characters, the title to 250, the url to 512 and the url title to 100. The message, title and url title are shortened with an ellipsis and a warning in the log. A url over the limit is left out instead, together with its url title, since shortening a url would break the link it points to.
+A notification without message text, or with a priority that is no defined `NotificationPriority` member, is rejected with an argument error before any request, also by `SendToAllTargets`.
+
+Pushover limits the message to 1024 characters, the title to 250, the url to 512 and the url title to 100. The message, title and url title are shortened with an ellipsis and a warning in the log. A url over the limit is left out instead, together with its url title, since shortening a url would break the link it points to. Only an absolute `http` or `https` url is sent; any other url, such as a relative path or another scheme, is left out together with its url title, with a warning in the log.
 
 ## State Properties
 

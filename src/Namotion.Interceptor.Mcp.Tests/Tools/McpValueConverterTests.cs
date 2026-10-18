@@ -112,6 +112,36 @@ public class McpValueConverterTests
         Assert.Throws<JsonException>(() => McpValueConverter.Deserialize(value, typeof(McpMethodParameterTests.TestNotification)));
     }
 
+    [Fact]
+    public void WhenAnEnumMemberOfARecordArgumentIsANumber_ThenThrowsJsonException()
+    {
+        // Arrange
+        var value = JsonDocument.Parse("""{"message":"Door open","priority":1}""").RootElement;
+
+        // Act & Assert
+        Assert.Throws<JsonException>(() => McpValueConverter.Deserialize(value, typeof(McpMethodParameterTests.TestNotification)));
+    }
+
+    [Fact]
+    public void WhenAnEnumMemberOfARecordArgumentIsANumberInAString_ThenThrowsJsonException()
+    {
+        // Arrange
+        var value = JsonDocument.Parse("""{"message":"Door open","priority":"1"}""").RootElement;
+
+        // Act & Assert
+        Assert.Throws<JsonException>(() => McpValueConverter.Deserialize(value, typeof(McpMethodParameterTests.TestNotification)));
+    }
+
+    [Fact]
+    public void WhenRecordArgumentHasAnUnknownMember_ThenThrowsJsonException()
+    {
+        // Arrange
+        var value = JsonDocument.Parse("""{"message":"Door open","sound":"siren"}""").RootElement;
+
+        // Act & Assert
+        Assert.Throws<JsonException>(() => McpValueConverter.Deserialize(value, typeof(McpMethodParameterTests.TestNotification)));
+    }
+
     [Flags]
     public enum TestPermissions
     {

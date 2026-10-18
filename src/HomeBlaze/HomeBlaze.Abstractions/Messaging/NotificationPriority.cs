@@ -21,7 +21,8 @@ public enum NotificationPriority
     High,
 
     /// <summary>
-    /// Repeated until the recipient acknowledges it, where the channel supports that.
+    /// Repeated until the recipient acknowledges it, for safety-critical events only. A channel without repeats
+    /// delivers it as <see cref="High"/>.
     /// </summary>
     Emergency
 }

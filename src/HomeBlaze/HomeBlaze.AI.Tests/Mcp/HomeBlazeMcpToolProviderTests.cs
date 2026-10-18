@@ -747,6 +747,55 @@ public class HomeBlazeMcpToolProviderTests
     }
 
     [Fact]
+    public async Task WhenListMethodsWithNotificationParameter_ThenEachMemberIsDescribedAndThePriorityExplainsEmergency()
+    {
+        // Arrange
+        var (room, factory) = CreateTestSetup(isReadOnly: false);
+        AddMethod(room, new MethodMetadata(_ => null)
+        {
+            Kind = MethodKind.Operation,
+            PropertyName = "SendNotification",
+            Parameters = [new MethodParameter { Name = "notification", Type = typeof(Notification) }]
+        });
+
+        // Act
+        var method = await ListMethodAsync(factory, "SendNotification");
+
+        // Assert
+        var members = method.GetProperty("parameters")[0].GetProperty("properties").EnumerateArray().ToArray();
+        Assert.All(members, member => Assert.False(string.IsNullOrEmpty(member.GetProperty("description").GetString())));
+        var priority = members[2].GetProperty("description").GetString()!;
+        Assert.Contains("repeats until the recipient acknowledges it", priority);
+        Assert.Contains("safety-critical", priority);
+    }
+
+    [Fact]
+    public async Task WhenInvokeOperationWithAnIntegerPriority_ThenTheArgumentIsRejected()
+    {
+        // Arrange
+        var (room, factory) = CreateTestSetup(isReadOnly: false);
+        var isInvoked = false;
+        AddMethod(room, new MethodMetadata(_ =>
+        {
+            isInvoked = true;
+            return Task.FromResult(new NotificationResult());
+        })
+        {
+            Kind = MethodKind.Operation,
+            PropertyName = "SendNotification",
+            Parameters = [new MethodParameter { Name = "notification", Type = typeof(Notification) }],
+            ResultType = typeof(NotificationResult)
+        });
+
+        // Act
+        var error = await InvokeForErrorAsync(factory, "SendNotification", """{"notification":{"message":"Door open","priority":2}}""");
+
+        // Assert
+        Assert.Contains("Invalid value for parameter 'notification'", error);
+        Assert.False(isInvoked);
+    }
+
+    [Fact]
     public async Task WhenInvokeOperationWithNotificationArgument_ThenMembersAreBoundAndTheResultIdIsReturned()
     {
         // Arrange

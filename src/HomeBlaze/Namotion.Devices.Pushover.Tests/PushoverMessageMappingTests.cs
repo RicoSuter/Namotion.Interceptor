@@ -25,22 +25,11 @@ public class PushoverMessageMappingTests
         Assert.Equal(expected, result);
     }
 
-    [Theory]
-    [InlineData(NotificationPriority.Low)]
-    [InlineData(NotificationPriority.Normal)]
-    [InlineData(NotificationPriority.High)]
-    [InlineData(NotificationPriority.Emergency)]
-    public void WhenPriorityIsADefinedMember_ThenValidatingDoesNotThrow(NotificationPriority priority)
-    {
-        // Act & Assert
-        PushoverMessageMapping.ValidatePriority(priority);
-    }
-
     [Fact]
-    public void WhenPriorityIsNotADefinedMember_ThenValidatingThrows()
+    public void WhenPriorityIsNotADefinedMember_ThenMappingThrows()
     {
         // Act & Assert
-        Assert.Throws<ArgumentOutOfRangeException>(() => PushoverMessageMapping.ValidatePriority((NotificationPriority)7));
+        Assert.Throws<ArgumentOutOfRangeException>(() => PushoverMessageMapping.ToPushoverPriority((NotificationPriority)7));
     }
 
     [Fact]
@@ -125,6 +114,35 @@ public class PushoverMessageMappingTests
         // Assert
         Assert.Null(request.Url);
         Assert.Null(request.UrlTitle);
+    }
+
+    [Theory]
+    [InlineData("ftp://example.com/file")]
+    [InlineData("javascript:alert(1)")]
+    [InlineData("/Devices/Kitchen")]
+    [InlineData("example.com")]
+    [InlineData("not a url")]
+    public void WhenUrlIsNotAnAbsoluteHttpOrHttpsAddress_ThenItAndItsUrlTitleAreOmitted(string url)
+    {
+        // Act
+        var request = Map(new Notification { Message = "Hello", Url = url, UrlTitle = "Open" });
+
+        // Assert
+        Assert.Null(request.Url);
+        Assert.Null(request.UrlTitle);
+    }
+
+    [Theory]
+    [InlineData("http://homeblaze.local/devices")]
+    [InlineData("HTTPS://example.com/a?b=c")]
+    public void WhenUrlIsAnAbsoluteHttpOrHttpsAddress_ThenItIsSentWithItsUrlTitle(string url)
+    {
+        // Act
+        var request = Map(new Notification { Message = "Hello", Url = url, UrlTitle = "Open" });
+
+        // Assert
+        Assert.Equal(url, request.Url);
+        Assert.Equal("Open", request.UrlTitle);
     }
 
     [Fact]

@@ -34,14 +34,14 @@ public sealed record NotificationResult
 }
 ```
 
-Members are added to `Notification` as optional members, so publishers and callers keep working when it grows. A channel ignores a member it cannot show and shortens a value longer than its own limit.
+Members are added to `Notification` as optional members, so publishers and callers keep working when it grows. A channel ignores a member it cannot show and shortens a value longer than its own limit. `Url` must be an absolute `http` or `https` address; a channel leaves out any other value together with `UrlTitle`. Each member carries a `[Description]` that the MCP tools list to agents.
 
 | Priority | Meaning |
 |----------|---------|
 | `Low` | Delivered without sound or vibration |
 | `Normal` | Delivered with the recipient's default alert |
 | `High` | Delivered with an alert also during quiet hours |
-| `Emergency` | Repeated until acknowledged, where the channel supports it |
+| `Emergency` | Repeated until acknowledged, for safety-critical events only. A channel without repeats delivers it as `High` |
 
 `NotificationResult.Id` is the channel's identifier of the delivered notification, or null when the channel has none. Its format is channel-specific; for Pushover it is the receipt of an emergency notification and the request id otherwise, see [Pushover](../devices/Pushover.md). Acknowledgement events of a channel carry the same id, so a caller can tell which acknowledgement belongs to its send.
 
@@ -60,7 +60,7 @@ Since `SendNotificationAsync` is marked with `[Operation]`, it is:
 
 ### From AI Agents
 
-A [built-in agent](../administration/ai-agents.md) finds the publishers through its tools: `list_types` finds the `INotificationPublisher` interface, and `search` with that interface in its `types` parameter finds the subjects that implement it. `list_methods` shows the exact method name and parameters: the operation is registered without the `Async` suffix, as `SendNotification` with a `notification` parameter whose members are listed with their types, for example `{"notification": {"message": "Door open", "priority": "High"}}`. The agent calls it with `invoke_operation`, which returns the `NotificationResult` as its result, for example `{"success": true, "result": {"Id": "r1a2b3"}}`, and must be in the agent's `AllowedTools`; it is off by default, so an agent without it can only report findings on its page. Do not mark `SendNotificationAsync` with `RequiresConfirmation`, because operations that require confirmation cannot be called through MCP, see [AI Agents](../administration/ai-agents.md#tools-and-permissions).
+A [built-in agent](../administration/ai-agents.md) finds the publishers through its tools: `list_types` finds the `INotificationPublisher` interface, and `search` with that interface in its `types` parameter finds the subjects that implement it. `list_methods` shows the exact method name and parameters: the operation is registered without the `Async` suffix, as `SendNotification` with a `notification` parameter whose members are listed with their types and descriptions, for example `{"notification": {"message": "Door open", "priority": "High"}}`. The priority is given by name; a number or an unknown member is rejected. The agent calls it with `invoke_operation`, which returns the `NotificationResult` as its result, for example `{"success": true, "result": {"Id": "r1a2b3"}}`, and must be in the agent's `AllowedTools`; it is off by default, so an agent without it can only report findings on its page. Do not mark `SendNotificationAsync` with `RequiresConfirmation`, because operations that require confirmation cannot be called through MCP, see [AI Agents](../administration/ai-agents.md#tools-and-permissions).
 
 ### From Other Subjects
 

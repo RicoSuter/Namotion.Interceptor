@@ -734,16 +734,23 @@ namespace HomeBlaze.Abstractions.Messaging
     [System.ComponentModel.Description("Sends notification messages.")]
     public interface INotificationPublisher
     {
-        [HomeBlaze.Abstractions.Attributes.Operation]
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Sends a notification to this recipient and returns the channel\'s id of it. Use th" +
+            "e Emergency priority only for safety-critical events.")]
         System.Threading.Tasks.Task<HomeBlaze.Abstractions.Messaging.NotificationResult> SendNotificationAsync(HomeBlaze.Abstractions.Messaging.Notification notification, System.Threading.CancellationToken cancellationToken);
     }
     public sealed class Notification : System.IEquatable<HomeBlaze.Abstractions.Messaging.Notification>
     {
         public Notification() { }
+        [System.ComponentModel.Description("The message text, required and not empty.")]
         public required string Message { get; init; }
+        [System.ComponentModel.Description(@"Low: no sound or vibration. Normal (default): the recipient's default alert. High: alerts also during quiet hours. Emergency: repeats until the recipient acknowledges it; use it only for safety-critical events. A channel without repeats delivers Emergency as High.")]
         public HomeBlaze.Abstractions.Messaging.NotificationPriority Priority { get; init; }
+        [System.ComponentModel.Description("A short heading, or null for the channel\'s default.")]
         public string? Title { get; init; }
+        [System.ComponentModel.Description("An absolute http or https address the recipient can open; any other value is left" +
+            " out.")]
         public string? Url { get; init; }
+        [System.ComponentModel.Description("The text shown for the url, or null to show the address itself.")]
         public string? UrlTitle { get; init; }
     }
     public enum NotificationPriority
