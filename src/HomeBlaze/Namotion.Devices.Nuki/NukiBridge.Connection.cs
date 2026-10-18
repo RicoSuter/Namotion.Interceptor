@@ -121,6 +121,12 @@ public partial class NukiBridge
         {
             _client = null;
             IsConnected = false;
+
+            // Disposing the HTTP client cancels a request that is still in flight, such as a lock action that waits
+            // for the motor. No new request takes this client once it is cleared, so waiting once for the gate lets
+            // the last one finish; its own timeout bounds the wait, which is why no token is passed.
+            await _requestGate.WaitAsync(CancellationToken.None);
+            _requestGate.Release();
         }
     }
 
@@ -179,9 +185,11 @@ public partial class NukiBridge
     internal async Task<NukiActionResponse> ExecuteActionAsync(
         NukiDevice device, int action, Action? enterTransition, CancellationToken cancellationToken)
     {
-        var client = GetConnectedClient();
         using (await EnterRequestGateAsync(cancellationToken))
         {
+            // Read under the gate, so that an action never uses a client whose connection has ended meanwhile.
+            var client = GetConnectedClient();
+
             // Entered only while the gate is held, so that a poll that is still running cannot overwrite the transition
             // with the state from before the action.
             enterTransition?.Invoke();

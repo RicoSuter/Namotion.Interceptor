@@ -19,6 +19,11 @@ public class NukiBridgeClientTests
     [InlineData("192.168.1.50", "http://192.168.1.50:8080/info?token=123456")]
     [InlineData("192.168.1.50:8081", "http://192.168.1.50:8081/info?token=123456")]
     [InlineData("http://192.168.1.50/", "http://192.168.1.50:8080/info?token=123456")]
+    [InlineData("https://192.168.1.50", "http://192.168.1.50:8080/info?token=123456")]
+    [InlineData("HTTPS://192.168.1.50:8081/", "http://192.168.1.50:8081/info?token=123456")]
+    [InlineData("[fe80::1]", "http://[fe80::1]:8080/info?token=123456")]
+    [InlineData("[fe80::1]:8081", "http://[fe80::1]:8081/info?token=123456")]
+    [InlineData("fe80::1", "http://[fe80::1]:8080/info?token=123456")]
     public async Task WhenTokenModeIsPlain_ThenTheRequestGoesToTheNormalizedHostAddressWithTheTokenAsQueryParameter(string hostAddress, string expectedUri)
     {
         // Arrange

@@ -1,5 +1,6 @@
 using System.Net;
 using HomeBlaze.Abstractions;
+using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Devices.Nuki.Tests.Testing;
 using Namotion.Interceptor.Testing;
 using Xunit;
@@ -118,6 +119,52 @@ public class NukiBridgeConnectionTests
 
         // Assert
         await AsyncTestHelpers.WaitUntilAsync(() => test.Fake.CountRequests("info") > infoRequests);
+    }
+
+    [Fact]
+    public async Task WhenConfigurationChangesDuringAnAction_ThenTheActionCompletesAndTheBridgeReconnects()
+    {
+        // Arrange
+        var fake = new FakeNukiBridge { ListJson = NukiFixtures.SmartLock(state: 3) };
+        await using var test = new TestBridge(fake);
+        await test.StartAsync();
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        fake.ActionGate = gate;
+        var action = test.Lock.LockAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => fake.CountRequests("lockAction") == 1, message: "The action was not sent.");
+        var infoRequests = fake.CountRequests("info");
+
+        // Act
+        await test.Bridge.ApplyConfigurationAsync(CancellationToken.None);
+        // The action completing early means its request was canceled by the reconnect.
+        await AsyncTestHelpers.WaitUntilAsync(() => !test.Bridge.IsConnected || action.IsCompleted, message: "The bridge did not disconnect.");
+        gate.SetResult();
+        await action;
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => test.Bridge.IsConnected && fake.CountRequests("info") > infoRequests,
+            message: "The bridge did not reconnect.");
+    }
+
+    [Theory]
+    [InlineData("192.168.1.50", "192.168.1.50")]
+    [InlineData("192.168.1.50:8081", "192.168.1.50")]
+    [InlineData("https://192.168.1.50", "192.168.1.50")]
+    [InlineData("HTTP://nuki.local:8081/", "nuki.local")]
+    [InlineData("[fe80::1]", "fe80::1")]
+    [InlineData("[fe80::1]:8081", "fe80::1")]
+    [InlineData("fe80::1", "fe80::1")]
+    public void WhenHostAddressIsSet_ThenIpAddressIsTheHostWithoutSchemeBracketsAndPort(string hostAddress, string expectedIpAddress)
+    {
+        // Arrange
+        using var bridge = new NukiBridge(new FakeNukiBridge(), NullLogger<NukiBridge>.Instance);
+
+        // Act
+        bridge.HostAddress = hostAddress;
+
+        // Assert
+        Assert.Equal(expectedIpAddress, bridge.IpAddress);
     }
 
     [Fact]

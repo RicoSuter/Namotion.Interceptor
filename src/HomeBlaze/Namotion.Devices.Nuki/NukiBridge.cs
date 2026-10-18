@@ -163,7 +163,7 @@ public partial class NukiBridge : BackgroundService,
     public decimal? TotalConsumedEnergy => null;
 
     [Derived]
-    public string? IpAddress => string.IsNullOrWhiteSpace(HostAddress) ? null : GetHost(NukiBridgeClient.NormalizeHostAddress(HostAddress));
+    public string? IpAddress => string.IsNullOrWhiteSpace(HostAddress) ? null : NukiBridgeClient.GetHost(NukiBridgeClient.NormalizeHostAddress(HostAddress));
 
     public string? MacAddress => null;
 
@@ -185,8 +185,4 @@ public partial class NukiBridge : BackgroundService,
 
     [Derived]
     public string? IconColor => IsConnected ? "Success" : null;
-
-    // A normalized address always carries a port.
-    private static string GetHost(string normalizedHostAddress) =>
-        normalizedHostAddress.AsSpan(0, normalizedHostAddress.IndexOf(':')).ToString();
 }

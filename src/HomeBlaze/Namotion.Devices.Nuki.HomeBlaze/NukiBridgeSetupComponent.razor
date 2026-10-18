@@ -16,7 +16,7 @@
         @if (_bridges.Count > 0)
         {
             <MudText Typo="Typo.body1">Select a bridge, or enter its address below.</MudText>
-            <MudList T="NukiDiscoveredBridge" SelectedValue="_selectedBridge" SelectedValueChanged="OnBridgeSelected" SelectionMode="SelectionMode.SingleSelection">
+            <MudList T="NukiDiscoveredBridge" SelectedValue="_selectedBridge" SelectedValueChanged="OnBridgeSelected" SelectionMode="SelectionMode.SingleSelection" Disabled="_pairing">
                 @foreach (var bridge in _bridges)
                 {
                     <MudListItem T="NukiDiscoveredBridge" Value="bridge">
@@ -36,6 +36,7 @@
 
         <MudTextField @bind-Value="_hostAddress"
                       @bind-Value:after="ResetPairing"
+                      Disabled="_pairing"
                       Label="Host address"
                       Placeholder="192.168.1.50:8080"
                       HelperText="IP address of the bridge with its port, 8080 by default"
@@ -62,7 +63,11 @@
             <MudAlert Severity="Severity.Error">@_errorMessage</MudAlert>
         }
 
-        @if (_token is not null)
+        @if (_warningMessage is not null)
+        {
+            <MudAlert Severity="Severity.Warning">@_warningMessage</MudAlert>
+        }
+        else if (_token is not null)
         {
             <MudAlert Severity="Severity.Success">Paired with the bridge at @_hostAddress, using the @_tokenMode token mode.</MudAlert>
         }
@@ -79,6 +84,7 @@
     private NukiTokenMode _tokenMode = NukiTokenMode.Encrypted;
     private bool _pairing;
     private string? _errorMessage;
+    private string? _warningMessage;
 
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
@@ -124,6 +130,7 @@
     private void ResetPairing()
     {
         _errorMessage = null;
+        _warningMessage = null;
         if (_token is not null)
         {
             _token = null;
@@ -142,6 +149,7 @@
 
         _pairing = true;
         _errorMessage = null;
+        _warningMessage = null;
         try
         {
             using var httpClient = HttpClientFactory.CreateClient();
@@ -152,7 +160,18 @@
                 return;
             }
 
-            _tokenMode = await NukiBridgeDiscovery.DetectTokenModeAsync(httpClient, hostAddress, token, _lifetime.Token);
+            try
+            {
+                _tokenMode = await NukiBridgeDiscovery.DetectTokenModeAsync(httpClient, hostAddress, token, _lifetime.Token);
+            }
+            catch (Exception exception) when (!_lifetime.IsCancellationRequested)
+            {
+                // Keeping the token spares another press of the bridge button. Hardware bridges use Encrypted.
+                _tokenMode = NukiTokenMode.Encrypted;
+                _warningMessage = $"Paired, but the token mode could not be detected ({exception.Message}). " +
+                                  "Using Encrypted; switch to Plain in the settings for a software bridge.";
+            }
+
             _hostAddress = hostAddress;
             _token = token;
             IsValidChanged?.Invoke(true);

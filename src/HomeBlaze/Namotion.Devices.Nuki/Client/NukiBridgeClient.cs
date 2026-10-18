@@ -42,18 +42,45 @@ internal sealed class NukiBridgeClient
     }
 
     /// <summary>
-    /// Gets the host and port of a bridge, with the default port when none is given.
+    /// Gets the host and port of a bridge without scheme and trailing slash, with the default port when none is given.
+    /// An IPv6 address is enclosed in brackets.
     /// </summary>
     public static string NormalizeHostAddress(string hostAddress)
     {
-        var trimmed = hostAddress.Trim();
-        if (trimmed.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
+        var address = hostAddress.AsSpan().Trim();
+        var schemeEnd = address.IndexOf("://", StringComparison.Ordinal);
+        if (schemeEnd >= 0 && (address[..schemeEnd].Equals("http", StringComparison.OrdinalIgnoreCase) ||
+                               address[..schemeEnd].Equals("https", StringComparison.OrdinalIgnoreCase)))
         {
-            trimmed = trimmed["http://".Length..];
+            address = address[(schemeEnd + "://".Length)..];
         }
 
-        trimmed = trimmed.TrimEnd('/');
-        return trimmed.Contains(':') ? trimmed : trimmed + ":" + DefaultPort.ToString(CultureInfo.InvariantCulture);
+        address = address.TrimEnd('/');
+        var defaultPort = DefaultPort.ToString(CultureInfo.InvariantCulture);
+        if (address.StartsWith('['))
+        {
+            var bracketEnd = address.IndexOf(']');
+            var hasPort = bracketEnd >= 0 && address[(bracketEnd + 1)..].StartsWith(':');
+            return hasPort ? address.ToString() : string.Concat(address, ":", defaultPort);
+        }
+
+        return address.Count(':') switch
+        {
+            0 => string.Concat(address, ":", defaultPort),
+            1 => address.ToString(),
+            _ => string.Concat("[", address, "]:", defaultPort)
+        };
+    }
+
+    /// <summary>
+    /// Gets the host of a <see cref="NormalizeHostAddress">normalized host address</see>, without brackets and port.
+    /// </summary>
+    public static string GetHost(string normalizedHostAddress)
+    {
+        var bracketEnd = normalizedHostAddress.IndexOf(']');
+        return normalizedHostAddress.StartsWith('[') && bracketEnd > 0
+            ? normalizedHostAddress[1..bracketEnd]
+            : normalizedHostAddress[..normalizedHostAddress.LastIndexOf(':')];
     }
 
     public Task<NukiInfoResponse> GetInfoAsync(CancellationToken cancellationToken) =>
