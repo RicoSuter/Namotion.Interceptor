@@ -1,5 +1,6 @@
 using System.Text.Json;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Abstractions.Messaging;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.AI.Mcp;
 using HomeBlaze.Services.Lifecycle;
@@ -720,6 +721,69 @@ public class HomeBlazeMcpToolProviderTests
             ToolProviders = { toolProvider }
         };
         return (room, new McpToolFactory(room, configuration));
+    }
+
+    [Fact]
+    public async Task WhenListMethodsWithNotificationParameter_ThenTheSchemaDescribesEachMember()
+    {
+        // Arrange
+        var (room, factory) = CreateTestSetup(isReadOnly: false);
+        AddMethod(room, new MethodMetadata(_ => null)
+        {
+            Kind = MethodKind.Operation,
+            PropertyName = "SendNotification",
+            Parameters = [new MethodParameter { Name = "notification", Type = typeof(Notification) }]
+        });
+
+        // Act
+        var method = await ListMethodAsync(factory, "SendNotification");
+
+        // Assert
+        var schema = method.GetProperty("parameters")[0].GetProperty("schema");
+        var members = schema.GetProperty("properties").EnumerateObject().ToArray();
+        Assert.Equal(["message", "title", "priority", "url", "urlTitle"], members.Select(member => member.Name));
+        Assert.All(members, member => Assert.False(string.IsNullOrEmpty(member.Value.GetProperty("description").GetString())));
+        Assert.Equal(["message"], schema.GetProperty("required").EnumerateArray().Select(name => name.GetString()));
+        Assert.Equal(["Low", "Normal", "High", "Emergency"], members[2].Value.GetProperty("enum").EnumerateArray().Select(value => value.GetString()));
+    }
+
+    [Fact]
+    public async Task WhenInvokeOperationWithNotificationArgument_ThenMembersAreBoundAndTheResultIdIsReturned()
+    {
+        // Arrange
+        var (room, factory) = CreateTestSetup(isReadOnly: false);
+        object? capturedNotification = null;
+        AddMethod(room, new MethodMetadata(arguments =>
+        {
+            capturedNotification = arguments?[0];
+            return Task.FromResult(new NotificationResult { Id = "receipt1" });
+        })
+        {
+            Kind = MethodKind.Operation,
+            PropertyName = "SendNotification",
+            Parameters = [new MethodParameter { Name = "notification", Type = typeof(Notification) }],
+            ResultType = typeof(NotificationResult)
+        });
+
+        var tool = factory.CreateTools().First(t => t.Name == "invoke_operation");
+
+        // Act
+        var input = JsonSerializer.SerializeToElement(new
+        {
+            path = "",
+            method = "SendNotification",
+            parameters = new { notification = new { message = "Door open", priority = "High" } }
+        });
+        var result = await tool.Handler(input, CancellationToken.None);
+
+        // Assert
+        var json = JsonSerializer.SerializeToElement(result);
+        Assert.True(json.GetProperty("success").GetBoolean());
+        Assert.Equal("receipt1", json.GetProperty("result").GetProperty("Id").GetString());
+        var notification = Assert.IsType<Notification>(capturedNotification);
+        Assert.Equal("Door open", notification.Message);
+        Assert.Equal(NotificationPriority.High, notification.Priority);
+        Assert.Null(notification.Title);
     }
 
     private static void AddMethod(TestThing room, MethodMetadata method) =>
