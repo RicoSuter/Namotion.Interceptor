@@ -240,6 +240,8 @@ public partial class PushoverService :
         _emergencyTracker.SetTargets(newValue);
     }
 
+    partial void OnApplicationTokenChanged(string? newValue) => RequestValidation();
+
     partial void OnTargetsChanged(Dictionary<string, PushoverTarget> newValue)
     {
         RequestValidation();

@@ -428,4 +428,21 @@ public class PushoverServiceTests
         // Assert
         Assert.Equal(expected, key);
     }
+
+    [Fact]
+    public async Task WhenATargetIsRemoved_ThenItCannotSend()
+    {
+        // Arrange
+        var (service, handler) = PushoverTestFactory.CreateService("rico", "anna");
+        var removedTarget = service.Targets["rico"];
+
+        // Act
+        service.Targets = new Dictionary<string, PushoverTarget> { ["anna"] = service.Targets["anna"] };
+
+        // Assert
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => removedTarget.SendNotificationAsync(new Notification { Message = "Hello" }, CancellationToken.None));
+        Assert.Contains("not part of a Pushover service", exception.Message);
+        Assert.Empty(handler.RequestsTo(MessagesPath));
+    }
 }

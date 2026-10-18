@@ -664,4 +664,43 @@ public class PushoverServiceMonitoringTests
             _ => throw new InvalidOperationException("Subscriber failure."),
             _ => { },
             () => { });
+
+    [Fact]
+    public async Task WhenTheApplicationTokenIsChangedAfterBeingRejected_ThenTheServiceRecoversToRunning()
+    {
+        // Arrange
+        var (service, handler) = PushoverTestFactory.CreateService("rico");
+        handler.Respond = request => request.Form["token"] == "app-token"
+            ? (HttpStatusCode.BadRequest, """{"token":"invalid","errors":["application token is invalid"],"status":0}""")
+            : (HttpStatusCode.OK, """{"status":1,"devices":["phone"]}""");
+
+        await using var running = await PushoverTestFactory.StartAsync(service);
+        await AsyncTestHelpers.WaitUntilAsync(() => service.Status == ServiceStatus.Error);
+
+        // Act
+        service.ApplicationToken = "new-app-token";
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => service.Status == ServiceStatus.Running);
+        Assert.Equal(ServiceStatus.Running, service.Targets["rico"].Status);
+    }
+
+    [Fact]
+    public async Task WhenConfigurationIsAppliedDuringAValidation_ThenTheTargetsAreValidatedOnceMore()
+    {
+        // Arrange
+        var (service, handler) = PushoverTestFactory.CreateService("rico");
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        handler.BeforeRespond = () => release.Task;
+        await using var running = await PushoverTestFactory.StartAsync(service);
+        await AsyncTestHelpers.WaitUntilAsync(() => handler.RequestsTo(ValidatePath).Length == 1);
+
+        // Act
+        await service.ApplyConfigurationAsync(CancellationToken.None);
+        release.SetResult();
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => handler.RequestsTo(ValidatePath).Length == 2 && service.Status == ServiceStatus.Running);
+        Assert.Equal(2, handler.RequestsTo(ValidatePath).Length);
+    }
 }
