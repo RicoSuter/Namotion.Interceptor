@@ -1,12 +1,8 @@
 using HomeBlaze.AI.Agents;
 using HomeBlaze.AI.Agents.ClaudeCli;
-using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Hosting.Server;
-using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
-using ModelContextProtocol.Protocol;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -31,18 +27,13 @@ public class ClaudeCliAgentIntegrationTests
     {
         // Arrange
         var registry = new AgentTurnTokenRegistry();
-        var builder = WebApplication.CreateSlimBuilder();
-        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        var builder = Host.CreateEmptyApplicationBuilder(new HostApplicationBuilderSettings());
+        builder.Services.AddLogging();
         builder.Services.AddSingleton(registry);
         builder.Services.AddHomeBlazeAgents();
-        builder.Services.AddMcpServer()
-            .WithHttpTransport(options => options.Stateless = true)
-            .WithListToolsHandler((_, _) => ValueTask.FromResult(new ListToolsResult { Tools = [] }))
-            .WithCallToolHandler((_, _) => ValueTask.FromResult(new CallToolResult { IsError = true, Content = [] }));
-        await using var app = builder.Build();
-        app.MapHomeBlazeAgentMcp();
-        await app.StartAsync();
-        var address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.First();
+        using var host = builder.Build();
+        await host.StartAsync();
+        var endpoint = host.Services.GetRequiredService<IAgentEndpointAddress>().GetAgentEndpoint();
 
         await using var test = await AgentTestContext<ClaudeCliAgent>.StartAsync(
             services => new ClaudeCliAgent(services, NullLogger<ClaudeCliAgent>.Instance),
@@ -52,7 +43,7 @@ public class ClaudeCliAgentIntegrationTests
                 agent.AllowedTools = ["get_property"];
                 agent.Instructions = "Answer with the numeric value only.";
             },
-            new Uri(address + AgentMcpEndpoint.Route),
+            endpoint,
             registry);
         test.Root.Temperature = 21.5m;
 

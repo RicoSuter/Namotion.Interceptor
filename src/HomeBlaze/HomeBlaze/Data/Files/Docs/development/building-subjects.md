@@ -473,7 +473,8 @@ public partial class Motor
 - Async methods are supported and show a progress indicator
 - Methods returning values display the result in a dialog
 - Errors are caught and shown in an error dialog
-- Operations with `RequiresConfirmation = true` show a confirmation dialog first and cannot be called through MCP, see [AI Agents](../administration/ai-agents.md#tools-and-permissions). Use it for operations a person must decide on, such as unlocking, rebooting or installing code. An implementation of an interface operation that requires confirmation, or an override of a base class operation that requires it, requires confirmation as well, also when it declares its own `[Operation]`; a `[Query]` that implements or overrides such an operation becomes an operation that requires confirmation
+- Operations with `RequiresConfirmation = true` show a confirmation dialog first and cannot be called through MCP, see [AI Agents](../administration/ai-agents.md#tools-and-permissions). Use it for operations a person must decide on, such as unlocking, rebooting or installing code
+- Confirmation is inherited: an implementation of an interface operation or an override of a base class operation that requires confirmation requires it too, also with its own `[Operation]`, and a `[Query]` in its place becomes an operation that requires confirmation
 - Do not require confirmation for safety actions such as an emergency stop; agents must be able to call them
 
 **Supported parameter types:**
@@ -1073,7 +1074,11 @@ Use this for internal subjects that are part of a parent subject's implementatio
 
 ### Page Layout Types
 
-A type whose blocks only lay out a page, such as a card or a tab layout, is marked with `[PageLayout]`. Its blocks create no subject that acts on anything and hold no secret, so an AI agent with the permission to edit page layout may add, change, remove and move them, see [AI Agents](../administration/ai-agents.md#editing-page-layout). The property attributes that describe its values decide what such a block may hold: a path of a `[SubjectPath]` with a subject type must lead to an existing subject, a `[LinkAddress]` may only hold a relative address or one with http, https or mailto, and a block that sets a `[MediaAddress]`, such as the picture of a card, is no layout block:
+A type whose blocks only lay out a page, such as a card or a tab layout, is marked with `[PageLayout]`. Its blocks act on nothing and hold no secret, so an AI agent with the permission to edit page layout may add, change, remove and move them, see [AI Agents](../administration/ai-agents.md#editing-page-layout). The attributes of its properties decide what such a block may hold:
+
+- A `[SubjectPath]` with a subject type must lead to an existing subject.
+- A `[LinkAddress]` may only hold a relative address or one with http, https or mailto.
+- A block that sets a `[MediaAddress]`, such as the picture of a card, is no layout block.
 
 ```csharp
 [PageLayout]

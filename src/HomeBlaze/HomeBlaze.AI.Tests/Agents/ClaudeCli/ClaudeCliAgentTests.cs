@@ -274,7 +274,7 @@ public class ClaudeCliAgentTests
     }
 
     [UnixFact]
-    public async Task WhenTheWebServerAddressIsUnknown_ThenTheTurnFailsWithoutStartingTheCli()
+    public async Task WhenTheAgentListenerHasNoAddress_ThenTheTurnFailsWithoutStartingTheCli()
     {
         // Arrange
         using var cli = FakeClaudeCli.Create("success.jsonl");
@@ -288,7 +288,7 @@ public class ClaudeCliAgentTests
         await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.Status == ServiceStatus.Error);
 
         // Assert
-        Assert.Contains("address", test.Agent.StatusMessage);
+        Assert.Contains("listener is not running", test.Agent.StatusMessage);
         Assert.Empty(cli.Invocations);
     }
 
