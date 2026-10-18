@@ -24,7 +24,9 @@ public class NukiBridgeClientTests
     [InlineData("HTTPS://192.168.1.50:8081/", "http://192.168.1.50:8081/info?token=123456")]
     [InlineData("[fe80::1]", "http://[fe80::1]:8080/info?token=123456")]
     [InlineData("[fe80::1]:8081", "http://[fe80::1]:8081/info?token=123456")]
+    [InlineData("[fe80::1]:65535", "http://[fe80::1]:65535/info?token=123456")]
     [InlineData("fe80::1", "http://[fe80::1]:8080/info?token=123456")]
+    [InlineData(" http://nuki.local/ ", "http://nuki.local:8080/info?token=123456")]
     public async Task WhenTokenModeIsPlain_ThenTheRequestGoesToTheNormalizedHostAddressWithTheTokenAsQueryParameter(string hostAddress, string expectedUri)
     {
         // Arrange
@@ -234,43 +236,31 @@ public class NukiBridgeClientTests
     }
 
     [Theory]
-    [InlineData("192.168.1.50:8081", "192.168.1.50:8081")]
-    [InlineData(" http://nuki.local/ ", "nuki.local:8080")]
-    [InlineData("[fe80::1]:65535", "[fe80::1]:65535")]
-    [InlineData("fe80::1", "[fe80::1]:8080")]
-    public void WhenHostAddressIsValid_ThenItIsNormalized(string hostAddress, string expected)
-    {
-        // Act
-        var normalized = NukiBridgeClient.NormalizeHostAddress(hostAddress);
-
-        // Assert
-        Assert.Equal(expected, normalized);
-        Assert.Null(NukiBridge.ValidateHostAddress(hostAddress));
-    }
-
-    [Theory]
     [InlineData("192.168.1.50/info", "without a path")]
     [InlineData("192.168.1.50?token=1", "without a path")]
     [InlineData("192.168.1.50#top", "without a path")]
     [InlineData("user@192.168.1.50", "without a path")]
     [InlineData("192.168.1.50\\share", "without a path")]
     [InlineData("nuki local", "without a path")]
+    [InlineData("[fe80::1", "without a path")]
+    [InlineData("[fe80::1]8080", "without a path")]
+    [InlineData(":8080", "without a path")]
+    [InlineData("[]", "without a path")]
+    [InlineData("", "without a path")]
+    [InlineData("192.168.1.50:80:90", "without a path")]
+    [InlineData("[not-an-ip]:8080", "without a path")]
     [InlineData("192.168.1.50:0", "from 1 to 65535")]
     [InlineData("192.168.1.50:65536", "from 1 to 65535")]
     [InlineData("192.168.1.50:", "from 1 to 65535")]
     [InlineData("192.168.1.50:+80", "from 1 to 65535")]
     [InlineData("[fe80::1]:0", "from 1 to 65535")]
-    [InlineData("[fe80::1", "brackets")]
-    [InlineData("[fe80::1]8080", "brackets")]
-    [InlineData(":8080", "host name or IP address")]
-    [InlineData("[]", "host name or IP address")]
-    [InlineData("", "host name or IP address")]
-    [InlineData("192.168.1.50:80:90", "valid IPv6 address")]
-    [InlineData("[not-an-ip]:8080", "valid IPv6 address")]
-    public void WhenHostAddressIsInvalid_ThenNormalizingThrowsWithTheReason(string hostAddress, string expectedReason)
+    public void WhenHostAddressIsInvalid_ThenTheClientCannotBeCreatedAndTheReasonIsReported(string hostAddress, string expectedReason)
     {
+        // Arrange
+        using var httpClient = new HttpClient();
+
         // Act & Assert
-        var exception = Assert.Throws<ArgumentException>(() => NukiBridgeClient.NormalizeHostAddress(hostAddress));
+        var exception = Assert.Throws<ArgumentException>(() => new NukiBridgeClient(httpClient, hostAddress, Token, NukiTokenMode.Plain));
         Assert.Contains(expectedReason, exception.Message);
         Assert.Contains(expectedReason, NukiBridge.ValidateHostAddress(hostAddress));
     }

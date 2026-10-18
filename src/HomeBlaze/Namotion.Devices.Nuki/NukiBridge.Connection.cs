@@ -46,14 +46,9 @@ public partial class NukiBridge
                 MinimumIntervalSeconds * TimeSpan.TicksPerSecond,
                 MaximumIntervalSeconds * TimeSpan.TicksPerSecond));
 
-    /// <summary>
-    /// Checks a <see cref="HostAddress"/>: a host name or IP address with an optional port from 1 to 65535, optionally
-    /// with an http or https scheme and a trailing slash. An IPv6 address with a port is enclosed in brackets.
-    /// </summary>
-    /// <param name="hostAddress">The host address to check.</param>
-    /// <returns>Null when the host address is valid, otherwise a message that describes the problem.</returns>
+    /// <summary>Gets why <paramref name="hostAddress"/> is no valid <see cref="HostAddress"/>, or null when it is valid.</summary>
     public static string? ValidateHostAddress(string? hostAddress) =>
-        NukiBridgeClient.TryNormalizeHostAddress(hostAddress, out _, out var errorMessage) ? null : errorMessage;
+        NukiBridgeClient.TryParseHostAddress(hostAddress, out _, out _, out var errorMessage) ? null : errorMessage;
 
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)

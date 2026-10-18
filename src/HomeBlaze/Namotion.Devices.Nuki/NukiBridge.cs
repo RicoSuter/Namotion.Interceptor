@@ -89,7 +89,10 @@ public partial class NukiBridge : BackgroundService,
     /// <summary>The delay before a request that the bridge answered with 503 is sent again.</summary>
     internal TimeSpan BusyRetryDelay { get; set; } = NukiBridgeClient.DefaultBusyRetryDelay;
 
-    /// <summary>The IP address or host name of the bridge, optionally with a port (8080 by default).</summary>
+    /// <summary>
+    /// The IP address or host name of the bridge, optionally with a port (8080 by default) and an http or https scheme.
+    /// An IPv6 address with a port is enclosed in brackets.
+    /// </summary>
     [Configuration]
     public partial string? HostAddress { get; set; }
 
@@ -165,9 +168,7 @@ public partial class NukiBridge : BackgroundService,
     public decimal? TotalConsumedEnergy => null;
 
     [Derived]
-    public string? IpAddress => NukiBridgeClient.TryNormalizeHostAddress(HostAddress, out var normalizedHostAddress, out _)
-        ? NukiBridgeClient.GetHost(normalizedHostAddress)
-        : null;
+    public string? IpAddress => NukiBridgeClient.TryParseHostAddress(HostAddress, out var host, out _, out _) ? host : null;
 
     public string? MacAddress => null;
 

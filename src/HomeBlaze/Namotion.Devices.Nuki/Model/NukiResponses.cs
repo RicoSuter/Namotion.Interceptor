@@ -2,130 +2,37 @@ using System.Text.Json.Serialization;
 
 namespace Namotion.Devices.Nuki.Model;
 
-internal sealed class NukiInfoResponse
-{
-    [JsonPropertyName("bridgeType")]
-    public int BridgeType { get; set; }
+internal sealed record NukiInfoResponse(int BridgeType, NukiIdsResponse? Ids, NukiVersionsResponse? Versions, long? Uptime, bool? ServerConnected);
 
-    [JsonPropertyName("ids")]
-    public NukiIdsResponse? Ids { get; set; }
+internal sealed record NukiIdsResponse(long? HardwareId, long? ServerId);
 
-    [JsonPropertyName("versions")]
-    public NukiVersionsResponse? Versions { get; set; }
+internal sealed record NukiVersionsResponse(string? FirmwareVersion, string? WifiFirmwareVersion, string? AppVersion);
 
-    [JsonPropertyName("uptime")]
-    public long? Uptime { get; set; }
+internal sealed record NukiDeviceResponse(
+    long NukiId, int DeviceType, string? Name, string? FirmwareVersion, NukiLastKnownStateResponse? LastKnownState);
 
-    [JsonPropertyName("serverConnected")]
-    public bool? ServerConnected { get; set; }
-}
+internal sealed record NukiLastKnownStateResponse(
+    int? Mode,
+    int? State,
+    bool? BatteryCritical,
+    bool? BatteryCharging,
+    int? BatteryChargeState,
+    bool? KeypadBatteryCritical,
+    int? DoorSensorState,
+    DateTimeOffset? RingActionTimestamp,
+    bool? RingActionState,
+    DateTimeOffset? Timestamp);
 
-internal sealed class NukiIdsResponse
-{
-    [JsonPropertyName("hardwareId")]
-    public long? HardwareId { get; set; }
+internal sealed record NukiActionResponse(bool Success);
 
-    [JsonPropertyName("serverId")]
-    public long? ServerId { get; set; }
-}
+internal sealed record NukiAuthResponse(string? Token, bool Success);
 
-internal sealed class NukiVersionsResponse
-{
-    [JsonPropertyName("firmwareVersion")]
-    public string? FirmwareVersion { get; set; }
+internal sealed record NukiDiscoveryResponse(NukiDiscoveryBridgeResponse[]? Bridges);
 
-    [JsonPropertyName("wifiFirmwareVersion")]
-    public string? WifiFirmwareVersion { get; set; }
+internal sealed record NukiDiscoveryBridgeResponse(long BridgeId, string? Ip, int Port);
 
-    [JsonPropertyName("appVersion")]
-    public string? AppVersion { get; set; }
-}
-
-internal sealed class NukiDeviceResponse
-{
-    [JsonPropertyName("nukiId")]
-    public long NukiId { get; set; }
-
-    [JsonPropertyName("deviceType")]
-    public int DeviceType { get; set; }
-
-    [JsonPropertyName("name")]
-    public string? Name { get; set; }
-
-    [JsonPropertyName("firmwareVersion")]
-    public string? FirmwareVersion { get; set; }
-
-    [JsonPropertyName("lastKnownState")]
-    public NukiLastKnownStateResponse? LastKnownState { get; set; }
-}
-
-internal sealed class NukiLastKnownStateResponse
-{
-    [JsonPropertyName("mode")]
-    public int? Mode { get; set; }
-
-    [JsonPropertyName("state")]
-    public int? State { get; set; }
-
-    [JsonPropertyName("batteryCritical")]
-    public bool? BatteryCritical { get; set; }
-
-    [JsonPropertyName("batteryCharging")]
-    public bool? BatteryCharging { get; set; }
-
-    [JsonPropertyName("batteryChargeState")]
-    public int? BatteryChargeState { get; set; }
-
-    [JsonPropertyName("keypadBatteryCritical")]
-    public bool? KeypadBatteryCritical { get; set; }
-
-    [JsonPropertyName("doorsensorState")]
-    public int? DoorSensorState { get; set; }
-
-    [JsonPropertyName("ringactionTimestamp")]
-    public DateTimeOffset? RingActionTimestamp { get; set; }
-
-    [JsonPropertyName("ringactionState")]
-    public bool? RingActionState { get; set; }
-
-    [JsonPropertyName("timestamp")]
-    public DateTimeOffset? Timestamp { get; set; }
-}
-
-internal sealed class NukiActionResponse
-{
-    [JsonPropertyName("success")]
-    public bool Success { get; set; }
-}
-
-internal sealed class NukiAuthResponse
-{
-    [JsonPropertyName("token")]
-    public string? Token { get; set; }
-
-    [JsonPropertyName("success")]
-    public bool Success { get; set; }
-}
-
-internal sealed class NukiDiscoveryResponse
-{
-    [JsonPropertyName("bridges")]
-    public NukiDiscoveryBridgeResponse[]? Bridges { get; set; }
-}
-
-internal sealed class NukiDiscoveryBridgeResponse
-{
-    [JsonPropertyName("bridgeId")]
-    public long BridgeId { get; set; }
-
-    [JsonPropertyName("ip")]
-    public string? Ip { get; set; }
-
-    [JsonPropertyName("port")]
-    public int Port { get; set; }
-}
-
-[JsonSourceGenerationOptions(NumberHandling = JsonNumberHandling.AllowReadingFromString)]
+// Case-insensitive matching also covers the spellings of the bridge, such as doorsensorState and ringactionTimestamp.
+[JsonSourceGenerationOptions(NumberHandling = JsonNumberHandling.AllowReadingFromString, PropertyNameCaseInsensitive = true)]
 [JsonSerializable(typeof(NukiInfoResponse))]
 [JsonSerializable(typeof(NukiDeviceResponse[]))]
 [JsonSerializable(typeof(NukiActionResponse))]
