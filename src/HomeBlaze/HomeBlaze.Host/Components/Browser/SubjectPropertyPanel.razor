@@ -987,7 +987,7 @@
 
         var isFolder = target.Child is null;
         var title = GetSubjectTitle();
-        await MetadataEditDialog.ShowAsync(DialogService, Subject, $"Metadata of {title}",
+        await MetadataEditDialog.ShowAsync(DialogService, Subject, isFolder, $"Metadata of {title}",
             titlePlaceholder: isFolder ? _registeredSubject?.Parents.FirstOrDefault().Index?.ToString() : null,
             navigationTitlePlaceholder: title,
             iconPlaceholder: isFolder ? "Folder" : (Subject as IIconProvider)?.IconName is { Length: > 0 } iconName ? iconName : "Article");

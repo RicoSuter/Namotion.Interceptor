@@ -9,9 +9,6 @@ namespace HomeBlaze.Services;
 /// </summary>
 public static class ChildOrdering
 {
-    // A longer order is put in a dictionary rather than searched for each child.
-    private const int MaxSearchedOrderLength = 16;
-
     /// <summary>
     /// Orders the children by the order of their container.
     /// </summary>
@@ -27,7 +24,7 @@ public static class ChildOrdering
         Func<T, string> getTitle)
     {
         Dictionary<string, int>? positions = null;
-        if (!childOrder.IsDefaultOrEmpty && childOrder.Length > MaxSearchedOrderLength)
+        if (!childOrder.IsDefaultOrEmpty)
         {
             positions = new Dictionary<string, int>(childOrder.Length, StringComparer.Ordinal);
             for (var index = 0; index < childOrder.Length; index++)
@@ -40,49 +37,39 @@ public static class ChildOrdering
         foreach (var child in children)
         {
             var name = getName(child);
-            var position = positions is not null ? positions.GetValueOrDefault(name, int.MaxValue)
-                : childOrder.IsDefaultOrEmpty ? -1
-                : childOrder.IndexOf(name, 0, StringComparer.Ordinal);
-            entries.Add(new Entry<T>(child, name, position < 0 ? int.MaxValue : position, GetDefaultRank(name), entries.Count));
+            var position = positions?.GetValueOrDefault(name, int.MaxValue) ?? int.MaxValue;
+            entries.Add(new Entry<T>(child, name, position, GetDefaultRank(name), entries.Count));
         }
 
+        var titles = new string?[entries.Count];
         var span = CollectionsMarshal.AsSpan(entries);
-        span.Sort(static (left, right) => left.Position != right.Position
-            ? left.Position.CompareTo(right.Position)
-            : left.Rank.CompareTo(right.Rank));
-
-        // The titles decide only within a run of children that are equal so far.
-        for (var start = 0; start < span.Length;)
+        span.Sort((left, right) =>
         {
-            var end = start + 1;
-            while (end < span.Length && span[end].Position == span[start].Position && span[end].Rank == span[start].Rank)
+            // First, as the sort may compare an entry with itself, which must not read its title.
+            if (left.Index == right.Index)
             {
-                end++;
+                return 0;
             }
 
-            if (end - start > 1)
+            var result = left.Position.CompareTo(right.Position);
+            if (result == 0)
             {
-                var run = span[start..end];
-                foreach (ref var entry in run)
-                {
-                    entry.Title = getTitle(entry.Child);
-                }
-
-                run.Sort(static (left, right) =>
-                {
-                    var result = StringComparer.InvariantCulture.Compare(left.Title, right.Title);
-                    if (result == 0)
-                    {
-                        result = string.CompareOrdinal(left.Name, right.Name);
-                    }
-
-                    // The sort is not stable, so the input order decides between children that are equal otherwise.
-                    return result != 0 ? result : left.Index.CompareTo(right.Index);
-                });
+                result = left.Rank.CompareTo(right.Rank);
             }
 
-            start = end;
-        }
+            if (result == 0)
+            {
+                result = StringComparer.InvariantCulture.Compare(GetTitle(left), GetTitle(right));
+            }
+
+            if (result == 0)
+            {
+                result = string.CompareOrdinal(left.Name, right.Name);
+            }
+
+            // The sort is not stable, so the input order decides between children that are equal otherwise.
+            return result != 0 ? result : left.Index.CompareTo(right.Index);
+        });
 
         var ordered = new T[span.Length];
         for (var index = 0; index < span.Length; index++)
@@ -91,6 +78,8 @@ public static class ChildOrdering
         }
 
         return ordered;
+
+        string GetTitle(Entry<T> entry) => titles[entry.Index] ??= getTitle(entry.Child);
     }
 
     private static int GetDefaultRank(string name)
@@ -101,13 +90,5 @@ public static class ChildOrdering
             : 2;
     }
 
-    private struct Entry<T>(T child, string name, int position, int rank, int index)
-    {
-        public readonly T Child = child;
-        public readonly string Name = name;
-        public readonly int Position = position;
-        public readonly int Rank = rank;
-        public readonly int Index = index;
-        public string? Title;
-    }
+    private readonly record struct Entry<T>(T Child, string Name, int Position, int Rank, int Index);
 }
