@@ -79,10 +79,10 @@ public sealed record McpMethodParameter
     /// <param name="isNullable">Whether the argument may be null, for example a nullable reference type.</param>
     /// <param name="description">A hint on the meaning of the value, such as its unit or range.</param>
     public static McpMethodParameter Create(string name, Type type, bool isNullable = false, string? description = null) =>
-        Create(name, type, isNullable, isRequired: false, description, depth: 0, visitedTypes: []);
+        Create(name, type, isNullable, isRequired: false, description, depth: 0, visitedTypes: null);
 
     private static McpMethodParameter Create(
-        string name, Type type, bool isNullable, bool isRequired, string? description, int depth, HashSet<Type> visitedTypes)
+        string name, Type type, bool isNullable, bool isRequired, string? description, int depth, HashSet<Type>? visitedTypes)
     {
         var underlyingType = Nullable.GetUnderlyingType(type);
         var valueType = underlyingType ?? type;
@@ -100,20 +100,17 @@ public sealed record McpMethodParameter
         };
     }
 
-    // Weak, so that the types of an unloaded plugin are not kept alive. Only the depth-0, empty-visitedTypes call
-    // (the public entry point) is a pure function of the type, so only that result is cached; nested recursion
-    // below depth 0 depends on the ancestor chain in visitedTypes and is computed every time.
+    // Weak, so that the types of an unloaded plugin are not kept alive. Only depth 0 is cached: deeper members
+    // depend on their ancestors in visitedTypes.
     private static readonly ConditionalWeakTable<Type, StrongBox<McpMethodParameter[]?>> PropertiesByTypeAtDepthZero = new();
 
-    private static McpMethodParameter[]? CreateProperties(Type type, int depth, HashSet<Type> visitedTypes)
+    private static McpMethodParameter[]? CreateProperties(Type type, int depth, HashSet<Type>? visitedTypes)
     {
         if (depth > 0)
         {
-            return CreatePropertiesCore(type, depth, visitedTypes);
+            return CreatePropertiesCore(type, depth, visitedTypes!);
         }
 
-        // The factory is static so it cannot capture this call's depth or visitedTypes: only depth 0 ever reaches
-        // here, so the factory recreates both as their fixed depth-0 values (0 and a fresh, empty set) itself.
         return PropertiesByTypeAtDepthZero
             .GetValue(type, static cachedType => new StrongBox<McpMethodParameter[]?>(CreatePropertiesCore(cachedType, 0, [])))
             .Value;
@@ -137,9 +134,7 @@ public sealed record McpMethodParameter
                 .Where(property => property.GetMethod?.IsPublic == true && property.SetMethod?.IsPublic == true &&
                                    property.GetIndexParameters().Length == 0 &&
                                    property.GetCustomAttribute<JsonIgnoreAttribute>()?.Condition != JsonIgnoreCondition.Always)
-                // A derived type may hide a same-named base member with `new`; GetProperties returns both, so keep the
-                // most derived one. Keep these rules in sync with the UI-side member walker that builds operation
-                // arguments from form input; kept as two copies because the project boundary prevents sharing code.
+                // Keep these member rules in sync with the host's member walker that builds arguments from form input.
                 .GroupBy(property => property.Name)
                 .Select(group => group.Aggregate((best, next) => next.DeclaringType!.IsSubclassOf(best.DeclaringType!) ? next : best))
                 .Select(property => Create(

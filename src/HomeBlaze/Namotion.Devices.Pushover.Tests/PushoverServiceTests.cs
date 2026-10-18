@@ -8,6 +8,7 @@ using Xunit;
 
 namespace Namotion.Devices.Pushover.Tests;
 
+[Collection(PushoverConnectionsCollection.Name)]
 public class PushoverServiceTests
 {
     private const string MessagesPath = "/1/messages.json";

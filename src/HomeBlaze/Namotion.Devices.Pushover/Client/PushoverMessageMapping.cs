@@ -78,14 +78,8 @@ internal static class PushoverMessageMapping
 
         logger.LogWarning("The Pushover {Field} has {Length} characters and is shortened to {MaximumLength}.", field, value.Length, maximumLength);
 
-        if (maximumLength <= 0)
-        {
-            // Not even the ellipsis fits; the shortened result must still never exceed maximumLength.
-            return string.Empty;
-        }
-
         var length = maximumLength - 1;
-        if (length > 0 && char.IsHighSurrogate(value[length - 1]))
+        if (char.IsHighSurrogate(value[length - 1]))
         {
             // Cutting between the two halves of a surrogate pair would leave an invalid character.
             length--;

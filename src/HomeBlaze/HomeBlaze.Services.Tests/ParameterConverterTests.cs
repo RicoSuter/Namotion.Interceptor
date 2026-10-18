@@ -326,7 +326,7 @@ public class ParameterConverterTests
         var inputs = new Dictionary<string, string?> { ["Text"] = "Hello", ["Count"] = "3" };
 
         // Act
-        var success = ParameterConverter.TryCreateObject(typeof(TestMessage), inputs, out var value, out var error);
+        var success = ParameterConverter.TryCreateObject(typeof(TestMessage), inputs, isNullable: false, out var value, out var error);
 
         // Assert
         Assert.True(success, error);
@@ -344,7 +344,7 @@ public class ParameterConverterTests
         var inputs = new Dictionary<string, string?> { ["Text"] = "Hello", ["Level"] = "High" };
 
         // Act
-        var success = ParameterConverter.TryCreateObject(typeof(TestMessage), inputs, out var value, out _);
+        var success = ParameterConverter.TryCreateObject(typeof(TestMessage), inputs, isNullable: false, out var value, out _);
 
         // Assert
         Assert.True(success);
@@ -355,7 +355,7 @@ public class ParameterConverterTests
     public void WhenRequiredMemberHasNoInput_ThenCreatingFails()
     {
         // Act
-        var success = ParameterConverter.TryCreateObject(typeof(TestMessage), new Dictionary<string, string?>(), out var value, out var error);
+        var success = ParameterConverter.TryCreateObject(typeof(TestMessage), new Dictionary<string, string?>(), isNullable: false, out var value, out var error);
 
         // Assert
         Assert.False(success);
@@ -370,7 +370,7 @@ public class ParameterConverterTests
         var inputs = new Dictionary<string, string?> { ["Text"] = "Hello" };
 
         // Act
-        var success = ParameterConverter.TryCreateObject(typeof(TestRequiredBoolMessage), inputs, out var value, out var error);
+        var success = ParameterConverter.TryCreateObject(typeof(TestRequiredBoolMessage), inputs, isNullable: false, out var value, out var error);
 
         // Assert
         Assert.True(success, error);
@@ -384,7 +384,7 @@ public class ParameterConverterTests
         var inputs = new Dictionary<string, string?> { ["Text"] = "Hello" };
 
         // Act
-        var success = ParameterConverter.TryCreateObject(typeof(TestRequiredNullableBoolMessage), inputs, out var value, out var error);
+        var success = ParameterConverter.TryCreateObject(typeof(TestRequiredNullableBoolMessage), inputs, isNullable: false, out var value, out var error);
 
         // Assert
         Assert.False(success);
@@ -430,7 +430,7 @@ public class ParameterConverterTests
         var inputs = new Dictionary<string, string?> { ["Text"] = "Hello", ["Count"] = "many" };
 
         // Act
-        var success = ParameterConverter.TryCreateObject(typeof(TestMessage), inputs, out _, out var error);
+        var success = ParameterConverter.TryCreateObject(typeof(TestMessage), inputs, isNullable: false, out _, out var error);
 
         // Assert
         Assert.False(success);
@@ -522,7 +522,7 @@ public class ParameterConverterTests
         var inputs = new Dictionary<string, string?> { ["DisplayName"] = "Hello" };
 
         // Act
-        var success = ParameterConverter.TryCreateObject(typeof(TestRenamedMessage), inputs, out var value, out var error);
+        var success = ParameterConverter.TryCreateObject(typeof(TestRenamedMessage), inputs, isNullable: false, out var value, out var error);
 
         // Assert
         Assert.True(success, error);
@@ -536,7 +536,7 @@ public class ParameterConverterTests
         var inputs = new Dictionary<string, string?> { ["Value"] = "NaN" };
 
         // Act
-        var success = ParameterConverter.TryCreateObject(typeof(TestDoubleMessage), inputs, out var value, out var error);
+        var success = ParameterConverter.TryCreateObject(typeof(TestDoubleMessage), inputs, isNullable: false, out var value, out var error);
 
         // Assert
         Assert.True(success, error);

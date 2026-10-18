@@ -5,7 +5,7 @@ navTitle: Pushover
 
 # Pushover
 
-[Pushover](https://pushover.net) delivers push notifications to phones, tablets and desktops. A Pushover service holds the application token of a Pushover application and one target per user or group key. Each target is a [notification publisher](../development/notifications.md), so agents, automations and alarms that send to all publishers reach each recipient once. The service itself is no publisher.
+[Pushover](https://pushover.net) delivers push notifications to phones, tablets and desktops. A Pushover service holds the application token of a Pushover application and one target per user or group key. Each target is a [notification publisher](../development/notifications.md), so agents, automations and alarms that send to all publishers reach each recipient once. The service itself is no publisher. A user who is in a group target and also has a target of their own still gets two copies.
 
 ## Configuration
 
@@ -34,10 +34,10 @@ navTitle: Pushover
 | Target | `SendNotification` | Sends a notification to this recipient and returns its id: the receipt of an emergency notification, otherwise the Pushover request id |
 | Target | `CancelAllEmergencies` | Requires confirmation. Stops the repeats of every emergency notification of this recipient by its tag, also those sent before a restart; enabled while a tracked one is active |
 | Emergency | `Cancel` | Requires confirmation. Stops the repeats of this emergency notification, enabled while it is active |
-| Service | `SendToAllTargets` | Sends a notification to every target at once. If some fail, the others are still sent and the error names the failed targets |
+| Service | `SendToAllTargets` | Sends a notification to every target at once |
 | Service | `CancelAllEmergencies` | Requires confirmation. Stops the repeats of the emergency notifications of every target by their tags, also those sent before a restart |
 
-When canceling the emergency notifications of several targets, a failure of one does not stop the others; the error names the failed ones. The cancel operations require confirmation, so agents and MCP clients cannot call them; run them from the UI, which asks you to confirm.
+When `SendToAllTargets` or `CancelAllEmergencies` of the service fails for some targets, the others are still sent or canceled, and the error names the failed targets. The cancel operations require confirmation, so agents and MCP clients cannot call them; run them from the UI, which asks you to confirm.
 
 ## Priorities
 
@@ -60,14 +60,14 @@ Pushover limits the message to 1024 characters, the title to 250, the url to 512
 
 | Property | Description |
 |----------|-------------|
-| `Status` | `Stopped` without application token, `Running`, or `Error` when the token is invalid or Pushover cannot be reached |
+| `Status` | `Stopped` without application token, `Starting` while validating the targets, `Running`, or `Error` when the token is invalid or Pushover cannot be reached |
 | `StatusMessage` | Details of the status |
 
 ### Target
 
 | Property | Description |
 |----------|-------------|
-| `Status` | `Running` when Pushover accepted the key, `Error` with the reason otherwise. Keys are checked at start and after each configuration change |
+| `Status` | `Stopped` with "Not validated yet" until the key is checked, `Running` when Pushover accepted the key, `Error` with the reason otherwise. Keys are checked at start and after each configuration change |
 | `Devices` | The devices of the user, as reported by Pushover |
 | `LastSentAt` | When the last notification was accepted by Pushover |
 | `Emergencies` | The emergency notifications by receipt, see [Emergencies](#emergencies) |
@@ -94,7 +94,7 @@ Sending an `Emergency` notification adds a Pushover emergency subject to the tar
 | `Expired` | It stopped repeating after `EmergencyExpire` without acknowledgement |
 | `Canceled` | It was canceled with `Cancel` or `CancelAllEmergencies`, or because its target was removed |
 
-While an emergency notification is active, the service reads its receipt every 10 seconds; otherwise it makes no requests. Each active emergency is read on its own, so with many active emergencies each receipt still costs one request every 10 seconds, and sending emergency notifications very often adds up to many requests. An emergency that is no longer active is removed from `Emergencies` 24 hours after it ended. `Emergencies` is kept in memory only: after a restart the list is empty, and an emergency that was still active keeps repeating on the phone until it is acknowledged or expires, without HomeBlaze tracking it. Every emergency notification is sent with the Pushover tag `target-{key}` of its target, so `CancelAllEmergencies` of the service, which is always enabled, still stops it, and so does that of the target while it has a tracked active emergency. Removing a target cancels its tag in the background.
+While an emergency notification is active, the service reads its receipt every 10 seconds; otherwise it makes no requests of its own, except that it validates the targets again every 30 seconds while it is in `Error` because Pushover cannot be reached. The receipts request carries the application token in its query string, which the .NET HTTP logging and tracing redact by default; do not disable that redaction. Each active emergency is read on its own, so with many active emergencies each receipt still costs one request every 10 seconds, and sending emergency notifications very often adds up to many requests. An emergency that is no longer active is removed from `Emergencies` 24 hours after it ended. When a history store is configured, the message and the status of each emergency are recorded in the history like any other state. `Emergencies` is kept in memory only: after a restart the list is empty, and an emergency that was still active keeps repeating on the phone until it is acknowledged or expires, without HomeBlaze tracking it. Every emergency notification is sent with the Pushover tag `target-{key}` of its target, so `CancelAllEmergencies` of the service, which is always enabled, still stops it, and so does that of the target while it has a tracked active emergency. Removing a target cancels its tag in the background.
 
 The service tracks the emergencies by the key of their target. When a configuration reload replaces a target but keeps its key, the new target shows the same emergencies and can still cancel them, including one whose send was still running during the reload. The replaced instance is no longer part of the service: sending through it fails. An external edit of the configuration file replaces the target subjects this way, so their emergencies are briefly detached from the subject graph and attached again, keeping their state. When a target is removed, its active emergencies are canceled, including one whose send completes after the removal.
 
@@ -102,7 +102,7 @@ Receipts are read also while validating the targets fails, so an acknowledgement
 
 ## Events
 
-The service and each target implement `IObservable<PushoverEmergencyAcknowledgedEvent>`, which emits one event per emergency notification when it is acknowledged, also when it was acknowledged just before a `Cancel`. Subscribe on the service for the events of all targets, or on a target for the events of its key; a subscription on a target keeps receiving them when a configuration reload replaces the target instance. Subscribing on a target that is not part of a service fails. The event carries the `TargetKey`, the `Target` instance under that key, the `Emergency`, its `Id` (the receipt, the same as the `NotificationResult.Id` of the send), the `Timestamp` of the acknowledgement and the `AcknowledgedByDevice`. The `Target` is left out when the event is serialized, since it holds the secret user key. Until the system-wide message bus exists, subscribe on the service or the target directly.
+The service and each target implement `IObservable<PushoverEmergencyAcknowledgedEvent>`, which emits one event per emergency notification when it is acknowledged, also when it was acknowledged just before a `Cancel`. Subscribe on the service for the events of all targets, or on a target for the events of its key; a subscription on a target keeps receiving them when a configuration reload replaces the target instance. Subscribing on a target that is not part of a service fails. The event carries the `TargetKey`, the `Target` instance under that key, the `Emergency`, its `Id` (the receipt), the `Timestamp` of the acknowledgement and the `AcknowledgedByDevice`. The `Target` is left out when the event is serialized, since it holds the secret user key. Until the system-wide message bus exists, subscribe on the service or the target directly.
 
 ## Interfaces
 

@@ -30,8 +30,7 @@ public partial class PushoverService
                     Status = ServiceStatus.Running;
                 }
 
-                var untilNextRemoval = _emergencyTracker.RemoveFinishedEmergencies();
-                var timeout = _emergencyTracker.GetWaitTimeout(untilNextRemoval);
+                var timeout = _emergencyTracker.RemoveFinishedEmergencies();
                 await _signal.WaitAsync(isValid && isPolled ? timeout : LimitTo(timeout, RetryInterval), stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)

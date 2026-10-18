@@ -72,17 +72,24 @@ var publishers = registry.KnownSubjects.Keys
     .OfType<INotificationPublisher>()
     .ToArray();
 
-// Send to all configured channels
 var notification = new Notification
 {
     Message = "Temperature exceeded threshold on CNC-01",
     Priority = NotificationPriority.High
 };
 
-foreach (var publisher in publishers)
+// Send to all channels at once; one failing channel must not stop the others
+await Task.WhenAll(publishers.Select(async publisher =>
 {
-    await publisher.SendNotificationAsync(notification, cancellationToken);
-}
+    try
+    {
+        await publisher.SendNotificationAsync(notification, cancellationToken);
+    }
+    catch (Exception exception) when (exception is not OperationCanceledException)
+    {
+        logger.LogWarning(exception, "Sending a notification failed");
+    }
+}));
 ```
 
 In the planned [Alarms](../architecture/design/alarms.md) system, alarm definitions will include configurable notification routing: which channels receive which alarms, based on alarm severity and type.

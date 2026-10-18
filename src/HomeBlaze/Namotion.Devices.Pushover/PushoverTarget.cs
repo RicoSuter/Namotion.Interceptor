@@ -33,15 +33,18 @@ public partial class PushoverTarget :
     public static readonly TimeSpan MaximumEmergencyExpire = TimeSpan.FromHours(3);
 
     // Not intercepted: an intercepted property holding the service would attach it as a child of its own child.
-    internal PushoverService? Service { get; set; }
+    // One reference, so the service and the key are always read together.
+    private Membership? _membership;
+
+    internal PushoverService? Service => _membership?.Service;
 
     /// <summary>
-    /// The key of this target in <see cref="PushoverService.Targets"/>, assigned together with <see cref="Service"/>.
+    /// The key of this target in <see cref="PushoverService.Targets"/>, or null when it is not part of a service.
     /// </summary>
-    internal string? Key { get; set; }
+    internal string? Key => _membership?.Key;
 
-    private PushoverService RequiredService =>
-        Service ?? throw new InvalidOperationException($"The target '{Title}' is not part of a Pushover service.");
+    private Membership RequiredMembership =>
+        _membership ?? throw new InvalidOperationException($"The target '{Title}' is not part of a Pushover service.");
 
     [Configuration]
     public partial string Name { get; set; }
@@ -88,8 +91,7 @@ public partial class PushoverTarget :
 
     /// <summary>
     /// The emergency notifications by receipt: the active ones and those that ended within the retention of the
-    /// service. Replaced as a whole, never changed in place. Set by the service, which tracks the emergencies by
-    /// the key of the target, so an instance that replaces this one under the same key shows the same emergencies.
+    /// service. Replaced as a whole, never changed in place.
     /// </summary>
     [State]
     public partial Dictionary<string, PushoverEmergency> Emergencies { get; internal set; }
@@ -140,16 +142,19 @@ public partial class PushoverTarget :
         Emergencies = new Dictionary<string, PushoverEmergency>();
     }
 
-    public async Task<NotificationResult> SendNotificationAsync(Notification notification, CancellationToken cancellationToken) =>
-        new() { Id = await RequiredService.SendAsync(this, notification, cancellationToken) };
+    public async Task<NotificationResult> SendNotificationAsync(Notification notification, CancellationToken cancellationToken)
+    {
+        var membership = RequiredMembership;
+        return new() { Id = await membership.Service.SendAsync(this, membership.Key, notification, cancellationToken) };
+    }
 
     /// <summary>
     /// Stops the repeats of every emergency notification of this target by its tag, also those sent before a restart.
     /// </summary>
     [Operation(Title = "Cancel all emergencies", Icon = "NotificationsOff", Position = 2, RequiresConfirmation = true)]
     public Task CancelAllEmergenciesAsync(CancellationToken cancellationToken) =>
-        Service is { } service && Key is { } key
-            ? service.EmergencyTracker.CancelAllAsync(key, cancellationToken)
+        _membership is { } membership
+            ? membership.Service.EmergencyTracker.CancelAllAsync(membership.Key, cancellationToken)
             : Task.CompletedTask;
 
     /// <summary>
@@ -157,16 +162,21 @@ public partial class PushoverTarget :
     /// receiving them when a configuration reload replaces this instance under the same key.
     /// </summary>
     /// <exception cref="InvalidOperationException">The target is not part of a Pushover service.</exception>
-    public IDisposable Subscribe(IObserver<PushoverEmergencyAcknowledgedEvent> observer) =>
-        Key is { } key && Service is { } service
-            ? service.AcknowledgedEvents.Subscribe(observer, key)
-            : throw new InvalidOperationException($"The target '{Title}' is not part of a Pushover service.");
+    public IDisposable Subscribe(IObserver<PushoverEmergencyAcknowledgedEvent> observer)
+    {
+        var membership = RequiredMembership;
+        return membership.Service.AcknowledgedEvents.Subscribe(observer, membership.Key);
+    }
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
     {
         Service?.RequestValidation();
         return Task.CompletedTask;
     }
+
+    internal void Attach(PushoverService service, string key) => _membership = new Membership(service, key);
+
+    internal void Detach() => _membership = null;
 
     internal void SetValidated(string[] devices)
     {
@@ -213,4 +223,6 @@ public partial class PushoverTarget :
     }
 
     partial void OnDevicesChanging(ref string[] newValue, ref bool cancel) => newValue ??= [];
+
+    private sealed record Membership(PushoverService Service, string Key);
 }

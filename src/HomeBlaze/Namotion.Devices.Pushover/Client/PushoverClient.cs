@@ -5,7 +5,7 @@ namespace Namotion.Devices.Pushover.Client;
 
 internal sealed class PushoverClient
 {
-    internal const string BaseAddress = "https://api.pushover.net/1/";
+    private const string BaseAddress = "https://api.pushover.net/1/";
 
     private readonly IHttpClientFactory _httpClientFactory;
 

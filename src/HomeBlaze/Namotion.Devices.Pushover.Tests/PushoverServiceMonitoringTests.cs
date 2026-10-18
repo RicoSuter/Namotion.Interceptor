@@ -260,8 +260,7 @@ public class PushoverServiceMonitoringTests
         var target = service.Targets["rico"];
         var events = new List<PushoverEmergencyAcknowledgedEvent>();
 
-        // The throwing subscriber is registered first so a bare try/catch around the publish call alone would
-        // not be enough: the fix must stop that subscriber's exception from also silencing the one after it.
+        // The throwing subscriber is registered before the one that records the events.
         using var throwingSubscription = target.Subscribe(CreateThrowingObserver());
         using var subscription = target.Subscribe(CreateListObserver(events));
 

@@ -89,13 +89,10 @@
     // "parameter.Member", so the two never collide.
     private sealed record InputField(string Key, string Label, Type Type, StateUnit? Unit, bool IsRequired)
     {
-        // Computed once per field instead of per render; only an enum member carries a non-null list.
         public string[]? EnumNames { get; } =
             (Nullable.GetUnderlyingType(Type) ?? Type).IsEnum ? Enum.GetNames(Nullable.GetUnderlyingType(Type) ?? Type) : null;
     }
 
-    // The parameters and their derived UI shape, computed once per Method so the markup, validation and Execute
-    // all walk the same array instead of recomputing GetInputKind/CreateMemberFields repeatedly.
     private sealed record ParameterInput(MethodParameter Parameter, InputKind Kind, InputField[] Fields);
 
     private IEnumerable<MethodParameter> InputParameters =>

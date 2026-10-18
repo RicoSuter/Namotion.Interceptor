@@ -37,8 +37,7 @@ public static class ParameterConverter
         Converters = { new JsonStringEnumConverter() }
     };
 
-    // Weak, so that the types of an unloaded plugin are not kept alive. The dialog this feeds re-scans a type several
-    // times per keystroke, so the reflection work is cached per type instead of repeated.
+    // Weak, so that the types of an unloaded plugin are not kept alive.
     private static readonly ConditionalWeakTable<Type, ObjectParameterMember[]> ObjectMembersByType = new();
 
     /// <summary>
@@ -64,7 +63,7 @@ public static class ParameterConverter
         }
 
         var actualType = Nullable.GetUnderlyingType(type) ?? type;
-        if (actualType.IsArray || typeof(System.Collections.IEnumerable).IsAssignableFrom(actualType))
+        if (typeof(System.Collections.IEnumerable).IsAssignableFrom(actualType))
         {
             return false;
         }
@@ -98,9 +97,7 @@ public static class ParameterConverter
             .Where(property => property.GetMethod?.IsPublic == true && property.SetMethod?.IsPublic == true &&
                                property.GetIndexParameters().Length == 0 &&
                                property.GetCustomAttribute<JsonIgnoreAttribute>()?.Condition != JsonIgnoreCondition.Always)
-            // A derived type may hide a same-named base member with `new`; GetProperties returns both, so keep the
-            // most derived one. Same member rules as McpMethodParameter.CreatePropertiesCore in Namotion.Interceptor.Mcp
-            // (see that file); kept as two copies because the project boundary prevents sharing code.
+            // Keep these member rules in sync with McpMethodParameter.CreatePropertiesCore in Namotion.Interceptor.Mcp.
             .GroupBy(property => property.Name)
             .Select(group => group.Aggregate((best, next) => next.DeclaringType!.IsSubclassOf(best.DeclaringType!) ? next : best))
             .Select(property => new ObjectParameterMember(
@@ -110,13 +107,6 @@ public static class ParameterConverter
                 property.IsDefined(typeof(RequiredMemberAttribute))))
             .ToArray();
     }
-
-    /// <summary>
-    /// Tries to create an object from the string inputs of its members, keyed by <see cref="ObjectParameterMember.Name"/>.
-    /// A member without input keeps its default value; a required member without input fails.
-    /// </summary>
-    public static bool TryCreateObject(Type type, IReadOnlyDictionary<string, string?> inputs, out object? value, out string? error) =>
-        TryCreateObject(type, inputs, isNullable: false, out value, out error);
 
     /// <summary>
     /// Tries to create an object from the string inputs of its members, keyed by <see cref="ObjectParameterMember.Name"/>.
@@ -147,8 +137,7 @@ public static class ParameterConverter
                 {
                     if (member.Type == typeof(bool))
                     {
-                        // An unticked checkbox carries no input, but System.Text.Json rejects a required member
-                        // that is missing from the JSON entirely, so the unticked default is written explicitly.
+                        // System.Text.Json rejects a required member that is missing from the JSON.
                         json[member.JsonName] = false;
                         continue;
                     }
@@ -177,11 +166,9 @@ public static class ParameterConverter
             }
         }
 
-        return TryDeserialize(json.ToJsonString(), type, out value, out error);
+        return TryDeserialize(json, static (node, type) => node.Deserialize(type, ObjectSerializerOptions), type, out value, out error);
     }
 
-    // A checkbox posts "False" (or "false") once unticked instead of leaving its input empty, so a bool or bool?
-    // member in that state is treated the same as no input when deciding whether the whole object was entered.
     private static bool IsEffectivelyEmpty(ObjectParameterMember member, string? input)
     {
         if (string.IsNullOrEmpty(input))
@@ -206,7 +193,7 @@ public static class ParameterConverter
             return isNullable;
         }
 
-        if (!TryDeserialize(input, type, out value, out error))
+        if (!TryDeserialize(input, static (text, type) => JsonSerializer.Deserialize(text, type, ObjectSerializerOptions), type, out value, out error))
         {
             return false;
         }
@@ -220,11 +207,12 @@ public static class ParameterConverter
         return true;
     }
 
-    private static bool TryDeserialize(string json, Type type, out object? value, out string? error)
+    private static bool TryDeserialize<TJson>(
+        TJson json, Func<TJson, Type, object?> deserialize, Type type, out object? value, out string? error)
     {
         try
         {
-            value = JsonSerializer.Deserialize(json, type, ObjectSerializerOptions);
+            value = deserialize(json, type);
             error = null;
             return true;
         }

@@ -28,7 +28,7 @@ internal sealed class PushoverMessageRequest
     public string? Tags { get; init; }
 
     /// <summary>
-    /// The Pushover messages endpoint documents form fields, not a JSON body.
+    /// Returns the form fields of the messages endpoint, leaving out each member that is null.
     /// </summary>
     internal IEnumerable<KeyValuePair<string, string>> ToFormFields()
     {

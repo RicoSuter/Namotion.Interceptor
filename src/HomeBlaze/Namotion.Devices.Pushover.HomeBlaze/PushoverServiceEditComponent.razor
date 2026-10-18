@@ -28,8 +28,8 @@
             <MudTextField @bind-Value="target.UserKey"
                           Label="User or Group Key"
                           InputType="InputType.Password"
-                          HelperText="@(target.HasStoredUserKey ? "Leave empty to keep the current key" : null)"
-                          Required="@(!target.HasStoredUserKey)"
+                          HelperText="@(HasStoredUserKey(target) ? "Leave empty to keep the current key" : null)"
+                          Required="@(!HasStoredUserKey(target))"
                           RequiredError="Key is required"
                           Immediate="true"
                           OnKeyUp="OnFieldChanged"
@@ -75,8 +75,6 @@
 
     private PushoverService? Service => Subject as PushoverService;
 
-    // The defaults a new target is created with, so the seeded input matches PushoverTarget's own constructor
-    // instead of drifting from it through separately maintained literals.
     private static readonly PushoverTarget DefaultTarget = new();
 
     private static readonly int MinimumEmergencyRetrySeconds = (int)PushoverTarget.MinimumEmergencyRetry.TotalSeconds;
@@ -95,7 +93,7 @@
     public bool IsValid =>
         (_hasApplicationToken || !string.IsNullOrWhiteSpace(_applicationToken)) &&
         _targets.Count > 0 &&
-        _targets.All(target => target.IsValid);
+        _targets.All(target => !string.IsNullOrWhiteSpace(target.Name) && (HasStoredUserKey(target) || !string.IsNullOrWhiteSpace(target.UserKey)));
 
     public bool IsDirty { get; private set; }
 
@@ -119,7 +117,6 @@
             {
                 Key = key,
                 Name = target.Name,
-                HasStoredUserKey = !string.IsNullOrEmpty(target.UserKey),
                 EmergencyRetrySeconds = emergencyRetrySeconds,
                 LoadedEmergencyRetrySeconds = emergencyRetrySeconds,
                 EmergencyExpireMinutes = emergencyExpireMinutes,
@@ -167,7 +164,8 @@
         foreach (var input in _targets)
         {
             var key = input.Key ?? PushoverService.CreateTargetKey(input.Name, targets.Keys.Concat(Service.Targets.Keys).ToArray());
-            var target = input.Key != null && Service.Targets.TryGetValue(input.Key, out var existing) ? existing : new PushoverTarget();
+            var isExisting = TryGetExistingTarget(input, out var existing);
+            var target = existing ?? new PushoverTarget();
 
             target.Name = input.Name;
             if (!string.IsNullOrWhiteSpace(input.UserKey))
@@ -175,14 +173,14 @@
                 target.UserKey = input.UserKey;
             }
 
-            // Only written when the user actually changed the number, so an untouched field never re-rounds the
-            // target's existing TimeSpan through the seconds/minutes the field displays it in.
-            if (input.EmergencyRetrySeconds != input.LoadedEmergencyRetrySeconds)
+            // Written only when the user changed the number, so an untouched field never rounds the existing
+            // TimeSpan to the seconds or minutes the field shows. A new target takes every value.
+            if (!isExisting || input.EmergencyRetrySeconds != input.LoadedEmergencyRetrySeconds)
             {
                 target.EmergencyRetry = TimeSpan.FromSeconds(input.EmergencyRetrySeconds);
             }
 
-            if (input.EmergencyExpireMinutes != input.LoadedEmergencyExpireMinutes)
+            if (!isExisting || input.EmergencyExpireMinutes != input.LoadedEmergencyExpireMinutes)
             {
                 target.EmergencyExpire = TimeSpan.FromMinutes(input.EmergencyExpireMinutes);
             }
@@ -191,7 +189,6 @@
 
             input.Key = key;
             input.UserKey = null;
-            input.HasStoredUserKey = !string.IsNullOrEmpty(target.UserKey);
             input.LoadedEmergencyRetrySeconds = input.EmergencyRetrySeconds;
             input.LoadedEmergencyExpireMinutes = input.EmergencyExpireMinutes;
             targets[key] = target;
@@ -206,6 +203,17 @@
         return Task.CompletedTask;
     }
 
+    // An input whose key is no longer in Service.Targets, for example after an external edit of the configuration,
+    // is a new target and needs its user key again.
+    private bool TryGetExistingTarget(TargetInput input, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out PushoverTarget? target)
+    {
+        target = null;
+        return input.Key is { } key && Service?.Targets.TryGetValue(key, out target) == true;
+    }
+
+    private bool HasStoredUserKey(TargetInput input) =>
+        TryGetExistingTarget(input, out var target) && !string.IsNullOrEmpty(target.UserKey);
+
     private sealed class TargetInput
     {
         public string? Key { get; set; }
@@ -214,12 +222,8 @@
 
         public string? UserKey { get; set; }
 
-        public bool HasStoredUserKey { get; set; }
-
         public int EmergencyRetrySeconds { get; set; } = (int)DefaultTarget.EmergencyRetry.TotalSeconds;
 
-        // The number the field was last loaded or saved with, so SaveAsync can tell an untouched field (which
-        // must leave the target's TimeSpan alone) from one the user actually edited.
         public int LoadedEmergencyRetrySeconds { get; set; } = (int)DefaultTarget.EmergencyRetry.TotalSeconds;
 
         public int EmergencyExpireMinutes { get; set; } = (int)DefaultTarget.EmergencyExpire.TotalMinutes;
@@ -227,7 +231,5 @@
         public int LoadedEmergencyExpireMinutes { get; set; } = (int)DefaultTarget.EmergencyExpire.TotalMinutes;
 
         public int MaximumActiveEmergencies { get; set; } = DefaultTarget.MaximumActiveEmergencies;
-
-        public bool IsValid => !string.IsNullOrWhiteSpace(Name) && (HasStoredUserKey || !string.IsNullOrWhiteSpace(UserKey));
     }
 }

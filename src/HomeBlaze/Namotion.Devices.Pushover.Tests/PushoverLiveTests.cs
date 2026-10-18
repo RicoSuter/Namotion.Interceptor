@@ -130,7 +130,18 @@ public class PushoverLiveTests
         }, CancellationToken.None);
 
         // Assert
-        var acknowledgedEvent = await acknowledged.Task.WaitAsync(TimeSpan.FromMinutes(5));
+        PushoverEmergencyAcknowledgedEvent acknowledgedEvent;
+        try
+        {
+            acknowledgedEvent = await acknowledged.Task.WaitAsync(TimeSpan.FromMinutes(5));
+        }
+        catch (TimeoutException)
+        {
+            // Stops the alarm on the phone, which would otherwise repeat until the emergency expires.
+            await target.Emergencies[result.Id!].CancelAsync(CancellationToken.None);
+            throw;
+        }
+
         Assert.Equal(result.Id, acknowledgedEvent.Id);
         Assert.Equal(PushoverEmergencyStatus.Acknowledged, acknowledgedEvent.Emergency.Status);
         Assert.False(string.IsNullOrEmpty(acknowledgedEvent.AcknowledgedByDevice));

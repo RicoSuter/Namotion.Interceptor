@@ -261,17 +261,19 @@ internal sealed class PushoverEmergencyTracker
         CancelByTagAsync(targetKey, GetActiveEmergencies(targetKey), cancellationToken);
 
     /// <summary>
-    /// Removes the emergencies that ended at least the retention of the service ago, and returns how long until the
-    /// next of the remaining ended ones is due for removal, or null when none is.
+    /// Removes the emergencies that ended at least the retention of the service ago, and returns how long the
+    /// receipt polling loop may wait: until the next receipt poll while an emergency is active, and no longer than
+    /// until the next ended emergency is due for removal; with neither pending, until a signal only.
     /// </summary>
-    public TimeSpan? RemoveFinishedEmergencies()
+    public TimeSpan RemoveFinishedEmergencies()
     {
         var retention = _service.FinishedEmergencyRetention;
         var timeProvider = _service.TimeProvider;
         lock (_lock)
         {
             var now = timeProvider.GetTimestamp();
-            TimeSpan? untilNextRemoval = null;
+            var timeout = Timeout.InfiniteTimeSpan;
+            var hasActiveEmergencies = false;
             List<(string TargetKey, Dictionary<string, PushoverEmergency> Remaining)>? changes = null;
             foreach (var (targetKey, emergencies) in _emergenciesByTargetKey)
             {
@@ -280,6 +282,7 @@ internal sealed class PushoverEmergencyTracker
                 {
                     if (emergency.EndedTimestamp is not { } endedTimestamp)
                     {
+                        hasActiveEmergencies = true;
                         continue;
                     }
 
@@ -288,9 +291,9 @@ internal sealed class PushoverEmergencyTracker
                     {
                         (remaining ??= new Dictionary<string, PushoverEmergency>(emergencies)).Remove(receipt);
                     }
-                    else if (untilNextRemoval is null || untilRemoval < untilNextRemoval)
+                    else
                     {
-                        untilNextRemoval = untilRemoval;
+                        timeout = Shorter(timeout, untilRemoval);
                     }
                 }
 
@@ -305,24 +308,12 @@ internal sealed class PushoverEmergencyTracker
                 Publish(targetKey, _targets[targetKey], remaining);
             }
 
-            return untilNextRemoval;
+            return hasActiveEmergencies ? Shorter(timeout, _service.ReceiptPollingInterval) : timeout;
         }
     }
 
-    /// <summary>
-    /// Returns how long the receipt polling loop may wait: until the next receipt poll while an emergency is active,
-    /// and no longer than <paramref name="untilNextRemoval"/>; with neither pending, until a signal only.
-    /// </summary>
-    public TimeSpan GetWaitTimeout(TimeSpan? untilNextRemoval)
-    {
-        var timeout = HasActiveEmergencies() ? _service.ReceiptPollingInterval : Timeout.InfiniteTimeSpan;
-        if (untilNextRemoval is { } untilRemoval && (timeout == Timeout.InfiniteTimeSpan || untilRemoval < timeout))
-        {
-            timeout = untilRemoval;
-        }
-
-        return timeout;
-    }
+    private static TimeSpan Shorter(TimeSpan timeout, TimeSpan other) =>
+        timeout == Timeout.InfiniteTimeSpan || other < timeout ? other : timeout;
 
     // The tracked emergencies are read before the request, so one sent while it runs is not marked canceled.
     private async Task CancelByTagAsync(string targetKey, PushoverEmergency[] trackedEmergencies, CancellationToken cancellationToken)
@@ -363,25 +354,6 @@ internal sealed class PushoverEmergencyTracker
             return _emergenciesByTargetKey.TryGetValue(targetKey, out var targetEmergencies)
                 ? targetEmergencies.Values.Where(IsActive).ToArray()
                 : [];
-        }
-    }
-
-    private bool HasActiveEmergencies()
-    {
-        lock (_lock)
-        {
-            foreach (var emergencies in _emergenciesByTargetKey.Values)
-            {
-                foreach (var emergency in emergencies.Values)
-                {
-                    if (IsActive(emergency))
-                    {
-                        return true;
-                    }
-                }
-            }
-
-            return false;
         }
     }
 

@@ -66,8 +66,7 @@ public partial class PushoverEmergency : ITitleProvider, IIconProvider
     private readonly PushoverEmergencyTracker _tracker;
 
     /// <summary>
-    /// The key of the target in <see cref="PushoverService.Targets"/>, which stays the same when a configuration
-    /// reload replaces the target instance.
+    /// The key of the target in <see cref="PushoverService.Targets"/>.
     /// </summary>
     internal string TargetKey { get; }
 

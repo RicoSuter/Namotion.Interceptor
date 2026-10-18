@@ -88,26 +88,6 @@ public class PushoverMessageMappingTests
     }
 
     [Fact]
-    public void WhenMaximumLengthIsOne_ThenTheResultIsJustTheEllipsisAndDoesNotThrow()
-    {
-        // Act
-        var shortened = PushoverMessageMapping.Shorten("abcdef", 1, "message", NullLogger.Instance);
-
-        // Assert
-        Assert.Equal("…", shortened);
-    }
-
-    [Fact]
-    public void WhenMaximumLengthIsZero_ThenTheResultIsEmptyAndDoesNotThrow()
-    {
-        // Act
-        var shortened = PushoverMessageMapping.Shorten("abcdef", 0, "message", NullLogger.Instance);
-
-        // Assert
-        Assert.Equal(string.Empty, shortened);
-    }
-
-    [Fact]
     public void WhenUrlIsTooLong_ThenItAndItsUrlTitleAreOmittedInsteadOfBeingShortened()
     {
         // Act

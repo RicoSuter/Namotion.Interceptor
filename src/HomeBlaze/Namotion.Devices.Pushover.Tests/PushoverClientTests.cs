@@ -6,6 +6,7 @@ using Xunit;
 
 namespace Namotion.Devices.Pushover.Tests;
 
+[Collection(PushoverConnectionsCollection.Name)]
 public class PushoverClientTests
 {
     private static PushoverMessageRequest CreateRequest() => new() { Token = "app", User = "user", Message = "Hello" };

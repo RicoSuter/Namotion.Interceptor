@@ -11,8 +11,7 @@ using Namotion.Interceptor.Attributes;
 namespace Namotion.Devices.Pushover;
 
 /// <summary>
-/// A Pushover application that sends notifications to its targets. Only the targets are notification publishers, so
-/// sending to all publishers reaches each recipient once.
+/// A Pushover application that sends notifications to its targets.
 /// </summary>
 [Category("Notifications")]
 [Description("Pushover push notifications to phones and desktops, one target per user or group")]
@@ -69,17 +68,11 @@ public partial class PushoverService :
         _ => null
     };
 
-    // Not intercepted, so tests can run faster than production timing: polling receipts below the five-second
-    // minimum the receipts API allows, and without waiting out the retry delay after a failure.
+    // Test hooks.
     internal TimeSpan ReceiptPollingInterval { get; set; } = TimeSpan.FromSeconds(10);
     internal TimeSpan MinimumReceiptPollingInterval { get; set; } = TimeSpan.FromSeconds(5);
     internal TimeSpan RetryInterval { get; set; } = TimeSpan.FromSeconds(30);
     internal TimeSpan FinishedEmergencyRetention { get; set; } = TimeSpan.FromHours(24);
-
-    /// <summary>
-    /// Measures the receipt polling, the expiry and the retention of the emergencies with its timestamps, and gives
-    /// the wall-clock times shown.
-    /// </summary>
     internal TimeProvider TimeProvider { get; set; } = TimeProvider.System;
 
     internal ILogger<PushoverService> Logger => _logger;
@@ -104,16 +97,17 @@ public partial class PushoverService :
     public async Task SendToAllTargetsAsync(Notification notification, CancellationToken cancellationToken)
     {
         PushoverMessageMapping.Validate(notification);
-        var targets = Targets.Values.ToArray();
-        if (targets.Length == 0)
+        // Targets is replaced, never changed in place, so the keys and their targets stay consistent.
+        var targets = Targets;
+        if (targets.Count == 0)
         {
             throw new InvalidOperationException("No Pushover targets are configured.");
         }
 
         await PushoverBatch.RunAllAsync(
-            targets,
-            target => SendAsync(target, notification, cancellationToken),
-            target => target.Title,
+            targets.Keys.ToArray(),
+            key => SendAsync(targets[key], key, notification, cancellationToken),
+            key => targets[key].Title,
             "Sending to",
             "targets",
             cancellationToken);
@@ -171,9 +165,9 @@ public partial class PushoverService :
 
     /// <summary>
     /// Sends <paramref name="notification"/> to <paramref name="target"/> and returns its id: the receipt of an
-    /// emergency notification, which is then tracked under the key of the target, otherwise the request id.
+    /// emergency notification, which is then tracked under <paramref name="targetKey"/>, otherwise the request id.
     /// </summary>
-    internal async Task<string?> SendAsync(PushoverTarget target, Notification notification, CancellationToken cancellationToken)
+    internal async Task<string?> SendAsync(PushoverTarget target, string targetKey, Notification notification, CancellationToken cancellationToken)
     {
         PushoverMessageMapping.Validate(notification);
 
@@ -184,7 +178,6 @@ public partial class PushoverService :
             throw new InvalidOperationException($"The user key of the Pushover target '{target.Title}' is not configured.");
         }
 
-        var targetKey = target.Key ?? throw new InvalidOperationException($"The target '{target.Title}' is not part of a Pushover service.");
         var isEmergency = notification.Priority == NotificationPriority.Emergency;
         if (isEmergency)
         {
@@ -247,16 +240,14 @@ public partial class PushoverService :
             {
                 if (!newValue.TryGetValue(key, out var target) || !ReferenceEquals(target, previousTarget))
                 {
-                    previousTarget.Service = null;
-                    previousTarget.Key = null;
+                    previousTarget.Detach();
                 }
             }
         }
 
         foreach (var (key, target) in newValue)
         {
-            target.Service = this;
-            target.Key = key;
+            target.Attach(this, key);
         }
 
         _emergencyTracker.SetTargets(newValue);
