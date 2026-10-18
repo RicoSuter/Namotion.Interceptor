@@ -39,6 +39,7 @@ MCP tools are split across packages, configured via a single `McpServerConfigura
 
 - **One configuration**: `HomeBlazeMcpConfigurationFactory` builds the configuration for both the MCP server and the built-in agents. Satellite packages contribute tool providers once with `AddHomeBlazeMcpToolProvider`.
 - **No dependency on `/mcp`**: the agents get their tools through `HomeBlazeAgentToolSource` and serve them in-process or on their own listener. `McpServer:Enabled` only decides whether the MCP server is registered and `/mcp` is mapped.
+- **Excluded types**: `HomeBlazeMcpConfigurationFactory` gives `browse`, `search` and `list_types` every registered type with `[ExcludeFrom(ExclusionTarget.Agents)]` and the type of the metadata subject as types to leave out, which agents still reach by explicit path (see [Excluding Subjects and Methods](../../development/building-subjects.md#excluding-subjects-and-methods)); the server instructions and the preamble of the built-in agents name `<path>/HomeBlaze:Metadata`.
 - **Transport-agnostic tools**: each tool is a `McpToolInfo` (metadata plus a plain function). It is served as an MCP tool through `McpToolDispatcher` (external agents and the CLI agent route) or wrapped with `ToAIFunction` (the API agent).
 - **Why method tools are HomeBlaze-specific**: method discovery uses `MethodMetadata` with `[Operation]` and `[Query]` registry attributes, a HomeBlaze convention, not a core interceptor concept. This keeps the interceptor library independently usable. Property metadata such as units and position is already in the registry as `StateMetadata` and is included in `browse` and `search` with `includeAttributes=true`.
 - **Paths** use the slash separator with `[InlinePaths]` flattening, such as `/Servers/OpcUaServer/Port`. See [MCP Server docs](../../../../../../../../docs/mcp.md) for the core MCP server design.
@@ -52,7 +53,6 @@ MCP tools are split across packages, configured via a single `McpServerConfigura
 - An unknown parameter, a missing non-nullable one or a value that does not convert returns an error naming the expected parameters, and the method is not invoked. A missing nullable parameter is passed as null.
 - An `ArgumentException` of the method returns its message, for example the list of known values. Any other failure returns a generic error and is logged.
 - Long string results are cut, see [Tools and permissions](../../administration/ai-agents.md#tools-and-permissions).
-- `HomeBlazeMcpConfigurationFactory` gives `browse`, `search` and `list_types` every registered type with `[ExcludeFrom(ExclusionTarget.Agents)]`, and the type of the metadata subject, as types to leave out. A subject of such a type is still reached by its explicit path, so agents call the methods of the metadata subject at `<path>/HomeBlaze:Metadata`, which the server instructions and the preamble of the built-in agents describe.
 
 #### Markdown Tools
 
@@ -142,7 +142,7 @@ With `edit_page_layout`, the agent's Markdown tools and `invoke_operation` may a
 **Agent route.** What the route exposes is in [How a turn runs the CLI](../../administration/ai-agents.md#how-a-turn-runs-the-cli).
 
 - `AgentMcpListener`, a hosted service, serves the stateless MCP route `/mcp/agents` on a web server of its own on `127.0.0.1`. The route never shares the bindings, reverse proxy or published ports of the HomeBlaze web server.
-- Each turn registers its tool set under a random bearer token. A request lists and calls exactly that turn's tools, with no server instructions, prompts or resources.
+- Each turn registers its tool set under a random bearer token. A request lists and calls exactly that turn's tools, with no prompts or resources.
 - Closing the tool set at the end of the turn makes a call that passed the token check just before fail without running.
 
 **Tool scoping.** `AllowedTools` is enforced where the tools are served: the API agent receives only the allowed functions, and the agent route lists and calls only the turn's tool set. A per-turn tool-call budget returns an error result once exhausted, so the model answers with what it has; `update_memory` is exempt. Every call is recorded in the timeline with previews of its arguments and result.

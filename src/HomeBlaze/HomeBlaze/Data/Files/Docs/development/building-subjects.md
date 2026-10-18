@@ -1074,7 +1074,7 @@ Use this for internal subjects that are part of a parent subject's implementatio
 | Target | A subject type is not | A method is not |
 |--------|-----------------------|-----------------|
 | `UserInterface` | listed or counted as a child in the browser, offered by the path picker, or walked by the navigation | shown as a button, or offered by the path picker and the widget pickers |
-| `Agents` | listed by MCP `browse` and `search` and by the built-in agents | listed by `list_methods` and `$methods`, or run by `invoke_query`, `invoke_operation`, the Markdown tools and the built-in agents |
+| `Agents` | listed by MCP `browse`, `search` and `list_types` and by the built-in agents | listed by `list_methods` and `$methods`, or run by `invoke_query`, `invoke_operation`, the Markdown tools and the built-in agents |
 | `All` | any of the above, also for targets added later | any of the above, also for targets added later |
 
 Exclusion decides where a subject or a method is offered, and is no access control: an agent still reaches a subject of a type excluded from agents by its explicit path and calls its methods, as it does for the metadata subject at `<path>/HomeBlaze:Metadata`, and a path to a method excluded from the user interface that a person types into a widget, such as an operation button, still runs it. Code checks a subject with the extension `IsExcludedFrom(target)`, a type with `ExcludeFromAttribute.IsExcluded(type, target)`, and lists the methods for a target with `GetAllMethods(target)`.

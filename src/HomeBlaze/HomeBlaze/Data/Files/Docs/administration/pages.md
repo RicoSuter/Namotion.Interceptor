@@ -122,7 +122,7 @@ A file whose name ends with `.metadata.json` in lower case is never loaded as a 
 
 ### Ordering and Metadata by Agents
 
-Every subject stored as a JSON file, every folder and the root of the storage has a metadata subject at `<path>/HomeBlaze:Metadata`, for example `/Devices/Motor/HomeBlaze:Metadata`. The browser does not list it, and neither do the MCP tools `browse`, `search` and `list_types`, but agents call its methods by that path: the queries with `invoke_query` and the operations with `invoke_operation`. The browser saves through the same operations.
+Every subject stored as a JSON file, every folder and the root of the storage has a metadata subject at `<path>/HomeBlaze:Metadata`, for example `/Devices/Motor/HomeBlaze:Metadata`. It is left out of the browser and of the agent listings but reached by that path, see [Excluding Subjects and Methods](../development/building-subjects.md#excluding-subjects-and-methods): agents call the queries with `invoke_query` and the operations with `invoke_operation`. The browser saves through the same operations.
 
 | Method | Description |
 |--------|-------------|
