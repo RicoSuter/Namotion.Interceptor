@@ -24,5 +24,5 @@ public interface IDoorSensor
     [Derived]
     [State(Position = 231)]
     [Category("Door")]
-    bool? IsClosed => DoorState is null ? null : DoorState == Sensors.DoorState.Closed;
+    bool? IsClosed => DoorState is { } state ? state == Sensors.DoorState.Closed : null;
 }

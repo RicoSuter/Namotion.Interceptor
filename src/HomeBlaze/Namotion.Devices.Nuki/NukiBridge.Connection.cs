@@ -205,8 +205,7 @@ public partial class NukiBridge
 
         try
         {
-            MergeDevices(await client.GetListAsync(CancellationToken.None));
-            LastUpdated = DateTimeOffset.UtcNow;
+            await ReadListAsync(client, CancellationToken.None);
         }
         catch (Exception exception)
         {
@@ -224,9 +223,15 @@ public partial class NukiBridge
                 ApplyInfo(await client.GetInfoAsync(cancellationToken));
             }
 
-            MergeDevices(await client.GetListAsync(cancellationToken));
-            LastUpdated = DateTimeOffset.UtcNow;
+            await ReadListAsync(client, cancellationToken);
         }
+    }
+
+    // The caller holds the request gate.
+    private async Task ReadListAsync(NukiBridgeClient client, CancellationToken cancellationToken)
+    {
+        MergeDevices(await client.GetListAsync(cancellationToken));
+        LastUpdated = DateTimeOffset.UtcNow;
     }
 
     private async Task<RequestGateLease> EnterRequestGateAsync(CancellationToken cancellationToken)

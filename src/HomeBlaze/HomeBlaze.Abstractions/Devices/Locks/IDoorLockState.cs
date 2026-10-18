@@ -25,5 +25,5 @@ public interface IDoorLockState
     [Derived]
     [State(Position = 131)]
     [Category("Lock")]
-    bool? IsLocked => LockState is null ? null : LockState == Locks.DoorLockState.Locked;
+    bool? IsLocked => LockState is { } state ? state == Locks.DoorLockState.Locked : null;
 }
