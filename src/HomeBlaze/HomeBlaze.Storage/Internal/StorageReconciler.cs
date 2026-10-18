@@ -27,6 +27,7 @@ internal sealed class StorageReconciler
     private readonly StorageIndex _index;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger? _logger;
+    private readonly bool _isOnDisk;
 
     // Cancelled when the connection ends. Nothing is assigned to the tree after that.
     private readonly CancellationToken _connectionToken;
@@ -47,6 +48,7 @@ internal sealed class StorageReconciler
         StorageIndex index,
         TimeProvider timeProvider,
         ILogger? logger,
+        bool isOnDisk,
         CancellationToken connectionToken)
     {
         _client = client;
@@ -56,6 +58,7 @@ internal sealed class StorageReconciler
         _index = index;
         _timeProvider = timeProvider;
         _logger = logger;
+        _isOnDisk = isOnDisk;
         _connectionToken = connectionToken;
     }
 
@@ -341,7 +344,7 @@ internal sealed class StorageReconciler
     /// Reads and parses a metadata file from the storage. An empty document for a file that does not exist.
     /// </summary>
     /// <exception cref="InvalidOperationException">
-    /// The file cannot be read as metadata or cannot be written back, or the path is a folder.
+    /// The file cannot be read as metadata or cannot be written back, the path is a folder, or its folder is gone.
     /// </exception>
     public async Task<StorageMetadataDocument> ReadMetadataFileAsync(string path, CancellationToken cancellationToken)
     {
@@ -350,17 +353,49 @@ internal sealed class StorageReconciler
             throw new StorageRefusedException($"'{path}' is a folder and not a metadata file.");
         }
 
+        var folder = StoragePath.GetParent(path);
+        if (await IsFolderGoneAsync(folder, cancellationToken))
+        {
+            throw new StorageRefusedException($"The folder '{folder}' is no longer in the storage.");
+        }
+
         // From the storage rather than the index, so that a write keeps an edit that no pass has seen yet, also of a
         // file that the index does not hold.
         var content = await TryReadAsync(path, cancellationToken);
         if (content is null)
         {
-            return new StorageMetadataDocument();
+            // The disk client reads a directory as a file that does not exist, and a write to it fails as access denied.
+            return await IsDirectoryOnDiskAsync(path, cancellationToken)
+                ? throw CreateUnreadableException(path)
+                : new StorageMetadataDocument();
         }
 
         return StorageMetadataDocument.TryParse(content, out var document, out _) && CanBeWritten(document)
             ? document
-            : throw new StorageRefusedException($"The metadata file '{path}' could not be read. Fix or delete it, then try again.");
+            : throw CreateUnreadableException(path);
+    }
+
+    private static StorageRefusedException CreateUnreadableException(string path)
+        => new($"The metadata file '{path}' could not be read. Fix or delete it, then try again.");
+
+    /// <summary>
+    /// Checks whether a folder of the index is gone from a storage on disk, where asking about a path in a folder
+    /// that does not exist creates that folder. Ask before a call that names a path in a folder that a pass has not
+    /// looked at since.
+    /// </summary>
+    public async Task<bool> IsFolderGoneAsync(string folder, CancellationToken cancellationToken)
+        => _isOnDisk && folder.Length > 0 && !await IsDirectoryOnDiskAsync(folder, cancellationToken);
+
+    // By a listing, which neither creates a folder nor reads a directory as a file that does not exist, as reading does.
+    private async Task<bool> IsDirectoryOnDiskAsync(string path, CancellationToken cancellationToken)
+    {
+        if (!_isOnDisk)
+        {
+            return false;
+        }
+
+        var blobs = await _client.ListAsync(new ListOptions { FolderPath = StoragePath.GetParent(path) }, cancellationToken);
+        return blobs.Any(blob => blob.IsFolder && StoragePath.FromBlob(blob) == path);
     }
 
     // A value that cannot be written, such as a string with a lone surrogate, is found only by writing it. A pass does

@@ -1167,7 +1167,10 @@ public partial class FluentStorageContainer :
 
         try
         {
-            if (!isFileKnownGone && await connection.Client.ExistsAsync(entry.Path, CancellationToken.None))
+            // A file in a folder that is gone is gone with its metadata file.
+            if (!isFileKnownGone &&
+                (await connection.Reconciler.IsFolderGoneAsync(entry.Parent, CancellationToken.None) ||
+                 await connection.Client.ExistsAsync(entry.Path, CancellationToken.None)))
             {
                 return;
             }

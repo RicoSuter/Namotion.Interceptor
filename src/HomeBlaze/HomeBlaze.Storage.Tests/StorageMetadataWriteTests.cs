@@ -180,6 +180,51 @@ public class StorageMetadataWriteTests : StorageTestBase
         Assert.False(Directory.Exists(GetFullPath("Docs")));
     }
 
+    [Theory]
+    [InlineData("get")]
+    [InlineData("set")]
+    [InlineData("order")]
+    [InlineData("subject")]
+    public async Task WhenFolderIsGoneFromTheStorageBeforeAPass_ThenMetadataCallsAreRefusedAndCreateNoFolder(string call)
+    {
+        // Arrange
+        WriteFile("Docs/a.md");
+        WriteFile("Docs/Motor.json", SerializeMotor("Motor 1"));
+        var storage = await ConnectAsync();
+        var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
+        var motor = docs.Children["Motor"];
+        Directory.Delete(GetFullPath("Docs"), recursive: true);
+        Func<Task> act = call switch
+        {
+            "get" => () => storage.GetMetadataAsync(docs, CancellationToken.None),
+            "set" => () => storage.SetMetadataAsync(docs, Values("""{ "title": "Documentation" }"""), CancellationToken.None),
+            "order" => () => storage.SetChildOrderAsync(docs, ["a.md"], CancellationToken.None),
+            _ => () => storage.SetMetadataAsync(motor, Values("""{ "navTitle": "Pump" }"""), CancellationToken.None)
+        };
+
+        // Act & Assert
+        await Assert.ThrowsAsync<StorageRefusedException>(act);
+        Assert.False(Directory.Exists(GetFullPath("Docs")));
+    }
+
+    [Fact]
+    public async Task WhenADirectoryHasTheNameOfTheMetadataFileOfAFolder_ThenAWriteIsRefusedAsUnreadable()
+    {
+        // Arrange
+        WriteFile("Docs/a.md");
+        WriteFile("Docs/.metadata.json/Notes.md");
+        var storage = await ConnectAsync();
+        var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
+
+        // Act
+        var exception = await Assert.ThrowsAsync<StorageRefusedException>(() =>
+            storage.SetMetadataAsync(docs, Values("""{ "title": "Documentation" }"""), CancellationToken.None));
+
+        // Assert
+        Assert.Contains("could not be read", exception.Message);
+        Assert.True(File.Exists(GetFullPath("Docs/.metadata.json/Notes.md")));
+    }
+
     [Fact]
     public async Task WhenOrderIsSet_ThenTheNamesComeFirstTheOtherChildrenKeepTheirOrderAndOtherKeysStay()
     {
