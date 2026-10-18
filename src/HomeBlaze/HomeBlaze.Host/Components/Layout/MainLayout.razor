@@ -1,21 +1,13 @@
-﻿@using HomeBlaze.Components.Abstractions.Pages
-@using HomeBlaze.Host.Components.Browser
+﻿@using HomeBlaze.Host.Components.Browser
 @using HomeBlaze.Host.Components.TimeZones
-@using Microsoft.Extensions.Logging
 
 @inherits LayoutComponentBase
 
 @inject DeveloperModeService DeveloperMode
 @inject RootManager RootManager
-@inject NavigationItemResolver NavigationResolver
 @inject NavigationManager NavigationManager
-@inject ILogger<MainLayout> Logger
 
 @implements IDisposable
-
-@{
-    var appBarItems = GetAppBarItems();
-}
 
 <MudThemeProvider Theme="@_theme" IsDarkMode="_isDarkMode"/>
 
@@ -33,21 +25,7 @@
             <MudAppBar Elevation="1">
                 <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start"
                                OnClick="@(_ => DrawerToggle())"/>
-                @foreach (var item in appBarItems)
-                {
-                    @if (item.Alignment == AppBarAlignment.Left)
-                    {
-                        @RenderAppBarButton(item)
-                    }
-                }
-                <MudSpacer/>
-                @foreach (var item in appBarItems)
-                {
-                    @if (item.Alignment == AppBarAlignment.Right)
-                    {
-                        @RenderAppBarButton(item)
-                    }
-                }
+                <AppBarItems Root="@RootManager.Root"/>
                 <MudIconButton Icon="@(DeveloperModeIcon)"
                                Color="@(DeveloperMode.IsEnabled ? Color.Success : Color.Inherit)"
                                OnClick="@DeveloperMode.Toggle"
@@ -99,13 +77,11 @@
     private MudTheme? _theme;
     private bool _isRootLoaded;
     private bool _rootLoadFailed;
-    private IReadOnlyList<NavigationItem> _appBarItems = [];
 
     protected override void OnInitialized()
     {
         base.OnInitialized();
         DeveloperMode.OnChange += OnStateHasChanged;
-        NavigationManager.LocationChanged += OnLocationChanged;
 
         _isRootLoaded = RootManager.RootLoaded.IsCompletedSuccessfully;
 
@@ -217,7 +193,6 @@
     public void Dispose()
     {
         DeveloperMode.OnChange -= OnStateHasChanged;
-        NavigationManager.LocationChanged -= OnLocationChanged;
 
         _disposalTokenSource.Cancel();
         _disposalTokenSource.Dispose();
@@ -228,45 +203,9 @@
         InvokeAsync(StateHasChanged);
     }
 
-    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
-    {
-        InvokeAsync(StateHasChanged);
-    }
-
-    private IReadOnlyList<NavigationItem> GetAppBarItems()
-    {
-        if (RootManager.Root == null)
-            return [];
-
-        try
-        {
-            _appBarItems = NavigationResolver.GetAppBarItems(RootManager.Root);
-        }
-        catch (Exception exception)
-        {
-            // The graph changes on other threads while this reads it. An exception escaping here would end the
-            // circuit or fail the prerendering, also of the error page, so the previous items stay until the next render.
-            Logger.LogWarning(exception, "Error getting the top bar items");
-        }
-
-        return _appBarItems;
-    }
-
     // The error page is shown exactly when the system is unhealthy, so it must render even if the
     // root never loads.
     private bool IsErrorPage => NavigationManager
         .ToBaseRelativePath(NavigationManager.Uri)
         .StartsWith("Error", StringComparison.OrdinalIgnoreCase);
-
-    private bool IsActive(NavigationItem item)
-    {
-        var currentPath = NavigationManager.ToBaseRelativePath(NavigationManager.Uri);
-        return currentPath.Equals(item.PageUrl, StringComparison.OrdinalIgnoreCase);
-    }
-
-    private RenderFragment RenderAppBarButton(NavigationItem item) =>
-        @<MudIconButton Icon="@SubjectIconExtensions.ResolveMudBlazorIcon(item.Icon)"
-                        Href="@item.PageUrl"
-                        Color="@(IsActive(item) ? Color.Primary : Color.Inherit)"
-                        title="@item.Title"/>;
 }

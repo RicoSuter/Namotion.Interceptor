@@ -1,0 +1,82 @@
+@using HomeBlaze.Components.Abstractions.Pages
+@using Microsoft.Extensions.Logging
+
+@inject NavigationItemResolver NavigationResolver
+@inject NavigationManager NavigationManager
+@inject ILogger<AppBarItems> Logger
+
+@implements IDisposable
+
+@{
+    var items = GetItems();
+}
+
+@foreach (var item in items.Where(item => item.Alignment == AppBarAlignment.Left))
+{
+    @RenderButton(item)
+}
+<MudSpacer/>
+@foreach (var item in items.Where(item => item.Alignment == AppBarAlignment.Right))
+{
+    @RenderButton(item)
+}
+
+@code {
+    // A parameter for the same reason as the one of NavMenu: the root can appear after the first render.
+    [Parameter]
+    public IInterceptorSubject? Root { get; set; }
+
+    private Timer? _refreshTimer;
+    private IReadOnlyList<NavigationItem> _items = [];
+
+    protected override void OnInitialized()
+    {
+        // Refreshed as NavMenu is, so that a change of the tree or of metadata shows.
+        _refreshTimer = new Timer(_ => InvokeAsync(StateHasChanged),
+            null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
+
+        NavigationManager.LocationChanged += OnLocationChanged;
+    }
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        InvokeAsync(StateHasChanged);
+    }
+
+    private IReadOnlyList<NavigationItem> GetItems()
+    {
+        if (Root == null)
+            return [];
+
+        try
+        {
+            _items = NavigationResolver.GetAppBarItems(Root);
+        }
+        catch (Exception exception)
+        {
+            // The graph changes on other threads while this reads it. An exception escaping here would end the
+            // circuit or fail the prerendering, also of the error page, so the previous items stay until the next render.
+            Logger.LogWarning(exception, "Error getting the top bar items");
+        }
+
+        return _items;
+    }
+
+    private bool IsActive(NavigationItem item)
+    {
+        var currentPath = NavigationManager.ToBaseRelativePath(NavigationManager.Uri);
+        return currentPath.Equals(item.PageUrl, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private RenderFragment RenderButton(NavigationItem item) =>
+        @<MudIconButton Icon="@SubjectIconExtensions.ResolveMudBlazorIcon(item.Icon)"
+                        Href="@item.PageUrl"
+                        Color="@(IsActive(item) ? Color.Primary : Color.Inherit)"
+                        title="@item.Title"/>;
+
+    public void Dispose()
+    {
+        _refreshTimer?.Dispose();
+        NavigationManager.LocationChanged -= OnLocationChanged;
+    }
+}

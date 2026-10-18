@@ -390,10 +390,7 @@ public class NavigationMetadataTests
             await dialog.GetByTestId("metadata-save").ClickAsync();
             await Assertions.Expect(dialog).ToHaveCountAsync(0, new() { Timeout = PageLoadTimeout });
 
-            // The layout reads the top bar when it renders, which a navigation does.
-            await page.GotoAsync($"{_fixture.ServerAddress}pages/Dashboard.md");
-
-            // Assert
+            // Assert - the top bar refreshes on its own, without a navigation.
             await Assertions.Expect(page.GetByRole(AriaRole.Banner).Locator("a[href='pages/Agents/TestAgent']"))
                 .ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
             Assert.Equal(NavigationLocation.AppBar, agent.GetNavigationLocation());
