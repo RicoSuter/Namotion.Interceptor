@@ -160,14 +160,13 @@ public class DoorLockTileTests : IDisposable
         var (page, tile) = await OpenTileAsync(DoorLockState.Jammed, "Jammed");
         var error = await page.ResolveColorAsync("var(--mud-palette-error)");
         var background = await GetTileRoot(tile).EvaluateAsync<string>("element => getComputedStyle(element).backgroundColor");
-        var title = await tile.GetAttributeAsync("title");
+        await Assertions.Expect(tile).ToHaveAttributeAsync("title", "Lock");
 
         // Act
         await tile.ClickAsync();
 
         // Assert
         Assert.Equal(error, background);
-        Assert.Equal("Lock", title);
         await Assertions.Expect(tile.GetByTestId("tile-subtitle")).ToHaveTextAsync("Locked", new() { Timeout = Timeout });
         await Assertions.Expect(GetConfirmationDialog(page)).ToHaveCountAsync(0);
         Assert.Equal(DoorLockState.Locked, GetLock().LockState);
