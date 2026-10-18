@@ -63,7 +63,7 @@ public partial class FluentStorageContainer :
 
     private StorageConnection Connection => _connection is { IsEnded: false } connection
         ? connection
-        : throw new InvalidOperationException("Storage not connected");
+        : throw new StorageRefusedException("Storage not connected");
 
     /// <summary>The clock for timeouts and timers. Read when the storage connects.</summary>
     internal TimeProvider TimeProvider { get; set; } = TimeProvider.System;
@@ -650,7 +650,7 @@ public partial class FluentStorageContainer :
 
         return connection.Index.TryGetEntry(owner, out var entry) && entry.HasSidecar
             ? (StorageMetadataPath.GetSubjectFilePath(entry.Path), StorageMetadataKind.Subject)
-            : throw new InvalidOperationException("Only a storage, its folders and the subjects of its JSON files have metadata.");
+            : throw new StorageRefusedException("Only a storage, its folders and the subjects of its JSON files have metadata.");
     }
 
     // Runs on the worker. Empty for this storage, else the path of the folder. Only the placed folder counts, so that a
@@ -662,11 +662,11 @@ public partial class FluentStorageContainer :
             return string.Empty;
         }
 
-        var folder = owner as VirtualFolder ?? throw new InvalidOperationException("Only a folder or the root of a storage has an order.");
+        var folder = owner as VirtualFolder ?? throw new StorageRefusedException("Only a folder or the root of a storage has an order.");
         var path = StoragePath.Normalize(folder.RelativePath);
         return ReferenceEquals(GetPlacedFolder(connection, path), folder)
             ? path
-            : throw new InvalidOperationException($"The folder '{path}' is no longer in the storage.");
+            : throw new StorageRefusedException($"The folder '{path}' is no longer in the storage.");
     }
 
     /// <summary>
@@ -769,7 +769,7 @@ public partial class FluentStorageContainer :
     private static VirtualFolder GetPlacedFolder(StorageConnection connection, string folder)
         => connection.Index.TryGet(folder, out var entry) && entry is { IsFolder: true, IsPlaced: true, Subject: VirtualFolder virtualFolder }
             ? virtualFolder
-            : throw new InvalidOperationException($"No folder at '{folder}'.");
+            : throw new StorageRefusedException($"No folder at '{folder}'.");
 
     // Runs on the worker. A file that would be empty is deleted, so that a metadata file exists only while it holds something.
     private async Task WriteMetadataDocumentAsync(
@@ -855,7 +855,7 @@ public partial class FluentStorageContainer :
         }
         catch (OperationCanceledException) when (connection.IsEnded && !cancellationToken.IsCancellationRequested)
         {
-            throw new InvalidOperationException("Storage not connected");
+            throw new StorageRefusedException("Storage not connected");
         }
     }
 

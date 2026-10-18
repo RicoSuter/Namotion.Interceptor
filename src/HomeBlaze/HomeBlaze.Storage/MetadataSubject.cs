@@ -1,6 +1,7 @@
 using System.Text.Json;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Components.Abstractions.Pages;
+using HomeBlaze.Storage.Internal;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry;
@@ -106,14 +107,14 @@ public sealed partial class MetadataSubject : IMetadataSubject
 
     // A refusal of the storage becomes an argument error, the only kind whose message McpMethodInvoker passes on to an
     // agent, so that the agent learns why: the file could not be read, the storage is not connected, or the owner is
-    // no longer in it.
+    // no longer in it. Any other failure keeps its type.
     private static async Task<TResult> RunAsync<TResult>(Func<Task<TResult>> call)
     {
         try
         {
             return await call();
         }
-        catch (InvalidOperationException exception)
+        catch (StorageRefusedException exception)
         {
             throw new ArgumentException(exception.Message, exception);
         }
@@ -125,7 +126,7 @@ public sealed partial class MetadataSubject : IMetadataSubject
         {
             await call();
         }
-        catch (InvalidOperationException exception)
+        catch (StorageRefusedException exception)
         {
             throw new ArgumentException(exception.Message, exception);
         }

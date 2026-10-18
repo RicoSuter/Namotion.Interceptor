@@ -4,8 +4,10 @@ using HomeBlaze.Components.Abstractions.Pages;
 using HomeBlaze.History;
 using HomeBlaze.OpcUa;
 using HomeBlaze.Services;
+using HomeBlaze.Storage.Internal;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.Storage.Tests;
 
@@ -134,6 +136,24 @@ public class MetadataSubjectTests : StorageTestBase
         var exception = await Assert.ThrowsAsync<ArgumentException>(() =>
             GetMetadataSubject(storage.Children["Motor"]).SetOrderAsync(["a.md"], CancellationToken.None));
         Assert.Contains("folder", exception.Message);
+    }
+
+    [Fact]
+    public async Task WhenACallFailsForAnotherReasonThanARefusalOfTheStorage_ThenItKeepsItsType()
+    {
+        // Arrange: a call from a lifecycle handler runs on the worker, which refuses a call from within its own work.
+        WriteFile("Motor.json", SerializeMotor("Motor 1"));
+        var storage = await ConnectAsync();
+        var motor = storage.Children["Motor"];
+        var handler = new CallOnDetach(motor, () => GetMetadataSubject(storage).GetMetadataAsync(CancellationToken.None));
+        Context!.AddService<ILifecycleHandler>(handler);
+
+        // Act
+        await storage.DeleteSubjectAsync(motor, CancellationToken.None);
+
+        // Assert
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => handler.Call!);
+        Assert.Equal(StorageWorker.CallFromWithinItemMessage, exception.Message);
     }
 
     [Fact]
@@ -344,5 +364,18 @@ public class MetadataSubjectTests : StorageTestBase
         // Assert
         Assert.False(isMetadataIncluded);
         Assert.True(isStateIncluded);
+    }
+
+    private sealed class CallOnDetach(IInterceptorSubject subject, Func<Task> call) : ILifecycleHandler
+    {
+        public Task? Call { get; private set; }
+
+        public void HandleLifecycleChange(SubjectLifecycleChange change)
+        {
+            if (change.IsContextDetach && ReferenceEquals(change.Subject, subject))
+            {
+                Call = call();
+            }
+        }
     }
 }

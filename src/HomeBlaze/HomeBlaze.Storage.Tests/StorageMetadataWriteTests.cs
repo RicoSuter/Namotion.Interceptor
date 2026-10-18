@@ -2,6 +2,7 @@ using System.Text.Json;
 using HomeBlaze.Components.Abstractions.Pages;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Files;
+using HomeBlaze.Storage.Internal;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
@@ -88,7 +89,7 @@ public class StorageMetadataWriteTests : StorageTestBase
         };
 
         // Act
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(write);
+        var exception = await Assert.ThrowsAsync<StorageRefusedException>(write);
 
         // Assert
         Assert.Contains("could not be read", exception.Message);
@@ -106,7 +107,7 @@ public class StorageMetadataWriteTests : StorageTestBase
         var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
 
         // Act
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        var exception = await Assert.ThrowsAsync<StorageRefusedException>(() =>
             storage.SetMetadataAsync(docs, Values("""{ "title": "Docs" }"""), CancellationToken.None));
 
         // Assert
@@ -141,7 +142,7 @@ public class StorageMetadataWriteTests : StorageTestBase
         var storage = await ConnectAsync();
 
         // Act & Assert
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        await Assert.ThrowsAsync<StorageRefusedException>(() =>
             storage.SetMetadataAsync(storage.Children["Readme.md"], Values("""{ "navTitle": "Home" }"""), CancellationToken.None));
     }
 
@@ -173,7 +174,7 @@ public class StorageMetadataWriteTests : StorageTestBase
         await storage.ReconcileAsync();
 
         // Act & Assert
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        await Assert.ThrowsAsync<StorageRefusedException>(() =>
             storage.SetMetadataAsync(docs, Values("""{ "title": "Documentation" }"""), CancellationToken.None));
         Assert.False(Directory.Exists(GetFullPath("Docs")));
     }

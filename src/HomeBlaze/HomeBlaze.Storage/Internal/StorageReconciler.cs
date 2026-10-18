@@ -336,7 +336,7 @@ internal sealed class StorageReconciler
     {
         if (_index.TryGet(path, out var entry) && entry.IsFolder)
         {
-            throw new InvalidOperationException($"'{path}' is a folder and not a metadata file.");
+            throw new StorageRefusedException($"'{path}' is a folder and not a metadata file.");
         }
 
         // From the storage rather than the index, so that a write keeps an edit that no pass has seen yet, also of a
@@ -349,7 +349,7 @@ internal sealed class StorageReconciler
 
         return StorageMetadataDocument.TryParse(content, out var document, out _) && CanBeWritten(document)
             ? document
-            : throw new InvalidOperationException($"The metadata file '{path}' could not be read. Fix or delete it, then try again.");
+            : throw new StorageRefusedException($"The metadata file '{path}' could not be read. Fix or delete it, then try again.");
     }
 
     // A value that cannot be written, such as a string with a lone surrogate, is found only by writing it. A pass does
