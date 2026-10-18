@@ -93,9 +93,9 @@ A metadata file left with every key blank is deleted rather than kept empty on d
 
 The **Reorder** button in the header of a folder with at least two children switches its list of children to reorder mode, and **Done** switches it back. **Reorder** is disabled while the storage is not connected. In reorder mode, dragging and the arrows are disabled while the storage is not connected, and a click on a row does not open it.
 
-Drag a row by its handle to move it. A dashed placeholder shows where it will land: dropping on a row puts the dragged row after it, and dropping at the very top of the list puts it first. Each move writes the whole order of the folder to its `.metadata.json`.
+Drag a row anywhere with the mouse to move it. A line shows where it will land: above the row under the pointer while the pointer is in the upper half of that row, and below it in the lower half. Dragging near the top or the bottom edge of the pane scrolls it, and Escape cancels the drag. Each move writes the whole order of the folder to its `.metadata.json`.
 
-On a touch screen the rows have no handle, so that swiping scrolls the list. Each row shows up and down arrows instead, which move it by one place.
+On a touch screen, drag a row by its handle, so that swiping elsewhere on a row scrolls the list. Each row also shows up and down arrows, which move it by one place. With the keyboard, the arrows show once they have the focus.
 
 With a keyboard, press Tab to reach the arrows of a row, which show while they have focus, and press Enter or Space to move the row by one place.
 

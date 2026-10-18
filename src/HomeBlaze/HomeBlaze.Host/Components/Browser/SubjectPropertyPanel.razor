@@ -285,19 +285,40 @@
         }
     }
 
-    /* A row in reorder mode, as high as a list item. The handle takes most of the gutter, so that the name starts
-       where it starts in the list. */
+    /* A row in reorder mode, as high as a list item and with the line of a list divider below it. The handle takes
+       the gutter, so that the name starts where it starts in the list. */
     .subject-pane-reorder-row {
         display: flex;
         align-items: center;
         padding: 8px 16px 8px 4px;
+        border-bottom: thin solid var(--mud-palette-divider);
+        cursor: grab;
+        user-select: none;
     }
 
+    .subject-pane-reorder-list[data-can-drag="false"] .subject-pane-reorder-row {
+        cursor: default;
+    }
+
+    .subject-pane-reorder-list[data-dragging] * {
+        cursor: grabbing;
+    }
+
+    .subject-pane-reorder-row[data-drag-source] {
+        opacity: 0.4;
+    }
+
+    /* As high as the row, so that a touch can grab it anywhere along the edge, where it does not scroll the pane. */
     .subject-pane-reorder-handle {
+        display: flex;
         flex-shrink: 0;
-        width: 24px;
+        align-self: stretch;
+        align-items: center;
         justify-content: center;
+        width: 28px;
+        margin: -8px 0 -8px -4px;
         color: var(--mud-palette-action-default);
+        touch-action: none;
     }
 
     .subject-pane-reorder-icon {
@@ -311,19 +332,34 @@
         margin: 4px 0;
     }
 
-    /* Above the strip at the top of the drop zone, which takes a drop in first place and would otherwise cover the
-       upper half of the handle and the arrows of the first row. */
-    .subject-pane-reorder-handle,
-    .subject-pane-move {
-        position: relative;
-        z-index: 1;
+    /* The copy of the dragged row under the pointer, and the line where it lands, above the pane but below dialogs. */
+    .subject-pane-reorder-preview {
+        position: fixed;
+        top: 0;
+        left: 0;
+        z-index: 1350;
+        background-color: var(--mud-palette-surface);
+        box-shadow: var(--mud-elevation-8);
+        opacity: 0.9;
+        pointer-events: none;
+        cursor: grabbing;
+    }
+
+    .subject-pane-reorder-indicator {
+        position: fixed;
+        top: 0;
+        left: 0;
+        z-index: 1351;
+        height: 2px;
+        background-color: var(--mud-palette-primary);
+        pointer-events: none;
     }
 
     /* Two columns, so that the single arrow of the first and the last row stays in the column of its kind.
        Dragging moves a row with a mouse. The arrows are for the keyboard, so they show only while one has focus.
        Transparent rather than hidden, so that they stay in the tab order, and without pointer events meanwhile, so
-       that a click cannot press an arrow it does not see. A device without hover gets the arrows instead of the
-       handle, so that a touch on a row scrolls the pane rather than dragging the row. */
+       that a click cannot press an arrow it does not see. A device without hover shows them, as dragging there needs
+       the handle. */
     .subject-pane-move {
         flex-shrink: 0;
         display: grid;
@@ -351,18 +387,6 @@
         .subject-pane-move {
             opacity: 1;
             pointer-events: auto;
-        }
-
-        .subject-pane-reorder-handle {
-            display: none;
-        }
-
-        .subject-pane-reorder-row {
-            padding-left: 16px;
-        }
-
-        .subject-pane-reorder-icon {
-            margin: 0 32px 0 0;
         }
     }
 
@@ -425,7 +449,7 @@
     private readonly HashSet<string> _expandedProperties = [];
 
     private ElementReference _rootElement;
-    private string? _copyButtonsElementId;
+    private string? _registeredElementId;
     private IJSObjectReference? _module;
     private DotNetObjectReference<SubjectPropertyPanel>? _dotNetReference;
     private bool _isDisposed;
@@ -444,15 +468,16 @@
     private bool _isMovingChild;
 
     private bool _isReordering;
-    private MudDropContainer<SubjectPropertyChild>? _reorderDropContainer;
+
+    // The container and the children the reorder list showed last, which a drop of the script refers to.
+    private IMetadataContainer? _reorderContainer;
+    private SubjectPropertyChild[]? _reorderedChildren;
     private readonly Dictionary<SubjectPropertyChild, MudIconButton> _upArrows = [];
     private readonly Dictionary<SubjectPropertyChild, MudIconButton> _downArrows = [];
 
     // The arrow that takes the focus after the next render, the up arrow of the child when the flag is set.
     private (SubjectPropertyChild Child, bool IsUpArrow)? _arrowToFocus;
 
-    // The children the reorder list showed last, to tell when the order changed.
-    private SubjectPropertyChild[]? _reorderedChildren;
     private readonly CancellationTokenSource _lifetime = new();
 
     [Parameter]
@@ -512,15 +537,15 @@
         await base.OnAfterRenderAsync(firstRender);
         await FocusArrowAsync();
 
-        // The listener sits on the root, as the tracking scope replaces everything inside it on every change in
+        // The listeners sit on the root, as the tracking scope replaces everything inside it on every change in
         // developer mode. The root is new only when the pane showed no subject in between.
-        if (Subject is null || _rootElement.Id is null || _rootElement.Id == _copyButtonsElementId)
+        if (Subject is null || _rootElement.Id is null || _rootElement.Id == _registeredElementId)
         {
             return;
         }
 
         // Claimed before the awaits, so that a render during them does not register the element again.
-        _copyButtonsElementId = _rootElement.Id;
+        _registeredElementId = _rootElement.Id;
         try
         {
             _module ??= await JsRuntime.InvokeAsync<IJSObjectReference>(
@@ -533,10 +558,11 @@
 
             _dotNetReference ??= DotNetObjectReference.Create(this);
             await _module.InvokeVoidAsync("registerCopyButtons", _rootElement, _dotNetReference);
+            await _module.InvokeVoidAsync("registerChildDragging", _rootElement, _dotNetReference);
         }
         catch (Exception exception) when (exception is JSDisconnectedException or OperationCanceledException or JSException)
         {
-            // Without the script the copy buttons do nothing; the values are still shown.
+            // Without the script the copy buttons and dragging do nothing; the values and the arrows still work.
         }
     }
 
@@ -728,7 +754,7 @@
     private void StopReordering()
     {
         _isReordering = false;
-        _reorderDropContainer = null;
+        _reorderContainer = null;
         _reorderedChildren = null;
         _upArrows.Clear();
         _downArrows.Clear();
@@ -1121,14 +1147,7 @@
     private RenderFragment RenderReorderList(
         RegisteredSubjectProperty property, SubjectPropertyChild[] children, IMetadataContainer container) => __builder =>
     {
-        // The drop zone keeps the order in which it first saw its items, and the one of its last drop, rather than the
-        // order of the items it is given. Cleared before it renders, so that it shows each new order of the storage.
-        // Must stay idempotent, as the fragment runs on every render of the pane.
-        if (_reorderedChildren is not null && !_reorderedChildren.AsSpan().SequenceEqual(children))
-        {
-            _reorderDropContainer?.Refresh();
-        }
-
+        _reorderContainer = container;
         _reorderedChildren = children;
         var canDrag = CanMoveChildren(container);
 
@@ -1136,29 +1155,25 @@
         // meanwhile is ignored.
         var canPressArrows = IsConnected(container);
 
-        <MudDropContainer T="SubjectPropertyChild"
-                          @ref="_reorderDropContainer"
-                          Items="@children"
-                          ItemsSelector="@((_, _) => true)"
-                          ItemDisabled="@(_ => !canDrag)"
-                          DisabledClass=""
-                          ItemDropped="@(drop => OnChildDropped(container, children, drop))">
-            <ChildContent>
-                <MudDropZone T="SubjectPropertyChild" AllowReorder="true" data-testid="reorder-children-list" />
-            </ChildContent>
-            <ItemRenderer>
-                @{
-                    var child = context;
-                    var childIndex = Array.IndexOf(children, child);
-                    var isSelected = child.Subject == SelectedChild;
-                    var childCount = GetChildCount(child);
-                    var childName = property.GetChildDisplayName(child);
-                }
-                <div class="@(isSelected ? "subject-pane-reorder-row mud-primary-text" : "subject-pane-reorder-row")"
+        @* The script drags the rows, see SubjectPropertyPanel.razor.js. *@
+        <div class="subject-pane-reorder-list"
+             data-reorder-list
+             data-can-drag="@(canDrag ? "true" : "false")"
+             data-testid="reorder-children-list">
+            @for (var childIndex = 0; childIndex < children.Length; childIndex++)
+            {
+                var child = children[childIndex];
+                var isSelected = child.Subject == SelectedChild;
+                var childCount = GetChildCount(child);
+                var childName = property.GetChildDisplayName(child);
+                <div @key="child"
+                     class="@(isSelected ? "subject-pane-reorder-row mud-primary-text" : "subject-pane-reorder-row")"
+                     data-reorder-row
+                     data-child-name="@child.Index"
                      data-testid="reorder-child-row">
-                    <MudDragHandle T="SubjectPropertyChild" Class="subject-pane-reorder-handle" aria-hidden="true">
+                    <span class="subject-pane-reorder-handle" data-reorder-handle aria-hidden="true">
                         <MudIcon Icon="@Icons.Material.Filled.DragIndicator" Size="Size.Small" />
-                    </MudDragHandle>
+                    </span>
                     <MudIcon Icon="@GetSubjectIcon(child.Subject)"
                              Color="@(isSelected ? Color.Primary : GetSubjectIconColor(child.Subject))"
                              Class="subject-pane-reorder-icon" />
@@ -1183,7 +1198,7 @@
                                            aria-label="@($"Move {childName} up")"
                                            data-testid="move-child-up-button" />
                         }
-                        @if (childIndex >= 0 && childIndex < children.Length - 1)
+                        @if (childIndex < children.Length - 1)
                         {
                             var nextChild = children[childIndex + 1];
                             var reachesBottom = childIndex == children.Length - 2;
@@ -1198,56 +1213,47 @@
                         }
                     </span>
                 </div>
-                <MudDivider />
-            </ItemRenderer>
-        </MudDropContainer>
+            }
+        </div>
     };
 
     private bool CanMoveChildren(IMetadataContainer container)
         => !_isMovingChild && IsConnected(container);
 
-    // The index in the drop info is the place of the dropped child in the order after the drop, which is the place of
-    // the child shown there before it.
-    private void OnChildDropped(
-        IMetadataContainer container, SubjectPropertyChild[] children, MudItemDropInfo<SubjectPropertyChild> drop)
+    // Called by the script with the names of the dragged child and of the child whose place it takes, which come from
+    // the order the list showed when the drag started. Returns once the pane shows the new order, as the script shows
+    // the dragged row in its new place until then.
+    [JSInvokable]
+    public async Task OnChildDropped(string name, string targetName)
     {
-        // A drop that moves nothing is refreshed away, as the zone shows the dropped row in its new place already.
-        var index = Array.IndexOf(children, drop.Item);
-        if (_isMovingChild || index < 0 || drop.IndexInZone < 0 || drop.IndexInZone >= children.Length || drop.IndexInZone == index)
+        if (_reorderContainer is not { } container || _reorderedChildren is not { } children)
         {
-            _reorderDropContainer?.Refresh();
             return;
         }
 
-        // Not awaited, so that the drop ends now: until it does, the zone shows a placeholder at the drop position.
-        _ = MoveDroppedChildAsync(container, children[index], children[drop.IndexInZone]);
-    }
-
-    private async Task MoveDroppedChildAsync(IMetadataContainer container, SubjectPropertyChild child, SubjectPropertyChild target)
-    {
-        try
+        var index = Array.FindIndex(children, child => child.Index?.ToString() == name);
+        var targetIndex = Array.FindIndex(children, child => child.Index?.ToString() == targetName);
+        if (index < 0 || targetIndex < 0 || index == targetIndex)
         {
-            await MoveChildAsync(container, child, target);
-            if (!_isDisposed)
-            {
-                StateHasChanged();
-            }
+            return;
         }
-        catch (Exception exception)
+
+        await MoveChildAsync(container, children[index], children[targetIndex]);
+        if (!_isDisposed)
         {
-            // Nothing awaits this task, so an exception would otherwise go unobserved.
-            await DispatchExceptionAsync(exception);
+            StateHasChanged();
         }
     }
 
-    // The arrow pressed on a row that the move takes to the top or the bottom is gone after the move, so the other
-    // arrow of the row takes the focus, which a keyboard user would lose otherwise.
+    // The rows are keyed, so a move takes a row out of the page and puts it back, which can take the focus from its
+    // arrow, and the arrow pressed on a row that the move takes to the top or the bottom is gone. The arrow of the row
+    // takes the focus again, its other arrow at the top or the bottom.
     private async Task MoveChildByArrowAsync(
         IMetadataContainer container, SubjectPropertyChild child, SubjectPropertyChild target, bool isUp, bool reachesEnd)
     {
-        if (await MoveChildAsync(container, child, target) && reachesEnd)
+        if (await MoveChildAsync(container, child, target))
         {
-            _arrowToFocus = (child, !isUp);
+            _arrowToFocus = (child, reachesEnd ? !isUp : isUp);
         }
     }
 
@@ -1255,8 +1261,7 @@
     private static bool IsConnected(IMetadataContainer container)
         => container is not IStorageContainer { Status: not StorageStatus.Connected };
 
-    // A failed move refreshes the reorder list, which shows a dropped row in its new place already. Returns whether
-    // the order was written.
+    // Returns whether the order was written.
     private async Task<bool> MoveChildAsync(IMetadataContainer container, SubjectPropertyChild child, SubjectPropertyChild target)
     {
         if (_isMovingChild)
@@ -1279,8 +1284,8 @@
         {
             if (!_isDisposed)
             {
-                _reorderDropContainer?.Refresh();
-                await DialogService.ShowMessageBoxAsync("Move Failed", $"Failed to move: {exception.Message}", yesText: "OK");
+                // Not awaited, so that a drop ends before the message shows rather than once it is closed.
+                _ = ShowMoveFailedAsync(exception.Message);
             }
 
             return false;
@@ -1288,6 +1293,19 @@
         finally
         {
             _isMovingChild = false;
+        }
+    }
+
+    private async Task ShowMoveFailedAsync(string message)
+    {
+        try
+        {
+            await DialogService.ShowMessageBoxAsync("Move Failed", $"Failed to move: {message}", yesText: "OK");
+        }
+        catch (Exception exception)
+        {
+            // Nothing awaits this task, so an exception would otherwise go unobserved.
+            await DispatchExceptionAsync(exception);
         }
     }
 

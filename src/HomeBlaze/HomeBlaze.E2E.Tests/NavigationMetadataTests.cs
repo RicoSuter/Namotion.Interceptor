@@ -62,6 +62,21 @@ public class NavigationMetadataTests
         return rows;
     }
 
+    // Drags a row by its middle with the mouse to a point of the target row, given as a fraction of its height, in
+    // steps, as a drag starts only once the pointer has moved a few pixels.
+    private static async Task DragRowAsync(IPage page, ILocator rows, int index, int targetIndex, float targetFraction)
+    {
+        var row = await rows.Nth(index).BoundingBoxAsync() ?? throw new InvalidOperationException("The row is not shown.");
+        var target = await rows.Nth(targetIndex).BoundingBoxAsync() ?? throw new InvalidOperationException("The target row is not shown.");
+        var x = row.X + row.Width / 2;
+
+        await page.Mouse.MoveAsync(x, row.Y + row.Height / 2);
+        await page.Mouse.DownAsync();
+        await page.Mouse.MoveAsync(x, target.Y + target.Height * targetFraction, new() { Steps = 10 });
+        await Assertions.Expect(page.Locator(".subject-pane-reorder-preview")).ToBeVisibleAsync();
+        await page.Mouse.UpAsync();
+    }
+
     // The test data is a copy in the output folder. Writing its text back and running a pass loads the metadata
     // the test started with, so that the order and the title it changed do not reach the next test.
     private async Task RestoreDemoMetadataAsync(string metadataPath, string originalMetadata)
@@ -71,7 +86,7 @@ public class NavigationMetadataTests
     }
 
     [Fact]
-    public async Task WhenAChildIsDraggedToTheTop_ThenThePaneAndTheFolderOrderChange()
+    public async Task WhenAChildIsDroppedOnTheUpperHalfOfTheFirstRow_ThenItGoesFirst()
     {
         // Arrange
         var metadataPath = _fixture.GetDemoPagePath(".metadata.json");
@@ -79,20 +94,14 @@ public class NavigationMetadataTests
         var folder = GetDemoFolder();
         try
         {
-            var (_, pane) = await OpenPaneAsync("Demo");
+            var (page, pane) = await OpenPaneAsync("Demo");
             var rows = await StartReorderingAsync(pane);
             var shownNames = await rows.Locator(".subject-pane-child-name").AllInnerTextsAsync();
             var names = GetShownChildNames(folder);
             Assert.Equal(names.Length, shownNames.Count);
 
-            // Act - a drop on a row puts the child after it, and one on the strip at the top of the list in first place.
-            await rows.Nth(2).Locator(".mud-drag-handle").DragToAsync(rows.Nth(0), new()
-            {
-                TargetPosition = new() { X = 100, Y = 2 },
-
-                // The strip lies over the first row, which Playwright reports as covered.
-                Force = true
-            });
+            // Act
+            await DragRowAsync(page, rows, index: 2, targetIndex: 0, targetFraction: 0.25f);
 
             // Assert
             string[] expectedShownNames = [shownNames[2], shownNames[0], shownNames[1], .. shownNames.Skip(3)];
@@ -112,7 +121,7 @@ public class NavigationMetadataTests
     }
 
     [Fact]
-    public async Task WhenAChildIsDraggedDown_ThenItTakesThePlaceOfTheRowItIsDroppedOn()
+    public async Task WhenAChildIsDroppedOnTheLowerHalfOfARow_ThenItLandsBelowIt()
     {
         // Arrange
         var metadataPath = _fixture.GetDemoPagePath(".metadata.json");
@@ -120,14 +129,50 @@ public class NavigationMetadataTests
         var folder = GetDemoFolder();
         try
         {
-            var (_, pane) = await OpenPaneAsync("Demo");
+            var (page, pane) = await OpenPaneAsync("Demo");
             var rows = await StartReorderingAsync(pane);
             var shownNames = await rows.Locator(".subject-pane-child-name").AllInnerTextsAsync();
             var names = GetShownChildNames(folder);
             Assert.Equal(names.Length, shownNames.Count);
 
             // Act
-            await rows.Nth(0).Locator(".mud-drag-handle").DragToAsync(rows.Nth(2));
+            await DragRowAsync(page, rows, index: 0, targetIndex: 2, targetFraction: 0.75f);
+
+            // Assert
+            string[] expectedShownNames = [shownNames[1], shownNames[2], shownNames[0], .. shownNames.Skip(3)];
+            await Assertions.Expect(rows.Locator(".subject-pane-child-name"))
+                .ToHaveTextAsync(expectedShownNames, new() { Timeout = PageLoadTimeout });
+            await Assertions.Expect(page.Locator(".subject-pane-reorder-preview")).ToHaveCountAsync(0);
+
+            string[] expectedNames = [names[1], names[2], names[0], .. names.Skip(3)];
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => folder.ChildOrder.ToArray().SequenceEqual(expectedNames),
+                message: "The order of the folder was not written");
+            Assert.Equal(expectedNames, folder.ChildOrder.ToArray());
+        }
+        finally
+        {
+            await RestoreDemoMetadataAsync(metadataPath, originalMetadata);
+        }
+    }
+
+    [Fact]
+    public async Task WhenAChildIsDroppedOnTheUpperHalfOfALaterRow_ThenItLandsAboveIt()
+    {
+        // Arrange
+        var metadataPath = _fixture.GetDemoPagePath(".metadata.json");
+        var originalMetadata = await File.ReadAllTextAsync(metadataPath);
+        var folder = GetDemoFolder();
+        try
+        {
+            var (page, pane) = await OpenPaneAsync("Demo");
+            var rows = await StartReorderingAsync(pane);
+            var shownNames = await rows.Locator(".subject-pane-child-name").AllInnerTextsAsync();
+            var names = GetShownChildNames(folder);
+            Assert.Equal(names.Length, shownNames.Count);
+
+            // Act
+            await DragRowAsync(page, rows, index: 0, targetIndex: 3, targetFraction: 0.25f);
 
             // Assert
             string[] expectedShownNames = [shownNames[1], shownNames[2], shownNames[0], .. shownNames.Skip(3)];
@@ -248,7 +293,6 @@ public class NavigationMetadataTests
 
             // Playwright counts a transparent element as visible, so the arrows are checked by their opacity.
             await Assertions.Expect(rows.Nth(1).Locator(".subject-pane-move")).ToHaveCSSAsync("opacity", "1");
-            await Assertions.Expect(rows.Nth(1).Locator(".mud-drag-handle")).ToBeHiddenAsync();
 
             // Act
             await rows.Nth(1).GetByTestId("move-child-up-button").TapAsync();
@@ -259,6 +303,69 @@ public class NavigationMetadataTests
             await Assertions.Expect(rows.Nth(1).Locator(".subject-pane-child-name")).ToHaveTextAsync(shownNames[0]);
 
             string[] expectedNames = [names[1], names[0], .. names.Skip(2)];
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => folder.ChildOrder.ToArray().SequenceEqual(expectedNames),
+                message: "The order of the folder was not written");
+            Assert.Equal(expectedNames, folder.ChildOrder.ToArray());
+        }
+        finally
+        {
+            await RestoreDemoMetadataAsync(metadataPath, originalMetadata);
+        }
+    }
+
+    [Fact]
+    public async Task WhenTheHandleIsDraggedByTouch_ThenTheRowMoves()
+    {
+        // Arrange
+        var metadataPath = _fixture.GetDemoPagePath(".metadata.json");
+        var originalMetadata = await File.ReadAllTextAsync(metadataPath);
+        var folder = GetDemoFolder();
+        try
+        {
+            var (page, pane) = await OpenPaneAsync("Demo", new BrowserNewContextOptions
+            {
+                HasTouch = true,
+                IsMobile = true,
+                ViewportSize = new() { Width = 390, Height = 844 }
+            });
+
+            var rows = await StartReorderingAsync(pane);
+            var shownNames = await rows.Locator(".subject-pane-child-name").AllInnerTextsAsync();
+            var names = GetShownChildNames(folder);
+            var handle = await rows.Nth(0).Locator(".subject-pane-reorder-handle").BoundingBoxAsync()
+                ?? throw new InvalidOperationException("The handle is not shown.");
+            var target = await rows.Nth(2).BoundingBoxAsync()
+                ?? throw new InvalidOperationException("The target row is not shown.");
+
+            // Playwright taps but does not swipe, so the touches go through the protocol of Chromium.
+            var session = await page.Context.NewCDPSessionAsync(page);
+            Task TouchAsync(string type, double x, double y) => session.SendAsync("Input.dispatchTouchEvent", new Dictionary<string, object>
+            {
+                ["type"] = type,
+                ["touchPoints"] = type == "touchEnd" ? Array.Empty<object>() : new object[] { new Dictionary<string, object> { ["x"] = x, ["y"] = y } }
+            });
+
+            var x = handle.X + handle.Width / 2;
+            var y = handle.Y + handle.Height / 2;
+            var targetY = target.Y + target.Height * 0.75f;
+
+            // Act
+            await TouchAsync("touchStart", x, y);
+            for (var step = 1; step <= 10; step++)
+            {
+                await TouchAsync("touchMove", x, y + (targetY - y) * step / 10);
+            }
+
+            await Assertions.Expect(page.Locator(".subject-pane-reorder-preview")).ToBeVisibleAsync();
+            await TouchAsync("touchEnd", x, targetY);
+
+            // Assert
+            string[] expectedShownNames = [shownNames[1], shownNames[2], shownNames[0], .. shownNames.Skip(3)];
+            await Assertions.Expect(rows.Locator(".subject-pane-child-name"))
+                .ToHaveTextAsync(expectedShownNames, new() { Timeout = PageLoadTimeout });
+
+            string[] expectedNames = [names[1], names[2], names[0], .. names.Skip(3)];
             await AsyncTestHelpers.WaitUntilAsync(
                 () => folder.ChildOrder.ToArray().SequenceEqual(expectedNames),
                 message: "The order of the folder was not written");
