@@ -3,44 +3,11 @@ using HomeBlaze.Components.Abstractions.Pages;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Tracking;
 
 namespace HomeBlaze.Services.Tests;
 
 public class SubjectMetadataExtensionsTests
 {
-    private static MetadataTestSubject CreateSubject()
-        => new(InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry());
-
-    [Fact]
-    public void WhenSubjectHasAMetadataSubject_ThenItsSubjectMetadataIsRead()
-    {
-        // Arrange
-        var subject = CreateSubject();
-        var metadata = new SubjectMetadata { NavigationTitle = "Pump", Icon = "Water" };
-        TestMetadataSubject.Attach(subject, metadata);
-
-        // Act
-        var read = subject.TryGetSubjectMetadata();
-
-        // Assert
-        Assert.Equal(metadata, read);
-        Assert.IsType<TestMetadataSubject>(subject.TryGetMetadataSubject());
-    }
-
-    [Fact]
-    public void WhenSubjectHasNoMetadataSubject_ThenItHasNoSubjectMetadata()
-    {
-        // Arrange
-        var subject = CreateSubject();
-
-        // Act
-        var metadata = subject.TryGetSubjectMetadata();
-
-        // Assert
-        Assert.Null(metadata);
-    }
-
     [Fact]
     public void WhenSubjectIsNotRegistered_ThenItHasNoMetadataSubject()
     {

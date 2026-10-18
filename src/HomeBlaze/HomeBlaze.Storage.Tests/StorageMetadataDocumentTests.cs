@@ -14,11 +14,20 @@ public class StorageMetadataDocumentTests
 
     private static string Write(StorageMetadataDocument document) => Encoding.UTF8.GetString(document.Serialize());
 
-    public static TheoryData<string, string> ValuesOverALimit() => new()
+    private static string JsonObject(IEnumerable<string> members) => "{" + string.Join(", ", members) + "}";
+
+    // An array of strings of 200 characters, which as a JSON value takes about 203 bytes each.
+    private static string LongStrings(int count) => "[" + string.Join(", ", Enumerable.Repeat($"\"{new string('a', 200)}\"", count)) + "]";
+
+    // The document, the values merged into it, and a part of the message.
+    public static TheoryData<string, string, string> ValuesOverALimit() => new()
     {
-        { $$"""{ "{{new string('k', 65)}}": 1 }""", "64 characters" },
-        { $$"""{ "note": "{{new string('a', 257)}}" }""", "'note'" },
-        { $$"""{ "notes": [{{string.Join(", ", Enumerable.Repeat($"\"{new string('a', 200)}\"", 21))}}] }""", "'notes'" }
+        { "{}", $$"""{ "{{new string('k', 65)}}": 1 }""", "64 characters" },
+        { "{}", $$"""{ "note": "{{new string('a', 257)}}" }""", "'note'" },
+        { "{}", $$"""{ "notes": {{LongStrings(21)}} }""", "'notes'" },
+        { "{}", JsonObject(Enumerable.Range(0, 65).Select(index => $"\"key{index}\": null")), "64 keys" },
+        { JsonObject(Enumerable.Range(0, 64).Select(index => $"\"key{index}\": {index}")), """{ "extra": 1 }""", "'extra'" },
+        { "{}", JsonObject(Enumerable.Range(0, 5).Select(index => $"\"part{index}\": {LongStrings(17)}")), "16 KB with 'part0', 'part1', 'part2', 'part3', 'part4'" }
     };
 
     public static TheoryData<string, string> ValuesWithAControlCharacterInAKey() => new()
@@ -206,37 +215,14 @@ public class StorageMetadataDocumentTests
 
     [Theory]
     [MemberData(nameof(ValuesOverALimit))]
-    public void WhenAMergedValueIsOverALimit_ThenItIsRefusedNamingTheKey(string values, string expectedPart)
+    public void WhenAMergeIsOverALimit_ThenItIsRefusedNamingTheKey(string json, string values, string expectedPart)
     {
         // Arrange
-        var document = Parse("{}");
+        var document = Parse(json);
 
         // Act & Assert
         var exception = Assert.Throws<ArgumentException>(() => document.Merge(Values(values), StorageMetadataKind.Folder));
         Assert.Contains(expectedPart, exception.Message);
-    }
-
-    [Fact]
-    public void WhenAMergeAddsTheSixtyFifthKey_ThenItIsRefusedNamingTheKey()
-    {
-        // Arrange
-        var document = Parse("{" + string.Join(", ", Enumerable.Range(0, 64).Select(index => $"\"key{index}\": {index}")) + "}");
-
-        // Act & Assert
-        var exception = Assert.Throws<ArgumentException>(() => document.Merge(Values("""{ "extra": 1 }"""), StorageMetadataKind.Folder));
-        Assert.Contains("'extra'", exception.Message);
-    }
-
-    [Fact]
-    public void WhenAMergeHasMoreThanSixtyFourKeys_ThenItIsRefusedAlsoWhenTheyAreNull()
-    {
-        // Arrange
-        var document = Parse("{}");
-        var values = "{" + string.Join(", ", Enumerable.Range(0, 65).Select(index => $"\"key{index}\": null")) + "}";
-
-        // Act & Assert
-        var exception = Assert.Throws<ArgumentException>(() => document.Merge(Values(values), StorageMetadataKind.Folder));
-        Assert.Contains("64 keys", exception.Message);
     }
 
     [Theory]
@@ -261,20 +247,6 @@ public class StorageMetadataDocumentTests
 
         // Assert
         Assert.Equal("'a\\u000D\\u000Ab', 'c'", formatted);
-    }
-
-    [Fact]
-    public void WhenAMergeMakesTheFileLargerThanSixteenKilobytes_ThenItIsRefusedNamingTheKeys()
-    {
-        // Arrange
-        var document = Parse("{}");
-        var part = "[" + string.Join(", ", Enumerable.Repeat($"\"{new string('a', 200)}\"", 17)) + "]";
-        var values = "{" + string.Join(", ", Enumerable.Range(0, 5).Select(index => $"\"part{index}\": {part}")) + "}";
-
-        // Act & Assert
-        var exception = Assert.Throws<ArgumentException>(() => document.Merge(Values(values), StorageMetadataKind.Folder));
-        Assert.Contains("16 KB", exception.Message);
-        Assert.Contains("'part4'", exception.Message);
     }
 
     [Theory]

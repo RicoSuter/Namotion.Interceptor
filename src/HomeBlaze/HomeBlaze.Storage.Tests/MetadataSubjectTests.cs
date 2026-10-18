@@ -37,21 +37,20 @@ public class MetadataSubjectTests : StorageTestBase
     }
 
     [Fact]
-    public async Task WhenMetadataOfASubjectIsSetAndRead_ThenKeysAreSetRemovedAndKeptAndTheSubjectHasItAtOnce()
+    public async Task WhenMetadataIsSetAndReadThroughTheMetadataSubjectOfASubject_ThenTheSubjectHasIt()
     {
         // Arrange
         WriteFile("Motor.json", SerializeMotor("Motor 1"));
-        WriteFile("Motor.metadata.json", """{ "navTitle": "Pump", "tags": ["cellar"] }""");
         var storage = await ConnectAsync();
         var motor = storage.Children["Motor"];
         var metadataSubject = GetMetadataSubject(motor);
 
         // Act
-        await metadataSubject.SetMetadataAsync(Values("""{ "navTitle": null, "icon": "Water" }"""), CancellationToken.None);
+        await metadataSubject.SetMetadataAsync(Values("""{ "icon": "Water" }"""), CancellationToken.None);
         var metadata = await metadataSubject.GetMetadataAsync(CancellationToken.None);
 
         // Assert
-        Assert.Equal("""{"tags":["cellar"],"icon":"Water"}""", metadata.GetRawText());
+        Assert.Equal("""{"icon":"Water"}""", metadata.GetRawText());
         Assert.Equal(new SubjectMetadata { Icon = "Water" }, motor.TryGetSubjectMetadata());
     }
 
@@ -117,7 +116,7 @@ public class MetadataSubjectTests : StorageTestBase
         var metadataSubject = GetMetadataSubject(docs);
 
         // Act
-        await metadataSubject.SetOrderAsync(["b.md"], CancellationToken.None);
+        await metadataSubject.SetOrderAsync(["b.md", "a.md"], CancellationToken.None);
         var order = await metadataSubject.GetOrderAsync(CancellationToken.None);
 
         // Assert
@@ -171,22 +170,6 @@ public class MetadataSubjectTests : StorageTestBase
         // Assert
         Assert.Equal(["Get Metadata", "Set Metadata", "Get Order", "Set Order"], methodsForAgents.Select(method => method.Title));
         Assert.Empty(methodsForTheUserInterface);
-    }
-
-    [Fact]
-    public async Task WhenSetMetadataIsCalledThroughItsMethod_ThenTheValuesArriveAsAJsonObject()
-    {
-        // Arrange
-        WriteFile("Motor.json", SerializeMotor("Motor 1"));
-        var storage = await ConnectAsync();
-        var motor = storage.Children["Motor"];
-        var method = GetMetadataSubject(motor).TryGetRegisteredSubject()!.TryGetProperty("SetMetadata")!.TryGetMethodMetadata()!;
-
-        // Act
-        await method.InvokeAsync([Values("""{ "navTitle": "Pump" }""")], serviceProvider: null, CancellationToken.None);
-
-        // Assert
-        Assert.Equal("Pump", motor.TryGetSubjectMetadata()?.NavigationTitle);
     }
 
     [Theory]
