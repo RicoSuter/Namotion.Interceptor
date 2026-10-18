@@ -1,0 +1,79 @@
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(PushoverService))]
+@implements ISubjectComponent
+
+<MudPaper Class="pa-4">
+    <MudStack Spacing="2">
+        <MudStack Row="true" AlignItems="AlignItems.Center">
+            <MudIcon Icon="@Icons.Material.Filled.NotificationsActive" Class="mr-2" />
+            <MudText Typo="Typo.h6">@(Service?.Title ?? "Pushover")</MudText>
+            <MudSpacer />
+            <MudChip T="string"
+                     Size="Size.Small"
+                     Color="@GetStatusColor(Service?.Status)"
+                     Variant="Variant.Filled">
+                @(Service?.Status.ToString() ?? "Unknown")
+            </MudChip>
+        </MudStack>
+
+        @if (!string.IsNullOrEmpty(Service?.StatusMessage))
+        {
+            <MudText Typo="Typo.caption">@Service.StatusMessage</MudText>
+        }
+
+        <MudDivider />
+
+        @{ var targets = Service?.Targets; }
+
+        @foreach (var target in targets?.Values ?? Enumerable.Empty<PushoverTarget>())
+        {
+            var emergencies = target.Emergencies.Values;
+            var latestAcknowledged = emergencies
+                .Where(emergency => emergency.Status == PushoverEmergencyStatus.Acknowledged)
+                .MaxBy(emergency => emergency.AcknowledgedAt);
+
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                <MudIcon Icon="@Icons.Material.Filled.Person" Size="Size.Small" Color="@GetStatusColor(target.Status)" />
+                <MudText>@target.Title</MudText>
+            </MudStack>
+
+            @foreach (var emergency in emergencies.Where(emergency => emergency.Status == PushoverEmergencyStatus.Active).OrderBy(emergency => emergency.SentAt))
+            {
+                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="ml-6">
+                    <MudIcon Icon="@Icons.Material.Filled.NotificationImportant" Size="Size.Small" Color="Color.Error" />
+                    <MudText Typo="Typo.body2">@emergency.Title</MudText>
+                    <MudSpacer />
+                    <MudText Typo="Typo.caption">@emergency.SentAt.ToLocalTime().ToString("g")</MudText>
+                </MudStack>
+            }
+
+            @if (latestAcknowledged is not null)
+            {
+                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="ml-6">
+                    <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Size="Size.Small" Color="Color.Success" />
+                    <MudText Typo="Typo.body2">@latestAcknowledged.Title</MudText>
+                    <MudSpacer />
+                    <MudText Typo="Typo.caption">Acknowledged @latestAcknowledged.AcknowledgedAt?.ToLocalTime().ToString("g")</MudText>
+                </MudStack>
+            }
+        }
+
+        @if (targets?.Count == 0)
+        {
+            <MudText Typo="Typo.caption">No targets configured</MudText>
+        }
+    </MudStack>
+</MudPaper>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private PushoverService? Service => Subject as PushoverService;
+
+    private static Color GetStatusColor(ServiceStatus? status) => status switch
+    {
+        ServiceStatus.Running => Color.Success,
+        ServiceStatus.Error => Color.Error,
+        _ => Color.Default
+    };
+}

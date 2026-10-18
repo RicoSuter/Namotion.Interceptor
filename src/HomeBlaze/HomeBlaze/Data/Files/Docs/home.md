@@ -58,6 +58,7 @@ Per-device documentation and setup guides.
 - [GPIO](devices/Gpio.md): Raspberry Pi / Linux GPIO with optional MCP3008 and ADS1115 ADCs
 - [Luxtronik](devices/Luxtronik.md): Luxtronik 2.1 heat pumps (Alpha Innotec, Novelan) via the Smart Home Interface, read only
 - [myStrom](devices/MyStrom.md): myStrom WiFi switches with power metering
+- [Pushover](devices/Pushover.md): Push notifications to phones and desktops, one target per user or group key, with tracked emergency notifications
 - [Philips Hue](devices/PhilipsHue.md): Hue Bridge: lights, rooms, motion and button sensors
 - [Shelly](devices/Shelly.md): Shelly Gen2+ devices via the RPC API
 - [Sonos](devices/Sonos.md): Sonos households over the local UPnP API: rooms with their satellites, groups, playback, favorites and live events
