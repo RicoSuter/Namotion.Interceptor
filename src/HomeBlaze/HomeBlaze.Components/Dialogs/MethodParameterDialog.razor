@@ -84,22 +84,20 @@
         Json
     }
 
+    private static readonly string[] BoolChoices = ["True", "False"];
+
     // One entered value: a simple parameter is keyed by its name, a member of an object parameter by
-    // "parameter.Member", so the two never collide.
-    private sealed record InputField(string Key, string Label, Type Type, StateUnit? Unit, bool IsRequired)
-    {
-        public string[]? EnumNames { get; } =
-            (Nullable.GetUnderlyingType(Type) ?? Type).IsEnum ? Enum.GetNames(Nullable.GetUnderlyingType(Type) ?? Type) : null;
-    }
+    // "parameter.Member", so the two never collide. Choices, when set, are offered in a select.
+    private sealed record InputField(string Key, string Label, Type Type, StateUnit? Unit, bool IsRequired, string[]? Choices);
 
     private sealed record ParameterInput(MethodParameter Parameter, InputKind Kind, InputField[] Fields);
 
     protected override void OnInitialized()
     {
         _inputs = Method?.Parameters.Where(parameter => parameter.RequiresInput).Select(CreateParameterInput).ToArray() ?? [];
-        foreach (var field in _inputs.SelectMany(input => input.Fields).Where(field => field.Type == typeof(bool)))
+        foreach (var input in _inputs.Where(input => input.Kind == InputKind.Simple && input.Parameter.Type == typeof(bool)))
         {
-            _inputValues[field.Key] = "false";
+            _inputValues[input.Parameter.Name] = "false";
         }
 
         ValidateAll();
@@ -125,37 +123,37 @@
         : InputKind.Unsupported;
 
     private static InputField CreateParameterField(MethodParameter parameter) =>
-        new(parameter.Name, GetLabel(parameter.Name, !parameter.IsNullable), parameter.Type, parameter.Unit, !parameter.IsNullable);
+        new(parameter.Name, GetLabel(parameter.Name, !parameter.IsNullable), parameter.Type, parameter.Unit, !parameter.IsNullable, GetEnumNames(parameter.Type));
 
     private static IEnumerable<InputField> CreateMemberFields(MethodParameter parameter) =>
         ParameterConverter.GetObjectMembers(parameter.Type).Select(member => CreateMemberField(parameter, member));
 
+    // A bool member is a choice rather than a checkbox, so that leaving it empty keeps the type's default.
     private static InputField CreateMemberField(MethodParameter parameter, ObjectParameterMember member) =>
-        new(GetMemberKey(parameter, member), GetLabel(member.Name, member.IsRequired), member.Type, null, member.IsRequired);
+        new(GetMemberKey(parameter, member), GetLabel(member.Name, member.IsRequired), member.Type, null, member.IsRequired,
+            (Nullable.GetUnderlyingType(member.Type) ?? member.Type) == typeof(bool) ? BoolChoices : GetEnumNames(member.Type));
+
+    private static string[]? GetEnumNames(Type type)
+    {
+        var valueType = Nullable.GetUnderlyingType(type) ?? type;
+        return valueType.IsEnum ? Enum.GetNames(valueType) : null;
+    }
 
     private static string GetMemberKey(MethodParameter parameter, ObjectParameterMember member) =>
         $"{parameter.Name}.{member.Name}";
 
     private static string GetLabel(string name, bool isRequired)
     {
-        var label = char.ToUpperInvariant(name[0]) + name.Substring(1);
+        var label = name.Length > 0 ? char.ToUpperInvariant(name[0]) + name.Substring(1) : name;
         return isRequired ? $"{label} *" : label;
     }
 
     private RenderFragment RenderField(InputField field) => __builder =>
     {
-        var valueType = Nullable.GetUnderlyingType(field.Type) ?? field.Type;
-        if (valueType == typeof(bool))
+        if (field.Choices is not null)
         {
-            <MudCheckBox T="bool"
-                         Label="@field.Label"
-                         Value="@GetBoolValue(field.Key)"
-                         ValueChanged="@(v => SetValue(field.Key, v))" />
-        }
-        else if (valueType.IsEnum)
-        {
-            // A plain enum member that is not required still has a default value once omitted, so its empty
-            // option reads "(Default)"; only a Nullable<T> enum actually becomes null, which reads "(None)".
+            // A plain enum or bool member that is not required still has a default value once omitted, so its empty
+            // option reads "(Default)"; only a Nullable<T> actually becomes null, which reads "(None)".
             var isNullableType = Nullable.GetUnderlyingType(field.Type) != null;
             <MudSelect T="string"
                        Label="@field.Label"
@@ -168,11 +166,18 @@
                 {
                     <MudSelectItem Value="@((string?)null)">@(isNullableType ? "(None)" : "(Default)")</MudSelectItem>
                 }
-                @foreach (var enumValue in field.EnumNames!)
+                @foreach (var choice in field.Choices)
                 {
-                    <MudSelectItem Value="@enumValue">@enumValue</MudSelectItem>
+                    <MudSelectItem Value="@choice">@choice</MudSelectItem>
                 }
             </MudSelect>
+        }
+        else if ((Nullable.GetUnderlyingType(field.Type) ?? field.Type) == typeof(bool))
+        {
+            <MudCheckBox T="bool"
+                         Label="@field.Label"
+                         Value="@GetBoolValue(field.Key)"
+                         ValueChanged="@(v => SetValue(field.Key, v))" />
         }
         else
         {

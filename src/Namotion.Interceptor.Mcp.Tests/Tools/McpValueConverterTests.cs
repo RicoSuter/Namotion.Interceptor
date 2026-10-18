@@ -82,6 +82,7 @@ public class McpValueConverterTests
     [InlineData("""{"message":"Door open","code":1,"priority":1}""", typeof(McpMethodParameterTests.TestNotification))]
     [InlineData("""{"message":"Door open","code":1,"priority":"1"}""", typeof(McpMethodParameterTests.TestNotification))]
     [InlineData("""{"message":"Door open","code":1,"sound":"siren"}""", typeof(McpMethodParameterTests.TestNotification))]
+    [InlineData("{}", typeof(McpMethodParameterTests.TestCommand))]
     public void WhenValueCannotBeConverted_ThenThrowsJsonException(string json, Type type)
     {
         // Arrange

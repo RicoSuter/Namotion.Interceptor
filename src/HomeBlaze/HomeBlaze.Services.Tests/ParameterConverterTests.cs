@@ -311,6 +311,29 @@ public class ParameterConverterTests
     }
 
     [Fact]
+    public void WhenTypeIsByRefPointerByRefLikeOrOpenGeneric_ThenItIsNotEnterable()
+    {
+        // Arrange
+        Type[] types =
+        [
+            typeof(int).MakeByRefType(),
+            typeof(int).MakePointerType(),
+            typeof(Span<int>),
+            typeof(List<>),
+            typeof(List<>).GetGenericArguments()[0]
+        ];
+
+        // Act & Assert
+        Assert.All(types, type =>
+        {
+            Assert.False(ParameterConverter.IsSupported(type));
+            Assert.False(ParameterConverter.IsSupportedObject(type));
+            Assert.False(ParameterConverter.IsJsonObject(type));
+            Assert.Empty(ParameterConverter.GetObjectMembers(type));
+        });
+    }
+
+    [Fact]
     public void WhenGettingObjectMembers_ThenRequiredIsDescribed()
     {
         // Act
@@ -352,6 +375,70 @@ public class ParameterConverterTests
         Assert.False(success);
         Assert.Null(value);
         Assert.Equal("Text is required", error);
+    }
+
+    [Fact]
+    public void WhenBoolMemberHasNoInput_ThenItKeepsItsDefault()
+    {
+        // Act
+        var success = ParameterConverter.TryCreateObject(typeof(TestSoundMessage), new Dictionary<string, string?>(), out var value, out var error);
+
+        // Assert
+        Assert.True(success, error);
+        Assert.True(Assert.IsType<TestSoundMessage>(value).Sound);
+    }
+
+    [Fact]
+    public void WhenRecordIsPositional_ThenConstructorParametersWithoutDefaultAreRequired()
+    {
+        // Act
+        var members = ParameterConverter.GetObjectMembers(typeof(TestCommand));
+
+        // Assert
+        Assert.Equal(["Target", "Level", "Mode"], members.Select(member => member.Name));
+        Assert.Equal([true, true, false], members.Select(member => member.IsRequired));
+    }
+
+    [Fact]
+    public void WhenPositionalRecordHasNoInputs_ThenCreatingFails()
+    {
+        // Act
+        var success = ParameterConverter.TryCreateObject(typeof(TestCommand), new Dictionary<string, string?>(), out var value, out var error);
+
+        // Assert
+        Assert.False(success);
+        Assert.Null(value);
+        Assert.Equal("Target is required", error);
+    }
+
+    [Fact]
+    public void WhenPositionalRecordParameterWithDefaultHasNoInput_ThenItKeepsItsDefault()
+    {
+        // Arrange
+        var inputs = new Dictionary<string, string?> { ["Target"] = "Lamp", ["Level"] = "2" };
+
+        // Act
+        var success = ParameterConverter.TryCreateObject(typeof(TestCommand), inputs, out var value, out var error);
+
+        // Assert
+        Assert.True(success, error);
+        Assert.Equal(new TestCommand("Lamp", 2), value);
+    }
+
+    [Fact]
+    public void WhenMemberIsSetOnlyThroughTheConstructor_ThenItIsListedAndBound()
+    {
+        // Arrange
+        var inputs = new Dictionary<string, string?> { ["A"] = "Hello" };
+
+        // Act
+        var members = ParameterConverter.GetObjectMembers(typeof(TestConstructorMessage));
+        var success = ParameterConverter.TryCreateObject(typeof(TestConstructorMessage), inputs, out var value, out var error);
+
+        // Assert
+        Assert.Equal(["A"], members.Select(member => member.Name));
+        Assert.True(success, error);
+        Assert.Equal("Hello", Assert.IsType<TestConstructorMessage>(value).A);
     }
 
     [Fact]
@@ -473,6 +560,23 @@ public class ParameterConverterTests
         public TestLevel Level { get; init; } = TestLevel.Normal;
 
         public int? Count { get; init; }
+    }
+
+    public sealed record TestSoundMessage
+    {
+        public bool Sound { get; init; } = true;
+    }
+
+    public sealed record TestCommand(string Target, int Level, string Mode = "Auto");
+
+    public sealed class TestConstructorMessage
+    {
+        public TestConstructorMessage(string a)
+        {
+            A = a;
+        }
+
+        public string A { get; }
     }
 
     public enum TestLevel

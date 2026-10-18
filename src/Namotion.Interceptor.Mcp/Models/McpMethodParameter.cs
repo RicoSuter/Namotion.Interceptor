@@ -13,7 +13,7 @@ namespace Namotion.Interceptor.Mcp.Models;
 /// </summary>
 public sealed record McpMethodParameter
 {
-    // Weak, so that the types of an unloaded plugin are not kept alive.
+    // Weak keys do not hold the type, but the shared serializer options cache its metadata for the process lifetime.
     private static readonly ConditionalWeakTable<Type, StrongBox<JsonElement?>> SchemaByType = new();
 
     /// <summary>
@@ -94,7 +94,9 @@ public sealed record McpMethodParameter
 
     private static bool HasMembers(Type type)
     {
-        if (typeof(IInterceptorSubject).IsAssignableFrom(type))
+        // System.Text.Json throws an ArgumentException for a by-ref, pointer, by-ref-like or open generic type.
+        if (type.IsByRef || type.IsPointer || type.IsByRefLike || type.ContainsGenericParameters ||
+            typeof(IInterceptorSubject).IsAssignableFrom(type))
         {
             return false;
         }
