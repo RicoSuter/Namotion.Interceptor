@@ -278,14 +278,15 @@ internal class BrowseTool
             }
             else if (property.Children.Length > 0)
             {
-                // Collapsed at depth boundary, with the count and the type of the children that are not excluded, as
-                // an expanded property would list them. A property left without one is not listed.
+                // Collapsed at depth boundary, with the count and the type of the children that an expanded property
+                // would list. A property left without one is not listed.
                 var count = 0;
                 Type? firstType = null;
                 var isOneType = true;
                 foreach (var child in property.Children)
                 {
-                    if (child.Subject.TryGetRegisteredSubject() is { } childRegistered &&
+                    if ((property.IsSubjectDictionary && child.Index is null) ||
+                        child.Subject.TryGetRegisteredSubject() is not { } childRegistered ||
                         McpToolHelper.ShouldExcludeByType(childRegistered, _configuration.ExcludeTypes, options.ExcludeTypes))
                     {
                         continue;

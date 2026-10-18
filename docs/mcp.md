@@ -151,7 +151,7 @@ Browse the subject tree starting at a path. Use `text` format (default) for over
 | `excludeTypes` | (none) | Exclude subjects matching these type/interface names |
 | `maxSubjects` | server limit | Maximum subjects to return |
 
-Subjects of a type in `ExcludeTypes` of the configuration, or matching `excludeTypes`, are left out of the tree, also of the count and the item type of a property collapsed at the depth limit. A collapsed property left without a child is not listed.
+Subjects of a type in `ExcludeTypes` of the configuration, or matching `excludeTypes`, are left out of the tree. A property collapsed at the depth limit counts and types only the remaining children and is left out if none remain.
 
 ### `search`
 
