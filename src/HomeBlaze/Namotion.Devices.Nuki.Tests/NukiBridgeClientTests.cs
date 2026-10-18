@@ -1,0 +1,175 @@
+using System.Net;
+using System.Security.Cryptography;
+using System.Text;
+using System.Web;
+using Namotion.Devices.Nuki.Client;
+using Namotion.Devices.Nuki.Tests.Testing;
+using Xunit;
+
+namespace Namotion.Devices.Nuki.Tests;
+
+public class NukiBridgeClientTests
+{
+    private const string Token = "123456";
+
+    private static NukiBridgeClient CreateClient(FakeNukiBridge bridge, NukiTokenMode tokenMode, string hostAddress = "192.168.1.50")
+        => new(bridge.CreateClient(string.Empty), hostAddress, Token, tokenMode, busyRetryDelay: TimeSpan.Zero);
+
+    [Fact]
+    public async Task WhenTokenModeIsPlain_ThenTheTokenIsSentAsQueryParameter()
+    {
+        // Arrange
+        var bridge = new FakeNukiBridge();
+        var client = CreateClient(bridge, NukiTokenMode.Plain);
+
+        // Act
+        await client.GetInfoAsync(CancellationToken.None);
+
+        // Assert
+        var uri = Assert.Single(bridge.Requests);
+        Assert.Equal("http://192.168.1.50:8080/info?token=123456", uri.ToString());
+    }
+
+    [Fact]
+    public async Task WhenHostAddressHasAPort_ThenThePortIsKept()
+    {
+        // Arrange
+        var bridge = new FakeNukiBridge();
+        var client = CreateClient(bridge, NukiTokenMode.Plain, hostAddress: "192.168.1.50:8081");
+
+        // Act
+        await client.GetInfoAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(8081, Assert.Single(bridge.Requests).Port);
+    }
+
+    [Fact]
+    public async Task WhenTokenModeIsEncrypted_ThenTheRequestCarriesACtokenThatDecryptsToTimestampAndRandomNumber()
+    {
+        // Arrange
+        var bridge = new FakeNukiBridge();
+        var client = CreateClient(bridge, NukiTokenMode.Encrypted);
+
+        // Act
+        await client.GetInfoAsync(CancellationToken.None);
+
+        // Assert
+        var query = HttpUtility.ParseQueryString(Assert.Single(bridge.Requests).Query);
+        Assert.Null(query["token"]);
+        var ctoken = Convert.FromHexString(query["ctoken"]!);
+        var nonce = Convert.FromHexString(query["nonce"]!);
+        Assert.Equal(24, nonce.Length);
+
+        var plaintext = Decrypt(ctoken, nonce, SHA256.HashData(Encoding.UTF8.GetBytes(Token)));
+        Assert.Matches(@"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z,\d{1,5}$", plaintext);
+        var timestamp = DateTimeOffset.Parse(plaintext.Split(',')[0], System.Globalization.CultureInfo.InvariantCulture);
+        Assert.InRange(DateTimeOffset.UtcNow - timestamp, TimeSpan.FromSeconds(-1), TimeSpan.FromMinutes(1));
+    }
+
+    [Fact]
+    public async Task WhenTwoRequestsAreSent_ThenEachHasItsOwnNonce()
+    {
+        // Arrange
+        var bridge = new FakeNukiBridge();
+        var client = CreateClient(bridge, NukiTokenMode.Encrypted);
+
+        // Act
+        await client.GetInfoAsync(CancellationToken.None);
+        await client.GetInfoAsync(CancellationToken.None);
+
+        // Assert
+        var nonces = bridge.Requests.Select(uri => HttpUtility.ParseQueryString(uri.Query)["nonce"]).ToArray();
+        Assert.NotEqual(nonces[0], nonces[1]);
+    }
+
+    [Fact]
+    public async Task WhenBridgeIsBusyOnce_ThenTheRequestIsRetried()
+    {
+        // Arrange
+        var bridge = new FakeNukiBridge();
+        var calls = 0;
+        bridge.StatusOverride = path => Interlocked.Increment(ref calls) == 1 ? HttpStatusCode.ServiceUnavailable : null;
+        var client = CreateClient(bridge, NukiTokenMode.Plain);
+
+        // Act
+        var devices = await client.GetListAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(2, devices.Length);
+        Assert.Equal(2, bridge.CountRequests("list"));
+    }
+
+    [Fact]
+    public async Task WhenBridgeStaysBusy_ThenTheSecondAttemptThrows()
+    {
+        // Arrange
+        var bridge = new FakeNukiBridge { StatusOverride = _ => HttpStatusCode.ServiceUnavailable };
+        var client = CreateClient(bridge, NukiTokenMode.Plain);
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<HttpRequestException>(() => client.GetListAsync(CancellationToken.None));
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, exception.StatusCode);
+        Assert.Equal(2, bridge.CountRequests("list"));
+    }
+
+    [Fact]
+    public async Task WhenTokenIsRejected_ThenTheMessageNamesTheLikelyCauses()
+    {
+        // Arrange
+        var bridge = new FakeNukiBridge { StatusOverride = _ => HttpStatusCode.Unauthorized };
+        var client = CreateClient(bridge, NukiTokenMode.Encrypted);
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<HttpRequestException>(() => client.GetInfoAsync(CancellationToken.None));
+        Assert.Equal(HttpStatusCode.Unauthorized, exception.StatusCode);
+        Assert.Contains("Token rejected", exception.Message);
+        Assert.Contains("clock", exception.Message);
+        Assert.Contains("Plain", exception.Message);
+    }
+
+    [Fact]
+    public async Task WhenLockActionIsSent_ThenItWaitsForTheResult()
+    {
+        // Arrange
+        var bridge = new FakeNukiBridge();
+        var client = CreateClient(bridge, NukiTokenMode.Plain);
+
+        // Act
+        var result = await client.LockActionAsync(nukiId: 7, deviceType: 4, action: 2, CancellationToken.None);
+
+        // Assert
+        Assert.True(result.Success);
+        var query = HttpUtility.ParseQueryString(Assert.Single(bridge.Requests).Query);
+        Assert.Equal("7", query["nukiId"]);
+        Assert.Equal("4", query["deviceType"]);
+        Assert.Equal("2", query["action"]);
+        Assert.Equal("0", query["nowait"]);
+    }
+
+    [Fact]
+    public async Task WhenAuthIsSent_ThenNoTokenIsAdded()
+    {
+        // Arrange
+        var bridge = new FakeNukiBridge();
+        var client = new NukiBridgeClient(bridge.CreateClient(string.Empty), "192.168.1.50", token: null, NukiTokenMode.Plain);
+
+        // Act
+        var result = await client.AuthAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal("abc123", result.Token);
+        Assert.Equal("http://192.168.1.50:8080/auth", Assert.Single(bridge.Requests).ToString());
+    }
+
+    // XSalsa20 over 32 zero bytes and the ciphertext gives the Poly1305 key and the plaintext.
+    private static string Decrypt(byte[] ctoken, byte[] nonce, byte[] key)
+    {
+        var stream = new byte[32 + ctoken.Length - SecretBox.TagSize];
+        ctoken.AsSpan(SecretBox.TagSize).CopyTo(stream.AsSpan(32));
+        using var cipher = new NaCl.Core.XSalsa20(key, 0);
+        cipher.Encrypt(stream, nonce, stream);
+        NaCl.Core.Poly1305.VerifyMac(stream.AsSpan(0, 32), ctoken.AsSpan(SecretBox.TagSize), ctoken.AsSpan(0, SecretBox.TagSize));
+        return Encoding.ASCII.GetString(stream, 32, stream.Length - 32);
+    }
+}
