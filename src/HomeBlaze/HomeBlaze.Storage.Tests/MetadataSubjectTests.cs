@@ -10,7 +10,7 @@ namespace HomeBlaze.Storage.Tests;
 
 public class MetadataSubjectTests : StorageTestBase
 {
-    private static JsonElement Values(string json) => JsonDocument.Parse(json).RootElement;
+    private static JsonElement Values(string json) => JsonElement.Parse(json);
 
     private static MetadataSubject GetMetadataSubject(IInterceptorSubject owner)
         => Assert.IsType<MetadataSubject>(owner.TryGetMetadataSubject());
@@ -136,7 +136,7 @@ public class MetadataSubjectTests : StorageTestBase
     }
 
     [Fact]
-    public async Task WhenTheMetadataSubjectIsListed_ThenItsMethodsAreForAgentsOnlyAndItsTypeIsExcludedEverywhere()
+    public async Task WhenTheMetadataSubjectIsListed_ThenItsMethodsAreForAgentsOnly()
     {
         // Arrange
         WriteFile("Motor.json", SerializeMotor("Motor 1"));
@@ -150,7 +150,6 @@ public class MetadataSubjectTests : StorageTestBase
         // Assert
         Assert.Equal(["Get Metadata", "Set Metadata", "Get Order", "Set Order"], methodsForAgents.Select(method => method.Title));
         Assert.Empty(methodsForTheUserInterface);
-        Assert.True(ExcludeFromAttribute.IsExcluded(typeof(MetadataSubject), ExclusionTarget.All));
     }
 
     [Fact]

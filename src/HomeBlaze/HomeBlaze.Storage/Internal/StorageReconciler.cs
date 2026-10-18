@@ -327,8 +327,7 @@ internal sealed class StorageReconciler
         => _index.TryGet(path, out var entry) ? entry.Metadata : null;
 
     /// <summary>
-    /// Reads and parses a metadata file from the storage, not from the index, so that a write keeps an edit that no
-    /// pass has seen yet, also of a file that the index does not hold. An empty document for a file that does not exist.
+    /// Reads and parses a metadata file from the storage. An empty document for a file that does not exist.
     /// </summary>
     /// <exception cref="InvalidOperationException">
     /// The file cannot be read as metadata or cannot be written back, or the path is a folder.
@@ -340,6 +339,8 @@ internal sealed class StorageReconciler
             throw new InvalidOperationException($"'{path}' is a folder and not a metadata file.");
         }
 
+        // From the storage rather than the index, so that a write keeps an edit that no pass has seen yet, also of a
+        // file that the index does not hold.
         var content = await TryReadAsync(path, cancellationToken);
         if (content is null)
         {
@@ -348,7 +349,7 @@ internal sealed class StorageReconciler
 
         return StorageMetadataDocument.TryParse(content, out var document, out _) && CanBeWritten(document)
             ? document
-            : throw StorageMetadataDocument.CreateUnreadableException(path);
+            : throw new InvalidOperationException($"The metadata file '{path}' could not be read. Fix or delete it, then try again.");
     }
 
     // A value that cannot be written, such as a string with a lone surrogate, is found only by writing it. A pass does

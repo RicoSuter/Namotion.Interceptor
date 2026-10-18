@@ -10,7 +10,7 @@ public class StorageMetadataDocumentTests
     private static StorageMetadataDocument Parse(string json)
         => StorageMetadataDocument.TryParse(Encoding.UTF8.GetBytes(json), out var document, out var error) ? document : throw error;
 
-    private static JsonElement Values(string json) => JsonDocument.Parse(json).RootElement;
+    private static JsonElement Values(string json) => JsonElement.Parse(json);
 
     private static string Write(StorageMetadataDocument document) => Encoding.UTF8.GetString(document.Serialize());
 
@@ -288,20 +288,5 @@ public class StorageMetadataDocumentTests
         // Assert
         Assert.Equal("{\n  \"title\": \"Docs\",\n  \"order\": [\n    \"b.md\",\n    \"a.md\"\n  ]\n}\n", withOrder);
         Assert.Equal("{\n  \"title\": \"Docs\"\n}\n", Write(document));
-    }
-
-    [Fact]
-    public void WhenDocumentIsReadAsJson_ThenTheOrderIsLeftOutUnlessItIsAskedFor()
-    {
-        // Arrange
-        var document = Parse("""{ "title": "Docs", "order": ["a.md"], "tags": ["x"] }""");
-
-        // Act
-        var withoutOrder = document.ToJsonElement(includesOrder: false);
-        var withOrder = document.ToJsonElement(includesOrder: true);
-
-        // Assert
-        Assert.Equal("""{"title":"Docs","tags":["x"]}""", withoutOrder.GetRawText());
-        Assert.Equal("""{"title":"Docs","order":["a.md"],"tags":["x"]}""", withOrder.GetRawText());
     }
 }

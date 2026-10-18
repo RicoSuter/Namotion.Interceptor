@@ -16,8 +16,8 @@ internal static class SubjectPathSelection
     /// Gets whether the path of the property can be selected. Without a <see cref="SubjectPathAttribute.SubjectType"/>
     /// the property holds no subjects and matches <see cref="SubjectPathAttribute.Kind"/>,
     /// <see cref="SubjectPathAttribute.ValueTypes"/> and <see cref="SubjectPathAttribute.IsWritable"/>; an attribute that
-    /// holds HomeBlaze metadata never matches. With a type the property is a
-    /// reference that currently leads to an instance of the type.
+    /// holds HomeBlaze metadata never matches. With a type the property is a reference that currently leads to an
+    /// instance of the type.
     /// </summary>
     public static bool CanSelectProperty(RegisteredSubjectProperty property, SubjectPathAttribute path)
     {

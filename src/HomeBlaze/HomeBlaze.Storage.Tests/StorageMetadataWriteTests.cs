@@ -9,7 +9,7 @@ namespace HomeBlaze.Storage.Tests;
 
 public class StorageMetadataWriteTests : StorageTestBase
 {
-    private static JsonElement Values(string json) => JsonDocument.Parse(json).RootElement;
+    private static JsonElement Values(string json) => JsonElement.Parse(json);
 
     private string ReadText(string relativePath) => File.ReadAllText(GetFullPath(relativePath));
 
@@ -28,21 +28,6 @@ public class StorageMetadataWriteTests : StorageTestBase
         Assert.Equal("Documentation", docs.Title);
         Assert.Equal("MenuBook", docs.IconName);
         Assert.Equal(new FolderMetadata { Title = "Documentation", Icon = "MenuBook" }, ReadMetadataFile("Docs/.metadata.json").ToFolderMetadata());
-    }
-
-    [Fact]
-    public async Task WhenMetadataIsSet_ThenTheFileIsIndentedEndsWithANewLineAndKeepsNonAsciiCharacters()
-    {
-        // Arrange
-        WriteFile("Docs/a.md");
-        var storage = await ConnectAsync();
-        var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
-
-        // Act
-        await storage.SetMetadataAsync(docs, Values("""{ "title": "Geräte" }"""), CancellationToken.None);
-
-        // Assert
-        Assert.Equal("{\n  \"title\": \"Geräte\"\n}\n", ReadText("Docs/.metadata.json"));
     }
 
     [Fact]

@@ -127,8 +127,7 @@
                     [MetadataKeys.Location] = _location?.ToString(),
                     [MetadataKeys.Alignment] = _location == NavigationLocation.AppBar ? _alignment?.ToString() : null
                 };
-            using var document = JsonDocument.Parse(values.ToJsonString());
-            await metadataSubject.SetMetadataAsync(document.RootElement, CancellationToken.None);
+            await metadataSubject.SetMetadataAsync(JsonElement.Parse(values.ToJsonString()), CancellationToken.None);
             MudDialog?.Close(DialogResult.Ok(true));
         }
         catch (Exception exception)

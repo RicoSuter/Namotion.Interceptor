@@ -27,7 +27,7 @@ internal enum StorageMetadataKind
 /// </summary>
 /// <remarks>
 /// Not thread-safe. A write changes only a document that it has just read from the storage, and drops it when a
-/// merge is refused, as the merge may have changed it in part.
+/// merge is refused, as the merge may have changed it in part. A document in the index is never changed.
 /// </remarks>
 internal sealed class StorageMetadataDocument
 {
@@ -61,6 +61,11 @@ internal sealed class StorageMetadataDocument
 
     private readonly JsonObject _root;
 
+    // Read when the document is created or changed rather than on each call, as every pass takes them for each file.
+    private FolderMetadata? _folderMetadata;
+    private SubjectMetadata? _subjectMetadata;
+    private ImmutableArray<string> _childOrder;
+
     public StorageMetadataDocument()
         : this(new JsonObject(NodeOptions))
     {
@@ -69,6 +74,7 @@ internal sealed class StorageMetadataDocument
     private StorageMetadataDocument(JsonObject root)
     {
         _root = root;
+        ReadTypedValues();
     }
 
     /// <summary>True when no key has a value, so that the file is deleted rather than written as <c>{}</c>.</summary>
@@ -108,7 +114,7 @@ internal sealed class StorageMetadataDocument
                 throw new JsonException("A metadata file holds a JSON object.");
             }
 
-            // Reads the keys here, which the node otherwise reads when it is first used, by a pass that applies it.
+            // Forces the keys to be read now, so a duplicate key fails here.
             _ = root.Count;
             document = new StorageMetadataDocument(root);
             error = null;
@@ -121,10 +127,6 @@ internal sealed class StorageMetadataDocument
             return false;
         }
     }
-
-    /// <summary>The refusal of a Get or a write of a metadata file that could not be read.</summary>
-    public static InvalidOperationException CreateUnreadableException(string path)
-        => new($"The metadata file '{path}' could not be read. Fix or delete it, then try again.");
 
     /// <summary>
     /// The content of the file: indented, ending with a new line, with non-ASCII characters as they are and without
@@ -144,52 +146,17 @@ internal sealed class StorageMetadataDocument
     {
         var buffer = new ArrayBufferWriter<byte>();
         Write(buffer, CompactOptions, includesOrder);
-        using var document = JsonDocument.Parse(buffer.WrittenMemory);
-        return document.RootElement.Clone();
+        return JsonElement.Parse(buffer.WrittenSpan);
     }
 
-    public FolderMetadata? ToFolderMetadata()
-    {
-        var metadata = new FolderMetadata
-        {
-            Title = GetString(MetadataKeys.Title),
-            NavigationTitle = GetString(MetadataKeys.NavigationTitle),
-            Icon = GetString(MetadataKeys.Icon)
-        };
-        return metadata is { Title: null, NavigationTitle: null, Icon: null } ? null : metadata;
-    }
+    /// <summary>Gets the title, navTitle and icon of a folder; null without any.</summary>
+    public FolderMetadata? ToFolderMetadata() => _folderMetadata;
 
-    public SubjectMetadata? ToSubjectMetadata()
-    {
-        var metadata = new SubjectMetadata
-        {
-            NavigationTitle = GetString(MetadataKeys.NavigationTitle),
-            Icon = GetString(MetadataKeys.Icon),
-            Location = GetEnum<NavigationLocation>(MetadataKeys.Location),
-            Alignment = GetEnum<AppBarAlignment>(MetadataKeys.Alignment)
-        };
-        return metadata is { NavigationTitle: null, Icon: null, Location: null, Alignment: null } ? null : metadata;
-    }
+    /// <summary>Gets the navTitle, icon, location and alignment of a subject; null without any.</summary>
+    public SubjectMetadata? ToSubjectMetadata() => _subjectMetadata;
 
     /// <summary>Gets the names of <c>order</c>, leaving out the values that are no string.</summary>
-    public ImmutableArray<string> ToChildOrder()
-    {
-        if (_root[MetadataKeys.Order] is not JsonArray order)
-        {
-            return [];
-        }
-
-        var names = ImmutableArray.CreateBuilder<string>(order.Count);
-        foreach (var item in order)
-        {
-            if (GetText(item) is { } name)
-            {
-                names.Add(name);
-            }
-        }
-
-        return names.ToImmutable();
-    }
+    public ImmutableArray<string> ToChildOrder() => _childOrder;
 
     /// <summary>Sets <c>order</c> to the names, and removes it for none.</summary>
     public void SetOrder(IEnumerable<string> names)
@@ -208,6 +175,8 @@ internal sealed class StorageMetadataDocument
         {
             _root[MetadataKeys.Order] = order;
         }
+
+        ReadTypedValues();
     }
 
     /// <summary>
@@ -284,6 +253,8 @@ internal sealed class StorageMetadataDocument
         {
             throw Refuse($"The metadata file would be larger than {MaxFileSize / 1024} KB with {FormatNames(givenKeys)}.");
         }
+
+        ReadTypedValues();
     }
 
     /// <summary>
@@ -301,6 +272,41 @@ internal sealed class StorageMetadataDocument
                 : $"'{(name.Length > maxNameLength ? name[..maxNameLength] + "…" : name)}'")
             .ToList();
         return formattedNames.Count > 0 ? string.Join(", ", formattedNames) : "none";
+    }
+
+    private void ReadTypedValues()
+    {
+        var folderMetadata = new FolderMetadata
+        {
+            Title = GetString(MetadataKeys.Title),
+            NavigationTitle = GetString(MetadataKeys.NavigationTitle),
+            Icon = GetString(MetadataKeys.Icon)
+        };
+        _folderMetadata = folderMetadata is { Title: null, NavigationTitle: null, Icon: null } ? null : folderMetadata;
+
+        var subjectMetadata = new SubjectMetadata
+        {
+            NavigationTitle = folderMetadata.NavigationTitle,
+            Icon = folderMetadata.Icon,
+            Location = GetEnum<NavigationLocation>(MetadataKeys.Location),
+            Alignment = GetEnum<AppBarAlignment>(MetadataKeys.Alignment)
+        };
+        _subjectMetadata = subjectMetadata is { NavigationTitle: null, Icon: null, Location: null, Alignment: null } ? null : subjectMetadata;
+
+        _childOrder = [];
+        if (_root[MetadataKeys.Order] is JsonArray order)
+        {
+            var names = ImmutableArray.CreateBuilder<string>(order.Count);
+            foreach (var item in order)
+            {
+                if (GetText(item) is { } name)
+                {
+                    names.Add(name);
+                }
+            }
+
+            _childOrder = names.DrainToImmutable();
+        }
     }
 
     private void Write(IBufferWriter<byte> buffer, JsonWriterOptions options, bool includesOrder)
@@ -332,7 +338,6 @@ internal sealed class StorageMetadataDocument
         return buffer.WrittenCount;
     }
 
-    // A copy, as the element belongs to the document of the caller.
     private static JsonNode? ToNode(JsonElement value)
         => value.ValueKind == JsonValueKind.Null ? null : JsonNode.Parse(value.GetRawText(), NodeOptions);
 
@@ -367,21 +372,10 @@ internal sealed class StorageMetadataDocument
     private TEnum? GetEnum<TEnum>(string key) where TEnum : struct, Enum
         => GetString(key) is { } text && TryParseName(text, out TEnum value) ? value : null;
 
-    // By name only, without regard to case: Enum.TryParse would also take numbers and lists of names.
+    // By name only, without regard to case: the name check leaves out the numbers and the lists of names that
+    // Enum.TryParse also takes.
     private static bool TryParseName<TEnum>(string text, out TEnum value) where TEnum : struct, Enum
-    {
-        foreach (var name in Enum.GetNames<TEnum>())
-        {
-            if (string.Equals(name, text, StringComparison.OrdinalIgnoreCase))
-            {
-                value = Enum.Parse<TEnum>(name);
-                return true;
-            }
-        }
-
-        value = default;
-        return false;
-    }
+        => Enum.TryParse(text, ignoreCase: true, out value) && string.Equals(value.ToString(), text, StringComparison.OrdinalIgnoreCase);
 
     // A string with a lone surrogate cannot be read as text, which counts as no value.
     private static string? GetText(JsonNode? node)

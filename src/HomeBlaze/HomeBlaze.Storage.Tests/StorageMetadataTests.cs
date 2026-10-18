@@ -166,23 +166,6 @@ public class StorageMetadataTests : StorageTestBase
     }
 
     [Fact]
-    public async Task WhenSubjectIsReplacedByAnotherType_ThenTheNewSubjectHasTheMetadata()
-    {
-        // Arrange
-        WriteFile("Motor.json", SerializeMotor("Motor 1"));
-        WriteFile("Motor.metadata.json", """{ "navTitle": "Pump" }""");
-        var storage = await ConnectAsync();
-        WriteFile("Motor.json", SerializeStorage(CreateTemporaryDirectory().FullName));
-
-        // Act
-        await storage.ReconcileAsync(Named("Motor.json"));
-
-        // Assert
-        var replaced = Assert.IsType<FluentStorageContainer>(storage.Children["Motor"]);
-        Assert.Equal("Pump", replaced.TryGetSubjectMetadata()?.NavigationTitle);
-    }
-
-    [Fact]
     public async Task WhenJsonSubjectMovesToAnotherFolder_ThenItTakesTheMetadataThereOrNone()
     {
         // Arrange

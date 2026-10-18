@@ -616,8 +616,7 @@ public partial class FluentStorageContainer :
     }
 
     /// <summary>
-    /// Merges values into the metadata file of the owner, see <see cref="StorageMetadataDocument.Merge"/>. The one
-    /// write of metadata, for agents and for the browser.
+    /// Merges values into the metadata file of the owner, see <see cref="StorageMetadataDocument.Merge"/>.
     /// </summary>
     /// <param name="owner">This storage, a folder of it, or the subject of a JSON file of it.</param>
     /// <param name="values">A JSON object.</param>
@@ -694,7 +693,7 @@ public partial class FluentStorageContainer :
     /// <summary>
     /// Writes the order of the children of this storage or of a folder of it: the given names first, in the given
     /// order, then the other children in the order in which they are shown, which drops the names of children that
-    /// are gone. The one write of an order, for agents and for the browser.
+    /// are gone.
     /// </summary>
     /// <param name="owner">This storage or a folder of it.</param>
     /// <param name="names">The names of the children to show first.</param>

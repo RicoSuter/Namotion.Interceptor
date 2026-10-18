@@ -119,30 +119,31 @@ public sealed partial class MetadataSubject : IMetadataSubject
         }
     }
 
-    private static Task RunAsync(Func<Task> call) => RunAsync(async () =>
+    private static async Task RunAsync(Func<Task> call)
     {
-        await call();
-        return true;
-    });
+        try
+        {
+            await call();
+        }
+        catch (InvalidOperationException exception)
+        {
+            throw new ArgumentException(exception.Message, exception);
+        }
+    }
 
     // The storage that holds the metadata file of the owner: the storage of a folder, else the storage that holds the
     // owner as the subject of a file, else the owner itself as the root of a storage. A storage that is the JSON file
     // of another one so has the metadata of that file, and once it has left the tree, none.
-    private FluentStorageContainer ResolveStorage() => _owner switch
-    {
-        VirtualFolder { Storage: FluentStorageContainer storage } => storage,
-        _ => FindHoldingStorage()
+    private FluentStorageContainer ResolveStorage()
+        => (_owner is VirtualFolder ? AsStorage(_owner) : null)
+            ?? FindHoldingStorage()
             ?? (_owner.TryGetRegisteredSubject() is not null ? _owner as FluentStorageContainer : null)
-            ?? throw new ArgumentException("The subject of this metadata is no longer in a storage.")
-    };
+            ?? throw new ArgumentException("The subject of this metadata is no longer in a storage.");
 
     // The storage whose children are put in order: the storage of a folder, or the owner itself as the root.
-    private FluentStorageContainer ResolveOrderStorage() => _owner switch
-    {
-        VirtualFolder { Storage: FluentStorageContainer storage } => storage,
-        FluentStorageContainer storage => storage,
-        _ => throw new ArgumentException("Only a folder or the root of a storage has an order; this is the metadata of a subject.")
-    };
+    private FluentStorageContainer ResolveOrderStorage()
+        => AsStorage(_owner)
+            ?? throw new ArgumentException("Only a folder or the root of a storage has an order; this is the metadata of a subject.");
 
     // The folder or root whose children hold the owner, which makes the owner the subject of a file of that storage.
     private FluentStorageContainer? FindHoldingStorage()
@@ -160,15 +161,20 @@ public sealed partial class MetadataSubject : IMetadataSubject
                 continue;
             }
 
-            switch (parent.Property.Parent.Subject)
+            if (AsStorage(parent.Property.Parent.Subject) is { } storage)
             {
-                case VirtualFolder { Storage: FluentStorageContainer storage }:
-                    return storage;
-                case FluentStorageContainer storage:
-                    return storage;
+                return storage;
             }
         }
 
         return null;
     }
+
+    // The storage of a folder, or the subject itself as the root of a storage.
+    private static FluentStorageContainer? AsStorage(object? subject) => subject switch
+    {
+        VirtualFolder { Storage: FluentStorageContainer storage } => storage,
+        FluentStorageContainer storage => storage,
+        _ => null
+    };
 }
