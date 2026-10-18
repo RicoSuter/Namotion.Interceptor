@@ -26,10 +26,14 @@ internal static class CanvasExtent
         return right;
     }
 
-    /// <summary>Gets the widget argument error of the width or the least width, or null when both can be used.</summary>
-    public static string? Validate(int? width, int? minWidth) =>
+    /// <summary>
+    /// Gets the widget argument error of the width, the least width or the largest width, or null when all can be used.
+    /// </summary>
+    public static string? Validate(int? width, int? minWidth, int? maxWidth) =>
         width is <= 0 ? string.Create(CultureInfo.InvariantCulture, $"Width must be above 0: {width}")
         : minWidth is <= 0 ? string.Create(CultureInfo.InvariantCulture, $"MinWidth must be above 0: {minWidth}")
+        : maxWidth is <= 0 ? string.Create(CultureInfo.InvariantCulture, $"MaxWidth must be above 0: {maxWidth}")
+        : maxWidth < minWidth ? string.Create(CultureInfo.InvariantCulture, $"MaxWidth must not be below MinWidth: {maxWidth}")
         : null;
 
     /// <summary>Gets whether a canvas is scaled to its width: a viewed canvas that fits the width and has a design width.</summary>
@@ -38,18 +42,21 @@ internal static class CanvasExtent
 
     /// <summary>
     /// Gets the CSS width a canvas that <see cref="IsScaled"/> is drawn at: the width of its frame, which must be an
-    /// inline-size container, but no less than the least width.
+    /// inline-size container, but no more than the largest width and no less than the least width, which wins.
     /// </summary>
-    public static string GetDrawnWidth(int? minWidth) =>
-        minWidth is { } pixels
-            ? string.Create(CultureInfo.InvariantCulture, $"max(100cqw, {pixels}px)")
-            : "100cqw";
+    public static string GetDrawnWidth(int? minWidth, int? maxWidth) => (minWidth, maxWidth) switch
+    {
+        ({ } least, { } largest) => string.Create(CultureInfo.InvariantCulture, $"clamp({least}px, 100cqw, {largest}px)"),
+        ({ } least, null) => string.Create(CultureInfo.InvariantCulture, $"max(100cqw, {least}px)"),
+        (null, { } largest) => string.Create(CultureInfo.InvariantCulture, $"min(100cqw, {largest}px)"),
+        _ => "100cqw"
+    };
 
     /// <summary>
     /// Gets the CSS number a canvas that <see cref="IsScaled"/> is drawn at: its <see cref="GetDrawnWidth"/> over its
     /// design width.
     /// </summary>
     // CSS divides a length by a length only through the tangent of the angle between them.
-    public static string GetFactor(int designWidth, int? minWidth) =>
-        string.Create(CultureInfo.InvariantCulture, $"tan(atan2({GetDrawnWidth(minWidth)}, {designWidth}px))");
+    public static string GetFactor(int designWidth, int? minWidth, int? maxWidth) =>
+        string.Create(CultureInfo.InvariantCulture, $"tan(atan2({GetDrawnWidth(minWidth, maxWidth)}, {designWidth}px))");
 }

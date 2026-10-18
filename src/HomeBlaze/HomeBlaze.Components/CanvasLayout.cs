@@ -55,6 +55,14 @@ public partial class CanvasLayout : IConfigurable, ITitleProvider
     public partial int? MinWidth { get; set; }
 
     /// <summary>
+    /// The largest width in pixels at which a canvas with <see cref="CanvasScale.FitWidth"/> is drawn. In a wider place it
+    /// keeps this width at the left. Set to <see cref="Width"/>, the canvas is never drawn larger than designed. Without it
+    /// the canvas always fits the width.
+    /// </summary>
+    [Configuration]
+    public partial int? MaxWidth { get; set; }
+
+    /// <summary>
     /// The nodes on the canvas. On a page one <c>Node</c> block each, in a configuration file a list.
     /// </summary>
     [Configuration, State, Slot("Node")]
