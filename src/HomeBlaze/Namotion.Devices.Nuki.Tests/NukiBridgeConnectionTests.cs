@@ -249,7 +249,7 @@ public class NukiBridgeConnectionTests
         // Assert
         var requests = test.Fake.Requests.Select(uri => uri.AbsolutePath).ToArray();
         var secondInfo = Array.LastIndexOf(requests, "/info");
-        Assert.Equal(1 + NukiBridge.InfoPollDivider, requests.Take(secondInfo).Count(path => path == "/list"));
+        Assert.Equal(NukiBridge.InfoPollDivider, requests.Take(secondInfo).Count(path => path == "/list"));
     }
 
     [Theory]

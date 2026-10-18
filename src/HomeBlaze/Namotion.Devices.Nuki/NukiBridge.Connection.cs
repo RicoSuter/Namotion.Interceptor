@@ -60,19 +60,16 @@ public partial class NukiBridge
                 stoppingToken.ThrowIfCancellationRequested();
                 var hostAddress = HostAddress;
                 var token = Token;
-                if (string.IsNullOrWhiteSpace(hostAddress) || string.IsNullOrEmpty(token))
+                var configurationError = string.IsNullOrWhiteSpace(hostAddress) || string.IsNullOrEmpty(token)
+                    ? "Host address and token are required."
+                    : ValidateHostAddress(hostAddress);
+                if (configurationError is not null)
                 {
-                    await WaitForConfigurationChangeAsync("Host address and token are required.", stoppingToken);
-                    continue;
+                    StatusMessage = configurationError;
+                    Status = ServiceStatus.Error;
+                    await _configurationChangedSignal.WaitAsync(stoppingToken);
                 }
-
-                if (ValidateHostAddress(hostAddress) is { } hostAddressError)
-                {
-                    await WaitForConfigurationChangeAsync(hostAddressError, stoppingToken);
-                    continue;
-                }
-
-                if (!await ConnectAndPollAsync(hostAddress, token, stoppingToken))
+                else if (!await ConnectAndPollAsync(hostAddress!, token!, stoppingToken))
                 {
                     await _configurationChangedSignal.WaitAsync(GetEffectiveInterval(RetryInterval, DefaultRetryInterval), stoppingToken);
                 }
@@ -87,13 +84,6 @@ public partial class NukiBridge
         Status = ServiceStatus.Stopped;
     }
 
-    private async Task WaitForConfigurationChangeAsync(string statusMessage, CancellationToken stoppingToken)
-    {
-        StatusMessage = statusMessage;
-        Status = ServiceStatus.Error;
-        await _configurationChangedSignal.WaitAsync(stoppingToken);
-    }
-
     /// <summary>
     /// Connects and polls until the configuration changes (true) or the connection fails (false).
     /// </summary>
@@ -105,9 +95,7 @@ public partial class NukiBridge
         {
             StatusMessage = null;
             Status = ServiceStatus.Starting;
-            await RefreshInfoAsync(client, stoppingToken);
-            await RefreshListAsync(client, stoppingToken);
-            LastUpdated = DateTimeOffset.UtcNow;
+            await ReadBridgeAsync(client, readInfo: true, stoppingToken);
 
             _client = client;
             IsConnected = true;
@@ -147,16 +135,9 @@ public partial class NukiBridge
         var poll = 0;
         while (!await _configurationChangedSignal.WaitAsync(GetEffectiveInterval(PollingInterval, DefaultPollingInterval), stoppingToken))
         {
-            poll++;
             try
             {
-                await RefreshListAsync(client, stoppingToken);
-                if (poll % InfoPollDivider == 0)
-                {
-                    await RefreshInfoAsync(client, stoppingToken);
-                }
-
-                LastUpdated = DateTimeOffset.UtcNow;
+                await ReadBridgeAsync(client, readInfo: ++poll % InfoPollDivider == 0, stoppingToken);
                 failures = 0;
                 StatusMessage = null;
             }
@@ -242,19 +223,17 @@ public partial class NukiBridge
         }
     }
 
-    private async Task RefreshListAsync(NukiBridgeClient client, CancellationToken cancellationToken)
+    private async Task ReadBridgeAsync(NukiBridgeClient client, bool readInfo, CancellationToken cancellationToken)
     {
         using (await EnterRequestGateAsync(cancellationToken))
         {
-            MergeDevices(await client.GetListAsync(cancellationToken));
-        }
-    }
+            if (readInfo)
+            {
+                ApplyInfo(await client.GetInfoAsync(cancellationToken));
+            }
 
-    private async Task RefreshInfoAsync(NukiBridgeClient client, CancellationToken cancellationToken)
-    {
-        using (await EnterRequestGateAsync(cancellationToken))
-        {
-            ApplyInfo(await client.GetInfoAsync(cancellationToken));
+            MergeDevices(await client.GetListAsync(cancellationToken));
+            LastUpdated = DateTimeOffset.UtcNow;
         }
     }
 

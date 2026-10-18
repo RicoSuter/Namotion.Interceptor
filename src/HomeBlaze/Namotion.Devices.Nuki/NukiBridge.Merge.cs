@@ -27,71 +27,63 @@ public partial class NukiBridge
         var existingOpeners = Openers;
         var locks = new Dictionary<string, NukiSmartLock>();
         var openers = new Dictionary<string, NukiOpener>();
-
+        var isLockCreated = false;
+        var isOpenerCreated = false;
         foreach (var device in devices)
         {
-            MergeDevice(device, existingLocks, locks, existingOpeners, openers);
+            var deviceType = (NukiDeviceType)device.DeviceType;
+            if (deviceType is NukiDeviceType.SmartLock or NukiDeviceType.SmartDoor or NukiDeviceType.SmartLock3)
+            {
+                isLockCreated |= MergeLock(device, deviceType, existingLocks, locks);
+            }
+            else if (deviceType == NukiDeviceType.Opener)
+            {
+                isOpenerCreated |= MergeOpener(device, existingOpeners, openers);
+            }
+            else
+            {
+                Logger.LogDebug("Skipping Nuki device {NukiId} of unsupported type {DeviceType}.", device.NukiId, device.DeviceType);
+            }
         }
 
-        if (!HaveSameInstances(existingLocks, locks))
+        // A reused instance keeps its key, so the set of instances is unchanged when none was created or dropped.
+        if (isLockCreated || locks.Count != existingLocks.Count)
         {
             Locks = locks;
         }
 
-        if (!HaveSameInstances(existingOpeners, openers))
+        if (isOpenerCreated || openers.Count != existingOpeners.Count)
         {
             Openers = openers;
         }
     }
 
-    private void MergeDevice(
-        NukiDeviceResponse device,
-        Dictionary<string, NukiSmartLock> existingLocks,
-        Dictionary<string, NukiSmartLock> locks,
-        Dictionary<string, NukiOpener> existingOpeners,
-        Dictionary<string, NukiOpener> openers)
+    // Returns whether the lock was created.
+    private bool MergeLock(
+        NukiDeviceResponse device, NukiDeviceType deviceType, Dictionary<string, NukiSmartLock> existing, Dictionary<string, NukiSmartLock> locks)
     {
-        var deviceType = (NukiDeviceType)device.DeviceType;
         var key = device.NukiId.ToString(CultureInfo.InvariantCulture);
-        if (IsLockDeviceType(deviceType))
+        var isCreated = false;
+        if (existing.GetValueOrDefault(key) is not { } smartLock || smartLock.DeviceType != deviceType)
         {
-            var smartLock = existingLocks.GetValueOrDefault(key) is { } existing && existing.DeviceType == deviceType
-                ? existing
-                : new NukiSmartLock(this, device.NukiId, deviceType);
-            smartLock.Update(device);
-            locks[key] = smartLock;
+            smartLock = new NukiSmartLock(this, device.NukiId, deviceType);
+            isCreated = true;
         }
-        else if (deviceType == NukiDeviceType.Opener)
-        {
-            var opener = existingOpeners.GetValueOrDefault(key) ?? new NukiOpener(this, device.NukiId);
-            opener.Update(device);
-            openers[key] = opener;
-        }
-        else
-        {
-            Logger.LogDebug("Skipping Nuki device {NukiId} of unsupported type {DeviceType}.", device.NukiId, device.DeviceType);
-        }
+
+        smartLock.Update(device);
+        locks[key] = smartLock;
+        return isCreated;
     }
 
-    private static bool IsLockDeviceType(NukiDeviceType deviceType) =>
-        deviceType is NukiDeviceType.SmartLock or NukiDeviceType.SmartDoor or NukiDeviceType.SmartLock3;
-
-    private static bool HaveSameInstances<T>(Dictionary<string, T> existing, Dictionary<string, T> updated)
-        where T : class
+    // Returns whether the Opener was created.
+    private bool MergeOpener(NukiDeviceResponse device, Dictionary<string, NukiOpener> existing, Dictionary<string, NukiOpener> openers)
     {
-        if (existing.Count != updated.Count)
-        {
-            return false;
-        }
-
-        foreach (var (key, device) in existing)
-        {
-            if (!updated.TryGetValue(key, out var updatedDevice) || !ReferenceEquals(device, updatedDevice))
-            {
-                return false;
-            }
-        }
-
-        return true;
+        var key = device.NukiId.ToString(CultureInfo.InvariantCulture);
+        var opener = existing.GetValueOrDefault(key);
+        var isCreated = opener is null;
+        opener ??= new NukiOpener(this, device.NukiId);
+        opener.Update(device);
+        openers[key] = opener;
+        return isCreated;
     }
 }
