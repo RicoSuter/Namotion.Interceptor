@@ -735,7 +735,23 @@ namespace HomeBlaze.Abstractions.Messaging
     public interface INotificationPublisher
     {
         [HomeBlaze.Abstractions.Attributes.Operation]
-        System.Threading.Tasks.Task SendNotificationAsync(string message, System.Threading.CancellationToken cancellationToken);
+        System.Threading.Tasks.Task SendNotificationAsync(HomeBlaze.Abstractions.Messaging.Notification notification, System.Threading.CancellationToken cancellationToken);
+    }
+    public sealed class Notification : System.IEquatable<HomeBlaze.Abstractions.Messaging.Notification>
+    {
+        public Notification() { }
+        public required string Message { get; init; }
+        public HomeBlaze.Abstractions.Messaging.NotificationPriority Priority { get; init; }
+        public string? Title { get; init; }
+        public string? Url { get; init; }
+        public string? UrlTitle { get; init; }
+    }
+    public enum NotificationPriority
+    {
+        Low = 0,
+        Normal = 1,
+        High = 2,
+        Emergency = 3,
     }
 }
 namespace HomeBlaze.Abstractions.Metadata

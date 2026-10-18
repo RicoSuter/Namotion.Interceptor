@@ -8,7 +8,7 @@ position: 5
 
 ## Overview
 
-HomeBlaze defines a standard interface for subjects that can send notifications to users. Notification channels are subjects themselves: any subject implementing `INotificationPublisher` can deliver messages to operators.
+HomeBlaze defines a standard interface for subjects that can send notifications to users. Notification channels are subjects themselves: any subject implementing `INotificationPublisher` delivers messages to one recipient or group.
 
 ## INotificationPublisher
 
@@ -16,49 +16,65 @@ HomeBlaze defines a standard interface for subjects that can send notifications 
 public interface INotificationPublisher
 {
     [Operation]
-    Task SendNotificationAsync(string message, CancellationToken cancellationToken);
+    Task SendNotificationAsync(Notification notification, CancellationToken cancellationToken);
+}
+
+public sealed record Notification
+{
+    public required string Message { get; init; }
+    public string? Title { get; init; }
+    public NotificationPriority Priority { get; init; } = NotificationPriority.Normal;
+    public string? Url { get; init; }
+    public string? UrlTitle { get; init; }
 }
 ```
 
-A notification publisher is any subject that delivers messages to an external channel. Examples include:
+Members are added to `Notification` as optional members, so publishers and callers keep working when it grows. A channel ignores a member it cannot show and shortens a value longer than its own limit.
 
-| Channel | Description |
-|---------|-------------|
-| Email | Sends notifications via SMTP or email API |
-| Push notification | Mobile or browser push notifications |
-| Telegram / Slack | Chat platform integration |
-| Webhook | HTTP POST to a configured URL |
-| SMS | Text message delivery |
+| Priority | Meaning |
+|----------|---------|
+| `Low` | Delivered without sound or vibration |
+| `Normal` | Delivered with the recipient's default alert |
+| `High` | Delivered with an alert also during quiet hours |
+| `Emergency` | Repeated until acknowledged, where the channel supports it |
 
-Each channel is a separate subject with its own `[Configuration]` properties (e.g., SMTP server, API key, recipient list). Operators configure notification channels through the standard subject editor UI.
+A notification publisher is any subject that delivers messages to an external channel, for example [Pushover](../devices/Pushover.md), email, chat platforms, webhooks or SMS. Each channel has its own `[Configuration]` properties (server, API key, recipient), edited through the standard subject editor.
+
+### One Publisher per Recipient
+
+Implement `INotificationPublisher` on the subject that delivers to one recipient or group, not on a subject that holds several of them. Callers send to every publisher they find, so a container that also published would deliver each message twice. A container can offer its own operation to send to all its recipients, such as the Pushover service's `SendToAllTargets`.
 
 ## Usage
 
 Since `SendNotificationAsync` is marked with `[Operation]`, it is:
-- Invocable from the Blazor UI (operators can send test notifications)
+- Invocable from the Blazor UI, where the notification members are entered in a form (operators can send test notifications)
 - Discoverable via the registry and MCP tools (`list_methods`, `invoke_operation`)
 - Callable by built-in AI agents for automated notifications
 
 ### From AI Agents
 
-A [built-in agent](../administration/ai-agents.md) finds the publishers through its tools: `list_types` finds the `INotificationPublisher` interface, and `search` with that interface in its `types` parameter finds the subjects that implement it. `list_methods` shows the exact method name and parameters: the operation is registered without the `Async` suffix, as `SendNotification` with a `message` parameter. The agent calls it with `invoke_operation`, which must be in the agent's `AllowedTools`; it is off by default, so an agent without it can only report findings on its page. Do not mark `SendNotificationAsync` with `RequiresConfirmation`, because operations that require confirmation cannot be called through MCP, see [AI Agents](../administration/ai-agents.md#tools-and-permissions).
+A [built-in agent](../administration/ai-agents.md) finds the publishers through its tools: `list_types` finds the `INotificationPublisher` interface, and `search` with that interface in its `types` parameter finds the subjects that implement it. `list_methods` shows the exact method name and parameters: the operation is registered without the `Async` suffix, as `SendNotification` with a `notification` parameter whose members are listed with their types, for example `{"notification": {"message": "Door open", "priority": "High"}}`. The agent calls it with `invoke_operation`, which must be in the agent's `AllowedTools`; it is off by default, so an agent without it can only report findings on its page. Do not mark `SendNotificationAsync` with `RequiresConfirmation`, because operations that require confirmation cannot be called through MCP, see [AI Agents](../administration/ai-agents.md#tools-and-permissions).
 
 ### From Other Subjects
 
-Subjects that need to send notifications (e.g., alarm handlers, automation rules) can resolve notification publishers from the knowledge graph and invoke them directly:
+Subjects that need to send notifications (e.g., alarm handlers, automation rules) can resolve notification publishers from the registry and invoke them directly:
 
 ```csharp
 // Find all notification channels
-var publishers = registry
-    .GetAllSubjects()
-    .OfType<INotificationPublisher>();
+var publishers = registry.KnownSubjects.Keys
+    .OfType<INotificationPublisher>()
+    .ToArray();
 
 // Send to all configured channels
+var notification = new Notification
+{
+    Message = "Temperature exceeded threshold on CNC-01",
+    Priority = NotificationPriority.High
+};
+
 foreach (var publisher in publishers)
 {
-    await publisher.SendNotificationAsync(
-        "Temperature exceeded threshold on CNC-01",
-        cancellationToken);
+    await publisher.SendNotificationAsync(notification, cancellationToken);
 }
 ```
 
