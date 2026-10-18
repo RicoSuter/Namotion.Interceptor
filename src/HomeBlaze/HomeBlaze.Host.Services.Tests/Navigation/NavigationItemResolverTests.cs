@@ -6,6 +6,7 @@ using HomeBlaze.Components.Abstractions.Pages;
 using HomeBlaze.Host.Services.Navigation;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Components;
+using Microsoft.Extensions.Time.Testing;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry;
@@ -21,6 +22,7 @@ public class NavigationItemResolverTests
     private readonly NavigationTestParent _root;
     private readonly SubjectComponentRegistry _componentRegistry;
     private readonly NavigationItemResolver _resolver;
+    private readonly FakeTimeProvider _timeProvider = new();
 
     public NavigationItemResolverTests()
     {
@@ -37,12 +39,13 @@ public class NavigationItemResolverTests
 
         _resolver = new NavigationItemResolver(
             _componentRegistry,
-            new SubjectPathResolver(() => _root));
+            new SubjectPathResolver(() => _root),
+            _timeProvider);
     }
 
     // A resolver for a tree whose root is a folder, which has an order of its own, unlike the default root.
     private NavigationItemResolver CreateResolver(IInterceptorSubject root)
-        => new(_componentRegistry, new SubjectPathResolver(() => root));
+        => new(_componentRegistry, new SubjectPathResolver(() => root), _timeProvider);
 
     private NavigationTestFolder CreateFolder(
         Dictionary<string, IInterceptorSubject> children, ImmutableArray<string> childOrder = default)
@@ -128,6 +131,27 @@ public class NavigationItemResolverTests
         var item = Assert.Single(items);
         Assert.Same(claude, item.Subject);
         Assert.Equal("/Agents/Claude", item.Path);
+    }
+
+    [Fact]
+    public void WhenRecentAppBarItemsAreReadAgainWithinTheMaximumAge_ThenTheTreeIsWalkedOnce()
+    {
+        // Arrange
+        var maximumAge = TimeSpan.FromSeconds(5);
+        var root = CreateFolder(new() { ["Alpha"] = CreateTopBarPage() });
+        var resolver = CreateResolver(root);
+        var first = resolver.GetRecentAppBarItems(root, maximumAge);
+        root.Children = new() { ["Alpha"] = root.Children["Alpha"], ["Beta"] = CreateTopBarPage() };
+
+        // Act
+        var withinMaximumAge = resolver.GetRecentAppBarItems(root, maximumAge);
+        _timeProvider.Advance(maximumAge);
+        var afterMaximumAge = resolver.GetRecentAppBarItems(root, maximumAge);
+
+        // Assert
+        Assert.Equal(["/Alpha"], first.Select(item => item.Path));
+        Assert.Equal(["/Alpha"], withinMaximumAge.Select(item => item.Path));
+        Assert.Equal(["/Alpha", "/Beta"], afterMaximumAge.Select(item => item.Path));
     }
 
     [Fact]

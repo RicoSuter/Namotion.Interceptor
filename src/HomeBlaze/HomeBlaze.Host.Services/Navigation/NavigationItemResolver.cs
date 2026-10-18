@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Components.Abstractions.Attributes;
@@ -16,13 +17,19 @@ public class NavigationItemResolver
 {
     private readonly SubjectComponentRegistry _componentRegistry;
     private readonly SubjectPathResolver _pathResolver;
+    private readonly TimeProvider _timeProvider;
+
+    // Replaced as a whole, so that a reader on another thread sees the items, root and time of one walk.
+    private volatile RecentAppBarItems? _recentAppBarItems;
 
     public NavigationItemResolver(
         SubjectComponentRegistry componentRegistry,
-        SubjectPathResolver pathResolver)
+        SubjectPathResolver pathResolver,
+        TimeProvider timeProvider)
     {
         _componentRegistry = componentRegistry;
         _pathResolver = pathResolver;
+        _timeProvider = timeProvider;
     }
 
     /// <summary>
@@ -109,6 +116,27 @@ public class NavigationItemResolver
         CollectAppBarItems(root, items, visited);
         return items;
     }
+
+    /// <summary>
+    /// Gets <see cref="GetAppBarItems"/> of <paramref name="root"/> as of a walk at most <paramref name="maximumAge"/>
+    /// ago, which every caller shares.
+    /// </summary>
+    public ImmutableArray<NavigationItem> GetRecentAppBarItems(IInterceptorSubject root, TimeSpan maximumAge)
+    {
+        var recent = _recentAppBarItems;
+        if (recent is not null && ReferenceEquals(recent.Root, root) &&
+            _timeProvider.GetElapsedTime(recent.Timestamp) < maximumAge)
+        {
+            return recent.Items;
+        }
+
+        var timestamp = _timeProvider.GetTimestamp();
+        var items = GetAppBarItems(root).ToImmutableArray();
+        _recentAppBarItems = new RecentAppBarItems(root, items, timestamp);
+        return items;
+    }
+
+    private sealed record RecentAppBarItems(IInterceptorSubject Root, ImmutableArray<NavigationItem> Items, long Timestamp);
 
     private void CollectAppBarItems(
         IInterceptorSubject parent, List<NavigationItem> items, HashSet<IInterceptorSubject> visited)
