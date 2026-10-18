@@ -272,6 +272,26 @@ public class StorageMetadataWriteTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenOrderHasManyLongUnknownNames_ThenTheMessageShowsTheFirstOnesShortened()
+    {
+        // Arrange
+        WriteFile("Docs/a.md");
+        var storage = await ConnectAsync();
+        var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
+        var names = Enumerable.Range(0, 20).Select(index => $"{index:D2}{new string('x', 1000)}").ToArray();
+
+        // Act
+        var exception = await Assert.ThrowsAsync<ArgumentException>(() =>
+            storage.SetChildOrderAsync(docs, names, CancellationToken.None));
+
+        // Assert
+        Assert.Contains($"'09{new string('x', 62)}…'", exception.Message);
+        Assert.DoesNotContain(new string('x', 63), exception.Message);
+        Assert.DoesNotContain("'10x", exception.Message);
+        Assert.Contains("'a.md'", exception.Message);
+    }
+
+    [Fact]
     public async Task WhenOrderHasANameTwice_ThenSettingItFailsNamingIt()
     {
         // Arrange

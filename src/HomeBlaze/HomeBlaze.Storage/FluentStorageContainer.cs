@@ -728,7 +728,7 @@ public partial class FluentStorageContainer :
         if (repeatedNames.Count > 0)
         {
             throw new ArgumentException(
-                $"Names given more than once: {FormatNames(repeatedNames.Order(StringComparer.Ordinal))}.", nameof(names));
+                $"Names given more than once: {StorageMetadataDocument.FormatNames(repeatedNames.Order(StringComparer.Ordinal))}.", nameof(names));
         }
 
         var connection = Connection;
@@ -739,7 +739,7 @@ public partial class FluentStorageContainer :
             if (unknownNames.Count > 0)
             {
                 throw new ArgumentException(
-                    $"Names that are not children of the folder: {FormatNames(unknownNames)}. Its children: {FormatNames(children.Keys.Order(StringComparer.Ordinal))}.",
+                    $"Names that are not children of the folder: {StorageMetadataDocument.FormatNames(unknownNames)}. Its children: {StorageMetadataDocument.FormatNames(children.Keys.Order(StringComparer.Ordinal))}.",
                     nameof(names));
             }
 
@@ -766,12 +766,6 @@ public partial class FluentStorageContainer :
             .Order(children, childOrder, static child => child.Key, static child => child.Value.GetNavigationTitle(child.Key))
             .Select(static child => child.Key)
             .ToList();
-
-    private static string FormatNames(IEnumerable<string> names)
-    {
-        var text = string.Join(", ", names.Select(static name => $"'{name}'"));
-        return text.Length > 0 ? text : "none";
-    }
 
     private static VirtualFolder GetPlacedFolder(StorageConnection connection, string folder)
         => connection.Index.TryGet(folder, out var entry) && entry is { IsFolder: true, IsPlaced: true, Subject: VirtualFolder virtualFolder }

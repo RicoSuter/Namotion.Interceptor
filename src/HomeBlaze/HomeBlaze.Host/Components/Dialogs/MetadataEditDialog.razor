@@ -100,8 +100,14 @@
 
     private async Task SaveAsync()
     {
-        if (_isSaving || (Child ?? Container as IInterceptorSubject)?.TryGetMetadataSubject() is not { } metadataSubject)
+        if (_isSaving)
             return;
+
+        if ((Child ?? Container as IInterceptorSubject)?.TryGetMetadataSubject() is not { } metadataSubject)
+        {
+            Snackbar.Add("Error saving metadata: the item is no longer in a storage.", Severity.Error);
+            return;
+        }
 
         _isSaving = true;
         try

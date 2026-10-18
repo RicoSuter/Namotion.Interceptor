@@ -1284,6 +1284,13 @@
         names.Remove(name);
         names.Insert(targetIndex, name);
 
+        // A child removed since the list was shown would make the write fail, as every name must be a child.
+        var currentNames = (container as IInterceptorSubject)?.TryGetRegisteredSubject()?
+            .TryGetProperty(IMetadataContainer.ChildrenPropertyName)?.Children
+            .Select(item => item.Index?.ToString())
+            .ToHashSet() ?? [];
+        names.RemoveAll(item => !currentNames.Contains(item));
+
         _isMovingChild = true;
         try
         {

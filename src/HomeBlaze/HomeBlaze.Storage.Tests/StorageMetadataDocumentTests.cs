@@ -232,6 +232,48 @@ public class StorageMetadataDocumentTests
         Assert.Contains("'part4'", exception.Message);
     }
 
+    [Theory]
+    [InlineData("""{ "title": null }""")]
+    [InlineData("""{ "title": "New" }""")]
+    public void WhenTheFileIsOverTheSizeLimitAndAMergeDoesNotGrowIt_ThenTheMergeIsAccepted(string values)
+    {
+        // Arrange
+        var document = Parse("""{ "title": "Old" }""");
+        document.SetOrder(Enumerable.Range(0, 100).Select(index => $"{index}{new string('a', 200)}"));
+
+        // Act
+        document.Merge(Values(values), StorageMetadataKind.Folder);
+
+        // Assert
+        Assert.True(document.Serialize().Length > 16 * 1024);
+        Assert.Equal(Values(values).GetProperty("title").GetString(), document.ToFolderMetadata()?.Title);
+    }
+
+    [Fact]
+    public void WhenTheFileIsOverTheSizeLimitAndAMergeGrowsIt_ThenTheMergeIsRefused()
+    {
+        // Arrange
+        var document = Parse("""{ "title": "Old" }""");
+        document.SetOrder(Enumerable.Range(0, 100).Select(index => $"{index}{new string('a', 200)}"));
+
+        // Act & Assert
+        var exception = Assert.Throws<ArgumentException>(() => document.Merge(Values("""{ "title": "Older" }"""), StorageMetadataKind.Folder));
+        Assert.Contains("16 KB", exception.Message);
+    }
+
+    [Fact]
+    public void WhenOrderIsMergedIntoTheMetadataOfASubject_ThenItIsStoredAsAnUnknownKey()
+    {
+        // Arrange
+        var document = Parse("{}");
+
+        // Act
+        document.Merge(Values("""{ "order": ["a"] }"""), StorageMetadataKind.Subject);
+
+        // Assert
+        Assert.Equal("{\n  \"order\": [\n    \"a\"\n  ]\n}\n", Write(document));
+    }
+
     [Fact]
     public void WhenOrderIsSet_ThenTheNamesAreStoredAndAnEmptyOrderRemovesTheKey()
     {

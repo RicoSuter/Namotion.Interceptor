@@ -21,7 +21,7 @@ public sealed partial class MetadataSubject : IMetadataSubject
         "Gets every key of the metadata file of the subject, folder or storage root that this metadata belongs to, as a JSON object, keys HomeBlaze does not know included; {} without a file. For a folder or the root the order is left out: Get Order returns it.";
 
     private const string SetMetadataDescription =
-        "Merges values, a JSON object, into the metadata file at the top level: a key with a value is set, replacing a nested value as a whole, a key with null is removed, and every other key stays. Keys are matched without regard to case. HomeBlaze reads title, navTitle and icon of a folder (the root uses none of them) and navTitle, icon, location (NavBar or AppBar) and alignment (Left or Right) of a subject; each takes a string, and a blank string removes it. order cannot be set here: use Set Order. Other keys are stored as given. At most 64 keys, key names of up to 64 characters, strings of up to 256 characters, values of up to 4 KB and a file of up to 16 KB. Example: {\"navTitle\": \"Pump\", \"icon\": null}.";
+        "Merges values, a JSON object, into the metadata file at the top level: a key with a value is set, replacing a nested value as a whole, a key with null is removed, and every other key stays. Keys are matched without regard to case. HomeBlaze reads title, navTitle and icon of a folder (the root uses none of them) and navTitle, icon, location (NavBar or AppBar) and alignment (Left or Right) of a subject; each takes a string, and a blank string removes it. The order of a folder or the root cannot be set here: use Set Order. Other keys are stored as given. At most 64 keys, key names of up to 64 characters, strings of up to 256 characters, values of up to 4 KB and a file of up to 16 KB, which a file that is larger already may exceed while the merge does not make it larger. Example: {\"navTitle\": \"Pump\", \"icon\": null}.";
 
     private const string GetOrderDescription =
         "Gets the names of the children of this folder or storage root in the order in which they are shown in navigation and in the browser. A name is the key of the child in Children. Only for a folder or the root.";
@@ -127,11 +127,12 @@ public sealed partial class MetadataSubject : IMetadataSubject
 
     // The storage that holds the metadata file of the owner: the storage of a folder, else the storage that holds the
     // owner as the subject of a file, else the owner itself as the root of a storage. A storage that is the JSON file
-    // of another one so has the metadata of that file.
+    // of another one so has the metadata of that file, and once it has left the tree, none.
     private FluentStorageContainer ResolveStorage() => _owner switch
     {
         VirtualFolder { Storage: FluentStorageContainer storage } => storage,
-        _ => FindHoldingStorage() ?? _owner as FluentStorageContainer
+        _ => FindHoldingStorage()
+            ?? (_owner.TryGetRegisteredSubject() is not null ? _owner as FluentStorageContainer : null)
             ?? throw new ArgumentException("The subject of this metadata is no longer in a storage.")
     };
 

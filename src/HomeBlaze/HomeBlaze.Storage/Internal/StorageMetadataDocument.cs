@@ -217,9 +217,10 @@ internal sealed class StorageMetadataDocument
     /// removes it. Unknown keys are stored as given.
     /// </summary>
     /// <exception cref="ArgumentException">
-    /// values is no JSON object, gives a key twice without regard to case, sets <c>order</c>, has a known key with a
-    /// value of another kind, or exceeds a limit: 64 keys, key names of 64 characters, strings of 256 characters,
-    /// values of 4 KB and a whole file of 16 KB. The message names the key.
+    /// values is no JSON object, gives a key twice without regard to case, sets <c>order</c> of a folder, has a known
+    /// key with a value of another kind, or exceeds a limit: 64 keys, key names of 64 characters, strings of 256
+    /// characters, values of 4 KB and a whole file of 16 KB, which a merge that does not make the file larger may
+    /// exceed. The message names the key.
     /// </exception>
     /// <exception cref="InvalidOperationException">A value cannot be written, such as a string with a lone surrogate.</exception>
     public void Merge(JsonElement values, StorageMetadataKind kind)
@@ -230,21 +231,22 @@ internal sealed class StorageMetadataDocument
         }
 
         var knownKeys = kind == StorageMetadataKind.Folder ? FolderKeys : SubjectKeys;
+        var sizeBefore = Serialize().Length;
         var givenKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var property in values.EnumerateObject())
         {
             var key = property.Name;
+            if (key.Length > MaxKeyLength)
+            {
+                throw Refuse($"The key {FormatNames([key])} is longer than {MaxKeyLength} characters.");
+            }
+
             if (!givenKeys.Add(key))
             {
                 throw Refuse($"'{key}' is given more than once, without regard to case.");
             }
 
-            if (key.Length > MaxKeyLength)
-            {
-                throw Refuse($"The key '{key[..MaxKeyLength]}' is longer than {MaxKeyLength} characters.");
-            }
-
-            if (string.Equals(key, MetadataKeys.Order, StringComparison.OrdinalIgnoreCase))
+            if (kind == StorageMetadataKind.Folder && string.Equals(key, MetadataKeys.Order, StringComparison.OrdinalIgnoreCase))
             {
                 throw Refuse($"'{key}' cannot be set here; use Set Order.");
             }
@@ -275,10 +277,30 @@ internal sealed class StorageMetadataDocument
             _root[knownKey ?? key] = value;
         }
 
-        if (Serialize().Length > MaxFileSize)
+        // A file over the limit, such as one with a long order, which Set Order does not limit, still takes a merge
+        // that does not make it larger, so that it can be made smaller.
+        var size = Serialize().Length;
+        if (size > MaxFileSize && size > sizeBefore)
         {
-            throw Refuse($"The metadata file would be larger than {MaxFileSize / 1024} KB with {string.Join(", ", givenKeys.Select(key => $"'{key}'"))}.");
+            throw Refuse($"The metadata file would be larger than {MaxFileSize / 1024} KB with {FormatNames(givenKeys)}.");
         }
+    }
+
+    /// <summary>
+    /// Formats names to show in a message, each in quotes and shortened to 64 characters, at most 10 of them; "none"
+    /// for no name.
+    /// </summary>
+    public static string FormatNames(IEnumerable<string> names)
+    {
+        const int maxNameLength = 64;
+        const int maxNameCount = 10;
+        var formattedNames = names
+            .Take(maxNameCount + 1)
+            .Select(static (name, index) => index == maxNameCount
+                ? "…"
+                : $"'{(name.Length > maxNameLength ? name[..maxNameLength] + "…" : name)}'")
+            .ToList();
+        return formattedNames.Count > 0 ? string.Join(", ", formattedNames) : "none";
     }
 
     private void Write(IBufferWriter<byte> buffer, JsonWriterOptions options, bool includesOrder)

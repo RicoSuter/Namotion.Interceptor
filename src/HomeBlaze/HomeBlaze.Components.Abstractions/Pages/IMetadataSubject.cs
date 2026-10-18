@@ -25,9 +25,10 @@ public interface IMetadataSubject
     /// a key with null is removed, and every other key stays.
     /// </summary>
     /// <exception cref="ArgumentException">
-    /// The values are refused (no JSON object, a key given twice without regard to case, <c>order</c>, a known key
-    /// with a value of another kind, or a limit), the metadata file could not be read or written, the storage is not
-    /// connected, or the item is no longer in a storage. The message says which.
+    /// The values are refused (no JSON object, a key given twice without regard to case, <c>order</c> of a folder, a
+    /// known key with a value of another kind, or a limit), the metadata file could not be read, the storage is not
+    /// connected, or the item is no longer in a storage. The message says which. A failure to write the file keeps its
+    /// own type.
     /// </exception>
     Task SetMetadataAsync(JsonElement values, CancellationToken cancellationToken);
 

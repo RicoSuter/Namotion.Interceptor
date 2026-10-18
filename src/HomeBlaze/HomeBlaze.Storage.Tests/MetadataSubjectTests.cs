@@ -169,21 +169,36 @@ public class MetadataSubjectTests : StorageTestBase
         Assert.Equal("Pump", motor.TryGetSubjectMetadata()?.NavigationTitle);
     }
 
-    [Fact]
-    public async Task WhenAStringValueOfTheFileHasALoneSurrogate_ThenTheFileLoadsAndAWriteIsRefused()
+    [Theory]
+    [InlineData("get")]
+    [InlineData("set")]
+    [InlineData("order")]
+    public async Task WhenAStringValueOfTheFileHasALoneSurrogate_ThenTheFileLoadsAndAGetOrAWriteIsRefusedNamingTheFile(string call)
     {
         // Arrange
-        const string content = """{ "navTitle": "Pump", "note": "\ud800" }""";
+        const string content = """{ "navTitle": "Pump", "note": { "text": "\ud800" } }""";
+        WriteFile("a.md");
+        WriteFile("b.md");
         WriteFile("Motor.json", SerializeMotor("Motor 1"));
         WriteFile("Motor.metadata.json", content);
+        WriteFile(".metadata.json", content);
         var storage = await ConnectAsync();
         var motor = storage.Children["Motor"];
+        Func<Task> act = call switch
+        {
+            "get" => () => GetMetadataSubject(motor).GetMetadataAsync(CancellationToken.None),
+            "set" => () => GetMetadataSubject(motor).SetMetadataAsync(Values("""{ "icon": "Water" }"""), CancellationToken.None),
+            _ => () => GetMetadataSubject(storage).SetOrderAsync(["b.md"], CancellationToken.None)
+        };
+        var path = call == "order" ? ".metadata.json" : "Motor.metadata.json";
 
-        // Act & Assert
-        await Assert.ThrowsAsync<ArgumentException>(() =>
-            GetMetadataSubject(motor).SetMetadataAsync(Values("""{ "icon": "Water" }"""), CancellationToken.None));
+        // Act
+        var exception = await Assert.ThrowsAsync<ArgumentException>(act);
+
+        // Assert
+        Assert.Contains($"'{path}' could not be read", exception.Message);
         Assert.Equal("Pump", motor.TryGetSubjectMetadata()?.NavigationTitle);
-        Assert.Equal(content, File.ReadAllText(GetFullPath("Motor.metadata.json")));
+        Assert.Equal(content, File.ReadAllText(GetFullPath(path)));
     }
 
     [Fact]
@@ -274,6 +289,38 @@ public class MetadataSubjectTests : StorageTestBase
             Assert.Equal("Archive", ReadMetadataFile("Nested.metadata.json").ToSubjectMetadata()?.NavigationTitle);
             Assert.Equal(["b.md", "a.md"], nested.ChildOrder.ToArray());
             Assert.True(File.Exists(Path.Combine(nestedDirectory.FullName, ".metadata.json")));
+            Assert.False(File.Exists(GetFullPath(".metadata.json")));
+        }
+        finally
+        {
+            nested.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task WhenANestedStorageIsRemovedFromTheOuterStorage_ThenItsMetadataSubjectWritesNothing()
+    {
+        // Arrange
+        var nestedDirectory = CreateTemporaryDirectory();
+        File.WriteAllText(Path.Combine(nestedDirectory.FullName, "a.md"), "a");
+        WriteFile("Nested.json", SerializeStorage(nestedDirectory.FullName));
+        var storage = await ConnectAsync();
+        var nested = Assert.IsType<FluentStorageContainer>(storage.Children["Nested"]);
+        await nested.ConnectAsync(CancellationToken.None);
+        try
+        {
+            var metadataSubject = GetMetadataSubject(nested);
+            File.Delete(GetFullPath("Nested.json"));
+            await storage.ReconcileAsync(Named("Nested.json"));
+
+            // Act
+            var exception = await Assert.ThrowsAsync<ArgumentException>(() =>
+                metadataSubject.SetMetadataAsync(Values("""{ "title": "Archive" }"""), CancellationToken.None));
+
+            // Assert
+            Assert.False(storage.Children.ContainsKey("Nested"));
+            Assert.Contains("no longer in a storage", exception.Message);
+            Assert.False(File.Exists(Path.Combine(nestedDirectory.FullName, ".metadata.json")));
         }
         finally
         {
