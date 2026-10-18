@@ -46,6 +46,7 @@
     <PackageVersion Include="MQTTnet" Version="5.1.0.1559" />
     <PackageVersion Include="MQTTnet.Server" Version="5.1.0.1559" />
     <PackageVersion Include="MudBlazor" Version="9.11.0" />
+    <PackageVersion Include="NaCl.Core" Version="2.2.0" />
     <PackageVersion Include="NBench" Version="2.0.1" />
     <PackageVersion Include="NSwag.AspNetCore" Version="14.6.1" />
     <PackageVersion Include="NuGet.Frameworks" Version="7.3.1" />
