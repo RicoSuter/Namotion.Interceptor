@@ -384,15 +384,17 @@ public class StorageMetadataWriteTests : StorageTestBase
         Assert.True(File.Exists(GetFullPath("Motor.metadata.json/Notes.md")));
     }
 
-    [Fact]
-    public async Task WhenSubjectNameEndsWithMetadata_ThenAddingItFails()
+    [Theory]
+    [InlineData("Motor.metadata.json")]
+    [InlineData("Motor.Metadata.json")]
+    public async Task WhenSubjectNameEndsWithMetadata_ThenAddingItFails(string path)
     {
         // Arrange
         var storage = await ConnectAsync();
 
         // Act & Assert
         await Assert.ThrowsAsync<ArgumentException>(() =>
-            storage.AddSubjectAsync("Motor.metadata.json", CreateMotor(), CancellationToken.None));
+            storage.AddSubjectAsync(path, CreateMotor(), CancellationToken.None));
     }
 
     // Cancels the delete of the subject once it has left the tree, which is after its file was deleted.

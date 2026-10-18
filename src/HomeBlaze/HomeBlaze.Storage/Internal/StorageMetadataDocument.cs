@@ -149,6 +149,9 @@ internal sealed class StorageMetadataDocument
         return JsonElement.Parse(buffer.WrittenSpan);
     }
 
+    /// <summary>Whether the document has the key, without regard to case.</summary>
+    public bool HasKey(string key) => _root.ContainsKey(key);
+
     /// <summary>Gets the title, navTitle and icon of a folder; null without any.</summary>
     public FolderMetadata? ToFolderMetadata() => _folderMetadata;
 

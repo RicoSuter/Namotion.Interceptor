@@ -563,8 +563,8 @@ public partial class FluentStorageContainer :
         if (StoragePathFilter.IsIgnored(relativePath))
             throw new ArgumentException($"A subject at '{path}' would not be loaded again: the path is hidden or temporary.", nameof(path));
 
-        if (StorageMetadataPath.IsMetadataFile(relativePath))
-            throw new ArgumentException($"A subject at '{path}' would be read as a metadata file: names that end with '.metadata' are reserved.", nameof(path));
+        if (StorageMetadataPath.IsReservedSubjectPath(relativePath))
+            throw new ArgumentException($"A subject at '{path}' could be read as a metadata file: names that end with '.metadata', in any case, are reserved.", nameof(path));
 
         var connection = Connection;
         await RunOperationAsync(connection, async token =>

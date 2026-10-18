@@ -118,7 +118,7 @@ The **Metadata** button in the header of a folder or of a subject file opens a d
 
 A subject metadata file never changes the title or the icon of the subject itself. A subject that is a page itself decides its place in navigation, so it does not use `location` and `alignment` of its metadata file. Pages keep their metadata in their frontmatter, which the dialog does not change. A field left empty removes its key, and the keys HomeBlaze does not know are kept when the dialog saves.
 
-A file whose name ends with `.metadata.json` is never loaded as a subject, so a subject cannot be named `Something.metadata`. Deleting a subject also deletes its `X.metadata.json` sidecar. A sidecar of a file that is moved or renamed outside HomeBlaze has to be moved or renamed with it.
+A file whose name ends with `.metadata.json` in lower case is never loaded as a subject, and one that holds a `$type`, such as a subject file that was named so before, is logged with a warning. A file whose name ends in another case, such as `Pump.Metadata.json`, is an ordinary file. A subject cannot be named `Something.metadata` in any case, as on a file system that ignores case its file would be the metadata file of `Something.json`. Deleting a subject also deletes its `X.metadata.json` sidecar. A sidecar of a file that is moved or renamed outside HomeBlaze has to be moved or renamed with it.
 
 ### Ordering and Metadata by Agents
 

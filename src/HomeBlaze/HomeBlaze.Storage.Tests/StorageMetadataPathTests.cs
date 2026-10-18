@@ -8,7 +8,8 @@ public class StorageMetadataPathTests
     [InlineData(".metadata.json", true)]
     [InlineData("Docs/.metadata.json", true)]
     [InlineData("Docs/Motor.metadata.json", true)]
-    [InlineData("Docs/Motor.Metadata.JSON", true)]
+    [InlineData("Docs/Motor.Metadata.JSON", false)]
+    [InlineData("Docs/Motor.Metadata.json", false)]
     [InlineData("Docs/Motor.json", false)]
     [InlineData("Docs/metadata.json", false)]
     public void WhenPathIsChecked_ThenOnlyMetadataFilesAreMetadata(string path, bool expected)

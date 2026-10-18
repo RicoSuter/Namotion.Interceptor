@@ -619,6 +619,12 @@ internal sealed class StorageReconciler
         {
             _logger?.LogWarning(error, "Ignoring a metadata file that is not valid: {Path}", listed.Path);
         }
+        else if (metadata.HasKey("$type"))
+        {
+            _logger?.LogWarning(
+                "The metadata file {Path} looks like a subject file; files named *.metadata.json are metadata files and are not loaded as subjects",
+                listed.Path);
+        }
 
         // Replaced rather than changed: the index then marks the tree as unapplied, and Apply passes the metadata on.
         _index.Set(new StorageEntry

@@ -27,6 +27,39 @@ public class StorageMetadataTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenAFileNameEndsWithMetadataInAnotherCase_ThenItIsNoMetadataFile()
+    {
+        // Arrange
+        WriteFile("Motor.json", SerializeMotor("Motor 1"));
+        WriteFile("Motor.Metadata.json", SerializeMotor("Motor 2"));
+
+        // Act
+        var storage = await ConnectAsync();
+
+        // Assert
+        Assert.Equal(["Motor", "Motor.Metadata"], storage.Children.Keys.Order(StringComparer.Ordinal));
+        Assert.Null(storage.Children["Motor"].TryGetSubjectMetadata());
+    }
+
+    [Fact]
+    public async Task WhenAMetadataFileHoldsASubject_ThenAWarningSaysSo()
+    {
+        // Arrange
+        WriteFile("Motor.metadata.json", SerializeMotor("Motor 1"));
+        var logger = new RecordingLogger<FluentStorageContainer>();
+        var storage = CreateStorage(logger: logger);
+
+        // Act
+        await storage.ConnectAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Empty(storage.Children);
+        var warning = Assert.Single(logger.Warnings);
+        Assert.Contains("Motor.metadata.json", warning);
+        Assert.Contains("looks like a subject file", warning);
+    }
+
+    [Fact]
     public async Task WhenFolderHasMetadataFile_ThenFolderHasItsMetadataAndOrder()
     {
         // Arrange

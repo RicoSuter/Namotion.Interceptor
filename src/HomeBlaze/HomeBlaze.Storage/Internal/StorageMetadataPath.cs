@@ -12,7 +12,14 @@ internal static class StorageMetadataPath
 
     private const string Suffix = ".metadata.json";
 
+    /// <summary>Whether the path names a metadata file, in exactly this case, as the files are found by that name.</summary>
     public static bool IsMetadataFile(string path)
+        => path.EndsWith(Suffix, StringComparison.Ordinal);
+
+    /// <summary>
+    /// Whether a subject at the path would share its file with a metadata file on a file system that ignores case.
+    /// </summary>
+    public static bool IsReservedSubjectPath(string path)
         => path.EndsWith(Suffix, StringComparison.OrdinalIgnoreCase);
 
     public static string GetFolderFilePath(string folder)
