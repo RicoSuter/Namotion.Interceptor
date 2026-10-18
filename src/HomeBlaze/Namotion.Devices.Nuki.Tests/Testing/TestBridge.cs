@@ -49,15 +49,19 @@ internal sealed class TestBridge : IAsyncDisposable
 
     /// <summary>
     /// Starts an action that the fake bridge holds, like a bridge waits for the motor, and waits until it was sent.
+    /// Returns a function that lets the bridge finish the action and returns the action.
     /// </summary>
-    public async Task<HeldAction> StartHeldActionAsync(Func<Task> startAction)
+    public async Task<Func<Task>> StartHeldActionAsync(Func<Task> startAction)
     {
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        Fake.ActionGate = gate;
-        var sentActions = Fake.CountRequests("lockAction");
+        Fake.Hold = path => path == "lockAction" ? gate.Task : null;
         var action = startAction();
-        await AsyncTestHelpers.WaitUntilAsync(() => Fake.CountRequests("lockAction") > sentActions, message: "The action was not sent.");
-        return new HeldAction(action, gate);
+        await AsyncTestHelpers.WaitUntilAsync(() => Fake.WaitingRequests == 1, message: "The action was not sent.");
+        return () =>
+        {
+            gate.TrySetResult();
+            return action;
+        };
     }
 
     public async ValueTask DisposeAsync()
@@ -65,19 +69,5 @@ internal sealed class TestBridge : IAsyncDisposable
         await Bridge.StopAsync(CancellationToken.None);
 
         Bridge.Dispose();
-    }
-
-    /// <summary>An action that the fake bridge holds until it is released.</summary>
-    public sealed class HeldAction(Task action, TaskCompletionSource gate)
-    {
-        /// <summary>The running action.</summary>
-        public Task Action => action;
-
-        /// <summary>Lets the bridge finish the action and returns the action.</summary>
-        public Task ReleaseAsync()
-        {
-            gate.TrySetResult();
-            return action;
-        }
     }
 }

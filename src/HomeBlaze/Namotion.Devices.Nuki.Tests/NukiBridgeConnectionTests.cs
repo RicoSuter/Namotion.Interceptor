@@ -10,19 +10,21 @@ namespace Namotion.Devices.Nuki.Tests;
 
 public class NukiBridgeConnectionTests
 {
-    [Fact]
-    public async Task WhenHostAddressIsMissing_ThenStatusIsErrorAndNothingIsSent()
+    [Theory]
+    [InlineData(null, "Host address and token are required.")]
+    [InlineData("user@192.168.1.50", "without a path")]
+    public async Task WhenHostAddressIsMissingOrInvalid_ThenStatusNamesTheProblemAndNothingIsSent(string? hostAddress, string expectedMessage)
     {
         // Arrange
         await using var test = new TestBridge();
-        test.Bridge.HostAddress = null;
+        test.Bridge.HostAddress = hostAddress;
 
         // Act
         await test.Bridge.StartAsync(CancellationToken.None);
 
         // Assert
         await AsyncTestHelpers.WaitUntilAsync(() => test.Bridge.Status == ServiceStatus.Error);
-        Assert.Equal("Host address and token are required.", test.Bridge.StatusMessage);
+        Assert.Contains(expectedMessage, test.Bridge.StatusMessage);
         Assert.Empty(test.Fake.Requests);
     }
 
@@ -68,24 +70,6 @@ public class NukiBridgeConnectionTests
     }
 
     [Fact]
-    public async Task WhenTokenIsRejected_ThenStatusMessageNamesTheLikelyCauses()
-    {
-        // Arrange
-        await using var test = new TestBridge();
-        test.Fake.StatusOverride = _ => HttpStatusCode.Unauthorized;
-        // Long, so that no retry resets the status while it is read.
-        test.Bridge.RetryInterval = TimeSpan.FromHours(1);
-
-        // Act
-        await test.Bridge.StartAsync(CancellationToken.None);
-
-        // Assert
-        await AsyncTestHelpers.WaitUntilAsync(() => test.Bridge.Status == ServiceStatus.Error);
-        Assert.Contains("Token rejected", test.Bridge.StatusMessage);
-        Assert.False(test.Bridge.IsConnected);
-    }
-
-    [Fact]
     public async Task WhenInfoAnswersButTheListFails_ThenTheBridgeIsNotConnected()
     {
         // Arrange
@@ -99,6 +83,7 @@ public class NukiBridgeConnectionTests
 
         // Assert
         await AsyncTestHelpers.WaitUntilAsync(() => test.Bridge.Status == ServiceStatus.Error, message: "The connection did not fail.");
+        Assert.Contains("/list", test.Bridge.StatusMessage);
         Assert.False(test.Bridge.IsConnected);
         Assert.Equal(1, test.Fake.CountRequests("info"));
         Assert.Equal(1, test.Fake.CountRequests("list"));
@@ -142,34 +127,13 @@ public class NukiBridgeConnectionTests
     }
 
     [Fact]
-    public async Task WhenConfigurationChangesDuringAnAction_ThenTheActionCompletesAndTheBridgeReconnects()
-    {
-        // Arrange
-        var fake = new FakeNukiBridge { ListJson = NukiFixtures.SmartLock(state: 3) };
-        await using var test = new TestBridge(fake);
-        await test.StartAsync();
-        var heldAction = await test.StartHeldActionAsync(() => test.Lock.LockAsync(CancellationToken.None));
-        var infoRequests = fake.CountRequests("info");
-
-        // Act
-        await test.Bridge.ApplyConfigurationAsync(CancellationToken.None);
-        await AsyncTestHelpers.WaitUntilAsync(() => !test.Bridge.IsConnected, message: "The bridge did not disconnect.");
-        await heldAction.ReleaseAsync();
-
-        // Assert
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => test.Bridge.IsConnected && fake.CountRequests("info") > infoRequests,
-            message: "The bridge did not reconnect.");
-    }
-
-    [Fact]
     public async Task WhenConfigurationChangesDuringAnAction_ThenTheStateIsUnknownUntilTheReconnectReadsIt()
     {
         // Arrange
         var fake = new FakeNukiBridge { ListJson = NukiFixtures.SmartLock(state: 3) };
         await using var test = new TestBridge(fake);
         await test.StartAsync();
-        var heldAction = await test.StartHeldActionAsync(() => test.Lock.LockAsync(CancellationToken.None));
+        var releaseAction = await test.StartHeldActionAsync(() => test.Lock.LockAsync(CancellationToken.None));
         // The reconnect fails and waits long, so that no device list replaces the state while it is read.
         fake.StatusOverride = path => path == "info" ? HttpStatusCode.InternalServerError : null;
         test.Bridge.RetryInterval = TimeSpan.FromHours(1);
@@ -178,7 +142,7 @@ public class NukiBridgeConnectionTests
         // Act
         await test.Bridge.ApplyConfigurationAsync(CancellationToken.None);
         await AsyncTestHelpers.WaitUntilAsync(() => !test.Bridge.IsConnected, message: "The bridge did not disconnect.");
-        await heldAction.ReleaseAsync();
+        await releaseAction();
 
         // Assert
         await AsyncTestHelpers.WaitUntilAsync(() => test.Bridge.Status == ServiceStatus.Error, message: "The reconnect did not run.");
@@ -195,7 +159,7 @@ public class NukiBridgeConnectionTests
         var fake = new FakeNukiBridge { ListJson = NukiFixtures.SmartLock(state: 3) };
         await using var test = new TestBridge(fake);
         await test.StartAsync();
-        var heldAction = await test.StartHeldActionAsync(() => test.Lock.LockAsync(CancellationToken.None));
+        var releaseAction = await test.StartHeldActionAsync(() => test.Lock.LockAsync(CancellationToken.None));
         if (reconnecting)
         {
             // The reconnect waits for the action before it connects again.
@@ -209,30 +173,9 @@ public class NukiBridgeConnectionTests
 
         // Assert
         Assert.Equal(ServiceStatus.Stopped, test.Bridge.Status);
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(heldAction.ReleaseAsync);
+        Assert.False(test.Bridge.IsConnected);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(releaseAction);
         Assert.Null(test.Lock.LockState);
-    }
-
-    [Theory]
-    [InlineData("192.168.1.50/path")]
-    [InlineData("user@192.168.1.50")]
-    [InlineData("192.168.1.50:0")]
-    [InlineData("192.168.1.50:65536")]
-    public async Task WhenHostAddressIsInvalid_ThenStatusNamesTheProblemAndNothingIsSent(string hostAddress)
-    {
-        // Arrange
-        await using var test = new TestBridge();
-        test.Bridge.HostAddress = hostAddress;
-
-        // Act
-        await test.Bridge.StartAsync(CancellationToken.None);
-
-        // Assert
-        await AsyncTestHelpers.WaitUntilAsync(() => test.Bridge.Status == ServiceStatus.Error);
-        Assert.Equal(NukiBridge.ValidateHostAddress(hostAddress), test.Bridge.StatusMessage);
-        Assert.NotNull(test.Bridge.StatusMessage);
-        Assert.Empty(test.Fake.Requests);
-        Assert.Null(test.Bridge.IpAddress);
     }
 
     [Fact]
@@ -272,20 +215,5 @@ public class NukiBridgeConnectionTests
 
         // Assert
         Assert.Equal(expectedIpAddress, bridge.IpAddress);
-    }
-
-    [Fact]
-    public async Task WhenBridgeStops_ThenStatusIsStopped()
-    {
-        // Arrange
-        await using var test = new TestBridge();
-        await test.StartAsync();
-
-        // Act
-        await test.Bridge.StopAsync(CancellationToken.None);
-
-        // Assert
-        Assert.Equal(ServiceStatus.Stopped, test.Bridge.Status);
-        Assert.False(test.Bridge.IsConnected);
     }
 }

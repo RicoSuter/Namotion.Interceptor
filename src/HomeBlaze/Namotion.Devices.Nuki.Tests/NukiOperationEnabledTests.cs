@@ -1,5 +1,6 @@
 using HomeBlaze.Services;
 using Namotion.Devices.Nuki.Tests.Testing;
+using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Xunit;
 
@@ -91,38 +92,24 @@ public class NukiOperationEnabledTests
     }
 
     [Theory]
-    [InlineData("Unlock")]
-    [InlineData("ToggleLock")]
-    [InlineData("Unlatch")]
-    [InlineData("LockNGo")]
-    [InlineData("LockNGoWithUnlatch")]
-    public async Task WhenAnOperationLetsSomeoneIn_ThenItRequiresConfirmation(string operation)
+    [InlineData("Lock", "Unlock")]
+    [InlineData("Lock", "ToggleLock")]
+    [InlineData("Lock", "Unlatch")]
+    [InlineData("Lock", "LockNGo")]
+    [InlineData("Lock", "LockNGoWithUnlatch")]
+    [InlineData("Opener", "OpenDoor")]
+    [InlineData("Opener", "ActivateRingToOpen")]
+    [InlineData("Opener", "ActivateContinuousMode")]
+    public async Task WhenAnOperationLetsSomeoneIn_ThenItRequiresConfirmation(string device, string operation)
     {
         // Arrange
         await using var test = new TestBridge();
 
         // Act
-        test.Merge(NukiFixtures.SmartLock(state: 1));
+        test.Merge(NukiFixtures.List);
 
         // Assert
-        var method = (HomeBlaze.Abstractions.Metadata.MethodMetadata)test.Lock.TryGetRegisteredSubject()!.TryGetProperty(operation)!.GetValue()!;
-        Assert.True(method.RequiresConfirmation);
-    }
-
-    [Theory]
-    [InlineData("OpenDoor")]
-    [InlineData("ActivateRingToOpen")]
-    [InlineData("ActivateContinuousMode")]
-    public async Task WhenAnOpenerOperationLetsSomeoneIn_ThenItRequiresConfirmation(string operation)
-    {
-        // Arrange
-        await using var test = new TestBridge();
-
-        // Act
-        test.Merge(NukiFixtures.Opener(state: 1));
-
-        // Assert
-        var method = (HomeBlaze.Abstractions.Metadata.MethodMetadata)test.Opener.TryGetRegisteredSubject()!.TryGetProperty(operation)!.GetValue()!;
-        Assert.True(method.RequiresConfirmation);
+        IInterceptorSubject subject = device == "Opener" ? test.Opener : test.Lock;
+        Assert.True(subject.TryGetRegisteredSubject()!.TryGetProperty(operation)!.TryGetMethodMetadata()!.RequiresConfirmation);
     }
 }

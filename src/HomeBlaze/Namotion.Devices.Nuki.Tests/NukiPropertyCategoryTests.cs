@@ -1,5 +1,6 @@
 using HomeBlaze.Services;
 using Namotion.Devices.Nuki.Tests.Testing;
+using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Xunit;
 
@@ -20,7 +21,8 @@ public class NukiPropertyCategoryTests
     public async Task WhenALockStatePropertyHasACategory_ThenThePanelReadsIt(string propertyName, string expectedCategory)
     {
         // Arrange
-        await using var test = CreateBridgeWithDevices();
+        await using var test = new TestBridge();
+        test.Merge(NukiFixtures.List);
         var property = test.Lock.TryGetRegisteredSubject()!.TryGetProperty(propertyName)!;
 
         // Act
@@ -30,38 +32,21 @@ public class NukiPropertyCategoryTests
         Assert.Equal(expectedCategory, category);
     }
 
-    [Fact]
-    public async Task WhenTheUnlockOperationHasACategory_ThenThePanelReadsIt()
+    [Theory]
+    [InlineData("Lock", "Unlock", "Lock")]
+    [InlineData("Opener", "OpenDoor", "Opener")]
+    public async Task WhenAnOperationHasACategory_ThenThePanelReadsIt(string device, string operation, string expectedCategory)
     {
         // Arrange
-        await using var test = CreateBridgeWithDevices();
-        var property = test.Lock.TryGetRegisteredSubject()!.TryGetProperty("Unlock")!;
-
-        // Act
-        var category = property.TryGetMethodMetadata()?.Category;
-
-        // Assert
-        Assert.Equal("Lock", category);
-    }
-
-    [Fact]
-    public async Task WhenTheOpenerOpenDoorOperationHasACategory_ThenThePanelReadsIt()
-    {
-        // Arrange
-        await using var test = CreateBridgeWithDevices();
-        var property = test.Opener.TryGetRegisteredSubject()!.TryGetProperty("OpenDoor")!;
-
-        // Act
-        var category = property.TryGetMethodMetadata()?.Category;
-
-        // Assert
-        Assert.Equal("Opener", category);
-    }
-
-    private static TestBridge CreateBridgeWithDevices()
-    {
-        var test = new TestBridge();
+        await using var test = new TestBridge();
         test.Merge(NukiFixtures.List);
-        return test;
+        IInterceptorSubject subject = device == "Opener" ? test.Opener : test.Lock;
+        var property = subject.TryGetRegisteredSubject()!.TryGetProperty(operation)!;
+
+        // Act
+        var category = property.TryGetMethodMetadata()?.Category;
+
+        // Assert
+        Assert.Equal(expectedCategory, category);
     }
 }

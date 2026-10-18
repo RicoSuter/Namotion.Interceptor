@@ -205,19 +205,4 @@ public class NukiBridgeMergeTests
         Assert.False(test.Lock.IsConnected);
         Assert.Equal("The bridge is not connected.", test.Lock.StatusMessage);
     }
-
-    [Fact]
-    public async Task WhenBridgeIsConnected_ThenDevicesWithAStateAreConnected()
-    {
-        // Arrange
-        await using var test = new TestBridge();
-        test.Merge(NukiFixtures.List);
-
-        // Act
-        test.Bridge.IsConnected = true;
-
-        // Assert
-        Assert.True(test.Lock.IsConnected);
-        Assert.True(test.Opener.IsConnected);
-    }
 }

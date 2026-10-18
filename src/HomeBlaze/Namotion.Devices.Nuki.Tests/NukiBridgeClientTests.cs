@@ -115,7 +115,8 @@ public class NukiBridgeClientTests
     public async Task WhenCallerCancelsDuringLockAction_ThenOperationCanceledExceptionIsThrownInsteadOfTimeoutException()
     {
         // Arrange
-        var bridge = new FakeNukiBridge { ActionGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously) };
+        var motor = new TaskCompletionSource();
+        var bridge = new FakeNukiBridge { Hold = _ => motor.Task };
         var client = CreateClient(bridge, NukiTokenMode.Plain);
         using var cancellationSource = new CancellationTokenSource();
 

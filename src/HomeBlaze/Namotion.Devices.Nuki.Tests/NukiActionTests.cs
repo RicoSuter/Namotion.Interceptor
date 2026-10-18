@@ -34,9 +34,9 @@ public class NukiActionTests
         };
 
         // Act
-        var heldAction = await test.StartHeldActionAsync(startAction);
+        var releaseAction = await test.StartHeldActionAsync(startAction);
         var stateDuringAction = test.Lock.LockState;
-        await heldAction.ReleaseAsync();
+        await releaseAction();
 
         // Assert
         Assert.Equal(transition, stateDuringAction);
@@ -97,7 +97,7 @@ public class NukiActionTests
         var fake = new FakeNukiBridge { ListJson = NukiFixtures.SmartLock(state: 3) };
         await using var test = new TestBridge(fake);
         await test.StartAsync();
-        var heldAction = await test.StartHeldActionAsync(() => test.Lock.LockAsync(CancellationToken.None));
+        var releaseAction = await test.StartHeldActionAsync(() => test.Lock.LockAsync(CancellationToken.None));
         var listRequests = fake.CountRequests("list");
         using var cancellation = new CancellationTokenSource();
         var waitingAction = test.Lock.UnlatchAsync(cancellation.Token);
@@ -112,7 +112,7 @@ public class NukiActionTests
         Assert.Equal(DoorLockState.Locking, test.Lock.LockState);
         Assert.Equal(1, fake.CountRequests("lockAction"));
 
-        await heldAction.ReleaseAsync();
+        await releaseAction();
     }
 
     [Fact]
@@ -124,19 +124,19 @@ public class NukiActionTests
         test.Bridge.PollingInterval = TimeSpan.FromSeconds(NukiBridge.MinimumIntervalSeconds);
         await test.StartAsync();
         var listGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        fake.ListGate = listGate;
-        await AsyncTestHelpers.WaitUntilAsync(() => fake.WaitingListRequests == 1, message: "No poll read the list.");
+        fake.Hold = path => path == "list" ? listGate.Task : null;
+        await AsyncTestHelpers.WaitUntilAsync(() => fake.WaitingRequests == 1, message: "No poll read the list.");
 
         // Act
         var action = test.Lock.LockAsync(CancellationToken.None);
         var stateDuringPoll = test.Lock.LockState;
-        fake.ListGate = null;
+        fake.Hold = null;
         listGate.SetResult();
         await action;
 
         // Assert
         Assert.Equal(DoorLockState.Unlocked, stateDuringPoll);
-        Assert.Equal(1, fake.MaxConcurrentRequests);
+        Assert.False(fake.RequestsOverlapped);
     }
 
     [Fact]
@@ -148,9 +148,9 @@ public class NukiActionTests
         await test.StartAsync();
 
         // Act
-        var heldAction = await test.StartHeldActionAsync(() => test.Opener.OpenDoorAsync(CancellationToken.None));
+        var releaseAction = await test.StartHeldActionAsync(() => test.Opener.OpenDoorAsync(CancellationToken.None));
         var stateDuringAction = test.Opener.OpenerState;
-        await heldAction.ReleaseAsync();
+        await releaseAction();
 
         // Assert
         Assert.Equal(NukiOpenerState.Opening, stateDuringAction);
