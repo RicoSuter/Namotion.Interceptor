@@ -1,5 +1,4 @@
 using System.Text;
-using System.Text.Json;
 using FluentStorage.Blobs;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Services;
@@ -291,11 +290,14 @@ internal sealed class StorageReconciler
     }
 
     /// <summary>
-    /// Gives every placed folder the metadata of its <c>.metadata.json</c> and the root the order in its own, and
-    /// every placed subject of a JSON file the metadata of the file beside it, or none.
+    /// Gives the root, every placed folder and every placed subject of a JSON file its metadata subject, also without a
+    /// metadata file, so that agents can create one. Then passes the content of the metadata files on: the order of
+    /// the root, the metadata and the order of every folder, and the metadata beside the JSON file of every subject.
+    /// A file that could not be read counts as none.
     /// </summary>
     private void ApplyMetadata()
     {
+        MetadataSubject.Ensure(_storage);
         _storage.ApplyMetadata(FindMetadata(StorageMetadataPath.GetFolderFilePath(string.Empty)));
         foreach (var entry in _index.Entries)
         {
@@ -306,11 +308,16 @@ internal sealed class StorageReconciler
 
             if (entry.Subject is VirtualFolder folder)
             {
+                MetadataSubject.Ensure(folder);
                 folder.ApplyMetadata(FindMetadata(StorageMetadataPath.GetFolderFilePath(entry.Path)));
             }
-            else if (entry.HasSidecar)
+            else if (entry.HasSidecar && MetadataSubject.Ensure(entry.Subject!) is { } metadataSubject)
             {
-                entry.Subject!.SetSubjectMetadata(FindMetadata(StorageMetadataPath.GetSubjectFilePath(entry.Path))?.ToSubjectMetadata());
+                var metadata = FindMetadata(StorageMetadataPath.GetSubjectFilePath(entry.Path))?.ToSubjectMetadata();
+                if (metadata != metadataSubject.SubjectMetadata)
+                {
+                    metadataSubject.SubjectMetadata = metadata;
+                }
             }
         }
     }
@@ -318,6 +325,29 @@ internal sealed class StorageReconciler
     // What the index holds for the metadata file at the path; null without one, and for one that could not be read.
     private StorageMetadataDocument? FindMetadata(string path)
         => _index.TryGet(path, out var entry) ? entry.Metadata : null;
+
+    /// <summary>
+    /// Reads and parses a metadata file from the storage, not from the index, so that a write keeps an edit that no
+    /// pass has seen yet, also of a file that the index does not hold. An empty document for a file that does not exist.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The file cannot be read as metadata, or the path is a folder.</exception>
+    public async Task<StorageMetadataDocument> ReadMetadataFileAsync(string path, CancellationToken cancellationToken)
+    {
+        if (_index.TryGet(path, out var entry) && entry.IsFolder)
+        {
+            throw new InvalidOperationException($"'{path}' is a folder and not a metadata file.");
+        }
+
+        var content = await TryReadAsync(path, cancellationToken);
+        if (content is null)
+        {
+            return new StorageMetadataDocument();
+        }
+
+        return StorageMetadataDocument.TryParse(content, out var document, out _)
+            ? document
+            : throw StorageMetadataDocument.CreateUnreadableException(path);
+    }
 
     /// <summary>
     /// Checks whether a new subject at the path could be placed: its key is free in its folder, or, when that
@@ -567,15 +597,9 @@ internal sealed class StorageReconciler
             return;
         }
 
-        StorageMetadataDocument? metadata;
-        try
+        if (!StorageMetadataDocument.TryParse(content, out var metadata, out var error))
         {
-            metadata = StorageMetadataDocument.Parse(content);
-        }
-        catch (JsonException exception)
-        {
-            _logger?.LogWarning(exception, "Ignoring a metadata file that is not valid: {Path}", listed.Path);
-            metadata = null;
+            _logger?.LogWarning(error, "Ignoring a metadata file that is not valid: {Path}", listed.Path);
         }
 
         // Replaced rather than changed: the index then marks the tree as unapplied, and Apply passes the metadata on.
@@ -772,8 +796,16 @@ internal sealed class StorageReconciler
            ?? throw new FileNotFoundException($"'{path}' is not in the storage.", path);
 
     private async Task<byte[]> ReadAsync(string path, CancellationToken cancellationToken)
+        => await TryReadAsync(path, cancellationToken) ?? throw new FileNotFoundException($"'{path}' is not in the storage.", path);
+
+    // Null for a file that does not exist, for which the client returns null although its signature does not say so.
+    private async Task<byte[]?> TryReadAsync(string path, CancellationToken cancellationToken)
     {
-        await using var stream = await OpenReadAsync(path, cancellationToken);
+        await using var stream = await _client.OpenReadAsync(path, cancellationToken);
+        if (stream is null)
+        {
+            return null;
+        }
 
         using var buffer = new MemoryStream();
         await stream.CopyToAsync(buffer, cancellationToken)

@@ -18,7 +18,7 @@ public class SubjectNavigationExtensionsTests
     {
         // Arrange
         var subject = new NavigationTitledSubject(CreateContext()) { Title = "Motor 1", IconName = "Settings" };
-        subject.SetSubjectMetadata(new SubjectMetadata("Pump", "Water", null, null));
+        TestMetadataSubject.Attach(subject, new SubjectMetadata { NavigationTitle = "Pump", Icon = "Water" });
 
         // Act
         var title = subject.GetNavigationTitle("Motor");
@@ -62,7 +62,7 @@ public class SubjectNavigationExtensionsTests
     {
         // Arrange
         var subject = new NavigationTitledSubject(CreateContext());
-        subject.SetSubjectMetadata(new SubjectMetadata(null, null, NavigationLocation.AppBar, AppBarAlignment.Right));
+        TestMetadataSubject.Attach(subject, new SubjectMetadata { Location = NavigationLocation.AppBar, Alignment = AppBarAlignment.Right });
 
         // Act
         var location = subject.GetNavigationLocation();
@@ -79,7 +79,7 @@ public class SubjectNavigationExtensionsTests
         // Arrange
         var folder = new NavigationTestFolder(CreateContext())
         {
-            Metadata = new FolderMetadata("All devices", "Devices", null)
+            Metadata = new FolderMetadata { Title = "All devices", NavigationTitle = "Devices" }
         };
 
         // Act
@@ -105,18 +105,10 @@ public partial class NavigationTestFolder : IMetadataContainer, ITitleProvider
 
     public partial ImmutableArray<string> ChildOrder { get; set; }
 
-    public bool HasOwnMetadata => true;
-
     public string? Title => Metadata?.Title;
 
     public NavigationTestFolder()
     {
         ChildOrder = [];
     }
-
-    public Task WriteMetadataAsync(FolderMetadata? metadata, CancellationToken cancellationToken) => Task.CompletedTask;
-
-    public Task WriteChildMetadataAsync(IInterceptorSubject child, SubjectMetadata? metadata, CancellationToken cancellationToken) => Task.CompletedTask;
-
-    public Task MoveChildAsync(string name, string targetName, CancellationToken cancellationToken) => Task.CompletedTask;
 }

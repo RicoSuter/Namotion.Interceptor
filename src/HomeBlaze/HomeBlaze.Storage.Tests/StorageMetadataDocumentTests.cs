@@ -7,35 +7,45 @@ namespace HomeBlaze.Storage.Tests;
 
 public class StorageMetadataDocumentTests
 {
+    private static StorageMetadataDocument Parse(string json)
+        => StorageMetadataDocument.TryParse(Encoding.UTF8.GetBytes(json), out var document, out var error) ? document : throw error;
+
+    private static JsonElement Values(string json) => JsonDocument.Parse(json).RootElement;
+
+    private static string Write(StorageMetadataDocument document) => Encoding.UTF8.GetString(document.Serialize());
+
+    public static TheoryData<string, string> ValuesOverALimit() => new()
+    {
+        { $$"""{ "{{new string('k', 65)}}": 1 }""", "64 characters" },
+        { $$"""{ "note": "{{new string('a', 257)}}" }""", "'note'" },
+        { $$"""{ "notes": [{{string.Join(", ", Enumerable.Repeat($"\"{new string('a', 200)}\"", 21))}}] }""", "'notes'" }
+    };
+
     [Fact]
-    public void WhenFileIsParsed_ThenKnownAndUnknownKeysAreRead()
+    public void WhenFileIsParsed_ThenKnownKeysAreReadWithoutRegardToCase()
     {
         // Arrange
-        var content = Encoding.UTF8.GetBytes("""
+        const string json = """
             {
               // A comment and a trailing comma are allowed.
-              "title": "Devices",
+              "Title": "Devices",
               "navTitle": "Devs",
-              "icon": "Devices",
+              "ICON": "Devices",
               "location": "appBar",
               "alignment": "Right",
               "order": ["Readme.md", "Pumps"],
-              "color": "red",
             }
-            """);
+            """;
 
         // Act
-        var document = StorageMetadataDocument.Parse(content);
+        var document = Parse(json);
 
         // Assert
-        Assert.Equal("Devices", document.Title);
-        Assert.Equal("Devs", document.NavigationTitle);
-        Assert.Equal("Devices", document.Icon);
-        Assert.Equal(NavigationLocation.AppBar, document.Location);
-        Assert.Equal(AppBarAlignment.Right, document.Alignment);
-        string?[] expectedOrder = ["Readme.md", "Pumps"];
-        Assert.Equal(expectedOrder, document.Order);
-        Assert.True(document.ExtensionData!.ContainsKey("color"));
+        Assert.Equal(new FolderMetadata { Title = "Devices", NavigationTitle = "Devs", Icon = "Devices" }, document.ToFolderMetadata());
+        Assert.Equal(
+            new SubjectMetadata { NavigationTitle = "Devs", Icon = "Devices", Location = NavigationLocation.AppBar, Alignment = AppBarAlignment.Right },
+            document.ToSubjectMetadata());
+        Assert.Equal(["Readme.md", "Pumps"], document.ToChildOrder().ToArray());
     }
 
     [Fact]
@@ -45,58 +55,63 @@ public class StorageMetadataDocumentTests
         var content = Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes("""{ "title": "Docs" }""")).ToArray();
 
         // Act
-        var document = StorageMetadataDocument.Parse(content);
+        var isParsed = StorageMetadataDocument.TryParse(content, out var document, out _);
 
         // Assert
-        Assert.Equal("Docs", document.Title);
+        Assert.True(isParsed);
+        Assert.Equal("Docs", document!.ToFolderMetadata()?.Title);
+    }
+
+    [Theory]
+    [InlineData("not json")]
+    [InlineData("[1]")]
+    [InlineData("null")]
+    [InlineData("")]
+    [InlineData("{ \"a\": 1, \"A\": 2 }")]
+    [InlineData("{ \"\\ud800\": 1 }")]
+    public void WhenContentIsNoJsonObjectOrHasAKeyThatCannotBeRead_ThenItIsNoMetadata(string json)
+    {
+        // Act
+        var isParsed = StorageMetadataDocument.TryParse(Encoding.UTF8.GetBytes(json), out var document, out var error);
+
+        // Assert
+        Assert.False(isParsed);
+        Assert.Null(document);
+        Assert.NotNull(error);
     }
 
     [Fact]
-    public void WhenDocumentIsSerialized_ThenUnknownKeysAreKeptAndNullsAreLeftOut()
+    public void WhenDocumentIsWritten_ThenItIsIndentedEndsWithANewLineKeepsNonAsciiAndLeavesOutNulls()
     {
         // Arrange
-        var document = StorageMetadataDocument.Parse(Encoding.UTF8.GetBytes("""{ "color": "red" }"""));
-        document.Location = NavigationLocation.AppBar;
+        var document = Parse("""{ "title": "Geräte", "note": null, "tags": { "room": "Küche" } }""");
 
         // Act
-        var json = Encoding.UTF8.GetString(document.Serialize());
+        var text = Write(document);
 
         // Assert
-        Assert.Contains("\"color\": \"red\"", json);
-        Assert.Contains("\"location\": \"AppBar\"", json);
-        Assert.DoesNotContain("title", json);
-        Assert.DoesNotContain("isEmpty", json, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public void WhenContentIsNotJson_ThenParsingFails()
-    {
-        // Act & Assert
-        Assert.ThrowsAny<JsonException>(() => StorageMetadataDocument.Parse(Encoding.UTF8.GetBytes("not json")));
+        Assert.Equal("{\n  \"title\": \"Geräte\",\n  \"tags\": {\n    \"room\": \"Küche\"\n  }\n}\n", text);
     }
 
     [Theory]
     [InlineData("{}", true)]
+    [InlineData("""{ "title": null, "tags": null }""", true)]
     [InlineData("""{ "order": [] }""", false)]
     [InlineData("""{ "color": "red" }""", false)]
-    [InlineData("""{ "icon": "Devices" }""", false)]
-    public void WhenDocumentIsChecked_ThenOnlyADocumentWithoutAnyKeyIsEmpty(string json, bool expected)
+    public void WhenDocumentIsChecked_ThenOnlyADocumentWithoutAKeyThatHasAValueIsEmpty(string json, bool expected)
     {
-        // Arrange
-        var document = StorageMetadataDocument.Parse(Encoding.UTF8.GetBytes(json));
-
         // Act
-        var isEmpty = document.IsEmpty;
+        var isEmpty = Parse(json).IsEmpty;
 
         // Assert
         Assert.Equal(expected, isEmpty);
     }
 
     [Fact]
-    public void WhenValuesAreBlank_ThenTheyAreNotSetInTheMetadata()
+    public void WhenValuesAreBlankOrOfAnotherTypeOrAStringCannotBeRead_ThenTheyAreNotSet()
     {
         // Arrange
-        var document = StorageMetadataDocument.Parse(Encoding.UTF8.GetBytes("""{ "title": " ", "navTitle": "", "order": ["a", null] }"""));
+        var document = Parse("""{ "title": " ", "navTitle": 5, "icon": "\ud800", "location": 1, "alignment": "Up", "order": ["a", null, 2] }""");
 
         // Act
         var folder = document.ToFolderMetadata();
@@ -106,19 +121,145 @@ public class StorageMetadataDocumentTests
         // Assert
         Assert.Null(folder);
         Assert.Null(subject);
-        Assert.Equal(["a"], order.AsSpan().ToArray());
+        Assert.Equal(["a"], order.ToArray());
     }
 
     [Fact]
-    public void WhenEnumValueIsUndefined_ThenItIsNotSetInTheMetadata()
+    public void WhenValuesAreMerged_ThenGivenKeysAreSetNullKeysAreRemovedAndOtherKeysStay()
     {
         // Arrange
-        var document = StorageMetadataDocument.Parse(Encoding.UTF8.GetBytes("""{ "navTitle": "Pump", "location": 5, "alignment": 7 }"""));
+        var document = Parse("""{ "title": "A", "icon": "Devices", "tags": ["x"], "extra": { "a": 1 } }""");
 
         // Act
-        var subject = document.ToSubjectMetadata();
+        document.Merge(Values("""{ "title": "B", "icon": null, "extra": { "b": 2 } }"""), StorageMetadataKind.Folder);
 
         // Assert
-        Assert.Equal(new SubjectMetadata("Pump", null, null, null), subject);
+        Assert.Equal("{\n  \"title\": \"B\",\n  \"tags\": [\n    \"x\"\n  ],\n  \"extra\": {\n    \"b\": 2\n  }\n}\n", Write(document));
+    }
+
+    [Fact]
+    public void WhenAMergedKeyDiffersOnlyInCase_ThenItReplacesTheValueOfTheKeyOfTheFile()
+    {
+        // Arrange
+        var document = Parse("""{ "NavTitle": "A", "Tags": 1 }""");
+
+        // Act
+        document.Merge(Values("""{ "navtitle": "B", "tags": 2 }"""), StorageMetadataKind.Subject);
+
+        // Assert
+        Assert.Equal("{\n  \"NavTitle\": \"B\",\n  \"Tags\": 2\n}\n", Write(document));
+    }
+
+    [Theory]
+    [InlineData("""{ "location": "appbar", "alignment": "RIGHT" }""", "{\n  \"navTitle\": \"Pump\",\n  \"location\": \"AppBar\",\n  \"alignment\": \"Right\"\n}\n")]
+    [InlineData("""{ "navTitle": "  " }""", "{}\n")]
+    public void WhenKnownSubjectKeysAreMerged_ThenEnumNamesAreStoredAndABlankStringRemovesTheKey(string values, string expected)
+    {
+        // Arrange
+        var document = Parse("""{ "navTitle": "Pump" }""");
+
+        // Act
+        document.Merge(Values(values), StorageMetadataKind.Subject);
+
+        // Assert
+        Assert.Equal(expected, Write(document));
+    }
+
+    [Theory]
+    [InlineData("""[]""", "JSON object")]
+    [InlineData("""{ "order": ["a"] }""", "'order'")]
+    [InlineData("""{ "Order": null }""", "'Order'")]
+    [InlineData("""{ "tags": 1, "Tags": 2 }""", "'Tags'")]
+    [InlineData("""{ "title": 5 }""", "'title'")]
+    [InlineData("""{ "navTitle": ["a"] }""", "'navTitle'")]
+    public void WhenMergedValuesAreRefused_ThenTheMessageNamesTheKey(string values, string expectedPart)
+    {
+        // Arrange
+        var document = Parse("{}");
+
+        // Act & Assert
+        var exception = Assert.Throws<ArgumentException>(() => document.Merge(Values(values), StorageMetadataKind.Folder));
+        Assert.Contains(expectedPart, exception.Message);
+        Assert.Equal("values", exception.ParamName);
+    }
+
+    [Fact]
+    public void WhenAnEnumValueIsUnknown_ThenItIsRefusedListingTheNames()
+    {
+        // Arrange
+        var document = Parse("{}");
+
+        // Act & Assert
+        var exception = Assert.Throws<ArgumentException>(() => document.Merge(Values("""{ "location": "Top" }"""), StorageMetadataKind.Subject));
+        Assert.Contains("'location'", exception.Message);
+        Assert.Contains("NavBar, AppBar", exception.Message);
+    }
+
+    [Theory]
+    [MemberData(nameof(ValuesOverALimit))]
+    public void WhenAMergedValueIsOverALimit_ThenItIsRefusedNamingTheKey(string values, string expectedPart)
+    {
+        // Arrange
+        var document = Parse("{}");
+
+        // Act & Assert
+        var exception = Assert.Throws<ArgumentException>(() => document.Merge(Values(values), StorageMetadataKind.Folder));
+        Assert.Contains(expectedPart, exception.Message);
+    }
+
+    [Fact]
+    public void WhenAMergeAddsTheSixtyFifthKey_ThenItIsRefusedNamingTheKey()
+    {
+        // Arrange
+        var document = Parse("{" + string.Join(", ", Enumerable.Range(0, 64).Select(index => $"\"key{index}\": {index}")) + "}");
+
+        // Act & Assert
+        var exception = Assert.Throws<ArgumentException>(() => document.Merge(Values("""{ "extra": 1 }"""), StorageMetadataKind.Folder));
+        Assert.Contains("'extra'", exception.Message);
+    }
+
+    [Fact]
+    public void WhenAMergeMakesTheFileLargerThanSixteenKilobytes_ThenItIsRefusedNamingTheKeys()
+    {
+        // Arrange
+        var document = Parse("{}");
+        var part = "[" + string.Join(", ", Enumerable.Repeat($"\"{new string('a', 200)}\"", 17)) + "]";
+        var values = "{" + string.Join(", ", Enumerable.Range(0, 5).Select(index => $"\"part{index}\": {part}")) + "}";
+
+        // Act & Assert
+        var exception = Assert.Throws<ArgumentException>(() => document.Merge(Values(values), StorageMetadataKind.Folder));
+        Assert.Contains("16 KB", exception.Message);
+        Assert.Contains("'part4'", exception.Message);
+    }
+
+    [Fact]
+    public void WhenOrderIsSet_ThenTheNamesAreStoredAndAnEmptyOrderRemovesTheKey()
+    {
+        // Arrange
+        var document = Parse("""{ "title": "Docs" }""");
+
+        // Act
+        document.SetOrder(["b.md", "a.md"]);
+        var withOrder = Write(document);
+        document.SetOrder([]);
+
+        // Assert
+        Assert.Equal("{\n  \"title\": \"Docs\",\n  \"order\": [\n    \"b.md\",\n    \"a.md\"\n  ]\n}\n", withOrder);
+        Assert.Equal("{\n  \"title\": \"Docs\"\n}\n", Write(document));
+    }
+
+    [Fact]
+    public void WhenDocumentIsReadAsJson_ThenTheOrderIsLeftOutUnlessItIsAskedFor()
+    {
+        // Arrange
+        var document = Parse("""{ "title": "Docs", "order": ["a.md"], "tags": ["x"] }""");
+
+        // Act
+        var withoutOrder = document.ToJsonElement(includesOrder: false);
+        var withOrder = document.ToJsonElement(includesOrder: true);
+
+        // Assert
+        Assert.Equal("""{"title":"Docs","tags":["x"]}""", withoutOrder.GetRawText());
+        Assert.Equal("""{"title":"Docs","order":["a.md"],"tags":["x"]}""", withOrder.GetRawText());
     }
 }

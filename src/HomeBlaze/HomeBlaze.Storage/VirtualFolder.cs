@@ -39,9 +39,6 @@ public partial class VirtualFolder : ITitleProvider, IIconProvider, IStorageCont
     /// <inheritdoc />
     public partial ImmutableArray<string> ChildOrder { get; private set; }
 
-    /// <inheritdoc />
-    public bool HasOwnMetadata => true;
-
     [Derived]
     public string Title => Metadata?.Title ?? Path.GetFileName(RelativePath.TrimEnd('/'));
 
@@ -79,21 +76,6 @@ public partial class VirtualFolder : ITitleProvider, IIconProvider, IStorageCont
             ChildOrder = childOrder;
         }
     }
-
-    /// <inheritdoc />
-    public Task WriteMetadataAsync(FolderMetadata? metadata, CancellationToken cancellationToken)
-        => RootStorage.WriteFolderMetadataAsync(StoragePath.Normalize(RelativePath), metadata, cancellationToken);
-
-    /// <inheritdoc />
-    public Task WriteChildMetadataAsync(IInterceptorSubject child, SubjectMetadata? metadata, CancellationToken cancellationToken)
-        => RootStorage.WriteSubjectMetadataAsync(child, metadata, cancellationToken);
-
-    /// <inheritdoc />
-    public Task MoveChildAsync(string name, string targetName, CancellationToken cancellationToken)
-        => RootStorage.MoveChildAsync(StoragePath.Normalize(RelativePath), name, targetName, cancellationToken);
-
-    private FluentStorageContainer RootStorage => Storage as FluentStorageContainer
-        ?? throw new NotSupportedException("Only a folder of a FluentStorageContainer stores metadata.");
 
     /// <summary>
     /// Gets metadata about a blob. Path is relative to the storage root.

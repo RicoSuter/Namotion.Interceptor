@@ -3,10 +3,8 @@ using System.Reflection;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
-using HomeBlaze.Components.Abstractions.Pages;
 using HomeBlaze.Components.Inputs;
 using HomeBlaze.Components.Tests.Models;
-using HomeBlaze.Services;
 using HomeBlaze.Services.Lifecycle;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
@@ -479,22 +477,6 @@ public class SubjectPathSelectionTests
 
         // Act
         var canSelect = SubjectPathSelection.CanSelectProperty(state, new SubjectPathAttribute { Kind = SubjectPathKind.Attribute });
-
-        // Assert
-        Assert.False(canSelect);
-    }
-
-    [Fact]
-    public void WhenPathLeadsToTheNavigationMetadataOfASubject_ThenItCannotBeSelected()
-    {
-        // Arrange
-        var target = CreateTarget();
-        target.SetSubjectMetadata(new SubjectMetadata("Pump", null, null, null));
-        var property = GetProperty(target, SubjectMetadata.PropertyName);
-
-        // Act
-        var canSelect = SubjectPathSelection.CanSelectProperty(
-            property, new SubjectPathAttribute { Kind = SubjectPathKind.Property | SubjectPathKind.Operation });
 
         // Assert
         Assert.False(canSelect);

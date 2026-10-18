@@ -973,10 +973,10 @@
     // The container that stores the metadata of the shown subject, and the subject when it is not that container itself.
     private (IMetadataContainer Container, IInterceptorSubject? Child)? GetMetadataTarget()
     {
-        if (Subject is IMetadataContainer { HasOwnMetadata: true } folder)
+        if (Subject is IMetadataContainer folder and not IConfigurable)
             return (folder, null);
 
-        if (Subject is IConfigurable and not IStorageFile && _registeredSubject is not null)
+        if (Subject?.TryGetMetadataSubject() is not null && _registeredSubject is not null)
         {
             foreach (var parent in _registeredSubject.Parents)
             {
@@ -1267,18 +1267,27 @@
     private static bool IsConnected(IMetadataContainer container)
         => container is not IStorageContainer { Status: not StorageStatus.Connected };
 
-    // Returns whether the order was written.
+    // Returns whether the order was written: the whole order the list shows, with the child in the place of the
+    // target, through the metadata subject of the container, as agents write it.
     private async Task<bool> MoveChildAsync(IMetadataContainer container, SubjectPropertyChild child, SubjectPropertyChild target)
     {
-        if (_isMovingChild)
+        if (_isMovingChild ||
+            _reorderedChildren is not { } children ||
+            (container as IInterceptorSubject)?.TryGetMetadataSubject() is not { } metadataSubject)
         {
             return false;
         }
 
+        var name = child.Index!.ToString()!;
+        List<string> names = [.. children.Select(item => item.Index!.ToString()!)];
+        var targetIndex = names.IndexOf(target.Index!.ToString()!);
+        names.Remove(name);
+        names.Insert(targetIndex, name);
+
         _isMovingChild = true;
         try
         {
-            await container.MoveChildAsync(child.Index!.ToString()!, target.Index!.ToString()!, _lifetime.Token);
+            await metadataSubject.SetOrderAsync([.. names], _lifetime.Token);
             return true;
         }
         catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)

@@ -1,3 +1,4 @@
+using System.Text.Json;
 using HomeBlaze.Components.Abstractions.Pages;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
@@ -12,88 +13,45 @@ public class SubjectMetadataExtensionsTests
         => new(InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry());
 
     [Fact]
-    public void WhenMetadataIsSet_ThenItIsRead()
+    public void WhenSubjectHasAMetadataSubject_ThenItsSubjectMetadataIsRead()
     {
         // Arrange
         var subject = CreateSubject();
-        var metadata = new SubjectMetadata("Pump", "Water", NavigationLocation.AppBar, AppBarAlignment.Right);
+        var metadata = new SubjectMetadata { NavigationTitle = "Pump", Icon = "Water" };
+        TestMetadataSubject.Attach(subject, metadata);
 
         // Act
-        subject.SetSubjectMetadata(metadata);
+        var read = subject.TryGetSubjectMetadata();
 
         // Assert
-        Assert.Equal(metadata, subject.TryGetSubjectMetadata());
+        Assert.Equal(metadata, read);
+        Assert.IsType<TestMetadataSubject>(subject.TryGetMetadataSubject());
     }
 
     [Fact]
-    public void WhenMetadataIsSetAgain_ThenTheNewValueIsRead()
-    {
-        // Arrange
-        var subject = CreateSubject();
-        subject.SetSubjectMetadata(new SubjectMetadata("Pump", null, null, null));
-
-        // Act
-        subject.SetSubjectMetadata(new SubjectMetadata("Main pump", null, null, null));
-
-        // Assert
-        Assert.Equal("Main pump", subject.TryGetSubjectMetadata()?.NavigationTitle);
-    }
-
-    [Fact]
-    public void WhenMetadataIsSetToNull_ThenNoneIsRead()
-    {
-        // Arrange
-        var subject = CreateSubject();
-        subject.SetSubjectMetadata(new SubjectMetadata("Pump", null, null, null));
-
-        // Act
-        subject.SetSubjectMetadata(null);
-
-        // Assert
-        Assert.Null(subject.TryGetSubjectMetadata());
-    }
-
-    [Fact]
-    public void WhenNullIsSetOnSubjectWithoutMetadata_ThenNoPropertyIsAdded()
+    public void WhenSubjectHasNoMetadataSubject_ThenItHasNoSubjectMetadata()
     {
         // Arrange
         var subject = CreateSubject();
 
         // Act
-        subject.SetSubjectMetadata(null);
+        var metadata = subject.TryGetSubjectMetadata();
 
         // Assert
-        Assert.Null(subject.TryGetRegisteredSubject()!.TryGetProperty(SubjectMetadata.PropertyName));
+        Assert.Null(metadata);
     }
 
     [Fact]
-    public void WhenSubjectIsNotRegistered_ThenSettingMetadataDoesNothing()
+    public void WhenSubjectIsNotRegistered_ThenItHasNoMetadataSubject()
     {
         // Arrange
         var subject = new MetadataTestSubject();
 
         // Act
-        subject.SetSubjectMetadata(new SubjectMetadata("Pump", null, null, null));
+        var metadataSubject = subject.TryGetMetadataSubject();
 
         // Assert
-        Assert.Null(subject.TryGetSubjectMetadata());
-    }
-
-    [Fact]
-    public void WhenPropertyIsChecked_ThenOnlyTheMetadataPropertyIsSubjectMetadata()
-    {
-        // Arrange
-        var subject = CreateSubject();
-        subject.SetSubjectMetadata(new SubjectMetadata("Pump", null, null, null));
-        var registered = subject.TryGetRegisteredSubject()!;
-
-        // Act
-        var isMetadata = registered.TryGetProperty(SubjectMetadata.PropertyName)!.IsSubjectMetadata();
-        var isNameMetadata = registered.TryGetProperty(nameof(MetadataTestSubject.Name))!.IsSubjectMetadata();
-
-        // Assert
-        Assert.True(isMetadata);
-        Assert.False(isNameMetadata);
+        Assert.Null(metadataSubject);
     }
 }
 
@@ -101,4 +59,20 @@ public class SubjectMetadataExtensionsTests
 public partial class MetadataTestSubject
 {
     public partial string? Name { get; set; }
+}
+
+/// <summary>A metadata subject with fixed metadata, in the property where a storage puts its own.</summary>
+public sealed class TestMetadataSubject(SubjectMetadata? metadata) : IMetadataSubject
+{
+    public SubjectMetadata? SubjectMetadata => metadata;
+
+    public Task SetMetadataAsync(JsonElement values, CancellationToken cancellationToken) => Task.CompletedTask;
+
+    public Task SetOrderAsync(string[] names, CancellationToken cancellationToken) => Task.CompletedTask;
+
+    public static void Attach(IInterceptorSubject subject, SubjectMetadata? metadata)
+    {
+        var metadataSubject = new TestMetadataSubject(metadata);
+        subject.TryGetRegisteredSubject()!.AddProperty<IMetadataSubject>(IMetadataSubject.PropertyName, _ => metadataSubject);
+    }
 }

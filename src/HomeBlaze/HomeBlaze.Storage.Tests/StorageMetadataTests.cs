@@ -39,7 +39,7 @@ public class StorageMetadataTests : StorageTestBase
 
         // Assert
         var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
-        Assert.Equal(new FolderMetadata("Documentation", "Docs", "MenuBook"), docs.Metadata);
+        Assert.Equal(new FolderMetadata { Title = "Documentation", NavigationTitle = "Docs", Icon = "MenuBook" }, docs.Metadata);
         Assert.Equal("Documentation", docs.Title);
         Assert.Equal("MenuBook", docs.IconName);
         Assert.Equal(["b.md", "a.md"], docs.ChildOrder.ToArray());
@@ -76,7 +76,6 @@ public class StorageMetadataTests : StorageTestBase
         // Assert
         Assert.Equal(["b.md"], storage.ChildOrder.ToArray());
         Assert.Null(storage.Metadata);
-        Assert.False(storage.HasOwnMetadata);
     }
 
     [Fact]
@@ -141,7 +140,7 @@ public class StorageMetadataTests : StorageTestBase
 
         // Assert
         Assert.Equal(
-            new SubjectMetadata("Pump", "Water", NavigationLocation.AppBar, AppBarAlignment.Right),
+            new SubjectMetadata { NavigationTitle = "Pump", Icon = "Water", Location = NavigationLocation.AppBar, Alignment = AppBarAlignment.Right },
             storage.Children["Motor"].TryGetSubjectMetadata());
     }
 

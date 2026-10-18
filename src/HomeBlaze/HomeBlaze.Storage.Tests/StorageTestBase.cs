@@ -134,6 +134,12 @@ public abstract class StorageTestBase : IDisposable
     protected string GetFullPath(string relativePath)
         => Path.Combine(StorageDirectory.FullName, relativePath.Replace('/', Path.DirectorySeparatorChar));
 
+    /// <summary>Reads a metadata file of the storage directory, failing the test when it cannot be read.</summary>
+    private protected StorageMetadataDocument ReadMetadataFile(string relativePath)
+        => StorageMetadataDocument.TryParse(File.ReadAllBytes(GetFullPath(relativePath)), out var document, out var error)
+            ? document
+            : throw error;
+
     protected void WriteFile(string relativePath, string content = "content")
     {
         var fullPath = GetFullPath(relativePath);

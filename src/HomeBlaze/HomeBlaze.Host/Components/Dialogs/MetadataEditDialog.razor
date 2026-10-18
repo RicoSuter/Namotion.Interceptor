@@ -1,4 +1,6 @@
 @using HomeBlaze.Components.Abstractions.Pages
+@using System.Text.Json
+@using System.Text.Json.Nodes
 
 @inject ISnackbar Snackbar
 
@@ -58,7 +60,7 @@
 @code {
     [CascadingParameter] private IMudDialogInstance? MudDialog { get; set; }
 
-    /// <summary>The container that stores the metadata.</summary>
+    /// <summary>The folder whose own metadata is edited when <see cref="Child"/> is null, else the container of the child.</summary>
     [Parameter, EditorRequired] public IMetadataContainer Container { get; set; } = default!;
 
     /// <summary>The subject whose metadata is edited, null for the container itself.</summary>
@@ -98,30 +100,29 @@
 
     private async Task SaveAsync()
     {
-        if (_isSaving)
+        if (_isSaving || (Child ?? Container as IInterceptorSubject)?.TryGetMetadataSubject() is not { } metadataSubject)
             return;
 
         _isSaving = true;
         try
         {
-            if (Child is null)
-            {
-                await Container.WriteMetadataAsync(
-                    new FolderMetadata(GetValue(_title), GetValue(_navigationTitle), GetValue(_icon)),
-                    CancellationToken.None);
-            }
-            else
-            {
-                await Container.WriteChildMetadataAsync(
-                    Child,
-                    new SubjectMetadata(
-                        GetValue(_navigationTitle),
-                        GetValue(_icon),
-                        _location,
-                        _location == NavigationLocation.AppBar ? _alignment : null),
-                    CancellationToken.None);
-            }
-
+            // Every field the dialog shows, so that a field left empty removes its key and the other keys stay.
+            var values = Child is null
+                ? new JsonObject
+                {
+                    [MetadataKeys.Title] = GetValue(_title),
+                    [MetadataKeys.NavigationTitle] = GetValue(_navigationTitle),
+                    [MetadataKeys.Icon] = GetValue(_icon)
+                }
+                : new JsonObject
+                {
+                    [MetadataKeys.NavigationTitle] = GetValue(_navigationTitle),
+                    [MetadataKeys.Icon] = GetValue(_icon),
+                    [MetadataKeys.Location] = _location?.ToString(),
+                    [MetadataKeys.Alignment] = _location == NavigationLocation.AppBar ? _alignment?.ToString() : null
+                };
+            using var document = JsonDocument.Parse(values.ToJsonString());
+            await metadataSubject.SetMetadataAsync(document.RootElement, CancellationToken.None);
             MudDialog?.Close(DialogResult.Ok(true));
         }
         catch (Exception exception)

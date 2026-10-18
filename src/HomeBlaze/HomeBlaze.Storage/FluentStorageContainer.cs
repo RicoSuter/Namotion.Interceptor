@@ -1,7 +1,7 @@
 using System.Collections.Immutable;
 using System.ComponentModel;
-using System.Diagnostics.CodeAnalysis;
 using System.Text;
+using System.Text.Json;
 using FluentStorage;
 using FluentStorage.Blobs;
 using HomeBlaze.Abstractions;
@@ -126,9 +126,6 @@ public partial class FluentStorageContainer :
 
     /// <inheritdoc />
     public partial ImmutableArray<string> ChildOrder { get; private set; }
-
-    /// <inheritdoc />
-    public bool HasOwnMetadata => false;
 
     /// <inheritdoc />
     public FolderMetadata? Metadata => null;
@@ -517,19 +514,6 @@ public partial class FluentStorageContainer :
         }
     }
 
-    /// <inheritdoc />
-    /// <exception cref="NotSupportedException">Always: the root of a storage has no metadata of its own.</exception>
-    public Task WriteMetadataAsync(FolderMetadata? metadata, CancellationToken cancellationToken)
-        => Task.FromException(new NotSupportedException("The root of a storage has no metadata of its own."));
-
-    /// <inheritdoc />
-    public Task WriteChildMetadataAsync(IInterceptorSubject child, SubjectMetadata? metadata, CancellationToken cancellationToken)
-        => WriteSubjectMetadataAsync(child, metadata, cancellationToken);
-
-    /// <inheritdoc />
-    public Task MoveChildAsync(string name, string targetName, CancellationToken cancellationToken)
-        => MoveChildAsync(string.Empty, name, targetName, cancellationToken);
-
     /// <summary>
     /// IConfigurationWriter - Saves the file of the subject, or of the subject it is nested in through
     /// [Configuration] properties.
@@ -607,123 +591,100 @@ public partial class FluentStorageContainer :
     }
 
     /// <summary>
-    /// Writes the metadata of a folder to its <c>.metadata.json</c>, keeping the order and the keys it does not know.
+    /// Gets every key of the metadata file of the owner as a JSON object, read from the storage; an empty object
+    /// without a file. For a folder or the root the order is left out.
     /// </summary>
-    /// <param name="folder">The path of the folder within the storage, not empty.</param>
-    /// <param name="metadata">The metadata, null to remove it.</param>
-    /// <param name="cancellationToken">Cancels the write.</param>
-    /// <exception cref="InvalidOperationException">The folder is not in the tree, or its metadata file could not be read.</exception>
-    internal async Task WriteFolderMetadataAsync(string folder, FolderMetadata? metadata, CancellationToken cancellationToken)
-    {
-        var connection = Connection;
-        await RunOperationAsync(connection, token =>
-        {
-            // Checked, because writing into a folder that is gone would create it again.
-            _ = GetPlacedFolder(connection, folder);
-
-            var path = StorageMetadataPath.GetFolderFilePath(folder);
-            var document = GetMetadataDocument(connection, path);
-            document.Title = GetValue(metadata?.Title);
-            document.NavigationTitle = GetValue(metadata?.NavigationTitle);
-            document.Icon = GetValue(metadata?.Icon);
-            return WriteMetadataDocumentAsync(connection, path, document, token);
-        }, cancellationToken);
-    }
-
-    /// <summary>
-    /// Writes the metadata of the subject of a JSON file to the metadata file beside it, keeping the keys it does not know.
-    /// </summary>
+    /// <param name="owner">This storage, a folder of it, or the subject of a JSON file of it.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
     /// <exception cref="InvalidOperationException">
-    /// The subject is not the subject of a JSON file in this storage, or its metadata file could not be read.
+    /// The storage is not connected, the owner is not in it, or the metadata file could not be read.
     /// </exception>
-    internal async Task WriteSubjectMetadataAsync(IInterceptorSubject subject, SubjectMetadata? metadata, CancellationToken cancellationToken)
+    internal async Task<JsonElement> GetMetadataAsync(IInterceptorSubject owner, CancellationToken cancellationToken)
     {
         var connection = Connection;
-        await RunOperationAsync(connection, token =>
+        var result = default(JsonElement);
+        await RunOperationAsync(connection, async token =>
         {
-            if (!TryGetJsonEntry(connection, subject, out var entry))
-            {
-                throw new InvalidOperationException("Only the subject of a JSON file in this storage has metadata.");
-            }
+            var (path, kind) = GetMetadataFile(connection, owner);
+            var document = await connection.Reconciler.ReadMetadataFileAsync(path, token);
 
-            return WriteSubjectMetadataAsync(connection, entry, metadata, token);
+            // The order of a folder is read with Get Order. The metadata file beside a subject has none of its own.
+            result = document.ToJsonElement(includesOrder: kind == StorageMetadataKind.Subject);
         }, cancellationToken);
-    }
 
-    private Task WriteSubjectMetadataAsync(
-        StorageConnection connection, StorageEntry entry, SubjectMetadata? metadata, CancellationToken cancellationToken)
-    {
-        var path = StorageMetadataPath.GetSubjectFilePath(entry.Path);
-        var document = GetMetadataDocument(connection, path);
-        document.NavigationTitle = GetValue(metadata?.NavigationTitle);
-        document.Icon = GetValue(metadata?.Icon);
-        document.Location = metadata?.Location;
-        document.Alignment = metadata?.Alignment;
-        return WriteMetadataDocumentAsync(connection, path, document, cancellationToken);
+        return result;
     }
-
-    // The one check for the subject of a JSON file of this storage, which has the metadata file beside it.
-    private static bool TryGetJsonEntry(
-        StorageConnection connection, IInterceptorSubject subject, [NotNullWhen(true)] out StorageEntry? entry)
-        => connection.Index.TryGetEntry(subject, out entry) && entry.HasSidecar;
 
     /// <summary>
-    /// Moves a child of a folder to the place of another child in the order in which they are shown, shifting the
-    /// children in between, and writes the whole resulting order, which drops the names of children that are gone.
+    /// Merges values into the metadata file of the owner, see <see cref="StorageMetadataDocument.Merge"/>. The one
+    /// write of metadata, for agents and for the browser.
     /// </summary>
-    /// <remarks>Moving a child to its own place writes the current order unchanged.</remarks>
-    /// <param name="folder">The path of the folder within the storage, empty for the root.</param>
-    /// <param name="name">The name of the child to move.</param>
-    /// <param name="targetName">The name of the child whose place it takes.</param>
+    /// <param name="owner">This storage, a folder of it, or the subject of a JSON file of it.</param>
+    /// <param name="values">A JSON object.</param>
     /// <param name="cancellationToken">Cancels the write.</param>
-    /// <exception cref="ArgumentException">A name is not a child of the folder.</exception>
-    /// <exception cref="InvalidOperationException">The folder is not in the tree, or its metadata file could not be read.</exception>
-    internal async Task MoveChildAsync(string folder, string name, string targetName, CancellationToken cancellationToken)
+    /// <exception cref="ArgumentException">A key or a value is refused. The message names it.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The storage is not connected, the owner is not in it, or the metadata file could not be read or written.
+    /// </exception>
+    internal async Task SetMetadataAsync(IInterceptorSubject owner, JsonElement values, CancellationToken cancellationToken)
     {
+        // A copy, as the worker reads the values later, and the caller can dispose the document that holds them.
+        var copy = values.Clone();
         var connection = Connection;
-        await RunOperationAsync(connection, token =>
+        await RunOperationAsync(connection, async token =>
         {
-            // Read on the worker, so that a move starts from the order the move before it wrote.
-            var children = GetChildren(connection, folder, out var virtualFolder);
-            var names = GetShownNames(children, virtualFolder?.ChildOrder ?? ChildOrder);
-
-            var index = names.IndexOf(name);
-            var targetIndex = names.IndexOf(targetName);
-            if (index < 0 || targetIndex < 0)
-            {
-                string[] unknownNames = index < 0 && targetIndex < 0 && name != targetName ? [name, targetName]
-                    : index < 0 ? [name]
-                    : [targetName];
-                throw new ArgumentException(
-                    $"Names that are not children of the folder: {FormatNames(unknownNames)}. Its children: {FormatNames(children.Keys.Order(StringComparer.Ordinal))}.",
-                    index < 0 ? nameof(name) : nameof(targetName));
-            }
-
-            names.RemoveAt(index);
-            names.Insert(targetIndex, name);
-
-            var path = StorageMetadataPath.GetFolderFilePath(folder);
-            var document = GetMetadataDocument(connection, path);
-            document.Order = [.. names];
-            return WriteMetadataDocumentAsync(connection, path, document, token);
+            var (path, kind) = GetMetadataFile(connection, owner);
+            var document = await connection.Reconciler.ReadMetadataFileAsync(path, token);
+            document.Merge(copy, kind);
+            await WriteMetadataDocumentAsync(connection, path, document, token);
         }, cancellationToken);
     }
 
+    // Runs on the worker. The root file for this storage, the file in a folder of it, or the file beside a JSON file
+    // of it, which a storage that is the JSON file of this one has.
+    private (string Path, StorageMetadataKind Kind) GetMetadataFile(StorageConnection connection, IInterceptorSubject owner)
+    {
+        if (owner is VirtualFolder || ReferenceEquals(owner, this))
+        {
+            return (StorageMetadataPath.GetFolderFilePath(GetFolderPath(connection, owner)), StorageMetadataKind.Folder);
+        }
+
+        return connection.Index.TryGetEntry(owner, out var entry) && entry.HasSidecar
+            ? (StorageMetadataPath.GetSubjectFilePath(entry.Path), StorageMetadataKind.Subject)
+            : throw new InvalidOperationException("Only a storage, its folders and the subjects of its JSON files have metadata.");
+    }
+
+    // Runs on the worker. Empty for this storage, else the path of the folder. Only the placed folder counts, so that a
+    // folder that was deleted cannot write into a folder of the same name that was created after it.
+    private string GetFolderPath(StorageConnection connection, IInterceptorSubject owner)
+    {
+        if (ReferenceEquals(owner, this))
+        {
+            return string.Empty;
+        }
+
+        var folder = owner as VirtualFolder ?? throw new InvalidOperationException("Only a folder or the root of a storage has an order.");
+        var path = StoragePath.Normalize(folder.RelativePath);
+        return ReferenceEquals(GetPlacedFolder(connection, path), folder)
+            ? path
+            : throw new InvalidOperationException($"The folder '{path}' is no longer in the storage.");
+    }
+
     /// <summary>
-    /// Gets the names of the children of a folder in the order in which they are shown.
+    /// Gets the names of the children of this storage or of a folder of it in the order in which they are shown.
     /// </summary>
-    /// <param name="folder">The path of the folder within the storage, empty for the root.</param>
+    /// <param name="owner">This storage or a folder of it.</param>
     /// <param name="cancellationToken">Cancels waiting for the worker.</param>
-    /// <exception cref="InvalidOperationException">The folder is not in the tree.</exception>
-    internal async Task<string[]> GetChildOrderAsync(string folder, CancellationToken cancellationToken)
+    /// <exception cref="InvalidOperationException">The storage is not connected, or the folder is not in it.</exception>
+    internal async Task<string[]> GetChildOrderAsync(IInterceptorSubject owner, CancellationToken cancellationToken)
     {
         var connection = Connection;
         string[] names = [];
         await RunOperationAsync(connection, _ =>
         {
             // Read on the worker, so that the order is the one that the write before it stored.
-            var children = GetChildren(connection, folder, out var virtualFolder);
-            names = [.. GetShownNames(children, virtualFolder?.ChildOrder ?? ChildOrder)];
+            var children = GetChildren(connection, owner, out var _);
+            names = [.. GetShownNames(children, ((IMetadataContainer)owner).ChildOrder)];
             return Task.CompletedTask;
         }, cancellationToken);
 
@@ -731,22 +692,25 @@ public partial class FluentStorageContainer :
     }
 
     /// <summary>
-    /// Writes the order of the children of a folder: the given names first, in the given order, then the other children
-    /// in the order in which they are shown, which drops the names of children that are gone.
+    /// Writes the order of the children of this storage or of a folder of it: the given names first, in the given
+    /// order, then the other children in the order in which they are shown, which drops the names of children that
+    /// are gone. The one write of an order, for agents and for the browser.
     /// </summary>
-    /// <param name="folder">The path of the folder within the storage, empty for the root.</param>
+    /// <param name="owner">This storage or a folder of it.</param>
     /// <param name="names">The names of the children to show first.</param>
     /// <param name="cancellationToken">Cancels the write.</param>
     /// <exception cref="ArgumentException">A name is given more than once, or is not a child of the folder.</exception>
-    /// <exception cref="InvalidOperationException">The folder is not in the tree, or its metadata file could not be read.</exception>
-    internal async Task SetChildOrderAsync(string folder, IReadOnlyList<string> names, CancellationToken cancellationToken)
+    /// <exception cref="InvalidOperationException">
+    /// The storage is not connected, the folder is not in it, or its metadata file could not be read.
+    /// </exception>
+    internal async Task SetChildOrderAsync(IInterceptorSubject owner, IReadOnlyList<string> names, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(names);
 
         // A copy, as the worker reads the names later.
         var requestedNames = names.ToArray();
         var listedNames = new HashSet<string>(StringComparer.Ordinal);
-        var repeatedNames = new List<string>();
+        var repeatedNames = new HashSet<string>(StringComparer.Ordinal);
         foreach (var name in requestedNames)
         {
             // Null arrives from an agent that sends a JSON null in the array.
@@ -755,7 +719,7 @@ public partial class FluentStorageContainer :
                 throw new ArgumentException("A name is null.", nameof(names));
             }
 
-            if (!listedNames.Add(name) && !repeatedNames.Contains(name))
+            if (!listedNames.Add(name))
             {
                 repeatedNames.Add(name);
             }
@@ -763,13 +727,14 @@ public partial class FluentStorageContainer :
 
         if (repeatedNames.Count > 0)
         {
-            throw new ArgumentException($"Names given more than once: {FormatNames(repeatedNames)}.", nameof(names));
+            throw new ArgumentException(
+                $"Names given more than once: {FormatNames(repeatedNames.Order(StringComparer.Ordinal))}.", nameof(names));
         }
 
         var connection = Connection;
-        await RunOperationAsync(connection, token =>
+        await RunOperationAsync(connection, async token =>
         {
-            var children = GetChildren(connection, folder, out var virtualFolder);
+            var children = GetChildren(connection, owner, out var folder);
             var unknownNames = requestedNames.Where(name => !children.ContainsKey(name)).ToList();
             if (unknownNames.Count > 0)
             {
@@ -778,35 +743,22 @@ public partial class FluentStorageContainer :
                     nameof(names));
             }
 
-            var shownNames = GetShownNames(children, virtualFolder?.ChildOrder ?? ChildOrder);
-            var order = new string[shownNames.Count];
-            var position = 0;
-            foreach (var name in requestedNames)
-            {
-                order[position++] = name;
-            }
-
-            foreach (var name in shownNames)
-            {
-                if (!listedNames.Contains(name))
-                {
-                    order[position++] = name;
-                }
-            }
-
+            // The other children follow in the order of the file as it is now.
             var path = StorageMetadataPath.GetFolderFilePath(folder);
-            var document = GetMetadataDocument(connection, path);
-            document.Order = order;
-            return WriteMetadataDocumentAsync(connection, path, document, token);
+            var document = await connection.Reconciler.ReadMetadataFileAsync(path, token);
+            var shownNames = GetShownNames(children, document.ToChildOrder());
+            document.SetOrder([.. requestedNames, .. shownNames.Where(name => !listedNames.Contains(name))]);
+            await WriteMetadataDocumentAsync(connection, path, document, token);
         }, cancellationToken);
     }
 
-    // Runs on the worker, which replaces the children of a folder.
+    // Runs on the worker, which replaces the children of a folder. The children of this storage or of the placed folder
+    // that the owner is, and the path of that folder, empty for this storage.
     private IReadOnlyDictionary<string, IInterceptorSubject> GetChildren(
-        StorageConnection connection, string folder, out VirtualFolder? virtualFolder)
+        StorageConnection connection, IInterceptorSubject owner, out string folder)
     {
-        virtualFolder = folder.Length == 0 ? null : GetPlacedFolder(connection, folder);
-        return virtualFolder?.Children ?? Children;
+        folder = GetFolderPath(connection, owner);
+        return owner is VirtualFolder virtualFolder ? virtualFolder.Children : Children;
     }
 
     private static List<string> GetShownNames(IReadOnlyDictionary<string, IInterceptorSubject> children, ImmutableArray<string> childOrder)
@@ -825,23 +777,6 @@ public partial class FluentStorageContainer :
         => connection.Index.TryGet(folder, out var entry) && entry is { IsFolder: true, IsPlaced: true, Subject: VirtualFolder virtualFolder }
             ? virtualFolder
             : throw new InvalidOperationException($"No folder at '{folder}'.");
-
-    // A copy, so that the entry keeps what the file holds until the write has succeeded. A file that could not be read
-    // is refused, because writing it would replace what someone wrote by hand.
-    private static StorageMetadataDocument GetMetadataDocument(StorageConnection connection, string path)
-    {
-        if (!connection.Index.TryGet(path, out var entry) || entry.IsFolder)
-        {
-            return new StorageMetadataDocument();
-        }
-
-        return entry.Metadata?.Clone()
-            ?? throw new InvalidOperationException($"The metadata file '{path}' could not be read. Fix or delete it, then try again.");
-    }
-
-    // Blank means not set, so that a value of only spaces is never written and a save with only such values deletes the file.
-    private static string? GetValue(string? value)
-        => string.IsNullOrWhiteSpace(value) ? null : value;
 
     // Runs on the worker. A file that would be empty is deleted, so that a metadata file exists only while it holds something.
     private async Task WriteMetadataDocumentAsync(

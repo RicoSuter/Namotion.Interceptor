@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Text.Json;
 using HomeBlaze.Components.Abstractions.Attributes;
 using HomeBlaze.Components.Abstractions.Pages;
 using HomeBlaze.Host.Services.Navigation;
@@ -279,7 +280,8 @@ public class NavigationItemResolverTests
         // Arrange
         var shared = CreateFolder(new() { ["Readme.md"] = new NavigationTestPage(_context) });
         var topBarFolder = CreateFolder(new() { ["Shared"] = shared });
-        topBarFolder.SetSubjectMetadata(new SubjectMetadata(null, null, NavigationLocation.AppBar, null));
+        topBarFolder.TryGetRegisteredSubject()!.AddProperty<IMetadataSubject>(
+            IMetadataSubject.PropertyName, _ => new NavigationTestMetadataSubject(new SubjectMetadata { Location = NavigationLocation.AppBar }));
 
         // The top bar folder comes first, so the walk reaches the shared folder outside the sidebar first.
         var root = CreateFolder(new()
@@ -350,8 +352,6 @@ public partial class NavigationTestFolder : IMetadataContainer
 
     public partial ImmutableArray<string> ChildOrder { get; set; }
 
-    public bool HasOwnMetadata => true;
-
     public FolderMetadata? Metadata => null;
 
     public NavigationTestFolder()
@@ -359,12 +359,6 @@ public partial class NavigationTestFolder : IMetadataContainer
         Children = new();
         ChildOrder = [];
     }
-
-    public Task WriteMetadataAsync(FolderMetadata? metadata, CancellationToken cancellationToken) => Task.CompletedTask;
-
-    public Task WriteChildMetadataAsync(IInterceptorSubject child, SubjectMetadata? metadata, CancellationToken cancellationToken) => Task.CompletedTask;
-
-    public Task MoveChildAsync(string name, string targetName, CancellationToken cancellationToken) => Task.CompletedTask;
 }
 
 [InterceptorSubject]
@@ -407,4 +401,13 @@ public partial class NavigationTestTopBarFolderPage : IPage
 [SubjectComponent(SubjectComponentType.Page, typeof(NavigationTestTopBarFolderPage))]
 public class NavigationTestTopBarFolderPageComponent
 {
+}
+
+public sealed class NavigationTestMetadataSubject(SubjectMetadata? metadata) : IMetadataSubject
+{
+    public SubjectMetadata? SubjectMetadata => metadata;
+
+    public Task SetMetadataAsync(JsonElement values, CancellationToken cancellationToken) => Task.CompletedTask;
+
+    public Task SetOrderAsync(string[] names, CancellationToken cancellationToken) => Task.CompletedTask;
 }
