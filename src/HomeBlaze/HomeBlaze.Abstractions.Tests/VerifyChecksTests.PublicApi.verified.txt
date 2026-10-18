@@ -8,6 +8,13 @@ namespace HomeBlaze.Abstractions.Attributes
         public ConfigurationAttribute() { }
         public bool IsSecret { get; set; }
     }
+    [System.AttributeUsage(System.AttributeTargets.Class | System.AttributeTargets.Method, Inherited=true)]
+    public sealed class ExcludeFromAttribute : System.Attribute
+    {
+        public ExcludeFromAttribute(HomeBlaze.Abstractions.Attributes.ExclusionTarget targets) { }
+        public HomeBlaze.Abstractions.Attributes.ExclusionTarget Targets { get; }
+        public static bool IsExcluded(System.Type type, HomeBlaze.Abstractions.Attributes.ExclusionTarget target) { }
+    }
     [System.AttributeUsage(System.AttributeTargets.Class, Inherited=true)]
     public sealed class ExcludeFromBrowsingAttribute : System.Attribute
     {
@@ -22,6 +29,13 @@ namespace HomeBlaze.Abstractions.Attributes
     public sealed class ExcludeFromExpressionsAttribute : System.Attribute
     {
         public ExcludeFromExpressionsAttribute() { }
+    }
+    [System.Flags]
+    public enum ExclusionTarget
+    {
+        UserInterface = 1,
+        Agents = 2,
+        All = -1,
     }
     [System.AttributeUsage(System.AttributeTargets.Parameter)]
     public sealed class FromServicesAttribute : System.Attribute
