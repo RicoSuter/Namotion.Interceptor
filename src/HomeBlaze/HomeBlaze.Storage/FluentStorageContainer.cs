@@ -1139,12 +1139,12 @@ public partial class FluentStorageContainer :
         catch (Exception exception) when (CanHaveReachedStorage(exception))
         {
             connection.NotifyChanged(entry.Path);
-            await DeleteSidecarAsync(connection, entry, isFileDeleted: false);
+            await DeleteSidecarAsync(connection, entry, isFileKnownGone: false);
             throw;
         }
 
         // Before the tree follows, so that a failure of the tree cannot leave the metadata file behind.
-        await DeleteSidecarAsync(connection, entry, isFileDeleted: true);
+        await DeleteSidecarAsync(connection, entry, isFileKnownGone: true);
 
         connection.Index.Remove(entry.Path);
         connection.Reconciler.Apply();
@@ -1158,24 +1158,48 @@ public partial class FluentStorageContainer :
 
     // The metadata of a subject goes with it once its file is gone, also when the caller has given up by now, as
     // nothing would delete it later. A failure here leaves the subject deleted.
-    private async Task DeleteSidecarAsync(StorageConnection connection, StorageEntry entry, bool isFileDeleted)
+    private async Task DeleteSidecarAsync(StorageConnection connection, StorageEntry entry, bool isFileKnownGone)
     {
         if (!entry.HasSidecar)
         {
             return;
         }
 
-        var metadataPath = StorageMetadataPath.GetSubjectFilePath(entry.Path);
         try
         {
-            if (isFileDeleted || !await connection.Client.ExistsAsync(entry.Path, CancellationToken.None))
+            if (!isFileKnownGone && await connection.Client.ExistsAsync(entry.Path, CancellationToken.None))
             {
-                await DeleteMetadataFileAsync(connection, metadataPath, CancellationToken.None);
+                return;
             }
         }
         catch (Exception exception)
         {
+            _logger?.LogWarning(exception, "Failed to find out whether the file of a subject is gone, so its metadata file is kept: {Path}", entry.Path);
+            return;
+        }
+
+        var metadataPath = StorageMetadataPath.GetSubjectFilePath(entry.Path);
+        try
+        {
+            await DeleteMetadataFileAsync(connection, metadataPath, CancellationToken.None);
+        }
+        catch (Exception exception)
+        {
             _logger?.LogWarning(exception, "Failed to delete the metadata file of a deleted subject: {Path}", metadataPath);
+            return;
+        }
+
+        // A known gone file is removed from the index by the caller, which applies both at once.
+        if (!isFileKnownGone)
+        {
+            try
+            {
+                connection.Reconciler.Apply();
+            }
+            catch (Exception exception)
+            {
+                _logger?.LogWarning(exception, "Failed to apply the deleted metadata file of a deleted subject: {Path}", metadataPath);
+            }
         }
     }
 

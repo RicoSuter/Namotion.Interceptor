@@ -4,6 +4,7 @@ using HomeBlaze.Services;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.Storage.Tests;
@@ -414,6 +415,50 @@ public class StorageMetadataWriteTests : StorageTestBase
         // Assert
         Assert.False(File.Exists(GetFullPath("Motor.json")));
         Assert.False(File.Exists(GetFullPath("Motor.metadata.json")));
+    }
+
+    [Fact]
+    public async Task WhenTheDeleteFailsAfterTheFileIsGone_ThenTheSubjectLosesItsMetadataAtOnce()
+    {
+        // Arrange
+        WriteFile("Motor.json", SerializeMotor("Motor 1"));
+        WriteFile("Motor.metadata.json", """{ "navTitle": "Pump" }""");
+        PausableBlobStorage? client = null;
+        var storage = await ConnectAsync(configure: container => container.ClientDecorator = inner => client = new PausableBlobStorage(inner));
+        var motor = storage.Children["Motor"];
+        client!.FailNextDeleteAfterItRan(new IOException("The answer was lost."));
+
+        // Act
+        await Assert.ThrowsAsync<IOException>(() => storage.DeleteSubjectAsync(motor, CancellationToken.None));
+
+        // Assert
+        Assert.Null(motor.TryGetSubjectMetadata());
+    }
+
+    [Fact]
+    public async Task WhenTheDeleteFailsAndItIsUnknownWhetherTheFileIsGone_ThenTheWarningNamesTheFile()
+    {
+        // Arrange
+        WriteFile("Motor.json", SerializeMotor("Motor 1"));
+        WriteFile("Motor.metadata.json", """{ "navTitle": "Pump" }""");
+        PausableBlobStorage? client = null;
+        var logger = new RecordingLogger<FluentStorageContainer>();
+        var storage = CreateStorage(configure: container => container.ClientDecorator = inner => client = new PausableBlobStorage(inner), logger: logger);
+        await storage.ConnectAsync(CancellationToken.None);
+        client!.FailNextDeleteAfterItRan(new IOException("The answer was lost."));
+        var existsReached = client.PauseNext(nameof(PausableBlobStorage.ExistsAsync));
+
+        // Act
+        var delete = storage.DeleteSubjectAsync(storage.Children["Motor"], CancellationToken.None);
+        await existsReached;
+        client.FailHangingCall(new IOException("No answer."));
+        await Assert.ThrowsAsync<IOException>(() => delete);
+
+        // Assert
+        var warning = Assert.Single(logger.Warnings);
+        Assert.Contains("Motor.json", warning);
+        Assert.DoesNotContain("deleted subject", warning);
+        Assert.True(File.Exists(GetFullPath("Motor.metadata.json")));
     }
 
     [Fact]
