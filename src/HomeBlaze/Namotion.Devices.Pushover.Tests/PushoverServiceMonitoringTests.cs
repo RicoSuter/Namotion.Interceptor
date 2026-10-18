@@ -409,48 +409,46 @@ public class PushoverServiceMonitoringTests
     }
 
     [Fact]
-    public async Task WhenAllEmergenciesOfATargetAreCanceled_ThenEachActiveOneIsCanceled()
+    public async Task WhenAllEmergenciesOfATargetAreCanceled_ThenItsTagIsCanceledAndEachTrackedActiveOneIsCanceled()
     {
         // Arrange
-        var (service, handler) = PushoverTestFactory.CreateService("rico");
+        var (service, handler) = PushoverTestFactory.CreateService("rico", "anna");
         handler.Respond = FakePushoverHandler.RespondWithNumberedReceipts(_ => NotAcknowledged);
         var target = service.Targets["rico"];
         await target.SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
+        service.EmergencyTracker.ApplyReceipt(target.Emergencies["receipt1"], new PushoverResponse { Status = 1, Acknowledged = 1 });
         await target.SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
+        await service.Targets["anna"].SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
 
         // Act
         await target.CancelAllEmergenciesAsync(CancellationToken.None);
 
         // Assert
-        Assert.Single(handler.RequestsTo("/1/receipts/receipt1/cancel.json"));
-        Assert.Single(handler.RequestsTo("/1/receipts/receipt2/cancel.json"));
-        Assert.All(target.Emergencies.Values, emergency => Assert.Equal(PushoverEmergencyStatus.Canceled, emergency.Status));
+        var request = Assert.Single(handler.RequestsTo(CancelByTagPathOf("target-rico")));
+        Assert.Equal(HttpMethod.Post, request.Method);
+        Assert.Equal("app-token", request.Form["token"]);
+        Assert.Empty(handler.RequestsTo(CancelByTagPathOf("target-anna")));
+        Assert.DoesNotContain(handler.Requests, recorded => recorded.Path.EndsWith("/cancel.json", StringComparison.Ordinal));
+        Assert.Equal(PushoverEmergencyStatus.Acknowledged, target.Emergencies["receipt1"].Status);
+        Assert.Equal(PushoverEmergencyStatus.Canceled, target.Emergencies["receipt2"].Status);
+        Assert.Equal(PushoverEmergencyStatus.Active, service.Targets["anna"].Emergencies["receipt3"].Status);
     }
 
     [Fact]
-    public async Task WhenCancelingOneOfSeveralEmergenciesFails_ThenTheOthersAreCanceledAndTheErrorNamesTheFailedOne()
+    public async Task WhenATargetWithoutTrackedEmergenciesCancelsAll_ThenItsTagIsStillCanceled()
     {
-        // Arrange
+        // Arrange: emergencies sent before a restart are not tracked, but still carry the tag of the target.
         var (service, handler) = PushoverTestFactory.CreateService("rico");
-        handler.Respond = FakePushoverHandler.RespondWithNumberedReceipts(_ => NotAcknowledged, failingCancelReceipt: "receipt1");
-        var target = service.Targets["rico"];
-        await target.SendNotificationAsync(new Notification { Message = "Smoke", Title = "Smoke", Priority = NotificationPriority.Emergency }, CancellationToken.None);
-        await target.SendNotificationAsync(new Notification { Message = "Water", Title = "Water", Priority = NotificationPriority.Emergency }, CancellationToken.None);
 
         // Act
-        var exception = await Assert.ThrowsAsync<PushoverException>(() => target.CancelAllEmergenciesAsync(CancellationToken.None));
+        await service.Targets["rico"].CancelAllEmergenciesAsync(CancellationToken.None);
 
         // Assert
-        Assert.Contains("1 of 2", exception.Message);
-        Assert.Contains("Smoke", exception.Message);
-        Assert.Contains("receipt not found", exception.Message);
-        Assert.DoesNotContain("Water", exception.Message);
-        Assert.Equal(PushoverEmergencyStatus.Active, target.Emergencies["receipt1"].Status);
-        Assert.Equal(PushoverEmergencyStatus.Canceled, target.Emergencies["receipt2"].Status);
+        Assert.Single(handler.RequestsTo(CancelByTagPathOf("target-rico")));
     }
 
     [Fact]
-    public async Task WhenTheServiceCancelsAllEmergencies_ThenTheActiveEmergenciesOfEveryTargetAreCanceled()
+    public async Task WhenTheServiceCancelsAllEmergencies_ThenTheTagOfEveryTargetIsCanceled()
     {
         // Arrange
         var (service, handler) = PushoverTestFactory.CreateService("rico", "anna");
@@ -462,10 +460,30 @@ public class PushoverServiceMonitoringTests
         await service.CancelAllEmergenciesAsync(CancellationToken.None);
 
         // Assert
-        Assert.Single(handler.RequestsTo("/1/receipts/receipt1/cancel.json"));
-        Assert.Single(handler.RequestsTo("/1/receipts/receipt2/cancel.json"));
+        Assert.Single(handler.RequestsTo(CancelByTagPathOf("target-rico")));
+        Assert.Single(handler.RequestsTo(CancelByTagPathOf("target-anna")));
         Assert.Equal(PushoverEmergencyStatus.Canceled, service.Targets["rico"].Emergencies["receipt1"].Status);
         Assert.Equal(PushoverEmergencyStatus.Canceled, service.Targets["anna"].Emergencies["receipt2"].Status);
+    }
+
+    [Fact]
+    public async Task WhenCancelingTheEmergenciesOfOneTargetFails_ThenTheOthersAreCanceledAndTheErrorNamesTheFailedTarget()
+    {
+        // Arrange
+        var (service, handler) = PushoverTestFactory.CreateService("rico", "anna");
+        handler.Respond = FakePushoverHandler.RespondWithNumberedReceipts(_ => NotAcknowledged, failingCancelTag: "target-anna");
+        await service.Targets["rico"].SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
+        await service.Targets["anna"].SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
+
+        // Act
+        var exception = await Assert.ThrowsAsync<PushoverException>(() => service.CancelAllEmergenciesAsync(CancellationToken.None));
+
+        // Assert
+        Assert.Contains("1 of 2", exception.Message);
+        Assert.Contains("anna: receipt not found", exception.Message);
+        Assert.DoesNotContain("rico", exception.Message);
+        Assert.Equal(PushoverEmergencyStatus.Canceled, service.Targets["rico"].Emergencies["receipt1"].Status);
+        Assert.Equal(PushoverEmergencyStatus.Active, service.Targets["anna"].Emergencies["receipt2"].Status);
     }
 
     [Fact]
@@ -708,6 +726,8 @@ public class PushoverServiceMonitoringTests
         // Assert
         Assert.Equal(PushoverEmergencyStatus.Canceled, emergency.Status);
     }
+
+    private static string CancelByTagPathOf(string tag) => $"/1/receipts/cancel_by_tag/{tag}.json";
 
     private static int CountOf(List<PushoverEmergencyAcknowledgedEvent> events)
     {

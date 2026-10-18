@@ -25,18 +25,19 @@ navTitle: Pushover
 | `UserKey` | Secret. The user key or group key of the recipient |
 | `EmergencyRetry` | How often an emergency notification repeats until acknowledged, 30 seconds or more, default 60 seconds |
 | `EmergencyExpire` | How long an emergency notification repeats, at most 3 hours, default 1 hour |
+| `MaximumActiveEmergencies` | How many emergency notifications of this recipient may be active at once, at least 1, default 5. Sending another one fails with an error naming the limit, before any request to Pushover |
 
 ## Operations
 
 | Subject | Operation | Description |
 |---------|-----------|-------------|
 | Target | `SendNotification` | Sends a notification to this recipient and returns its id: the receipt of an emergency notification, otherwise the Pushover request id |
-| Target | `CancelAllEmergencies` | Stops the repeats of every active emergency notification of this recipient, enabled while one is active |
-| Emergency | `Cancel` | Stops the repeats of this emergency notification, enabled while it is active |
+| Target | `CancelAllEmergencies` | Requires confirmation. Stops the repeats of every emergency notification of this recipient by its tag, also those sent before a restart; enabled while a tracked one is active |
+| Emergency | `Cancel` | Requires confirmation. Stops the repeats of this emergency notification, enabled while it is active |
 | Service | `SendToAllTargets` | Sends a notification to every target at once. If some fail, the others are still sent and the error names the failed targets |
-| Service | `CancelAllEmergencies` | Stops the repeats of the active emergency notifications of every target |
+| Service | `CancelAllEmergencies` | Requires confirmation. Stops the repeats of the emergency notifications of every target by their tags, also those sent before a restart |
 
-When canceling several emergency notifications, a failure of one does not stop the others; the error names the failed ones.
+When canceling the emergency notifications of several targets, a failure of one does not stop the others; the error names the failed ones. The cancel operations require confirmation, so agents and MCP clients cannot call them; run them from the UI, which asks you to confirm.
 
 ## Priorities
 
@@ -93,7 +94,7 @@ Sending an `Emergency` notification adds a Pushover emergency subject to the tar
 | `Expired` | It stopped repeating after `EmergencyExpire` without acknowledgement |
 | `Canceled` | It was canceled with `Cancel` or `CancelAllEmergencies`, or because its target was removed |
 
-While an emergency notification is active, the service reads its receipt every 10 seconds; otherwise it makes no requests. Each active emergency is read on its own, so with many active emergencies each receipt still costs one request every 10 seconds, and sending emergency notifications very often adds up to many requests. An emergency that is no longer active is removed from `Emergencies` 24 hours after it ended. `Emergencies` is kept in memory only: after a restart the list is empty, and an emergency that was still active keeps repeating on the phone until it is acknowledged or expires, without HomeBlaze tracking or canceling it.
+While an emergency notification is active, the service reads its receipt every 10 seconds; otherwise it makes no requests. Each active emergency is read on its own, so with many active emergencies each receipt still costs one request every 10 seconds, and sending emergency notifications very often adds up to many requests. An emergency that is no longer active is removed from `Emergencies` 24 hours after it ended. `Emergencies` is kept in memory only: after a restart the list is empty, and an emergency that was still active keeps repeating on the phone until it is acknowledged or expires, without HomeBlaze tracking it. Every emergency notification is sent with the Pushover tag `target-{key}` of its target, so `CancelAllEmergencies` of the service, which is always enabled, still stops it, and so does that of the target while it has a tracked active emergency. Removing a target cancels its tag in the background.
 
 The service tracks the emergencies by the key of their target. When a configuration reload replaces a target but keeps its key, the new target shows the same emergencies and can still cancel them, including one whose send was still running during the reload. The replaced instance is no longer part of the service: sending through it fails. An external edit of the configuration file replaces the target subjects this way, so their emergencies are briefly detached from the subject graph and attached again, keeping their state. When a target is removed, its active emergencies are canceled, including one whose send completes after the removal.
 
@@ -123,7 +124,8 @@ The service and each target implement `IObservable<PushoverEmergencyAcknowledged
       "name": "Rico",
       "userKey": "your-user-key",
       "emergencyRetry": "00:01:00",
-      "emergencyExpire": "01:00:00"
+      "emergencyExpire": "01:00:00",
+      "maximumActiveEmergencies": 5
     }
   }
 }
@@ -149,9 +151,9 @@ Messages can contain bold, italic, colored and linked text, or use a monospace f
 
 A message can carry an image of up to 5 MB, for example a camera snapshot.
 
-### Emergency Callback and Tags
+### Emergency Callback
 
-Pushover can call a URL when an emergency notification is acknowledged, instead of being polled, which needs HomeBlaze reachable from the internet. Tags allow canceling a chosen group of emergency notifications at once.
+Pushover can call a URL when an emergency notification is acknowledged, instead of being polled, which needs HomeBlaze reachable from the internet.
 
 ### Message Timestamp
 

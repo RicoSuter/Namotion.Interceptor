@@ -47,8 +47,8 @@ public class PushoverOperationTests
         var registered = service.TryGetRegisteredSubject()!;
 
         // Assert
-        Assert.NotNull(registered.TryGetProperty("SendToAllTargets")?.TryGetMethodMetadata());
-        Assert.NotNull(registered.TryGetProperty("CancelAllEmergencies")?.TryGetMethodMetadata());
+        Assert.False(registered.TryGetProperty("SendToAllTargets")!.TryGetMethodMetadata()!.RequiresConfirmation);
+        Assert.True(registered.TryGetProperty("CancelAllEmergencies")!.TryGetMethodMetadata()!.RequiresConfirmation);
         Assert.Null(registered.TryGetProperty("SendNotification"));
     }
 
@@ -60,6 +60,7 @@ public class PushoverOperationTests
         handler.Respond = FakePushoverHandler.RespondWithNumberedReceipts();
         var target = service.Targets["rico"];
         var cancelAllEmergencies = target.TryGetRegisteredSubject()!.TryGetProperty("CancelAllEmergencies")!;
+        Assert.True(cancelAllEmergencies.TryGetMethodMetadata()!.RequiresConfirmation);
         Assert.False(cancelAllEmergencies.IsMethodEnabled());
 
         // Act
@@ -85,6 +86,7 @@ public class PushoverOperationTests
         await target.SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
         var emergency = target.Emergencies["receipt1"];
         var cancel = emergency.TryGetRegisteredSubject()!.TryGetProperty("Cancel")!;
+        Assert.True(cancel.TryGetMethodMetadata()!.RequiresConfirmation);
         Assert.True(cancel.IsMethodEnabled());
 
         // Act

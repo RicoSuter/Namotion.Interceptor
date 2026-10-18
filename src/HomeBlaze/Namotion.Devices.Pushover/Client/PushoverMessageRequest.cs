@@ -23,6 +23,11 @@ internal sealed class PushoverMessageRequest
     public int? Expire { get; init; }
 
     /// <summary>
+    /// Comma-separated tags of an emergency notification, which cancel it together with others by tag.
+    /// </summary>
+    public string? Tags { get; init; }
+
+    /// <summary>
     /// The Pushover messages endpoint documents form fields, not a JSON body.
     /// </summary>
     internal IEnumerable<KeyValuePair<string, string>> ToFormFields()
@@ -59,6 +64,11 @@ internal sealed class PushoverMessageRequest
         if (Expire is { } expire)
         {
             yield return new KeyValuePair<string, string>("expire", expire.ToString(CultureInfo.InvariantCulture));
+        }
+
+        if (Tags is not null)
+        {
+            yield return new KeyValuePair<string, string>("tags", Tags);
         }
     }
 }

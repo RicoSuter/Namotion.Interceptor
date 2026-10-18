@@ -120,10 +120,10 @@ public partial class PushoverService :
     }
 
     /// <summary>
-    /// Stops the repeats of the active emergency notifications of every target. When some fail, the others are still
-    /// canceled and the error names the failed ones.
+    /// Stops the repeats of the emergency notifications of every target by their tags, also those sent before a
+    /// restart. When some targets fail, the others are still canceled and the error names the failed ones.
     /// </summary>
-    [Operation(Title = "Cancel all emergencies", Icon = "NotificationsOff", Position = 2)]
+    [Operation(Title = "Cancel all emergencies", Icon = "NotificationsOff", Position = 2, RequiresConfirmation = true)]
     public Task CancelAllEmergenciesAsync(CancellationToken cancellationToken) =>
         _emergencyTracker.CancelAllAsync(cancellationToken);
 
@@ -185,20 +185,37 @@ public partial class PushoverService :
         }
 
         var targetKey = target.Key ?? throw new InvalidOperationException($"The target '{target.Title}' is not part of a Pushover service.");
-        var expire = target.EmergencyExpire;
-        var request = PushoverMessageMapping.Create(token, userKey, notification, target.EmergencyRetry, expire, _logger);
-        var response = await _client.SendMessageAsync(request, cancellationToken);
-
-        var now = TimeProvider.GetUtcNow();
-        target.LastSentAt = now;
-        if (response.Receipt is not { } receipt)
+        var isEmergency = notification.Priority == NotificationPriority.Emergency;
+        if (isEmergency)
         {
-            return response.Request;
+            _emergencyTracker.ReserveEmergency(targetKey, target.MaximumActiveEmergencies, target.Title);
         }
 
-        _emergencyTracker.Add(targetKey, receipt, request.Title, request.Message, now, expire);
-        _signal.Set();
-        return receipt;
+        try
+        {
+            var expire = target.EmergencyExpire;
+            var request = PushoverMessageMapping.Create(
+                token, userKey, notification, target.EmergencyRetry, expire, PushoverMessageMapping.GetEmergencyTag(targetKey), _logger);
+            var response = await _client.SendMessageAsync(request, cancellationToken);
+
+            var now = TimeProvider.GetUtcNow();
+            target.LastSentAt = now;
+            if (response.Receipt is not { } receipt)
+            {
+                return response.Request;
+            }
+
+            _emergencyTracker.Add(targetKey, receipt, request.Title, request.Message, now, expire);
+            _signal.Set();
+            return receipt;
+        }
+        finally
+        {
+            if (isEmergency)
+            {
+                _emergencyTracker.ReleaseReservation(targetKey);
+            }
+        }
     }
 
     /// <summary>

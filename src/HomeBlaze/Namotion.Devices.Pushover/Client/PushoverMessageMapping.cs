@@ -12,8 +12,19 @@ internal static class PushoverMessageMapping
 
     private const int EmergencyPriority = 2;
 
+    /// <summary>
+    /// The tag every emergency notification of the target with <paramref name="targetKey"/> is sent with.
+    /// </summary>
+    public static string GetEmergencyTag(string targetKey) => $"target-{targetKey}";
+
     public static PushoverMessageRequest Create(
-        string token, string userKey, Notification notification, TimeSpan emergencyRetry, TimeSpan emergencyExpire, ILogger logger)
+        string token,
+        string userKey,
+        Notification notification,
+        TimeSpan emergencyRetry,
+        TimeSpan emergencyExpire,
+        string emergencyTag,
+        ILogger logger)
     {
         var priority = ToPushoverPriority(notification.Priority);
         var isEmergency = priority == EmergencyPriority;
@@ -29,7 +40,8 @@ internal static class PushoverMessageMapping
             UrlTitle = urlTitle,
             Priority = priority == 0 ? null : priority,
             Retry = isEmergency ? (int)emergencyRetry.TotalSeconds : null,
-            Expire = isEmergency ? (int)emergencyExpire.TotalSeconds : null
+            Expire = isEmergency ? (int)emergencyExpire.TotalSeconds : null,
+            Tags = isEmergency ? emergencyTag : null
         };
     }
 

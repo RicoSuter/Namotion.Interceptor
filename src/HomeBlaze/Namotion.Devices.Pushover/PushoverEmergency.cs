@@ -109,7 +109,7 @@ public partial class PushoverEmergency : ITitleProvider, IIconProvider
     /// <summary>
     /// Stops the repeats of the notification; does nothing when it is no longer active.
     /// </summary>
-    [Operation(Title = "Cancel", Icon = "NotificationsOff", Position = 1)]
+    [Operation(Title = "Cancel", Icon = "NotificationsOff", Position = 1, RequiresConfirmation = true)]
     public Task CancelAsync(CancellationToken cancellationToken) =>
         _tracker.CancelAsync(this, cancellationToken);
 }

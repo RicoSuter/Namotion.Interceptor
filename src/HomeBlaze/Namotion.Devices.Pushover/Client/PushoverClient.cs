@@ -36,6 +36,14 @@ internal sealed class PushoverClient
             new FormUrlEncodedContent([new("token", token)]),
             cancellationToken);
 
+    /// <summary>
+    /// Stops the repeats of every emergency notification of the application that was sent with <paramref name="tag"/>.
+    /// </summary>
+    public Task<PushoverResponse> CancelByTagAsync(string token, string tag, CancellationToken cancellationToken) =>
+        SendAsync(HttpMethod.Post, $"receipts/cancel_by_tag/{Uri.EscapeDataString(tag)}.json",
+            new FormUrlEncodedContent([new("token", token)]),
+            cancellationToken);
+
     private async Task<PushoverResponse> SendAsync(HttpMethod method, string path, HttpContent? content, CancellationToken cancellationToken)
     {
         await Connections.WaitAsync(cancellationToken);

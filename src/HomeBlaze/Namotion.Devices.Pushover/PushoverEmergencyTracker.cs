@@ -25,6 +25,9 @@ internal sealed class PushoverEmergencyTracker
     // the lock.
     private Dictionary<string, PushoverTarget> _targets = new();
 
+    // The emergency sends in flight per target key, which count toward its MaximumActiveEmergencies.
+    private readonly Dictionary<string, int> _sendingEmergencyCountByTargetKey = new();
+
     public PushoverEmergencyTracker(PushoverService service, PushoverClient client)
     {
         _service = service;
@@ -35,19 +38,19 @@ internal sealed class PushoverEmergencyTracker
 
     /// <summary>
     /// Switches to the new targets of the service: a target instance that replaces another under the same key shows
-    /// the emergencies of that key, and the active emergencies of a removed key are canceled in the background.
+    /// the emergencies of that key, and the emergencies of a removed key are canceled by its tag in the background,
+    /// also those sent before a restart.
     /// </summary>
     public void SetTargets(Dictionary<string, PushoverTarget> targets)
     {
-        List<PushoverEmergency>? removedEmergencies = null;
+        Dictionary<string, PushoverEmergency[]>? removedTargets = null;
         lock (_lock)
         {
-            foreach (var (key, emergencies) in _emergenciesByTargetKey.ToArray())
+            foreach (var (key, previousTarget) in _targets)
             {
-                var previousTarget = _targets.GetValueOrDefault(key);
                 if (targets.TryGetValue(key, out var target))
                 {
-                    if (!ReferenceEquals(target, previousTarget))
+                    if (!ReferenceEquals(target, previousTarget) && _emergenciesByTargetKey.TryGetValue(key, out var emergencies))
                     {
                         target.Emergencies = emergencies;
                         ClearView(previousTarget);
@@ -55,18 +58,65 @@ internal sealed class PushoverEmergencyTracker
                 }
                 else
                 {
-                    _emergenciesByTargetKey.Remove(key);
+                    var activeEmergencies = _emergenciesByTargetKey.Remove(key, out var emergencies)
+                        ? emergencies.Values.Where(IsActive).ToArray()
+                        : [];
                     ClearView(previousTarget);
-                    (removedEmergencies ??= []).AddRange(emergencies.Values.Where(IsActive));
+                    (removedTargets ??= [])[key] = activeEmergencies;
                 }
             }
 
             _targets = targets;
         }
 
-        if (removedEmergencies is { Count: > 0 })
+        if (removedTargets is not null)
         {
-            CancelInBackground(removedEmergencies.ToArray());
+            RunInBackground(() => PushoverBatch.RunAllAsync(
+                removedTargets.ToArray(),
+                removed => CancelByTagAsync(removed.Key, removed.Value, CancellationToken.None),
+                removed => removed.Key,
+                "Canceling the emergencies of",
+                "removed targets",
+                CancellationToken.None));
+        }
+    }
+
+    /// <summary>
+    /// Reserves the send of an emergency notification for the target with <paramref name="targetKey"/>, which
+    /// <see cref="ReleaseReservation"/> ends once the send completed.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The target already has <paramref name="maximumActiveEmergencies"/>
+    /// active or sending emergencies.</exception>
+    public void ReserveEmergency(string targetKey, int maximumActiveEmergencies, string targetTitle)
+    {
+        lock (_lock)
+        {
+            var sendingCount = _sendingEmergencyCountByTargetKey.GetValueOrDefault(targetKey);
+            var activeCount = _emergenciesByTargetKey.TryGetValue(targetKey, out var emergencies) ? emergencies.Values.Count(IsActive) : 0;
+            if (activeCount + sendingCount >= maximumActiveEmergencies)
+            {
+                throw new InvalidOperationException(
+                    $"The Pushover target '{targetTitle}' already has {maximumActiveEmergencies} active emergency notifications, " +
+                    $"its MaximumActiveEmergencies limit. Cancel one or wait until one ends.");
+            }
+
+            _sendingEmergencyCountByTargetKey[targetKey] = sendingCount + 1;
+        }
+    }
+
+    public void ReleaseReservation(string targetKey)
+    {
+        lock (_lock)
+        {
+            var sendingCount = _sendingEmergencyCountByTargetKey[targetKey] - 1;
+            if (sendingCount == 0)
+            {
+                _sendingEmergencyCountByTargetKey.Remove(targetKey);
+            }
+            else
+            {
+                _sendingEmergencyCountByTargetKey[targetKey] = sendingCount;
+            }
         }
     }
 
@@ -90,7 +140,7 @@ internal sealed class PushoverEmergencyTracker
             }
         }
 
-        CancelInBackground([emergency]);
+        RunInBackground(() => CancelAsync(emergency, CancellationToken.None));
         return emergency;
     }
 
@@ -191,18 +241,24 @@ internal sealed class PushoverEmergencyTracker
     }
 
     /// <summary>
-    /// Cancels the active emergencies of every target at once, throwing one <see cref="PushoverException"/> that
-    /// names each failed emergency.
+    /// Cancels the emergencies of every target by their tags at once, throwing one <see cref="PushoverException"/>
+    /// that names each failed target.
     /// </summary>
     public Task CancelAllAsync(CancellationToken cancellationToken) =>
-        CancelAllAsync(GetActiveEmergencies(targetKey: null), cancellationToken);
+        PushoverBatch.RunAllAsync(
+            _targets.Keys.ToArray(),
+            targetKey => CancelAllAsync(targetKey, cancellationToken),
+            GetTargetTitle,
+            "Canceling the emergencies of",
+            "targets",
+            cancellationToken);
 
     /// <summary>
-    /// Cancels the active emergencies of the target with <paramref name="targetKey"/> at once, throwing one
-    /// <see cref="PushoverException"/> that names each failed emergency.
+    /// Cancels the emergencies of the target with <paramref name="targetKey"/> by its tag, also those sent before a
+    /// restart, and marks the tracked active ones canceled.
     /// </summary>
     public Task CancelAllAsync(string targetKey, CancellationToken cancellationToken) =>
-        CancelAllAsync(GetActiveEmergencies(targetKey), cancellationToken);
+        CancelByTagAsync(targetKey, GetActiveEmergencies(targetKey), cancellationToken);
 
     /// <summary>
     /// Removes the emergencies that ended at least the retention of the service ago, and returns how long until the
@@ -268,23 +324,31 @@ internal sealed class PushoverEmergencyTracker
         return timeout;
     }
 
-    private Task CancelAllAsync(PushoverEmergency[] emergencies, CancellationToken cancellationToken) =>
-        PushoverBatch.RunAllAsync(
-            emergencies,
-            emergency => CancelAsync(emergency, cancellationToken),
-            emergency => $"{GetTargetTitle(emergency.TargetKey)} ({emergency.Title})",
-            "Canceling",
-            "emergencies",
-            cancellationToken);
+    // The tracked emergencies are read before the request, so one sent while it runs is not marked canceled.
+    private async Task CancelByTagAsync(string targetKey, PushoverEmergency[] trackedEmergencies, CancellationToken cancellationToken)
+    {
+        var token = _service.GetRequiredApplicationToken();
+        await _client.CancelByTagAsync(token, PushoverMessageMapping.GetEmergencyTag(targetKey), cancellationToken);
+        lock (_lock)
+        {
+            foreach (var emergency in trackedEmergencies)
+            {
+                if (IsActive(emergency))
+                {
+                    EndLocked(emergency, PushoverEmergencyStatus.Canceled);
+                }
+            }
+        }
+    }
 
     // Run on the thread pool, outside the lock and outside the configuration change or send that removed the
-    // target: no target polls or cancels these anymore.
-    private void CancelInBackground(PushoverEmergency[] emergencies) =>
+    // target: no target polls or cancels these emergencies anymore.
+    private void RunInBackground(Func<Task> cancel) =>
         _ = Task.Run(async () =>
         {
             try
             {
-                await CancelAllAsync(emergencies, CancellationToken.None);
+                await cancel();
             }
             catch (Exception exception)
             {
@@ -292,15 +356,10 @@ internal sealed class PushoverEmergencyTracker
             }
         });
 
-    private PushoverEmergency[] GetActiveEmergencies(string? targetKey)
+    private PushoverEmergency[] GetActiveEmergencies(string targetKey)
     {
         lock (_lock)
         {
-            if (targetKey is null)
-            {
-                return _emergenciesByTargetKey.Values.SelectMany(emergencies => emergencies.Values).Where(IsActive).ToArray();
-            }
-
             return _emergenciesByTargetKey.TryGetValue(targetKey, out var targetEmergencies)
                 ? targetEmergencies.Values.Where(IsActive).ToArray()
                 : [];

@@ -9,7 +9,7 @@ namespace Namotion.Devices.Pushover.Tests;
 public class PushoverMessageMappingTests
 {
     private static PushoverMessageRequest Map(Notification notification) =>
-        PushoverMessageMapping.Create("app", "user", notification, TimeSpan.FromSeconds(60), TimeSpan.FromHours(1), NullLogger.Instance);
+        PushoverMessageMapping.Create("app", "user", notification, TimeSpan.FromSeconds(60), TimeSpan.FromHours(1), "target-rico", NullLogger.Instance);
 
     [Theory]
     [InlineData(NotificationPriority.Low, -1)]
@@ -33,7 +33,7 @@ public class PushoverMessageMappingTests
     }
 
     [Fact]
-    public void WhenNotificationIsNormal_ThenPriorityRetryAndExpireAreOmitted()
+    public void WhenNotificationIsNormal_ThenPriorityRetryExpireAndTagsAreOmitted()
     {
         // Act
         var request = Map(new Notification { Message = "Hello", Title = "Title", Url = "https://example.com", UrlTitle = "Open" });
@@ -46,10 +46,11 @@ public class PushoverMessageMappingTests
         Assert.Null(request.Priority);
         Assert.Null(request.Retry);
         Assert.Null(request.Expire);
+        Assert.Null(request.Tags);
     }
 
     [Fact]
-    public void WhenNotificationIsEmergency_ThenRetryAndExpireAreSet()
+    public void WhenNotificationIsEmergency_ThenRetryExpireAndTagsAreSet()
     {
         // Act
         var request = Map(PushoverTestFactory.EmergencyNotification);
@@ -58,6 +59,7 @@ public class PushoverMessageMappingTests
         Assert.Equal(2, request.Priority);
         Assert.Equal(60, request.Retry);
         Assert.Equal(3600, request.Expire);
+        Assert.Equal("target-rico", request.Tags);
     }
 
     [Fact]

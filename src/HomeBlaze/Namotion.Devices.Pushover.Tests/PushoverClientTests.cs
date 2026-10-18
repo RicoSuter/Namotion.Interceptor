@@ -170,6 +170,41 @@ public class PushoverClientTests
     }
 
     [Theory]
+    [InlineData("target-rico", "https://api.pushover.net/1/receipts/cancel_by_tag/target-rico.json")]
+    [InlineData("a b/c", "https://api.pushover.net/1/receipts/cancel_by_tag/a%20b%2Fc.json")]
+    public async Task WhenCancelingByTag_ThenPostsTheTokenToTheEscapedTagPath(string tag, string expectedUri)
+    {
+        // Arrange
+        var handler = new FakePushoverHandler();
+        var client = new PushoverClient(new TestHttpClientFactory(handler));
+
+        // Act
+        await client.CancelByTagAsync("app", tag, CancellationToken.None);
+
+        // Assert
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal(HttpMethod.Post, request.Method);
+        Assert.Equal(expectedUri, request.Uri.AbsoluteUri);
+        Assert.Equal("application/x-www-form-urlencoded", request.ContentType);
+        Assert.Equal("app", Assert.Single(request.Form).Value);
+        Assert.Equal("token", Assert.Single(request.Form).Key);
+    }
+
+    [Fact]
+    public async Task WhenSendingAMessageWithTags_ThenTheTagsFieldIsSent()
+    {
+        // Arrange
+        var handler = new FakePushoverHandler();
+        var client = new PushoverClient(new TestHttpClientFactory(handler));
+
+        // Act
+        await client.SendMessageAsync(new PushoverMessageRequest { Token = "app", User = "user", Message = "Fire", Priority = 2, Tags = "target-rico" }, CancellationToken.None);
+
+        // Assert
+        Assert.Equal("target-rico", Assert.Single(handler.Requests).Form["tags"]);
+    }
+
+    [Theory]
     [InlineData(1)]
     [InlineData(4)]
     public async Task WhenManyRequestsRunAtOnce_ThenAtMostTwoAreOpen(int clientCount)

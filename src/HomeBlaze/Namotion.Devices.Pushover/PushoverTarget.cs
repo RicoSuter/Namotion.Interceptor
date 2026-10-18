@@ -64,6 +64,13 @@ public partial class PushoverTarget :
     [Configuration]
     public partial TimeSpan EmergencyExpire { get; set; }
 
+    /// <summary>
+    /// How many emergency notifications may be active at once, at least 1. Sending another one fails before any
+    /// request.
+    /// </summary>
+    [Configuration]
+    public partial int MaximumActiveEmergencies { get; set; }
+
     [State(IsDiscrete = true)]
     public partial ServiceStatus Status { get; internal set; }
 
@@ -124,6 +131,7 @@ public partial class PushoverTarget :
         UserKey = null;
         EmergencyRetry = TimeSpan.FromSeconds(60);
         EmergencyExpire = TimeSpan.FromHours(1);
+        MaximumActiveEmergencies = 5;
 
         Status = ServiceStatus.Stopped;
         StatusMessage = "Not validated yet";
@@ -136,10 +144,9 @@ public partial class PushoverTarget :
         new() { Id = await RequiredService.SendAsync(this, notification, cancellationToken) };
 
     /// <summary>
-    /// Stops the repeats of every active emergency notification. When some fail, the others are still canceled and
-    /// the error names the failed ones.
+    /// Stops the repeats of every emergency notification of this target by its tag, also those sent before a restart.
     /// </summary>
-    [Operation(Title = "Cancel all emergencies", Icon = "NotificationsOff", Position = 2)]
+    [Operation(Title = "Cancel all emergencies", Icon = "NotificationsOff", Position = 2, RequiresConfirmation = true)]
     public Task CancelAllEmergenciesAsync(CancellationToken cancellationToken) =>
         Service is { } service && Key is { } key
             ? service.EmergencyTracker.CancelAllAsync(key, cancellationToken)
@@ -194,6 +201,14 @@ public partial class PushoverTarget :
         else if (newValue > MaximumEmergencyExpire)
         {
             newValue = MaximumEmergencyExpire;
+        }
+    }
+
+    partial void OnMaximumActiveEmergenciesChanging(ref int newValue, ref bool cancel)
+    {
+        if (newValue < 1)
+        {
+            newValue = 1;
         }
     }
 
