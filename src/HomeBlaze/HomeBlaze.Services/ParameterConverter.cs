@@ -32,8 +32,13 @@ public static class ParameterConverter
     private static readonly JsonSerializerOptions ObjectSerializerOptions = new()
     {
         PropertyNameCaseInsensitive = true,
+        NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals,
         Converters = { new JsonStringEnumConverter() }
     };
+
+    // Weak, so that the types of an unloaded plugin are not kept alive. The dialog this feeds re-scans a type several
+    // times per keystroke, so the reflection work is cached per type instead of repeated.
+    private static readonly ConditionalWeakTable<Type, ObjectParameterMember[]> ObjectMembersByType = new();
 
     /// <summary>
     /// Checks if a type is supported for UI parameter input.
@@ -46,11 +51,19 @@ public static class ParameterConverter
 
     /// <summary>
     /// Checks if a type is an object whose public settable members are all supported for UI input, so that it can be
-    /// entered member by member.
+    /// entered member by member. A collection or array is excluded even though its members (such as
+    /// <see cref="List{T}.Capacity"/>) might otherwise qualify; it stays enterable as JSON through
+    /// <see cref="IsJsonObject"/>.
     /// </summary>
     public static bool IsSupportedObject(Type type)
     {
         if (!IsJsonObject(type))
+        {
+            return false;
+        }
+
+        var actualType = Nullable.GetUnderlyingType(type) ?? type;
+        if (actualType.IsArray || typeof(System.Collections.IEnumerable).IsAssignableFrom(actualType))
         {
             return false;
         }
@@ -60,30 +73,36 @@ public static class ParameterConverter
     }
 
     /// <summary>
-    /// Checks if a value of the type can be entered as JSON: a concrete type that is no supported simple value.
+    /// Checks if a value of the type can be entered as JSON: a concrete, non-delegate type that is no supported
+    /// simple value.
     /// </summary>
     public static bool IsJsonObject(Type type)
     {
         var actualType = Nullable.GetUnderlyingType(type) ?? type;
         return !IsSupported(actualType) && actualType != typeof(object) && !actualType.IsPrimitive &&
-               !actualType.IsAbstract && !actualType.IsInterface;
+               !actualType.IsAbstract && !actualType.IsInterface && !typeof(Delegate).IsAssignableFrom(actualType);
     }
 
     /// <summary>
-    /// Gets the public settable members of an object type, including init-only members.
+    /// Gets the public settable members of an object type, including init-only members. The result is cached per type.
     /// </summary>
-    public static IReadOnlyList<ObjectParameterMember> GetObjectMembers(Type type)
+    public static IReadOnlyList<ObjectParameterMember> GetObjectMembers(Type type) =>
+        ObjectMembersByType.GetValue(Nullable.GetUnderlyingType(type) ?? type, BuildObjectMembers);
+
+    private static ObjectParameterMember[] BuildObjectMembers(Type type)
     {
         // Owned by this call: the context caches the members it reads and is not thread-safe.
         var nullabilityContext = new NullabilityInfoContext();
-        return (Nullable.GetUnderlyingType(type) ?? type)
+        return type
             .GetProperties(BindingFlags.Public | BindingFlags.Instance)
             .Where(property => property.GetMethod?.IsPublic == true && property.SetMethod?.IsPublic == true &&
-                               property.GetIndexParameters().Length == 0 &&
-                               property.GetCustomAttribute<JsonIgnoreAttribute>()?.Condition != JsonIgnoreCondition.Always)
+                               property.GetIndexParameters().Length == 0)
             // A derived type may hide a same-named base member with `new`; GetProperties returns both, so keep the most derived one.
             .GroupBy(property => property.Name)
             .Select(group => group.OrderByDescending(property => GetInheritanceDepth(property.DeclaringType)).First())
+            // Applied after the hiding member is picked, so an always-ignored derived member drops the whole name
+            // instead of falling back to the base member it hides.
+            .Where(property => property.GetCustomAttribute<JsonIgnoreAttribute>()?.Condition != JsonIgnoreCondition.Always)
             .Select(property => new ObjectParameterMember(
                 property.Name,
                 property.GetCustomAttribute<JsonPropertyNameAttribute>()?.Name ?? property.Name,
@@ -122,15 +141,23 @@ public static class ParameterConverter
                 return false;
             }
 
-            json[member.JsonName] = JsonSerializer.SerializeToNode(memberValue, member.Type, ObjectSerializerOptions);
+            try
+            {
+                json[member.JsonName] = JsonSerializer.SerializeToNode(memberValue, member.Type, ObjectSerializerOptions);
+            }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                error = $"Invalid value for {member.Name}";
+                return false;
+            }
         }
 
         return TryDeserialize(json.ToJsonString(), type, out value, out error);
     }
 
     /// <summary>
-    /// Tries to read an object from JSON text. Member names match in any case and enums are read by name. Empty text
-    /// is null, which only a nullable parameter accepts.
+    /// Tries to read an object from JSON text. Member names match in any case and enums are read by name. Empty text,
+    /// and a JSON <c>null</c> literal, are null, which only a nullable parameter accepts.
     /// </summary>
     public static bool TryParseJson(string? input, Type type, bool isNullable, out object? value, out string? error)
     {
@@ -141,7 +168,18 @@ public static class ParameterConverter
             return isNullable;
         }
 
-        return TryDeserialize(input, type, out value, out error);
+        if (!TryDeserialize(input, type, out value, out error))
+        {
+            return false;
+        }
+
+        if (value is null && !isNullable)
+        {
+            error = "This field is required";
+            return false;
+        }
+
+        return true;
     }
 
     private static bool TryDeserialize(string json, Type type, out object? value, out string? error)
@@ -152,7 +190,11 @@ public static class ParameterConverter
             error = null;
             return true;
         }
-        catch (Exception exception) when (exception is JsonException or NotSupportedException)
+        // This is a Try method facing free-form UI input: besides malformed JSON (JsonException), a constructor or
+        // property setter invoked during deserialization can throw any exception (for example ArgumentException),
+        // and an ambiguous binding can throw InvalidOperationException. None of these may escape into the caller's
+        // event handler, so every non-fatal exception is caught and reported as the failure message.
+        catch (Exception exception) when (exception is not OutOfMemoryException)
         {
             value = null;
             error = exception.Message;

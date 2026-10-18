@@ -435,8 +435,99 @@ public class ParameterConverterTests
         var members = ParameterConverter.GetObjectMembers(typeof(TestDerivedWithHiddenMember));
 
         // Assert
-        var member = Assert.Single(members, candidate => candidate.Name == "V");
+        var member = Assert.Single(members, candidate => candidate.Name == "Value");
         Assert.Equal(typeof(string), member.Type);
+    }
+
+    [Fact]
+    public void WhenDerivedMemberHidingBaseIsJsonIgnored_ThenTheMemberIsExcludedEntirely()
+    {
+        // Act
+        var members = ParameterConverter.GetObjectMembers(typeof(TestDerivedHidingWithIgnoredMember));
+
+        // Assert
+        Assert.DoesNotContain(members, member => member.Name == "Code");
+    }
+
+    [Fact]
+    public void WhenMemberHasJsonPropertyName_ThenInputBindsByClrName()
+    {
+        // Arrange
+        var inputs = new Dictionary<string, string?> { ["DisplayName"] = "Hello" };
+
+        // Act
+        var success = ParameterConverter.TryCreateObject(typeof(TestRenamedMessage), inputs, out var value, out var error);
+
+        // Assert
+        Assert.True(success, error);
+        Assert.Equal("Hello", Assert.IsType<TestRenamedMessage>(value).DisplayName);
+    }
+
+    [Fact]
+    public void WhenCreatingObjectWithNaNInput_ThenDoubleMemberIsSetToNaN()
+    {
+        // Arrange
+        var inputs = new Dictionary<string, string?> { ["Value"] = "NaN" };
+
+        // Act
+        var success = ParameterConverter.TryCreateObject(typeof(TestDoubleMessage), inputs, out var value, out var error);
+
+        // Assert
+        Assert.True(success, error);
+        Assert.True(double.IsNaN(Assert.IsType<TestDoubleMessage>(value).Value));
+    }
+
+    [Fact]
+    public void WhenSetterThrowsArgumentException_ThenParsingFailsWithExceptionMessage()
+    {
+        // Act
+        var success = ParameterConverter.TryParseJson("""{"text":""}""", typeof(TestThrowingMessage), isNullable: false, out var value, out var error);
+
+        // Assert
+        Assert.False(success);
+        Assert.Null(value);
+        Assert.Equal("Text must not be empty", error);
+    }
+
+    [Fact]
+    public void WhenJsonIsNullLiteral_ThenOnlyANullableParameterAcceptsIt()
+    {
+        // Act
+        var success = ParameterConverter.TryParseJson("null", typeof(TestEnvelope), isNullable: false, out var value, out var error);
+
+        // Assert
+        Assert.False(success);
+        Assert.Null(value);
+        Assert.Equal("This field is required", error);
+    }
+
+    [Fact]
+    public void WhenJsonIsNullLiteralAndParameterIsNullable_ThenParsingSucceedsWithNull()
+    {
+        // Act
+        var success = ParameterConverter.TryParseJson("null", typeof(TestEnvelope), isNullable: true, out var value, out _);
+
+        // Assert
+        Assert.True(success);
+        Assert.Null(value);
+    }
+
+    [Fact]
+    public void WhenTypeIsCollectionOrArray_ThenItIsJsonObjectButNotSupportedObject()
+    {
+        // Act & Assert
+        Assert.False(ParameterConverter.IsSupportedObject(typeof(List<int>)));
+        Assert.True(ParameterConverter.IsJsonObject(typeof(List<int>)));
+        Assert.False(ParameterConverter.IsSupportedObject(typeof(int[])));
+        Assert.True(ParameterConverter.IsJsonObject(typeof(int[])));
+    }
+
+    [Fact]
+    public void WhenTypeIsDelegate_ThenItIsNeitherSupportedObjectNorJsonObject()
+    {
+        // Act & Assert
+        Assert.False(ParameterConverter.IsSupportedObject(typeof(Action)));
+        Assert.False(ParameterConverter.IsJsonObject(typeof(Action)));
     }
 
     public sealed record TestMessage
@@ -479,11 +570,47 @@ public class ParameterConverterTests
 
     public class TestBaseWithMember
     {
-        public int V { get; set; }
+        public int Value { get; set; }
     }
 
     public sealed class TestDerivedWithHiddenMember : TestBaseWithMember
     {
-        public new string V { get; set; } = string.Empty;
+        public new string Value { get; set; } = string.Empty;
+    }
+
+    public class TestBaseWithIgnoredMember
+    {
+        public int Code { get; set; }
+    }
+
+    // The hiding member has a different type than the base member so that GetProperties returns both (see
+    // TestDerivedWithHiddenMember above); a same-type "new" hide collapses to a single PropertyInfo and would not
+    // exercise the filter-after-grouping behavior this type is meant to test.
+    public sealed class TestDerivedHidingWithIgnoredMember : TestBaseWithIgnoredMember
+    {
+        [JsonIgnore]
+        public new string Code { get; set; } = string.Empty;
+    }
+
+    public sealed class TestRenamedMessage
+    {
+        [JsonPropertyName("display_name")]
+        public string DisplayName { get; set; } = string.Empty;
+    }
+
+    public sealed class TestDoubleMessage
+    {
+        public double Value { get; set; }
+    }
+
+    public sealed class TestThrowingMessage
+    {
+        private string _text = string.Empty;
+
+        public string Text
+        {
+            get => _text;
+            set => _text = value.Length > 0 ? value : throw new ArgumentException("Text must not be empty");
+        }
     }
 }
