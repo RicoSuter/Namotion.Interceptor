@@ -18,25 +18,18 @@ public class DoorLockTileTests : IDisposable
     private const int Timeout = 30000;
     private const string PageName = "DoorLock.md";
 
-    // The TransitionDuration of the lock on the page.
-    private static readonly TimeSpan PageTransitionDuration = TimeSpan.FromMilliseconds(500);
-
     private readonly PlaywrightFixture _fixture;
+    private readonly TimeSpan _originalTransitionDuration;
 
     public DoorLockTileTests(PlaywrightFixture fixture)
     {
         _fixture = fixture;
+        _originalTransitionDuration = GetLock().TransitionDuration;
     }
 
     public void Dispose()
     {
-        // The duration is a configuration property, so it is only written back when a test changed it.
-        var doorLock = GetLock();
-        if (doorLock.TransitionDuration != PageTransitionDuration)
-        {
-            doorLock.TransitionDuration = PageTransitionDuration;
-        }
-
+        GetLock().TransitionDuration = _originalTransitionDuration;
         SetLockState(DoorLockState.Locked, DoorState.Closed);
     }
 
