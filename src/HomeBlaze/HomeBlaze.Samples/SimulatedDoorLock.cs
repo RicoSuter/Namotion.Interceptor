@@ -55,11 +55,11 @@ public partial class SimulatedDoorLock : IConfigurable, IDoorLock, IDoorLatchCon
 
     [Derived]
     [PropertyAttribute("Lock", KnownAttributes.IsEnabled)]
-    public bool Lock_IsEnabled => LockState is DoorLockState.Unlocked or DoorLockState.Unlatched;
+    public bool Lock_IsEnabled => LockState is DoorLockState.Unlocked or DoorLockState.Unlatched or DoorLockState.Jammed;
 
     [Derived]
     [PropertyAttribute("Unlock", KnownAttributes.IsEnabled)]
-    public bool Unlock_IsEnabled => LockState is DoorLockState.Locked;
+    public bool Unlock_IsEnabled => LockState is DoorLockState.Locked or DoorLockState.Jammed;
 
     [Derived]
     [PropertyAttribute("ToggleLock", KnownAttributes.IsEnabled)]

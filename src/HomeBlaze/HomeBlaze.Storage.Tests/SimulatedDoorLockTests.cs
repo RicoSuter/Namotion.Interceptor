@@ -8,6 +8,26 @@ public class SimulatedDoorLockTests
     // Long enough that a transition only ends when its caller cancels it.
     private static readonly TimeSpan PendingDuration = TimeSpan.FromHours(1);
 
+    [Theory]
+    [InlineData(DoorLockState.Locked, false, true)]
+    [InlineData(DoorLockState.Unlocked, true, false)]
+    [InlineData(DoorLockState.Unlatched, true, false)]
+    [InlineData(DoorLockState.Jammed, true, true)]
+    [InlineData(DoorLockState.Locking, false, false)]
+    [InlineData(null, false, false)]
+    public void WhenLockIsInAState_ThenLockAndUnlockAreEnabledForIt(DoorLockState? lockState, bool lockEnabled, bool unlockEnabled)
+    {
+        // Arrange
+        var doorLock = new SimulatedDoorLock();
+
+        // Act
+        doorLock.LockState = lockState;
+
+        // Assert
+        Assert.Equal(lockEnabled, doorLock.Lock_IsEnabled);
+        Assert.Equal(unlockEnabled, doorLock.Unlock_IsEnabled);
+    }
+
     [Fact]
     public async Task WhenTransitionEnds_ThenTheLockReachesItsTarget()
     {

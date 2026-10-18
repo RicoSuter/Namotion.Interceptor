@@ -38,7 +38,8 @@ internal static class DoorLockDisplay
             DoorLockState.Locking => (Icons.Material.Filled.HourglassTop, Color.Default, "Locking…", "Locking… · open", null, null, null),
             DoorLockState.Unlocking => (Icons.Material.Filled.HourglassTop, Color.Default, "Unlocking…", "Unlocking… · open", null, null, null),
             DoorLockState.Unlatching => (Icons.Material.Filled.HourglassTop, Color.Default, "Unlatching…", "Unlatching… · open", null, null, null),
-            DoorLockState.Jammed => (Icons.Material.Filled.LockReset, Color.Error, "Jammed", "Jammed · open", null, null, null),
+            DoorLockState.Jammed => (Icons.Material.Filled.LockReset, Color.Error, "Jammed", "Jammed · open",
+                "Jammed, locks on click", "Jammed · open, locks on click", "Lock"),
             _ => (Icons.Material.Filled.QuestionMark, Color.Default, "Unknown", "Unknown · open", (string?)null, (string?)null, (string?)null)
         };
 
