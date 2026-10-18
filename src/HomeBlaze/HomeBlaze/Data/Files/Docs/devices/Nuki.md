@@ -13,16 +13,16 @@ The Nuki integration reads and controls Nuki smart locks and Nuki Openers throug
 2. Create a **Nuki bridge** in HomeBlaze. The setup lists the bridges that the Nuki discovery service knows for your network; select one or enter the address of the bridge.
 3. Select **Pair** and press the button on the bridge within 30 seconds.
 
-The setup reads the token from the bridge and chooses the token mode. It tries `Encrypted` first. When the bridge refuses the encrypted token, the setup reads the bridge type with the plain token and picks `Plain` for a software bridge. When it cannot confirm the mode, the setup shows a warning with the reason: a hardware bridge that refuses the encrypted token keeps `Encrypted`, because its clock is then likely off, and its requests fail until the clock is right or you switch to `Plain` in the settings; a bridge of an unknown type gets `Plain`, which it accepted. See [Security](#security).
+The setup reads the token from the bridge and picks the token mode: `Encrypted` when the bridge accepts it, `Plain` for a software bridge. When it cannot confirm the mode, it shows a warning that says what to check. See [Security](#security).
 
 ## Configuration
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
-| `HostAddress` | string | null | IP address or host name of the bridge, optionally with the port (8080 by default), for example `192.168.1.50`, `nuki-bridge:8080` or `[fd00::5]:8080` for an IPv6 address with a port. A leading `http://` and a trailing slash are ignored; a path, a query, a user name or spaces are refused, and the port must be between 1 and 65535 |
+| `HostAddress` | string | null | IP address or host name of the bridge with an optional port (8080 by default), for example `192.168.1.50`, `nuki-bridge:8080` or `[fd00::5]:8080` (IPv6 with a port in brackets) |
 | `Token` | string (secret) | null | API token of the bridge |
 | `TokenMode` | `Encrypted` or `Plain` | `Encrypted` | How requests carry the token, see [Security](#security) |
-| `PollingInterval` | TimeSpan | 10 seconds | How often the device list is read. Keep it below 30 seconds, the time the bridge shows a ring of an Opener |
+| `PollingInterval` | TimeSpan | 10 seconds | How often the device list is read. Keep it below 30 seconds to see every ring, see [Opener](#opener) |
 | `RetryInterval` | TimeSpan | 30 seconds | Delay before reconnecting after the connection failed |
 
 Both intervals accept 1 second to 1 hour; values outside that range set in JSON are clamped, and zero or less uses the default.
@@ -80,7 +80,7 @@ A device is a child of its bridge, so its path is the path of the bridge, then `
 
 While an operation runs, `LockState` shows its transition (for example Locking). The bridge answers once the lock has finished, and the state is read from the bridge right after it. An operation that the lock reports as failed shows an error. An operation is never sent twice: when the bridge answers that it is busy, the operation fails and can be run again, while reads are retried once.
 
-`LockNGo` and `LockNGoWithUnlatch` are available while the lock is locked. While the lock is jammed, `Lock` and `Unlock` stay available, so that the move can be retried from HomeBlaze as in the Nuki app; `Unlock` still asks for confirmation. A click on the [DoorLock](../administration/widgets/door-lock.md) tile of a jammed lock locks it.
+`LockNGo` and `LockNGoWithUnlatch` are available while the lock is locked. `Lock` and `Unlock` stay available while it is jammed, so that the move can be retried as in the Nuki app.
 
 ## Opener
 
@@ -120,7 +120,7 @@ The bridge offers no HTTPS, so requests and responses travel unencrypted in the 
 - **Smart lock**: The `NukiSmartLock` widget shows the lock state, the door, the battery level and battery warnings.
 - **Opener**: The `NukiOpener` widget shows the Opener state, continuous mode and the last ring.
 
-Embed them with a `Widget` block as described in [Widget](../administration/widgets/widget.md). The [DoorLock](../administration/widgets/door-lock.md) tile shows a lock and its door and locks or unlocks it with one click. A `Widget` block takes the path of any device and the tile the path of a smart lock, see [Devices](#devices). For example, the tile for a lock of a bridge stored as `Devices/Nuki.json`:
+Embed them with a `Widget` block, see [Widget](../administration/widgets/widget.md), with the device path from [Devices](#devices). A smart lock also works with the [DoorLock](../administration/widgets/door-lock.md) tile, which locks or unlocks it with one click:
 
 ~~~~markdown
 :: HomeBlaze.Components.DoorLock Path=/Devices/Nuki/Locks[123456789]
@@ -146,8 +146,8 @@ Embed them with a `Widget` block as described in [Widget](../administration/widg
 |----------|---------|
 | `GET /info` | Bridge type, IDs, versions, uptime |
 | `GET /list` | Devices with their last known state, cached by the bridge |
-| `GET /lockAction` | Lock actions, waiting for the result. Never sent again when the bridge is busy |
+| `GET /lockAction` | Lock actions, waiting for the result |
 | `GET /auth` | Pairing with the button of the bridge |
 | `https://api.nuki.io/discover/bridges` | Discovery service used by the setup |
 
-Responses larger than 1 MB are refused. `/lockState` is not used, because it wakes the lock and drains its batteries. Callbacks are not used, because they need an HTTP endpoint that the bridge can reach.
+Responses larger than 1 MB are refused. States come from the polled `/list`; `/lockState` and callbacks are not used.
