@@ -1,0 +1,134 @@
+@attribute [SubjectComponent(SubjectComponentType.Edit, typeof(NukiBridge))]
+@implements ISubjectEditComponent
+
+<MudForm>
+    <MudTextField @bind-Value="_hostAddress" @bind-Value:after="OnFieldChanged"
+                  Label="Host address"
+                  Placeholder="192.168.1.50:8080"
+                  Required="true"
+                  RequiredError="The host address is required"
+                  Immediate="true" />
+
+    <MudTextField @bind-Value="_token" @bind-Value:after="OnFieldChanged"
+                  Label="Token"
+                  InputType="InputType.Password"
+                  Placeholder="@(_hasToken ? "Unchanged" : null)"
+                  HelperText="Leave empty to keep the current token"
+                  Immediate="true"
+                  Class="mt-4" />
+
+    <MudSelect T="NukiTokenMode" @bind-Value="_tokenMode" @bind-Value:after="OnFieldChanged" Label="Token mode" Class="mt-4">
+        <MudSelectItem Value="NukiTokenMode.Encrypted">Encrypted (hardware bridge)</MudSelectItem>
+        <MudSelectItem Value="NukiTokenMode.Plain">Plain (software bridge)</MudSelectItem>
+    </MudSelect>
+
+    <MudNumericField @bind-Value="_pollingIntervalSeconds" @bind-Value:after="OnFieldChanged"
+                     Label="Polling interval (seconds)" Min="1" Max="3600" Class="mt-4" />
+
+    <MudNumericField @bind-Value="_retryIntervalSeconds" @bind-Value:after="OnFieldChanged"
+                     Label="Retry interval (seconds)" Min="1" Max="3600" Class="mt-4" />
+
+    <MudDivider Class="my-4" />
+
+    <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
+        <MudText>Connection:</MudText>
+        <MudChip T="string"
+                 Size="Size.Small"
+                 Color="@(BridgeSubject?.IsConnected == true ? Color.Success : Color.Error)"
+                 Variant="Variant.Filled">
+            @(BridgeSubject?.IsConnected == true ? "Connected" : "Disconnected")
+        </MudChip>
+    </MudStack>
+    @if (BridgeSubject?.StatusMessage is { } statusMessage)
+    {
+        <MudText Typo="Typo.caption" Class="mt-1">@statusMessage</MudText>
+    }
+</MudForm>
+
+@code {
+    private string? _hostAddress;
+    private string? _token;
+    private bool _hasToken;
+    private NukiTokenMode _tokenMode;
+    private int _pollingIntervalSeconds;
+    private int _retryIntervalSeconds;
+
+    private string? _originalHostAddress;
+    private NukiTokenMode _originalTokenMode;
+    private int _originalPollingIntervalSeconds;
+    private int _originalRetryIntervalSeconds;
+
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    [Parameter]
+    public bool IsCreating { get; set; }
+
+    private NukiBridge? BridgeSubject => Subject as NukiBridge;
+
+    public bool IsValid => !string.IsNullOrWhiteSpace(_hostAddress) &&
+                           (_hasToken || !string.IsNullOrEmpty(_token)) &&
+                           _pollingIntervalSeconds is >= 1 and <= 3600 &&
+                           _retryIntervalSeconds is >= 1 and <= 3600;
+
+    public bool IsDirty => _hostAddress != _originalHostAddress ||
+                           !string.IsNullOrEmpty(_token) ||
+                           _tokenMode != _originalTokenMode ||
+                           _pollingIntervalSeconds != _originalPollingIntervalSeconds ||
+                           _retryIntervalSeconds != _originalRetryIntervalSeconds;
+
+    public event Action<bool>? IsValidChanged;
+
+    public event Action<bool>? IsDirtyChanged;
+
+    protected override void OnInitialized()
+    {
+        var bridge = BridgeSubject;
+        _hostAddress = bridge?.HostAddress;
+        _hasToken = !string.IsNullOrEmpty(bridge?.Token);
+        _tokenMode = bridge?.TokenMode ?? NukiTokenMode.Encrypted;
+        _pollingIntervalSeconds = ToSeconds(bridge?.PollingInterval, NukiBridge.DefaultPollingInterval);
+        _retryIntervalSeconds = ToSeconds(bridge?.RetryInterval, NukiBridge.DefaultRetryInterval);
+
+        _originalHostAddress = _hostAddress;
+        _originalTokenMode = _tokenMode;
+        _originalPollingIntervalSeconds = _pollingIntervalSeconds;
+        _originalRetryIntervalSeconds = _retryIntervalSeconds;
+    }
+
+    private static int ToSeconds(TimeSpan? interval, TimeSpan fallback) =>
+        (int)(interval is { } value && value > TimeSpan.Zero ? value : fallback).TotalSeconds;
+
+    private void OnFieldChanged()
+    {
+        IsValidChanged?.Invoke(IsValid);
+        IsDirtyChanged?.Invoke(IsDirty);
+    }
+
+    public Task SaveAsync(CancellationToken cancellationToken)
+    {
+        var bridge = BridgeSubject;
+        if (bridge is not null && IsValid)
+        {
+            bridge.HostAddress = _hostAddress?.Trim();
+            if (!string.IsNullOrEmpty(_token))
+            {
+                bridge.Token = _token;
+                _hasToken = true;
+                _token = null;
+            }
+
+            bridge.TokenMode = _tokenMode;
+            bridge.PollingInterval = TimeSpan.FromSeconds(_pollingIntervalSeconds);
+            bridge.RetryInterval = TimeSpan.FromSeconds(_retryIntervalSeconds);
+
+            _originalHostAddress = _hostAddress;
+            _originalTokenMode = _tokenMode;
+            _originalPollingIntervalSeconds = _pollingIntervalSeconds;
+            _originalRetryIntervalSeconds = _retryIntervalSeconds;
+            IsDirtyChanged?.Invoke(false);
+        }
+
+        return Task.CompletedTask;
+    }
+}

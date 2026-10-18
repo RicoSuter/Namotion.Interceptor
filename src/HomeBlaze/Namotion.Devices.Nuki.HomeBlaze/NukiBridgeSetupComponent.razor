@@ -1,0 +1,188 @@
+@attribute [SubjectComponent(SubjectComponentType.Setup, typeof(NukiBridge))]
+@implements ISubjectEditComponent
+@implements IDisposable
+@inject IHttpClientFactory HttpClientFactory
+
+<MudStack Spacing="3">
+    @if (_bridges is null)
+    {
+        <MudStack AlignItems="AlignItems.Center" Class="my-4">
+            <MudProgressCircular Color="Color.Primary" Indeterminate="true" />
+            <MudText>Searching for Nuki bridges...</MudText>
+        </MudStack>
+    }
+    else
+    {
+        @if (_bridges.Count > 0)
+        {
+            <MudText Typo="Typo.body1">Select a bridge, or enter its address below.</MudText>
+            <MudList T="NukiDiscoveredBridge" SelectedValue="_selectedBridge" SelectedValueChanged="OnBridgeSelected" SelectionMode="SelectionMode.SingleSelection">
+                @foreach (var bridge in _bridges)
+                {
+                    <MudListItem T="NukiDiscoveredBridge" Value="bridge">
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                            <MudIcon Icon="@Icons.Material.Filled.Hub" />
+                            <MudText>@bridge.BridgeId</MudText>
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary">(@bridge.HostAddress)</MudText>
+                        </MudStack>
+                    </MudListItem>
+                }
+            </MudList>
+        }
+        else
+        {
+            <MudAlert Severity="Severity.Info">@(_discoveryError ?? "The Nuki discovery service lists no bridge for this network.") Enter the address of the bridge below.</MudAlert>
+        }
+
+        <MudTextField @bind-Value="_hostAddress"
+                      @bind-Value:after="ResetPairing"
+                      Label="Host address"
+                      Placeholder="192.168.1.50:8080"
+                      HelperText="IP address of the bridge with its port, 8080 by default"
+                      Immediate="true" />
+
+        <MudButton Variant="Variant.Filled"
+                   Color="Color.Primary"
+                   OnClick="PairAsync"
+                   Disabled="@(string.IsNullOrWhiteSpace(_hostAddress) || _pairing || _token is not null)">
+            @if (_pairing)
+            {
+                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+            }
+            Pair
+        </MudButton>
+
+        @if (_pairing)
+        {
+            <MudAlert Severity="Severity.Warning">Press the button on the bridge within 30 seconds.</MudAlert>
+        }
+
+        @if (_errorMessage is not null)
+        {
+            <MudAlert Severity="Severity.Error">@_errorMessage</MudAlert>
+        }
+
+        @if (_token is not null)
+        {
+            <MudAlert Severity="Severity.Success">Paired with the bridge at @_hostAddress, using the @_tokenMode token mode.</MudAlert>
+        }
+    }
+</MudStack>
+
+@code {
+    private readonly CancellationTokenSource _lifetime = new();
+    private IReadOnlyList<NukiDiscoveredBridge>? _bridges;
+    private NukiDiscoveredBridge? _selectedBridge;
+    private string? _discoveryError;
+    private string? _hostAddress;
+    private string? _token;
+    private NukiTokenMode _tokenMode = NukiTokenMode.Encrypted;
+    private bool _pairing;
+    private string? _errorMessage;
+
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    [Parameter]
+    public bool IsCreating { get; set; }
+
+    private NukiBridge? BridgeSubject => Subject as NukiBridge;
+
+    public bool IsValid => _token is not null;
+
+    public bool IsDirty => _token is not null;
+
+    public event Action<bool>? IsValidChanged;
+
+    public event Action<bool>? IsDirtyChanged;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            using var httpClient = HttpClientFactory.CreateClient();
+            _bridges = await NukiBridgeDiscovery.DiscoverAsync(httpClient, _lifetime.Token);
+        }
+        catch (Exception exception) when (!_lifetime.IsCancellationRequested)
+        {
+            _discoveryError = $"The Nuki discovery service could not be reached ({exception.Message}).";
+            _bridges = [];
+        }
+    }
+
+    private void OnBridgeSelected(NukiDiscoveredBridge? bridge)
+    {
+        _selectedBridge = bridge;
+        if (bridge is not null)
+        {
+            _hostAddress = bridge.HostAddress;
+        }
+
+        ResetPairing();
+    }
+
+    private void ResetPairing()
+    {
+        _errorMessage = null;
+        if (_token is not null)
+        {
+            _token = null;
+            IsValidChanged?.Invoke(false);
+            IsDirtyChanged?.Invoke(false);
+        }
+    }
+
+    private async Task PairAsync()
+    {
+        var hostAddress = _hostAddress?.Trim();
+        if (string.IsNullOrEmpty(hostAddress))
+        {
+            return;
+        }
+
+        _pairing = true;
+        _errorMessage = null;
+        try
+        {
+            using var httpClient = HttpClientFactory.CreateClient();
+            var token = await NukiBridgeDiscovery.PairAsync(httpClient, hostAddress, _lifetime.Token);
+            if (token is null)
+            {
+                _errorMessage = "The bridge did not confirm the pairing. Press its button within 30 seconds after selecting Pair.";
+                return;
+            }
+
+            _tokenMode = await NukiBridgeDiscovery.DetectTokenModeAsync(httpClient, hostAddress, token, _lifetime.Token);
+            _hostAddress = hostAddress;
+            _token = token;
+            IsValidChanged?.Invoke(true);
+            IsDirtyChanged?.Invoke(true);
+        }
+        catch (Exception exception) when (!_lifetime.IsCancellationRequested)
+        {
+            _errorMessage = $"Pairing failed: {exception.Message}";
+        }
+        finally
+        {
+            _pairing = false;
+        }
+    }
+
+    public Task SaveAsync(CancellationToken cancellationToken)
+    {
+        if (BridgeSubject is not null && _token is not null)
+        {
+            BridgeSubject.HostAddress = _hostAddress;
+            BridgeSubject.Token = _token;
+            BridgeSubject.TokenMode = _tokenMode;
+        }
+
+        return Task.CompletedTask;
+    }
+
+    public void Dispose()
+    {
+        _lifetime.Cancel();
+        _lifetime.Dispose();
+    }
+}

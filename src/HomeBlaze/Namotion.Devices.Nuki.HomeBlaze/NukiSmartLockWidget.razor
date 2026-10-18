@@ -1,0 +1,57 @@
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(NukiSmartLock))]
+@implements ISubjectComponent
+
+@if (Subject is NukiSmartLock smartLock)
+{
+    var lockState = smartLock.LockState;
+    <MudPaper Class="pa-4">
+        <MudStack Spacing="2">
+            <MudStack Row="true" AlignItems="AlignItems.Center">
+                <MudIcon Icon="@(lockState == DoorLockState.Locked ? Icons.Material.Filled.Lock : Icons.Material.Filled.LockOpen)" Class="mr-2" />
+                <MudText Typo="Typo.h6">@smartLock.Title</MudText>
+                <MudSpacer />
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="@GetColor(lockState)">
+                    @(lockState?.ToString() ?? "Unknown")
+                </MudChip>
+            </MudStack>
+
+            <MudDivider />
+
+            <MudStack Row="true" Spacing="4">
+                <MudStack Spacing="0">
+                    <MudText Typo="Typo.caption">Door</MudText>
+                    <MudText Typo="Typo.h6">@(smartLock.DoorState?.ToString() ?? "–")</MudText>
+                </MudStack>
+                <MudStack Spacing="0">
+                    <MudText Typo="Typo.caption">Battery</MudText>
+                    <MudText Typo="Typo.h6" Color="@(smartLock.IsBatteryCritical == true ? Color.Error : Color.Default)">
+                        @(smartLock.BatteryLevel is { } level ? level.ToString("P0", System.Globalization.CultureInfo.CurrentCulture) : "–")
+                    </MudText>
+                </MudStack>
+            </MudStack>
+
+            @if (smartLock.IsBatteryCritical == true)
+            {
+                <MudAlert Severity="Severity.Warning" Dense="true">The batteries of the lock are at a critical level.</MudAlert>
+            }
+
+            @if (smartLock.IsKeypadBatteryCritical == true)
+            {
+                <MudAlert Severity="Severity.Warning" Dense="true">The batteries of the keypad are at a critical level.</MudAlert>
+            }
+        </MudStack>
+    </MudPaper>
+}
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private static Color GetColor(DoorLockState? lockState) => lockState switch
+    {
+        DoorLockState.Locked => Color.Success,
+        DoorLockState.Unlocked or DoorLockState.Unlatched => Color.Warning,
+        DoorLockState.Jammed => Color.Error,
+        _ => Color.Default
+    };
+}

@@ -1,0 +1,44 @@
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(NukiBridge))]
+@implements ISubjectComponent
+
+@if (Subject is NukiBridge bridge)
+{
+    <MudPaper Class="pa-4">
+        <MudStack Spacing="2">
+            <MudStack Row="true" AlignItems="AlignItems.Center">
+                <MudIcon Icon="@Icons.Material.Filled.Hub" Class="mr-2" />
+                <MudText Typo="Typo.h6">@bridge.Title</MudText>
+                <MudSpacer />
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Filled"
+                         Color="@(bridge.IsConnected ? Color.Success : Color.Error)">
+                    @(bridge.IsConnected ? "Connected" : "Disconnected")
+                </MudChip>
+            </MudStack>
+
+            <MudDivider />
+
+            <MudStack Row="true" Spacing="4">
+                <MudStack Spacing="0">
+                    <MudText Typo="Typo.caption">Locks</MudText>
+                    <MudText Typo="Typo.h5">@bridge.Locks.Count</MudText>
+                </MudStack>
+                <MudStack Spacing="0">
+                    <MudText Typo="Typo.caption">Openers</MudText>
+                    <MudText Typo="Typo.h5">@bridge.Openers.Count</MudText>
+                </MudStack>
+                @if (bridge.SoftwareVersion is { } softwareVersion)
+                {
+                    <MudStack Spacing="0">
+                        <MudText Typo="Typo.caption">Firmware</MudText>
+                        <MudText Typo="Typo.h5">@softwareVersion</MudText>
+                    </MudStack>
+                }
+            </MudStack>
+        </MudStack>
+    </MudPaper>
+}
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+}

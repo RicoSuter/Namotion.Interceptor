@@ -73,6 +73,7 @@
     <Project Path="HomeBlaze/Namotion.Devices.MyStrom.HomeBlaze/Namotion.Devices.MyStrom.HomeBlaze.csproj" />
     <Project Path="HomeBlaze/Namotion.Devices.Nuki/Namotion.Devices.Nuki.csproj" />
     <Project Path="HomeBlaze/Namotion.Devices.Nuki.Tests/Namotion.Devices.Nuki.Tests.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.Nuki.HomeBlaze/Namotion.Devices.Nuki.HomeBlaze.csproj" />
     <Project Path="HomeBlaze/Namotion.Devices.Sonos/Namotion.Devices.Sonos.csproj" />
     <Project Path="HomeBlaze/Namotion.Devices.Sonos.Tests/Namotion.Devices.Sonos.Tests.csproj" />
     <Project Path="HomeBlaze/Namotion.Devices.Sonos.HomeBlaze/Namotion.Devices.Sonos.HomeBlaze.csproj" />
