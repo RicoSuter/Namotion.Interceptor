@@ -296,27 +296,7 @@ internal sealed class StorageReconciler
     /// </summary>
     private void ApplyMetadata()
     {
-        var folderMetadata = new Dictionary<string, StorageMetadataDocument>(StringComparer.Ordinal);
-        var subjectMetadata = new Dictionary<(string Folder, string Name), StorageMetadataDocument>();
-        foreach (var entry in _index.Entries)
-        {
-            if (entry is not { IsMetadata: true, Metadata: { } metadata })
-            {
-                continue;
-            }
-
-            var name = StorageMetadataPath.GetDescribedName(entry.Path);
-            if (name.Length == 0)
-            {
-                folderMetadata[entry.Parent] = metadata;
-            }
-            else
-            {
-                subjectMetadata[(entry.Parent, name)] = metadata;
-            }
-        }
-
-        _storage.ApplyMetadata(folderMetadata.GetValueOrDefault(string.Empty));
+        _storage.ApplyMetadata(GetMetadataDocument(StorageMetadataPath.GetFolderFilePath(string.Empty)));
         foreach (var entry in _index.Entries)
         {
             if (!entry.IsPlaced)
@@ -326,14 +306,18 @@ internal sealed class StorageReconciler
 
             if (entry.Subject is VirtualFolder folder)
             {
-                folder.ApplyMetadata(folderMetadata.GetValueOrDefault(entry.Path));
+                folder.ApplyMetadata(GetMetadataDocument(StorageMetadataPath.GetFolderFilePath(entry.Path)));
             }
-            else if (entry.Subject is IConfigurable && StoragePath.IsJson(entry.Path))
+            else if (entry.HasSidecar)
             {
-                entry.Subject.SetSubjectMetadata(subjectMetadata.GetValueOrDefault((entry.Parent, entry.Key!))?.ToSubjectMetadata());
+                entry.Subject!.SetSubjectMetadata(GetMetadataDocument(StorageMetadataPath.GetSubjectFilePath(entry.Path))?.ToSubjectMetadata());
             }
         }
     }
+
+    // What the index holds for the metadata file at the path; null without one, and for one that could not be read.
+    private StorageMetadataDocument? GetMetadataDocument(string path)
+        => _index.TryGet(path, out var entry) ? entry.Metadata : null;
 
     /// <summary>
     /// Checks whether a new subject at the path could be placed: its key is free in its folder, or, when that

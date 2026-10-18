@@ -1,7 +1,10 @@
 using System.Text;
 using HomeBlaze.Components.Abstractions.Pages;
 using HomeBlaze.Services;
+using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
+using Namotion.Interceptor;
+using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.Storage.Tests;
 
@@ -322,6 +325,49 @@ public class StorageMetadataWriteTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenAPlainJsonFileIsDeleted_ThenItsMetadataFileIsDeleted()
+    {
+        // Arrange
+        WriteFile("Notes.json", "{ not json");
+        WriteFile("Notes.metadata.json", """{ "navTitle": "Notes" }""");
+        var storage = await ConnectAsync();
+
+        // Act
+        await storage.DeleteSubjectAsync(Assert.IsType<JsonFile>(storage.Children["Notes.json"]), CancellationToken.None);
+
+        // Assert
+        Assert.False(File.Exists(GetFullPath("Notes.json")));
+        Assert.False(File.Exists(GetFullPath("Notes.metadata.json")));
+    }
+
+    [Fact]
+    public async Task WhenTheDeleteIsCanceledAfterTheFileIsGone_ThenTheMetadataFileIsDeletedAnyway()
+    {
+        // Arrange
+        WriteFile("Motor.json", SerializeMotor("Motor 1"));
+        WriteFile("Motor.metadata.json", """{ "navTitle": "Pump" }""");
+        var storage = await ConnectAsync();
+        var motor = storage.Children["Motor"];
+        using var cancellation = new CancellationTokenSource();
+        Context!.AddService<ILifecycleHandler>(new CancelOnDetach(motor, cancellation));
+
+        // Act
+        try
+        {
+            await storage.DeleteSubjectAsync(motor, cancellation.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            // The caller gave up after the file of the subject was deleted.
+        }
+
+        // Assert
+        Assert.True(cancellation.IsCancellationRequested);
+        Assert.False(File.Exists(GetFullPath("Motor.json")));
+        Assert.False(File.Exists(GetFullPath("Motor.metadata.json")));
+    }
+
+    [Fact]
     public async Task WhenSubjectIsDeletedAndAFolderHasTheNameOfItsMetadataFile_ThenTheFolderIsKept()
     {
         // Arrange
@@ -346,5 +392,17 @@ public class StorageMetadataWriteTests : StorageTestBase
         // Act & Assert
         await Assert.ThrowsAsync<ArgumentException>(() =>
             storage.AddSubjectAsync("Motor.metadata.json", CreateMotor(), CancellationToken.None));
+    }
+
+    // Cancels the delete of the subject once it has left the tree, which is after its file was deleted.
+    private sealed class CancelOnDetach(IInterceptorSubject subject, CancellationTokenSource cancellation) : ILifecycleHandler
+    {
+        public void HandleLifecycleChange(SubjectLifecycleChange change)
+        {
+            if (change.IsContextDetach && ReferenceEquals(change.Subject, subject))
+            {
+                cancellation.Cancel();
+            }
+        }
     }
 }

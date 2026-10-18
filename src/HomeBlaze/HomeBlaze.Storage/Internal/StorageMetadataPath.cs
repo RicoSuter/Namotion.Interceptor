@@ -15,16 +15,6 @@ internal static class StorageMetadataPath
     public static bool IsMetadataFile(string path)
         => path.EndsWith(Suffix, StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>
-    /// The name of what a metadata file describes: empty for the folder that holds it, else the name of a subject in
-    /// that folder.
-    /// </summary>
-    public static string GetDescribedName(string path)
-    {
-        var name = StoragePath.GetName(path);
-        return name[..^Suffix.Length];
-    }
-
     public static string GetFolderFilePath(string folder)
         => folder.Length == 0 ? FolderFileName : $"{folder}/{FolderFileName}";
 

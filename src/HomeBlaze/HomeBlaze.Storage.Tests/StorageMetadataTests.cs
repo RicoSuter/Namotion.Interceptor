@@ -1,5 +1,6 @@
 using HomeBlaze.Components.Abstractions.Pages;
 using HomeBlaze.Services;
+using HomeBlaze.Storage.Files;
 using Namotion.Interceptor.Testing;
 
 namespace HomeBlaze.Storage.Tests;
@@ -220,5 +221,36 @@ public class StorageMetadataTests : StorageTestBase
 
         // Assert
         await AsyncTestHelpers.WaitUntilAsync(() => docs.Title == "Documentation", WatcherTimeout);
+    }
+
+    [Fact]
+    public async Task WhenAJsonFileDoesNotLoadAsASubject_ThenItsPlainFileHasTheMetadataBesideIt()
+    {
+        // Arrange
+        WriteFile("Notes.json", "{ not json");
+        WriteFile("Notes.metadata.json", """{ "navTitle": "Pump" }""");
+
+        // Act
+        var storage = await ConnectAsync();
+
+        // Assert
+        var file = Assert.IsType<JsonFile>(storage.Children["Notes.json"]);
+        Assert.Equal("Pump", file.TryGetSubjectMetadata()?.NavigationTitle);
+    }
+
+    [Fact]
+    public async Task WhenADirectoryHasTheNameOfTheMetadataFileOfItsFolder_ThenItStaysHidden()
+    {
+        // Arrange
+        WriteFile("Docs/a.md");
+        WriteFile("Docs/.metadata.json/Notes.md");
+
+        // Act
+        var storage = await ConnectAsync();
+
+        // Assert
+        var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
+        Assert.Equal(["a.md"], docs.Children.Keys);
+        Assert.Null(docs.Metadata);
     }
 }

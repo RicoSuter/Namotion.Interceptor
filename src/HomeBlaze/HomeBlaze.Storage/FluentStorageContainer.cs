@@ -662,10 +662,10 @@ public partial class FluentStorageContainer :
         return WriteMetadataDocumentAsync(connection, path, document, cancellationToken);
     }
 
+    // The one check for the subject of a JSON file of this storage, which has the metadata file beside it.
     private static bool TryGetJsonEntry(
         StorageConnection connection, IInterceptorSubject subject, [NotNullWhen(true)] out StorageEntry? entry)
-        => connection.Index.TryGetEntry(subject, out entry) && !entry.IsFolder &&
-            subject is IConfigurable && StoragePath.IsJson(entry.Path);
+        => connection.Index.TryGetEntry(subject, out entry) && entry.HasSidecar;
 
     /// <summary>
     /// Moves a child of a folder to the place of another child in the order in which they are shown, shifting the
@@ -1223,16 +1223,17 @@ public partial class FluentStorageContainer :
 
         _logger?.LogDebug("Deleted blob from storage: {Path}", entry.Path);
 
-        // The metadata of a subject goes with it. A failure here leaves the subject deleted, and only the file behind.
-        if (entry.Subject is IConfigurable && StoragePath.IsJson(entry.Path))
+        // The metadata of a subject goes with it, also when the caller has given up by now: the subject is deleted
+        // already, and its metadata file would be left behind. A failure here leaves the subject deleted.
+        if (entry.HasSidecar)
         {
             var metadataPath = StorageMetadataPath.GetSubjectFilePath(entry.Path);
             try
             {
-                await DeleteMetadataFileAsync(connection, metadataPath, cancellationToken);
+                await DeleteMetadataFileAsync(connection, metadataPath, CancellationToken.None);
                 connection.Reconciler.Apply();
             }
-            catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
+            catch (Exception exception)
             {
                 _logger?.LogWarning(exception, "Failed to delete the metadata file of a deleted subject: {Path}", metadataPath);
             }

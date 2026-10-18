@@ -21,20 +21,6 @@ public class StorageMetadataPathTests
     }
 
     [Theory]
-    [InlineData(".metadata.json", "")]
-    [InlineData("Docs/.metadata.json", "")]
-    [InlineData("Docs/Motor.metadata.json", "Motor")]
-    [InlineData("Docs/Readme.md.metadata.json", "Readme.md")]
-    public void WhenMetadataFileIsGiven_ThenTheDescribedNameIsItsNameWithoutSuffix(string path, string expected)
-    {
-        // Act
-        var name = StorageMetadataPath.GetDescribedName(path);
-
-        // Assert
-        Assert.Equal(expected, name);
-    }
-
-    [Theory]
     [InlineData("", ".metadata.json")]
     [InlineData("Docs", "Docs/.metadata.json")]
     [InlineData("Docs/Guides", "Docs/Guides/.metadata.json")]
