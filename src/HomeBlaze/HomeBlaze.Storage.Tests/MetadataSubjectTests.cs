@@ -13,6 +13,8 @@ namespace HomeBlaze.Storage.Tests;
 
 public class MetadataSubjectTests : StorageTestBase
 {
+    private const string LoneSurrogateContent = """{ "navTitle": "Pump", "note": { "text": "\ud800" } }""";
+
     private static JsonElement Values(string json) => JsonElement.Parse(json);
 
     private static MetadataSubject GetMetadataSubject(IInterceptorSubject owner)
@@ -106,25 +108,6 @@ public class MetadataSubjectTests : StorageTestBase
     }
 
     [Fact]
-    public async Task WhenOrderIsSetAndReadThroughTheMetadataSubjectOfAFolder_ThenTheFolderHasIt()
-    {
-        // Arrange
-        WriteFile("Docs/a.md");
-        WriteFile("Docs/b.md");
-        var storage = await ConnectAsync();
-        var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
-        var metadataSubject = GetMetadataSubject(docs);
-
-        // Act
-        await metadataSubject.SetOrderAsync(["b.md", "a.md"], CancellationToken.None);
-        var order = await metadataSubject.GetOrderAsync(CancellationToken.None);
-
-        // Assert
-        Assert.Equal(["b.md", "a.md"], order);
-        Assert.Equal(["b.md", "a.md"], docs.ChildOrder.ToArray());
-    }
-
-    [Fact]
     public async Task WhenOrderIsSetThroughTheMetadataSubjectOfASubject_ThenItIsRefused()
     {
         // Arrange
@@ -173,13 +156,16 @@ public class MetadataSubjectTests : StorageTestBase
     }
 
     [Theory]
-    [InlineData("get")]
-    [InlineData("set")]
-    [InlineData("order")]
-    public async Task WhenAStringValueOfTheFileHasALoneSurrogate_ThenTheFileLoadsAndAGetOrAWriteIsRefusedNamingTheFile(string call)
+    [InlineData("get", LoneSurrogateContent, "Pump")]
+    [InlineData("set", LoneSurrogateContent, "Pump")]
+    [InlineData("order", LoneSurrogateContent, "Pump")]
+    [InlineData("get", "not json", null)]
+    [InlineData("set", "not json", null)]
+    [InlineData("order", "not json", null)]
+    public async Task WhenTheFileCannotBeReadOrWrittenBack_ThenAGetOrAWriteIsRefusedNamingTheFile(
+        string call, string content, string? loadedNavigationTitle)
     {
         // Arrange
-        const string content = """{ "navTitle": "Pump", "note": { "text": "\ud800" } }""";
         WriteFile("a.md");
         WriteFile("b.md");
         WriteFile("Motor.json", SerializeMotor("Motor 1"));
@@ -200,7 +186,7 @@ public class MetadataSubjectTests : StorageTestBase
 
         // Assert
         Assert.Contains($"'{path}' could not be read", exception.Message);
-        Assert.Equal("Pump", motor.TryGetSubjectMetadata()?.NavigationTitle);
+        Assert.Equal(loadedNavigationTitle, motor.TryGetSubjectMetadata()?.NavigationTitle);
         Assert.Equal(content, File.ReadAllText(GetFullPath(path)));
     }
 

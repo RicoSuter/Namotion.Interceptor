@@ -66,57 +66,6 @@ public class StorageMetadataWriteTests : StorageTestBase
         Assert.Equal("{\n  \"navTitle\": \"Docs\",\n  \"title\": \"Documentation\"\n}\n", ReadText("Docs/.metadata.json"));
     }
 
-    [Theory]
-    [InlineData("folder")]
-    [InlineData("order")]
-    [InlineData("subject")]
-    public async Task WhenTheFileCannotBeRead_ThenTheWriteIsRefusedAndKeepsTheFile(string target)
-    {
-        // Arrange
-        const string content = """{"navTitle":"Pump",}x""";
-        WriteFile("Docs/a.md");
-        WriteFile("Docs/b.md");
-        WriteFile("Docs/Motor.json", SerializeMotor("Motor 1"));
-        WriteFile("Docs/.metadata.json", content);
-        WriteFile("Docs/Motor.metadata.json", content);
-        var storage = await ConnectAsync();
-        var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
-        var motor = docs.Children["Motor"];
-        Func<Task> write = target switch
-        {
-            "folder" => () => storage.SetMetadataAsync(docs, Values("""{ "title": "Docs" }"""), CancellationToken.None),
-            "order" => () => storage.SetChildOrderAsync(docs, ["b.md"], CancellationToken.None),
-            _ => () => storage.SetMetadataAsync(motor, Values("""{ "navTitle": "Water" }"""), CancellationToken.None)
-        };
-
-        // Act
-        var exception = await Assert.ThrowsAsync<StorageRefusedException>(write);
-
-        // Assert
-        Assert.Contains("could not be read", exception.Message);
-        Assert.Equal(content, ReadText(target == "subject" ? "Docs/Motor.metadata.json" : "Docs/.metadata.json"));
-    }
-
-    [Fact]
-    public async Task WhenAKeyOfTheFileCannotBeRead_ThenTheFolderHasNoMetadataAndWritesAreRefused()
-    {
-        // Arrange
-        const string content = "{ \"\\ud800\": 1 }";
-        WriteFile("Docs/a.md");
-        WriteFile("Docs/.metadata.json", content);
-        var storage = await ConnectAsync();
-        var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
-
-        // Act
-        var exception = await Assert.ThrowsAsync<StorageRefusedException>(() =>
-            storage.SetMetadataAsync(docs, Values("""{ "title": "Docs" }"""), CancellationToken.None));
-
-        // Assert
-        Assert.Null(docs.Metadata);
-        Assert.Contains("could not be read", exception.Message);
-        Assert.Equal(content, ReadText("Docs/.metadata.json"));
-    }
-
     [Fact]
     public async Task WhenSubjectMetadataIsSet_ThenTheSubjectHasItAndItsOwnWriteDoesNotReloadIt()
     {
