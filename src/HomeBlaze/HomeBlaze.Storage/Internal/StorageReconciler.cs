@@ -126,6 +126,17 @@ internal sealed class StorageReconciler
                         await LoadMetadataAsync(listed, entry, cancellationToken);
                     }
                 }
+                // Neither a subject nor metadata: on a file system that ignores case, it is the metadata file of a subject.
+                else if (StorageMetadataPath.IsReservedSubjectPath(listed.Path))
+                {
+                    if (isChanged)
+                    {
+                        _logger?.LogWarning(
+                            "Ignoring {Path}: rename it to end with .metadata.json in lower case to make it a metadata file",
+                            listed.Path);
+                        _index.Set(new StorageEntry { Path = listed.Path, IsFolder = false, Version = listed.Version });
+                    }
+                }
                 else if (entry?.Subject != null)
                 {
                     if (isChanged)
