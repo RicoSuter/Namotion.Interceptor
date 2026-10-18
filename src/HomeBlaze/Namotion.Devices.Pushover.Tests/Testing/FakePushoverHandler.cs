@@ -11,17 +11,47 @@ internal sealed class FakePushoverHandler : HttpMessageHandler
 {
     public const string Success = """{"status":1,"request":"test"}""";
 
+    private const string ReceiptsPath = "/1/receipts/";
+    private const string CancelSuffix = "/cancel.json";
+
     /// <summary>
-    /// A responder for the common emergency flow: sending a message always returns receipt "receipt1", polling its
-    /// receipt returns <paramref name="receiptBody"/>, and every other request succeeds.
+    /// A responder for the emergency flow: each sent message gets the next receipt ("receipt1", "receipt2", ...), each
+    /// receipt poll the body <paramref name="receiptBody"/> gives for that receipt (success when null), canceling
+    /// <paramref name="failingCancelReceipt"/> fails with "receipt not found", and every other request succeeds.
+    /// </summary>
+    public static Func<RecordedRequest, (HttpStatusCode StatusCode, string Body)> RespondWithNumberedReceipts(
+        Func<string, string>? receiptBody = null, string? failingCancelReceipt = null)
+    {
+        var receiptNumber = 0;
+        return request =>
+        {
+            var path = request.Path;
+            if (path.StartsWith(ReceiptsPath, StringComparison.Ordinal) && path.EndsWith(CancelSuffix, StringComparison.Ordinal))
+            {
+                return path[ReceiptsPath.Length..^CancelSuffix.Length] == failingCancelReceipt
+                    ? (HttpStatusCode.BadRequest, """{"status":0,"errors":["receipt not found"]}""")
+                    : (HttpStatusCode.OK, Success);
+            }
+
+            if (path == "/1/messages.json")
+            {
+                return (HttpStatusCode.OK, $$"""{"status":1,"receipt":"receipt{{Interlocked.Increment(ref receiptNumber)}}"}""");
+            }
+
+            if (receiptBody is not null && path.StartsWith(ReceiptsPath, StringComparison.Ordinal) && path.EndsWith(".json", StringComparison.Ordinal))
+            {
+                return (HttpStatusCode.OK, receiptBody(path[ReceiptsPath.Length..^".json".Length]));
+            }
+
+            return (HttpStatusCode.OK, Success);
+        };
+    }
+
+    /// <summary>
+    /// <see cref="RespondWithNumberedReceipts"/> with every receipt poll answered by <paramref name="receiptBody"/>.
     /// </summary>
     public static Func<RecordedRequest, (HttpStatusCode StatusCode, string Body)> RespondWithReceipt(string receiptBody) =>
-        request => request.Path switch
-        {
-            "/1/messages.json" => (HttpStatusCode.OK, """{"status":1,"receipt":"receipt1"}"""),
-            "/1/receipts/receipt1.json" => (HttpStatusCode.OK, receiptBody),
-            _ => (HttpStatusCode.OK, Success)
-        };
+        RespondWithNumberedReceipts(_ => receiptBody);
 
     private readonly Lock _lock = new();
     private readonly List<RecordedRequest> _requests = [];

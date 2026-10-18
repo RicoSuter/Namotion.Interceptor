@@ -115,19 +115,9 @@ public class MethodMetadata
         return result;
     }
 
-    private static object? GetTaskResult(Task task)
-    {
-        // An async method returns a subclass of Task<T> (its state machine box), not Task<T> itself.
-        for (var taskType = task.GetType(); taskType is not null; taskType = taskType.BaseType)
-        {
-            if (taskType.IsGenericType && taskType.GetGenericTypeDefinition() == typeof(Task<>))
-            {
-                return taskType.GetProperty("Result")?.GetValue(task);
-            }
-        }
-
-        return null;
-    }
+    // An async method returns a subclass of Task<T> (its state machine box); GetProperty finds the inherited Result.
+    private static object? GetTaskResult(Task task) =>
+        task.GetType().GetProperty("Result")?.GetValue(task);
 
     private object?[] ResolveParameters(
         object?[]? userParameters,

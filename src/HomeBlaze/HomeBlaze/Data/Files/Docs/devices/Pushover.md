@@ -76,7 +76,8 @@ Sending an `Emergency` notification adds a Pushover emergency subject to the tar
 | Property | Description |
 |----------|-------------|
 | `Receipt` | The receipt of the notification |
-| `Title` | The title of the notification, or null when it had none; the subject is shown as "Emergency" then |
+| `NotificationTitle` | The title of the notification as sent, or null when it had none |
+| `Title` | The display title: the notification title, or "Emergency" when it had none |
 | `Message` | The message of the notification |
 | `SentAt` | When Pushover accepted the notification |
 | `Status` | `Active`, `Acknowledged`, `Expired` or `Canceled` |
@@ -90,7 +91,7 @@ Sending an `Emergency` notification adds a Pushover emergency subject to the tar
 | `Expired` | It stopped repeating after `EmergencyExpire` without acknowledgement |
 | `Canceled` | It was canceled with `Cancel` or `CancelAllEmergencies`, or because its target was removed |
 
-While an emergency notification is active, the service reads its receipt every 10 seconds; otherwise it makes no requests. An emergency that is no longer active is removed from `Emergencies` 24 hours after it ended. `Emergencies` is kept in memory only: after a restart the list is empty, and an emergency that was still active keeps repeating on the phone until it is acknowledged or expires, without HomeBlaze tracking or canceling it.
+While an emergency notification is active, the service reads its receipt every 10 seconds; otherwise it makes no requests. Each active emergency is read on its own, so with many active emergencies each receipt still costs one request every 10 seconds, and sending emergency notifications very often adds up to many requests. An emergency that is no longer active is removed from `Emergencies` 24 hours after it ended. `Emergencies` is kept in memory only: after a restart the list is empty, and an emergency that was still active keeps repeating on the phone until it is acknowledged or expires, without HomeBlaze tracking or canceling it.
 
 The service tracks the emergencies by the key of their target. When a configuration reload replaces a target but keeps its key, the new target shows the same emergencies and can still cancel them, including one whose send was still running during the reload. When a target is removed, its active emergencies are canceled, including one whose send completes after the removal.
 

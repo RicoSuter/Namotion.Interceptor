@@ -26,7 +26,6 @@
 
         @foreach (var target in targets?.Values ?? Enumerable.Empty<PushoverTarget>())
         {
-            // Emergencies is replaced as a whole, never changed in place, so the read instance can be enumerated.
             var emergencies = target.Emergencies.Values;
             var latestAcknowledged = emergencies
                 .Where(emergency => emergency.Status == PushoverEmergencyStatus.Acknowledged)
@@ -41,7 +40,7 @@
             {
                 <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="ml-6">
                     <MudIcon Icon="@Icons.Material.Filled.NotificationImportant" Size="Size.Small" Color="Color.Error" />
-                    <MudText Typo="Typo.body2">@GetTitle(emergency)</MudText>
+                    <MudText Typo="Typo.body2">@emergency.Title</MudText>
                     <MudSpacer />
                     <MudText Typo="Typo.caption">@emergency.SentAt.ToLocalTime().ToString("g")</MudText>
                 </MudStack>
@@ -51,7 +50,7 @@
             {
                 <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="ml-6">
                     <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Size="Size.Small" Color="Color.Success" />
-                    <MudText Typo="Typo.body2">@GetTitle(latestAcknowledged)</MudText>
+                    <MudText Typo="Typo.body2">@latestAcknowledged.Title</MudText>
                     <MudSpacer />
                     <MudText Typo="Typo.caption">Acknowledged @latestAcknowledged.AcknowledgedAt?.ToLocalTime().ToString("g")</MudText>
                 </MudStack>
@@ -70,8 +69,6 @@
     public IInterceptorSubject? Subject { get; set; }
 
     private PushoverService? Service => Subject as PushoverService;
-
-    private static string? GetTitle(PushoverEmergency emergency) => ((ITitleProvider)emergency).Title;
 
     private static Color GetStatusColor(ServiceStatus? status) => status switch
     {

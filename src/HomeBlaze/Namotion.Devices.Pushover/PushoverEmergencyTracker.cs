@@ -1,4 +1,3 @@
-using HomeBlaze.Abstractions;
 using Microsoft.Extensions.Logging;
 using Namotion.Devices.Pushover.Client;
 
@@ -280,7 +279,7 @@ internal sealed class PushoverEmergencyTracker
         PushoverBatch.RunAllAsync(
             emergencies,
             emergency => CancelAsync(emergency, cancellationToken),
-            emergency => $"{GetTargetTitle(emergency.TargetKey)} ({((ITitleProvider)emergency).Title})",
+            emergency => $"{GetTargetTitle(emergency.TargetKey)} ({emergency.Title})",
             "Canceling",
             "emergencies",
             cancellationToken);

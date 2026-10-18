@@ -23,10 +23,10 @@ public partial class PushoverEmergency : ITitleProvider, IIconProvider
     public partial string Receipt { get; private set; }
 
     /// <summary>
-    /// The title of the notification, or null when it had none.
+    /// The title of the notification as sent, or null when it had none.
     /// </summary>
     [State]
-    public partial string? Title { get; private set; }
+    public partial string? NotificationTitle { get; private set; }
 
     [State]
     public partial string Message { get; private set; }
@@ -46,7 +46,8 @@ public partial class PushoverEmergency : ITitleProvider, IIconProvider
     [State]
     public partial string? AcknowledgedByDevice { get; internal set; }
 
-    string? ITitleProvider.Title => Title ?? "Emergency";
+    [Derived]
+    public string Title => NotificationTitle ?? "Emergency";
 
     public string IconName => "NotificationImportant";
 
@@ -83,7 +84,7 @@ public partial class PushoverEmergency : ITitleProvider, IIconProvider
         _tracker = tracker;
         TargetKey = targetKey;
         Receipt = receipt;
-        Title = title;
+        NotificationTitle = title;
         Message = message;
         SentAt = sentAt;
         ExpiresAt = expiresAt;

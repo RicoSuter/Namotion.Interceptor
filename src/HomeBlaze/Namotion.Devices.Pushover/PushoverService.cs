@@ -62,8 +62,8 @@ public partial class PushoverService : BackgroundService, IConfigurable, IMonito
         _ => null
     };
 
-    // Not intercepted, so tests can run faster than production timing: polling faster than the five seconds the
-    // receipts API allows, below its real five-second minimum, and without waiting out the retry delay after a failure.
+    // Not intercepted, so tests can run faster than production timing: polling receipts below the five-second
+    // minimum the receipts API allows, and without waiting out the retry delay after a failure.
     internal TimeSpan ReceiptPollingInterval { get; set; } = TimeSpan.FromSeconds(10);
     internal TimeSpan MinimumReceiptPollingInterval { get; set; } = TimeSpan.FromSeconds(5);
     internal TimeSpan RetryInterval { get; set; } = TimeSpan.FromSeconds(30);

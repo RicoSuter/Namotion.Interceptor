@@ -1,4 +1,3 @@
-using System.Net;
 using HomeBlaze.Abstractions.Messaging;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Lifecycle;
@@ -38,7 +37,7 @@ public class PushoverOperationTests
     }
 
     [Fact]
-    public void WhenServiceIsRegistered_ThenItOffersSendToAllButIsNoPublisher()
+    public void WhenServiceIsRegistered_ThenItOffersSendToAllAndCancelAllEmergenciesButIsNoPublisher()
     {
         // Arrange
         var (service, _) = CreateRegisteredService("rico");
@@ -48,20 +47,8 @@ public class PushoverOperationTests
 
         // Assert
         Assert.NotNull(registered.TryGetProperty("SendToAllTargets")?.TryGetMethodMetadata());
-        Assert.Null(registered.TryGetProperty("SendNotification"));
-    }
-
-    [Fact]
-    public void WhenServiceIsRegistered_ThenItOffersCancelAllEmergencies()
-    {
-        // Arrange
-        var (service, _) = CreateRegisteredService("rico");
-
-        // Act
-        var registered = service.TryGetRegisteredSubject()!;
-
-        // Assert
         Assert.NotNull(registered.TryGetProperty("CancelAllEmergencies")?.TryGetMethodMetadata());
+        Assert.Null(registered.TryGetProperty("SendNotification"));
     }
 
     [Fact]
@@ -69,9 +56,7 @@ public class PushoverOperationTests
     {
         // Arrange
         var (service, handler) = CreateRegisteredService("rico");
-        handler.Respond = request => request.Path == "/1/messages.json"
-            ? (HttpStatusCode.OK, """{"status":1,"receipt":"receipt1"}""")
-            : (HttpStatusCode.OK, FakePushoverHandler.Success);
+        handler.Respond = FakePushoverHandler.RespondWithNumberedReceipts();
         var target = service.Targets["rico"];
         var cancelAllEmergencies = target.TryGetRegisteredSubject()!.TryGetProperty("CancelAllEmergencies")!;
         Assert.False(cancelAllEmergencies.IsMethodEnabled());
@@ -94,9 +79,7 @@ public class PushoverOperationTests
     {
         // Arrange
         var (service, handler) = CreateRegisteredService("rico");
-        handler.Respond = request => request.Path == "/1/messages.json"
-            ? (HttpStatusCode.OK, """{"status":1,"receipt":"receipt1"}""")
-            : (HttpStatusCode.OK, FakePushoverHandler.Success);
+        handler.Respond = FakePushoverHandler.RespondWithNumberedReceipts();
         var target = service.Targets["rico"];
         await target.SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
         var emergency = target.Emergencies["receipt1"];

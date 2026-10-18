@@ -94,7 +94,7 @@ public class PushoverServiceTests
         var (receipt, emergency) = Assert.Single(target.Emergencies);
         Assert.Equal("receipt1", receipt);
         Assert.Equal("receipt1", emergency.Receipt);
-        Assert.Equal("Smoke", emergency.Title);
+        Assert.Equal("Smoke", emergency.NotificationTitle);
         Assert.Equal("Smoke in the kitchen", emergency.Message);
         Assert.Equal(target.LastSentAt, emergency.SentAt);
         Assert.Equal(PushoverEmergencyStatus.Active, emergency.Status);
@@ -112,8 +112,8 @@ public class PushoverServiceTests
         var emergency = service.EmergencyTracker.Add("rico", "receipt1", title: null, "Fire", now, now + TimeSpan.FromHours(1));
 
         // Assert
-        Assert.Null(emergency.Title);
-        Assert.Equal("Emergency", ((ITitleProvider)emergency).Title);
+        Assert.Null(emergency.NotificationTitle);
+        Assert.Equal("Emergency", emergency.Title);
         Assert.Equal("Error", emergency.IconColor);
     }
 
@@ -206,7 +206,7 @@ public class PushoverServiceTests
     {
         // Arrange
         var (service, handler) = PushoverTestFactory.CreateService("rico");
-        handler.Respond = RespondWithNumberedReceipts();
+        handler.Respond = FakePushoverHandler.RespondWithNumberedReceipts();
         var oldTarget = service.Targets["rico"];
         await oldTarget.SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
         await oldTarget.SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
@@ -294,7 +294,7 @@ public class PushoverServiceTests
     {
         // Arrange
         var (service, handler) = PushoverTestFactory.CreateService("rico");
-        handler.Respond = RespondWithNumberedReceipts();
+        handler.Respond = FakePushoverHandler.RespondWithNumberedReceipts();
         var target = service.Targets["rico"];
         await target.SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
         await target.SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
@@ -319,10 +319,7 @@ public class PushoverServiceTests
         var target = new PushoverTarget { Name = "Rico", UserKey = "user-rico" };
         service.Targets = new Dictionary<string, PushoverTarget> { ["rico"] = target };
 
-        var respondWithReceipts = RespondWithNumberedReceipts();
-        handler.Respond = request => request.Path == "/1/receipts/receipt1/cancel.json"
-            ? (HttpStatusCode.BadRequest, """{"status":0,"errors":["receipt not found"]}""")
-            : respondWithReceipts(request);
+        handler.Respond = FakePushoverHandler.RespondWithNumberedReceipts(failingCancelReceipt: "receipt1");
         await target.SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
         await target.SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
         var second = target.Emergencies["receipt2"];
@@ -381,14 +378,6 @@ public class PushoverServiceTests
         // Assert
         Assert.Equal(TimeSpan.FromSeconds(30), target.EmergencyRetry);
         Assert.Equal(TimeSpan.FromHours(3), target.EmergencyExpire);
-    }
-
-    private static Func<RecordedRequest, (HttpStatusCode StatusCode, string Body)> RespondWithNumberedReceipts()
-    {
-        var receiptNumber = 0;
-        return request => request.Path == MessagesPath
-            ? (HttpStatusCode.OK, $$"""{"status":1,"receipt":"receipt{{Interlocked.Increment(ref receiptNumber)}}"}""")
-            : (HttpStatusCode.OK, FakePushoverHandler.Success);
     }
 
     [Theory]

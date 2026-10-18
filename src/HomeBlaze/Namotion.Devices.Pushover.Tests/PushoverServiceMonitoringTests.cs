@@ -213,7 +213,7 @@ public class PushoverServiceMonitoringTests
         // Arrange
         var (service, handler) = PushoverTestFactory.CreateService("rico");
         var isSecondAcknowledged = false;
-        handler.Respond = RespondWithNumberedReceipts(receipt => receipt switch
+        handler.Respond = FakePushoverHandler.RespondWithNumberedReceipts(receipt => receipt switch
         {
             "receipt1" => Acknowledged,
             _ => Volatile.Read(ref isSecondAcknowledged) ? Acknowledged : NotAcknowledged
@@ -389,7 +389,7 @@ public class PushoverServiceMonitoringTests
     {
         // Arrange
         var (service, handler) = PushoverTestFactory.CreateService("rico");
-        handler.Respond = RespondWithNumberedReceipts(_ => NotAcknowledged);
+        handler.Respond = FakePushoverHandler.RespondWithNumberedReceipts(_ => NotAcknowledged);
         var target = service.Targets["rico"];
         await target.SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
         await target.SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
@@ -410,7 +410,7 @@ public class PushoverServiceMonitoringTests
     {
         // Arrange
         var (service, handler) = PushoverTestFactory.CreateService("rico");
-        handler.Respond = RespondWithNumberedReceipts(_ => NotAcknowledged);
+        handler.Respond = FakePushoverHandler.RespondWithNumberedReceipts(_ => NotAcknowledged);
         var target = service.Targets["rico"];
         await target.SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
         await target.SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
@@ -429,10 +429,7 @@ public class PushoverServiceMonitoringTests
     {
         // Arrange
         var (service, handler) = PushoverTestFactory.CreateService("rico");
-        var respondWithReceipts = RespondWithNumberedReceipts(_ => NotAcknowledged);
-        handler.Respond = request => request.Path == "/1/receipts/receipt1/cancel.json"
-            ? (HttpStatusCode.BadRequest, """{"status":0,"errors":["receipt not found"]}""")
-            : respondWithReceipts(request);
+        handler.Respond = FakePushoverHandler.RespondWithNumberedReceipts(_ => NotAcknowledged, failingCancelReceipt: "receipt1");
         var target = service.Targets["rico"];
         await target.SendNotificationAsync(new Notification { Message = "Smoke", Title = "Smoke", Priority = NotificationPriority.Emergency }, CancellationToken.None);
         await target.SendNotificationAsync(new Notification { Message = "Water", Title = "Water", Priority = NotificationPriority.Emergency }, CancellationToken.None);
@@ -454,7 +451,7 @@ public class PushoverServiceMonitoringTests
     {
         // Arrange
         var (service, handler) = PushoverTestFactory.CreateService("rico", "anna");
-        handler.Respond = RespondWithNumberedReceipts(_ => NotAcknowledged);
+        handler.Respond = FakePushoverHandler.RespondWithNumberedReceipts(_ => NotAcknowledged);
         await service.Targets["rico"].SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
         await service.Targets["anna"].SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
 
@@ -474,7 +471,7 @@ public class PushoverServiceMonitoringTests
         // Arrange
         var (service, handler) = PushoverTestFactory.CreateService("rico");
         service.FinishedEmergencyRetention = TimeSpan.FromMilliseconds(300);
-        handler.Respond = RespondWithNumberedReceipts(receipt => receipt == "receipt1" ? Acknowledged : NotAcknowledged);
+        handler.Respond = FakePushoverHandler.RespondWithNumberedReceipts(receipt => receipt == "receipt1" ? Acknowledged : NotAcknowledged);
         var target = service.Targets["rico"];
 
         await using var running = await PushoverTestFactory.StartAsync(service);
@@ -498,31 +495,6 @@ public class PushoverServiceMonitoringTests
         {
             return events.Count;
         }
-    }
-
-    /// <summary>
-    /// Answers each sent message with the next receipt ("receipt1", "receipt2", ...), each receipt poll with the body
-    /// <paramref name="receiptBody"/> gives for that receipt, and every other request with success.
-    /// </summary>
-    private static Func<RecordedRequest, (HttpStatusCode StatusCode, string Body)> RespondWithNumberedReceipts(Func<string, string> receiptBody)
-    {
-        var receiptNumber = 0;
-        return request =>
-        {
-            if (request.Path == MessagesPath)
-            {
-                return (HttpStatusCode.OK, $$"""{"status":1,"receipt":"receipt{{Interlocked.Increment(ref receiptNumber)}}"}""");
-            }
-
-            if (request.Path.StartsWith("/1/receipts/", StringComparison.Ordinal) && request.Path.EndsWith(".json", StringComparison.Ordinal) &&
-                !request.Path.EndsWith("/cancel.json", StringComparison.Ordinal))
-            {
-                var receipt = request.Path["/1/receipts/".Length..^".json".Length];
-                return (HttpStatusCode.OK, receiptBody(receipt));
-            }
-
-            return (HttpStatusCode.OK, FakePushoverHandler.Success);
-        };
     }
 
     private static IObserver<PushoverEmergencyAcknowledgedEvent> CreateListObserver(List<PushoverEmergencyAcknowledgedEvent> events) =>
