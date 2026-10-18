@@ -1,0 +1,191 @@
+@attribute [SubjectComponent(SubjectComponentType.Edit, typeof(PushoverService))]
+@implements ISubjectEditComponent
+
+<MudForm>
+    <MudTextField @bind-Value="_name"
+                  Label="Name"
+                  Immediate="true"
+                  OnKeyUp="OnFieldChanged" />
+
+    <MudTextField @bind-Value="_applicationToken"
+                  Label="Application Token"
+                  InputType="InputType.Password"
+                  HelperText="@(_hasApplicationToken ? "Leave empty to keep the current token" : null)"
+                  Immediate="true"
+                  OnKeyUp="OnFieldChanged"
+                  Class="mt-4" />
+
+    @foreach (var target in _targets)
+    {
+        <MudPaper Outlined="true" Class="pa-3 mt-4">
+            <MudTextField @bind-Value="target.Name"
+                          Label="Target Name"
+                          Required="true"
+                          RequiredError="Name is required"
+                          Immediate="true"
+                          OnKeyUp="OnFieldChanged" />
+
+            <MudTextField @bind-Value="target.UserKey"
+                          Label="User or Group Key"
+                          InputType="InputType.Password"
+                          HelperText="@(target.HasStoredUserKey ? "Leave empty to keep the current key" : null)"
+                          Required="@(!target.HasStoredUserKey)"
+                          RequiredError="Key is required"
+                          Immediate="true"
+                          OnKeyUp="OnFieldChanged"
+                          Class="mt-2" />
+
+            <MudStack Row="true" Spacing="2" Class="mt-2">
+                <MudNumericField T="int"
+                                 Value="target.EmergencyRetrySeconds"
+                                 ValueChanged="@(value => { target.EmergencyRetrySeconds = value; OnFieldChanged(); })"
+                                 Label="Emergency Retry (seconds)"
+                                 Min="30"
+                                 Max="10800" />
+                <MudNumericField T="int"
+                                 Value="target.EmergencyExpireMinutes"
+                                 ValueChanged="@(value => { target.EmergencyExpireMinutes = value; OnFieldChanged(); })"
+                                 Label="Emergency Expire (minutes)"
+                                 Min="1"
+                                 Max="180" />
+            </MudStack>
+
+            <MudButton OnClick="@(() => RemoveTarget(target))"
+                       Variant="Variant.Filled"
+                       Size="Size.Small"
+                       Color="Color.Error"
+                       Class="mt-2">Remove</MudButton>
+        </MudPaper>
+    }
+
+    <MudButton OnClick="AddTarget" Variant="Variant.Filled" Color="Color.Primary" Class="mt-4">Add Target</MudButton>
+</MudForm>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    [Parameter]
+    public bool IsCreating { get; set; }
+
+    private PushoverService? Service => Subject as PushoverService;
+
+    private string _name = string.Empty;
+    private string? _applicationToken;
+    private bool _hasApplicationToken;
+    private readonly List<TargetInput> _targets = [];
+    private bool _isDirty;
+
+    public bool IsValid =>
+        (_hasApplicationToken || !string.IsNullOrWhiteSpace(_applicationToken)) &&
+        _targets.Count > 0 &&
+        _targets.All(target => target.IsValid);
+
+    public bool IsDirty => _isDirty;
+
+    public event Action<bool>? IsValidChanged;
+    public event Action<bool>? IsDirtyChanged;
+
+    protected override void OnInitialized()
+    {
+        if (Service == null)
+        {
+            return;
+        }
+
+        _name = Service.Name;
+        _hasApplicationToken = !string.IsNullOrEmpty(Service.ApplicationToken);
+        foreach (var (key, target) in Service.Targets)
+        {
+            _targets.Add(new TargetInput
+            {
+                Key = key,
+                Name = target.Name,
+                HasStoredUserKey = !string.IsNullOrEmpty(target.UserKey),
+                EmergencyRetrySeconds = (int)target.EmergencyRetry.TotalSeconds,
+                EmergencyExpireMinutes = (int)target.EmergencyExpire.TotalMinutes
+            });
+        }
+    }
+
+    private void OnFieldChanged()
+    {
+        _isDirty = true;
+        IsValidChanged?.Invoke(IsValid);
+        IsDirtyChanged?.Invoke(IsDirty);
+    }
+
+    private void AddTarget()
+    {
+        _targets.Add(new TargetInput());
+        OnFieldChanged();
+    }
+
+    private void RemoveTarget(TargetInput target)
+    {
+        _targets.Remove(target);
+        OnFieldChanged();
+    }
+
+    public Task SaveAsync(CancellationToken cancellationToken)
+    {
+        if (Service == null || !IsValid)
+        {
+            return Task.CompletedTask;
+        }
+
+        Service.Name = _name;
+        if (!string.IsNullOrWhiteSpace(_applicationToken))
+        {
+            Service.ApplicationToken = _applicationToken;
+        }
+
+        // Existing targets are kept as instances, so their state and subscriptions survive; the dictionary is
+        // replaced as a whole.
+        var targets = new Dictionary<string, PushoverTarget>();
+        foreach (var input in _targets)
+        {
+            var key = input.Key ?? PushoverService.CreateTargetKey(input.Name, targets.Keys.Concat(Service.Targets.Keys).ToArray());
+            var target = input.Key != null && Service.Targets.TryGetValue(input.Key, out var existing) ? existing : new PushoverTarget();
+
+            target.Name = input.Name;
+            if (!string.IsNullOrWhiteSpace(input.UserKey))
+            {
+                target.UserKey = input.UserKey;
+            }
+
+            target.EmergencyRetry = TimeSpan.FromSeconds(input.EmergencyRetrySeconds);
+            target.EmergencyExpire = TimeSpan.FromMinutes(input.EmergencyExpireMinutes);
+
+            input.Key = key;
+            input.UserKey = null;
+            input.HasStoredUserKey = !string.IsNullOrEmpty(target.UserKey);
+            targets[key] = target;
+        }
+
+        Service.Targets = targets;
+
+        _hasApplicationToken = !string.IsNullOrEmpty(Service.ApplicationToken);
+        _applicationToken = null;
+        _isDirty = false;
+        IsDirtyChanged?.Invoke(false);
+        return Task.CompletedTask;
+    }
+
+    private sealed class TargetInput
+    {
+        public string? Key { get; set; }
+
+        public string Name { get; set; } = string.Empty;
+
+        public string? UserKey { get; set; }
+
+        public bool HasStoredUserKey { get; set; }
+
+        public int EmergencyRetrySeconds { get; set; } = 60;
+
+        public int EmergencyExpireMinutes { get; set; } = 60;
+
+        public bool IsValid => !string.IsNullOrWhiteSpace(Name) && (HasStoredUserKey || !string.IsNullOrWhiteSpace(UserKey));
+    }
+}

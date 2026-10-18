@@ -1,0 +1,61 @@
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(PushoverService))]
+@implements ISubjectComponent
+
+<MudPaper Class="pa-4">
+    <MudStack Spacing="2">
+        <MudStack Row="true" AlignItems="AlignItems.Center">
+            <MudIcon Icon="@Icons.Material.Filled.NotificationsActive" Class="mr-2" />
+            <MudText Typo="Typo.h6">@(Service?.Title ?? "Pushover")</MudText>
+            <MudSpacer />
+            <MudChip T="string"
+                     Size="Size.Small"
+                     Color="@GetStatusColor(Service?.Status)"
+                     Variant="Variant.Filled">
+                @(Service?.Status.ToString() ?? "Unknown")
+            </MudChip>
+        </MudStack>
+
+        @if (!string.IsNullOrEmpty(Service?.StatusMessage))
+        {
+            <MudText Typo="Typo.caption">@Service.StatusMessage</MudText>
+        }
+
+        <MudDivider />
+
+        @foreach (var target in Service?.Targets.Values ?? Enumerable.Empty<PushoverTarget>())
+        {
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                <MudIcon Icon="@Icons.Material.Filled.Person" Size="Size.Small" Color="@GetStatusColor(target.Status)" />
+                <MudText>@target.Title</MudText>
+                <MudSpacer />
+                @if (target.IsEmergencyActive)
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Filled">Emergency open</MudChip>
+                }
+                else if (target.IsEmergencyAcknowledged)
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined">Acknowledged</MudChip>
+                }
+            </MudStack>
+        }
+
+        @if (Service?.Targets.Count == 0)
+        {
+            <MudText Typo="Typo.caption">No targets configured</MudText>
+        }
+    </MudStack>
+</MudPaper>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private PushoverService? Service => Subject as PushoverService;
+
+    private static Color GetStatusColor(ServiceStatus? status) => status switch
+    {
+        ServiceStatus.Running => Color.Success,
+        ServiceStatus.Error => Color.Error,
+        _ => Color.Default
+    };
+}
