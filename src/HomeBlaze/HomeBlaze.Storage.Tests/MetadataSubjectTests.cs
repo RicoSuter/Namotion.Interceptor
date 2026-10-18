@@ -2,6 +2,7 @@ using System.Text.Json;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Components.Abstractions.Pages;
 using HomeBlaze.History;
+using HomeBlaze.OpcUa;
 using HomeBlaze.Services;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
@@ -325,5 +326,23 @@ public class MetadataSubjectTests : StorageTestBase
         {
             nested.Dispose();
         }
+    }
+
+    [Fact]
+    public async Task WhenTheOpcUaServerWalksAStoredSubject_ThenItSkipsTheMetadataSubjectAndKeepsTheState()
+    {
+        // Arrange
+        WriteFile("Motor.json", SerializeMotor("Motor 1"));
+        var storage = await ConnectAsync();
+        var registered = storage.Children["Motor"].TryGetRegisteredSubject()!;
+        var provider = new StateAttributeOpcUaPathProvider();
+
+        // Act
+        var isMetadataIncluded = provider.IsPropertyIncluded(registered.TryGetProperty(IMetadataSubject.PropertyName)!);
+        var isStateIncluded = provider.IsPropertyIncluded(registered.TryGetProperty(nameof(Samples.Motor.CurrentSpeed))!);
+
+        // Assert
+        Assert.False(isMetadataIncluded);
+        Assert.True(isStateIncluded);
     }
 }
