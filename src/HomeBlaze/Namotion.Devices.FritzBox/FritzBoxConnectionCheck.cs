@@ -107,9 +107,15 @@ public static class FritzBoxConnectionCheck
         return true;
     }
 
-    /// <returns>Whether the value is not empty and has no whitespace, scheme or path.</returns>
+    /// <returns>Whether the value is not empty and has no whitespace, control character, scheme, path, query or user.</returns>
+    /// <remarks>
+    /// <see cref="Uri.CheckHostName"/> accepts anything after the <c>%</c> of an IPv6 scope id, so a value like
+    /// <c>fe80::1%@evil.example</c> would otherwise send the credentials to another host.
+    /// </remarks>
     private static bool IsBareHost(string value) =>
-        value.Length > 0 && !value.Any(char.IsWhiteSpace) && !value.Contains('/');
+        value.Length > 0 &&
+        !value.Any(character => char.IsWhiteSpace(character) || char.IsControl(character)) &&
+        value.AsSpan().IndexOfAny(@"/?#@\") < 0;
 
     /// <returns>
     /// The host to check (the part inside brackets, otherwise the whole value), whether a port follows it (after a
