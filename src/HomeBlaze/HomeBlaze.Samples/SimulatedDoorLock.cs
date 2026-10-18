@@ -19,6 +19,8 @@ namespace HomeBlaze.Samples;
 [InterceptorSubject]
 public partial class SimulatedDoorLock : IConfigurable, IDoorLock, IDoorLatchController, IDoorSensor, ITitleProvider, IIconProvider
 {
+    private int _transitionGeneration;
+
     public SimulatedDoorLock()
     {
         Name = string.Empty;
@@ -81,6 +83,7 @@ public partial class SimulatedDoorLock : IConfigurable, IDoorLock, IDoorLatchCon
 
     private async Task TransitionAsync(DoorLockState transition, DoorLockState target, CancellationToken cancellationToken)
     {
+        var generation = Interlocked.Increment(ref _transitionGeneration);
         LockState = transition;
         try
         {
@@ -91,8 +94,12 @@ public partial class SimulatedDoorLock : IConfigurable, IDoorLock, IDoorLatchCon
         }
         finally
         {
-            // The simulated motor finishes its move also when the caller stops waiting.
-            LockState = target;
+            // The simulated motor finishes its move also when the caller stops waiting, unless a newer operation or a
+            // direct write of the state replaced the move meanwhile.
+            if (Volatile.Read(ref _transitionGeneration) == generation && LockState == transition)
+            {
+                LockState = target;
+            }
         }
     }
 }
