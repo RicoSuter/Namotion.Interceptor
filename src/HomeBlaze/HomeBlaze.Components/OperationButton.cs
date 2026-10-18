@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 
 namespace HomeBlaze.Components;
@@ -58,6 +59,24 @@ public partial class OperationButton : IConfigurable, ITitleProvider
     /// </summary>
     [Configuration]
     public partial MudBlazor.Variant Variant { get; set; }
+
+    /// <summary>
+    /// Whether the operation is a button or a tile. A tile is filled with <see cref="Color"/> by <see cref="Variant"/>.
+    /// </summary>
+    [Configuration]
+    public partial OperationButtonKind Kind { get; set; }
+
+    /// <summary>
+    /// A second, smaller line below the label of a tile.
+    /// </summary>
+    [Configuration]
+    public partial string? Subtitle { get; set; }
+
+    /// <summary>
+    /// Content drawn over the top right corner of a tile, such as an indicator. A click on it reaches the tile.
+    /// </summary>
+    [Slot]
+    public partial IInterceptorSubject? Badge { get; set; }
 
     public string? Title => null;
 

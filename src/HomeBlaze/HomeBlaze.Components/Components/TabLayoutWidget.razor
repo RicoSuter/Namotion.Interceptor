@@ -12,12 +12,9 @@
 }
 
 <div class="tab-layout" data-testid="tab-layout">
-    @* Every panel stays rendered, so that the content of a tab is read in the render of the tracking
-       scope and not only in the render that a click on the tab causes, which the scope does not record. *@
     <MudTabs @ref="_tabs"
              Elevation="1"
              Rounded="true"
-             KeepPanelsAlive="true"
              TabHeaderClass="edit-mode-interactive"
              @attributes="GetChangedPosition(position)"
              ActivePanelIndex="@GetActivePanelIndex(tabs)"

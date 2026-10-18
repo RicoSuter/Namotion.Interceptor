@@ -7,7 +7,7 @@ using HomeBlaze.Services;
 
 namespace HomeBlaze.AI.Mcp;
 
-public class HomeBlazeMcpSubjectEnricher : IMcpSubjectEnricher
+internal class HomeBlazeMcpSubjectEnricher : IMcpSubjectEnricher
 {
     private readonly Lazy<(HashSet<Type> Concrete, HashSet<Type> Interfaces)> _typeCache;
     private readonly bool _isReadOnly;

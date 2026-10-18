@@ -16,6 +16,7 @@ namespace HomeBlaze.Components;
 [Description("Shows its content only on windows of some widths")]
 [DisplayName("Responsive")]
 [SubjectIcon("Devices")]
+[PageLayout]
 [InterceptorSubject]
 public partial class Responsive : IConfigurable, ITitleProvider
 {

@@ -31,8 +31,9 @@ public partial class RenderExpression : ITitleProvider
 
     public string? Title => null;
 
-    // No production code reads this. Its change notification is what renders the page again when the target of an
-    // absolute path appears after the page rendered, a case that the reads of a render miss because the resolver caches such paths.
+    // No production code reads this: a render reads the value through GetText, which also reads the version of the paths,
+    // so it renders again when the target of an absolute path appears. Its change notification tells other observers when
+    // the value of a resolved target changes, but not when a target appears.
     [Derived]
     public object? Value => ResolveProperty()?.GetValue();
 
@@ -54,7 +55,7 @@ public partial class RenderExpression : ITitleProvider
     {
         try
         {
-            return _pathResolver.ResolveScopedProperty(Path, PathStyle.Canonical, Parent);
+            return _pathResolver.ResolveScopedDisplayableProperty(Path, PathStyle.Canonical, Parent);
         }
         catch
         {
@@ -68,7 +69,7 @@ public partial class RenderExpression : ITitleProvider
     /// <param name="timeZone">The time zone of the viewer for dates, or null for the time zone of the server.</param>
     public string GetText(ITimeZoneDisplay? timeZone) =>
         // The property is read here and not through Value, which would resolve the path a second time.
-        // The tracking scope of a render records this read like it records one of Value.
+        // The render that reads it records this read like it records one of Value.
         GetText(ResolveProperty(), Format, timeZone);
 
     /// <summary>

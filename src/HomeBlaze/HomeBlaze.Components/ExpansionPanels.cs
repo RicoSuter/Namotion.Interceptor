@@ -12,6 +12,7 @@ namespace HomeBlaze.Components;
 [Description("Shows page content in panels that open and close")]
 [DisplayName("Expansion panels")]
 [SubjectIcon("ExpandMore")]
+[PageLayout]
 [InterceptorSubject]
 public partial class ExpansionPanels : IConfigurable, ITitleProvider
 {

@@ -58,7 +58,8 @@ public static class ValueReader
     /// resolved, with the same text, color and missing value as <see cref="Read"/> gives for a path.
     /// </summary>
     /// <param name="subject">The subject that has the property, for example a row of a table.</param>
-    /// <param name="propertyName">The name of the property. Null, empty or unknown gives a missing reading.</param>
+    /// <param name="propertyName">The name of the property. Null, empty, unknown or a property that is not
+    /// <see cref="HomeBlaze.Services.SubjectRegistryExtensions.IsDisplayable"/>, as for a path, gives a missing reading.</param>
     /// <param name="valueMap">The resolved map, or null for none.</param>
     /// <param name="timeZone">The time zone of the viewer for dates, or null for that of the server.</param>
     public static ValueReading ReadProperty(
@@ -68,7 +69,7 @@ public static class ValueReader
         ITimeZoneDisplay? timeZone)
     {
         var property = string.IsNullOrEmpty(propertyName) ? null : subject.TryGetRegisteredProperty(propertyName);
-        return ReadCore(property, valueMap, mapError: null, timeZone);
+        return ReadCore(property is not null && property.IsDisplayable() ? property : null, valueMap, mapError: null, timeZone);
     }
 
     private static ValueReading ReadCore(
@@ -84,18 +85,20 @@ public static class ValueReader
         }
 
         var matched = valueMap?.FindCase(RawValueFormatter.Format(value));
-        var text = string.IsNullOrEmpty(matched?.Text)
-            ? property.GetPropertyDisplayValue(value, timeZone)
-            : matched.Text;
-
         return new ValueReading(
             property,
             value,
-            text,
+            GetText(property, value, matched, timeZone),
             matched?.Color ?? Color.Default,
             string.IsNullOrEmpty(matched?.Icon) ? null : matched.Icon,
             mapError);
     }
+
+    /// <summary>
+    /// Gets the text of a value that is not missing: that of the matched case, otherwise the formatted value.
+    /// </summary>
+    internal static string GetText(RegisteredSubjectProperty property, object value, ValueMapCase? matched, ITimeZoneDisplay? timeZone) =>
+        string.IsNullOrEmpty(matched?.Text) ? property.GetPropertyDisplayValue(value, timeZone) : matched.Text;
 
     /// <summary>
     /// Reads the value at the path alone, for a widget that shows no text of it.
@@ -181,7 +184,7 @@ public static class ValueReader
 
         try
         {
-            return resolver.ResolveScopedProperty(path, PathStyle.Canonical, widget);
+            return resolver.ResolveScopedDisplayableProperty(path, PathStyle.Canonical, widget);
         }
         catch
         {

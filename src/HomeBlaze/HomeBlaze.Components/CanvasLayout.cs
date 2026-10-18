@@ -12,6 +12,7 @@ namespace HomeBlaze.Components;
 [Description("Free-form canvas layout with draggable widgets")]
 [DisplayName("Canvas layout")]
 [SubjectIcon("Dashboard")]
+[PageLayout]
 [InterceptorSubject]
 public partial class CanvasLayout : IConfigurable, ITitleProvider
 {
@@ -32,6 +33,26 @@ public partial class CanvasLayout : IConfigurable, ITitleProvider
     /// </summary>
     [Configuration]
     public partial int GridSize { get; set; }
+
+    /// <summary>
+    /// How the canvas is sized on the page. With <see cref="CanvasScale.FitWidth"/> a viewed canvas fills the width of
+    /// its place, smaller or larger than designed, and keeps its proportions.
+    /// </summary>
+    [Configuration]
+    public partial CanvasScale Scale { get; set; }
+
+    /// <summary>
+    /// The width in pixels the canvas was designed for. Defaults to the right edge of its rightmost node.
+    /// </summary>
+    [Configuration]
+    public partial int? Width { get; set; }
+
+    /// <summary>
+    /// The least width in pixels at which a canvas with <see cref="CanvasScale.FitWidth"/> is drawn. In a narrower place it
+    /// keeps this width and scrolls horizontally. Without it the canvas always fits the width.
+    /// </summary>
+    [Configuration]
+    public partial int? MinWidth { get; set; }
 
     /// <summary>
     /// The nodes on the canvas. On a page one <c>Node</c> block each, in a configuration file a list.

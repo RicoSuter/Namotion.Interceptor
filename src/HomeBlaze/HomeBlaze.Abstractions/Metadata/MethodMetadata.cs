@@ -76,7 +76,8 @@ public class MethodMetadata
     public string? Category { get; init; }
 
     /// <summary>
-    /// Whether the UI should show a confirmation dialog before invoking this method.
+    /// Whether the UI should show a confirmation dialog before invoking this method; see
+    /// <see cref="Attributes.OperationAttribute.RequiresConfirmation"/>.
     /// </summary>
     public bool RequiresConfirmation { get; init; }
 

@@ -546,6 +546,96 @@ public class MethodPropertyInitializerTests
         Assert.Single(registered.Properties, property => property.Name == "Stop");
     }
 
+    [Theory]
+    [InlineData("Unlock", true)]
+    [InlineData("ToggleLock", true)]
+    [InlineData("Lock", false)]
+    public void WhenASubjectImplementsTheDoorLockController_ThenOperationsThatCanUnlockRequireConfirmation(string methodName, bool expected)
+    {
+        // Arrange
+        var subject = new DoorLockTestSubject(CreateContext());
+
+        // Act
+        var metadata = (MethodMetadata)subject.TryGetRegisteredSubject()!.TryGetProperty(methodName)!.GetValue()!;
+
+        // Assert
+        Assert.Equal(expected, metadata.RequiresConfirmation);
+    }
+
+    [Fact]
+    public void WhenAConcreteOperationImplementsAnInterfaceOperationThatRequiresConfirmation_ThenItStillRequiresConfirmation()
+    {
+        // Arrange
+        var subject = new OwnUnlockDoorLockTestSubject(CreateContext());
+
+        // Act
+        var unlock = GetMethod(subject, "Unlock");
+        var lockMethod = GetMethod(subject, "Lock");
+
+        // Assert
+        Assert.Equal("Open", unlock.Title);
+        Assert.True(unlock.RequiresConfirmation);
+        Assert.Equal("Close", lockMethod.Title);
+        Assert.False(lockMethod.RequiresConfirmation);
+    }
+
+    [Fact]
+    public void WhenAQueryImplementsAnInterfaceOperationThatRequiresConfirmation_ThenItIsAnOperationThatRequiresConfirmation()
+    {
+        // Arrange
+        var subject = new QueryUnlockDoorLockTestSubject(CreateContext());
+
+        // Act
+        var unlock = GetMethod(subject, "Unlock");
+
+        // Assert
+        Assert.Equal(MethodKind.Operation, unlock.Kind);
+        Assert.True(unlock.RequiresConfirmation);
+        Assert.Equal("Peek", unlock.Title);
+    }
+
+    [Fact]
+    public void WhenAnOperationOverridesABaseOperationThatRequiresConfirmation_ThenItStillRequiresConfirmation()
+    {
+        // Arrange
+        var subject = new OwnOperationOverrideSubject(CreateContext());
+
+        // Act
+        var reset = GetMethod(subject, "Reset");
+
+        // Assert
+        Assert.Equal("Reset now", reset.Title);
+        Assert.True(reset.RequiresConfirmation);
+    }
+
+    [Fact]
+    public void WhenAnIntermediateOverrideRequiresConfirmation_ThenAFurtherOverrideStillRequiresConfirmation()
+    {
+        // Arrange
+        var subject = new FurtherOperationOverrideSubject(CreateContext());
+
+        // Act
+        var restart = GetMethod(subject, "Restart");
+
+        // Assert
+        Assert.Equal("Restart now", restart.Title);
+        Assert.True(restart.RequiresConfirmation);
+    }
+
+    [Fact]
+    public void WhenAnIntermediateOverrideOfAGenericMethodRequiresConfirmation_ThenAFurtherOverrideStillRequiresConfirmation()
+    {
+        // Arrange
+        var subject = new FurtherGenericOperationOverrideSubject(CreateContext());
+
+        // Act
+        var apply = GetMethod(subject, "Apply");
+
+        // Assert
+        Assert.Equal("Apply now", apply.Title);
+        Assert.True(apply.RequiresConfirmation);
+    }
+
     [Fact]
     public void WhenASubjectHasNoMethods_ThenNoMethodPropertiesAreRegistered()
     {
@@ -1031,4 +1121,83 @@ public partial class MethodWithRequiredServiceSubject
 public partial class NoMethodsSubject
 {
     public partial string? Name { get; set; }
+}
+
+[InterceptorSubject]
+public partial class DoorLockTestSubject : HomeBlaze.Abstractions.Devices.Locks.IDoorLockController
+{
+    public Task LockAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    public Task UnlockAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+}
+
+[InterceptorSubject]
+public partial class OwnUnlockDoorLockTestSubject : HomeBlaze.Abstractions.Devices.Locks.IDoorLockController
+{
+    [Operation(Title = "Close")]
+    public Task LockAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    [Operation(Title = "Open")]
+    public Task UnlockAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+}
+
+[InterceptorSubject]
+public partial class QueryUnlockDoorLockTestSubject : HomeBlaze.Abstractions.Devices.Locks.IDoorLockController
+{
+    public Task LockAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    [Query(Title = "Peek")]
+    public Task UnlockAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+}
+
+[InterceptorSubject]
+public abstract partial class ConfirmedOperationBaseSubject
+{
+    [Operation(RequiresConfirmation = true)]
+    public virtual Task ResetAsync() => Task.CompletedTask;
+}
+
+[InterceptorSubject]
+public partial class OwnOperationOverrideSubject : ConfirmedOperationBaseSubject
+{
+    [Operation(Title = "Reset now")]
+    public override Task ResetAsync() => Task.CompletedTask;
+}
+
+public abstract class UnconfirmedOperationBaseSubject
+{
+    [Operation]
+    public virtual Task RestartAsync() => Task.CompletedTask;
+}
+
+public abstract class ConfirmedOperationOverrideSubject : UnconfirmedOperationBaseSubject
+{
+    [Operation(RequiresConfirmation = true)]
+    public override Task RestartAsync() => Task.CompletedTask;
+}
+
+[InterceptorSubject]
+public partial class FurtherOperationOverrideSubject : ConfirmedOperationOverrideSubject
+{
+    [Operation(Title = "Restart now")]
+    public override Task RestartAsync() => Task.CompletedTask;
+}
+
+public abstract class UnconfirmedGenericOperationBaseSubject
+{
+    [Operation]
+    public virtual Task ApplyAsync<TValue>(TValue value) => Task.CompletedTask;
+}
+
+public abstract class ConfirmedGenericOperationOverrideSubject : UnconfirmedGenericOperationBaseSubject
+{
+    [Operation(RequiresConfirmation = true)]
+    public override Task ApplyAsync<TValue>(TValue value) => Task.CompletedTask;
+}
+
+[InterceptorSubject]
+public partial class FurtherGenericOperationOverrideSubject : ConfirmedGenericOperationOverrideSubject
+{
+    [Operation(Title = "Apply now")]
+    public override Task ApplyAsync<TValue>(TValue value) => Task.CompletedTask;
 }

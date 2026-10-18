@@ -8,10 +8,10 @@ namespace HomeBlaze.Components;
 /// </summary>
 internal static class GaugeDisplay
 {
-    // Built once, so that a render does not format the style of the ring again.
-    private static readonly string SmallRingStyle = CreateRingStyle(GaugeSize.Small);
-    private static readonly string MediumRingStyle = CreateRingStyle(GaugeSize.Medium);
-    private static readonly string LargeRingStyle = CreateRingStyle(GaugeSize.Large);
+    // Built once, so that a render does not format the style of the gauge again.
+    private static readonly string SmallSizeStyle = CreateSizeStyle(GaugeSize.Small);
+    private static readonly string MediumSizeStyle = CreateSizeStyle(GaugeSize.Medium);
+    private static readonly string LargeSizeStyle = CreateSizeStyle(GaugeSize.Large);
 
     /// <summary>
     /// Gets the color of the ring: that of the matched case of the map, otherwise the primary color.
@@ -30,23 +30,14 @@ internal static class GaugeDisplay
     };
 
     /// <summary>
-    /// Gets the inline style that gives the ring its width and height.
+    /// Gets the inline style that gives the gauge the diameter of its ring, from which GaugeWidget.razor.css sizes the ring
+    /// and its text.
     /// </summary>
-    public static string GetRingStyle(GaugeSize size) => size switch
+    public static string GetSizeStyle(GaugeSize size) => size switch
     {
-        GaugeSize.Small => SmallRingStyle,
-        GaugeSize.Large => LargeRingStyle,
-        _ => MediumRingStyle,
-    };
-
-    /// <summary>
-    /// Gets the typography of the value in the center of the ring.
-    /// </summary>
-    public static Typo GetValueTypo(GaugeSize size) => size switch
-    {
-        GaugeSize.Small => Typo.body2,
-        GaugeSize.Large => Typo.h4,
-        _ => Typo.h6,
+        GaugeSize.Small => SmallSizeStyle,
+        GaugeSize.Large => LargeSizeStyle,
+        _ => MediumSizeStyle,
     };
 
     /// <summary>
@@ -55,9 +46,9 @@ internal static class GaugeDisplay
     public static string? FormatNumber(double? number) =>
         number?.ToString(CultureInfo.InvariantCulture);
 
-    private static string CreateRingStyle(GaugeSize size)
+    private static string CreateSizeStyle(GaugeSize size)
     {
         var pixels = GetPixelSize(size).ToString(CultureInfo.InvariantCulture);
-        return $"width: {pixels}px; height: {pixels}px;";
+        return $"--gauge-size: {pixels}px;";
     }
 }

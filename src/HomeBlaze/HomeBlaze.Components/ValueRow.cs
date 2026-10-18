@@ -9,6 +9,7 @@ namespace HomeBlaze.Components;
 /// One row of a <see cref="ValueList"/>: an icon, a label, optional content and a value.
 /// </summary>
 [ExcludeFromCreation]
+[PageLayout]
 [InterceptorSubject]
 public partial class ValueRow : IConfigurable
 {

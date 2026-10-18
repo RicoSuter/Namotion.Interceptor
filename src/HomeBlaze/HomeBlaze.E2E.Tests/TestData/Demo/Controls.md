@@ -25,7 +25,7 @@ The outline of this card is switched by a control.
 :: HomeBlaze.Components.Switch#ctlblockedswitch Path=ctlmotor/IsPowered Label="Blocked power" On=ctlmotor/PowerOff Off=ctlmotor/PowerOn
 ::
 
-:: HomeBlaze.Components.Switch#ctlconfirmswitch Path=ctlmotor/IsPowered Label="Power with stop" On=ctlmotor/PowerOn Off=ctlmotor/EmergencyStop
+:: HomeBlaze.Components.Switch#ctlconfirmswitch Path=ctlmotor/IsPowered Label="Power with restart" On=ctlmotor/PowerOn Off=ctlmotor/RestartController
 ::
 
 :: HomeBlaze.Components.Slider#ctlspeedslider Path=ctlmotor/TargetSpeed Label="Target speed"
@@ -38,6 +38,9 @@ The outline of this card is switched by a control.
 ::
 
 :: HomeBlaze.Components.OperationButton#ctlstopbutton Path=ctlmotor/EmergencyStop
+::
+
+:: HomeBlaze.Components.OperationButton#ctlrestartbutton Path=ctlmotor/RestartController
 ::
 
 :: HomeBlaze.Components.OperationButton#ctlpoweronbutton Path=ctlmotor/PowerOn

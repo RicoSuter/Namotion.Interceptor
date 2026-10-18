@@ -35,6 +35,7 @@ Setup, deployment, and runtime configuration for operators and administrators.
 - [Page Errors](administration/page-errors.md): Every error message of a markdown page with its cause and its fix
 - [Paths](administration/paths.md): Path syntax for referencing subjects
 - [Monitoring](administration/monitoring.md): Health endpoints, OpenTelemetry and Seq
+- [AI Agents](administration/ai-agents.md): Built-in agents on a Claude subscription or the Anthropic API: triggers, chat, memory and permissions
 - [Version and Updates](administration/updates.md): Running version, build and update check
 
 ### Development
@@ -45,6 +46,7 @@ Guides for building custom subjects, plugins, and UI components.
 - [Configurable Subjects](development/configurable-subject.md): Subject serialization and persistence
 - [Notifications](development/notifications.md): Notification channel interface
 - [Aspire](development/aspire.md): Development environment with Seq
+- [Testing the AI Agents](development/testing-ai-agents.md): Fakes and the opt-in integration tests of the AI agents
 
 ### Devices
 
@@ -77,4 +79,3 @@ System architecture, scaling stages, deployment topology, and design decisions. 
 Working design documents for features not yet implemented. During implementation, the relevant content migrates into [design documents](architecture/design/) and [architecture decisions](architecture/decisions/). Completed plans are removed. [Implementation State](architecture/state.md) tracks overall status.
 
 - [Dynamic Subject Proxying](plans/dynamic-subject-proxying.md): WebSocket sync with dynamic proxy subjects
-- [AI Agents](plans/ai-agents.md): Built-in LLM-powered agent subjects

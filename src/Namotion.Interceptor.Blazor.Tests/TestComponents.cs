@@ -40,6 +40,13 @@ public sealed class Host : ComponentBase
 
     public Task RenderAgainAsync() => InvokeAsync(StateHasChanged);
 
+    /// <summary>Replaces the content, on the dispatcher.</summary>
+    public void SetContent(RenderFragment content)
+    {
+        Content = content;
+        StateHasChanged();
+    }
+
     protected override void BuildRenderTree(RenderTreeBuilder builder)
     {
         builder.AddContent(0, Content);
@@ -136,6 +143,22 @@ internal static class Fragments
             builder.AddContent(0, item(index));
             builder.CloseRegion();
         }
+    };
+
+    /// <summary>Reads the first name in the fragment itself, so the component that invokes the fragment reads it.</summary>
+    public static RenderFragment Inline(string key, Person person, RenderLog log) => builder =>
+    {
+        var value = person.FirstName;
+        builder.AddContent(0, value);
+        log.Record(key, value);
+    };
+
+    public static RenderFragment Cascading(RenderFragment content) => builder =>
+    {
+        builder.OpenComponent<CascadingValue<int>>(0);
+        builder.AddComponentParameter(1, nameof(CascadingValue<int>.Value), 1);
+        builder.AddComponentParameter(2, nameof(CascadingValue<int>.ChildContent), content);
+        builder.CloseComponent();
     };
 
     public static RenderFragment Both(RenderFragment first, RenderFragment second) => builder =>

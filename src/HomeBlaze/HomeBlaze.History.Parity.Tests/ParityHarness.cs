@@ -16,7 +16,9 @@ public interface IParityStore : IDisposable
     Task FlushAsync();
     HistorySeries Query(HistoryQuery query);
     HistoryPoint? GetSampleAtOrBefore(string propertyPath, DateTimeOffset asOf);
+    HistoryPoint? GetLastNumericSampleBefore(string propertyPath, DateTimeOffset before);
     ImmutableArray<HistoryCoverage> CoverageRanges { get; }
+    IHistoryStore AsHistoryStore();
 }
 
 /// <summary>The wall-clock bounds all parity stores share.</summary>
@@ -58,7 +60,12 @@ internal sealed class InMemoryParityStore : IParityStore
     public HistoryPoint? GetSampleAtOrBefore(string propertyPath, DateTimeOffset asOf)
         => _engine.GetSampleAtOrBefore(propertyPath, asOf);
 
+    public HistoryPoint? GetLastNumericSampleBefore(string propertyPath, DateTimeOffset before)
+        => _engine.GetLastNumericSampleBefore(propertyPath, before);
+
     public ImmutableArray<HistoryCoverage> CoverageRanges => _engine.CoverageRanges;
+
+    public IHistoryStore AsHistoryStore() => _engine;
 
     public void Dispose() { }
 }
@@ -94,7 +101,12 @@ internal sealed class SqliteParityStore : IParityStore
     public HistoryPoint? GetSampleAtOrBefore(string propertyPath, DateTimeOffset asOf)
         => _engine.GetSampleAtOrBefore(propertyPath, asOf);
 
+    public HistoryPoint? GetLastNumericSampleBefore(string propertyPath, DateTimeOffset before)
+        => _engine.GetLastNumericSampleBefore(propertyPath, before);
+
     public ImmutableArray<HistoryCoverage> CoverageRanges => _engine.CoverageRanges;
+
+    public IHistoryStore AsHistoryStore() => _engine;
 
     public void Dispose()
     {
@@ -128,6 +140,9 @@ public static class ParityStores
             CreateCoveredFrom = start => new SqliteParityStore(start)
         },
     };
+
+    /// <summary>The factories of <see cref="Stores"/>, for building theory data that adds more columns.</summary>
+    public static IEnumerable<ParityStoreFactory> Factories => Stores.Cast<object[]>().Select(row => (ParityStoreFactory)row[0]);
 }
 
 /// <summary>Tolerance-aware comparison of a query result's numeric points against a golden sequence.</summary>

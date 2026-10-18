@@ -5,7 +5,7 @@ icon: Router
 
 # FRITZ!Box
 
-Connects to an AVM FRITZ!Box router over its documented local TR-064 interface, without MyFRITZ or any cloud connection. One `FritzBox` lists every device the router knows as a `FritzBoxClient` with presence, shows the router itself and every FRITZ!Repeater or meshed FRITZ!Box as a `FritzBoxAccessPoint` with the clients connected to it, and reports the internet connection, current traffic rates and the WLANs. The guest WLAN can be switched on and off; everything else is read only.
+Connects to an AVM FRITZ!Box router over its documented local TR-064 interface, without MyFRITZ or any cloud connection. One `FritzBox` lists every device the router knows as a `FritzBoxClient` with presence, shows the router itself and every FRITZ!Repeater or meshed FRITZ!Box as a `FritzBoxAccessPoint` with the clients connected to it, and reports the internet connection, current traffic rates and the WLANs. The guest WLAN can be switched on and off. Turning it on opens the network to guests, so turning it on and toggling it need confirmation in the operations panel and cannot be called by AI agents or over MCP, see [Operations](#operations); the switch on the dashboard widget acts directly. Everything else is read only.
 
 ## Supported Devices
 
@@ -78,7 +78,7 @@ WLANs are keyed by the band their radio reports: `2.4GHz`, `5GHz` or `6GHz`. Whe
 - **FRITZ!Box:** connection, internet state, present and total clients, current upload and download rates, external IP, a link to the router's own web UI.
 - **Access point:** model, uplink type and speed, number of connected clients.
 - **Client:** presence, IP address, access point name and band or LAN port, link speed.
-- **WLAN:** band, channel and clients; the guest WLAN has an on/off switch.
+- **WLAN:** band, channel and clients; the guest WLAN has an on/off switch, which acts directly without confirmation.
 
 ## Interfaces
 
@@ -142,7 +142,9 @@ WLANs are keyed by the band their radio reports: `2.4GHz`, `5GHz` or `6GHz`. Whe
 
 | Subject | Operation | Description |
 |---|---|---|
-| `FritzBoxGuestWlan` | `TurnOn`, `TurnOff`, `Toggle` | Switches the guest WLAN. The main bands cannot be switched, because switching one off can cut off the connection HomeBlaze itself uses. |
+| `FritzBoxGuestWlan` | `TurnOn`, `TurnOff`, `Toggle` | Switches the guest WLAN. `TurnOn` and `Toggle` require confirmation in the operations panel and cannot be called by AI agents or over MCP, `TurnOff` does not; the switch on the dashboard widget acts directly. The main bands cannot be switched, because switching one off can cut off the connection HomeBlaze itself uses. |
+
+Operations that require confirmation cannot be called through MCP, neither by [AI agents](../administration/ai-agents.md#tools-and-permissions) nor by external clients; turning the guest WLAN off stays available to them.
 
 ## How It Works
 

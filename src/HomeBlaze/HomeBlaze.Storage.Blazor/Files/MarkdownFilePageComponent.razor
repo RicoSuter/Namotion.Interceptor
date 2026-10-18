@@ -11,7 +11,6 @@
 @attribute [SubjectComponent(SubjectComponentType.Page, typeof(MarkdownFile))]
 
 @implements ISubjectComponent
-@implements IDisposable
 @inject ITimeZoneDisplay TimeZone
 @inject IJSRuntime JsRuntime
 
@@ -73,14 +72,6 @@
 
     private bool IsLoading => File?.Content is null;
 
-    protected override void OnInitialized()
-    {
-        // The last-modified stamp is formatted through the display time zone, so re-render when it changes.
-        TimeZone.Changed += OnTimeZoneChanged;
-    }
-
-    private void OnTimeZoneChanged() => InvokeAsync(StateHasChanged);
-
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender)
@@ -98,10 +89,5 @@
         {
             // The circuit is gone, so there is no page with pictures to watch.
         }
-    }
-
-    public void Dispose()
-    {
-        TimeZone.Changed -= OnTimeZoneChanged;
     }
 }

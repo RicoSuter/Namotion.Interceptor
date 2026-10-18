@@ -152,10 +152,22 @@ public partial class VirtualFolder : ITitleProvider, IIconProvider, IStorageCont
         => subjectSetupService.CreateSubjectAndAddToStorageAsync(this, cancellationToken);
 
     /// <summary>
+    /// Creates a Markdown file in this folder and adds it as a page.
+    /// </summary>
+    /// <inheritdoc cref="FluentStorageContainer.CreateMarkdownFileAsync(string, string, CancellationToken)" path="/exception"/>
+    /// <exception cref="ArgumentException">The storage of this folder is not a <see cref="FluentStorageContainer"/>.</exception>
+    [Operation(Title = "Create Markdown File", Description = "Creates a new markdown file with the given name (ending in .md) and content in this folder.", Icon = "NoteAdd", Position = 2)]
+    public Task CreateMarkdownFileAsync(string name, string content, CancellationToken cancellationToken)
+        => Storage is FluentStorageContainer storage
+            ? storage.CreateMarkdownFileAsync(RelativePath, name, content, cancellationToken)
+            // An argument error, so that its message reaches the caller of the operation.
+            : throw new ArgumentException("Markdown files cannot be created in this folder: its storage does not support it.");
+
+    /// <summary>
     /// Gets the names of the children of this folder in the order in which they are shown.
     /// </summary>
     /// <exception cref="InvalidOperationException">The storage is not connected, or the folder is not in it.</exception>
-    [Query(Title = "Get Order", Description = MetadataMethodDescriptions.GetOrder, Position = 2, Audience = MethodAudience.Agents)]
+    [Query(Title = "Get Order", Description = MetadataMethodDescriptions.GetOrder, Position = 3, Audience = MethodAudience.Agents)]
     public Task<string[]> GetOrderAsync(CancellationToken cancellationToken)
         => RootStorage.GetChildOrderAsync(StoragePath.Normalize(RelativePath), cancellationToken);
 
@@ -167,7 +179,7 @@ public partial class VirtualFolder : ITitleProvider, IIconProvider, IStorageCont
     /// <exception cref="InvalidOperationException">
     /// The storage is not connected, the folder is not in it, or its metadata file could not be read.
     /// </exception>
-    [Operation(Title = "Set Order", Description = MetadataMethodDescriptions.SetOrder, Position = 3, Audience = MethodAudience.Agents)]
+    [Operation(Title = "Set Order", Description = MetadataMethodDescriptions.SetOrder, Position = 4, Audience = MethodAudience.Agents)]
     public Task SetOrderAsync(string[] names, CancellationToken cancellationToken)
         => RootStorage.SetChildOrderAsync(StoragePath.Normalize(RelativePath), names, cancellationToken);
 
@@ -175,7 +187,7 @@ public partial class VirtualFolder : ITitleProvider, IIconProvider, IStorageCont
     /// Gets the metadata of this folder and of its children that are stored as JSON files.
     /// </summary>
     /// <exception cref="InvalidOperationException">The storage is not connected, or the folder is not in it.</exception>
-    [Query(Title = "Get Metadata", Description = MetadataMethodDescriptions.GetMetadata, Position = 4, Audience = MethodAudience.Agents)]
+    [Query(Title = "Get Metadata", Description = MetadataMethodDescriptions.GetMetadata, Position = 5, Audience = MethodAudience.Agents)]
     public Task<ContainerMetadata> GetMetadataAsync(CancellationToken cancellationToken)
         => RootStorage.GetContainerMetadataAsync(StoragePath.Normalize(RelativePath), cancellationToken);
 
@@ -185,7 +197,7 @@ public partial class VirtualFolder : ITitleProvider, IIconProvider, IStorageCont
     /// <exception cref="InvalidOperationException">
     /// The storage is not connected, the folder is not in it, or its metadata file could not be read.
     /// </exception>
-    [Operation(Title = "Set Metadata", Description = MetadataMethodDescriptions.SetMetadata, Position = 5, Audience = MethodAudience.Agents)]
+    [Operation(Title = "Set Metadata", Description = MetadataMethodDescriptions.SetMetadata, Position = 6, Audience = MethodAudience.Agents)]
     public Task SetMetadataAsync(string? title, string? navigationTitle, string? icon, CancellationToken cancellationToken)
         => WriteMetadataAsync(new FolderMetadata(title, navigationTitle, icon), cancellationToken);
 
@@ -196,7 +208,7 @@ public partial class VirtualFolder : ITitleProvider, IIconProvider, IStorageCont
     /// <exception cref="InvalidOperationException">
     /// The storage is not connected, the folder is not in it, or the metadata file could not be read.
     /// </exception>
-    [Operation(Title = "Set Child Metadata", Description = MetadataMethodDescriptions.SetChildMetadata, Position = 6, Audience = MethodAudience.Agents)]
+    [Operation(Title = "Set Child Metadata", Description = MetadataMethodDescriptions.SetChildMetadata, Position = 7, Audience = MethodAudience.Agents)]
     public Task SetChildMetadataAsync(
         string name, string? navigationTitle, string? icon, NavigationLocation? location, AppBarAlignment? alignment,
         CancellationToken cancellationToken)

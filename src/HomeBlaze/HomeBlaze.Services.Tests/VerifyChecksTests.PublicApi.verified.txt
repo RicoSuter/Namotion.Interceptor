@@ -123,10 +123,10 @@ namespace HomeBlaze.Services
         public static HomeBlaze.Components.Abstractions.Pages.NavigationLocation GetNavigationLocation(this Namotion.Interceptor.IInterceptorSubject subject) { }
         public static string GetNavigationTitle(this Namotion.Interceptor.IInterceptorSubject subject, string? propertyKey = null) { }
     }
-    public class SubjectPathResolver : HomeBlaze.Abstractions.ISubjectPathResolver, Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler
+    public class SubjectPathResolver : HomeBlaze.Abstractions.ISubjectPathResolver, Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler, Namotion.Interceptor.Tracking.Lifecycle.IPropertyLifecycleHandler
     {
         public SubjectPathResolver(System.Func<Namotion.Interceptor.IInterceptorSubject?> getRoot) { }
-        public event System.Action? PathsChanged;
+        public long PathsVersion { get; }
         public string? GetPath(Namotion.Interceptor.IInterceptorSubject subject, HomeBlaze.Abstractions.PathStyle style) { }
         public System.Collections.Generic.IReadOnlyList<string> GetPaths(Namotion.Interceptor.IInterceptorSubject subject, HomeBlaze.Abstractions.PathStyle style) { }
         public void HandleLifecycleChange(Namotion.Interceptor.Tracking.Lifecycle.SubjectLifecycleChange change) { }
@@ -139,6 +139,7 @@ namespace HomeBlaze.Services
     }
     public static class SubjectPathResolverScopeExtensions
     {
+        public static Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? ResolveScopedDisplayableProperty(this HomeBlaze.Services.SubjectPathResolver resolver, string path, HomeBlaze.Abstractions.PathStyle style, Namotion.Interceptor.IInterceptorSubject from) { }
         public static Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? ResolveScopedProperty(this HomeBlaze.Services.SubjectPathResolver resolver, string path, HomeBlaze.Abstractions.PathStyle style, Namotion.Interceptor.IInterceptorSubject from) { }
         public static Namotion.Interceptor.IInterceptorSubject? ResolveScopedSubject(this HomeBlaze.Services.SubjectPathResolver resolver, string path, HomeBlaze.Abstractions.PathStyle style, Namotion.Interceptor.IInterceptorSubject from) { }
         public static object? ResolveScopedValue(this HomeBlaze.Services.SubjectPathResolver resolver, string path, HomeBlaze.Abstractions.PathStyle style, Namotion.Interceptor.IInterceptorSubject from) { }
@@ -153,6 +154,7 @@ namespace HomeBlaze.Services
         public static System.Collections.Generic.IEnumerable<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty> GetStateProperties(this Namotion.Interceptor.IInterceptorSubject subject) { }
         public static bool HasConfigurationProperties(this Namotion.Interceptor.IInterceptorSubject subject) { }
         public static bool IsConfigurationProperty(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
+        public static bool IsDisplayable(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
         public static Namotion.Interceptor.IInterceptorSubject? TryGetConfigurationOwner(this Namotion.Interceptor.IInterceptorSubject subject) { }
         public static Namotion.Interceptor.IInterceptorSubject? TryGetConfigurationOwner(this Namotion.Interceptor.IInterceptorSubject subject, System.Func<Namotion.Interceptor.IInterceptorSubject, bool> isOwner) { }
     }

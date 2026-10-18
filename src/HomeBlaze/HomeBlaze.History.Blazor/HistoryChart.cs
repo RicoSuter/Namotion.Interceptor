@@ -12,6 +12,7 @@ namespace HomeBlaze.History.Blazor;
 [Description("Shows the recorded history of numbers as lines and of states as bands")]
 [DisplayName("History chart")]
 [SubjectIcon("ShowChart")]
+[PageLayout]
 [InterceptorSubject]
 public partial class HistoryChart : IConfigurable, ITitleProvider
 {
@@ -40,7 +41,7 @@ public partial class HistoryChart : IConfigurable, ITitleProvider
 
     /// <summary>
     /// How the values in a bucket become one point of a line, a name of <see cref="HomeBlaze.History.Abstractions.HistoryAggregations"/>
-    /// such as Maximum. Null or empty for the automatic choice: the first aggregation the property and the stores offer.
+    /// other than Delta, such as Maximum, or Average for the time-weighted average. Null or empty for the automatic choice: the first aggregation the property and the stores offer.
     /// A band and a raw bucket ignore it.
     /// </summary>
     [Configuration]

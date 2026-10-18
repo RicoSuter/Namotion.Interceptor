@@ -1,0 +1,8 @@
+@* Frames sanitized Markdown HTML with the styles in AgentMarkdown.razor.css. *@
+<div class="agent-markdown mud-typography-body1">@ChildContent</div>
+
+@code {
+    /// <summary>The sanitized HTML, as produced by <see cref="AgentMarkdownRenderer"/>.</summary>
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+}

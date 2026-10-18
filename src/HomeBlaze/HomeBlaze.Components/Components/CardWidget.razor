@@ -32,7 +32,7 @@
             ? @<div class="mt-2 me-1 mb-n1" data-testid="card-header-right"><SubjectComponent Subject="@headerRight" Type="SubjectComponentType.Widget" /></div>
             : null;
 
-        <MudCard Class="@(sizeStyle is null ? "card-widget" : "card-widget card-widget-sized")" Style="@sizeStyle" Elevation="@(card.Outlined ? 0 : card.Elevation)" Outlined="@card.Outlined" data-testid="card">
+        <MudCard Class="@(sizeStyle is null ? "card-widget place-filler" : "card-widget card-widget-sized place-filler")" Style="@sizeStyle" Elevation="@(card.Outlined ? 0 : card.Elevation)" Outlined="@card.Outlined" data-testid="card">
             @if (hasHeader)
             {
                 <MudCardHeader Class="align-start" CardHeaderAvatar="@avatar" CardHeaderActions="@actions">

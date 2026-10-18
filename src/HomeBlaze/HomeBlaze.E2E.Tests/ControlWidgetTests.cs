@@ -222,19 +222,19 @@ public class ControlWidgetTests
             // Arrange
             ResetMotor();
             var page = await OpenPageAsync();
-            var stopSwitch = GetSwitch(page, "Power with stop");
-            await Assertions.Expect(stopSwitch).ToBeCheckedAsync(new() { Timeout = Timeout });
+            var restartSwitch = GetSwitch(page, "Power with restart");
+            await Assertions.Expect(restartSwitch).ToBeCheckedAsync(new() { Timeout = Timeout });
 
             // Act
-            await stopSwitch.ClickAsync();
+            await restartSwitch.ClickAsync();
             var dialog = page.GetByRole(AriaRole.Dialog);
-            await Assertions.Expect(dialog).ToContainTextAsync("Confirm: Emergency Stop", new() { Timeout = Timeout });
+            await Assertions.Expect(dialog).ToContainTextAsync("Confirm: Restart Controller", new() { Timeout = Timeout });
             await dialog.GetByRole(AriaRole.Button, new() { Name = "Cancel", Exact = true }).ClickAsync();
 
             // Assert
             await Assertions.Expect(dialog).ToHaveCountAsync(0, new() { Timeout = Timeout });
-            await Assertions.Expect(stopSwitch).ToBeCheckedAsync(new() { Timeout = Timeout });
-            await Assertions.Expect(stopSwitch).ToBeEnabledAsync(new() { Timeout = Timeout });
+            await Assertions.Expect(restartSwitch).ToBeCheckedAsync(new() { Timeout = Timeout });
+            await Assertions.Expect(restartSwitch).ToBeEnabledAsync(new() { Timeout = Timeout });
             Assert.True(GetMotor().IsPowered);
         }
         finally
@@ -260,16 +260,17 @@ public class ControlWidgetTests
             var page = await OpenPageAsync();
             var slider = GetSlider(page, "Target speed");
             await Assertions.Expect(slider).ToHaveValueAsync(originalSpeed.ToString(CultureInfo.InvariantCulture), new() { Timeout = Timeout });
-            // The pointer acts on the window, so the slider is moved into it first.
-            await slider.ScrollIntoViewIfNeededAsync();
             var box = await slider.BoundingBoxAsync() ?? throw new InvalidOperationException("The slider has no box");
-            var middle = box.Y + box.Height / 2;
 
             // Act: the pointer goes down at a quarter of the track and comes up at three quarters, with moves in between.
-            await page.Mouse.MoveAsync(box.X + box.Width / 4, middle);
-            await page.Mouse.DownAsync();
-            await page.Mouse.MoveAsync(box.X + box.Width * 3 / 4, middle, new() { Steps = 10 });
-            await page.Mouse.UpAsync();
+            // Not with page.Mouse at measured coordinates: the motor widget above grows when the motor starts running, which
+            // moves the slider away from them, while DragToAsync checks that the pointer lands on the slider.
+            await slider.DragToAsync(slider, new()
+            {
+                SourcePosition = new() { X = box.Width / 4, Y = box.Height / 2 },
+                TargetPosition = new() { X = box.Width * 3 / 4, Y = box.Height / 2 },
+                Steps = 10,
+            });
 
             // Assert: the page is saved a moment after the write, by which time any further write would have happened.
             await AsyncTestHelpers.WaitUntilAsync(() => GetMotor().TargetSpeed != originalSpeed, WaitTimeout, message: "The slider did not write the target speed");
@@ -365,16 +366,16 @@ public class ControlWidgetTests
             var page = await OpenPageAsync();
 
             // Act
-            await GetButton(page, "Emergency Stop").ClickAsync();
+            await GetButton(page, "Restart Controller").ClickAsync();
             var dialog = page.GetByRole(AriaRole.Dialog);
-            await Assertions.Expect(dialog).ToContainTextAsync("Confirm: Emergency Stop", new() { Timeout = Timeout });
+            await Assertions.Expect(dialog).ToContainTextAsync("Confirm: Restart Controller", new() { Timeout = Timeout });
             await dialog.GetByRole(AriaRole.Button, new() { Name = "Execute", Exact = true }).ClickAsync();
 
             // Assert
             await AsyncTestHelpers.WaitUntilAsync(
                 () => GetMotor() is { IsPowered: false, CurrentSpeed: 0 },
                 WaitTimeout,
-                message: "The emergency stop was not invoked");
+                message: "The restart of the controller was not invoked");
         }
         finally
         {

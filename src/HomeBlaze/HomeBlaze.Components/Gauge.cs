@@ -13,6 +13,7 @@ namespace HomeBlaze.Components;
 [Description("Shows a number as a ring with the value in its center")]
 [DisplayName("Gauge")]
 [SubjectIcon("Speed")]
+[PageLayout]
 [InterceptorSubject]
 public partial class Gauge : IConfigurable, ITitleProvider
 {

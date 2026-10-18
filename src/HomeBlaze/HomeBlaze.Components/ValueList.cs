@@ -12,6 +12,7 @@ namespace HomeBlaze.Components;
 [Description("A list of rows with a label and a value each")]
 [DisplayName("Value list")]
 [SubjectIcon("List")]
+[PageLayout]
 [InterceptorSubject]
 public partial class ValueList : IConfigurable, ITitleProvider
 {

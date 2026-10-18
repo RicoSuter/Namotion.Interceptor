@@ -53,11 +53,6 @@ public class SubjectBrowserLayoutTests
         }
         """;
 
-    // The page is prerendered, and a click before its circuit is interactive is lost. The pane width is set by the
-    // script the interactive browser runs, so it marks the point from which clicks arrive.
-    private const string BrowserIsInteractive =
-        "() => (document.getElementById('scrollContainer')?.style.getPropertyValue('--pane-width') ?? '') !== ''";
-
     // Records where the row is when placeholders appear, the positions it scrolls through, and where its scrolling had
     // got to when they are removed. The position at removal comes from the scroll events: once the placeholders are
     // gone the row is shorter, and reading it then says nothing about where it was.
@@ -129,7 +124,7 @@ public class SubjectBrowserLayoutTests
         var page = await _fixture.CreatePageAsync(contextOptions);
         await page.SetViewportSizeAsync(width, height);
         await page.GotoAsync($"{_fixture.ServerAddress}{path}");
-        await page.WaitForFunctionAsync(BrowserIsInteractive, null, new() { Timeout = PageLoadTimeout });
+        await page.WaitForFunctionAsync(SubjectBrowserPage.IsInteractive, null, new() { Timeout = PageLoadTimeout });
         await WaitUntilSettledAsync(page, paneCount);
         return page;
     }
@@ -298,7 +293,7 @@ public class SubjectBrowserLayoutTests
 
     [Theory]
     [InlineData(false)]
-    [InlineData(true)] // Developer mode puts an element of the tracking scope around the content of a pane.
+    [InlineData(true)]
     public async Task WhenAPaneHasMoreContentThanFits_ThenTheContentScrollsInsideThePane(bool isDeveloperMode)
     {
         // Arrange
@@ -320,11 +315,6 @@ public class SubjectBrowserLayoutTests
                 }
                 """);
             Assert.True(isBounded, "The content of the root pane should be taller than the pane and end inside it.");
-
-            // The element developer mode adds is the one with the tooltip, and it has to be between pane and content.
-            var wrapperCount = await page.Locator(
-                "#scrollContainer [data-testid='subject-pane'] div[title]:has([data-testid='subject-pane-content'])").CountAsync();
-            Assert.Equal(isDeveloperMode ? 1 : 0, wrapperCount);
         }
         finally
         {
@@ -333,21 +323,21 @@ public class SubjectBrowserLayoutTests
     }
 
     [Fact]
-    public async Task WhenASubjectHasChildrenAndMethods_ThenTheMethodsPrecedeTheChildren()
+    public async Task WhenASubjectHasChildrenAndMethods_ThenTheChildrenPrecedeTheMethods()
     {
         // Act
         var page = await OpenAsync("browser", 1280, 720, paneCount: 1);
 
         // Assert
-        var methodsPrecedeChildren = await page.EvaluateAsync<bool>("""
+        var childrenPrecedeMethods = await page.EvaluateAsync<bool>("""
             () => {
                 const pane = document.querySelector("#scrollContainer [data-testid='subject-pane']");
                 const firstChild = pane.querySelector('.mud-list-item');
                 const method = [...pane.querySelectorAll('button')].find(button => button.textContent.includes('Create'));
-                return (method.compareDocumentPosition(firstChild) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+                return (firstChild.compareDocumentPosition(method) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
             }
             """);
-        Assert.True(methodsPrecedeChildren);
+        Assert.True(childrenPrecedeMethods);
     }
 
     [Fact]
@@ -575,7 +565,7 @@ public class SubjectBrowserLayoutTests
         await page.ReloadAsync();
 
         // Assert
-        await page.WaitForFunctionAsync(BrowserIsInteractive, null, new() { Timeout = PageLoadTimeout });
+        await page.WaitForFunctionAsync(SubjectBrowserPage.IsInteractive, null, new() { Timeout = PageLoadTimeout });
         await WaitUntilSettledAsync(page, paneCount: 3);
         await WaitForRowLayoutAsync(page, isStacked);
     }

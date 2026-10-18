@@ -61,9 +61,10 @@
 }
 
 /* The content of a grid cell or a canvas node has the room of a card body at the edges, because the cell or the node
-   draws a frame. A card that is the only content fills the cell or the node instead, by the rules and the selector in
-   SubjectComponent.razor.css of HomeBlaze.Components. */
-.markdown-content ::deep :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .markdown-fragment:not(:has(> .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty)) > .card-widget)) {
+   draws a frame. A widget that fills its place (class place-filler, such as a card or a tile) or is centered in it
+   (class place-centered, such as a gauge) and is the only content fills the cell or the node instead, by the rules and
+   the selector in SubjectComponent.razor.css of HomeBlaze.Components. */
+.markdown-content ::deep :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .markdown-fragment:not(:has(> .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty)) > :is(.place-filler, .place-centered))) {
     padding: 12px;
 }
 

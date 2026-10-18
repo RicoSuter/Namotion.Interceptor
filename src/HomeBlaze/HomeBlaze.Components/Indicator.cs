@@ -12,6 +12,7 @@ namespace HomeBlaze.Components;
 [Description("Shows a state as a coloured chip or icon")]
 [DisplayName("Indicator")]
 [SubjectIcon("Lightbulb")]
+[PageLayout]
 [InterceptorSubject]
 public partial class Indicator : IConfigurable, ITitleProvider
 {

@@ -206,6 +206,14 @@ public partial class SqliteHistoryStoreSubject :
         return new ValueTask<HistoryPoint?>(_engine?.GetSampleAtOrBefore(propertyPath, asOf));
     }
 
+    /// <inheritdoc />
+    public ValueTask<HistoryPoint?> GetLastNumericSampleBeforeAsync(
+        string propertyPath, DateTimeOffset before, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return new ValueTask<HistoryPoint?>(_engine?.GetLastNumericSampleBefore(propertyPath, before));
+    }
+
     /// <summary>
     /// Test-only hook that forces the engine to flush its pending samples immediately, so queued
     /// changes become queryable without waiting for the interval flush. Returns a completed task

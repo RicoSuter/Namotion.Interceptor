@@ -48,25 +48,28 @@ namespace HomeBlaze.Storage
         public System.Threading.Tasks.Task ConnectAsync(System.Threading.CancellationToken cancellationToken) { }
         [HomeBlaze.Abstractions.Attributes.Operation(Icon="Add", Position=1, Title="Create")]
         public System.Threading.Tasks.Task CreateAsync([HomeBlaze.Abstractions.Attributes.FromServices] HomeBlaze.Storage.Abstractions.ISubjectSetupService subjectSetupService, System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Creates a new markdown file with the given name (ending in .md) and content in th" +
+            "is folder.", Icon="NoteAdd", Position=2, Title="Create Markdown File")]
+        public System.Threading.Tasks.Task CreateMarkdownFileAsync(string name, string content, System.Threading.CancellationToken cancellationToken) { }
         public System.Threading.Tasks.Task DeleteBlobAsync(string path, System.Threading.CancellationToken cancellationToken) { }
         public System.Threading.Tasks.Task DeleteSubjectAsync(Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken) { }
         public override void Dispose() { }
         protected override System.Threading.Tasks.Task ExecuteAsync(System.Threading.CancellationToken stoppingToken) { }
         public System.Threading.Tasks.Task<HomeBlaze.Storage.Abstractions.BlobMetadata?> GetBlobMetadataAsync(string path, System.Threading.CancellationToken cancellationToken) { }
         protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
-        [HomeBlaze.Abstractions.Attributes.Query(Audience=HomeBlaze.Abstractions.Attributes.MethodAudience.Agents, Description=@"Gets the metadata of this folder as Metadata (Title, NavigationTitle, Icon; null when it has none, always null for the root of a storage) and the navigation metadata of each child stored as a JSON file as Children, keyed by the name of the child (NavigationTitle, Icon, Location, Alignment; null when it has none). Set Metadata and Set Child Metadata replace every value, so read it first to keep the values that are not changed.", Position=4, Title="Get Metadata")]
+        [HomeBlaze.Abstractions.Attributes.Query(Audience=HomeBlaze.Abstractions.Attributes.MethodAudience.Agents, Description=@"Gets the metadata of this folder as Metadata (Title, NavigationTitle, Icon; null when it has none, always null for the root of a storage) and the navigation metadata of each child stored as a JSON file as Children, keyed by the name of the child (NavigationTitle, Icon, Location, Alignment; null when it has none). Set Metadata and Set Child Metadata replace every value, so read it first to keep the values that are not changed.", Position=5, Title="Get Metadata")]
         public System.Threading.Tasks.Task<HomeBlaze.Storage.ContainerMetadata> GetMetadataAsync(System.Threading.CancellationToken cancellationToken) { }
         [HomeBlaze.Abstractions.Attributes.Query(Audience=HomeBlaze.Abstractions.Attributes.MethodAudience.Agents, Description="Gets the names of the children of this folder in the order in which they are show" +
-            "n in navigation and in the browser. A name is the key of the child in Children.", Position=2, Title="Get Order")]
+            "n in navigation and in the browser. A name is the key of the child in Children.", Position=3, Title="Get Order")]
         public System.Threading.Tasks.Task<string[]> GetOrderAsync(System.Threading.CancellationToken cancellationToken) { }
         protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
         protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
         public System.Threading.Tasks.Task MoveChildAsync(string name, string targetName, System.Threading.CancellationToken cancellationToken) { }
         protected void RaisePropertyChanged(string propertyName) { }
         public System.Threading.Tasks.Task<System.IO.Stream> ReadBlobAsync(string path, System.Threading.CancellationToken cancellationToken) { }
-        [HomeBlaze.Abstractions.Attributes.Operation(Audience=HomeBlaze.Abstractions.Attributes.MethodAudience.Agents, Description=@"Replaces the navigation metadata of a child stored as a JSON file, given by its name as Get Metadata lists it. A value that is null or blank is removed. navigationTitle: the title in navigation. icon: a MudBlazor icon name for navigation, the icon of the subject itself is unchanged. location: where a subject with a page appears in navigation. alignment: the side of the top bar, only used for the location AppBar.", Position=5, Title="Set Child Metadata")]
+        [HomeBlaze.Abstractions.Attributes.Operation(Audience=HomeBlaze.Abstractions.Attributes.MethodAudience.Agents, Description=@"Replaces the navigation metadata of a child stored as a JSON file, given by its name as Get Metadata lists it. A value that is null or blank is removed. navigationTitle: the title in navigation. icon: a MudBlazor icon name for navigation, the icon of the subject itself is unchanged. location: where a subject with a page appears in navigation. alignment: the side of the top bar, only used for the location AppBar.", Position=6, Title="Set Child Metadata")]
         public System.Threading.Tasks.Task SetChildMetadataAsync(string name, string? navigationTitle, string? icon, HomeBlaze.Components.Abstractions.Pages.NavigationLocation? location, HomeBlaze.Components.Abstractions.Pages.AppBarAlignment? alignment, System.Threading.CancellationToken cancellationToken) { }
-        [HomeBlaze.Abstractions.Attributes.Operation(Audience=HomeBlaze.Abstractions.Attributes.MethodAudience.Agents, Description=@"Sets the order in which the children of this folder are shown: the given names first, in the given order, then the other children in the order in which they are shown now. Each name must be the name of a child, as Get Order returns it, and may be given only once.", Position=3, Title="Set Order")]
+        [HomeBlaze.Abstractions.Attributes.Operation(Audience=HomeBlaze.Abstractions.Attributes.MethodAudience.Agents, Description=@"Sets the order in which the children of this folder are shown: the given names first, in the given order, then the other children in the order in which they are shown now. Each name must be the name of a child, as Get Order returns it, and may be given only once.", Position=4, Title="Set Order")]
         public System.Threading.Tasks.Task SetOrderAsync(string[] names, System.Threading.CancellationToken cancellationToken) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
         public override System.Threading.Tasks.Task StartAsync(System.Threading.CancellationToken cancellationToken) { }
@@ -76,6 +79,11 @@ namespace HomeBlaze.Storage
         public System.Threading.Tasks.Task WriteChildMetadataAsync(Namotion.Interceptor.IInterceptorSubject child, HomeBlaze.Components.Abstractions.Pages.SubjectMetadata? metadata, System.Threading.CancellationToken cancellationToken) { }
         public System.Threading.Tasks.Task<bool> WriteConfigurationAsync(Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken) { }
         public System.Threading.Tasks.Task WriteMetadataAsync(HomeBlaze.Components.Abstractions.Pages.FolderMetadata? metadata, System.Threading.CancellationToken cancellationToken) { }
+    }
+    public static class MarkdownPageLayoutPermission
+    {
+        public static bool IsGranted { get; }
+        public static System.IDisposable Enter(bool isGranted) { }
     }
     [Namotion.Interceptor.Attributes.InterceptorSubject]
     public class VirtualFolder : HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Components.Abstractions.Pages.IMetadataContainer, HomeBlaze.Storage.Abstractions.IStorageContainer, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
@@ -100,25 +108,28 @@ namespace HomeBlaze.Storage
         public System.Threading.Tasks.Task AddSubjectAsync(string path, Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken) { }
         [HomeBlaze.Abstractions.Attributes.Operation(Icon="Add", Position=1, Title="Create")]
         public System.Threading.Tasks.Task CreateAsync([HomeBlaze.Abstractions.Attributes.FromServices] HomeBlaze.Storage.Abstractions.ISubjectSetupService subjectSetupService, System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Creates a new markdown file with the given name (ending in .md) and content in th" +
+            "is folder.", Icon="NoteAdd", Position=2, Title="Create Markdown File")]
+        public System.Threading.Tasks.Task CreateMarkdownFileAsync(string name, string content, System.Threading.CancellationToken cancellationToken) { }
         public System.Threading.Tasks.Task DeleteBlobAsync(string path, System.Threading.CancellationToken cancellationToken) { }
         public System.Threading.Tasks.Task DeleteSubjectAsync(Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken) { }
         public System.Threading.Tasks.Task<HomeBlaze.Storage.Abstractions.BlobMetadata?> GetBlobMetadataAsync(string path, System.Threading.CancellationToken cancellationToken) { }
         protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
-        [HomeBlaze.Abstractions.Attributes.Query(Audience=HomeBlaze.Abstractions.Attributes.MethodAudience.Agents, Description=@"Gets the metadata of this folder as Metadata (Title, NavigationTitle, Icon; null when it has none, always null for the root of a storage) and the navigation metadata of each child stored as a JSON file as Children, keyed by the name of the child (NavigationTitle, Icon, Location, Alignment; null when it has none). Set Metadata and Set Child Metadata replace every value, so read it first to keep the values that are not changed.", Position=4, Title="Get Metadata")]
+        [HomeBlaze.Abstractions.Attributes.Query(Audience=HomeBlaze.Abstractions.Attributes.MethodAudience.Agents, Description=@"Gets the metadata of this folder as Metadata (Title, NavigationTitle, Icon; null when it has none, always null for the root of a storage) and the navigation metadata of each child stored as a JSON file as Children, keyed by the name of the child (NavigationTitle, Icon, Location, Alignment; null when it has none). Set Metadata and Set Child Metadata replace every value, so read it first to keep the values that are not changed.", Position=5, Title="Get Metadata")]
         public System.Threading.Tasks.Task<HomeBlaze.Storage.ContainerMetadata> GetMetadataAsync(System.Threading.CancellationToken cancellationToken) { }
         [HomeBlaze.Abstractions.Attributes.Query(Audience=HomeBlaze.Abstractions.Attributes.MethodAudience.Agents, Description="Gets the names of the children of this folder in the order in which they are show" +
-            "n in navigation and in the browser. A name is the key of the child in Children.", Position=2, Title="Get Order")]
+            "n in navigation and in the browser. A name is the key of the child in Children.", Position=3, Title="Get Order")]
         public System.Threading.Tasks.Task<string[]> GetOrderAsync(System.Threading.CancellationToken cancellationToken) { }
         protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
         protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
         public System.Threading.Tasks.Task MoveChildAsync(string name, string targetName, System.Threading.CancellationToken cancellationToken) { }
         protected void RaisePropertyChanged(string propertyName) { }
         public System.Threading.Tasks.Task<System.IO.Stream> ReadBlobAsync(string path, System.Threading.CancellationToken cancellationToken) { }
-        [HomeBlaze.Abstractions.Attributes.Operation(Audience=HomeBlaze.Abstractions.Attributes.MethodAudience.Agents, Description=@"Replaces the navigation metadata of a child stored as a JSON file, given by its name as Get Metadata lists it. A value that is null or blank is removed. navigationTitle: the title in navigation. icon: a MudBlazor icon name for navigation, the icon of the subject itself is unchanged. location: where a subject with a page appears in navigation. alignment: the side of the top bar, only used for the location AppBar.", Position=6, Title="Set Child Metadata")]
+        [HomeBlaze.Abstractions.Attributes.Operation(Audience=HomeBlaze.Abstractions.Attributes.MethodAudience.Agents, Description=@"Replaces the navigation metadata of a child stored as a JSON file, given by its name as Get Metadata lists it. A value that is null or blank is removed. navigationTitle: the title in navigation. icon: a MudBlazor icon name for navigation, the icon of the subject itself is unchanged. location: where a subject with a page appears in navigation. alignment: the side of the top bar, only used for the location AppBar.", Position=7, Title="Set Child Metadata")]
         public System.Threading.Tasks.Task SetChildMetadataAsync(string name, string? navigationTitle, string? icon, HomeBlaze.Components.Abstractions.Pages.NavigationLocation? location, HomeBlaze.Components.Abstractions.Pages.AppBarAlignment? alignment, System.Threading.CancellationToken cancellationToken) { }
-        [HomeBlaze.Abstractions.Attributes.Operation(Audience=HomeBlaze.Abstractions.Attributes.MethodAudience.Agents, Description=@"Replaces the metadata of this folder. A value that is null or blank is removed. title: the title of the folder everywhere, without one the name of the folder. navigationTitle: the title in navigation, without one the title. icon: a MudBlazor icon name such as Devices, without one Folder.", Position=5, Title="Set Metadata")]
+        [HomeBlaze.Abstractions.Attributes.Operation(Audience=HomeBlaze.Abstractions.Attributes.MethodAudience.Agents, Description=@"Replaces the metadata of this folder. A value that is null or blank is removed. title: the title of the folder everywhere, without one the name of the folder. navigationTitle: the title in navigation, without one the title. icon: a MudBlazor icon name such as Devices, without one Folder.", Position=6, Title="Set Metadata")]
         public System.Threading.Tasks.Task SetMetadataAsync(string? title, string? navigationTitle, string? icon, System.Threading.CancellationToken cancellationToken) { }
-        [HomeBlaze.Abstractions.Attributes.Operation(Audience=HomeBlaze.Abstractions.Attributes.MethodAudience.Agents, Description=@"Sets the order in which the children of this folder are shown: the given names first, in the given order, then the other children in the order in which they are shown now. Each name must be the name of a child, as Get Order returns it, and may be given only once.", Position=3, Title="Set Order")]
+        [HomeBlaze.Abstractions.Attributes.Operation(Audience=HomeBlaze.Abstractions.Attributes.MethodAudience.Agents, Description=@"Sets the order in which the children of this folder are shown: the given names first, in the given order, then the other children in the order in which they are shown now. Each name must be the name of a child, as Get Order returns it, and may be given only once.", Position=4, Title="Set Order")]
         public System.Threading.Tasks.Task SetOrderAsync(string[] names, System.Threading.CancellationToken cancellationToken) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
         public System.Threading.Tasks.Task WriteBlobAsync(string path, System.IO.Stream content, System.Threading.CancellationToken cancellationToken) { }
@@ -184,11 +195,15 @@ namespace HomeBlaze.Storage.Files
     [Namotion.Interceptor.Attributes.InterceptorSubject]
     public class MarkdownFile : HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ILinkScope, HomeBlaze.Abstractions.IPathScope, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Components.Abstractions.Pages.IPage, HomeBlaze.Storage.Abstractions.IConfigurationWriter, HomeBlaze.Storage.Abstractions.IStorageFile, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
+        public const string ActiveContent = "HTML, images and media, math and diagram blocks, element attributes, abbreviation" +
+            " definitions and links other than http, https and mailto";
+        public const int MaxContentSize = 65536;
         public MarkdownFile(HomeBlaze.Storage.Abstractions.IStorageContainer storage, string fullPath, HomeBlaze.Storage.Internal.MarkdownContentParser parser, HomeBlaze.Services.ConfigurableSubjectSerializer serializer) { }
         [Namotion.Interceptor.Attributes.Derived]
         public HomeBlaze.Components.Abstractions.Pages.AppBarAlignment AppBarAlignment { get; }
         [Namotion.Interceptor.Registry.Attributes.InlinePaths]
         public System.Collections.Generic.IDictionary<string, Namotion.Interceptor.IInterceptorSubject> Children { get; }
+        [HomeBlaze.Abstractions.Attributes.ExcludeFromExpressions]
         public string? Content { get; }
         [HomeBlaze.Abstractions.Attributes.State("Size", Position=1, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Byte)]
         public long FileSize { get; set; }
@@ -216,14 +231,19 @@ namespace HomeBlaze.Storage.Files
         public System.Threading.Tasks.Task OnFileChangedAsync(System.Threading.CancellationToken cancellationToken) { }
         protected void RaisePropertyChanged(string propertyName) { }
         public System.Threading.Tasks.Task<System.IO.Stream> ReadAsync(System.Threading.CancellationToken cancellationToken) { }
-        [HomeBlaze.Abstractions.Attributes.Query(Description="Returns the markdown content with {{ path }} expressions evaluated against the cu" +
-            "rrent object graph", Icon="Preview", Title="Read Evaluated Content")]
-        public string? ReadEvaluatedContent() { }
-        [HomeBlaze.Abstractions.Attributes.Query(Description="Returns the markdown file source, including unevaluated {{ path }} expressions", Icon="Description", Title="Read Raw Content")]
+        [HomeBlaze.Abstractions.Attributes.Query(Description=@"Returns the markdown content with {{ path }} expressions evaluated against the current object graph. With includeSourcePaths set to true, each value is followed by the absolute path of its property in parentheses, which get_property reads when the property is exposed as state", Icon="Preview", Title="Read Evaluated Content")]
+        public string? ReadEvaluatedContent(bool? includeSourcePaths = default) { }
+        [HomeBlaze.Abstractions.Attributes.Query(Description="Returns the markdown file source, including unevaluated {{ path }} expressions. S" +
+            "ecret configuration values in blocks are shown as ***", Icon="Description", Title="Read Raw Content")]
         public string? ReadRawContent() { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Replaces the whole markdown source of this file.", Icon="EditNote", Title="Replace Content")]
+        public System.Threading.Tasks.Task ReplaceContentAsync(string content, System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Replaces one exact, unique passage of the markdown source.", Icon="FindReplace", Title="Replace Text")]
+        public System.Threading.Tasks.Task ReplaceTextAsync(string oldText, string newText, System.Threading.CancellationToken cancellationToken) { }
         public string ResolveLink(string link) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
         public System.Threading.Tasks.Task WriteAsync(System.IO.Stream content, System.Threading.CancellationToken cancellationToken) { }
+        public System.Threading.Tasks.Task WriteAsync(string content, System.Threading.CancellationToken cancellationToken) { }
         public System.Threading.Tasks.Task<bool> WriteConfigurationAsync(Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken) { }
     }
 }
@@ -252,7 +272,7 @@ namespace HomeBlaze.Storage.Internal
     {
         public MarkdownContentParser(HomeBlaze.Services.ConfigurableSubjectSerializer serializer, HomeBlaze.Services.SubjectPathResolver pathResolver, HomeBlaze.Services.TypeProvider typeProvider, Microsoft.Extensions.Logging.ILogger<HomeBlaze.Storage.Internal.MarkdownContentParser>? logger = null) { }
         public System.Threading.Tasks.Task<HomeBlaze.Storage.Pages.MarkdownParseResult> ParseAsync(string? content, HomeBlaze.Storage.Files.MarkdownFile parent, System.Collections.Generic.IDictionary<string, Namotion.Interceptor.IInterceptorSubject> existingChildren, System.Threading.CancellationToken cancellationToken) { }
-        public string? RenderContent(string? content, HomeBlaze.Storage.Files.MarkdownFile parent) { }
+        public string? RenderContent(string? content, HomeBlaze.Storage.Files.MarkdownFile parent, bool includeSourcePaths = false) { }
         public string ResolveLink(string link, HomeBlaze.Storage.Files.MarkdownFile page) { }
     }
     public class MarkdownFrontmatter
