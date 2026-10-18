@@ -47,6 +47,26 @@ public class StorageMetadataTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenTheMetadataFileOfAFolderIsNamedInAnotherCase_ThenItIsIgnoredWithAWarning()
+    {
+        // Arrange
+        WriteFile("Docs/a.md");
+        WriteFile("Docs/.Metadata.json", """{ "title": "Documentation" }""");
+        var logger = new RecordingLogger<FluentStorageContainer>();
+        var storage = CreateStorage(logger: logger);
+
+        // Act
+        await storage.ConnectAsync(CancellationToken.None);
+
+        // Assert
+        var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
+        Assert.Equal(["a.md"], docs.Children.Keys);
+        Assert.Null(docs.Metadata);
+        var warning = Assert.Single(logger.Warnings);
+        Assert.Contains("Docs/.Metadata.json", warning);
+    }
+
+    [Fact]
     public async Task WhenAMetadataFileHoldsASubject_ThenAWarningSaysSo()
     {
         // Arrange

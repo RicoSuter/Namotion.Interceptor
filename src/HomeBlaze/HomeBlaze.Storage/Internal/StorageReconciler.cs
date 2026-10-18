@@ -344,13 +344,23 @@ internal sealed class StorageReconciler
     /// Reads and parses a metadata file from the storage. An empty document for a file that does not exist.
     /// </summary>
     /// <exception cref="InvalidOperationException">
-    /// The file cannot be read as metadata or cannot be written back, the path is a folder, or its folder is gone.
+    /// The file cannot be read as metadata or cannot be written back, the path is a folder, its folder is gone, or the
+    /// index holds the file in another case.
     /// </exception>
     public async Task<StorageMetadataDocument> ReadMetadataFileAsync(string path, CancellationToken cancellationToken)
     {
         if (_index.TryGet(path, out var entry) && entry.IsFolder)
         {
             throw new StorageRefusedException($"'{path}' is a folder and not a metadata file.");
+        }
+
+        // On a file system that ignores case, that file would be read and written here, and a pass ignores it.
+        foreach (var candidate in _index.Entries)
+        {
+            if (string.Equals(candidate.Path, path, StringComparison.OrdinalIgnoreCase) && candidate.Path != path)
+            {
+                throw new StorageRefusedException($"Rename '{candidate.Path}' to '{StoragePath.GetName(path)}' to make it the metadata file, then try again.");
+            }
         }
 
         var folder = StoragePath.GetParent(path);
@@ -518,7 +528,7 @@ internal sealed class StorageReconciler
             }
 
             // A directory named .metadata.json, which the path filter cannot tell from the file, would shadow it.
-            if (blob.IsFolder && string.Equals(StoragePath.GetName(path), StorageMetadataPath.FolderFileName, StringComparison.Ordinal))
+            if (blob.IsFolder && string.Equals(StoragePath.GetName(path), StorageMetadataPath.FolderFileName, StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }

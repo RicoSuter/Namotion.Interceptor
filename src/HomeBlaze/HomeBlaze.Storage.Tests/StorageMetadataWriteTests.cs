@@ -225,6 +225,29 @@ public class StorageMetadataWriteTests : StorageTestBase
         Assert.True(File.Exists(GetFullPath("Docs/.metadata.json/Notes.md")));
     }
 
+    [Theory]
+    [InlineData("Docs/Motor.Metadata.json", "Docs/Motor.metadata.json")]
+    [InlineData("Docs/.Metadata.json", "Docs/.metadata.json")]
+    public async Task WhenTheMetadataFileIsNamedInAnotherCase_ThenAWriteIsRefusedNamingBothNames(string actualPath, string expectedPath)
+    {
+        // Arrange
+        WriteFile("Docs/a.md");
+        WriteFile("Docs/Motor.json", SerializeMotor("Motor 1"));
+        WriteFile(actualPath, """{ "navTitle": "Pump" }""");
+        var storage = await ConnectAsync();
+        var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
+        IInterceptorSubject owner = expectedPath.EndsWith("/.metadata.json") ? docs : docs.Children["Motor"];
+
+        // Act
+        var exception = await Assert.ThrowsAsync<StorageRefusedException>(() =>
+            storage.SetMetadataAsync(owner, Values("""{ "icon": "Water" }"""), CancellationToken.None));
+
+        // Assert
+        Assert.Contains($"'{actualPath}'", exception.Message);
+        Assert.Contains($"'{StoragePath.GetName(expectedPath)}'", exception.Message);
+        Assert.False(File.Exists(GetFullPath(expectedPath)));
+    }
+
     [Fact]
     public async Task WhenOrderIsSet_ThenTheNamesComeFirstTheOtherChildrenKeepTheirOrderAndOtherKeysStay()
     {
