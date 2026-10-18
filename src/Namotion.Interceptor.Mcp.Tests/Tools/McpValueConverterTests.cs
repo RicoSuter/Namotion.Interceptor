@@ -87,6 +87,31 @@ public class McpValueConverterTests
         Assert.Throws<JsonException>(() => McpValueConverter.Deserialize(element, type));
     }
 
+    [Fact]
+    public void WhenRecordArgumentUsesCamelCaseNames_ThenMembersAreBound()
+    {
+        // Arrange
+        var value = JsonDocument.Parse("""{"message":"Door open","priority":"Low"}""").RootElement;
+
+        // Act
+        var result = McpValueConverter.Deserialize(value, typeof(McpMethodParameterTests.TestNotification));
+
+        // Assert
+        var notification = Assert.IsType<McpMethodParameterTests.TestNotification>(result);
+        Assert.Equal("Door open", notification.Message);
+        Assert.Equal(McpMethodParameterTests.TestPriority.Low, notification.Priority);
+    }
+
+    [Fact]
+    public void WhenRecordArgumentMissesARequiredMember_ThenThrowsJsonException()
+    {
+        // Arrange
+        var value = JsonDocument.Parse("""{"title":"No message"}""").RootElement;
+
+        // Act & Assert
+        Assert.Throws<JsonException>(() => McpValueConverter.Deserialize(value, typeof(McpMethodParameterTests.TestNotification)));
+    }
+
     [Flags]
     public enum TestPermissions
     {

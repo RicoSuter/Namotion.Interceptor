@@ -82,6 +82,79 @@ public class McpMethodParameterTests
         Assert.Equal("""{"name":"mode","type":"string","enum":["Off","On"]}""", enumJson);
     }
 
+    [Fact]
+    public void WhenParameterIsRecord_ThenListsItsMembersWithRequiredAndNullable()
+    {
+        // Act
+        var parameter = McpMethodParameter.Create("notification", typeof(TestNotification));
+
+        // Assert
+        Assert.Equal("object", parameter.Type);
+        var properties = parameter.Properties!;
+        Assert.Equal(["message", "title", "priority"], properties.Select(property => property.Name));
+        Assert.True(properties[0].IsRequired);
+        Assert.False(properties[0].IsNullable);
+        Assert.False(properties[1].IsRequired);
+        Assert.True(properties[1].IsNullable);
+        Assert.Equal(["Low", "Normal"], properties[2].EnumValues);
+    }
+
+    [Fact]
+    public void WhenRecordIsSerialized_ThenRequiredAndPropertiesAreWritten()
+    {
+        // Act
+        var json = JsonSerializer.Serialize(McpMethodParameter.Create("notification", typeof(TestNotification)));
+
+        // Assert
+        Assert.Equal(
+            """{"name":"notification","type":"object","properties":[{"name":"message","type":"string","required":true},{"name":"title","type":"string","nullable":true},{"name":"priority","type":"string","enum":["Low","Normal"]}]}""",
+            json);
+    }
+
+    [Fact]
+    public void WhenTypeReferencesItself_ThenTheNestedMemberHasNoProperties()
+    {
+        // Act
+        var parameter = McpMethodParameter.Create("node", typeof(TestNode));
+
+        // Assert
+        var next = Assert.Single(parameter.Properties!, property => property.Name == "next");
+        Assert.Equal("object", next.Type);
+        Assert.Null(next.Properties);
+    }
+
+    [Fact]
+    public void WhenParameterIsObject_ThenHasNoProperties()
+    {
+        // Act
+        var parameter = McpMethodParameter.Create("value", typeof(object));
+
+        // Assert
+        Assert.Null(parameter.Properties);
+    }
+
+    public sealed record TestNotification
+    {
+        public required string Message { get; init; }
+
+        public string? Title { get; init; }
+
+        public TestPriority Priority { get; init; }
+    }
+
+    public enum TestPriority
+    {
+        Low,
+        Normal
+    }
+
+    public sealed class TestNode
+    {
+        public string? Name { get; set; }
+
+        public TestNode? Next { get; set; }
+    }
+
     public enum TestMode
     {
         Off,

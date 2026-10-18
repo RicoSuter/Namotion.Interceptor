@@ -1,3 +1,6 @@
+using System.Reflection;
+using System.Runtime.CompilerServices;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using Namotion.Interceptor.Mcp.Tools;
 
@@ -49,24 +52,81 @@ public sealed record McpMethodParameter
     public string? Description { get; init; }
 
     /// <summary>
-    /// Describes a parameter of the given CLR type. A <see cref="Nullable{T}"/> type is always nullable.
+    /// Whether a member of an object argument must be given.
+    /// </summary>
+    [JsonPropertyName("required")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool IsRequired { get; init; }
+
+    /// <summary>
+    /// The members of an object argument, or null for other types and for types nested too deeply or recursively.
+    /// </summary>
+    [JsonPropertyName("properties")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<McpMethodParameter>? Properties { get; init; }
+
+    private const int MaximumPropertyDepth = 3;
+
+    /// <summary>
+    /// Describes a parameter of the given CLR type. A <see cref="Nullable{T}"/> type is always nullable. An object type
+    /// lists its public settable members, by their JSON name in camel case.
     /// </summary>
     /// <param name="name">The parameter name.</param>
     /// <param name="type">The CLR parameter type.</param>
     /// <param name="isNullable">Whether the argument may be null, for example a nullable reference type.</param>
     /// <param name="description">A hint on the meaning of the value, such as its unit or range.</param>
-    public static McpMethodParameter Create(string name, Type type, bool isNullable = false, string? description = null)
+    public static McpMethodParameter Create(string name, Type type, bool isNullable = false, string? description = null) =>
+        Create(name, type, isNullable, isRequired: false, description, depth: 0, visitedTypes: []);
+
+    private static McpMethodParameter Create(
+        string name, Type type, bool isNullable, bool isRequired, string? description, int depth, HashSet<Type> visitedTypes)
     {
         var underlyingType = Nullable.GetUnderlyingType(type);
         var valueType = underlyingType ?? type;
+        var schemaType = JsonSchemaTypeMapper.ToJsonSchemaType(valueType) ?? "object";
         return new McpMethodParameter
         {
             Name = name,
-            Type = JsonSchemaTypeMapper.ToJsonSchemaType(valueType) ?? "object",
+            Type = schemaType,
             Format = JsonSchemaTypeMapper.GetFormat(valueType),
             EnumValues = valueType.IsEnum ? Enum.GetNames(valueType) : null,
             IsNullable = isNullable || underlyingType is not null,
-            Description = description
+            IsRequired = isRequired,
+            Description = description,
+            Properties = schemaType == "object" ? CreateProperties(valueType, depth, visitedTypes) : null
         };
+    }
+
+    private static McpMethodParameter[]? CreateProperties(Type type, int depth, HashSet<Type> visitedTypes)
+    {
+        if (type == typeof(object) || type.IsAbstract || type.IsInterface || depth >= MaximumPropertyDepth || !visitedTypes.Add(type))
+        {
+            return null;
+        }
+
+        try
+        {
+            // Owned by this call: the context caches the members it reads and is not thread-safe.
+            var nullabilityContext = new NullabilityInfoContext();
+            var properties = type
+                .GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                .Where(property => property.GetMethod?.IsPublic == true && property.SetMethod?.IsPublic == true &&
+                                   property.GetIndexParameters().Length == 0 && !property.IsDefined(typeof(JsonIgnoreAttribute)))
+                .Select(property => Create(
+                    property.GetCustomAttribute<JsonPropertyNameAttribute>()?.Name ?? JsonNamingPolicy.CamelCase.ConvertName(property.Name),
+                    property.PropertyType,
+                    nullabilityContext.Create(property).WriteState == NullabilityState.Nullable,
+                    property.IsDefined(typeof(RequiredMemberAttribute)),
+                    description: null,
+                    depth + 1,
+                    visitedTypes))
+                .ToArray();
+
+            return properties.Length > 0 ? properties : null;
+        }
+        finally
+        {
+            visitedTypes.Remove(type);
+        }
     }
 }

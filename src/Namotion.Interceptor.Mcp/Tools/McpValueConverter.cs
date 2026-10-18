@@ -8,8 +8,10 @@ namespace Namotion.Interceptor.Mcp.Tools;
 /// </summary>
 public static class McpValueConverter
 {
+    // Members are listed to agents in camel case and bound in any case.
     private static readonly JsonSerializerOptions SerializerOptions = new()
     {
+        PropertyNameCaseInsensitive = true,
         Converters = { new JsonStringEnumConverter() }
     };
 
