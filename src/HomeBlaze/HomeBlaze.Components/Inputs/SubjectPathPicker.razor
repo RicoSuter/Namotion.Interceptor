@@ -222,6 +222,9 @@
                 // For collection/dictionary, show child subjects by index
                 foreach (var child in parent.Property.Children)
                 {
+                    if (!IsOffered(child.Subject))
+                        continue;
+
                     string childPath;
                     if (isInlinePathsProperty)
                     {
@@ -281,12 +284,19 @@
                 {
                     foreach (var child in property.Children)
                     {
+                        if (!IsOffered(child.Subject))
+                            continue;
+
                         var childKey = child.Index?.ToString() ?? "";
                         var childPath = $"{basePath.TrimEnd('/')}/{childKey}";
                         children.Add(CreateSubjectTreeItem(child.Subject, childKey, childPath));
                     }
                     continue;
                 }
+
+                // A reference to a subject that is not offered is left out with what it holds.
+                if (property is { IsSubjectReference: true, Children.Length: > 0 } && !IsOffered(property.Children[0].Subject))
+                    continue;
 
                 // Determine if property has state attribute
                 var hasState = property.GetStateMetadata() != null;
@@ -295,7 +305,7 @@
                 var isExpandable = false;
                 if (property.IsSubjectDictionary || property.IsSubjectCollection)
                 {
-                    isExpandable = property.Children.Length > 0;
+                    isExpandable = property.Children.Any(child => IsOffered(child.Subject));
                 }
                 else if (property is { IsSubjectReference: true, Children.Length: > 0 })
                 {
@@ -500,13 +510,13 @@
             if (IsListedMethod(p, method))
                 return true;
 
-            // Collection/Dictionary with children - will be shown
-            if ((p.IsSubjectDictionary || p.IsSubjectCollection) && p.Children.Length > 0)
+            // Collection/Dictionary with children that are offered - will be shown
+            if ((p.IsSubjectDictionary || p.IsSubjectCollection) && p.Children.Any(child => IsOffered(child.Subject)))
                 return true;
 
-            // Reference with expandable subject - will be shown
+            // Reference with an offered, expandable subject - will be shown
             if (p is { IsSubjectReference: true, Children.Length: > 0 })
-                return HasExpandableProperties(p.Children[0].Subject);
+                return IsOffered(p.Children[0].Subject) && HasExpandableProperties(p.Children[0].Subject);
 
             // Property with attributes that can be selected - will be shown
             return !p.IsAttribute && !p.CanContainSubjects && HasListedAttributes(p);
@@ -531,6 +541,11 @@
     {
         return method is not null && !method.IsExcludedFrom(ExclusionTarget.UserInterface) && CanSelectProperty is not null && CanSelectProperty(property);
     }
+
+    // A subject whose type is excluded from user interfaces, such as the metadata of a subject, is not offered, nor what
+    // it holds.
+    private static bool IsOffered(IInterceptorSubject subject)
+        => !ExcludeFromAttribute.IsExcluded(subject.GetType(), ExclusionTarget.UserInterface);
 
     private static string GetMethodIcon(MethodMetadata method)
     {

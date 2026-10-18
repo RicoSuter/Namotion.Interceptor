@@ -1,4 +1,5 @@
 using HomeBlaze.Abstractions;
+using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Components.Abstractions.Attributes;
 using HomeBlaze.Components.Abstractions.Pages;
 using HomeBlaze.Services;
@@ -25,7 +26,8 @@ public class NavigationItemResolver
     }
 
     /// <summary>
-    /// Gets navigation items for direct children of a subject, in the order of <see cref="ChildOrdering"/>.
+    /// Gets navigation items for direct children of a subject, in the order of <see cref="ChildOrdering"/>. A child whose
+    /// type is excluded from user interfaces is left out with what it holds.
     /// </summary>
     public IEnumerable<NavigationItem> GetChildItems(IInterceptorSubject parent)
     {
@@ -78,7 +80,7 @@ public class NavigationItemResolver
             foreach (var childInfo in prop.Children)
             {
                 var child = childInfo.Subject;
-                if (child == null)
+                if (child == null || ExcludeFromAttribute.IsExcluded(child.GetType(), ExclusionTarget.UserInterface))
                     continue;
 
                 var key = childInfo.Index?.ToString() ?? prop.Name;
@@ -172,7 +174,7 @@ public class NavigationItemResolver
             foreach (var childInfo in prop.Children)
             {
                 var child = childInfo.Subject;
-                if (child == null)
+                if (child == null || ExcludeFromAttribute.IsExcluded(child.GetType(), ExclusionTarget.UserInterface))
                     continue;
 
                 var isChildInNavigationBar = isInNavigationBar &&

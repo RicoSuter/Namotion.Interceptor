@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Text.Json;
+using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Components.Abstractions.Attributes;
 using HomeBlaze.Components.Abstractions.Pages;
 using HomeBlaze.Host.Services.Navigation;
@@ -322,6 +323,25 @@ public class NavigationItemResolverTests
         Assert.True(item.IsFolder);
         Assert.False(item.HasNavigationBarPages);
     }
+
+    [Fact]
+    public void WhenAChildIsExcludedFromTheUserInterface_ThenNavigationLeavesItOutWithWhatItHolds()
+    {
+        // Arrange
+        var root = CreateFolder(new()
+        {
+            ["Hidden"] = new NavigationTestHiddenPage(_context),
+            ["Folder"] = CreateFolder(new() { ["Hidden"] = new NavigationTestHiddenPage(_context) }),
+            ["Shown"] = new NavigationTestPage(_context)
+        });
+        var resolver = CreateResolver(root);
+
+        // Act
+        var items = resolver.GetChildItems(root);
+
+        // Assert
+        Assert.Equal(["Shown"], items.Select(item => item.Title));
+    }
 }
 
 [InterceptorSubject]
@@ -400,6 +420,17 @@ public partial class NavigationTestTopBarFolderPage : IPage
 
 [SubjectComponent(SubjectComponentType.Page, typeof(NavigationTestTopBarFolderPage))]
 public class NavigationTestTopBarFolderPageComponent
+{
+}
+
+[InterceptorSubject]
+[ExcludeFrom(ExclusionTarget.UserInterface)]
+public partial class NavigationTestHiddenPage
+{
+}
+
+[SubjectComponent(SubjectComponentType.Page, typeof(NavigationTestHiddenPage))]
+public class NavigationTestHiddenPageComponent
 {
 }
 
