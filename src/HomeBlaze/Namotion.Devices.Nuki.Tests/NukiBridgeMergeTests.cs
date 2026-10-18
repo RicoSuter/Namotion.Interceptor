@@ -86,6 +86,22 @@ public class NukiBridgeMergeTests
     }
 
     [Fact]
+    public async Task WhenTheTypeOfALockChanges_ThenANewInstanceWithTheNewTypeReplacesIt()
+    {
+        // Arrange
+        await using var test = new TestBridge();
+        test.Merge(NukiFixtures.SmartLock(state: 1, deviceType: 0));
+        var smartLock = test.Lock;
+
+        // Act
+        test.Merge(NukiFixtures.SmartLock(state: 1, deviceType: 4));
+
+        // Assert
+        Assert.NotSame(smartLock, test.Lock);
+        Assert.Equal(NukiDeviceType.SmartLock3, test.Lock.DeviceType);
+    }
+
+    [Fact]
     public async Task WhenDeviceTypeIsUnknown_ThenItIsSkipped()
     {
         // Arrange

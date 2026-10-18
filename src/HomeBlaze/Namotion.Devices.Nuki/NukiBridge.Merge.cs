@@ -19,7 +19,7 @@ public partial class NukiBridge
     }
 
     /// <summary>
-    /// Updates the existing devices and creates new ones. A collection is replaced only when its set of devices changed.
+    /// Updates the existing devices and creates new ones. A collection is replaced only when its set of instances changed.
     /// </summary>
     internal void MergeDevices(IReadOnlyList<NukiDeviceResponse> devices)
     {
@@ -33,12 +33,12 @@ public partial class NukiBridge
             MergeDevice(device, existingLocks, locks, existingOpeners, openers);
         }
 
-        if (!HaveSameKeys(existingLocks, locks))
+        if (!HaveSameInstances(existingLocks, locks))
         {
             Locks = locks;
         }
 
-        if (!HaveSameKeys(existingOpeners, openers))
+        if (!HaveSameInstances(existingOpeners, openers))
         {
             Openers = openers;
         }
@@ -55,7 +55,9 @@ public partial class NukiBridge
         var key = device.NukiId.ToString(CultureInfo.InvariantCulture);
         if (IsLockDeviceType(deviceType))
         {
-            var smartLock = existingLocks.GetValueOrDefault(key) ?? new NukiSmartLock(this, device.NukiId, deviceType);
+            var smartLock = existingLocks.GetValueOrDefault(key) is { } existing && existing.DeviceType == deviceType
+                ? existing
+                : new NukiSmartLock(this, device.NukiId, deviceType);
             smartLock.Update(device);
             locks[key] = smartLock;
         }
@@ -74,16 +76,17 @@ public partial class NukiBridge
     private static bool IsLockDeviceType(NukiDeviceType deviceType) =>
         deviceType is NukiDeviceType.SmartLock or NukiDeviceType.SmartDoor or NukiDeviceType.SmartLock3;
 
-    private static bool HaveSameKeys<T>(Dictionary<string, T> existing, Dictionary<string, T> updated)
+    private static bool HaveSameInstances<T>(Dictionary<string, T> existing, Dictionary<string, T> updated)
+        where T : class
     {
         if (existing.Count != updated.Count)
         {
             return false;
         }
 
-        foreach (var key in existing.Keys)
+        foreach (var (key, device) in existing)
         {
-            if (!updated.ContainsKey(key))
+            if (!updated.TryGetValue(key, out var updatedDevice) || !ReferenceEquals(device, updatedDevice))
             {
                 return false;
             }
