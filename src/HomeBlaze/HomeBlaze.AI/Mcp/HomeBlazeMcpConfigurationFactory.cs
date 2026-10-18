@@ -53,7 +53,7 @@ internal static class HomeBlazeMcpConfigurationFactory
         };
 
         var excludeTypes = typeRegistry.RegisteredTypes
-            .Where(type => type.GetCustomAttributes(typeof(ExcludeFromBrowsingAttribute), true).Length > 0)
+            .Where(type => ExcludeFromAttribute.IsExcluded(type, ExclusionTarget.Agents))
             .ToArray();
 
         var invoker = new McpMethodInvoker(

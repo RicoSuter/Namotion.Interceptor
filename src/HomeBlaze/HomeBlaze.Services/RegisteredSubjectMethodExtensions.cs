@@ -11,51 +11,17 @@ namespace HomeBlaze.Services;
 public static class RegisteredSubjectMethodExtensions
 {
     /// <summary>
-    /// Gets all methods (operations and queries) for the subject, ordered by Position.
+    /// Gets the methods (operations and queries) of the subject that are offered to the target, so not excluded from
+    /// it, ordered by Position.
     /// </summary>
-    public static IReadOnlyList<MethodMetadata> GetAllMethods(this RegisteredSubject subject)
-        => subject.GetAllMethods(MethodAudience.All);
-
-    /// <summary>
-    /// Gets the methods (operations and queries) of the subject that are meant for any of the given audiences, see
-    /// <see cref="MethodMetadata.IsFor"/>, ordered by Position.
-    /// </summary>
-    public static IReadOnlyList<MethodMetadata> GetAllMethods(this RegisteredSubject subject, MethodAudience audience)
+    public static IReadOnlyList<MethodMetadata> GetAllMethods(this RegisteredSubject subject, ExclusionTarget target)
     {
         return subject.Properties
             .Where(CanContainMethodMetadata)
-            .Select(p => p.GetValue())
+            .Select(property => property.GetValue())
             .OfType<MethodMetadata>()
-            .Where(m => m.IsFor(audience))
-            .OrderBy(m => m.Position)
-            .ToList();
-    }
-
-    /// <summary>
-    /// Gets all operation methods for the subject, ordered by Position.
-    /// </summary>
-    public static IReadOnlyList<MethodMetadata> GetOperationMethods(this RegisteredSubject subject)
-    {
-        return subject.Properties
-            .Where(CanContainMethodMetadata)
-            .Select(p => p.GetValue())
-            .OfType<MethodMetadata>()
-            .Where(m => m.Kind == MethodKind.Operation)
-            .OrderBy(m => m.Position)
-            .ToList();
-    }
-
-    /// <summary>
-    /// Gets all query methods for the subject, ordered by Position.
-    /// </summary>
-    public static IReadOnlyList<MethodMetadata> GetQueryMethods(this RegisteredSubject subject)
-    {
-        return subject.Properties
-            .Where(CanContainMethodMetadata)
-            .Select(p => p.GetValue())
-            .OfType<MethodMetadata>()
-            .Where(m => m.Kind == MethodKind.Query)
-            .OrderBy(m => m.Position)
+            .Where(method => !method.IsExcludedFrom(target))
+            .OrderBy(method => method.Position)
             .ToList();
     }
 

@@ -16,7 +16,7 @@ namespace HomeBlaze.Storage.Internal;
 /// first segment can be the name of a block on that page.
 /// </summary>
 [InterceptorSubject]
-[ExcludeFromBrowsing]
+[ExcludeFrom(ExclusionTarget.All)]
 public partial class RenderExpression : ITitleProvider
 {
     private readonly SubjectPathResolver _pathResolver;

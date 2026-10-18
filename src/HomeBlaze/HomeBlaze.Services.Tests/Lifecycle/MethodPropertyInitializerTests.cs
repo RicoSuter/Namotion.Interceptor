@@ -65,20 +65,20 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public void WhenAMethodHasAnAudience_ThenItsMetadataHasIt()
+    public void WhenAMethodIsExcluded_ThenItsMetadataHasTheTargets()
     {
         // Arrange
-        var registered = new MethodAudienceTestSubject(CreateContext()).TryGetRegisteredSubject()!;
+        var registered = new MethodExclusionTestSubject(CreateContext()).TryGetRegisteredSubject()!;
 
         // Act
-        var everyone = registered.TryGetProperty("Everyone")?.GetValue() as MethodMetadata;
-        var people = registered.TryGetProperty("People")?.GetValue() as MethodMetadata;
-        var agents = registered.TryGetProperty("Agents")?.GetValue() as MethodMetadata;
+        var everywhere = registered.TryGetProperty("Everywhere")?.GetValue() as MethodMetadata;
+        var notInUserInterface = registered.TryGetProperty("NotInUserInterface")?.GetValue() as MethodMetadata;
+        var notForAgents = registered.TryGetProperty("NotForAgents")?.GetValue() as MethodMetadata;
 
         // Assert
-        Assert.Equal(MethodAudience.All, everyone?.Audience);
-        Assert.Equal(MethodAudience.People, people?.Audience);
-        Assert.Equal(MethodAudience.Agents, agents?.Audience);
+        Assert.Equal((ExclusionTarget)0, everywhere?.ExcludedFrom);
+        Assert.Equal(ExclusionTarget.UserInterface, notInUserInterface?.ExcludedFrom);
+        Assert.Equal(ExclusionTarget.Agents, notForAgents?.ExcludedFrom);
     }
 
     [Fact]
@@ -525,7 +525,7 @@ public class MethodPropertyInitializerTests
         var metadata = property!.GetValue() as MethodMetadata;
 
         // Assert — only one property registered for this method name
-        var allMethods = registered.GetAllMethods();
+        var allMethods = registered.GetAllMethods(ExclusionTarget.UserInterface);
         Assert.Equal(1, allMethods.Count(m => m.Title == "Interface Op" || m.Title == "InterfaceOperation"));
     }
 
@@ -645,7 +645,7 @@ public class MethodPropertyInitializerTests
         var registered = subject.TryGetRegisteredSubject()!;
 
         // Act
-        var methods = registered.GetAllMethods();
+        var methods = registered.GetAllMethods(ExclusionTarget.UserInterface);
 
         // Assert
         Assert.Empty(methods);

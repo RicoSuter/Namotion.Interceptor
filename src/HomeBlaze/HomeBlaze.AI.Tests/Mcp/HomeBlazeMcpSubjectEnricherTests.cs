@@ -190,7 +190,7 @@ public class HomeBlazeMcpSubjectEnricherTests
     }
 
     [Fact]
-    public void WhenMethodIsOnlyForPeople_ThenItIsExcluded()
+    public void WhenMethodIsExcludedFromAgents_ThenItIsNotInTheMethods()
     {
         // Arrange
         var context = CreateContext();
@@ -202,7 +202,7 @@ public class HomeBlazeMcpSubjectEnricherTests
             Kind = MethodKind.Operation,
             Title = "Open",
             PropertyName = "Open",
-            Audience = MethodAudience.People
+            ExcludedFrom = ExclusionTarget.Agents
         });
 
         registered.AddProperty<MethodMetadata>("GetOrder", _ => new MethodMetadata(_ => null)
@@ -210,7 +210,7 @@ public class HomeBlazeMcpSubjectEnricherTests
             Kind = MethodKind.Query,
             Title = "Get Order",
             PropertyName = "GetOrder",
-            Audience = MethodAudience.Agents
+            ExcludedFrom = ExclusionTarget.UserInterface
         });
 
         var enricher = CreateEnricher();

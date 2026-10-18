@@ -57,7 +57,7 @@ internal class HomeBlazeMcpSubjectEnricher : IMcpSubjectEnricher
             metadata["$interfaces"] = interfaces;
         }
 
-        var methods = subject.GetAllMethods(MethodAudience.Agents)
+        var methods = subject.GetAllMethods(ExclusionTarget.Agents)
             .Where(method => !_isReadOnly || method.Kind == MethodKind.Query)
             .Select(method => method.PropertyName)
             .ToArray();

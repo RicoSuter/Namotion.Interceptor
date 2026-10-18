@@ -58,3 +58,11 @@ public interface ITestSensorInterface
 {
     decimal Temperature { get; }
 }
+
+[InterceptorSubject]
+[ExcludeFrom(ExclusionTarget.Agents)]
+public partial class AgentExcludedThing;
+
+[InterceptorSubject]
+[ExcludeFrom(ExclusionTarget.UserInterface)]
+public partial class UserInterfaceExcludedThing;

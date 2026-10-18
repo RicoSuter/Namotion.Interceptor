@@ -1,4 +1,5 @@
 using System.Text.Json;
+using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.AI;
 using HomeBlaze.AI.Mcp;
 using HomeBlaze.Services;
@@ -10,6 +11,7 @@ using ModelContextProtocol.Server;
 using Namotion.Interceptor.Mcp;
 using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Mcp.Tools;
+using Namotion.Interceptor.Registry;
 using Xunit;
 
 namespace HomeBlaze.AI.Tests.Mcp;
@@ -143,6 +145,50 @@ public class HomeBlazeMcpConfigurationFactoryTests
         // Assert
         Assert.True(result.GetProperty("success").GetBoolean());
         Assert.Equal(23m, room.Temperature);
+    }
+
+    [Fact]
+    public void WhenATypeIsExcludedFromAgents_ThenBrowseAndSearchDoNotListIt()
+    {
+        // Arrange
+        var (room, _) = HomeBlazeMcpToolProviderTests.CreateTestSetup(isReadOnly: false);
+        var typeProvider = new TypeProvider();
+        typeProvider.AddTypes([typeof(AgentExcludedThing), typeof(UserInterfaceExcludedThing)]);
+        var services = CreateServices(services => services.AddSingleton(new SubjectTypeRegistry(typeProvider)));
+
+        // Act
+        var configuration = HomeBlazeMcpConfigurationFactory.Create(services, () => room, isReadOnly: false, forAgents: false);
+
+        // Assert
+        Assert.Contains(typeof(AgentExcludedThing), configuration.ExcludeTypes);
+        Assert.DoesNotContain(typeof(UserInterfaceExcludedThing), configuration.ExcludeTypes);
+    }
+
+    [Fact]
+    public async Task WhenASubjectIsExcludedFromAgents_ThenItsMethodsAreStillCalledByItsPath()
+    {
+        // Arrange
+        var (room, _) = HomeBlazeMcpToolProviderTests.CreateTestSetup(isReadOnly: false);
+        var excluded = new AgentExcludedThing();
+        room.TryGetRegisteredSubject()!.AddProperty<AgentExcludedThing>("Excluded", _ => excluded);
+        excluded.TryGetRegisteredSubject()!.AddProperty<MethodMetadata>("Ping", _ => new MethodMetadata(_ => "pong")
+        {
+            Kind = MethodKind.Query,
+            PropertyName = "Ping",
+            ResultType = typeof(string)
+        });
+        var typeProvider = new TypeProvider();
+        typeProvider.AddTypes([typeof(AgentExcludedThing)]);
+        var services = CreateServices(services => services.AddSingleton(new SubjectTypeRegistry(typeProvider)));
+        var configuration = HomeBlazeMcpConfigurationFactory.Create(services, () => room, isReadOnly: false, forAgents: false);
+        var invokeQuery = new McpToolFactory(room, configuration).CreateTools().First(tool => tool.Name == "invoke_query");
+
+        // Act
+        var result = await invokeQuery.Handler(
+            JsonSerializer.SerializeToElement(new { path = "Excluded", method = "Ping" }), CancellationToken.None);
+
+        // Assert
+        Assert.Equal("pong", JsonSerializer.SerializeToElement(result).GetProperty("result").GetString());
     }
 
     /// <summary>Creates the services the configuration factory needs, after <paramref name="configure"/> added others.</summary>

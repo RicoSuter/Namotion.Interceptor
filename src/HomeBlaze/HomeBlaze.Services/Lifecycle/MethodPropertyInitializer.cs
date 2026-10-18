@@ -105,7 +105,7 @@ public class MethodPropertyInitializer : ILifecycleHandler
             Position = attribute.Position,
             Category = traits.Category,
             RequiresConfirmation = traits.RequiresConfirmation,
-            Audience = attribute.Audience,
+            ExcludedFrom = traits.ExcludedFrom,
             Parameters = traits.Parameters,
             ResultType = resultType,
         };
@@ -133,7 +133,7 @@ public class MethodPropertyInitializer : ILifecycleHandler
     }
 
     /// <summary>The category, the confirmation and the parameters of a discovered method of one subject type.</summary>
-    private readonly record struct MethodTraits(string? Category, bool RequiresConfirmation, MethodParameter[] Parameters);
+    private readonly record struct MethodTraits(string? Category, bool RequiresConfirmation, MethodParameter[] Parameters, ExclusionTarget ExcludedFrom);
 
     /// <summary>The interface maps of a subject type and the traits of its methods, computed once per method.</summary>
     private sealed class SubjectTypeMethods
@@ -166,7 +166,8 @@ public class MethodPropertyInitializer : ILifecycleHandler
                 RequiresConfirmation(method) ||
                 (classMethod is not null && AnyOverriddenMethodRequiresConfirmation(classMethod)) ||
                 implementedMethods.Exists(RequiresConfirmation),
-                CreateParameters(method));
+                CreateParameters(method),
+                method.GetCustomAttribute<ExcludeFromAttribute>()?.Targets ?? default(ExclusionTarget));
         }
 
         private static MethodParameter[] CreateParameters(MethodInfo method)

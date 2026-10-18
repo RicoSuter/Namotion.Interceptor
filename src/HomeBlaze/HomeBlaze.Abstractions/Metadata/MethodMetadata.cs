@@ -82,9 +82,9 @@ public class MethodMetadata
     public bool RequiresConfirmation { get; init; }
 
     /// <summary>
-    /// Who the method is meant for, see <see cref="IsFor"/>.
+    /// The targets the method is excluded from, from its <see cref="ExcludeFromAttribute"/>; none by default.
     /// </summary>
-    public MethodAudience Audience { get; init; } = MethodAudience.All;
+    public ExclusionTarget ExcludedFrom { get; init; }
 
     /// <summary>
     /// The method's parameter descriptors.
@@ -98,9 +98,9 @@ public class MethodMetadata
     public Type? ResultType { get; init; }
 
     /// <summary>
-    /// Gets whether the method is meant for any of the given audiences.
+    /// Gets whether the method is excluded from any of the given targets.
     /// </summary>
-    public bool IsFor(MethodAudience audience) => (Audience & audience) != 0;
+    public bool IsExcludedFrom(ExclusionTarget target) => (ExcludedFrom & target) != 0;
 
     /// <summary>
     /// Invokes the method on the bound subject with the provided user-input parameters.

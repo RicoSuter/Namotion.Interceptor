@@ -617,13 +617,13 @@ public class HomeBlazeMcpToolProviderTests
     }
 
     [Fact]
-    public async Task WhenListMethods_ThenOnlyTheMethodsForAgentsAreListed()
+    public async Task WhenListMethods_ThenTheMethodsExcludedFromAgentsAreLeftOut()
     {
         // Arrange
         var (room, factory) = CreateTestSetup(isReadOnly: false);
-        AddMethod(room, "ForAll", MethodAudience.All, () => { });
-        AddMethod(room, "ForPeople", MethodAudience.People, () => { });
-        AddMethod(room, "ForAgents", MethodAudience.Agents, () => { });
+        AddMethod(room, "Everywhere", (ExclusionTarget)0, () => { });
+        AddMethod(room, "NotForAgents", ExclusionTarget.Agents, () => { });
+        AddMethod(room, "NotInUserInterface", ExclusionTarget.UserInterface, () => { });
         var tool = factory.CreateTools().First(t => t.Name == "list_methods");
 
         // Act
@@ -632,36 +632,36 @@ public class HomeBlazeMcpToolProviderTests
         // Assert
         var names = JsonSerializer.SerializeToElement(result).GetProperty("methods").EnumerateArray()
             .Select(method => method.GetProperty("name").GetString());
-        Assert.Equal(["ForAll", "ForAgents"], names);
+        Assert.Equal(["Everywhere", "NotInUserInterface"], names);
     }
 
     [Fact]
-    public async Task WhenInvokeMethodOnlyForPeople_ThenItIsNotFoundAndNotInvoked()
+    public async Task WhenInvokeMethodExcludedFromAgents_ThenItIsNotFoundAndNotInvoked()
     {
         // Arrange
         var (room, factory) = CreateTestSetup(isReadOnly: false);
         var isInvoked = false;
-        AddMethod(room, "ForPeople", MethodAudience.People, () => isInvoked = true);
+        AddMethod(room, "NotForAgents", ExclusionTarget.Agents, () => isInvoked = true);
 
         // Act
-        var error = await InvokeForErrorAsync(factory, "ForPeople", parameters: null);
+        var error = await InvokeForErrorAsync(factory, "NotForAgents", parameters: null);
 
         // Assert
-        Assert.Equal("Method not found: ForPeople", error);
+        Assert.Equal("Method not found: NotForAgents", error);
         Assert.False(isInvoked);
     }
 
     [Fact]
-    public async Task WhenInvokeMethodOnlyForAgents_ThenItIsInvoked()
+    public async Task WhenInvokeMethodExcludedFromTheUserInterface_ThenItIsInvoked()
     {
         // Arrange
         var (room, factory) = CreateTestSetup(isReadOnly: false);
         var isInvoked = false;
-        AddMethod(room, "ForAgents", MethodAudience.Agents, () => isInvoked = true);
+        AddMethod(room, "NotInUserInterface", ExclusionTarget.UserInterface, () => isInvoked = true);
         var tool = factory.CreateTools().First(t => t.Name == "invoke_operation");
 
         // Act
-        var input = JsonSerializer.SerializeToElement(new { path = "", method = "ForAgents" });
+        var input = JsonSerializer.SerializeToElement(new { path = "", method = "NotInUserInterface" });
         var result = await tool.Handler(input, CancellationToken.None);
 
         // Assert
@@ -805,7 +805,7 @@ public class HomeBlazeMcpToolProviderTests
     private static void AddMethod(TestThing room, MethodMetadata method) =>
         room.TryGetRegisteredSubject()!.AddProperty<MethodMetadata>(method.PropertyName, _ => method);
 
-    private static void AddMethod(TestThing room, string name, MethodAudience audience, Action invoke)
+    private static void AddMethod(TestThing room, string name, ExclusionTarget excludedFrom, Action invoke)
     {
         room.TryGetRegisteredSubject()!.AddProperty<MethodMetadata>(name, _ => new MethodMetadata(_ =>
         {
@@ -816,7 +816,7 @@ public class HomeBlazeMcpToolProviderTests
             Kind = MethodKind.Operation,
             Title = name,
             PropertyName = name,
-            Audience = audience
+            ExcludedFrom = excludedFrom
         });
     }
 

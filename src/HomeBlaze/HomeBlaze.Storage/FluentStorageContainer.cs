@@ -650,65 +650,6 @@ public partial class FluentStorageContainer :
         }, cancellationToken);
     }
 
-    /// <summary>
-    /// Writes the metadata of a child of a folder that is stored as a JSON file, given by its name.
-    /// </summary>
-    /// <param name="folder">The path of the folder within the storage, empty for the root.</param>
-    /// <param name="name">The name of the child.</param>
-    /// <param name="metadata">The metadata, null to remove it.</param>
-    /// <param name="cancellationToken">Cancels the write.</param>
-    /// <exception cref="ArgumentException">The name is not the name of a child stored as a JSON file.</exception>
-    /// <exception cref="InvalidOperationException">The folder is not in the tree, or the metadata file could not be read.</exception>
-    internal async Task WriteChildMetadataAsync(string folder, string name, SubjectMetadata? metadata, CancellationToken cancellationToken)
-    {
-        var connection = Connection;
-        await RunOperationAsync(connection, token =>
-        {
-            var children = GetChildren(connection, folder, out _);
-            if (!children.TryGetValue(name, out var child) || !TryGetJsonEntry(connection, child, out var entry))
-            {
-                var namesWithMetadata = children
-                    .Where(pair => TryGetJsonEntry(connection, pair.Value, out _))
-                    .Select(static pair => pair.Key)
-                    .Order(StringComparer.Ordinal);
-                throw new ArgumentException(
-                    $"'{name}' is not a child of the folder stored as a JSON file. Children with metadata: {FormatNames(namesWithMetadata)}.",
-                    nameof(name));
-            }
-
-            return WriteSubjectMetadataAsync(connection, entry, metadata, token);
-        }, cancellationToken);
-    }
-
-    /// <summary>
-    /// Gets the metadata of a folder and the metadata of its children that are stored as JSON files.
-    /// </summary>
-    /// <param name="folder">The path of the folder within the storage, empty for the root.</param>
-    /// <param name="cancellationToken">Cancels waiting for the worker.</param>
-    /// <exception cref="InvalidOperationException">The folder is not in the tree.</exception>
-    internal async Task<ContainerMetadata> GetContainerMetadataAsync(string folder, CancellationToken cancellationToken)
-    {
-        var connection = Connection;
-        ContainerMetadata? result = null;
-        await RunOperationAsync(connection, token =>
-        {
-            var children = GetChildren(connection, folder, out var virtualFolder);
-            var childrenMetadata = new Dictionary<string, SubjectMetadata?>(StringComparer.Ordinal);
-            foreach (var (name, child) in children)
-            {
-                if (TryGetJsonEntry(connection, child, out _))
-                {
-                    childrenMetadata[name] = child.TryGetSubjectMetadata();
-                }
-            }
-
-            result = new ContainerMetadata(virtualFolder?.Metadata, childrenMetadata);
-            return Task.CompletedTask;
-        }, cancellationToken);
-
-        return result!;
-    }
-
     private Task WriteSubjectMetadataAsync(
         StorageConnection connection, StorageEntry entry, SubjectMetadata? metadata, CancellationToken cancellationToken)
     {
@@ -1147,43 +1088,6 @@ public partial class FluentStorageContainer :
     [Operation(Title = "Create Markdown File", Description = "Creates a new markdown file with the given name (ending in .md) and content in this folder.", Icon = "NoteAdd", Position = 2)]
     public Task CreateMarkdownFileAsync(string name, string content, CancellationToken cancellationToken)
         => CreateMarkdownFileAsync(folderPath: string.Empty, name, content, cancellationToken);
-
-    /// <summary>
-    /// Gets the names of the children of the root in the order in which they are shown.
-    /// </summary>
-    /// <exception cref="InvalidOperationException">The storage is not connected.</exception>
-    [Query(Title = "Get Order", Description = MetadataMethodDescriptions.GetOrder, Position = 3, Audience = MethodAudience.Agents)]
-    public Task<string[]> GetOrderAsync(CancellationToken cancellationToken)
-        => GetChildOrderAsync(string.Empty, cancellationToken);
-
-    /// <summary>
-    /// Stores the order of the children of the root: the given names first, in the given order, then the other
-    /// children in the order in which they are shown.
-    /// </summary>
-    /// <exception cref="ArgumentException">A name is given more than once, or is not a child of the root.</exception>
-    /// <exception cref="InvalidOperationException">The storage is not connected, or the metadata file could not be read.</exception>
-    [Operation(Title = "Set Order", Description = MetadataMethodDescriptions.SetOrder, Position = 4, Audience = MethodAudience.Agents)]
-    public Task SetOrderAsync(string[] names, CancellationToken cancellationToken)
-        => SetChildOrderAsync(string.Empty, names, cancellationToken);
-
-    /// <summary>
-    /// Gets the metadata of the children of the root that are stored as JSON files. The root has no metadata of its own.
-    /// </summary>
-    /// <exception cref="InvalidOperationException">The storage is not connected.</exception>
-    [Query(Title = "Get Metadata", Description = MetadataMethodDescriptions.GetMetadata, Position = 5, Audience = MethodAudience.Agents)]
-    public Task<ContainerMetadata> GetMetadataAsync(CancellationToken cancellationToken)
-        => GetContainerMetadataAsync(string.Empty, cancellationToken);
-
-    /// <summary>
-    /// Writes the navigation metadata of a child of the root that is stored as a JSON file. A null or blank value is removed.
-    /// </summary>
-    /// <exception cref="ArgumentException">The name is not the name of a child stored as a JSON file.</exception>
-    /// <exception cref="InvalidOperationException">The storage is not connected, or the metadata file could not be read.</exception>
-    [Operation(Title = "Set Child Metadata", Description = MetadataMethodDescriptions.SetChildMetadata, Position = 6, Audience = MethodAudience.Agents)]
-    public Task SetChildMetadataAsync(
-        string name, string? navigationTitle, string? icon, NavigationLocation? location, AppBarAlignment? alignment,
-        CancellationToken cancellationToken)
-        => WriteChildMetadataAsync(string.Empty, name, new SubjectMetadata(navigationTitle, icon, location, alignment), cancellationToken);
 
     /// <summary>
     /// Creates a Markdown file in the folder at <paramref name="folderPath"/>, relative to the storage root, and adds it as a page.
