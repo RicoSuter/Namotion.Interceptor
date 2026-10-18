@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using Namotion.Devices.Nuki.Client;
 using Xunit;
 
@@ -42,9 +41,13 @@ public class SecretBoxTests
         for (var run = 0; run < 50; run++)
         {
             // Arrange
-            var message = RandomNumberGenerator.GetBytes(length);
-            var nonce = RandomNumberGenerator.GetBytes(SecretBox.NonceSize);
-            var key = RandomNumberGenerator.GetBytes(SecretBox.KeySize);
+            var random = new Random(length * 1000 + run);
+            var message = new byte[length];
+            var nonce = new byte[SecretBox.NonceSize];
+            var key = new byte[SecretBox.KeySize];
+            random.NextBytes(message);
+            random.NextBytes(nonce);
+            random.NextBytes(key);
 
             // Act
             var result = SecretBox.Seal(message, nonce, key);
@@ -59,6 +62,13 @@ public class SecretBoxTests
     {
         // Act & Assert
         Assert.Throws<ArgumentOutOfRangeException>(() => SecretBox.Seal([1, 2, 3], new byte[SecretBox.NonceSize], new byte[16]));
+    }
+
+    [Fact]
+    public void WhenTheNonceHasTheWrongLength_ThenSealThrows()
+    {
+        // Act & Assert
+        Assert.Throws<ArgumentOutOfRangeException>(() => SecretBox.Seal([1, 2, 3], new byte[8], new byte[SecretBox.KeySize]));
     }
 
     // The same construction from the primitives of NaCl.Core: XSalsa20 over 32 zero bytes and the message gives the

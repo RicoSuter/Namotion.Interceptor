@@ -1,5 +1,7 @@
 using System.Buffers.Binary;
 using System.Numerics;
+using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 
 namespace Namotion.Devices.Nuki.Client;
 
@@ -12,6 +14,8 @@ internal static class SecretBox
     public const int KeySize = 32;
     public const int NonceSize = 24;
     public const int TagSize = 16;
+
+    private const int MacKeySize = 32;
 
     /// <summary>
     /// Encrypts and authenticates the message.
@@ -29,7 +33,7 @@ internal static class SecretBox
         Span<uint> words = stackalloc uint[16];
         Span<byte> block = stackalloc byte[64];
         Span<byte> subKey = stackalloc byte[KeySize];
-        Span<byte> macKey = stackalloc byte[32];
+        Span<byte> macKey = stackalloc byte[MacKeySize];
 
         // XSalsa20: HSalsa20 derives a subkey from the first 16 nonce bytes, Salsa20 runs with it on the last 8.
         InitializeState(state, key, nonce[..16]);
@@ -44,10 +48,10 @@ internal static class SecretBox
         nonce[16..].CopyTo(nonceAndCounter);
         InitializeState(state, subKey, nonceAndCounter);
 
-        // The first 32 key stream bytes are the Poly1305 key, the message is encrypted with the stream after them.
+        // The first MacKeySize key stream bytes are the Poly1305 key, the message is encrypted with the stream after them.
         var result = new byte[TagSize + message.Length];
         var ciphertext = result.AsSpan(TagSize);
-        var streamLength = 32 + message.Length;
+        var streamLength = MacKeySize + message.Length;
         for (var position = 0; position < streamLength; position += 64)
         {
             state[8] = (uint)(position / 64);
@@ -60,21 +64,26 @@ internal static class SecretBox
             for (var i = 0; i < 64 && position + i < streamLength; i++)
             {
                 var index = position + i;
-                if (index < 32)
+                if (index < MacKeySize)
                 {
                     macKey[index] = block[i];
                 }
                 else
                 {
-                    ciphertext[index - 32] = (byte)(message[index - 32] ^ block[i]);
+                    ciphertext[index - MacKeySize] = (byte)(message[index - MacKeySize] ^ block[i]);
                 }
             }
         }
 
         ComputePoly1305(ciphertext, macKey, result.AsSpan(0, TagSize));
-        macKey.Clear();
-        subKey.Clear();
-        block.Clear();
+
+        // Clear everything that held key material or a derived secret: the HSalsa20/Salsa20 state and its last
+        // output words (which held the subkey and the final key stream block, i.e. the Poly1305 key).
+        CryptographicOperations.ZeroMemory(MemoryMarshal.AsBytes(state));
+        CryptographicOperations.ZeroMemory(MemoryMarshal.AsBytes(words));
+        CryptographicOperations.ZeroMemory(block);
+        CryptographicOperations.ZeroMemory(subKey);
+        CryptographicOperations.ZeroMemory(macKey);
         return result;
     }
 
@@ -125,7 +134,8 @@ internal static class SecretBox
         x[a] ^= BitOperations.RotateLeft(x[d] + x[c], 18);
     }
 
-    // Poly1305 with 26-bit limbs (poly1305-donna-32). No branch depends on the key or the message.
+    // Poly1305 with 26-bit limbs (poly1305-donna-32). No branch depends on the key or the message content, only on
+    // the public message length.
     private static void ComputePoly1305(ReadOnlySpan<byte> message, ReadOnlySpan<byte> key, Span<byte> tag)
     {
         const uint Mask = 0x3ffffff;
