@@ -1157,7 +1157,7 @@ public partial class FluentStorageContainer :
     }
 
     // The metadata of a subject goes with it once its file is gone, also when the caller has given up by now, as
-    // nothing would delete it later. A failure here leaves the subject deleted.
+    // nothing would delete it later. A failure here is only logged, so the delete succeeds or fails as it did without it.
     private async Task DeleteSidecarAsync(StorageConnection connection, StorageEntry entry, bool isFileKnownGone)
     {
         if (!entry.HasSidecar)
