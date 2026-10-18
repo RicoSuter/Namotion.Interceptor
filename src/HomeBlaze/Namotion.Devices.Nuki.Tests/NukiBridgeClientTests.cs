@@ -265,6 +265,8 @@ public class NukiBridgeClientTests
     [InlineData(":8080", "host name or IP address")]
     [InlineData("[]", "host name or IP address")]
     [InlineData("", "host name or IP address")]
+    [InlineData("192.168.1.50:80:90", "valid IPv6 address")]
+    [InlineData("[not-an-ip]:8080", "valid IPv6 address")]
     public void WhenHostAddressIsInvalid_ThenNormalizingThrowsWithTheReason(string hostAddress, string expectedReason)
     {
         // Act & Assert

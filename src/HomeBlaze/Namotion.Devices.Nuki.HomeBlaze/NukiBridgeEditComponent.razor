@@ -99,7 +99,7 @@
     protected override void OnInitialized()
     {
         var bridge = BridgeSubject;
-        _hostAddress = bridge?.HostAddress;
+        _hostAddress = bridge?.HostAddress?.Trim();
         _hasToken = !string.IsNullOrEmpty(bridge?.Token);
         _tokenMode = bridge?.TokenMode ?? NukiTokenMode.Encrypted;
         _pollingIntervalSeconds = LoadInterval(bridge?.PollingInterval, NukiBridge.DefaultPollingInterval);

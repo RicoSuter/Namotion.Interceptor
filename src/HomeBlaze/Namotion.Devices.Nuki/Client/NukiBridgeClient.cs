@@ -3,6 +3,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
+using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Serialization.Metadata;
@@ -117,8 +118,7 @@ internal sealed class NukiBridgeClient
         if (!address.StartsWith('[') && address.Count(':') > 1)
         {
             // An IPv6 address without brackets, which cannot carry a port.
-            host = string.Concat("[", address, "]");
-            return null;
+            return TrySetUnbracketedIPv6Host(address, out host);
         }
 
         var portSeparator = FindPortSeparator(address);
@@ -128,9 +128,10 @@ internal sealed class NukiBridgeClient
         }
 
         var hostPart = portSeparator >= 0 ? address[..portSeparator] : address;
-        if (hostPart.IsEmpty || hostPart.SequenceEqual("[]"))
+        var hostPartError = ValidateHostPart(hostPart);
+        if (hostPartError is not null)
         {
-            return "The host address must contain a host name or IP address.";
+            return hostPartError;
         }
 
         if (portSeparator >= 0 && !TryParsePort(address[(portSeparator + 1)..], out port))
@@ -141,6 +142,36 @@ internal sealed class NukiBridgeClient
         host = hostPart.ToString();
         return null;
     }
+
+    private static string? ValidateHostPart(ReadOnlySpan<char> hostPart)
+    {
+        if (hostPart.IsEmpty || hostPart.SequenceEqual("[]"))
+        {
+            return "The host address must contain a host name or IP address.";
+        }
+
+        if (hostPart.StartsWith('[') && !IsIPv6Address(hostPart[1..^1]))
+        {
+            return "The host address must be a valid IPv6 address when it is enclosed in brackets or contains more than one colon.";
+        }
+
+        return null;
+    }
+
+    private static string? TrySetUnbracketedIPv6Host(ReadOnlySpan<char> address, out string host)
+    {
+        if (!IsIPv6Address(address))
+        {
+            host = string.Empty;
+            return "The host address must be a valid IPv6 address when it is enclosed in brackets or contains more than one colon.";
+        }
+
+        host = string.Concat("[", address, "]");
+        return null;
+    }
+
+    private static bool IsIPv6Address(ReadOnlySpan<char> text) =>
+        IPAddress.TryParse(text, out var address) && address.AddressFamily == AddressFamily.InterNetworkV6;
 
     // Gets the index of the colon before the port, -1 when there is no port, or InvalidBrackets.
     private static int FindPortSeparator(ReadOnlySpan<char> address)

@@ -20,23 +20,35 @@ public class NukiBridgeIntegrationTests
         var hostAddress = Environment.GetEnvironmentVariable(RealNukiBridgeTheoryAttribute.HostVariable)!;
         var token = Environment.GetEnvironmentVariable(RealNukiBridgeTheoryAttribute.TokenVariable)!;
         using var httpClient = new HttpClient();
-        var plainInfo = await new NukiBridgeClient(httpClient, hostAddress, token, NukiTokenMode.Plain).GetInfoAsync(CancellationToken.None);
         var client = new NukiBridgeClient(httpClient, hostAddress, token, tokenMode);
 
-        if (tokenMode == NukiTokenMode.Encrypted && NukiStateMapping.ToBridgeType(plainInfo.BridgeType) == NukiBridgeType.Software)
+        async Task AssertInfoAndListAsync(NukiBridgeClient bridgeClient)
         {
-            // Act & Assert: a software bridge accepts plain tokens only.
-            var exception = await Assert.ThrowsAsync<HttpRequestException>(() => client.GetInfoAsync(CancellationToken.None));
-            Assert.Equal(HttpStatusCode.Unauthorized, exception.StatusCode);
+            var info = await bridgeClient.GetInfoAsync(CancellationToken.None);
+            var devices = await bridgeClient.GetListAsync(CancellationToken.None);
+
+            Assert.NotNull(NukiStateMapping.ToBridgeType(info.BridgeType));
+            Assert.All(devices, device => Assert.True(device.NukiId > 0));
+        }
+
+        if (tokenMode != NukiTokenMode.Encrypted)
+        {
+            // Act & Assert
+            await AssertInfoAndListAsync(client);
             return;
         }
 
-        // Act
-        var info = await client.GetInfoAsync(CancellationToken.None);
-        var devices = await client.GetListAsync(CancellationToken.None);
-
-        // Assert
-        Assert.NotNull(NukiStateMapping.ToBridgeType(info.BridgeType));
-        Assert.All(devices, device => Assert.True(device.NukiId > 0));
+        try
+        {
+            // Act & Assert
+            await AssertInfoAndListAsync(client);
+        }
+        catch (HttpRequestException exception) when (exception.StatusCode == HttpStatusCode.Unauthorized)
+        {
+            // Act & Assert: as DetectTokenModeAsync does, read the bridge type in Plain only after the encrypted
+            // request is rejected, so the token is never sent in plain text against a hardware bridge.
+            var plainInfo = await new NukiBridgeClient(httpClient, hostAddress, token, NukiTokenMode.Plain).GetInfoAsync(CancellationToken.None);
+            Assert.Equal(NukiBridgeType.Software, NukiStateMapping.ToBridgeType(plainInfo.BridgeType));
+        }
     }
 }
