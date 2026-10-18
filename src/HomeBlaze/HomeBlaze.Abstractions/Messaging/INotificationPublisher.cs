@@ -13,7 +13,7 @@ namespace HomeBlaze.Abstractions.Messaging;
 public interface INotificationPublisher
 {
     /// <summary>
-    /// Sends a notification and returns the channel's identifier of it, which the channel's acknowledgement events
+    /// Sends a notification and returns the channel's identifier of it, which the channel's acknowledgment events
     /// carry as well.
     /// </summary>
     [Operation(Description = "Sends a notification to this recipient and returns the channel's id of it. Use the Emergency priority only for safety-critical events.")]

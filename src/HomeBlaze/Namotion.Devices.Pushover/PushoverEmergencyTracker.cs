@@ -288,7 +288,7 @@ internal sealed class PushoverEmergencyTracker
                 }
                 catch (Exception exception)
                 {
-                    _service.Logger.LogWarning(exception, "A Pushover emergency acknowledgement subscriber of target {Target} threw", value.TargetKey);
+                    _service.Logger.LogWarning(exception, "A Pushover emergency acknowledgment subscriber of target {Target} threw", value.TargetKey);
                 }
             },
             observer.OnError,

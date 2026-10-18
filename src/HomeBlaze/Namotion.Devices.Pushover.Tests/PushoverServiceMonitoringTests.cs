@@ -563,7 +563,7 @@ public class PushoverServiceMonitoringTests
     }
 
     [Fact]
-    public async Task WhenTheServiceIsSubscribed_ThenItEmitsTheAcknowledgementsOfEveryTarget()
+    public async Task WhenTheServiceIsSubscribed_ThenItEmitsTheAcknowledgmentsOfEveryTarget()
     {
         // Arrange
         var (service, handler) = PushoverTestFactory.CreateService("rico", "anna");

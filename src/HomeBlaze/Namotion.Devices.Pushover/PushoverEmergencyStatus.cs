@@ -6,7 +6,7 @@ namespace Namotion.Devices.Pushover;
 public enum PushoverEmergencyStatus
 {
     /// <summary>
-    /// The notification repeats and waits for acknowledgement.
+    /// The notification repeats and waits for acknowledgment.
     /// </summary>
     Active,
 
@@ -16,7 +16,7 @@ public enum PushoverEmergencyStatus
     Acknowledged,
 
     /// <summary>
-    /// The notification stopped repeating without acknowledgement.
+    /// The notification stopped repeating without acknowledgment.
     /// </summary>
     Expired,
 

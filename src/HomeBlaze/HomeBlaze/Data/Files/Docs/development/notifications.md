@@ -43,7 +43,7 @@ Members are added to `Notification` as optional members, so publishers and calle
 | `High` | Delivered with an alert also during quiet hours |
 | `Emergency` | Repeated until acknowledged, for safety-critical events only. A channel without repeats delivers it as `High` |
 
-`NotificationResult.Id` is the channel's identifier of the delivered notification, or null when the channel has none. Its format is channel-specific; for Pushover it is the receipt of an emergency notification and the request id otherwise, see [Pushover](../devices/Pushover.md). Acknowledgement events of a channel carry the same id, so a caller can tell which acknowledgement belongs to its send.
+`NotificationResult.Id` is the channel's identifier of the delivered notification, or null when the channel has none. Its format is channel-specific, see [Pushover](../devices/Pushover.md). Acknowledgment events of a channel carry the same id, so a caller can tell which acknowledgment belongs to its send.
 
 A notification publisher is any subject that delivers messages to an external channel, for example [Pushover](../devices/Pushover.md), email, chat platforms, webhooks or SMS. Each channel has its own `[Configuration]` properties (server, API key, recipient), edited through the standard subject editor.
 

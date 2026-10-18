@@ -1,6 +1,6 @@
 ---
 title: Pushover
-navTitle: Pushover
+icon: NotificationsActive
 ---
 
 # Pushover
@@ -17,6 +17,10 @@ navTitle: Pushover
 | `ApplicationToken` | Secret. The API token of your application, created at pushover.net under "Your Applications" |
 | `Targets` | The recipients, by a key made from the name when the target is added. The key stays when the target is renamed, so paths such as `/Devices/Pushover/Targets[rico]` keep working |
 
+Use a separate Pushover application, and so a separate application token, for each Pushover service and each installation, because canceling by tag acts on every emergency notification sent with the token.
+
+The editor of the service sets the name, the application token and, per target, the name and the user key. A new target starts with the defaults below; change its emergency settings in the editor of the target.
+
 ### Target
 
 | Property | Description |
@@ -24,7 +28,7 @@ navTitle: Pushover
 | `Name` | Display name |
 | `UserKey` | Secret. The user key or group key of the recipient |
 | `EmergencyRetry` | How often an emergency notification repeats until acknowledged, 30 seconds or more, default 60 seconds |
-| `EmergencyExpire` | How long an emergency notification repeats, at most 3 hours, default 1 hour |
+| `EmergencyExpire` | How long an emergency notification repeats, 30 seconds to 3 hours, default 1 hour |
 | `MaximumActiveEmergencies` | How many emergency notifications of this recipient may be active at once, at least 1, default 5. Sending another one fails with an error naming the limit, before any request to Pushover |
 
 ## Operations
@@ -50,7 +54,7 @@ When `SendToAllTargets` or `CancelAllEmergencies` of the service fails for some 
 
 Each emergency notification is tracked on its own, so several can repeat at once, for example one for smoke and one for water, and each is acknowledged or canceled independently. See [Emergencies](#emergencies).
 
-A notification without message text, or with a priority that is no defined `NotificationPriority` member, is rejected with an argument error before any request, also by `SendToAllTargets`.
+A notification without message text is rejected with an argument error before any request, also by `SendToAllTargets`.
 
 Pushover limits the message to 1024 characters, the title to 250, the url to 512 and the url title to 100. The message, title and url title are shortened with an ellipsis and a warning in the log. A url over the limit is left out instead, together with its url title, since shortening a url would break the link it points to. Only an absolute `http` or `https` url is sent; any other url, such as a relative path or another scheme, is left out together with its url title, with a warning in the log.
 
@@ -74,7 +78,7 @@ Pushover limits the message to 1024 characters, the title to 250, the url to 512
 
 ## Emergencies
 
-Sending an `Emergency` notification adds a Pushover emergency subject to the target's `Emergencies`, keyed by the receipt Pushover returned. The receipt is also the `Id` of the `NotificationResult` the send returns and of the acknowledgement event, so a caller can tell which acknowledgement belongs to its send. The emergency is reachable at a path such as `/Devices/Pushover/Targets[rico]/Emergencies[r1a2b3]`.
+Sending an `Emergency` notification adds a Pushover emergency subject to the target's `Emergencies`, keyed by the receipt Pushover returned. The emergency is reachable at a path such as `/Devices/Pushover/Targets[rico]/Emergencies[r1a2b3]`.
 
 | Property | Description |
 |----------|-------------|
@@ -88,20 +92,20 @@ Sending an `Emergency` notification adds a Pushover emergency subject to the tar
 
 | Status | Meaning |
 |--------|---------|
-| `Active` | The notification repeats and waits for acknowledgement |
+| `Active` | The notification repeats and waits for acknowledgment |
 | `Acknowledged` | The recipient acknowledged it |
-| `Expired` | It stopped repeating after `EmergencyExpire` without acknowledgement |
+| `Expired` | It stopped repeating after `EmergencyExpire` without acknowledgment |
 | `Canceled` | It was canceled with `Cancel` or `CancelAllEmergencies`, or because its target was removed |
 
-While an emergency notification is active, the service reads its receipt every 10 seconds; otherwise it makes no requests of its own, except that it validates the targets again every 30 seconds while it is in `Error` because Pushover cannot be reached. The receipts request carries the application token in its query string, which the .NET HTTP logging and tracing redact by default; do not disable that redaction. Each active emergency is read on its own, so with many active emergencies each receipt still costs one request every 10 seconds, and sending emergency notifications very often adds up to many requests. `Emergencies` keeps the 10 most recently sent emergencies that are no longer active, besides the active ones; an older one is removed when a newer one ends. When a history store is configured, the message and the status of each emergency are recorded in the history like any other state. `Emergencies` is kept in memory only: after a restart the list is empty, and an emergency that was still active keeps repeating on the phone until it is acknowledged or expires, without HomeBlaze tracking it. Every emergency notification is sent with the Pushover tag `target-{key}` of its target, with the key in lowercase and every character other than a letter, a digit or a dash replaced by a dash, so `CancelAllEmergencies` of the service or of the target still stops it. Removing a target cancels its tag in the background; if that fails, the emergency repeats until it expires. Once sending an emergency notification started, canceling the call does not stop it, so every emergency that Pushover accepted is tracked and can be canceled.
+While an emergency notification is active, the service reads its receipt every 10 seconds; otherwise it makes no requests of its own, except that it validates the targets again every 30 seconds while it is in `Error` because Pushover cannot be reached. The receipts request carries the application token in its query string, which the .NET HTTP logging and tracing redact by default; do not disable that redaction. `Emergencies` keeps the 10 most recently sent emergencies that are no longer active, besides the active ones; an older one is removed when a newer one ends. When a history store is configured, the message and the status of each emergency are recorded in the history like any other state. `Emergencies` is kept in memory only: after a restart the list is empty, and an emergency that was still active keeps repeating on the phone until it is acknowledged or expires, without HomeBlaze tracking it. Every emergency notification is sent with the Pushover tag `target-{key}` of its target, with the key in lowercase and every character other than a letter, a digit or a dash replaced by a dash, so `CancelAllEmergencies` of the service or of the target still stops it. Removing a target cancels its tag in the background; if that fails, the emergency repeats until it expires. Once sending an emergency notification started, canceling the call does not stop it, so every emergency that Pushover accepted is tracked and can be canceled.
 
-The service tracks the emergencies by the key of their target. When a configuration reload replaces a target but keeps its key, the new target shows the same emergencies and can still cancel them, including one whose send was still running during the reload. The replaced instance is no longer part of the service: sending through it fails. An external edit of the configuration file replaces the target subjects this way, so their emergencies are briefly detached from the subject graph and attached again, keeping their state. When a target is removed, its active emergencies are canceled, including one whose send completes after the removal.
+The service tracks the emergencies by the key of their target. When a configuration reload replaces a target but keeps its key, the new target shows the same emergencies and can still cancel them. The replaced instance is no longer part of the service: sending through it fails. An external edit of the configuration file replaces the target subjects this way, so their emergencies are briefly detached from the subject graph and attached again, keeping their state.
 
-Receipts are read also while validating the targets fails, so an acknowledgement is not missed during a Pushover outage. A receipt that cannot be read, for example because of a network error, is read again on the next poll without changing the service status; after `EmergencyExpire` it is given up as `Expired`. The polling interval is measured with a monotonic clock, so a change of the system time does not delay or skip them.
+Receipts are read also while validating the targets fails, so an acknowledgment is not missed during a Pushover outage. A receipt that cannot be read, for example because of a network error, is read again on the next poll without changing the service status; after `EmergencyExpire` it is given up as `Expired`.
 
 ## Events
 
-The service and each target implement `IObservable<PushoverEmergencyAcknowledgedEvent>`, which emits one event per emergency notification when it is acknowledged. Subscribe on the service for the events of all targets, or on a target for the events of its key; a subscription on a target keeps receiving them when a configuration reload replaces the target instance. Subscribing on a target that is not part of a service fails. The event carries the `TargetKey`, the `Emergency`, its `Id` (the receipt) and the `Timestamp` of the acknowledgement. Until the system-wide message bus exists, subscribe on the service or the target directly.
+The service and each target implement `IObservable<PushoverEmergencyAcknowledgedEvent>`, which emits one event per emergency notification when it is acknowledged. Subscribe on the service for the events of all targets, or on a target for the events of its key; a subscription on a target keeps receiving them when a configuration reload replaces the target instance. Subscribing on a target that is not part of a service fails. The event carries the `TargetKey`, the `Emergency`, its `Id` (the receipt) and the `Timestamp` of the acknowledgment.
 
 ## Interfaces
 
@@ -130,49 +134,23 @@ The service and each target implement `IObservable<PushoverEmergencyAcknowledged
 }
 ```
 
+## Limitations
+
+An agent that may call `invoke_operation` can send any number of notifications below `Emergency`; only emergencies are bounded, by `MaximumActiveEmergencies`, so such an agent can use up the monthly message quota of the application. Pushover has no action buttons or replies, such as yes or no, so an answer is only possible as the acknowledgment of an emergency notification or through a link.
+
 ## Missing Features
 
 The following features are not yet implemented but may be added in future versions:
 
-### Sound, Device and Time to Live
-
-Pushover can play a chosen sound, deliver to one device of the user, and delete a message after a time. Each user can already choose the sound in the Pushover app.
-
-### Quota State
-
-Every response carries the monthly message limit, the remaining messages and the reset time in `X-Limit-App-*` headers, which could be shown on the service. The free quota is 10,000 messages a month.
-
-### HTML and Monospace Formatting
-
-Messages can contain bold, italic, colored and linked text, or use a monospace font.
-
-### Image Attachments
-
-A message can carry an image of up to 5 MB, for example a camera snapshot.
-
-### Emergency Callback
-
-Pushover can call a URL when an emergency notification is acknowledged, instead of being polled, which needs HomeBlaze reachable from the internet.
-
-### Message Timestamp
-
-A message can carry the time of the event instead of the time it was sent.
-
-### Groups API
-
-Pushover groups can be created and their members managed through the API. Group keys already work as target keys.
-
-### End-to-End Encryption
-
-Messages can be encrypted with a key that only the recipient's devices hold.
-
-### Glances
-
-Small values can be pushed to watch faces and widgets.
-
-### Answers
-
-Pushover has no action buttons or replies, such as yes or no; Pushover lists them as an open feature request. Only the acknowledgement of emergency notifications and links are available, and an answer through a link would need HomeBlaze reachable from the phone.
+- Sound, device and time to live: a chosen sound, delivery to one device of the user, and deleting a message after a time. Each user can already choose the sound in the Pushover app.
+- Quota state: every response carries the monthly message limit, the remaining messages and the reset time in `X-Limit-App-*` headers, which could be shown on the service. The free quota is 10,000 messages a month.
+- HTML and monospace formatting: bold, italic, colored and linked text, or a monospace font.
+- Image attachments: an image of up to 5 MB, for example a camera snapshot.
+- Emergency callback: Pushover can call a URL when an emergency notification is acknowledged, instead of being polled, which needs HomeBlaze reachable from the internet.
+- Message timestamp: the time of the event instead of the time it was sent.
+- Groups API: creating Pushover groups and managing their members. Group keys already work as target keys.
+- End-to-end encryption with a key that only the recipient's devices hold.
+- Glances: small values pushed to watch faces and widgets.
 
 ## References
 

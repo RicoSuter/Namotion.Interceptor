@@ -21,7 +21,7 @@ public partial class PushoverService
             try
             {
                 // Polling runs also when validation failed, so a transient validation failure cannot leave
-                // acknowledgements unseen.
+                // acknowledgments unseen.
                 var isValid = await ValidateTargetsIfRequestedAsync(token, stoppingToken);
                 await _emergencyTracker.PollReceiptsAsync(token, stoppingToken);
                 if (isValid)
