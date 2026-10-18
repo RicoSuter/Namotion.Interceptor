@@ -308,7 +308,7 @@
         opacity: 0.4;
     }
 
-    /* As high as the row, so that a touch can grab it anywhere along the edge, where it does not scroll the pane. */
+    /* As high as the row, so that a touch or a pen can grab it anywhere along the edge, where it does not scroll the pane. */
     .subject-pane-reorder-handle {
         display: flex;
         flex-shrink: 0;
@@ -1158,8 +1158,7 @@
         @* The script drags the rows, see SubjectPropertyPanel.razor.js. *@
         <div class="subject-pane-reorder-list"
              data-reorder-list
-             data-can-drag="@(canDrag ? "true" : "false")"
-             data-testid="reorder-children-list">
+             data-can-drag="@(canDrag ? "true" : "false")">
             @for (var childIndex = 0; childIndex < children.Length; childIndex++)
             {
                 var child = children[childIndex];

@@ -63,8 +63,8 @@ public class NavigationMetadataTests
     }
 
     // Drags a row by its middle with the mouse to a point of the target row, given as a fraction of its height, in
-    // steps, as a drag starts only once the pointer has moved a few pixels.
-    private static async Task DragRowAsync(IPage page, ILocator rows, int index, int targetIndex, float targetFraction)
+    // steps, as a drag starts only once the pointer has moved a few pixels. Leaves the button pressed.
+    private static async Task MoveDraggedRowAsync(IPage page, ILocator rows, int index, int targetIndex, float targetFraction)
     {
         var row = await rows.Nth(index).BoundingBoxAsync() ?? throw new InvalidOperationException("The row is not shown.");
         var target = await rows.Nth(targetIndex).BoundingBoxAsync() ?? throw new InvalidOperationException("The target row is not shown.");
@@ -74,6 +74,11 @@ public class NavigationMetadataTests
         await page.Mouse.DownAsync();
         await page.Mouse.MoveAsync(x, target.Y + target.Height * targetFraction, new() { Steps = 10 });
         await Assertions.Expect(page.Locator(".subject-pane-reorder-preview")).ToBeVisibleAsync();
+    }
+
+    private static async Task DragRowAsync(IPage page, ILocator rows, int index, int targetIndex, float targetFraction)
+    {
+        await MoveDraggedRowAsync(page, rows, index, targetIndex, targetFraction);
         await page.Mouse.UpAsync();
     }
 
@@ -180,6 +185,80 @@ public class NavigationMetadataTests
                 .ToHaveTextAsync(expectedShownNames, new() { Timeout = PageLoadTimeout });
 
             string[] expectedNames = [names[1], names[2], names[0], .. names.Skip(3)];
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => folder.ChildOrder.ToArray().SequenceEqual(expectedNames),
+                message: "The order of the folder was not written");
+            Assert.Equal(expectedNames, folder.ChildOrder.ToArray());
+        }
+        finally
+        {
+            await RestoreDemoMetadataAsync(metadataPath, originalMetadata);
+        }
+    }
+
+    [Fact]
+    public async Task WhenAChildIsDroppedOnItsOwnPlace_ThenTheOrderStays()
+    {
+        // Arrange
+        var metadataPath = _fixture.GetDemoPagePath(".metadata.json");
+        var originalMetadata = await File.ReadAllTextAsync(metadataPath);
+        var folder = GetDemoFolder();
+        try
+        {
+            var (page, pane) = await OpenPaneAsync("Demo");
+            var rows = await StartReorderingAsync(pane);
+            var shownNames = await rows.Locator(".subject-pane-child-name").AllInnerTextsAsync();
+            var names = GetShownChildNames(folder);
+
+            // Act - the lower half of the row above the dragged one is the place of the dragged one.
+            await DragRowAsync(page, rows, index: 1, targetIndex: 0, targetFraction: 0.75f);
+
+            // Assert
+            await Assertions.Expect(page.Locator(".subject-pane-reorder-preview")).ToHaveCountAsync(0);
+            await Assertions.Expect(rows.Locator(".subject-pane-child-name")).ToHaveTextAsync(shownNames.ToArray());
+            Assert.Equal(originalMetadata, await File.ReadAllTextAsync(metadataPath));
+
+            // A move after it shows the order the drop left, as a write of the drop would come before the move's.
+            await DragRowAsync(page, rows, index: 0, targetIndex: 2, targetFraction: 0.75f);
+            string[] expectedNames = [names[1], names[2], names[0], .. names.Skip(3)];
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => folder.ChildOrder.ToArray().SequenceEqual(expectedNames),
+                message: "The order of the folder was not written");
+            Assert.Equal(expectedNames, folder.ChildOrder.ToArray());
+        }
+        finally
+        {
+            await RestoreDemoMetadataAsync(metadataPath, originalMetadata);
+        }
+    }
+
+    [Fact]
+    public async Task WhenEscapeIsPressedDuringADrag_ThenTheReleaseDropsNothing()
+    {
+        // Arrange
+        var metadataPath = _fixture.GetDemoPagePath(".metadata.json");
+        var originalMetadata = await File.ReadAllTextAsync(metadataPath);
+        var folder = GetDemoFolder();
+        try
+        {
+            var (page, pane) = await OpenPaneAsync("Demo");
+            var rows = await StartReorderingAsync(pane);
+            var shownNames = await rows.Locator(".subject-pane-child-name").AllInnerTextsAsync();
+            var names = GetShownChildNames(folder);
+            await MoveDraggedRowAsync(page, rows, index: 0, targetIndex: 3, targetFraction: 0.75f);
+
+            // Act
+            await page.Keyboard.PressAsync("Escape");
+            await page.Mouse.UpAsync();
+
+            // Assert
+            await Assertions.Expect(page.Locator(".subject-pane-reorder-preview")).ToHaveCountAsync(0);
+            await Assertions.Expect(page.Locator(".subject-pane-reorder-indicator")).ToHaveCountAsync(0);
+            await Assertions.Expect(rows.Locator(".subject-pane-child-name")).ToHaveTextAsync(shownNames.ToArray());
+
+            // A move after it shows the order the release left, as a write of the release would come before the move's.
+            await DragRowAsync(page, rows, index: 2, targetIndex: 0, targetFraction: 0.25f);
+            string[] expectedNames = [names[2], names[0], names[1], .. names.Skip(3)];
             await AsyncTestHelpers.WaitUntilAsync(
                 () => folder.ChildOrder.ToArray().SequenceEqual(expectedNames),
                 message: "The order of the folder was not written");

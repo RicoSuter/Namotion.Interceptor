@@ -64,7 +64,7 @@ const autoScrollMaximumSpeed = 16;
 // the order before the first one.
 let activeDrag = null;
 
-// Moves a row of a reorder list within the element by dragging it: a mouse or a pen drags the whole row, a touch only
+// Moves a row of a reorder list within the element by dragging it: a mouse drags the whole row, a touch or a pen only
 // its handle, so that a swipe on a row still scrolls. A drop that changes the order calls OnChildDropped with the
 // name of the dragged child and the name of the child whose place it takes. An element is registered once, however
 // often it is passed.
@@ -82,7 +82,7 @@ export function registerChildDragging(element, dotNetReference) {
         const row = event.target.closest('[data-reorder-row]');
         const list = row?.closest('[data-reorder-list]');
         if (!list || !element.contains(list) || list.dataset.canDrag !== 'true' || event.target.closest('button') !== null ||
-            (event.pointerType === 'touch' && event.target.closest('[data-reorder-handle]') === null)) {
+            (event.pointerType !== 'mouse' && event.target.closest('[data-reorder-handle]') === null)) {
             return;
         }
 
@@ -102,20 +102,32 @@ class RowDrag {
         this.pointerX = event.clientX;
         this.pointerY = event.clientY;
         this.isStarted = false;
-        this.isDropped = false;
 
         this.onPointerMove = this.onPointerMove.bind(this);
         this.onPointerUp = this.onPointerUp.bind(this);
         this.onPointerCancel = this.onPointerCancel.bind(this);
         this.onKeyDown = this.onKeyDown.bind(this);
+        this.onInterruption = this.onInterruption.bind(this);
+        this.onScroll = this.onScroll.bind(this);
+        this.onLostPointerCapture = this.onLostPointerCapture.bind(this);
         this.onAnimationFrame = this.onAnimationFrame.bind(this);
         document.addEventListener('pointermove', this.onPointerMove);
         document.addEventListener('pointerup', this.onPointerUp);
         document.addEventListener('pointercancel', this.onPointerCancel);
+
+        // A context menu or a switch to another window can swallow the release of the button, after which the next
+        // click would drop the row.
+        document.addEventListener('contextmenu', this.onInterruption);
+        window.addEventListener('blur', this.onInterruption);
     }
 
     onPointerMove(event) {
         if (event.pointerId !== this.pointerId) {
+            return;
+        }
+
+        if (event.pointerType !== 'touch' && (event.buttons & 1) === 0) {
+            this.end();
             return;
         }
 
@@ -155,6 +167,7 @@ class RowDrag {
 
         this.preview.classList.add('subject-pane-reorder-preview');
         this.preview.setAttribute('aria-hidden', 'true');
+        this.preview.inert = true;
         this.preview.style.width = `${rowRectangle.width}px`;
         this.preview.style.height = `${rowRectangle.height}px`;
         document.body.appendChild(this.preview);
@@ -172,7 +185,11 @@ class RowDrag {
             // The pointer is gone already, which ends the drag with its pointercancel.
         }
 
+        this.row.addEventListener('lostpointercapture', this.onLostPointerCapture);
         document.addEventListener('keydown', this.onKeyDown, true);
+
+        // Scroll events do not bubble, so the listener captures the scrolling of any element, the pane among them.
+        document.addEventListener('scroll', this.onScroll, true);
 
         // A render that changes the rows while the drag is under way ends it, as the place it would drop on is gone.
         // A render that shows the new order once the drop is written ends the drop.
@@ -232,11 +249,7 @@ class RowDrag {
         }
 
         if (speed !== 0) {
-            const scrollTop = this.scroller.scrollTop;
             this.scroller.scrollTop += speed;
-            if (this.scroller.scrollTop !== scrollTop) {
-                this.update();
-            }
         }
 
         this.animationFrame = requestAnimationFrame(this.onAnimationFrame);
@@ -255,7 +268,7 @@ class RowDrag {
         this.pointerX = event.clientX;
         this.pointerY = event.clientY;
         const gap = this.getGap();
-        if (gap === this.index || gap === this.index + 1) {
+        if (gap === this.index || gap === this.index + 1 || !this.list.isConnected || this.list.dataset.canDrag !== 'true') {
             this.end();
             return;
         }
@@ -267,7 +280,6 @@ class RowDrag {
     // jump back to its old place meanwhile. The call ends after the render of the new order, or after a move that
     // failed or was ignored, which leave the order as it was.
     drop(gap) {
-        this.isDropped = true;
         this.removeGestureListeners();
         cancelAnimationFrame(this.animationFrame);
         this.indicator.style.display = 'none';
@@ -290,6 +302,21 @@ class RowDrag {
         if (event.pointerId === this.pointerId) {
             this.end();
         }
+    }
+
+    onInterruption() {
+        this.end();
+    }
+
+    // The event bubbles, and the element that a touch started on loses its own capture to the row.
+    onLostPointerCapture(event) {
+        if (event.target === this.row) {
+            this.end();
+        }
+    }
+
+    onScroll() {
+        this.update();
     }
 
     onKeyDown(event) {
@@ -316,7 +343,11 @@ class RowDrag {
         document.removeEventListener('pointermove', this.onPointerMove);
         document.removeEventListener('pointerup', this.onPointerUp);
         document.removeEventListener('pointercancel', this.onPointerCancel);
+        document.removeEventListener('contextmenu', this.onInterruption);
+        window.removeEventListener('blur', this.onInterruption);
+        this.row.removeEventListener('lostpointercapture', this.onLostPointerCapture);
         document.removeEventListener('keydown', this.onKeyDown, true);
+        document.removeEventListener('scroll', this.onScroll, true);
     }
 
     end() {
