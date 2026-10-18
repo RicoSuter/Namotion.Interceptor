@@ -67,8 +67,8 @@ public partial class NukiBridge
                 var token = Token;
                 if (string.IsNullOrWhiteSpace(hostAddress) || string.IsNullOrEmpty(token))
                 {
-                    Status = ServiceStatus.Error;
                     StatusMessage = "Host address and token are required.";
+                    Status = ServiceStatus.Error;
                     await _configurationChangedSignal.WaitAsync(stoppingToken);
                     continue;
                 }
@@ -84,8 +84,8 @@ public partial class NukiBridge
             // Stopped.
         }
 
-        Status = ServiceStatus.Stopped;
         StatusMessage = null;
+        Status = ServiceStatus.Stopped;
     }
 
     /// <summary>
@@ -97,8 +97,8 @@ public partial class NukiBridge
         var client = new NukiBridgeClient(httpClient, hostAddress, token, TokenMode, BusyRetryDelay);
         try
         {
-            Status = ServiceStatus.Starting;
             StatusMessage = null;
+            Status = ServiceStatus.Starting;
             await RefreshInfoAsync(client, stoppingToken);
             await RefreshListAsync(client, stoppingToken);
             LastUpdated = DateTimeOffset.UtcNow;
@@ -117,8 +117,8 @@ public partial class NukiBridge
         catch (Exception exception)
         {
             Logger.LogWarning(exception, "Nuki bridge {HostAddress} connection failed.", hostAddress);
-            Status = ServiceStatus.Error;
             StatusMessage = exception.Message;
+            Status = ServiceStatus.Error;
             return false;
         }
         finally
