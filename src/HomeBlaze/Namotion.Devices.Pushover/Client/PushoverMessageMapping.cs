@@ -31,6 +31,18 @@ internal static class PushoverMessageMapping
         };
     }
 
+    /// <summary>
+    /// Throws if <paramref name="priority"/> is not one of the defined <see cref="NotificationPriority"/> members,
+    /// for example a value cast from an integer an agent supplied directly.
+    /// </summary>
+    public static void ValidatePriority(NotificationPriority priority)
+    {
+        if (!Enum.IsDefined(priority))
+        {
+            throw new ArgumentOutOfRangeException(nameof(priority), priority, "The notification priority is not a defined NotificationPriority member.");
+        }
+    }
+
     public static int ToPushoverPriority(NotificationPriority priority) => priority switch
     {
         NotificationPriority.Low => -1,

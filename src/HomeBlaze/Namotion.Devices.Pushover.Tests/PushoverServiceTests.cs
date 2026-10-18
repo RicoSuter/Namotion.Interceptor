@@ -2,6 +2,7 @@ using System.Net;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Messaging;
 using Namotion.Devices.Pushover.Tests.Testing;
+using Namotion.Interceptor.Testing;
 using Xunit;
 
 namespace Namotion.Devices.Pushover.Tests;
@@ -157,6 +158,82 @@ public class PushoverServiceTests
 
         // Assert
         Assert.Equal("user-anna", Assert.Single(handler.Requests).Form["user"]);
+    }
+
+    [Fact]
+    public async Task WhenATargetInstanceIsReplacedForTheSameKey_ThenTheOpenEmergencyIsAdoptedByTheNewInstance()
+    {
+        // Arrange
+        var (service, handler) = PushoverTestFactory.CreateService("rico");
+        handler.Respond = request => request.Path == MessagesPath
+            ? (HttpStatusCode.OK, """{"status":1,"receipt":"receipt1"}""")
+            : (HttpStatusCode.OK, FakePushoverHandler.Success);
+        var oldTarget = service.Targets["rico"];
+        await oldTarget.SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
+
+        var newTarget = new PushoverTarget { Name = "Rico", UserKey = "user-rico" };
+
+        // Act: a configuration reload replaces the target instance but keeps its "rico" key.
+        service.Targets = new Dictionary<string, PushoverTarget> { ["rico"] = newTarget };
+
+        // Assert
+        Assert.True(newTarget.IsEmergencyActive);
+        Assert.Equal("receipt1", newTarget.EmergencyReceipt);
+
+        // Act: the new instance can still cancel the emergency the old instance started.
+        await newTarget.CancelEmergencyAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Single(handler.RequestsTo("/1/receipts/receipt1/cancel.json"));
+        Assert.Null(newTarget.EmergencyReceipt);
+    }
+
+    [Fact]
+    public async Task WhenATargetWithAnOpenEmergencyIsRemoved_ThenItsReceiptIsCanceledInTheBackgroundAndItsServiceReferenceIsCleared()
+    {
+        // Arrange
+        var (service, handler) = PushoverTestFactory.CreateService("rico");
+        handler.Respond = request => request.Path == MessagesPath
+            ? (HttpStatusCode.OK, """{"status":1,"receipt":"receipt1"}""")
+            : (HttpStatusCode.OK, FakePushoverHandler.Success);
+        var target = service.Targets["rico"];
+        await target.SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
+
+        // Act
+        service.Targets = new Dictionary<string, PushoverTarget>();
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => handler.RequestsTo("/1/receipts/receipt1/cancel.json").Length == 1);
+        Assert.Null(target.Service);
+    }
+
+    [Fact]
+    public void WhenATargetWithoutAnOpenEmergencyIsRemoved_ThenNoCancelRequestIsMade()
+    {
+        // Arrange
+        var (service, handler) = PushoverTestFactory.CreateService("rico");
+        var target = service.Targets["rico"];
+
+        // Act
+        service.Targets = new Dictionary<string, PushoverTarget>();
+
+        // Assert
+        Assert.DoesNotContain(handler.Requests, request => request.Path.Contains("cancel", StringComparison.Ordinal));
+        Assert.Same(service, target.Service);
+    }
+
+    [Fact]
+    public async Task WhenNotificationPriorityIsUndefined_ThenSendingFailsWithoutARequest()
+    {
+        // Arrange
+        var (service, handler) = PushoverTestFactory.CreateService("rico");
+        var target = service.Targets["rico"];
+        var notification = new Notification { Message = "Hello", Priority = (NotificationPriority)7 };
+
+        // Act & Assert
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+            () => target.SendNotificationAsync(notification, CancellationToken.None));
+        Assert.Empty(handler.Requests);
     }
 
     [Fact]

@@ -157,6 +157,7 @@ public partial class PushoverService : BackgroundService, IConfigurable, IMonito
     internal async Task SendAsync(PushoverTarget target, Notification notification, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(notification);
+        PushoverMessageMapping.ValidatePriority(notification.Priority);
 
         var token = GetRequiredApplicationToken();
         var userKey = target.UserKey;
@@ -172,8 +173,21 @@ public partial class PushoverService : BackgroundService, IConfigurable, IMonito
         target.LastSentAt = now;
         if (response.Receipt is { } receipt)
         {
-            target.StartEmergency(receipt, now);
+            var previousReceipt = target.StartEmergency(receipt, now);
             Signal();
+
+            if (previousReceipt is not null)
+            {
+                try
+                {
+                    await CancelReceiptAsync(previousReceipt, cancellationToken);
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    _logger.LogWarning(
+                        exception, "Canceling the superseded Pushover emergency receipt of target {Target} failed", target.Title);
+                }
+            }
         }
     }
 
@@ -216,9 +230,46 @@ public partial class PushoverService : BackgroundService, IConfigurable, IMonito
     partial void OnTargetsChanging(ref Dictionary<string, PushoverTarget> newValue, ref bool cancel)
     {
         newValue ??= new Dictionary<string, PushoverTarget>();
+
+        if (Targets is { } current)
+        {
+            foreach (var (key, previousTarget) in current)
+            {
+                if (newValue.TryGetValue(key, out var newTarget))
+                {
+                    // Same key, new instance: a configuration reload replaced the target object, so the open
+                    // emergency (if any) must move over for polling and cancellation to keep working.
+                    if (!ReferenceEquals(newTarget, previousTarget))
+                    {
+                        newTarget.AdoptEmergencyFrom(previousTarget);
+                    }
+                }
+                else if (previousTarget.EmergencyReceipt is { } receipt)
+                {
+                    _ = CancelReceiptInBackgroundAsync(previousTarget, receipt);
+                    previousTarget.Service = null;
+                }
+            }
+        }
+
         foreach (var target in newValue.Values)
         {
             target.Service = this;
+        }
+    }
+
+    // Fire-and-forget: a target dropped from Targets is no longer polled by the background loop, so its open
+    // emergency receipt is canceled here instead, outside the request that is replacing the configuration.
+    private async Task CancelReceiptInBackgroundAsync(PushoverTarget removedTarget, string receipt)
+    {
+        try
+        {
+            await CancelReceiptAsync(receipt, CancellationToken.None);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(
+                exception, "Canceling the Pushover emergency receipt of removed target {Target} failed", removedTarget.Title);
         }
     }
 

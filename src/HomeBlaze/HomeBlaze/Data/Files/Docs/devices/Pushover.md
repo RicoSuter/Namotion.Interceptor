@@ -43,7 +43,9 @@ navTitle: Pushover
 | `High` | 1 | Alerts also during quiet hours |
 | `Emergency` | 2 | Repeats every `EmergencyRetry` until acknowledged or until `EmergencyExpire` |
 
-Pushover limits the message to 1024 characters, the title to 250, the url to 512 and the url title to 100. Longer values are shortened with an ellipsis and a warning in the log.
+Sending a new emergency notification to a target that already has one open cancels the previous one before the new one starts repeating.
+
+Pushover limits the message to 1024 characters, the title to 250, the url to 512 and the url title to 100. The message, title and url title are shortened with an ellipsis and a warning in the log. A url over the limit is left out instead, together with its url title, since shortening a url would break the link it points to.
 
 ## State Properties
 

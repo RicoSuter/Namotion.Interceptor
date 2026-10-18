@@ -76,7 +76,10 @@
 
     private static readonly int MinimumEmergencyRetrySeconds = (int)PushoverTarget.MinimumEmergencyRetry.TotalSeconds;
     private static readonly int MaximumEmergencyExpireSeconds = (int)PushoverTarget.MaximumEmergencyExpire.TotalSeconds;
-    private static readonly int MinimumEmergencyRetryMinutes = (int)PushoverTarget.MinimumEmergencyRetry.TotalMinutes;
+
+    // MinimumEmergencyRetry is 30 seconds, less than one minute; the Expire field is entered in whole minutes, so
+    // its floor is 1, not the 0 that truncating 0.5 minutes down would give.
+    private static readonly int MinimumEmergencyRetryMinutes = Math.Max(1, (int)PushoverTarget.MinimumEmergencyRetry.TotalMinutes);
     private static readonly int MaximumEmergencyExpireMinutes = (int)PushoverTarget.MaximumEmergencyExpire.TotalMinutes;
 
     private string _name = string.Empty;
@@ -105,13 +108,17 @@
         _hasApplicationToken = !string.IsNullOrEmpty(Service.ApplicationToken);
         foreach (var (key, target) in Service.Targets)
         {
+            var emergencyRetrySeconds = (int)target.EmergencyRetry.TotalSeconds;
+            var emergencyExpireMinutes = (int)target.EmergencyExpire.TotalMinutes;
             _targets.Add(new TargetInput
             {
                 Key = key,
                 Name = target.Name,
                 HasStoredUserKey = !string.IsNullOrEmpty(target.UserKey),
-                EmergencyRetrySeconds = (int)target.EmergencyRetry.TotalSeconds,
-                EmergencyExpireMinutes = (int)target.EmergencyExpire.TotalMinutes
+                EmergencyRetrySeconds = emergencyRetrySeconds,
+                LoadedEmergencyRetrySeconds = emergencyRetrySeconds,
+                EmergencyExpireMinutes = emergencyExpireMinutes,
+                LoadedEmergencyExpireMinutes = emergencyExpireMinutes
             });
         }
     }
@@ -162,12 +169,23 @@
                 target.UserKey = input.UserKey;
             }
 
-            target.EmergencyRetry = TimeSpan.FromSeconds(input.EmergencyRetrySeconds);
-            target.EmergencyExpire = TimeSpan.FromMinutes(input.EmergencyExpireMinutes);
+            // Only written when the user actually changed the number, so an untouched field never re-rounds the
+            // target's existing TimeSpan through the seconds/minutes the field displays it in.
+            if (input.EmergencyRetrySeconds != input.LoadedEmergencyRetrySeconds)
+            {
+                target.EmergencyRetry = TimeSpan.FromSeconds(input.EmergencyRetrySeconds);
+            }
+
+            if (input.EmergencyExpireMinutes != input.LoadedEmergencyExpireMinutes)
+            {
+                target.EmergencyExpire = TimeSpan.FromMinutes(input.EmergencyExpireMinutes);
+            }
 
             input.Key = key;
             input.UserKey = null;
             input.HasStoredUserKey = !string.IsNullOrEmpty(target.UserKey);
+            input.LoadedEmergencyRetrySeconds = input.EmergencyRetrySeconds;
+            input.LoadedEmergencyExpireMinutes = input.EmergencyExpireMinutes;
             targets[key] = target;
         }
 
@@ -192,7 +210,13 @@
 
         public int EmergencyRetrySeconds { get; set; } = (int)DefaultTarget.EmergencyRetry.TotalSeconds;
 
+        // The number the field was last loaded or saved with, so SaveAsync can tell an untouched field (which
+        // must leave the target's TimeSpan alone) from one the user actually edited.
+        public int LoadedEmergencyRetrySeconds { get; set; } = (int)DefaultTarget.EmergencyRetry.TotalSeconds;
+
         public int EmergencyExpireMinutes { get; set; } = (int)DefaultTarget.EmergencyExpire.TotalMinutes;
+
+        public int LoadedEmergencyExpireMinutes { get; set; } = (int)DefaultTarget.EmergencyExpire.TotalMinutes;
 
         public bool IsValid => !string.IsNullOrWhiteSpace(Name) && (HasStoredUserKey || !string.IsNullOrWhiteSpace(UserKey));
     }

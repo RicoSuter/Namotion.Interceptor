@@ -25,6 +25,24 @@ public class PushoverMessageMappingTests
         Assert.Equal(expected, result);
     }
 
+    [Theory]
+    [InlineData(NotificationPriority.Low)]
+    [InlineData(NotificationPriority.Normal)]
+    [InlineData(NotificationPriority.High)]
+    [InlineData(NotificationPriority.Emergency)]
+    public void WhenPriorityIsADefinedMember_ThenValidatingDoesNotThrow(NotificationPriority priority)
+    {
+        // Act & Assert
+        PushoverMessageMapping.ValidatePriority(priority);
+    }
+
+    [Fact]
+    public void WhenPriorityIsNotADefinedMember_ThenValidatingThrows()
+    {
+        // Act & Assert
+        Assert.Throws<ArgumentOutOfRangeException>(() => PushoverMessageMapping.ValidatePriority((NotificationPriority)7));
+    }
+
     [Fact]
     public void WhenNotificationIsNormal_ThenPriorityRetryAndExpireAreOmitted()
     {

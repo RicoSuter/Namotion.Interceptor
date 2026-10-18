@@ -331,6 +331,68 @@ public class PushoverServiceMonitoringTests
         Assert.Null(target.EmergencyReceipt);
     }
 
+    [Fact]
+    public async Task WhenASecondEmergencyIsSentToTheSameTarget_ThenThePreviousReceiptIsCanceledAndTheNewOneCanStillBeCanceled()
+    {
+        // Arrange
+        var (service, handler) = PushoverTestFactory.CreateService("rico");
+        var receiptNumber = 0;
+        handler.Respond = request => request.Path == "/1/messages.json"
+            ? (HttpStatusCode.OK, $$"""{"status":1,"receipt":"receipt{{Interlocked.Increment(ref receiptNumber)}}"}""")
+            : (HttpStatusCode.OK, FakePushoverHandler.Success);
+        var target = service.Targets["rico"];
+
+        // Act: the second emergency supersedes the first before it was ever acknowledged or canceled by hand.
+        await target.SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
+        await target.SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
+
+        // Assert
+        Assert.Single(handler.RequestsTo("/1/receipts/receipt1/cancel.json"));
+        Assert.Equal("receipt2", target.EmergencyReceipt);
+
+        // Act
+        await target.CancelEmergencyAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Single(handler.RequestsTo("/1/receipts/receipt2/cancel.json"));
+        Assert.Null(target.EmergencyReceipt);
+    }
+
+    [Fact]
+    public async Task WhenCancelingTheSupersededReceiptFails_ThenAWarningIsLoggedAndTheNewEmergencyStillStarts()
+    {
+        // Arrange
+        var handler = new FakePushoverHandler();
+        var logger = new RecordingLogger<PushoverService>();
+        var service = new PushoverService(new TestHttpClientFactory(handler), logger) { ApplicationToken = "app-token" };
+        var target = new PushoverTarget { Name = "Rico", UserKey = "user-rico" };
+        service.Targets = new Dictionary<string, PushoverTarget> { ["rico"] = target };
+
+        var receiptNumber = 0;
+        handler.Respond = request =>
+        {
+            if (request.Path == "/1/messages.json")
+            {
+                return (HttpStatusCode.OK, $$"""{"status":1,"receipt":"receipt{{Interlocked.Increment(ref receiptNumber)}}"}""");
+            }
+
+            if (request.Path == "/1/receipts/receipt1/cancel.json")
+            {
+                return (HttpStatusCode.BadRequest, """{"status":0,"errors":["receipt not found"]}""");
+            }
+
+            return (HttpStatusCode.OK, FakePushoverHandler.Success);
+        };
+
+        // Act
+        await target.SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
+        await target.SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
+
+        // Assert
+        Assert.Equal("receipt2", target.EmergencyReceipt);
+        Assert.Contains(logger.Warnings, warning => warning.Contains("superseded", StringComparison.OrdinalIgnoreCase));
+    }
+
     private static IObserver<PushoverEmergencyAcknowledgedEvent> CreateListObserver(List<PushoverEmergencyAcknowledgedEvent> events) =>
         Observer.Create<PushoverEmergencyAcknowledgedEvent>(
             value =>

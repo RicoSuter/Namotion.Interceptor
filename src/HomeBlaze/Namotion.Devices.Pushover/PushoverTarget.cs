@@ -202,10 +202,16 @@ public partial class PushoverTarget :
         Status = ServiceStatus.Error;
     }
 
-    internal void StartEmergency(string receipt, DateTimeOffset now)
+    /// <summary>
+    /// Starts tracking a newly sent emergency receipt, returning the receipt of an emergency that was still open
+    /// on this target, or null if none was; the caller cancels that previous receipt, since a target only waits
+    /// on one emergency at a time.
+    /// </summary>
+    internal string? StartEmergency(string receipt, DateTimeOffset now)
     {
         lock (_emergencyLock)
         {
+            var previousReceipt = _emergencyReceipt;
             _emergencyReceipt = receipt;
             _emergencyExpiresAt = now + EmergencyExpire;
             // A new emergency's first poll may happen at once, regardless of when the previous one was last polled.
@@ -215,6 +221,32 @@ public partial class PushoverTarget :
             EmergencyAcknowledgedByDevice = null;
             IsEmergencyExpired = false;
             IsEmergencyActive = true;
+            return previousReceipt;
+        }
+    }
+
+    /// <summary>
+    /// Copies the open emergency receipt, expiry, poll time and public emergency state from <paramref name="previous"/>
+    /// onto this instance. Used when a configuration reload replaces a target's instance but keeps its dictionary key,
+    /// so the new instance keeps polling and can still cancel the emergency the old instance started.
+    /// </summary>
+    internal void AdoptEmergencyFrom(PushoverTarget previous)
+    {
+        // Locked in a fixed order (the previous instance, then this one) since this is the only direction the
+        // method is ever called in, so the two locks can never be taken in the opposite order elsewhere.
+        lock (previous._emergencyLock)
+        {
+            lock (_emergencyLock)
+            {
+                _emergencyReceipt = previous._emergencyReceipt;
+                _emergencyExpiresAt = previous._emergencyExpiresAt;
+                _lastReceiptPolledAt = previous._lastReceiptPolledAt;
+                IsEmergencyActive = previous.IsEmergencyActive;
+                IsEmergencyAcknowledged = previous.IsEmergencyAcknowledged;
+                EmergencyAcknowledgedAt = previous.EmergencyAcknowledgedAt;
+                EmergencyAcknowledgedByDevice = previous.EmergencyAcknowledgedByDevice;
+                IsEmergencyExpired = previous.IsEmergencyExpired;
+            }
         }
     }
 
