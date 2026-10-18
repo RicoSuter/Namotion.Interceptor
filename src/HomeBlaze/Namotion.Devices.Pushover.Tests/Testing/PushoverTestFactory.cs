@@ -17,7 +17,6 @@ internal static class PushoverTestFactory
         {
             ApplicationToken = "app-token",
             ReceiptPollingInterval = TimeSpan.FromMilliseconds(50),
-            MinimumReceiptPollingInterval = TimeSpan.FromMilliseconds(10),
             RetryInterval = TimeSpan.FromMilliseconds(50)
         };
 

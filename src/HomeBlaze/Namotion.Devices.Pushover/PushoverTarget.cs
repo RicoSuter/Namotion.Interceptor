@@ -3,7 +3,6 @@ using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Messaging;
 using Namotion.Interceptor.Attributes;
-using Namotion.Interceptor.Registry.Attributes;
 
 namespace Namotion.Devices.Pushover;
 
@@ -37,11 +36,6 @@ public partial class PushoverTarget :
     private Membership? _membership;
 
     internal PushoverService? Service => _membership?.Service;
-
-    /// <summary>
-    /// The key of this target in <see cref="PushoverService.Targets"/>, or null when it is not part of a service.
-    /// </summary>
-    internal string? Key => _membership?.Key;
 
     private Membership RequiredMembership =>
         _membership ?? throw new InvalidOperationException($"The target '{Title}' is not part of a Pushover service.");
@@ -90,8 +84,8 @@ public partial class PushoverTarget :
     public partial DateTimeOffset? LastSentAt { get; internal set; }
 
     /// <summary>
-    /// The emergency notifications by receipt: the active ones and those that ended within the retention of the
-    /// service. Replaced as a whole, never changed in place.
+    /// The emergency notifications by receipt: the active ones and the newest 10 that ended. Replaced as a whole,
+    /// never changed in place.
     /// </summary>
     [State]
     public partial Dictionary<string, PushoverEmergency> Emergencies { get; internal set; }
@@ -108,24 +102,6 @@ public partial class PushoverTarget :
         ServiceStatus.Error => "Error",
         _ => null
     };
-
-    [Derived]
-    [PropertyAttribute("CancelAllEmergencies", KnownAttributes.IsEnabled)]
-    public bool CancelAllEmergencies_IsEnabled
-    {
-        get
-        {
-            foreach (var emergency in Emergencies.Values)
-            {
-                if (emergency.Status == PushoverEmergencyStatus.Active)
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-    }
 
     public PushoverTarget()
     {
@@ -151,11 +127,13 @@ public partial class PushoverTarget :
     /// <summary>
     /// Stops the repeats of every emergency notification of this target by its tag, also those sent before a restart.
     /// </summary>
+    /// <exception cref="InvalidOperationException">The target is not part of a Pushover service.</exception>
     [Operation(Title = "Cancel all emergencies", Icon = "NotificationsOff", Position = 2, RequiresConfirmation = true)]
-    public Task CancelAllEmergenciesAsync(CancellationToken cancellationToken) =>
-        _membership is { } membership
-            ? membership.Service.EmergencyTracker.CancelAllAsync(membership.Key, cancellationToken)
-            : Task.CompletedTask;
+    public Task CancelAllEmergenciesAsync(CancellationToken cancellationToken)
+    {
+        var membership = RequiredMembership;
+        return membership.Service.EmergencyTracker.CancelAllAsync(membership.Key, cancellationToken);
+    }
 
     /// <summary>
     /// Emits one event per acknowledged emergency notification of the key of this target. The subscription keeps
@@ -165,7 +143,7 @@ public partial class PushoverTarget :
     public IDisposable Subscribe(IObserver<PushoverEmergencyAcknowledgedEvent> observer)
     {
         var membership = RequiredMembership;
-        return membership.Service.AcknowledgedEvents.Subscribe(observer, membership.Key);
+        return membership.Service.EmergencyTracker.Subscribe(observer, membership.Key);
     }
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
@@ -221,8 +199,6 @@ public partial class PushoverTarget :
             newValue = 1;
         }
     }
-
-    partial void OnDevicesChanging(ref string[] newValue, ref bool cancel) => newValue ??= [];
 
     private sealed record Membership(PushoverService Service, string Key);
 }

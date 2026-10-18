@@ -9,17 +9,16 @@ internal sealed class PushoverClient
 
     private readonly IHttpClientFactory _httpClientFactory;
 
-    // Static, so the limit is shared per process: Pushover accepts at most two concurrent connections per
-    // application, across every PushoverClient instance, not two per instance.
-    private static readonly SemaphoreSlim Connections = new(2, 2);
+    // Pushover accepts at most two concurrent connections per application, and each service has its own client.
+    private readonly SemaphoreSlim _connections = new(2, 2);
 
     public PushoverClient(IHttpClientFactory httpClientFactory)
     {
         _httpClientFactory = httpClientFactory;
     }
 
-    public Task<PushoverResponse> SendMessageAsync(PushoverMessageRequest request, CancellationToken cancellationToken) =>
-        SendAsync(HttpMethod.Post, "messages.json", new FormUrlEncodedContent(request.ToFormFields()), cancellationToken);
+    public Task<PushoverResponse> SendMessageAsync(IEnumerable<KeyValuePair<string, string>> fields, CancellationToken cancellationToken) =>
+        SendAsync(HttpMethod.Post, "messages.json", new FormUrlEncodedContent(fields), cancellationToken);
 
     public Task<PushoverResponse> ValidateUserAsync(string token, string userKey, CancellationToken cancellationToken) =>
         SendAsync(HttpMethod.Post, "users/validate.json",
@@ -46,7 +45,7 @@ internal sealed class PushoverClient
 
     private async Task<PushoverResponse> SendAsync(HttpMethod method, string path, HttpContent? content, CancellationToken cancellationToken)
     {
-        await Connections.WaitAsync(cancellationToken);
+        await _connections.WaitAsync(cancellationToken);
         try
         {
             using var client = _httpClientFactory.CreateClient();
@@ -63,7 +62,7 @@ internal sealed class PushoverClient
         }
         finally
         {
-            Connections.Release();
+            _connections.Release();
         }
     }
 

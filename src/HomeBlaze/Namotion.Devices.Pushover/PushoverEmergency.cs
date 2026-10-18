@@ -7,8 +7,8 @@ using Namotion.Interceptor.Registry.Attributes;
 namespace Namotion.Devices.Pushover;
 
 /// <summary>
-/// An emergency notification of a <see cref="PushoverTarget"/>, kept under its receipt while it repeats and for a
-/// while after it ended.
+/// An emergency notification of a <see cref="PushoverTarget"/>, kept under its receipt while it repeats and, as one of
+/// the newest 10 of its target, after it ended.
 /// </summary>
 [Description("Pushover emergency notification that repeats until acknowledged")]
 [DisplayName("Pushover emergency")]
@@ -40,12 +40,6 @@ public partial class PushoverEmergency : ITitleProvider, IIconProvider
     [State]
     public partial DateTimeOffset? AcknowledgedAt { get; internal set; }
 
-    /// <summary>
-    /// The name of the device the notification was acknowledged on.
-    /// </summary>
-    [State]
-    public partial string? AcknowledgedByDevice { get; internal set; }
-
     [Derived]
     public string Title => NotificationTitle ?? "Emergency";
 
@@ -74,19 +68,15 @@ public partial class PushoverEmergency : ITitleProvider, IIconProvider
     /// The timestamp of <see cref="PushoverService.TimeProvider"/> when tracking started, right after the send, which
     /// measures the intervals from the send unaffected by changes of the wall clock.
     /// </summary>
-    internal long SentTimestamp { get; }
+    internal long SentTimestamp { get; init; }
 
     /// <summary>
     /// How long the notification repeats on the Pushover side, from <see cref="SentTimestamp"/>.
     /// </summary>
     internal TimeSpan Expire { get; }
 
-    // The members below are written only under the lock of the tracker.
+    // Written only under the lock of the tracker.
     internal long? LastPolledTimestamp { get; set; }
-
-    internal DateTimeOffset? EndedAt { get; set; }
-
-    internal long? EndedTimestamp { get; set; }
 
     internal PushoverEmergency(
         PushoverEmergencyTracker tracker, string targetKey, string receipt, string? title, string message, DateTimeOffset sentAt, TimeSpan expire)
@@ -97,16 +87,14 @@ public partial class PushoverEmergency : ITitleProvider, IIconProvider
         NotificationTitle = title;
         Message = message;
         SentAt = sentAt;
-        SentTimestamp = tracker.TimeProvider.GetTimestamp();
         Expire = expire;
 
         Status = PushoverEmergencyStatus.Active;
         AcknowledgedAt = null;
-        AcknowledgedByDevice = null;
     }
 
     /// <summary>
-    /// Stops the repeats of the notification; does nothing when it is no longer active.
+    /// Stops the repeats of the notification and marks it canceled; does nothing when it is no longer active.
     /// </summary>
     [Operation(Title = "Cancel", Icon = "NotificationsOff", Position = 1, RequiresConfirmation = true)]
     public Task CancelAsync(CancellationToken cancellationToken) =>

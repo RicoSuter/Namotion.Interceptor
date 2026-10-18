@@ -144,7 +144,6 @@ public class PushoverLiveTests
 
         Assert.Equal(result.Id, acknowledgedEvent.Id);
         Assert.Equal(PushoverEmergencyStatus.Acknowledged, acknowledgedEvent.Emergency.Status);
-        Assert.False(string.IsNullOrEmpty(acknowledgedEvent.AcknowledgedByDevice));
     }
 
     [Fact]

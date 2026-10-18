@@ -8,7 +8,6 @@ using Xunit;
 
 namespace Namotion.Devices.Pushover.Tests;
 
-[Collection(PushoverConnectionsCollection.Name)]
 public class PushoverServiceTests
 {
     private const string MessagesPath = "/1/messages.json";
@@ -41,26 +40,7 @@ public class PushoverServiceTests
     }
 
     [Fact]
-    public async Task WhenTargetSendsNotification_ThenMessageUsesTheTargetUserKey()
-    {
-        // Arrange
-        var (service, handler) = PushoverTestFactory.CreateService("rico");
-        var target = service.Targets["rico"];
-
-        // Act
-        await target.SendNotificationAsync(new Notification { Message = "Door open", Title = "Home" }, CancellationToken.None);
-
-        // Assert
-        var request = Assert.Single(handler.RequestsTo(MessagesPath));
-        Assert.Equal("app-token", request.Form["token"]);
-        Assert.Equal("user-rico", request.Form["user"]);
-        Assert.Equal("Door open", request.Form["message"]);
-        Assert.Equal("Home", request.Form["title"]);
-        Assert.NotNull(target.LastSentAt);
-    }
-
-    [Fact]
-    public async Task WhenTargetSendsANormalNotification_ThenTheResultIdIsThePushoverRequestId()
+    public async Task WhenTargetSendsNotification_ThenMessageUsesTheTargetUserKeyAndTheResultIdIsThePushoverRequestId()
     {
         // Arrange
         var (service, handler) = PushoverTestFactory.CreateService("rico");
@@ -68,14 +48,21 @@ public class PushoverServiceTests
         var target = service.Targets["rico"];
 
         // Act
-        var result = await target.SendNotificationAsync(new Notification { Message = "Door open" }, CancellationToken.None);
+        var result = await target.SendNotificationAsync(new Notification { Message = "Door open", Title = "Home" }, CancellationToken.None);
 
         // Assert
+        var request = Assert.Single(handler.RequestsTo(MessagesPath));
+        Assert.Equal("app-token", request.Form["token"]);
+        Assert.Equal("user-rico", request.Form["user"]);
+        Assert.Equal("Door open", request.Form["message"]);
+        Assert.Equal("Home", request.Form["title"]);
+        Assert.False(request.Form.ContainsKey("tags"));
+        Assert.NotNull(target.LastSentAt);
         Assert.Equal("request1", result.Id);
     }
 
     [Fact]
-    public async Task WhenEmergencyIsSent_ThenRetryAndExpireAreSentAndAnActiveEmergencyIsTrackedUnderItsReceipt()
+    public async Task WhenEmergencyIsSent_ThenRetryExpireAndTagAreSentAndAnActiveEmergencyIsTrackedUnderItsReceipt()
     {
         // Arrange
         var (service, handler) = PushoverTestFactory.CreateService("rico");
@@ -91,6 +78,7 @@ public class PushoverServiceTests
         Assert.Equal("2", request.Form["priority"]);
         Assert.Equal("60", request.Form["retry"]);
         Assert.Equal("3600", request.Form["expire"]);
+        Assert.Equal("target-rico", request.Form["tags"]);
         Assert.Equal("receipt1", result.Id);
 
         var (receipt, emergency) = Assert.Single(target.Emergencies);
@@ -108,6 +96,7 @@ public class PushoverServiceTests
     {
         // Arrange
         var (service, _) = PushoverTestFactory.CreateService("rico");
+
         // Act
         var emergency = service.EmergencyTracker.Add("rico", "receipt1", title: null, "Fire", DateTimeOffset.UtcNow, TimeSpan.FromHours(1));
 
@@ -176,32 +165,6 @@ public class PushoverServiceTests
     }
 
     [Fact]
-    public async Task WhenTargetIsNotPartOfAService_ThenSendFails()
-    {
-        // Arrange
-        var target = new PushoverTarget { Name = "rico", UserKey = "user" };
-
-        // Act & Assert
-        await Assert.ThrowsAsync<InvalidOperationException>(
-            () => target.SendNotificationAsync(new Notification { Message = "Hello" }, CancellationToken.None));
-    }
-
-    [Fact]
-    public async Task WhenTargetsAreReplaced_ThenNewTargetsSendThroughTheService()
-    {
-        // Arrange
-        var (service, handler) = PushoverTestFactory.CreateService("rico");
-        var anna = new PushoverTarget { Name = "Anna", UserKey = "user-anna" };
-
-        // Act
-        service.Targets = new Dictionary<string, PushoverTarget> { ["anna"] = anna };
-        await anna.SendNotificationAsync(new Notification { Message = "Hello" }, CancellationToken.None);
-
-        // Assert
-        Assert.Equal("user-anna", Assert.Single(handler.RequestsTo(MessagesPath)).Form["user"]);
-    }
-
-    [Fact]
     public async Task WhenATargetInstanceIsReplacedForTheSameKey_ThenItsEmergenciesMoveToTheNewInstance()
     {
         // Arrange
@@ -242,8 +205,6 @@ public class PushoverServiceTests
         service.Targets = new Dictionary<string, PushoverTarget> { ["rico"] = new() { Name = "Rico", UserKey = "user-rico" } };
 
         // Assert
-        Assert.Null(oldTarget.Service);
-        Assert.Null(oldTarget.Key);
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(
             () => oldTarget.SendNotificationAsync(new Notification { Message = "Hello" }, CancellationToken.None));
         Assert.Contains("not part of a Pushover service", exception.Message);
@@ -251,32 +212,7 @@ public class PushoverServiceTests
     }
 
     [Fact]
-    public void WhenTheAcknowledgedEventIsSerialized_ThenItCarriesTheTargetKeyButNotTheTarget()
-    {
-        // Arrange
-        var (service, _) = PushoverTestFactory.CreateService("rico");
-        var target = service.Targets["rico"];
-        var emergency = service.EmergencyTracker.Add("rico", "receipt1", "Fire", "Kitchen", DateTimeOffset.UtcNow, TimeSpan.FromHours(1));
-        var acknowledgedEvent = new PushoverEmergencyAcknowledgedEvent
-        {
-            Timestamp = DateTimeOffset.UtcNow,
-            Target = target,
-            TargetKey = "rico",
-            Emergency = emergency,
-            Id = "receipt1"
-        };
-
-        // Act
-        var json = System.Text.Json.JsonSerializer.Serialize(acknowledgedEvent);
-
-        // Assert
-        Assert.Contains("\"TargetKey\":\"rico\"", json);
-        Assert.DoesNotContain("user-rico", json);
-        Assert.DoesNotContain("\"Target\":", json);
-    }
-
-    [Fact]
-    public async Task WhenATargetInstanceIsReplacedWhileAnEmergencyIsBeingSent_ThenTheNewInstanceTracksPollsAndCancelsIt()
+    public async Task WhenATargetInstanceIsReplacedWhileAnEmergencyIsBeingSent_ThenTheNewInstanceTracksAndPollsIt()
     {
         // Arrange
         var (service, handler) = PushoverTestFactory.CreateService("rico");
@@ -298,16 +234,9 @@ public class PushoverServiceTests
         var result = await sending;
 
         // Assert
-        var emergency = newTarget.Emergencies[result.Id!];
+        Assert.Equal(PushoverEmergencyStatus.Active, newTarget.Emergencies[result.Id!].Status);
         Assert.Empty(oldTarget.Emergencies);
         await AsyncTestHelpers.WaitUntilAsync(() => handler.RequestsTo("/1/receipts/receipt1.json").Length >= 1);
-
-        // Act
-        await emergency.CancelAsync(CancellationToken.None);
-
-        // Assert
-        Assert.Single(handler.RequestsTo("/1/receipts/receipt1/cancel.json"));
-        Assert.Equal(PushoverEmergencyStatus.Canceled, emergency.Status);
     }
 
     [Fact]
@@ -333,24 +262,31 @@ public class PushoverServiceTests
         Assert.Empty(target.Emergencies);
     }
 
-    [Fact]
-    public async Task WhenATargetWithActiveEmergenciesIsRemoved_ThenItsTagIsCanceledInTheBackgroundAndItsServiceReferenceIsCleared()
+    [Theory]
+    [InlineData(0)]
+    [InlineData(2)]
+    public async Task WhenATargetIsRemoved_ThenItsTagIsCanceledInTheBackgroundAndItsTrackedEmergenciesAreCanceled(int emergencyCount)
     {
         // Arrange
         var (service, handler) = PushoverTestFactory.CreateService("rico", "anna");
         handler.Respond = FakePushoverHandler.RespondWithNumberedReceipts();
         var target = service.Targets["rico"];
-        await target.SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
-        await target.SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
+        for (var index = 0; index < emergencyCount; index++)
+        {
+            await target.SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
+        }
+
         var emergencies = target.Emergencies.Values.ToArray();
 
         // Act
         service.Targets = new Dictionary<string, PushoverTarget> { ["anna"] = service.Targets["anna"] };
 
         // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => handler.RequestsTo("/1/receipts/cancel_by_tag/target-rico.json").Length == 1);
         await AsyncTestHelpers.WaitUntilAsync(() => emergencies.All(emergency => emergency.Status == PushoverEmergencyStatus.Canceled));
-        Assert.Single(handler.RequestsTo("/1/receipts/cancel_by_tag/target-rico.json"));
+        Assert.Equal(emergencyCount, emergencies.Length);
         Assert.Empty(handler.RequestsTo("/1/receipts/cancel_by_tag/target-anna.json"));
+        Assert.Empty(target.Emergencies);
         Assert.Null(target.Service);
     }
 
@@ -372,66 +308,13 @@ public class PushoverServiceTests
 
         // Assert
         await AsyncTestHelpers.WaitUntilAsync(() => logger.Warnings.Count == 1);
-        var warning = Assert.Single(logger.Entries, entry => entry.Level == LogLevel.Warning);
-        Assert.Contains("removed Pushover targets", warning.Message);
+        var warning = Assert.Single(logger.Entries);
+        Assert.Contains("removed Pushover target rico", warning.Message);
         Assert.Contains("receipt not found", warning.Exception!.Message);
     }
 
     [Fact]
-    public async Task WhenATargetWithoutTrackedEmergenciesIsRemoved_ThenItsTagIsStillCanceledAndItsServiceReferenceIsCleared()
-    {
-        // Arrange
-        var (service, handler) = PushoverTestFactory.CreateService("rico");
-        var target = service.Targets["rico"];
-
-        // Act
-        service.Targets = new Dictionary<string, PushoverTarget>();
-
-        // Assert
-        await AsyncTestHelpers.WaitUntilAsync(() => handler.RequestsTo("/1/receipts/cancel_by_tag/target-rico.json").Length == 1);
-        Assert.Null(target.Service);
-    }
-
-    [Fact]
-    public async Task WhenAnEmergencyIsSent_ThenItCarriesTheTagOfItsTarget()
-    {
-        // Arrange
-        var (service, handler) = PushoverTestFactory.CreateService("rico");
-        handler.Respond = FakePushoverHandler.RespondWithNumberedReceipts();
-        var target = service.Targets["rico"];
-
-        // Act
-        await target.SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
-        await target.SendNotificationAsync(new Notification { Message = "Hello" }, CancellationToken.None);
-
-        // Assert
-        var requests = handler.RequestsTo(MessagesPath);
-        Assert.Equal("target-rico", requests[0].Form["tags"]);
-        Assert.False(requests[1].Form.ContainsKey("tags"));
-    }
-
-    [Fact]
-    public async Task WhenTheTargetHasTheMaximumOfActiveEmergencies_ThenAnotherEmergencyFailsWithoutARequest()
-    {
-        // Arrange
-        var (service, handler) = PushoverTestFactory.CreateService("rico");
-        handler.Respond = FakePushoverHandler.RespondWithNumberedReceipts();
-        var target = service.Targets["rico"];
-        target.MaximumActiveEmergencies = 2;
-        await target.SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
-        await target.SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
-
-        // Act
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => target.SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None));
-
-        // Assert
-        Assert.Contains("2", exception.Message);
-        Assert.Equal(2, handler.RequestsTo(MessagesPath).Length);
-    }
-
-    [Fact]
-    public async Task WhenTheTargetHasTheMaximumOfActiveEmergencies_ThenOtherPrioritiesAndAnEmergencyAfterOneEndedAreSent()
+    public async Task WhenTheTargetHasTheMaximumOfActiveEmergencies_ThenAnotherEmergencyFailsWithoutARequestUntilOneEnded()
     {
         // Arrange
         var (service, handler) = PushoverTestFactory.CreateService("rico");
@@ -441,11 +324,14 @@ public class PushoverServiceTests
         await target.SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
 
         // Act
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => target.SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None));
         await target.SendNotificationAsync(new Notification { Message = "Hello", Priority = NotificationPriority.High }, CancellationToken.None);
         await target.Emergencies["receipt1"].CancelAsync(CancellationToken.None);
         var result = await target.SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
 
         // Assert
+        Assert.Contains("1 active emergency notifications", exception.Message);
         Assert.Equal(3, handler.RequestsTo(MessagesPath).Length);
         Assert.Equal(PushoverEmergencyStatus.Active, target.Emergencies[result.Id!].Status);
     }
@@ -473,62 +359,27 @@ public class PushoverServiceTests
         Assert.Single(handler.RequestsTo(MessagesPath));
     }
 
-    [Fact]
-    public void WhenMaximumActiveEmergenciesIsBelowOne_ThenItIsClampedToOne()
-    {
-        // Arrange
-        var target = new PushoverTarget();
-
-        // Act
-        target.MaximumActiveEmergencies = 0;
-
-        // Assert
-        Assert.Equal(1, target.MaximumActiveEmergencies);
-    }
-
     [Theory]
-    [InlineData("")]
-    [InlineData("   ")]
-    [InlineData(null)]
-    public async Task WhenMessageIsBlank_ThenSendingFailsWithAnArgumentExceptionWithoutARequest(string? message)
+    [InlineData("", NotificationPriority.Normal)]
+    [InlineData("   ", NotificationPriority.Normal)]
+    [InlineData(null, NotificationPriority.Normal)]
+    [InlineData("Hello", (NotificationPriority)7)]
+    public async Task WhenMessageIsBlankOrPriorityIsUndefined_ThenSendingFailsWithAnArgumentExceptionWithoutARequest(string? message, NotificationPriority priority)
     {
         // Arrange
-        var (service, handler) = PushoverTestFactory.CreateService("rico");
-        var notification = new Notification { Message = message! };
+        var (service, handler) = PushoverTestFactory.CreateService("rico", "anna");
+        var notification = new Notification { Message = message!, Priority = priority };
 
         // Act & Assert
         await Assert.ThrowsAnyAsync<ArgumentException>(
             () => service.Targets["rico"].SendNotificationAsync(notification, CancellationToken.None));
-        Assert.Empty(handler.Requests);
-    }
-
-    [Fact]
-    public async Task WhenSendingToAllTargetsWithAnUndefinedPriority_ThenTheArgumentErrorReachesTheCallerWithoutARequest()
-    {
-        // Arrange
-        var (service, handler) = PushoverTestFactory.CreateService("rico", "anna");
-        var notification = new Notification { Message = "Hello", Priority = (NotificationPriority)7 };
-
-        // Act & Assert
-        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+        await Assert.ThrowsAnyAsync<ArgumentException>(
             () => service.SendToAllTargetsAsync(notification, CancellationToken.None));
         Assert.Empty(handler.Requests);
     }
 
     [Fact]
-    public async Task WhenSendingToAllTargetsWithABlankMessage_ThenTheArgumentErrorReachesTheCallerWithoutARequest()
-    {
-        // Arrange
-        var (service, handler) = PushoverTestFactory.CreateService("rico", "anna");
-
-        // Act & Assert
-        await Assert.ThrowsAsync<ArgumentException>(
-            () => service.SendToAllTargetsAsync(new Notification { Message = " " }, CancellationToken.None));
-        Assert.Empty(handler.Requests);
-    }
-
-    [Fact]
-    public void WhenEmergencyTimesAreOutOfRange_ThenTheyAreClamped()
+    public void WhenEmergencySettingsAreOutOfRange_ThenTheyAreClamped()
     {
         // Arrange
         var target = new PushoverTarget();
@@ -536,10 +387,12 @@ public class PushoverServiceTests
         // Act
         target.EmergencyRetry = TimeSpan.FromSeconds(5);
         target.EmergencyExpire = TimeSpan.FromHours(10);
+        target.MaximumActiveEmergencies = 0;
 
         // Assert
         Assert.Equal(TimeSpan.FromSeconds(30), target.EmergencyRetry);
         Assert.Equal(TimeSpan.FromHours(3), target.EmergencyExpire);
+        Assert.Equal(1, target.MaximumActiveEmergencies);
     }
 
     [Theory]

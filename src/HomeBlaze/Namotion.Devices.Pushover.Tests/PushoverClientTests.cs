@@ -6,10 +6,9 @@ using Xunit;
 
 namespace Namotion.Devices.Pushover.Tests;
 
-[Collection(PushoverConnectionsCollection.Name)]
 public class PushoverClientTests
 {
-    private static PushoverMessageRequest CreateRequest() => new() { Token = "app", User = "user", Message = "Hello" };
+    private static Dictionary<string, string> CreateFields() => new() { ["token"] = "app", ["user"] = "user", ["message"] = "Hello" };
 
     [Fact]
     public async Task WhenSendingMessage_ThenPostsFormEncodedToTheMessagesEndpoint()
@@ -19,7 +18,7 @@ public class PushoverClientTests
         var client = new PushoverClient(new TestHttpClientFactory(handler));
 
         // Act
-        await client.SendMessageAsync(CreateRequest(), CancellationToken.None);
+        await client.SendMessageAsync(CreateFields(), CancellationToken.None);
 
         // Assert
         var request = Assert.Single(handler.Requests);
@@ -33,73 +32,40 @@ public class PushoverClientTests
         Assert.False(request.Form.ContainsKey("priority"));
     }
 
-    [Fact]
-    public async Task WhenPushoverRejectsTheUserKey_ThenExceptionCarriesItsErrors()
+    [Theory]
+    [InlineData("""{"user":"invalid","errors":["user identifier is invalid"],"status":0,"request":"x"}""", "user identifier is invalid", false)]
+    [InlineData("""{"token":"invalid","errors":["application token is invalid"],"status":0}""", "application token is invalid", true)]
+    public async Task WhenPushoverRejectsTheUserKeyOrTheApplicationToken_ThenTheExceptionCarriesItsErrors(string body, string expectedMessage, bool expectedApplicationTokenInvalid)
     {
         // Arrange
-        var handler = new FakePushoverHandler
-        {
-            Respond = _ => (HttpStatusCode.BadRequest, """{"user":"invalid","errors":["user identifier is invalid"],"status":0,"request":"x"}""")
-        };
-        var client = new PushoverClient(new TestHttpClientFactory(handler));
-
-        // Act
-        var exception = await Assert.ThrowsAsync<PushoverException>(() => client.SendMessageAsync(CreateRequest(), CancellationToken.None));
-
-        // Assert
-        Assert.Equal("user identifier is invalid", exception.Message);
-        Assert.True(exception.IsUserKeyInvalid);
-        Assert.False(exception.IsApplicationTokenInvalid);
-        Assert.Equal(HttpStatusCode.BadRequest, exception.StatusCode);
-    }
-
-    [Fact]
-    public async Task WhenPushoverRejectsTheApplicationToken_ThenExceptionSaysSo()
-    {
-        // Arrange
-        var handler = new FakePushoverHandler
-        {
-            Respond = _ => (HttpStatusCode.BadRequest, """{"token":"invalid","errors":["application token is invalid"],"status":0}""")
-        };
+        var handler = new FakePushoverHandler { Respond = _ => (HttpStatusCode.BadRequest, body) };
         var client = new PushoverClient(new TestHttpClientFactory(handler));
 
         // Act
         var exception = await Assert.ThrowsAsync<PushoverException>(() => client.ValidateUserAsync("app", "user", CancellationToken.None));
 
         // Assert
-        Assert.True(exception.IsApplicationTokenInvalid);
+        Assert.Equal(expectedMessage, exception.Message);
+        Assert.Equal(expectedApplicationTokenInvalid, exception.IsApplicationTokenInvalid);
+        Assert.Equal(HttpStatusCode.BadRequest, exception.StatusCode);
     }
 
     [Fact]
     public async Task WhenResponseIsNotJson_ThenExceptionNamesTheStatusCode()
     {
         // Arrange
-        var handler = new FakePushoverHandler { Respond = _ => (HttpStatusCode.TooManyRequests, "Too many requests") };
-        var client = new PushoverClient(new TestHttpClientFactory(handler));
-
-        // Act
-        var exception = await Assert.ThrowsAsync<PushoverException>(() => client.SendMessageAsync(CreateRequest(), CancellationToken.None));
-
-        // Assert
-        Assert.Equal("Pushover returned HTTP 429.", exception.Message);
-    }
-
-    [Fact]
-    public async Task WhenErrorResponseIsPlainText_ThenExceptionNamesTheStatusCode()
-    {
-        // Arrange
         var handler = new FakePushoverHandler
         {
             ResponseContentType = "text/plain",
-            Respond = _ => (HttpStatusCode.ServiceUnavailable, "Service unavailable, try again later")
+            Respond = _ => (HttpStatusCode.TooManyRequests, "Too many requests")
         };
         var client = new PushoverClient(new TestHttpClientFactory(handler));
 
         // Act
-        var exception = await Assert.ThrowsAsync<PushoverException>(() => client.SendMessageAsync(CreateRequest(), CancellationToken.None));
+        var exception = await Assert.ThrowsAsync<PushoverException>(() => client.SendMessageAsync(CreateFields(), CancellationToken.None));
 
         // Assert
-        Assert.Equal("Pushover returned HTTP 503.", exception.Message);
+        Assert.Equal("Pushover returned HTTP 429.", exception.Message);
     }
 
     [Fact]
@@ -110,7 +76,7 @@ public class PushoverClientTests
         var client = new PushoverClient(new TestHttpClientFactory(handler));
 
         // Act
-        var exception = await Assert.ThrowsAsync<PushoverException>(() => client.SendMessageAsync(CreateRequest(), CancellationToken.None));
+        var exception = await Assert.ThrowsAsync<PushoverException>(() => client.SendMessageAsync(CreateFields(), CancellationToken.None));
 
         // Assert
         Assert.Equal("Pushover rejected the request (HTTP 200).", exception.Message);
@@ -137,7 +103,7 @@ public class PushoverClientTests
         // Arrange
         var handler = new FakePushoverHandler
         {
-            Respond = _ => (HttpStatusCode.OK, """{"status":1,"acknowledged":1,"acknowledged_at":1700000000,"acknowledged_by_device":"phone","expired":0}""")
+            Respond = _ => (HttpStatusCode.OK, """{"status":1,"acknowledged":1,"acknowledged_at":1700000000,"expired":0}""")
         };
         var client = new PushoverClient(new TestHttpClientFactory(handler));
 
@@ -150,7 +116,6 @@ public class PushoverClientTests
         Assert.Equal("https://api.pushover.net/1/receipts/receipt1.json?token=app", request.Uri.ToString());
         Assert.Equal(1, response.Acknowledged);
         Assert.Equal(1700000000, response.AcknowledgedAt);
-        Assert.Equal("phone", response.AcknowledgedByDevice);
     }
 
     [Fact]
@@ -192,32 +157,15 @@ public class PushoverClientTests
     }
 
     [Fact]
-    public async Task WhenSendingAMessageWithTags_ThenTheTagsFieldIsSent()
+    public async Task WhenManyRequestsRunAtOnce_ThenAtMostTwoAreOpen()
     {
         // Arrange
-        var handler = new FakePushoverHandler();
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var handler = new FakePushoverHandler { BeforeRespond = () => release.Task };
         var client = new PushoverClient(new TestHttpClientFactory(handler));
 
         // Act
-        await client.SendMessageAsync(new PushoverMessageRequest { Token = "app", User = "user", Message = "Fire", Priority = 2, Tags = "target-rico" }, CancellationToken.None);
-
-        // Assert
-        Assert.Equal("target-rico", Assert.Single(handler.Requests).Form["tags"]);
-    }
-
-    [Theory]
-    [InlineData(1)]
-    [InlineData(4)]
-    public async Task WhenManyRequestsRunAtOnce_ThenAtMostTwoAreOpen(int clientCount)
-    {
-        // Arrange: one client sending 4 messages, or (when clientCount is 4) each message from its own client
-        // instance, to prove the connection limit is shared across client instances and not just within one.
-        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var handler = new FakePushoverHandler { BeforeRespond = () => release.Task };
-        var clients = Enumerable.Range(0, clientCount).Select(_ => new PushoverClient(new TestHttpClientFactory(handler))).ToArray();
-
-        // Act
-        var sends = Enumerable.Range(0, 4).Select(i => clients[i % clientCount].SendMessageAsync(CreateRequest(), CancellationToken.None)).ToArray();
+        var sends = Enumerable.Range(0, 4).Select(_ => client.SendMessageAsync(CreateFields(), CancellationToken.None)).ToArray();
         await AsyncTestHelpers.WaitUntilAsync(() => handler.Requests.Count == 2);
         release.SetResult();
         await Task.WhenAll(sends);

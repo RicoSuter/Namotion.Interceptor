@@ -12,26 +12,23 @@ internal sealed class FakePushoverHandler : HttpMessageHandler
     public const string Success = """{"status":1,"request":"test"}""";
 
     private const string ReceiptsPath = "/1/receipts/";
-    private const string CancelSuffix = "/cancel.json";
     private const string CancelByTagPath = "/1/receipts/cancel_by_tag/";
-    private const string ReceiptNotFound = """{"status":0,"errors":["receipt not found"]}""";
 
     /// <summary>
     /// A responder for the emergency flow: each sent emergency message gets the next receipt ("receipt1", "receipt2", ...), each
-    /// receipt poll the body <paramref name="receiptBody"/> gives for that receipt (success when null), canceling
-    /// <paramref name="failingCancelReceipt"/> or the tag <paramref name="failingCancelTag"/> fails with "receipt not
-    /// found", and every other request succeeds.
+    /// receipt poll the body <paramref name="receiptBody"/> gives for that receipt (success when null), canceling the
+    /// tag <paramref name="failingCancelTag"/> fails with "receipt not found", and every other request succeeds.
     /// </summary>
     public static Func<RecordedRequest, (HttpStatusCode StatusCode, string Body)> RespondWithNumberedReceipts(
-        Func<string, string>? receiptBody = null, string? failingCancelReceipt = null, string? failingCancelTag = null)
+        Func<string, string>? receiptBody = null, string? failingCancelTag = null)
     {
         var receiptNumber = 0;
         return request =>
         {
             var path = request.Path;
-            if (TryRespondToCancel(path, failingCancelReceipt, failingCancelTag) is { } cancelResponse)
+            if (failingCancelTag is not null && path == $"{CancelByTagPath}{failingCancelTag}.json")
             {
-                return cancelResponse;
+                return (HttpStatusCode.BadRequest, """{"status":0,"errors":["receipt not found"]}""");
             }
 
             if (path == "/1/messages.json" && request.Form.GetValueOrDefault("priority") == "2")
@@ -39,32 +36,14 @@ internal sealed class FakePushoverHandler : HttpMessageHandler
                 return (HttpStatusCode.OK, $$"""{"status":1,"receipt":"receipt{{Interlocked.Increment(ref receiptNumber)}}"}""");
             }
 
-            if (receiptBody is not null && path.StartsWith(ReceiptsPath, StringComparison.Ordinal) && path.EndsWith(".json", StringComparison.Ordinal))
+            if (receiptBody is not null && path.StartsWith(ReceiptsPath, StringComparison.Ordinal) && !path.StartsWith(CancelByTagPath, StringComparison.Ordinal)
+                && !path.EndsWith("/cancel.json", StringComparison.Ordinal))
             {
                 return (HttpStatusCode.OK, receiptBody(path[ReceiptsPath.Length..^".json".Length]));
             }
 
             return (HttpStatusCode.OK, Success);
         };
-    }
-
-    private static (HttpStatusCode StatusCode, string Body)? TryRespondToCancel(string path, string? failingCancelReceipt, string? failingCancelTag)
-    {
-        if (path.StartsWith(CancelByTagPath, StringComparison.Ordinal))
-        {
-            return path[CancelByTagPath.Length..^".json".Length] == failingCancelTag
-                ? (HttpStatusCode.BadRequest, ReceiptNotFound)
-                : (HttpStatusCode.OK, """{"status":1,"canceled":0}""");
-        }
-
-        if (path.StartsWith(ReceiptsPath, StringComparison.Ordinal) && path.EndsWith(CancelSuffix, StringComparison.Ordinal))
-        {
-            return path[ReceiptsPath.Length..^CancelSuffix.Length] == failingCancelReceipt
-                ? (HttpStatusCode.BadRequest, ReceiptNotFound)
-                : (HttpStatusCode.OK, Success);
-        }
-
-        return null;
     }
 
     /// <summary>

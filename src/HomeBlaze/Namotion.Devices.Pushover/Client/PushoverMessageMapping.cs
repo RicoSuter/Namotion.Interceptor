@@ -1,3 +1,4 @@
+using System.Globalization;
 using HomeBlaze.Abstractions.Messaging;
 using Microsoft.Extensions.Logging;
 
@@ -11,38 +12,69 @@ internal static class PushoverMessageMapping
     internal const int MaximumUrlTitleLength = 100;
 
     private const int EmergencyPriority = 2;
+    private const string EmergencyTagPrefix = "target-";
 
     /// <summary>
-    /// The tag every emergency notification of the target with <paramref name="targetKey"/> is sent with.
+    /// The tag every emergency notification of the target with <paramref name="targetKey"/> is sent with: the key in
+    /// lowercase after <c>target-</c>, with every character other than a letter, a digit or a dash replaced by a dash.
     /// </summary>
-    public static string GetEmergencyTag(string targetKey) => $"target-{targetKey}";
+    public static string GetEmergencyTag(string targetKey) =>
+        string.Create(EmergencyTagPrefix.Length + targetKey.Length, targetKey, static (tag, key) =>
+        {
+            EmergencyTagPrefix.CopyTo(tag);
+            for (var index = 0; index < key.Length; index++)
+            {
+                var character = char.ToLowerInvariant(key[index]);
+                tag[EmergencyTagPrefix.Length + index] = char.IsAsciiLetterLower(character) || char.IsAsciiDigit(character) ? character : '-';
+            }
+        });
 
-    public static PushoverMessageRequest Create(
+    /// <summary>
+    /// Creates the form fields of the messages endpoint, leaving out each value that is not set. An emergency also
+    /// gets its retry, expire and the tag of the target with <paramref name="targetKey"/>.
+    /// </summary>
+    public static Dictionary<string, string> Create(
         string token,
         string userKey,
         Notification notification,
         TimeSpan emergencyRetry,
         TimeSpan emergencyExpire,
-        string emergencyTag,
+        string targetKey,
         ILogger logger)
     {
         var priority = ToPushoverPriority(notification.Priority);
-        var isEmergency = priority == EmergencyPriority;
-        var (url, urlTitle) = CreateUrl(notification, logger);
-
-        return new PushoverMessageRequest
+        var fields = new Dictionary<string, string>
         {
-            Token = token,
-            User = userKey,
-            Message = Shorten(notification.Message, MaximumMessageLength, "message", logger)!,
-            Title = Shorten(notification.Title, MaximumTitleLength, "title", logger),
-            Url = url,
-            UrlTitle = urlTitle,
-            Priority = priority == 0 ? null : priority,
-            Retry = isEmergency ? (int)emergencyRetry.TotalSeconds : null,
-            Expire = isEmergency ? (int)emergencyExpire.TotalSeconds : null,
-            Tags = isEmergency ? emergencyTag : null
+            ["token"] = token,
+            ["user"] = userKey,
+            ["message"] = Shorten(notification.Message, MaximumMessageLength, "message", logger)!
         };
+
+        AddIfSet(fields, "title", Shorten(notification.Title, MaximumTitleLength, "title", logger));
+        var (url, urlTitle) = CreateUrl(notification, logger);
+        AddIfSet(fields, "url", url);
+        AddIfSet(fields, "url_title", urlTitle);
+        if (priority != 0)
+        {
+            fields["priority"] = priority.ToString(CultureInfo.InvariantCulture);
+        }
+
+        if (priority == EmergencyPriority)
+        {
+            fields["retry"] = ((int)emergencyRetry.TotalSeconds).ToString(CultureInfo.InvariantCulture);
+            fields["expire"] = ((int)emergencyExpire.TotalSeconds).ToString(CultureInfo.InvariantCulture);
+            fields["tags"] = GetEmergencyTag(targetKey);
+        }
+
+        return fields;
+    }
+
+    private static void AddIfSet(Dictionary<string, string> fields, string name, string? value)
+    {
+        if (value is not null)
+        {
+            fields[name] = value;
+        }
     }
 
     /// <summary>

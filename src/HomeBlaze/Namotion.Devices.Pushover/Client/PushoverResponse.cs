@@ -22,12 +22,6 @@ internal sealed class PushoverResponse
     [JsonPropertyName("token")]
     public string? Token { get; init; }
 
-    /// <summary>
-    /// "invalid" when the user or group key was rejected.
-    /// </summary>
-    [JsonPropertyName("user")]
-    public string? User { get; init; }
-
     [JsonPropertyName("receipt")]
     public string? Receipt { get; init; }
 
@@ -39,9 +33,6 @@ internal sealed class PushoverResponse
 
     [JsonPropertyName("acknowledged_at")]
     public long AcknowledgedAt { get; init; }
-
-    [JsonPropertyName("acknowledged_by_device")]
-    public string? AcknowledgedByDevice { get; init; }
 
     [JsonPropertyName("expired")]
     public int Expired { get; init; }

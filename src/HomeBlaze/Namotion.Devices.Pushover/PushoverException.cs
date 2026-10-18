@@ -18,7 +18,6 @@ public sealed class PushoverException : Exception
     {
         StatusCode = statusCode;
         IsApplicationTokenInvalid = response?.Token == "invalid";
-        IsUserKeyInvalid = response?.User == "invalid";
     }
 
     /// <summary>
@@ -31,11 +30,6 @@ public sealed class PushoverException : Exception
     /// </summary>
     public bool IsApplicationTokenInvalid { get; }
 
-    /// <summary>
-    /// Whether Pushover rejected the user or group key.
-    /// </summary>
-    public bool IsUserKeyInvalid { get; }
-
     private static string BuildMessage(HttpStatusCode statusCode, PushoverResponse? response)
     {
         if (response?.Errors is { Length: > 0 } errors)
@@ -43,7 +37,6 @@ public sealed class PushoverException : Exception
             return string.Join("; ", errors);
         }
 
-        // A 2xx response without errors still means rejection when its status is not 1; that reads differently from a transport-level failure.
         return (int)statusCode is >= 200 and <= 299
             ? $"Pushover rejected the request (HTTP {(int)statusCode})."
             : $"Pushover returned HTTP {(int)statusCode}.";
