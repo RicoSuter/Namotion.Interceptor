@@ -1068,6 +1068,8 @@ public partial class HtmlSegment
 }
 ```
 
+Use this for internal subjects that are part of a parent subject's implementation but have no meaning to end users or AI agents (e.g., parsed HTML segments, render expressions).
+
 | Target | A subject type is not | A method is not |
 |--------|-----------------------|-----------------|
 | `UserInterface` | listed or counted as a child in the browser, offered by the path picker, or walked by the navigation | shown as a button, or offered by the path picker and the widget pickers |
@@ -1083,8 +1085,6 @@ Use `UserInterface` on a method that gives an agent what a person does through o
 [ExcludeFrom(ExclusionTarget.UserInterface)]
 public Task<string[]> GetOrderAsync(CancellationToken cancellationToken)
 ```
-
-Use this for internal subjects that are part of a parent subject's implementation but have no meaning to end users or AI agents (e.g., parsed HTML segments, render expressions).
 
 ### Page Layout Types
 
