@@ -1233,7 +1233,7 @@
             return;
         }
 
-        await MoveChildAsync(container, children[index], children[targetIndex]);
+        await WriteMovedOrderAsync(container, children[index], children[targetIndex]);
         if (!_isDisposed)
         {
             StateHasChanged();
@@ -1246,7 +1246,7 @@
     private async Task MoveChildByArrowAsync(
         IMetadataContainer container, SubjectPropertyChild child, SubjectPropertyChild target, bool isUp, bool reachesEnd)
     {
-        if (await MoveChildAsync(container, child, target))
+        if (await WriteMovedOrderAsync(container, child, target))
         {
             _arrowToFocus = (child, reachesEnd ? !isUp : isUp);
         }
@@ -1258,12 +1258,20 @@
 
     // Returns whether the order was written: the whole order the list shows, with the child in the place of the
     // target, through the metadata subject of the container, as agents write it.
-    private async Task<bool> MoveChildAsync(IMetadataContainer container, SubjectPropertyChild child, SubjectPropertyChild target)
+    private async Task<bool> WriteMovedOrderAsync(IMetadataContainer container, SubjectPropertyChild child, SubjectPropertyChild target)
     {
-        if (_isMovingChild ||
-            _reorderedChildren is not { } children ||
-            (container as IInterceptorSubject)?.TryGetMetadataSubject() is not { } metadataSubject)
+        if (_isMovingChild || _reorderedChildren is not { } children)
         {
+            return false;
+        }
+
+        if ((container as IInterceptorSubject)?.TryGetMetadataSubject() is not { } metadataSubject)
+        {
+            if (!_isDisposed)
+            {
+                _ = ShowMoveFailedAsync("the folder has no metadata to keep its order in.");
+            }
+
             return false;
         }
 
