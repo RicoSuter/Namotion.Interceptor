@@ -7,7 +7,7 @@
 @using HomeBlaze.Components.Controls
 @using Microsoft.AspNetCore.Components.Rendering
 
-<div class="@(Disabled ? "tile-widget place-filler tile-widget-disabled" : "tile-widget place-filler")" style="@TileStyle.GetStyle(Color, Variant)" data-testid="@TestId">
+<div class="@RootClass" style="@TileStyle.GetStyle(Color, Variant)" data-testid="@TestId">
     @if (OnClick.HasDelegate)
     {
         <button type="button"
@@ -92,6 +92,15 @@
 
     /// <summary>What a click does. Without it the tile is no button and takes no input.</summary>
     [Parameter] public EventCallback<MouseEventArgs> OnClick { get; set; }
+
+    // Literals, so that a render allocates no class text.
+    private string RootClass => (Disabled, Badge is not null || BadgeIcon is not null) switch
+    {
+        (false, false) => "tile-widget place-filler",
+        (true, false) => "tile-widget place-filler tile-widget-disabled",
+        (false, true) => "tile-widget place-filler tile-widget-badged",
+        (true, true) => "tile-widget place-filler tile-widget-disabled tile-widget-badged"
+    };
 
     private void RenderContent(RenderTreeBuilder __builder)
     {

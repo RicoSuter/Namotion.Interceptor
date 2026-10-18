@@ -83,11 +83,24 @@
     pointer-events: none;
 }
 
+/* The badge covers the top right corner, so the content of a tile with a badge starts below a small icon or indicator
+   there, and content that does not fit overflows at the bottom instead of running under the badge. */
+.tile-widget-badged > .tile-widget-face {
+    justify-content: safe center;
+    padding-top: 36px;
+}
+
 /* A tile in a grid cell or a canvas node (a size container, SubjectComponent.razor.css) that is lower than its icon, its
    two lines and their room at their least sizes, such as in a square cell of a grid on a phone, leaves out the icon, so
-   that its text stays whole. A tile without text keeps its icon. */
+   that its text stays whole. A tile without text keeps its icon. A tile with a badge needs 24 pixels more. */
 @container tile (height < 115px) {
     .tile-widget-face:has(> .tile-widget-label, > .tile-widget-subtitle) ::deep .tile-widget-icon {
+        display: none;
+    }
+}
+
+@container tile (height < 140px) {
+    .tile-widget-badged > .tile-widget-face:has(> .tile-widget-label, > .tile-widget-subtitle) ::deep .tile-widget-icon {
         display: none;
     }
 }
