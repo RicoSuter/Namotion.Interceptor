@@ -185,10 +185,10 @@ internal sealed class StorageMetadataDocument
     /// </summary>
     /// <exception cref="ArgumentException">
     /// values is no JSON object, gives a key twice without regard to case, sets <c>order</c> of a folder, has a known
-    /// key with a value of another kind, has a value that cannot be written, such as a string with a lone surrogate, or
-    /// exceeds a limit: 64 keys in the file and in values, key names of 64 characters, strings of 256 characters,
-    /// values of 4 KB and a whole file of 16 KB, which a merge that does not make the file larger may exceed. The
-    /// message names the key.
+    /// key with a value of another kind, has a key that cannot be read or a value that cannot be written, such as one
+    /// with a lone surrogate, or exceeds a limit: 64 keys in the file and in values, key names of 64 characters,
+    /// strings of 256 characters, values of 4 KB and a whole file of 16 KB, which a merge that does not make the file
+    /// larger may exceed. The message names the key.
     /// </exception>
     /// <exception cref="InvalidOperationException">
     /// The document already holds a value that cannot be written, such as a string with a lone surrogate.
@@ -205,7 +205,16 @@ internal sealed class StorageMetadataDocument
         var givenKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var property in values.EnumerateObject())
         {
-            var key = property.Name;
+            string key;
+            try
+            {
+                key = property.Name;
+            }
+            catch (InvalidOperationException)
+            {
+                throw Refuse("A key cannot be read, such as one with a lone surrogate.");
+            }
+
             if (key.Length > MaxKeyLength)
             {
                 throw Refuse($"The key {FormatNames([key])} is longer than {MaxKeyLength} characters.");

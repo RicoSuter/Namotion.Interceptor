@@ -190,6 +190,7 @@ public class StorageMetadataDocumentTests
     [InlineData("""{ "note": "\ud800" }""", "'note'")]
     [InlineData("""{ "note": { "text": "\ud800" } }""", "'note'")]
     [InlineData("""{ "title": "\ud800" }""", "'title'")]
+    [InlineData("""{ "\ud800": "x" }""", "lone surrogate")]
     public void WhenMergedValuesAreRefused_ThenTheMessageNamesTheKey(string values, string expectedPart)
     {
         // Arrange
