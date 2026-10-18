@@ -22,7 +22,9 @@
 
         <MudDivider />
 
-        @foreach (var target in Service?.Targets.Values ?? Enumerable.Empty<PushoverTarget>())
+        @{ var targets = Service?.Targets; }
+
+        @foreach (var target in targets?.Values ?? Enumerable.Empty<PushoverTarget>())
         {
             <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
                 <MudIcon Icon="@Icons.Material.Filled.Person" Size="Size.Small" Color="@GetStatusColor(target.Status)" />
@@ -39,7 +41,7 @@
             </MudStack>
         }
 
-        @if (Service?.Targets.Count == 0)
+        @if (targets?.Count == 0)
         {
             <MudText Typo="Typo.caption">No targets configured</MudText>
         }

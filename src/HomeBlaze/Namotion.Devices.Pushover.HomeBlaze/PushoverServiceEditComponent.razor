@@ -40,14 +40,14 @@
                                  Value="target.EmergencyRetrySeconds"
                                  ValueChanged="@(value => { target.EmergencyRetrySeconds = value; OnFieldChanged(); })"
                                  Label="Emergency Retry (seconds)"
-                                 Min="30"
-                                 Max="10800" />
+                                 Min="@MinimumEmergencyRetrySeconds"
+                                 Max="@MaximumEmergencyExpireSeconds" />
                 <MudNumericField T="int"
                                  Value="target.EmergencyExpireMinutes"
                                  ValueChanged="@(value => { target.EmergencyExpireMinutes = value; OnFieldChanged(); })"
                                  Label="Emergency Expire (minutes)"
-                                 Min="1"
-                                 Max="180" />
+                                 Min="@MinimumEmergencyRetryMinutes"
+                                 Max="@MaximumEmergencyExpireMinutes" />
             </MudStack>
 
             <MudButton OnClick="@(() => RemoveTarget(target))"
@@ -70,18 +70,26 @@
 
     private PushoverService? Service => Subject as PushoverService;
 
+    // The defaults a new target is created with, so the seeded input matches PushoverTarget's own constructor
+    // instead of drifting from it through separately maintained literals.
+    private static readonly PushoverTarget DefaultTarget = new();
+
+    private static readonly int MinimumEmergencyRetrySeconds = (int)PushoverTarget.MinimumEmergencyRetry.TotalSeconds;
+    private static readonly int MaximumEmergencyExpireSeconds = (int)PushoverTarget.MaximumEmergencyExpire.TotalSeconds;
+    private static readonly int MinimumEmergencyRetryMinutes = (int)PushoverTarget.MinimumEmergencyRetry.TotalMinutes;
+    private static readonly int MaximumEmergencyExpireMinutes = (int)PushoverTarget.MaximumEmergencyExpire.TotalMinutes;
+
     private string _name = string.Empty;
     private string? _applicationToken;
     private bool _hasApplicationToken;
     private readonly List<TargetInput> _targets = [];
-    private bool _isDirty;
 
     public bool IsValid =>
         (_hasApplicationToken || !string.IsNullOrWhiteSpace(_applicationToken)) &&
         _targets.Count > 0 &&
         _targets.All(target => target.IsValid);
 
-    public bool IsDirty => _isDirty;
+    public bool IsDirty { get; private set; }
 
     public event Action<bool>? IsValidChanged;
     public event Action<bool>? IsDirtyChanged;
@@ -110,7 +118,7 @@
 
     private void OnFieldChanged()
     {
-        _isDirty = true;
+        IsDirty = true;
         IsValidChanged?.Invoke(IsValid);
         IsDirtyChanged?.Invoke(IsDirty);
     }
@@ -167,7 +175,7 @@
 
         _hasApplicationToken = !string.IsNullOrEmpty(Service.ApplicationToken);
         _applicationToken = null;
-        _isDirty = false;
+        IsDirty = false;
         IsDirtyChanged?.Invoke(false);
         return Task.CompletedTask;
     }
@@ -182,9 +190,9 @@
 
         public bool HasStoredUserKey { get; set; }
 
-        public int EmergencyRetrySeconds { get; set; } = 60;
+        public int EmergencyRetrySeconds { get; set; } = (int)DefaultTarget.EmergencyRetry.TotalSeconds;
 
-        public int EmergencyExpireMinutes { get; set; } = 60;
+        public int EmergencyExpireMinutes { get; set; } = (int)DefaultTarget.EmergencyExpire.TotalMinutes;
 
         public bool IsValid => !string.IsNullOrWhiteSpace(Name) && (HasStoredUserKey || !string.IsNullOrWhiteSpace(UserKey));
     }
