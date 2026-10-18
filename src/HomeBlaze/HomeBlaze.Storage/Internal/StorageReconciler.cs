@@ -353,7 +353,7 @@ internal sealed class StorageReconciler
     /// </summary>
     /// <exception cref="InvalidOperationException">
     /// The file cannot be read as metadata or cannot be written back, the path is a folder, its folder is gone, or the
-    /// index holds the file in another case.
+    /// index holds the file in another case under a name that is not a metadata file.
     /// </exception>
     public async Task<StorageMetadataDocument> ReadMetadataFileAsync(string path, CancellationToken cancellationToken)
     {
@@ -362,10 +362,12 @@ internal sealed class StorageReconciler
             throw new StorageRefusedException($"'{path}' is a folder and not a metadata file.");
         }
 
-        // On a file system that ignores case, that file would be read and written here, and a pass ignores it.
+        // On a file system that ignores case, a misnamed file would be read and written here, and a pass ignores it. A
+        // metadata file in another case is that of another subject on a file system that respects case.
         foreach (var candidate in _index.Entries)
         {
-            if (string.Equals(candidate.Path, path, StringComparison.OrdinalIgnoreCase) && candidate.Path != path)
+            if (string.Equals(candidate.Path, path, StringComparison.OrdinalIgnoreCase) &&
+                !StorageMetadataPath.IsMetadataFile(candidate.Path))
             {
                 throw new StorageRefusedException($"Rename '{candidate.Path}' to '{StoragePath.GetName(path)}' to make it the metadata file, then try again.");
             }
