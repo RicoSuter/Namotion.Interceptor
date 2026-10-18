@@ -71,7 +71,7 @@ public partial class NukiSmartLock : NukiDevice, IDoorLock, IDoorLatchController
 
     [Derived]
     [PropertyAttribute("ToggleLock", KnownAttributes.IsEnabled)]
-    public bool ToggleLock_IsEnabled => Unlatch_IsEnabled;
+    public bool ToggleLock_IsEnabled => IsConnected && LockState is DoorLockState.Locked or DoorLockState.Unlocked;
 
     [Derived]
     [PropertyAttribute("Unlatch", KnownAttributes.IsEnabled)]

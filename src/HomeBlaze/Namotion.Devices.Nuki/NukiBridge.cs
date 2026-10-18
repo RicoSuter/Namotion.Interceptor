@@ -53,11 +53,12 @@ public partial class NukiBridge : BackgroundService,
     internal const int InfoPollDivider = 6;
 
     private readonly IHttpClientFactory _httpClientFactory;
+    private readonly ILogger<NukiBridge> _logger;
 
     public NukiBridge(IHttpClientFactory httpClientFactory, ILogger<NukiBridge> logger)
     {
         _httpClientFactory = httpClientFactory;
-        Logger = logger;
+        _logger = logger;
 
         HostAddress = null;
         Token = null;
@@ -79,8 +80,6 @@ public partial class NukiBridge : BackgroundService,
         Locks = new Dictionary<string, NukiSmartLock>();
         Openers = new Dictionary<string, NukiOpener>();
     }
-
-    internal ILogger<NukiBridge> Logger { get; }
 
     /// <summary>
     /// The IP address or host name of the bridge, optionally with a port (8080 by default) and an http scheme.

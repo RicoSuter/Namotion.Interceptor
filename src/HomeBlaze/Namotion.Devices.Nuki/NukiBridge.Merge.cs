@@ -7,7 +7,7 @@ namespace Namotion.Devices.Nuki;
 
 public partial class NukiBridge
 {
-    internal void ApplyInfo(NukiInfoResponse info)
+    private void ApplyInfo(NukiInfoResponse info)
     {
         BridgeType = NukiStateMapping.ToBridgeType(info.BridgeType);
         HardwareId = info.Ids?.HardwareId;
@@ -42,7 +42,7 @@ public partial class NukiBridge
             }
             else
             {
-                Logger.LogDebug("Skipping Nuki device {NukiId} of unsupported type {DeviceType}.", device.NukiId, device.DeviceType);
+                _logger.LogDebug("Skipping Nuki device {NukiId} of unsupported type {DeviceType}.", device.NukiId, device.DeviceType);
             }
         }
 

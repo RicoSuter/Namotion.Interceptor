@@ -107,7 +107,7 @@ public partial class NukiBridge
         }
         catch (Exception exception)
         {
-            Logger.LogWarning(exception, "Nuki bridge {HostAddress} connection failed.", hostAddress);
+            _logger.LogWarning(exception, "Nuki bridge {HostAddress} connection failed.", hostAddress);
             StatusMessage = exception.Message;
             Status = ServiceStatus.Error;
             return false;
@@ -151,7 +151,7 @@ public partial class NukiBridge
                 }
 
                 StatusMessage = $"Poll failed ({failures} of {MaxConsecutivePollFailures}): {exception.Message}";
-                Logger.LogWarning(
+                _logger.LogWarning(
                     exception,
                     "Nuki bridge {HostAddress} poll failed ({FailureCount} of {MaxFailureCount}).",
                     HostAddress, failures, MaxConsecutivePollFailures);
@@ -162,7 +162,6 @@ public partial class NukiBridge
     /// <summary>Runs a lock action of a device and reads the device list under the same gate afterwards.</summary>
     /// <exception cref="InvalidOperationException">The bridge is not connected and nothing was sent, or the device
     /// reported a failure, with <paramref name="failureMessage"/> as the message.</exception>
-    /// <exception cref="OperationCanceledException">The caller canceled, possibly before anything was sent.</exception>
     internal async Task ExecuteActionAsync(
         NukiDevice device, int action, Action? enterTransition, string failureMessage, CancellationToken cancellationToken)
     {
@@ -199,7 +198,7 @@ public partial class NukiBridge
         if (_client is not { } client)
         {
             device.ResetActionState();
-            Logger.LogDebug("Nuki device {NukiId} is not read after action {Action}: the connection has ended.", device.NukiId, action);
+            _logger.LogDebug("Nuki device {NukiId} is not read after action {Action}: the connection has ended.", device.NukiId, action);
             return;
         }
 
@@ -210,7 +209,7 @@ public partial class NukiBridge
         catch (Exception exception)
         {
             device.ResetActionState();
-            Logger.LogWarning(exception, "Nuki device {NukiId} could not be read after action {Action}.", device.NukiId, action);
+            _logger.LogWarning(exception, "Nuki device {NukiId} could not be read after action {Action}.", device.NukiId, action);
         }
     }
 
