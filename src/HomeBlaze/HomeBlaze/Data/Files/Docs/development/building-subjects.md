@@ -482,7 +482,7 @@ public partial class Motor
 - `DateTime`, `DateTimeOffset`, `Guid`, `TimeSpan`
 - Nullable versions of the above (`int?`, `bool?`, etc.)
 - Enums and nullable enums
-- Objects such as records: a form per member when every member is a supported type, otherwise a JSON field
+- Objects such as records: a form per member, or a JSON field when a member is not a supported type or the parameter is nullable
 
 **Parameter units:**
 

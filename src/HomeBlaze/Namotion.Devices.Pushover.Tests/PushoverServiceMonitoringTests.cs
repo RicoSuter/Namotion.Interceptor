@@ -466,6 +466,30 @@ public class PushoverServiceMonitoringTests
     }
 
     [Fact]
+    public void WhenAnOldEmergencyEndsAfterTheMaximumOfNewerOnesEnded_ThenItIsKeptAndTheFirstEndedOneIsRemoved()
+    {
+        // Arrange
+        var (service, _) = PushoverTestFactory.CreateService("rico");
+        var target = service.Targets["rico"];
+        var old = service.EmergencyTracker.Add("rico", "old", null, "Fire", DateTimeOffset.UtcNow, target.EmergencyExpire);
+        var newer = Enumerable.Range(1, PushoverEmergencyTracker.MaximumFinishedEmergencies)
+            .Select(number => service.EmergencyTracker.Add("rico", $"receipt{number}", null, "Fire", DateTimeOffset.UtcNow, target.EmergencyExpire))
+            .ToArray();
+        foreach (var emergency in newer)
+        {
+            service.EmergencyTracker.ApplyReceipt(emergency, new PushoverResponse { Status = 1, Expired = 1 });
+        }
+
+        // Act
+        service.EmergencyTracker.ApplyReceipt(old, new PushoverResponse { Status = 1, Expired = 1 });
+
+        // Assert
+        Assert.Equal(PushoverEmergencyTracker.MaximumFinishedEmergencies, target.Emergencies.Count);
+        Assert.Same(old, target.Emergencies["old"]);
+        Assert.False(target.Emergencies.ContainsKey("receipt1"));
+    }
+
+    [Fact]
     public async Task WhenValidationFailsWhileAReceiptIsAcknowledged_ThenTheEmergencyIsStillAcknowledged()
     {
         // Arrange

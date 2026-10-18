@@ -80,14 +80,24 @@ public static class ParameterConverter
 
     /// <summary>
     /// Gets the members System.Text.Json sets when it reads an object type, including init-only members, or none for
-    /// a type that is not read as a JSON object. The result is cached per type.
+    /// a type that is not read as a JSON object or that System.Text.Json cannot describe. The result is cached per type.
     /// </summary>
     public static IReadOnlyList<ObjectParameterMember> GetObjectMembers(Type type) =>
         ObjectMembersByType.GetValue(Nullable.GetUnderlyingType(type) ?? type, BuildObjectMembers);
 
     private static ObjectParameterMember[] BuildObjectMembers(Type type)
     {
-        var typeInfo = ObjectSerializerOptions.GetTypeInfo(type);
+        JsonTypeInfo typeInfo;
+        try
+        {
+            typeInfo = ObjectSerializerOptions.GetTypeInfo(type);
+        }
+        // Such as colliding member names; the JSON input it falls back to reports the error when parsing.
+        catch (InvalidOperationException)
+        {
+            return [];
+        }
+
         return typeInfo.Kind != JsonTypeInfoKind.Object ? [] : typeInfo.Properties
             .Where(property => property.Set is not null)
             .Select(property => new ObjectParameterMember(property.Name, property.PropertyType, property.IsRequired))

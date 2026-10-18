@@ -11,7 +11,7 @@ namespace Namotion.Devices.Pushover;
 internal sealed class PushoverEmergencyTracker
 {
     /// <summary>
-    /// How many emergencies that are no longer active are kept per target, the newest by send time.
+    /// How many emergencies that are no longer active are kept per target, those that ended last.
     /// </summary>
     public const int MaximumFinishedEmergencies = 10;
 
@@ -30,12 +30,13 @@ internal sealed class PushoverEmergencyTracker
     // The emergency sends in flight per target key, which count toward its MaximumActiveEmergencies.
     private readonly Dictionary<string, int> _sendingEmergencyCountByTargetKey = new();
 
-    // Synchronized, so each subscriber receives the events one at a time.
-    private readonly ISubject<PushoverEmergencyAcknowledgedEvent> _acknowledgedEvents =
-        Subject.Synchronize(new Subject<PushoverEmergencyAcknowledgedEvent>());
+    // Emitted only from the receipt polling loop, so each subscriber receives the events one at a time.
+    private readonly Subject<PushoverEmergencyAcknowledgedEvent> _acknowledgedEvents = new();
 
     // The Targets of the service, read without the lock.
     private Dictionary<string, PushoverTarget> _targets = new();
+
+    private long _endSequence;
 
     public PushoverEmergencyTracker(PushoverService service, PushoverClient client)
     {
@@ -53,6 +54,7 @@ internal sealed class PushoverEmergencyTracker
         List<(string Key, PushoverEmergency[] ActiveEmergencies)>? removedTargets = null;
         lock (_lock)
         {
+            // All previous instances are cleared before any is shown again, since an instance can move to another key.
             foreach (var (key, previousTarget) in _targets)
             {
                 if (!targets.TryGetValue(key, out var target))
@@ -64,10 +66,6 @@ internal sealed class PushoverEmergencyTracker
                 {
                     continue;
                 }
-                else if (_emergenciesByTargetKey.TryGetValue(key, out var emergencies))
-                {
-                    target.Emergencies = emergencies;
-                }
 
                 previousTarget.Detach();
                 if (previousTarget.Emergencies.Count > 0)
@@ -78,6 +76,12 @@ internal sealed class PushoverEmergencyTracker
 
             foreach (var (key, target) in targets)
             {
+                if (!ReferenceEquals(_targets.GetValueOrDefault(key), target) &&
+                    _emergenciesByTargetKey.TryGetValue(key, out var emergencies))
+                {
+                    target.Emergencies = emergencies;
+                }
+
                 target.Attach(_service, key);
             }
 
@@ -386,6 +390,7 @@ internal sealed class PushoverEmergencyTracker
     // Caller must hold _lock. Status is the discrete value readers wait on, so it is written after the other state.
     private void EndLocked(PushoverEmergency emergency, PushoverEmergencyStatus status)
     {
+        emergency.EndSequence = ++_endSequence;
         emergency.Status = status;
 
         var targetKey = emergency.TargetKey;
@@ -396,7 +401,7 @@ internal sealed class PushoverEmergencyTracker
 
         var removed = emergencies.Values
             .Where(candidate => !IsActive(candidate))
-            .OrderByDescending(candidate => candidate.SentTimestamp)
+            .OrderByDescending(candidate => candidate.EndSequence)
             .Skip(MaximumFinishedEmergencies)
             .ToArray();
         if (removed.Length > 0)

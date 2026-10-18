@@ -195,6 +195,25 @@ public class PushoverServiceTests
     }
 
     [Fact]
+    public async Task WhenTwoTargetInstancesSwapTheirKeys_ThenEachShowsTheEmergenciesOfItsNewKey()
+    {
+        // Arrange
+        var (service, handler) = PushoverTestFactory.CreateService("rico", "anna");
+        handler.Respond = FakePushoverHandler.RespondWithNumberedReceipts();
+        var ricoTarget = service.Targets["rico"];
+        var annaTarget = service.Targets["anna"];
+        await ricoTarget.SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
+        await annaTarget.SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
+
+        // Act
+        service.Targets = new Dictionary<string, PushoverTarget> { ["rico"] = annaTarget, ["anna"] = ricoTarget };
+
+        // Assert
+        Assert.Equal(["receipt1"], annaTarget.Emergencies.Keys);
+        Assert.Equal(["receipt2"], ricoTarget.Emergencies.Keys);
+    }
+
+    [Fact]
     public async Task WhenATargetInstanceIsReplacedForTheSameKey_ThenTheOldInstanceIsDetachedAndCannotSend()
     {
         // Arrange

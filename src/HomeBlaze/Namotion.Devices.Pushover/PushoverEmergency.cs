@@ -8,7 +8,7 @@ namespace Namotion.Devices.Pushover;
 
 /// <summary>
 /// An emergency notification of a <see cref="PushoverTarget"/>, kept under its receipt while it repeats and, as one of
-/// the newest 10 of its target, after it ended.
+/// the 10 of its target that ended last, after it ended.
 /// </summary>
 [Description("Pushover emergency notification that repeats until acknowledged")]
 [DisplayName("Pushover emergency")]
@@ -77,6 +77,12 @@ public partial class PushoverEmergency : ITitleProvider, IIconProvider
 
     // Written only under the lock of the tracker.
     internal long? LastPolledTimestamp { get; set; }
+
+    /// <summary>
+    /// Increases with each emergency the tracker ends, under its lock, which orders the finished emergencies by when
+    /// they ended.
+    /// </summary>
+    internal long EndSequence { get; set; }
 
     internal PushoverEmergency(
         PushoverEmergencyTracker tracker, string targetKey, string receipt, string? title, string message, DateTimeOffset sentAt, TimeSpan expire)

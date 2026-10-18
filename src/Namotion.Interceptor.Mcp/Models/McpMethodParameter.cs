@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
@@ -12,6 +13,9 @@ namespace Namotion.Interceptor.Mcp.Models;
 /// </summary>
 public sealed record McpMethodParameter
 {
+    // Weak, so that the types of an unloaded plugin are not kept alive.
+    private static readonly ConditionalWeakTable<Type, StrongBox<JsonElement?>> SchemaByType = new();
+
     /// <summary>
     /// The parameter name the argument is passed under.
     /// </summary>
@@ -81,13 +85,27 @@ public sealed record McpMethodParameter
             EnumValues = valueType.IsEnum ? Enum.GetNames(valueType) : null,
             IsNullable = isNullable || underlyingType is not null,
             Description = description,
-            Schema = schemaType == "object" && HasMembers(valueType)
-                ? AIJsonUtilities.CreateJsonSchema(valueType, serializerOptions: McpValueConverter.SerializerOptions)
-                : null
+            Schema = schemaType == "object" ? SchemaByType.GetValue(valueType, CreateSchema).Value : null
         };
     }
 
-    private static bool HasMembers(Type type) =>
-        !typeof(IInterceptorSubject).IsAssignableFrom(type) &&
-        McpValueConverter.SerializerOptions.GetTypeInfo(type).Kind == JsonTypeInfoKind.Object;
+    private static StrongBox<JsonElement?> CreateSchema(Type type) =>
+        new(HasMembers(type) ? AIJsonUtilities.CreateJsonSchema(type, serializerOptions: McpValueConverter.SerializerOptions) : null);
+
+    private static bool HasMembers(Type type)
+    {
+        if (typeof(IInterceptorSubject).IsAssignableFrom(type))
+        {
+            return false;
+        }
+
+        try
+        {
+            return McpValueConverter.SerializerOptions.GetTypeInfo(type).Kind == JsonTypeInfoKind.Object;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+    }
 }

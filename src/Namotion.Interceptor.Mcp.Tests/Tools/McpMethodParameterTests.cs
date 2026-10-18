@@ -125,6 +125,17 @@ public class McpMethodParameterTests
         Assert.Null(parameter.Schema);
     }
 
+    [Fact]
+    public void WhenMemberNamesCollide_ThenTheParameterHasNoSchema()
+    {
+        // Act
+        var parameter = McpMethodParameter.Create("value", typeof(TestCollidingMessage));
+
+        // Assert
+        Assert.Equal("object", parameter.Type);
+        Assert.Null(parameter.Schema);
+    }
+
     public sealed record TestNotification
     {
         [Description("The text shown to the reader.")]
@@ -149,6 +160,15 @@ public class McpMethodParameterTests
         public string? Name { get; set; }
 
         public TestNode? Next { get; set; }
+    }
+
+    public sealed class TestCollidingMessage
+    {
+        [JsonPropertyName("text")]
+        public string? First { get; set; }
+
+        [JsonPropertyName("text")]
+        public string? Second { get; set; }
     }
 
     public enum TestMode

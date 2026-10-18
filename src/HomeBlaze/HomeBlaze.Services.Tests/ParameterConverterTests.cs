@@ -290,6 +290,7 @@ public class ParameterConverterTests
     [Theory]
     [InlineData(typeof(TestMessage), true, true)]
     [InlineData(typeof(TestEnvelope), false, true)]
+    [InlineData(typeof(TestCollidingMessage), false, true)]
     [InlineData(typeof(List<int>), false, true)]
     [InlineData(typeof(int[]), false, true)]
     [InlineData(typeof(string), false, false)]
@@ -451,6 +452,18 @@ public class ParameterConverterTests
         Assert.Equal("Text must not be empty", error);
     }
 
+    [Fact]
+    public void WhenMemberNamesCollide_ThenParsingFailsWithExceptionMessage()
+    {
+        // Act
+        var success = ParameterConverter.TryParseJson("{}", typeof(TestCollidingMessage), isNullable: false, out var value, out var error);
+
+        // Assert
+        Assert.False(success);
+        Assert.Null(value);
+        Assert.False(string.IsNullOrEmpty(error));
+    }
+
     public sealed record TestMessage
     {
         public required string Text { get; init; }
@@ -489,6 +502,15 @@ public class ParameterConverterTests
     public sealed class TestDoubleMessage
     {
         public double Value { get; set; }
+    }
+
+    public sealed class TestCollidingMessage
+    {
+        [JsonPropertyName("text")]
+        public string? First { get; set; }
+
+        [JsonPropertyName("text")]
+        public string? Second { get; set; }
     }
 
     public sealed class TestThrowingMessage
