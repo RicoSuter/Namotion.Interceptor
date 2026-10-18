@@ -116,7 +116,7 @@ A file whose name ends with `.metadata.json` is never loaded as a subject, so a 
 
 ### Ordering and Metadata by Agents
 
-Agents read and change the order and the metadata through methods of the folder, and of the root of the storage, that are meant only for agents: they are listed by MCP `list_methods` and run by `invoke_method`, but show no button in the browser.
+Agents read and change the order and the metadata through methods of the folder, and of the root of the storage, that are meant only for agents: they are listed by MCP `list_methods` and run by `invoke_query` and `invoke_operation`, but show no button in the browser.
 
 | Method | Description |
 |--------|-------------|
