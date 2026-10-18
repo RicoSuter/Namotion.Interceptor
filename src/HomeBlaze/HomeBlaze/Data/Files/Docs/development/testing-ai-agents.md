@@ -1,7 +1,6 @@
 ---
 title: Testing the AI Agents
 navTitle: AI Agent Tests
-position: 7
 ---
 
 # Testing the AI Agents

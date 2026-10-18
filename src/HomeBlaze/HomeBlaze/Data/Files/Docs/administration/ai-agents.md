@@ -1,7 +1,6 @@
 ---
 title: AI Agents
 navTitle: AI Agents
-position: 10
 ---
 
 # AI Agents
