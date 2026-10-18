@@ -477,13 +477,7 @@ public partial class Motor
 
 **Where a method is offered:**
 
-A method is offered everywhere by default. `[ExcludeFrom(ExclusionTarget.Agents)]` on an `[Operation]` or `[Query]` keeps it out of MCP `list_methods` and `$methods`, and `invoke_query`, `invoke_operation` and the Markdown tools treat it as unknown. `[ExcludeFrom(ExclusionTarget.UserInterface)]` gives it no button in the browser and keeps it out of the path picker and the widget pickers, while agents still list and run it. A path to it that a person types into a widget, such as an operation button, still runs it: the attribute decides where a method is offered, not who may run it. Use `UserInterface` for a method that gives an agent what a person does through other controls, as the metadata subject does for the order that people change by dragging:
-
-```csharp
-[Query(Title = "Get Order", Description = "Gets the names of the children in the order in which they are shown.")]
-[ExcludeFrom(ExclusionTarget.UserInterface)]
-public Task<string[]> GetOrderAsync(CancellationToken cancellationToken)
-```
+A method is offered everywhere by default; `[ExcludeFrom]` keeps it out of the user interface or away from agents, see [Excluding Subjects and Methods](#excluding-subjects-and-methods).
 
 **Supported parameter types:**
 - `string`, `int`, `long`, `double`, `float`, `decimal`, `bool`
@@ -1080,7 +1074,15 @@ public partial class HtmlSegment
 | `Agents` | listed by MCP `browse` and `search` and by the built-in agents | listed by `list_methods` and `$methods`, or run by `invoke_query`, `invoke_operation`, the Markdown tools and the built-in agents |
 | `All` | any of the above, also for targets added later | any of the above, also for targets added later |
 
-A subject excluded from agents is still reached by its explicit path, as the metadata subject at `<path>/HomeBlaze:Metadata` is. Code checks a subject with the extension `IsExcludedFrom(target)` and a type with `ExcludeFromAttribute.IsExcluded(type, target)`.
+Exclusion decides where a subject or a method is offered, and is no access control: an agent still reaches a subject of a type excluded from agents by its explicit path and calls its methods, as it does for the metadata subject at `<path>/HomeBlaze:Metadata`, and a path to a method excluded from the user interface that a person types into a widget, such as an operation button, still runs it. Code checks a subject with the extension `IsExcludedFrom(target)`, a type with `ExcludeFromAttribute.IsExcluded(type, target)`, and lists the methods for a target with `GetAllMethods(target)`.
+
+Use `UserInterface` on a method that gives an agent what a person does through other controls, as the metadata subject does for the order that people change by dragging:
+
+```csharp
+[Query(Title = "Get Order", Description = "Gets the names of the children in the order in which they are shown.")]
+[ExcludeFrom(ExclusionTarget.UserInterface)]
+public Task<string[]> GetOrderAsync(CancellationToken cancellationToken)
+```
 
 Use this for internal subjects that are part of a parent subject's implementation but have no meaning to end users or AI agents (e.g., parsed HTML segments, render expressions).
 
