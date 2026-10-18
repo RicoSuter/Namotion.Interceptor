@@ -4,13 +4,14 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Devices.Pushover.Tests.Testing;
 using Namotion.Interceptor.Testing;
 using Xunit;
+using Observer = System.Reactive.Observer;
 
 namespace Namotion.Devices.Pushover.Tests;
 
 /// <summary>
 /// Runs against the real Pushover API with the tokens in PUSHOVER_APPLICATION_TOKEN and PUSHOVER_USER_KEY; without
 /// them each test returns at once. The emergency test also needs PUSHOVER_RUN_EMERGENCY=1, because the phone alarms
-/// until the notification is acknowledged on it or expires after 30 seconds.
+/// until the notification is acknowledged on it.
 /// </summary>
 [Trait("Category", "Integration")]
 public class PushoverLiveTests
@@ -103,7 +104,7 @@ public class PushoverLiveTests
     }
 
     [Fact]
-    public async Task WhenSendingAnEmergencyNotification_ThenPushoverReturnsAReceipt()
+    public async Task WhenEmergencyIsAcknowledgedOnThePhone_ThenTheEventArrives()
     {
         if (!HasTokens || !RunEmergency)
         {
@@ -113,18 +114,61 @@ public class PushoverLiveTests
         // Arrange
         var service = CreateService(UserKey!);
         var target = service.Targets["live"];
-        target.EmergencyRetry = PushoverTarget.MinimumEmergencyRetry;
-        target.EmergencyExpire = PushoverTarget.MinimumEmergencyRetry;
+        var acknowledged = new TaskCompletionSource<PushoverEmergencyAcknowledgedEvent>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var subscription = target.Subscribe(Observer.Create<PushoverEmergencyAcknowledgedEvent>(
+            value => acknowledged.TrySetResult(value),
+            error => acknowledged.TrySetException(error),
+            () => { }));
+        await using var running = await PushoverTestFactory.StartAsync(service);
 
         // Act
         var result = await target.SendNotificationAsync(new Notification
         {
-            Message = "Emergency test, it stops repeating after 30 seconds.",
+            Message = "Acknowledge this emergency test on your phone.",
             Title = "Namotion emergency test",
             Priority = NotificationPriority.Emergency
         }, CancellationToken.None);
 
         // Assert
-        Assert.False(string.IsNullOrEmpty(result.Id));
+        PushoverEmergencyAcknowledgedEvent acknowledgedEvent;
+        try
+        {
+            acknowledgedEvent = await acknowledged.Task.WaitAsync(TimeSpan.FromMinutes(5));
+        }
+        catch (TimeoutException)
+        {
+            // Stops the alarm on the phone, which would otherwise repeat until the emergency expires.
+            await target.Emergencies[result.Id!].CancelAsync(CancellationToken.None);
+            throw;
+        }
+
+        Assert.Equal(result.Id, acknowledgedEvent.Id);
+        Assert.Equal(PushoverEmergencyStatus.Acknowledged, acknowledgedEvent.Emergency.Status);
+    }
+
+    [Fact]
+    public async Task WhenEmergencyIsCanceled_ThenItStopsRepeating()
+    {
+        if (!HasTokens || !RunEmergency)
+        {
+            return;
+        }
+
+        // Arrange
+        var service = CreateService(UserKey!);
+        var target = service.Targets["live"];
+        var result = await target.SendNotificationAsync(new Notification
+        {
+            Message = "This emergency test is canceled at once.",
+            Title = "Namotion cancel test",
+            Priority = NotificationPriority.Emergency
+        }, CancellationToken.None);
+        var emergency = target.Emergencies[result.Id!];
+
+        // Act
+        await emergency.CancelAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(PushoverEmergencyStatus.Canceled, emergency.Status);
     }
 }

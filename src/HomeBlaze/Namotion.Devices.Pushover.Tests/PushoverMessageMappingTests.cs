@@ -8,7 +8,7 @@ namespace Namotion.Devices.Pushover.Tests;
 public class PushoverMessageMappingTests
 {
     private static Dictionary<string, string> Map(Notification notification) =>
-        PushoverMessageMapping.Create("app", "user", notification, TimeSpan.FromSeconds(60), TimeSpan.FromHours(1), NullLogger.Instance);
+        PushoverMessageMapping.Create("app", "user", notification, TimeSpan.FromSeconds(60), TimeSpan.FromHours(1), "rico", NullLogger.Instance);
 
     [Theory]
     [InlineData(NotificationPriority.Low, "-1")]
@@ -25,7 +25,7 @@ public class PushoverMessageMappingTests
     }
 
     [Fact]
-    public void WhenNotificationIsNormal_ThenPriorityRetryAndExpireAreOmitted()
+    public void WhenNotificationIsNormal_ThenPriorityRetryExpireAndTagsAreOmitted()
     {
         // Act
         var fields = Map(new Notification { Message = "Hello", Title = "Title", Url = "https://example.com", UrlTitle = "Open" });
@@ -42,6 +42,18 @@ public class PushoverMessageMappingTests
                 ["url_title"] = "Open"
             },
             fields);
+    }
+
+    [Theory]
+    [InlineData("rico", "target-rico")]
+    [InlineData("Living Room, 2", "target-living-room--2")]
+    public void WhenCreatingTheEmergencyTag_ThenEveryCharacterOtherThanALetterDigitOrDashIsADash(string targetKey, string expected)
+    {
+        // Act
+        var tag = PushoverMessageMapping.GetEmergencyTag(targetKey);
+
+        // Assert
+        Assert.Equal(expected, tag);
     }
 
     [Fact]
