@@ -27,13 +27,13 @@ public class StorageMetadataMethodTests : StorageTestBase
         var rootMethodsForAgents = storage.TryGetRegisteredSubject()!.GetAllMethods(MethodAudience.Agents);
 
         // Assert
-        Assert.Equal(["Create"], folderMethodsForPeople.Select(method => method.Title));
+        Assert.Equal(["Create", "Create Markdown File"], folderMethodsForPeople.Select(method => method.Title));
         Assert.Equal(
-            ["Create", "Get Order", "Set Order", "Get Metadata", "Set Metadata", "Set Child Metadata"],
+            ["Create", "Create Markdown File", "Get Order", "Set Order", "Get Metadata", "Set Metadata", "Set Child Metadata"],
             folderMethodsForAgents.Select(method => method.Title));
-        Assert.Equal(["Create"], rootMethodsForPeople.Select(method => method.Title));
+        Assert.Equal(["Create", "Create Markdown File"], rootMethodsForPeople.Select(method => method.Title));
         Assert.Equal(
-            ["Create", "Get Order", "Set Order", "Get Metadata", "Set Child Metadata"],
+            ["Create", "Create Markdown File", "Get Order", "Set Order", "Get Metadata", "Set Child Metadata"],
             rootMethodsForAgents.Select(method => method.Title));
     }
 
