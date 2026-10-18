@@ -64,6 +64,9 @@ public partial class PushoverService : BackgroundService, IConfigurable, IMonito
     // Not intercepted, so tests can poll faster than the five seconds the receipts API allows.
     internal TimeSpan ReceiptPollingInterval { get; set; } = TimeSpan.FromSeconds(10);
 
+    // Not intercepted, so tests can lower it below the Pushover receipts API's real five-second minimum.
+    internal TimeSpan MinimumReceiptPollingInterval { get; set; } = TimeSpan.FromSeconds(5);
+
     internal TimeSpan RetryInterval { get; set; } = TimeSpan.FromSeconds(30);
 
     public PushoverService(IHttpClientFactory httpClientFactory, ILogger<PushoverService> logger)
@@ -94,13 +97,22 @@ public partial class PushoverService : BackgroundService, IConfigurable, IMonito
         }
         catch (Exception) when (!cancellationToken.IsCancellationRequested)
         {
-            var failures = targets
+            var failedPairs = targets
                 .Zip(sends)
                 .Where(pair => !pair.Second.IsCompletedSuccessfully)
+                .ToArray();
+
+            var failures = failedPairs
                 .Select(pair => $"{pair.First.Title}: {pair.Second.Exception?.InnerException?.Message ?? "canceled"}")
                 .ToArray();
 
-            throw new PushoverException($"Sending to {failures.Length} of {targets.Length} targets failed. {string.Join(" ", failures)}");
+            var innerExceptions = failedPairs
+                .Select(pair => pair.Second.Exception?.InnerException ?? new TaskCanceledException(pair.Second))
+                .ToArray();
+
+            throw new PushoverException(
+                $"Sending to {failures.Length} of {targets.Length} targets failed. {string.Join(" ", failures)}",
+                new AggregateException(innerExceptions));
         }
     }
 
@@ -193,6 +205,13 @@ public partial class PushoverService : BackgroundService, IConfigurable, IMonito
 
     private void Signal()
     {
+        // Avoids a first-chance exception on every redundant signal. The catch below is a backstop for the race
+        // between this check and the release.
+        if (_signal.CurrentCount != 0)
+        {
+            return;
+        }
+
         try
         {
             _signal.Release();
@@ -203,16 +222,20 @@ public partial class PushoverService : BackgroundService, IConfigurable, IMonito
         }
     }
 
-    partial void OnTargetsChanging(ref Dictionary<string, PushoverTarget> newValue, ref bool cancel) =>
-        newValue ??= new Dictionary<string, PushoverTarget>();
-
-    partial void OnTargetsChanged(Dictionary<string, PushoverTarget> newValue)
+    // The back-reference is assigned here, not in OnTargetsChanged, so there is no window in which an attached
+    // target is reachable through Targets but its Service (and Logger) are not yet set.
+    partial void OnTargetsChanging(ref Dictionary<string, PushoverTarget> newValue, ref bool cancel)
     {
+        newValue ??= new Dictionary<string, PushoverTarget>();
         foreach (var target in newValue.Values)
         {
             target.Service = this;
+            target.Logger = _logger;
         }
+    }
 
+    partial void OnTargetsChanged(Dictionary<string, PushoverTarget> newValue)
+    {
         RequestValidation();
     }
 }

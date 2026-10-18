@@ -3,6 +3,7 @@ using System.Reactive.Subjects;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Messaging;
+using Microsoft.Extensions.Logging;
 using Namotion.Devices.Pushover.Client;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry.Attributes;
@@ -34,9 +35,13 @@ public partial class PushoverTarget :
     private readonly Lock _emergencyLock = new();
     private string? _emergencyReceipt;
     private DateTimeOffset _emergencyExpiresAt;
+    private DateTimeOffset? _lastReceiptPolledAt;
 
     // Not intercepted: an intercepted property holding the service would attach it as a child of its own child.
     internal PushoverService? Service { get; set; }
+
+    // Not intercepted, for the same reason as Service; set together with it so a subscriber exception can always be logged.
+    internal ILogger? Logger { get; set; }
 
     [Configuration]
     public partial string Name { get; set; }
@@ -154,8 +159,10 @@ public partial class PushoverTarget :
         CloseEmergency(receipt);
     }
 
+    // Each subscriber is wrapped so that one throwing from OnNext cannot stop the subject from notifying the
+    // others, or propagate into the receipt-polling loop that raises the event.
     public IDisposable Subscribe(IObserver<PushoverEmergencyAcknowledgedEvent> observer) =>
-        _acknowledgedEvents.Subscribe(observer);
+        _acknowledgedEvents.Subscribe(new SafeAcknowledgedObserver(this, observer));
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
     {
@@ -165,16 +172,18 @@ public partial class PushoverTarget :
 
     internal void SetValidated(string[] devices)
     {
+        // Status is the discrete value readers wait on; writing it last avoids a window where a waiter sees the
+        // new Status with the previous Devices or StatusMessage still in place.
         Devices = devices;
-        Status = ServiceStatus.Running;
         StatusMessage = null;
+        Status = ServiceStatus.Running;
     }
 
     internal void SetValidationFailed(string message)
     {
         Devices = [];
-        Status = ServiceStatus.Error;
         StatusMessage = message;
+        Status = ServiceStatus.Error;
     }
 
     internal void StartEmergency(string receipt, DateTimeOffset now)
@@ -183,11 +192,36 @@ public partial class PushoverTarget :
         {
             _emergencyReceipt = receipt;
             _emergencyExpiresAt = now + EmergencyExpire;
+            // A new emergency's first poll may happen at once, regardless of when the previous one was last polled.
+            _lastReceiptPolledAt = null;
             IsEmergencyAcknowledged = false;
             EmergencyAcknowledgedAt = null;
             EmergencyAcknowledgedByDevice = null;
             IsEmergencyExpired = false;
             IsEmergencyActive = true;
+        }
+    }
+
+    /// <summary>
+    /// Returns the receipt to poll when an emergency is active and it was not already polled within
+    /// <paramref name="minimumInterval"/>, recording <paramref name="now"/> as the new poll time; otherwise null.
+    /// </summary>
+    internal string? TryStartReceiptPoll(DateTimeOffset now, TimeSpan minimumInterval)
+    {
+        lock (_emergencyLock)
+        {
+            if (_emergencyReceipt is not { } receipt)
+            {
+                return null;
+            }
+
+            if (_lastReceiptPolledAt is { } lastPolledAt && now - lastPolledAt < minimumInterval)
+            {
+                return null;
+            }
+
+            _lastReceiptPolledAt = now;
+            return receipt;
         }
     }
 
@@ -277,4 +311,26 @@ public partial class PushoverTarget :
     }
 
     partial void OnDevicesChanging(ref string[] newValue, ref bool cancel) => newValue ??= [];
+
+    // Wraps a subscriber so that its exception is logged and swallowed instead of reaching the Subject, which
+    // would otherwise stop notifying the subscribers after this one and propagate into the receipt-polling loop.
+    private sealed class SafeAcknowledgedObserver(PushoverTarget target, IObserver<PushoverEmergencyAcknowledgedEvent> inner)
+        : IObserver<PushoverEmergencyAcknowledgedEvent>
+    {
+        public void OnNext(PushoverEmergencyAcknowledgedEvent value)
+        {
+            try
+            {
+                inner.OnNext(value);
+            }
+            catch (Exception exception)
+            {
+                target.Logger?.LogWarning(exception, "A Pushover emergency acknowledgement subscriber of target {Target} threw", target.Title);
+            }
+        }
+
+        public void OnError(Exception error) => inner.OnError(error);
+
+        public void OnCompleted() => inner.OnCompleted();
+    }
 }

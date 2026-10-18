@@ -43,8 +43,11 @@ public partial class PushoverService
             {
                 _logger.LogError(exception, "Pushover rejected the application token");
                 _isValidationRequested = true;
-                Status = ServiceStatus.Error;
+
+                // Status is the discrete value readers wait on; writing it last avoids a window where a waiter
+                // sees the new Status with the previous StatusMessage still in place.
                 StatusMessage = "The application token is invalid";
+                Status = ServiceStatus.Error;
 
                 // Retrying cannot help until the token changes, which signals the loop.
                 await WaitForSignalAsync(Timeout.InfiniteTimeSpan, stoppingToken);
@@ -53,8 +56,8 @@ public partial class PushoverService
             {
                 _logger.LogError(exception, "Pushover service failed");
                 _isValidationRequested = true;
-                Status = ServiceStatus.Error;
                 StatusMessage = exception.Message;
+                Status = ServiceStatus.Error;
                 await WaitForSignalAsync(RetryInterval, stoppingToken);
             }
         }
@@ -82,19 +85,35 @@ public partial class PushoverService
             }
             catch (PushoverException exception) when (!exception.IsApplicationTokenInvalid)
             {
+                // A rejected user key is permanent, as is any other 4xx response except 429 (rate limited); both
+                // mean retrying with the same request cannot succeed. Anything else, including a 5xx outage or a
+                // 429, is transient, so it is rethrown for the generic catch below to retry after RetryInterval
+                // with validation requested again, instead of marking the target permanently failed.
+                if (!IsPermanentValidationFailure(exception))
+                {
+                    throw;
+                }
+
                 _logger.LogWarning(exception, "Pushover target {Target} failed validation", target.Title);
                 target.SetValidationFailed(exception.Message);
             }
         }
     }
 
+    private static bool IsPermanentValidationFailure(PushoverException exception) =>
+        exception.IsUserKeyInvalid ||
+        (exception.StatusCode is { } statusCode && (int)statusCode is >= 400 and < 500 and not 429);
+
     private async Task<bool> PollReceiptsAsync(string token, CancellationToken cancellationToken)
     {
         var hasOpenEmergencies = false;
+        var now = DateTimeOffset.UtcNow;
         foreach (var target in Targets.Values)
         {
-            if (target.EmergencyReceipt is not { } receipt)
+            var receipt = target.TryStartReceiptPoll(now, MinimumReceiptPollingInterval);
+            if (receipt is null)
             {
+                hasOpenEmergencies |= target.IsEmergencyActive;
                 continue;
             }
 
