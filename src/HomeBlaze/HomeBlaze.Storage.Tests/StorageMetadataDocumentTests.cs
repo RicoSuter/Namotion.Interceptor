@@ -178,6 +178,9 @@ public class StorageMetadataDocumentTests
     [InlineData("""{ "tags": 1, "Tags": 2 }""", "'Tags'")]
     [InlineData("""{ "title": 5 }""", "'title'")]
     [InlineData("""{ "navTitle": ["a"] }""", "'navTitle'")]
+    [InlineData("""{ "note": "\ud800" }""", "'note'")]
+    [InlineData("""{ "note": { "text": "\ud800" } }""", "'note'")]
+    [InlineData("""{ "title": "\ud800" }""", "'title'")]
     public void WhenMergedValuesAreRefused_ThenTheMessageNamesTheKey(string values, string expectedPart)
     {
         // Arrange
