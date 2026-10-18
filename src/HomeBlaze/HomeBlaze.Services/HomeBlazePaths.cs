@@ -16,6 +16,12 @@ public static class HomeBlazePaths
     /// <summary>Setting that overrides the plugin configuration file.</summary>
     public const string PluginConfigurationPathKey = "PluginConfigurationPath";
 
+    /// <summary>Setting that points to a PKCS#12 certificate with a private key that encrypts the Data Protection keys at rest.</summary>
+    public const string DataProtectionCertificatePathKey = "HomeBlaze:DataProtection:CertificatePath";
+
+    /// <summary>Setting that holds the password of the Data Protection certificate, if it has one.</summary>
+    public const string DataProtectionCertificatePasswordKey = "HomeBlaze:DataProtection:CertificatePassword";
+
     /// <summary>Default root configuration file, relative to the working directory.</summary>
     public static readonly string DefaultRootConfigurationFile = Path.Combine("Data", "Root.json");
 
@@ -51,5 +57,15 @@ public static class HomeBlazePaths
     {
         var dataDirectory = Path.GetDirectoryName(GetRootConfigurationPath(configuration))!;
         return Path.Combine(dataDirectory, DataProtectionKeysDirectory);
+    }
+
+    /// <summary>
+    /// Resolves the full path of the certificate that encrypts the Data Protection keys, or <c>null</c> when none is configured.
+    /// A relative setting resolves against the working directory.
+    /// </summary>
+    public static string? GetDataProtectionCertificatePath(IConfiguration configuration)
+    {
+        var certificatePath = configuration[DataProtectionCertificatePathKey];
+        return string.IsNullOrWhiteSpace(certificatePath) ? null : Path.GetFullPath(certificatePath);
     }
 }

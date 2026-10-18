@@ -17,7 +17,6 @@ using HomeBlaze.Services.Diagnostics;
 using HomeBlaze.Storage;
 using HomeBlaze.Storage.Blazor;
 using HomeBlaze.Storage.Blazor.Files;
-using Microsoft.AspNetCore.DataProtection;
 using Namotion.Devices.Gpio;
 using Namotion.Devices.Gpio.HomeBlaze;
 using Namotion.Devices.MyStrom;
@@ -55,15 +54,7 @@ var rootConfigurationPath = HomeBlazePaths.GetRootConfigurationPath(builder.Conf
 var seedDirectory = builder.Configuration[HomeBlazePaths.SeedDirectoryKey];
 var seededFileCount = DataDirectorySeeder.SeedIfMissing(rootConfigurationPath, seedDirectory);
 
-// Kept in the data directory so antiforgery tokens and protected state survive a restart or an image update.
-var dataProtectionBuilder = builder.Services.AddDataProtection()
-    .SetApplicationName("HomeBlaze")
-    .PersistKeysToFileSystem(new DirectoryInfo(HomeBlazePaths.GetDataProtectionKeysPath(builder.Configuration)));
-if (OperatingSystem.IsWindows())
-{
-    // A custom key folder turns off the default DPAPI encryption at rest, which only Windows offers.
-    dataProtectionBuilder.ProtectKeysWithDpapi();
-}
+builder.Services.AddHomeBlazeDataProtection(builder.Configuration);
 
 var pluginConfigPath = HomeBlazePaths.GetPluginConfigurationPath(builder.Configuration);
 
