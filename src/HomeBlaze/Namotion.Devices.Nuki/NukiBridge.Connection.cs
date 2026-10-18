@@ -35,9 +35,6 @@ public partial class NukiBridge
     /// <see cref="MinimumIntervalSeconds"/> through <see cref="MaximumIntervalSeconds"/>, or the fallback when it is
     /// zero or negative.
     /// </summary>
-    /// <param name="configured">The configured interval, such as <see cref="PollingInterval"/>.</param>
-    /// <param name="fallback">The interval to use when the configured one is zero or negative.</param>
-    /// <returns>The effective interval.</returns>
     public static TimeSpan GetEffectiveInterval(TimeSpan configured, TimeSpan fallback) =>
         configured <= TimeSpan.Zero
             ? fallback
@@ -162,12 +159,7 @@ public partial class NukiBridge
         }
     }
 
-    /// <summary>
-    /// Runs a lock action of a device and waits until the device has finished it. <paramref name="enterTransition"/>
-    /// runs right before the request is sent. Once the request was sent, the device list is read whether the action
-    /// succeeded or not; when that read fails or the connection has ended meanwhile, the state of the device becomes
-    /// unknown (<see cref="NukiDevice.ResetActionState"/>) until the next device list.
-    /// </summary>
+    /// <summary>Runs a lock action of a device and reads the device list under the same gate afterwards.</summary>
     /// <exception cref="InvalidOperationException">The bridge is not connected and nothing was sent, or the device
     /// reported a failure, with <paramref name="failureMessage"/> as the message.</exception>
     /// <exception cref="OperationCanceledException">The caller canceled, possibly before anything was sent.</exception>

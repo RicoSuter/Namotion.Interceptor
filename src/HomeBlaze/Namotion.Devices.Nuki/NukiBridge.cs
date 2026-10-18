@@ -35,20 +35,16 @@ public partial class NukiBridge : BackgroundService,
     ITitleProvider,
     IIconProvider
 {
-    /// <summary>The default <see cref="PollingInterval"/>. It stays below 30 seconds, the time a ring shows at the bridge.</summary>
+    /// <summary>The default <see cref="PollingInterval"/>.</summary>
     public static readonly TimeSpan DefaultPollingInterval = TimeSpan.FromSeconds(10);
 
     /// <summary>The default <see cref="RetryInterval"/>.</summary>
     public static readonly TimeSpan DefaultRetryInterval = TimeSpan.FromSeconds(30);
 
-    /// <summary>
-    /// The shortest <see cref="PollingInterval"/> and <see cref="RetryInterval"/>, in seconds; a shorter one is raised to it.
-    /// </summary>
+    /// <summary>The shortest <see cref="PollingInterval"/> and <see cref="RetryInterval"/>, in seconds.</summary>
     public const int MinimumIntervalSeconds = 1;
 
-    /// <summary>
-    /// The longest <see cref="PollingInterval"/> and <see cref="RetryInterval"/>, in seconds; a longer one is lowered to it.
-    /// </summary>
+    /// <summary>The longest <see cref="PollingInterval"/> and <see cref="RetryInterval"/>, in seconds.</summary>
     public const int MaximumIntervalSeconds = 3600;
 
     private const int MaxConsecutivePollFailures = 3;

@@ -5,15 +5,10 @@ using MudBlazor;
 namespace HomeBlaze.Components.Controls;
 
 /// <summary>
-/// What a door lock tile shows.
+/// What a door lock tile shows. <see cref="Description"/> is the text of the state followed by what a click does, and
+/// <see cref="Operation"/> names the operation a click invokes; when a click does nothing, they are the text of the
+/// state alone and null.
 /// </summary>
-/// <param name="DoorIcon">The large icon, from the state of the door.</param>
-/// <param name="BadgeIcon">The icon of the badge, from the state of the lock.</param>
-/// <param name="Fill">The fill of the tile.</param>
-/// <param name="Subtitle">The text of the state.</param>
-/// <param name="Description">The text of the state followed by what a click does, or the text of the state alone when a
-/// click does nothing.</param>
-/// <param name="Operation">The name of the operation a click invokes, or null when a click does nothing.</param>
 internal readonly record struct DoorLockAppearance(string DoorIcon, string BadgeIcon, Color Fill, string Subtitle, string Description, string? Operation);
 
 /// <summary>
