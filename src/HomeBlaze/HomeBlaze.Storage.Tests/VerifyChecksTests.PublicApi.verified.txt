@@ -185,8 +185,8 @@ namespace HomeBlaze.Storage
         [HomeBlaze.Abstractions.Attributes.ExcludeFrom(HomeBlaze.Abstractions.Attributes.ExclusionTarget.UserInterface)]
         [HomeBlaze.Abstractions.Attributes.Query(Description="Gets every key of the metadata file of the subject, folder or storage root that t" +
             "his metadata belongs to, as a JSON object, keys HomeBlaze does not know included" +
-            "; {} without a file. For a folder or the root the order is left out: Get Order r" +
-            "eturns it.", Position=1, Title="Get Metadata")]
+            "; {} without a file. For a folder or the root the order is left out: GetOrder re" +
+            "turns it.", Position=1, Title="Get Metadata")]
         public System.Threading.Tasks.Task<System.Text.Json.JsonElement> GetMetadataAsync(System.Threading.CancellationToken cancellationToken) { }
         [HomeBlaze.Abstractions.Attributes.ExcludeFrom(HomeBlaze.Abstractions.Attributes.ExclusionTarget.UserInterface)]
         [HomeBlaze.Abstractions.Attributes.Query(Description="Gets the names of the children of this folder or storage root in the order in whi" +
@@ -194,10 +194,10 @@ namespace HomeBlaze.Storage
             "ld in Children. Only for a folder or the root.", Position=3, Title="Get Order")]
         public System.Threading.Tasks.Task<string[]> GetOrderAsync(System.Threading.CancellationToken cancellationToken) { }
         [HomeBlaze.Abstractions.Attributes.ExcludeFrom(HomeBlaze.Abstractions.Attributes.ExclusionTarget.UserInterface)]
-        [HomeBlaze.Abstractions.Attributes.Operation(Description=@"Merges values, a JSON object, into the metadata file at the top level: a key with a value is set, replacing a nested value as a whole, a key with null is removed, and every other key stays. Keys are matched without regard to case. HomeBlaze reads title, navTitle and icon of a folder (the root uses none of them) and navTitle, icon, location (NavBar or AppBar) and alignment (Left or Right) of a subject; each takes a string, and a blank string removes it. The order of a folder or the root cannot be set here: use Set Order. Other keys are stored as given. At most 64 keys, key names of up to 64 characters, strings of up to 256 characters, values of up to 4 KB and a file of up to 16 KB, which a file that is larger already may exceed while the merge does not make it larger. Example: {""navTitle"": ""Pump"", ""icon"": null}.", Position=2, Title="Set Metadata")]
+        [HomeBlaze.Abstractions.Attributes.Operation(Description=@"Merges values, a JSON object, into the metadata file at the top level: a key with a value is set, replacing a nested value as a whole, a key with null is removed, and every other key stays. Keys are matched without regard to case. HomeBlaze reads title, navTitle and icon of a folder (the root uses none of them) and navTitle, icon, location (NavBar or AppBar) and alignment (Left or Right) of a subject; each takes a string, and a blank string removes it. The order of a folder or the root cannot be set here: use SetOrder. Other keys are stored as given. At most 64 keys, key names of up to 64 characters, strings of up to 256 characters, values of up to 4 KB and a file of up to 16 KB, which a file that is larger already may exceed while the merge does not make it larger. Example: {""navTitle"": ""Pump"", ""icon"": null}.", Position=2, Title="Set Metadata")]
         public System.Threading.Tasks.Task SetMetadataAsync(System.Text.Json.JsonElement values, System.Threading.CancellationToken cancellationToken) { }
         [HomeBlaze.Abstractions.Attributes.ExcludeFrom(HomeBlaze.Abstractions.Attributes.ExclusionTarget.UserInterface)]
-        [HomeBlaze.Abstractions.Attributes.Operation(Description=@"Sets the order in which the children of this folder or storage root are shown: the given names first, in the given order, then the other children in the order in which they are shown now. Each name must be the name of a child, as Get Order returns it, and may be given only once. Only for a folder or the root.", Position=4, Title="Set Order")]
+        [HomeBlaze.Abstractions.Attributes.Operation(Description=@"Sets the order in which the children of this folder or storage root are shown: the given names first, in the given order, then the other children in the order in which they are shown now. Each name must be the name of a child, as GetOrder returns it, and may be given only once. Only for a folder or the root.", Position=4, Title="Set Order")]
         public System.Threading.Tasks.Task SetOrderAsync(string[] names, System.Threading.CancellationToken cancellationToken) { }
     }
     [Namotion.Interceptor.Attributes.InterceptorSubject]

@@ -54,7 +54,7 @@ internal static class HomeBlazeMcpConfigurationFactory
         };
 
         // The metadata subject is added explicitly: browse, search and list_types skip only the listed types, and a
-        // registry lists only the types of the assemblies it was given. A type listed twice does no harm.
+        // registry lists only the types of the assemblies it was given.
         var excludeTypes = typeRegistry.RegisteredTypes
             .Where(type => ExcludeFromAttribute.IsExcluded(type, ExclusionTarget.Agents))
             .Append(typeof(MetadataSubject))

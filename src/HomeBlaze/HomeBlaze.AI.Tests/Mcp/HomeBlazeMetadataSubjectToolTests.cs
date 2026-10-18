@@ -32,7 +32,47 @@ public sealed class HomeBlazeMetadataSubjectToolTests : IDisposable
 
         // Assert
         var node = result.GetProperty("result");
-        Assert.False(node.TryGetProperty("properties", out var properties) && properties.TryGetProperty(IMetadataSubject.PropertyName, out _));
+        Assert.True(node.TryGetProperty("properties", out var properties));
+        Assert.False(properties.TryGetProperty(IMetadataSubject.PropertyName, out _));
+    }
+
+    [Fact]
+    public async Task WhenMetadataAndOrderAreSetThroughTheMcpTools_ThenGetMetadataAndGetOrderReturnThem()
+    {
+        // Arrange
+        WriteFile("Docs/Pump.json", """{ "speed": 1 }""");
+        WriteFile("Logs/info.md", "# Info");
+        var tools = await CreateToolsAsync();
+
+        // Act
+        var setMetadataResult = await CallAsync(tools["invoke_operation"], new
+        {
+            path = "/Storage/Docs/Pump.json/HomeBlaze:Metadata",
+            method = "SetMetadata",
+            parameters = new { values = new { navTitle = "Pump" } }
+        });
+        var getMetadataResult = await CallAsync(tools["invoke_query"], new
+        {
+            path = "/Storage/Docs/Pump.json/HomeBlaze:Metadata",
+            method = "GetMetadata"
+        });
+        var setOrderResult = await CallAsync(tools["invoke_operation"], new
+        {
+            path = "/Storage/HomeBlaze:Metadata",
+            method = "SetOrder",
+            parameters = new { names = new[] { "Logs" } }
+        });
+        var getOrderResult = await CallAsync(tools["invoke_query"], new
+        {
+            path = "/Storage/HomeBlaze:Metadata",
+            method = "GetOrder"
+        });
+
+        // Assert
+        Assert.True(setMetadataResult.GetProperty("success").GetBoolean());
+        Assert.Equal("Pump", getMetadataResult.GetProperty("result").GetProperty("navTitle").GetString());
+        Assert.True(setOrderResult.GetProperty("success").GetBoolean());
+        Assert.Equal("Logs", getOrderResult.GetProperty("result").EnumerateArray().First().GetString());
     }
 
     [Fact]

@@ -21,8 +21,8 @@ internal static class HomeBlazeMcpInstructions
     /// <summary>Where the metadata and the order of stored subjects, folders and the storage root are.</summary>
     public const string MetadataSubjects =
         "Every subject stored as a JSON file, every folder and the storage root has its metadata at <path>/HomeBlaze:Metadata, " +
-        "which browse and search do not list: call its queries GetMetadata and GetOrder with invoke_query and its operations " +
-        "SetMetadata (values, a JSON object that is merged) and SetOrder (names) with invoke_operation, the order only for a folder or the root.";
+        "which browse and search do not list: call its queries GetMetadata and GetOrder with invoke_query, and its operations " +
+        "SetMetadata (values, a JSON object that is merged) and SetOrder (names) with invoke_operation, when available; the order only for a folder or the root.";
 
     /// <summary>The server instructions of the HomeBlaze MCP server.</summary>
     public const string ServerInstructions =

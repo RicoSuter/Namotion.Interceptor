@@ -18,16 +18,16 @@ namespace HomeBlaze.Storage;
 public sealed partial class MetadataSubject : IMetadataSubject
 {
     private const string GetMetadataDescription =
-        "Gets every key of the metadata file of the subject, folder or storage root that this metadata belongs to, as a JSON object, keys HomeBlaze does not know included; {} without a file. For a folder or the root the order is left out: Get Order returns it.";
+        "Gets every key of the metadata file of the subject, folder or storage root that this metadata belongs to, as a JSON object, keys HomeBlaze does not know included; {} without a file. For a folder or the root the order is left out: GetOrder returns it.";
 
     private const string SetMetadataDescription =
-        "Merges values, a JSON object, into the metadata file at the top level: a key with a value is set, replacing a nested value as a whole, a key with null is removed, and every other key stays. Keys are matched without regard to case. HomeBlaze reads title, navTitle and icon of a folder (the root uses none of them) and navTitle, icon, location (NavBar or AppBar) and alignment (Left or Right) of a subject; each takes a string, and a blank string removes it. The order of a folder or the root cannot be set here: use Set Order. Other keys are stored as given. At most 64 keys, key names of up to 64 characters, strings of up to 256 characters, values of up to 4 KB and a file of up to 16 KB, which a file that is larger already may exceed while the merge does not make it larger. Example: {\"navTitle\": \"Pump\", \"icon\": null}.";
+        "Merges values, a JSON object, into the metadata file at the top level: a key with a value is set, replacing a nested value as a whole, a key with null is removed, and every other key stays. Keys are matched without regard to case. HomeBlaze reads title, navTitle and icon of a folder (the root uses none of them) and navTitle, icon, location (NavBar or AppBar) and alignment (Left or Right) of a subject; each takes a string, and a blank string removes it. The order of a folder or the root cannot be set here: use SetOrder. Other keys are stored as given. At most 64 keys, key names of up to 64 characters, strings of up to 256 characters, values of up to 4 KB and a file of up to 16 KB, which a file that is larger already may exceed while the merge does not make it larger. Example: {\"navTitle\": \"Pump\", \"icon\": null}.";
 
     private const string GetOrderDescription =
         "Gets the names of the children of this folder or storage root in the order in which they are shown in navigation and in the browser. A name is the key of the child in Children. Only for a folder or the root.";
 
     private const string SetOrderDescription =
-        "Sets the order in which the children of this folder or storage root are shown: the given names first, in the given order, then the other children in the order in which they are shown now. Each name must be the name of a child, as Get Order returns it, and may be given only once. Only for a folder or the root.";
+        "Sets the order in which the children of this folder or storage root are shown: the given names first, in the given order, then the other children in the order in which they are shown now. Each name must be the name of a child, as GetOrder returns it, and may be given only once. Only for a folder or the root.";
 
     // Two storages give the same subject its metadata subject when a storage is the JSON file of another one.
     private static readonly Lock EnsureLock = new();
