@@ -8,11 +8,12 @@ using Microsoft.Playwright;
 namespace HomeBlaze.E2E.Tests;
 
 /// <summary>
-/// E2E tests for the door lock tile.
+/// E2E tests for the door lock tile. The tests share one lock, so each one sets the state it needs and the lock is
+/// reset after each test, also when it fails.
 /// </summary>
 [Collection(nameof(PlaywrightCollection))]
 [Trait("Category", "Integration")]
-public class DoorLockTileTests
+public class DoorLockTileTests : IDisposable
 {
     private const int Timeout = 30000;
     private const string PageName = "DoorLock.md";
@@ -24,8 +25,18 @@ public class DoorLockTileTests
         _fixture = fixture;
     }
 
+    public void Dispose() => SetLockState(DoorLockState.Locked, DoorState.Closed);
+
     private SimulatedDoorLock GetLock() =>
         (SimulatedDoorLock)((MarkdownFile)_fixture.GetDemoFolder().Children[PageName]).Children["frontdoor"];
+
+    private SimulatedDoorLock SetLockState(DoorLockState lockState, DoorState doorState)
+    {
+        var doorLock = GetLock();
+        doorLock.LockState = lockState;
+        doorLock.DoorState = doorState;
+        return doorLock;
+    }
 
     private async Task<IPage> OpenPageAsync()
     {
@@ -45,6 +56,7 @@ public class DoorLockTileTests
     public async Task WhenPageRenders_ThenItShowsNoBlockErrors()
     {
         // Arrange & Act
+        SetLockState(DoorLockState.Locked, DoorState.Closed);
         var page = await OpenPageAsync();
 
         // Assert
@@ -56,9 +68,7 @@ public class DoorLockTileTests
     public async Task WhenLockIsUnlocked_ThenTheTileShowsItAndAClickLocksIt()
     {
         // Arrange
-        var doorLock = GetLock();
-        doorLock.LockState = DoorLockState.Unlocked;
-        doorLock.DoorState = DoorState.Closed;
+        SetLockState(DoorLockState.Unlocked, DoorState.Closed);
         var page = await OpenPageAsync();
         var tile = GetTile(page, "Front door");
         await Assertions.Expect(tile.GetByTestId("tile-subtitle")).ToHaveTextAsync("Unlocked", new() { Timeout = Timeout });
@@ -75,8 +85,7 @@ public class DoorLockTileTests
     public async Task WhenLockedTileIsClicked_ThenUnlockAsksForConfirmationFirst()
     {
         // Arrange
-        var doorLock = GetLock();
-        doorLock.LockState = DoorLockState.Locked;
+        SetLockState(DoorLockState.Locked, DoorState.Closed);
         var page = await OpenPageAsync();
         var tile = GetTile(page, "Front door");
         await Assertions.Expect(tile.GetByTestId("tile-subtitle")).ToHaveTextAsync("Locked", new() { Timeout = Timeout });
@@ -96,8 +105,7 @@ public class DoorLockTileTests
     public async Task WhenDoorOpens_ThenTheSubtitleSaysSo()
     {
         // Arrange
-        var doorLock = GetLock();
-        doorLock.LockState = DoorLockState.Unlocked;
+        var doorLock = SetLockState(DoorLockState.Unlocked, DoorState.Closed);
         var page = await OpenPageAsync();
         var tile = GetTile(page, "Front door");
 
@@ -106,14 +114,13 @@ public class DoorLockTileTests
 
         // Assert
         await Assertions.Expect(tile.GetByTestId("tile-subtitle")).ToHaveTextAsync("Unlocked · open", new() { Timeout = Timeout });
-        doorLock.DoorState = DoorState.Closed;
     }
 
     [Fact]
     public async Task WhenLockIsJammed_ThenTheTileIsDisabledAndFilledWithTheErrorColor()
     {
         // Arrange
-        GetLock().LockState = DoorLockState.Jammed;
+        SetLockState(DoorLockState.Jammed, DoorState.Closed);
         var page = await OpenPageAsync();
         var tile = GetTile(page, "Front door");
 
@@ -125,7 +132,6 @@ public class DoorLockTileTests
         var error = await page.ResolveColorAsync("var(--mud-palette-error)");
         var background = await GetTileRoot(tile).EvaluateAsync<string>("element => getComputedStyle(element).backgroundColor");
         Assert.Equal(error, background);
-        GetLock().LockState = DoorLockState.Locked;
     }
 
     [Fact]
