@@ -1173,11 +1173,11 @@
                     <span class="subject-pane-move">
                         @if (childIndex > 0)
                         {
-                            @RenderMoveArrow(container, child, children[childIndex - 1], isUp: true, reachesEnd: childIndex == 1, childName, canPressArrows)
+                            @RenderMoveArrow(child, children[childIndex - 1], isUp: true, reachesEnd: childIndex == 1, childName, canPressArrows)
                         }
                         @if (childIndex < children.Length - 1)
                         {
-                            @RenderMoveArrow(container, child, children[childIndex + 1], isUp: false, reachesEnd: childIndex == children.Length - 2, childName, canPressArrows)
+                            @RenderMoveArrow(child, children[childIndex + 1], isUp: false, reachesEnd: childIndex == children.Length - 2, childName, canPressArrows)
                         }
                     </span>
                 </div>
@@ -1186,8 +1186,7 @@
     };
 
     private RenderFragment RenderMoveArrow(
-        IMetadataContainer container, SubjectPropertyChild child, SubjectPropertyChild neighbor, bool isUp, bool reachesEnd,
-        string childName, bool isEnabled) => __builder =>
+        SubjectPropertyChild child, SubjectPropertyChild neighbor, bool isUp, bool reachesEnd, string childName, bool isEnabled) => __builder =>
     {
         var direction = isUp ? "up" : "down";
         <MudIconButton @ref="_arrows[(child, isUp)]"
@@ -1195,7 +1194,7 @@
                        Size="Size.Small"
                        Class="@($"subject-pane-move-{direction} pa-0")"
                        Disabled="@(!isEnabled)"
-                       OnClick="@(() => MoveChildByArrowAsync(container, child, neighbor, isUp, reachesEnd))"
+                       OnClick="@(() => MoveChildByArrowAsync(child, neighbor, isUp, reachesEnd))"
                        aria-label="@($"Move {childName} {direction}")"
                        data-testid="@($"move-child-{direction}-button")" />
     };
@@ -1206,19 +1205,7 @@
     [JSInvokable]
     public async Task OnChildDropped(string name, string targetName)
     {
-        if (_reorderContainer is not { } container || _reorderedChildren is not { } children)
-        {
-            return;
-        }
-
-        var index = Array.FindIndex(children, child => child.Index?.ToString() == name);
-        var targetIndex = Array.FindIndex(children, child => child.Index?.ToString() == targetName);
-        if (index < 0 || targetIndex < 0 || index == targetIndex)
-        {
-            return;
-        }
-
-        await WriteMovedOrderAsync(container, children[index], children[targetIndex]);
+        await MoveChildAsync(name, targetName);
         if (!_isDisposed)
         {
             StateHasChanged();
@@ -1228,10 +1215,9 @@
     // The rows are keyed, so a move takes a row out of the page and puts it back, which can take the focus from its
     // arrow, and the arrow pressed on a row that the move takes to the top or the bottom is gone. The arrow of the row
     // takes the focus again, its other arrow at the top or the bottom.
-    private async Task MoveChildByArrowAsync(
-        IMetadataContainer container, SubjectPropertyChild child, SubjectPropertyChild target, bool isUp, bool reachesEnd)
+    private async Task MoveChildByArrowAsync(SubjectPropertyChild child, SubjectPropertyChild target, bool isUp, bool reachesEnd)
     {
-        if (await WriteMovedOrderAsync(container, child, target))
+        if (await MoveChildAsync(child.Index!.ToString()!, target.Index!.ToString()!))
         {
             _arrowToFocus = (child, reachesEnd ? !isUp : isUp);
         }
@@ -1242,40 +1228,36 @@
         => container is not IStorageContainer { Status: not StorageStatus.Connected };
 
     // Returns whether the order was written: the whole order the list shows, with the child in the place of the
-    // target, through the metadata subject of the container, as agents write it.
-    private async Task<bool> WriteMovedOrderAsync(IMetadataContainer container, SubjectPropertyChild child, SubjectPropertyChild target)
+    // target, through the metadata subject of the container, as agents write it. Nothing is written when the child or
+    // the target is no longer a child of the container.
+    private async Task<bool> MoveChildAsync(string name, string targetName)
     {
-        if (_isMovingChild || _reorderedChildren is not { } children)
+        if (_isMovingChild || _reorderContainer is not IInterceptorSubject container || _reorderedChildren is not { } children)
         {
             return false;
         }
-
-        if ((container as IInterceptorSubject)?.TryGetMetadataSubject() is not { } metadataSubject)
-        {
-            if (!_isDisposed)
-            {
-                _ = ShowMoveFailedAsync("the folder has no metadata to keep its order in.");
-            }
-
-            return false;
-        }
-
-        var name = child.Index!.ToString()!;
-        List<string> names = [.. children.Select(item => item.Index!.ToString()!)];
-        var targetIndex = names.IndexOf(target.Index!.ToString()!);
-        names.Remove(name);
-        names.Insert(targetIndex, name);
 
         // A child removed since the list was shown would make the write fail, as every name must be a child.
-        var currentNames = (container as IInterceptorSubject)?.TryGetRegisteredSubject()?
+        var currentNames = container.TryGetRegisteredSubject()?
             .TryGetProperty(IMetadataContainer.ChildrenPropertyName)?.Children
             .Select(item => item.Index?.ToString())
             .ToHashSet() ?? [];
-        names.RemoveAll(item => !currentNames.Contains(item));
+        List<string> names = [.. children.Select(item => item.Index!.ToString()!).Where(currentNames.Contains)];
+        var index = names.IndexOf(name);
+        var targetIndex = names.IndexOf(targetName);
+        if (index < 0 || targetIndex < 0 || index == targetIndex)
+        {
+            return false;
+        }
+
+        names.RemoveAt(index);
+        names.Insert(targetIndex, name);
 
         _isMovingChild = true;
         try
         {
+            var metadataSubject = container.TryGetMetadataSubject()
+                ?? throw new InvalidOperationException("the folder has no metadata to keep its order in.");
             await metadataSubject.SetOrderAsync([.. names], _lifetime.Token);
             return true;
         }
