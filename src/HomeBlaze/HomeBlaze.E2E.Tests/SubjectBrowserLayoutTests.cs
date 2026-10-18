@@ -323,21 +323,21 @@ public class SubjectBrowserLayoutTests
     }
 
     [Fact]
-    public async Task WhenASubjectHasChildrenAndMethods_ThenTheMethodsPrecedeTheChildren()
+    public async Task WhenASubjectHasChildrenAndMethods_ThenTheChildrenPrecedeTheMethods()
     {
         // Act
         var page = await OpenAsync("browser", 1280, 720, paneCount: 1);
 
         // Assert
-        var methodsPrecedeChildren = await page.EvaluateAsync<bool>("""
+        var childrenPrecedeMethods = await page.EvaluateAsync<bool>("""
             () => {
                 const pane = document.querySelector("#scrollContainer [data-testid='subject-pane']");
                 const firstChild = pane.querySelector('.mud-list-item');
                 const method = [...pane.querySelectorAll('button')].find(button => button.textContent.includes('Create'));
-                return (method.compareDocumentPosition(firstChild) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+                return (firstChild.compareDocumentPosition(method) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
             }
             """);
-        Assert.True(methodsPrecedeChildren);
+        Assert.True(childrenPrecedeMethods);
     }
 
     [Fact]

@@ -41,7 +41,14 @@ Since `SendNotificationAsync` is marked with `[Operation]`, it is:
 
 ### From AI Agents
 
-A [built-in agent](../administration/ai-agents.md) finds the publishers through its tools: `list_types` finds the `INotificationPublisher` interface, and `search` with that interface in its `types` parameter finds the subjects that implement it. `list_methods` shows the exact method name and parameters: the operation is registered without the `Async` suffix, as `SendNotification` with a `message` parameter. The agent calls it with `invoke_operation`, which must be in the agent's `AllowedTools`; it is off by default, so an agent without it can only report findings on its page. Do not mark `SendNotificationAsync` with `RequiresConfirmation`, because operations that require confirmation cannot be called through MCP, see [AI Agents](../administration/ai-agents.md#tools-and-permissions).
+A [built-in agent](../administration/ai-agents.md) sends a notification with its tools:
+
+1. `list_types` finds the `INotificationPublisher` interface.
+2. `search` with that interface in its `types` parameter finds the publishers.
+3. `list_methods` shows the operation, registered without the `Async` suffix as `SendNotification` with a `message` parameter.
+4. `invoke_operation` calls it. It must be in the agent's `AllowedTools` and is off by default; without it, the agent can only report findings on its page.
+
+Do not mark `SendNotificationAsync` with `RequiresConfirmation`, because such operations cannot be called through MCP, see [AI Agents](../administration/ai-agents.md#tools-and-permissions).
 
 ### From Other Subjects
 
