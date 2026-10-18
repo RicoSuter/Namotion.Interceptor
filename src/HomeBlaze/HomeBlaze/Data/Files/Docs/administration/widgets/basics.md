@@ -12,13 +12,13 @@ The rules that all widgets of a markdown page share. The [overview](overview.md)
 
 ## Type Names
 
-A block names its type with the full type name: the namespace and the name of the class, for example `HomeBlaze.Components.Card`. The namespace is the name of the library that ships the type. The widgets of this reference are in `HomeBlaze.Components`, except `HomeBlaze.History.Blazor.HistoryChart`, which ships with the history library. The sample motor is `HomeBlaze.Samples.Motor`, and a device has the namespace of its device library. The name is case-sensitive.
+A block names its type with the full type name: the namespace and the name of the class, for example `HomeBlaze.Components.Card`. The namespace is the name of the library that ships the type. The widgets of this reference are in `HomeBlaze.Components`, except `HomeBlaze.History.Blazor.HistoryChart`, which ships with the history library. The sample motor is `HomeBlaze.Samples.Motor`, the sample lock `HomeBlaze.Samples.SimulatedDoorLock`, and a device has the namespace of its device library. The name is case-sensitive.
 
 A block that fills a slot of a widget is written with the name of the slot instead, for example `Tab` inside a `TabLayout` or `Case` inside a `ValueMap`. Such a slot block is only allowed directly inside its widget, see [Slot Blocks](#slot-blocks).
 
 ## Sample Motors
 
-The samples of these pages need subjects to show. They use two sample motors: the subject files `Pump.json` and `Fan.json` in this folder, of the type `HomeBlaze.Samples.Motor`, with the names "Pump" and "Fan" and the target speeds 1200 and 800 RPM. The documentation is copied into every installation, so the two motors run there as well and the samples show live values.
+The samples of these pages need subjects to show. They use two sample motors: the subject files `Pump.json` and `Fan.json` in this folder, of the type `HomeBlaze.Samples.Motor`, with the names "Pump" and "Fan" and the target speeds 1200 and 800 RPM. The documentation is copied into every installation, so the two motors run there as well and the samples show live values. The samples of [DoorLock](door-lock.md) use the sample lock `FrontDoor.json` in this folder, of the type `HomeBlaze.Samples.SimulatedDoorLock`, with the name "Front door".
 
 A sample refers to a motor relative to its page, for example `../Pump/CurrentSpeed` for the current speed of the pump. A sample that you copy to a page of your own needs the path of one of your subjects in its place.
 
@@ -119,7 +119,7 @@ The `Icon` of a card, a tab, a panel, a row, a tile, an indicator, an alert, an 
 
 The control widgets ([Switch](switch.md) and the others of the group Controls in the [overview](overview.md)) write properties and invoke operations. They follow the same rules as the property panel of a subject.
 
-- **Who can operate**: Every viewer of a page can operate its controls. Every viewer of this documentation can operate the two sample motors through the control samples.
+- **Who can operate**: Every viewer of a page can operate its controls. Every viewer of this documentation can operate the two sample motors and the sample lock through the control samples.
 - **Disabled**: A control is disabled when its path leads nowhere, when the property cannot be written because it has no public setter, and while the page is edited.
 - **Live**: A control follows its property, so a change by another viewer or by the device moves it.
 - **Writes**: A value is converted to the type of the property. A value that the type cannot hold, or that the property refuses, shows an error message, and nothing is rolled back.
