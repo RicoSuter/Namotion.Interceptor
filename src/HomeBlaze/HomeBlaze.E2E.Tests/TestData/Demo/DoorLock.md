@@ -4,7 +4,7 @@ title: Door Lock Demo
 
 # Door Lock Demo
 
-This page is changed by the door lock tile tests.
+The door lock tile tests change the lock at runtime and reset it after each test.
 
 :: HomeBlaze.Samples.SimulatedDoorLock#frontdoor Name="Front door" TransitionDuration=00:00:00.500
 ::

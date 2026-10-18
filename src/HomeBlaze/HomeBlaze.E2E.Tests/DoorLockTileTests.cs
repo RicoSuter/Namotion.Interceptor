@@ -18,6 +18,9 @@ public class DoorLockTileTests : IDisposable
     private const int Timeout = 30000;
     private const string PageName = "DoorLock.md";
 
+    // The TransitionDuration of the lock on the page.
+    private static readonly TimeSpan PageTransitionDuration = TimeSpan.FromMilliseconds(500);
+
     private readonly PlaywrightFixture _fixture;
 
     public DoorLockTileTests(PlaywrightFixture fixture)
@@ -25,7 +28,17 @@ public class DoorLockTileTests : IDisposable
         _fixture = fixture;
     }
 
-    public void Dispose() => SetLockState(DoorLockState.Locked, DoorState.Closed);
+    public void Dispose()
+    {
+        // The duration is a configuration property, so it is only written back when a test changed it.
+        var doorLock = GetLock();
+        if (doorLock.TransitionDuration != PageTransitionDuration)
+        {
+            doorLock.TransitionDuration = PageTransitionDuration;
+        }
+
+        SetLockState(DoorLockState.Locked, DoorState.Closed);
+    }
 
     private SimulatedDoorLock GetLock() =>
         (SimulatedDoorLock)((MarkdownFile)_fixture.GetDemoFolder().Children[PageName]).Children["frontdoor"];
@@ -62,6 +75,31 @@ public class DoorLockTileTests : IDisposable
         // Assert
         await Assertions.Expect(page.GetByTestId("door-lock-tile").First).ToBeVisibleAsync(new() { Timeout = Timeout });
         await Assertions.Expect(page.Locator(".markdown-block-error")).ToHaveCountAsync(0);
+    }
+
+    [Fact]
+    public async Task WhenPageRenders_ThenEveryTileShowsItsBadge()
+    {
+        // Arrange & Act
+        SetLockState(DoorLockState.Locked, DoorState.Closed);
+        var page = await OpenPageAsync();
+
+        // Assert
+        await Assertions.Expect(GetTileRoot(GetTile(page, "Front door")).GetByTestId("tile-badge")).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(GetTileRoot(GetTile(page, "Missing")).GetByTestId("tile-badge")).ToBeVisibleAsync(new() { Timeout = Timeout });
+    }
+
+    [Fact]
+    public async Task WhenLockIsLocked_ThenTheStateIsTheAccessibleDescriptionAndTheTooltipNamesTheClick()
+    {
+        // Arrange & Act
+        SetLockState(DoorLockState.Locked, DoorState.Closed);
+        var page = await OpenPageAsync();
+        var tile = GetTile(page, "Front door");
+
+        // Assert
+        await Assertions.Expect(tile).ToHaveAccessibleDescriptionAsync("Locked", new() { Timeout = Timeout });
+        await Assertions.Expect(tile).ToHaveAttributeAsync("title", "Unlock");
     }
 
     [Fact]
@@ -102,12 +140,55 @@ public class DoorLockTileTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenLockMoves_ThenTheTileShowsTheTransitionAndIsBusyUntilItEnds()
+    {
+        // Arrange
+        var doorLock = SetLockState(DoorLockState.Unlocked, DoorState.Closed);
+        doorLock.TransitionDuration = TimeSpan.FromSeconds(3);
+        var page = await OpenPageAsync();
+        var tile = GetTile(page, "Front door");
+        await Assertions.Expect(tile.GetByTestId("tile-subtitle")).ToHaveTextAsync("Unlocked", new() { Timeout = Timeout });
+
+        // Act
+        await tile.ClickAsync();
+
+        // Assert
+        await Assertions.Expect(tile.GetByTestId("tile-subtitle")).ToHaveTextAsync("Locking…", new() { Timeout = Timeout });
+        await Assertions.Expect(tile).ToBeDisabledAsync();
+        await Assertions.Expect(GetTileRoot(tile).GetByTestId("tile-progress")).ToBeVisibleAsync();
+        await Assertions.Expect(tile.GetByTestId("tile-subtitle")).ToHaveTextAsync("Locked", new() { Timeout = Timeout });
+        await Assertions.Expect(GetTileRoot(tile).GetByTestId("tile-progress")).ToBeHiddenAsync(new() { Timeout = Timeout });
+        Assert.Equal(DoorLockState.Locked, GetLock().LockState);
+    }
+
+    [Fact]
+    public async Task WhenUnlockIsConfirmed_ThenTheLockIsUnlocked()
+    {
+        // Arrange
+        SetLockState(DoorLockState.Locked, DoorState.Closed);
+        var page = await OpenPageAsync();
+        var tile = GetTile(page, "Front door");
+        await Assertions.Expect(tile.GetByTestId("tile-subtitle")).ToHaveTextAsync("Locked", new() { Timeout = Timeout });
+
+        // Act
+        await tile.ClickAsync();
+        var dialog = page.GetByRole(AriaRole.Dialog).Filter(new() { HasText = "Are you sure you want to execute this operation?" });
+        await Assertions.Expect(dialog).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await dialog.GetByRole(AriaRole.Button, new() { Name = "Execute", Exact = true }).ClickAsync();
+
+        // Assert
+        await Assertions.Expect(tile.GetByTestId("tile-subtitle")).ToHaveTextAsync("Unlocked", new() { Timeout = Timeout });
+        Assert.Equal(DoorLockState.Unlocked, GetLock().LockState);
+    }
+
+    [Fact]
     public async Task WhenDoorOpens_ThenTheSubtitleSaysSo()
     {
         // Arrange
         var doorLock = SetLockState(DoorLockState.Unlocked, DoorState.Closed);
         var page = await OpenPageAsync();
         var tile = GetTile(page, "Front door");
+        await Assertions.Expect(tile.GetByTestId("tile-subtitle")).ToHaveTextAsync("Unlocked", new() { Timeout = Timeout });
 
         // Act
         doorLock.DoorState = DoorState.Open;
@@ -121,13 +202,13 @@ public class DoorLockTileTests : IDisposable
     {
         // Arrange
         SetLockState(DoorLockState.Jammed, DoorState.Closed);
+
+        // Act
         var page = await OpenPageAsync();
         var tile = GetTile(page, "Front door");
 
-        // Act
-        await Assertions.Expect(tile.GetByTestId("tile-subtitle")).ToHaveTextAsync("Jammed", new() { Timeout = Timeout });
-
         // Assert
+        await Assertions.Expect(tile.GetByTestId("tile-subtitle")).ToHaveTextAsync("Jammed", new() { Timeout = Timeout });
         await Assertions.Expect(tile).ToBeDisabledAsync();
         var error = await page.ResolveColorAsync("var(--mud-palette-error)");
         var background = await GetTileRoot(tile).EvaluateAsync<string>("element => getComputedStyle(element).backgroundColor");
