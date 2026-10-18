@@ -19,28 +19,24 @@ internal readonly record struct DoorLockAppearance(string DoorIcon, string Badge
 /// </summary>
 internal static class DoorLockDisplay
 {
-    private const string OpenSuffix = " · open";
-
     public static DoorLockAppearance Get(DoorLockState? lockState, DoorState? doorState)
     {
-        var doorIcon = doorState == DoorState.Open ? Icons.Material.Filled.MeetingRoom : Icons.Material.Filled.DoorFront;
-        var (badgeIcon, fill, subtitle, operation) = lockState switch
+        var isOpen = doorState == DoorState.Open;
+        var doorIcon = isOpen ? Icons.Material.Filled.MeetingRoom : Icons.Material.Filled.DoorFront;
+
+        // Both subtitles are literals, so a render allocates no text.
+        var (badgeIcon, fill, subtitle, openSubtitle, operation) = lockState switch
         {
-            DoorLockState.Locked => (Icons.Material.Filled.Lock, Color.Default, "Locked", "Unlock"),
-            DoorLockState.Unlocked => (Icons.Material.Filled.LockOpen, Color.Warning, "Unlocked", "Lock"),
-            DoorLockState.Unlatched => (Icons.Material.Filled.LockOpen, Color.Warning, "Unlatched", "Lock"),
-            DoorLockState.Locking => (Icons.Material.Filled.HourglassTop, Color.Default, "Locking…", null),
-            DoorLockState.Unlocking => (Icons.Material.Filled.HourglassTop, Color.Default, "Unlocking…", null),
-            DoorLockState.Unlatching => (Icons.Material.Filled.HourglassTop, Color.Default, "Unlatching…", null),
-            DoorLockState.Jammed => (Icons.Material.Filled.LockReset, Color.Error, "Jammed", (string?)null),
-            _ => (Icons.Material.Filled.QuestionMark, Color.Default, "Unknown", null)
+            DoorLockState.Locked => (Icons.Material.Filled.Lock, Color.Default, "Locked", "Locked · open", "Unlock"),
+            DoorLockState.Unlocked => (Icons.Material.Filled.LockOpen, Color.Warning, "Unlocked", "Unlocked · open", "Lock"),
+            DoorLockState.Unlatched => (Icons.Material.Filled.LockOpen, Color.Warning, "Unlatched", "Unlatched · open", "Lock"),
+            DoorLockState.Locking => (Icons.Material.Filled.HourglassTop, Color.Default, "Locking…", "Locking… · open", null),
+            DoorLockState.Unlocking => (Icons.Material.Filled.HourglassTop, Color.Default, "Unlocking…", "Unlocking… · open", null),
+            DoorLockState.Unlatching => (Icons.Material.Filled.HourglassTop, Color.Default, "Unlatching…", "Unlatching… · open", null),
+            DoorLockState.Jammed => (Icons.Material.Filled.LockReset, Color.Error, "Jammed", "Jammed · open", (string?)null),
+            _ => (Icons.Material.Filled.QuestionMark, Color.Default, "Unknown", "Unknown · open", null)
         };
 
-        return new DoorLockAppearance(
-            doorIcon,
-            badgeIcon,
-            fill,
-            doorState == DoorState.Open ? subtitle + OpenSuffix : subtitle,
-            operation);
+        return new DoorLockAppearance(doorIcon, badgeIcon, fill, isOpen ? openSubtitle : subtitle, operation);
     }
 }

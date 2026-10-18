@@ -1344,6 +1344,8 @@ namespace HomeBlaze.Components.Components
     {
         public TileView() { }
         [Microsoft.AspNetCore.Components.Parameter]
+        public string? AccessibleDescription { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
         public string? AccessibleName { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public Namotion.Interceptor.IInterceptorSubject? Badge { get; set; }

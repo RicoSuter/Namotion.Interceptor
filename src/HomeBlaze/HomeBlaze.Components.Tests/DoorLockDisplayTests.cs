@@ -43,4 +43,22 @@ public class DoorLockDisplayTests
         Assert.Equal(doorIcon, appearance.DoorIcon);
         Assert.Equal(subtitle, appearance.Subtitle);
     }
+
+    [Theory]
+    [InlineData(DoorLockState.Locked, "Locked · open")]
+    [InlineData(DoorLockState.Unlocked, "Unlocked · open")]
+    [InlineData(DoorLockState.Unlatched, "Unlatched · open")]
+    [InlineData(DoorLockState.Locking, "Locking… · open")]
+    [InlineData(DoorLockState.Unlocking, "Unlocking… · open")]
+    [InlineData(DoorLockState.Unlatching, "Unlatching… · open")]
+    [InlineData(DoorLockState.Jammed, "Jammed · open")]
+    [InlineData(null, "Unknown · open")]
+    public void WhenDoorIsOpen_ThenEveryLockStateSaysSo(DoorLockState? lockState, string subtitle)
+    {
+        // Act
+        var appearance = DoorLockDisplay.Get(lockState, DoorState.Open);
+
+        // Assert
+        Assert.Equal(subtitle, appearance.Subtitle);
+    }
 }
