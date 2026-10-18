@@ -1139,8 +1139,12 @@ public partial class FluentStorageContainer :
         catch (Exception exception) when (CanHaveReachedStorage(exception))
         {
             connection.NotifyChanged(entry.Path);
+            await DeleteSidecarAsync(connection, entry, isFileDeleted: false);
             throw;
         }
+
+        // Before the tree follows, so that a failure of the tree cannot leave the metadata file behind.
+        await DeleteSidecarAsync(connection, entry, isFileDeleted: true);
 
         connection.Index.Remove(entry.Path);
         connection.Reconciler.Apply();
@@ -1150,21 +1154,28 @@ public partial class FluentStorageContainer :
         connection.NotifyChanged(entry.Path);
 
         _logger?.LogDebug("Deleted blob from storage: {Path}", entry.Path);
+    }
 
-        // The metadata of a subject goes with it, also when the caller has given up by now: the subject is deleted
-        // already, and its metadata file would be left behind. A failure here leaves the subject deleted.
-        if (entry.HasSidecar)
+    // The metadata of a subject goes with it once its file is gone, also when the caller has given up by now, as
+    // nothing would delete it later. A failure here leaves the subject deleted.
+    private async Task DeleteSidecarAsync(StorageConnection connection, StorageEntry entry, bool isFileDeleted)
+    {
+        if (!entry.HasSidecar)
         {
-            var metadataPath = StorageMetadataPath.GetSubjectFilePath(entry.Path);
-            try
+            return;
+        }
+
+        var metadataPath = StorageMetadataPath.GetSubjectFilePath(entry.Path);
+        try
+        {
+            if (isFileDeleted || !await connection.Client.ExistsAsync(entry.Path, CancellationToken.None))
             {
                 await DeleteMetadataFileAsync(connection, metadataPath, CancellationToken.None);
-                connection.Reconciler.Apply();
             }
-            catch (Exception exception)
-            {
-                _logger?.LogWarning(exception, "Failed to delete the metadata file of a deleted subject: {Path}", metadataPath);
-            }
+        }
+        catch (Exception exception)
+        {
+            _logger?.LogWarning(exception, "Failed to delete the metadata file of a deleted subject: {Path}", metadataPath);
         }
     }
 

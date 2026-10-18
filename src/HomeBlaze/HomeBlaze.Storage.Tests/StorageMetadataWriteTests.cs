@@ -397,6 +397,53 @@ public class StorageMetadataWriteTests : StorageTestBase
             storage.AddSubjectAsync(path, CreateMotor(), CancellationToken.None));
     }
 
+    [Fact]
+    public async Task WhenTheDeleteFailsAfterTheFileIsGone_ThenTheMetadataFileIsDeletedAnyway()
+    {
+        // Arrange
+        WriteFile("Motor.json", SerializeMotor("Motor 1"));
+        WriteFile("Motor.metadata.json", """{ "navTitle": "Pump" }""");
+        PausableBlobStorage? client = null;
+        var storage = await ConnectAsync(configure: container => container.ClientDecorator = inner => client = new PausableBlobStorage(inner));
+        client!.FailNextDeleteAfterItRan(new IOException("The answer was lost."));
+
+        // Act
+        await Assert.ThrowsAsync<IOException>(() => storage.DeleteSubjectAsync(storage.Children["Motor"], CancellationToken.None));
+
+        // Assert
+        Assert.False(File.Exists(GetFullPath("Motor.json")));
+        Assert.False(File.Exists(GetFullPath("Motor.metadata.json")));
+    }
+
+    [Fact]
+    public async Task WhenTheTreeFailsToFollowADelete_ThenTheMetadataFileIsDeletedAnyway()
+    {
+        // Arrange
+        WriteFile("Motor.json", SerializeMotor("Motor 1"));
+        WriteFile("Motor.metadata.json", """{ "navTitle": "Pump" }""");
+        var storage = await ConnectAsync();
+        var motor = storage.Children["Motor"];
+        Context!.AddService<ILifecycleHandler>(new ThrowOnDetach(motor));
+
+        // Act
+        await Assert.ThrowsAsync<InvalidOperationException>(() => storage.DeleteSubjectAsync(motor, CancellationToken.None));
+
+        // Assert
+        Assert.False(File.Exists(GetFullPath("Motor.json")));
+        Assert.False(File.Exists(GetFullPath("Motor.metadata.json")));
+    }
+
+    private sealed class ThrowOnDetach(IInterceptorSubject subject) : ILifecycleHandler
+    {
+        public void HandleLifecycleChange(SubjectLifecycleChange change)
+        {
+            if (change.IsContextDetach && ReferenceEquals(change.Subject, subject))
+            {
+                throw new InvalidOperationException("The tree failed.");
+            }
+        }
+    }
+
     // Cancels the delete of the subject once it has left the tree, which is after its file was deleted.
     private sealed class CancelOnDetach(IInterceptorSubject subject, CancellationTokenSource cancellation) : ILifecycleHandler
     {
