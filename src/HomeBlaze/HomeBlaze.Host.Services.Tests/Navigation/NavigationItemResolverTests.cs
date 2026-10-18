@@ -276,7 +276,7 @@ public class NavigationItemResolverTests
     }
 
     [Fact]
-    public void WhenFolderIsReachedOutsideTheSidebarBeforeThroughIt_ThenItsSidebarPageCounts()
+    public void WhenSidebarFolderIsAlsoBelowTopBarFolder_ThenItsSidebarPageCounts()
     {
         // Arrange
         var shared = CreateFolder(new() { ["Readme.md"] = new NavigationTestPage(_context) });
@@ -284,7 +284,6 @@ public class NavigationItemResolverTests
         topBarFolder.TryGetRegisteredSubject()!.AddProperty<IMetadataSubject>(
             IMetadataSubject.PropertyName, _ => new NavigationTestMetadataSubject(new SubjectMetadata { Location = NavigationLocation.AppBar }));
 
-        // The top bar folder comes first, so the walk reaches the shared folder outside the sidebar first.
         var root = CreateFolder(new()
         {
             ["Agents"] = CreateFolder(new()
