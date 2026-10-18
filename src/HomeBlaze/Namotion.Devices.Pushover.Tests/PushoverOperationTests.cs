@@ -96,7 +96,36 @@ public class PushoverOperationTests
         Assert.False(cancel.IsMethodEnabled());
     }
 
-    private static (PushoverService Service, FakePushoverHandler Handler) CreateRegisteredService(params string[] targetKeys)
+    [Fact]
+    public async Task WhenAConfigurationReloadReplacesTheTargetInstance_ThenItsEmergencyIsAttachedAgainWithItsState()
+    {
+        // Arrange
+        var lifecycleChanges = new RecordingLifecycleHandler();
+        var (service, handler) = CreateRegisteredService(lifecycleChanges, "rico");
+        handler.Respond = FakePushoverHandler.RespondWithNumberedReceipts();
+        var oldTarget = service.Targets["rico"];
+        await oldTarget.SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
+        var emergency = oldTarget.Emergencies["receipt1"];
+        var newTarget = new PushoverTarget { Name = "Rico", UserKey = "user-rico" };
+
+        // Act
+        service.Targets = new Dictionary<string, PushoverTarget> { ["rico"] = newTarget };
+
+        // Assert
+        Assert.Same(emergency, newTarget.Emergencies["receipt1"]);
+        Assert.Empty(oldTarget.Emergencies);
+        Assert.True(lifecycleChanges.IsAttached(emergency));
+        Assert.NotNull(emergency.TryGetRegisteredSubject());
+        Assert.Equal("receipt1", emergency.Receipt);
+        Assert.Equal(PushoverEmergencyStatus.Active, emergency.Status);
+        Assert.True(emergency.TryGetRegisteredSubject()!.TryGetProperty("Cancel")!.IsMethodEnabled());
+    }
+
+    private static (PushoverService Service, FakePushoverHandler Handler) CreateRegisteredService(params string[] targetKeys) =>
+        CreateRegisteredService(lifecycleChanges: null, targetKeys);
+
+    private static (PushoverService Service, FakePushoverHandler Handler) CreateRegisteredService(
+        RecordingLifecycleHandler? lifecycleChanges, params string[] targetKeys)
     {
         var context = InterceptorSubjectContext.Create()
             .WithFullPropertyTracking()
@@ -106,8 +135,41 @@ public class PushoverOperationTests
                 () => new MethodPropertyInitializer(),
                 handler => handler is MethodPropertyInitializer);
 
+        if (lifecycleChanges is not null)
+        {
+            context.WithService<ILifecycleHandler>(() => lifecycleChanges, handler => ReferenceEquals(handler, lifecycleChanges));
+        }
+
         var (service, handler) = PushoverTestFactory.CreateService(targetKeys);
         ((IInterceptorSubject)service).Context.AddFallbackContext(context);
         return (service, handler);
+    }
+
+    /// <summary>
+    /// Records whether each subject is in the graph, from the last context attach or detach it went through.
+    /// </summary>
+    private sealed class RecordingLifecycleHandler : ILifecycleHandler
+    {
+        private readonly Lock _lock = new();
+        private readonly Dictionary<IInterceptorSubject, bool> _isAttachedBySubject = new(ReferenceEqualityComparer.Instance);
+
+        public bool IsAttached(IInterceptorSubject subject)
+        {
+            lock (_lock)
+            {
+                return _isAttachedBySubject.GetValueOrDefault(subject);
+            }
+        }
+
+        public void HandleLifecycleChange(SubjectLifecycleChange change)
+        {
+            if (change.IsContextAttach || change.IsContextDetach)
+            {
+                lock (_lock)
+                {
+                    _isAttachedBySubject[change.Subject] = change.IsContextAttach;
+                }
+            }
+        }
     }
 }

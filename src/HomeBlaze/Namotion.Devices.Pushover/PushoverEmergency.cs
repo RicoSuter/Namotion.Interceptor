@@ -71,15 +71,26 @@ public partial class PushoverEmergency : ITitleProvider, IIconProvider
     /// </summary>
     internal string TargetKey { get; }
 
-    internal DateTimeOffset ExpiresAt { get; }
+    /// <summary>
+    /// The timestamp of <see cref="PushoverService.TimeProvider"/> when tracking started, right after the send, which
+    /// measures the intervals from the send unaffected by changes of the wall clock.
+    /// </summary>
+    internal long SentTimestamp { get; }
+
+    /// <summary>
+    /// How long the notification repeats on the Pushover side, from <see cref="SentTimestamp"/>.
+    /// </summary>
+    internal TimeSpan Expire { get; }
 
     // The members below are written only under the lock of the tracker.
-    internal DateTimeOffset? LastPolledAt { get; set; }
+    internal long? LastPolledTimestamp { get; set; }
 
     internal DateTimeOffset? EndedAt { get; set; }
 
+    internal long? EndedTimestamp { get; set; }
+
     internal PushoverEmergency(
-        PushoverEmergencyTracker tracker, string targetKey, string receipt, string? title, string message, DateTimeOffset sentAt, DateTimeOffset expiresAt)
+        PushoverEmergencyTracker tracker, string targetKey, string receipt, string? title, string message, DateTimeOffset sentAt, TimeSpan expire)
     {
         _tracker = tracker;
         TargetKey = targetKey;
@@ -87,7 +98,8 @@ public partial class PushoverEmergency : ITitleProvider, IIconProvider
         NotificationTitle = title;
         Message = message;
         SentAt = sentAt;
-        ExpiresAt = expiresAt;
+        SentTimestamp = tracker.TimeProvider.GetTimestamp();
+        Expire = expire;
 
         Status = PushoverEmergencyStatus.Active;
         AcknowledgedAt = null;

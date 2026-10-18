@@ -34,6 +34,17 @@ internal static class PushoverMessageMapping
     }
 
     /// <summary>
+    /// Throws an <see cref="ArgumentException"/> for a notification that cannot be sent: one without message text or
+    /// with a priority that is no defined member.
+    /// </summary>
+    public static void Validate(Notification notification)
+    {
+        ArgumentNullException.ThrowIfNull(notification);
+        ArgumentException.ThrowIfNullOrWhiteSpace(notification.Message);
+        _ = ToPushoverPriority(notification.Priority);
+    }
+
+    /// <summary>
     /// Maps <paramref name="priority"/> to the Pushover priority level; throws for a value that is no defined member,
     /// for example one cast from an integer.
     /// </summary>

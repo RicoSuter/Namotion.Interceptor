@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using HomeBlaze.Abstractions.Messaging;
 
 namespace Namotion.Devices.Pushover;
@@ -13,9 +14,17 @@ public sealed record PushoverEmergencyAcknowledgedEvent : IEvent
     public required DateTimeOffset Timestamp { get; init; }
 
     /// <summary>
-    /// The target the notification was sent to.
+    /// The target instance under <see cref="TargetKey"/> when the notification was acknowledged, always set by the
+    /// service. Not serialized, as the target holds its secret user key, and therefore not marked required, which
+    /// System.Text.Json rejects for an ignored member.
     /// </summary>
-    public required PushoverTarget Target { get; init; }
+    [JsonIgnore]
+    public PushoverTarget Target { get; init; } = null!;
+
+    /// <summary>
+    /// The key of the target in <see cref="PushoverService.Targets"/>.
+    /// </summary>
+    public required string TargetKey { get; init; }
 
     /// <summary>
     /// The acknowledged emergency.

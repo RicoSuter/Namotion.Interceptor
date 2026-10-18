@@ -95,17 +95,19 @@ Sending an `Emergency` notification adds a Pushover emergency subject to the tar
 
 While an emergency notification is active, the service reads its receipt every 10 seconds; otherwise it makes no requests. Each active emergency is read on its own, so with many active emergencies each receipt still costs one request every 10 seconds, and sending emergency notifications very often adds up to many requests. An emergency that is no longer active is removed from `Emergencies` 24 hours after it ended. `Emergencies` is kept in memory only: after a restart the list is empty, and an emergency that was still active keeps repeating on the phone until it is acknowledged or expires, without HomeBlaze tracking or canceling it.
 
-The service tracks the emergencies by the key of their target. When a configuration reload replaces a target but keeps its key, the new target shows the same emergencies and can still cancel them, including one whose send was still running during the reload. When a target is removed, its active emergencies are canceled, including one whose send completes after the removal.
+The service tracks the emergencies by the key of their target. When a configuration reload replaces a target but keeps its key, the new target shows the same emergencies and can still cancel them, including one whose send was still running during the reload. The replaced instance is no longer part of the service: sending through it fails. An external edit of the configuration file replaces the target subjects this way, so their emergencies are briefly detached from the subject graph and attached again, keeping their state. When a target is removed, its active emergencies are canceled, including one whose send completes after the removal.
+
+Receipts are read also while validating the targets fails, so an acknowledgement is not missed during a Pushover outage. A receipt that cannot be read, for example because of a network error, is read again on the next poll without changing the service status; after `EmergencyExpire` it is given up as `Expired`. The polling and retention intervals are measured with a monotonic clock, so a change of the system time does not delay or skip them.
 
 ## Events
 
-A target implements `IObservable<PushoverEmergencyAcknowledgedEvent>` and emits one event per emergency notification when it is acknowledged. The event carries the `Target`, the `Emergency`, its `Id` (the receipt, the same as the `NotificationResult.Id` of the send), the `Timestamp` of the acknowledgement and the `AcknowledgedByDevice`. Until the system-wide message bus exists, subscribe on the target directly.
+The service and each target implement `IObservable<PushoverEmergencyAcknowledgedEvent>`, which emits one event per emergency notification when it is acknowledged, also when it was acknowledged just before a `Cancel`. Subscribe on the service for the events of all targets, or on a target for the events of its key; a subscription on a target keeps receiving them when a configuration reload replaces the target instance. Subscribing on a target that is not part of a service fails. The event carries the `TargetKey`, the `Target` instance under that key, the `Emergency`, its `Id` (the receipt, the same as the `NotificationResult.Id` of the send), the `Timestamp` of the acknowledgement and the `AcknowledgedByDevice`. The `Target` is left out when the event is serialized, since it holds the secret user key. Until the system-wide message bus exists, subscribe on the service or the target directly.
 
 ## Interfaces
 
 | Subject | Interfaces |
 |---------|------------|
-| Service | `IConfigurable`, `IMonitoredService`, `ITitleProvider`, `IIconProvider` |
+| Service | `IObservable<PushoverEmergencyAcknowledgedEvent>`, `IConfigurable`, `IMonitoredService`, `ITitleProvider`, `IIconProvider` |
 | Target | `INotificationPublisher`, `IObservable<PushoverEmergencyAcknowledgedEvent>`, `IConfigurable`, `IMonitoredService`, `ITitleProvider`, `IIconProvider` |
 | Emergency | `ITitleProvider`, `IIconProvider` |
 

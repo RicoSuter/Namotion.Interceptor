@@ -1,9 +1,7 @@
 using System.ComponentModel;
-using System.Reactive.Subjects;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Messaging;
-using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry.Attributes;
 
@@ -33,8 +31,6 @@ public partial class PushoverTarget :
     /// The highest <see cref="EmergencyExpire"/> Pushover allows.
     /// </summary>
     public static readonly TimeSpan MaximumEmergencyExpire = TimeSpan.FromHours(3);
-
-    private readonly Subject<PushoverEmergencyAcknowledgedEvent> _acknowledgedEvents = new();
 
     // Not intercepted: an intercepted property holding the service would attach it as a child of its own child.
     internal PushoverService? Service { get; set; }
@@ -149,23 +145,15 @@ public partial class PushoverTarget :
             ? service.EmergencyTracker.CancelAllAsync(key, cancellationToken)
             : Task.CompletedTask;
 
-    // Each subscriber is wrapped so that one throwing from OnNext cannot stop the subject from notifying the
-    // others, or propagate into the receipt-polling loop that raises the event.
+    /// <summary>
+    /// Emits one event per acknowledged emergency notification of the key of this target. The subscription keeps
+    /// receiving them when a configuration reload replaces this instance under the same key.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The target is not part of a Pushover service.</exception>
     public IDisposable Subscribe(IObserver<PushoverEmergencyAcknowledgedEvent> observer) =>
-        _acknowledgedEvents.Subscribe(
-            value =>
-            {
-                try
-                {
-                    observer.OnNext(value);
-                }
-                catch (Exception exception)
-                {
-                    Service?.Logger.LogWarning(exception, "A Pushover emergency acknowledgement subscriber of target {Target} threw", Title);
-                }
-            },
-            observer.OnError,
-            observer.OnCompleted);
+        Key is { } key && Service is { } service
+            ? service.AcknowledgedEvents.Subscribe(observer, key)
+            : throw new InvalidOperationException($"The target '{Title}' is not part of a Pushover service.");
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
     {
@@ -188,9 +176,6 @@ public partial class PushoverTarget :
         StatusMessage = message;
         Status = ServiceStatus.Error;
     }
-
-    internal void PublishAcknowledged(PushoverEmergencyAcknowledgedEvent acknowledgedEvent) =>
-        _acknowledgedEvents.OnNext(acknowledgedEvent);
 
     partial void OnEmergencyRetryChanging(ref TimeSpan newValue, ref bool cancel)
     {

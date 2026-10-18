@@ -14,28 +14,25 @@ public partial class PushoverService
             {
                 StatusMessage = "No application token configured";
                 Status = ServiceStatus.Stopped;
-                await WaitForSignalAsync(Timeout.InfiniteTimeSpan, stoppingToken);
+                await _signal.WaitAsync(Timeout.InfiniteTimeSpan, stoppingToken);
                 continue;
             }
 
             try
             {
-                if (_isValidationRequested)
+                // Polling runs also when validation failed, so a transient validation failure cannot leave
+                // acknowledgements unseen.
+                var isValid = await ValidateTargetsIfRequestedAsync(token, stoppingToken);
+                var isPolled = await PollReceiptsAsync(token, stoppingToken);
+                if (isValid && isPolled)
                 {
-                    // Cleared before validating, so a change during validation requests another one.
-                    _isValidationRequested = false;
-                    Status = ServiceStatus.Starting;
-                    StatusMessage = "Validating targets...";
-                    await ValidateTargetsAsync(token, stoppingToken);
+                    StatusMessage = null;
+                    Status = ServiceStatus.Running;
                 }
 
-                StatusMessage = null;
-                Status = ServiceStatus.Running;
-
-                await PollReceiptsAsync(token, stoppingToken);
-                var now = DateTimeOffset.UtcNow;
-                var nextRemovalAt = _emergencyTracker.RemoveFinishedEmergencies(now);
-                await WaitForSignalAsync(_emergencyTracker.GetWaitTimeout(now, nextRemovalAt), stoppingToken);
+                var untilNextRemoval = _emergencyTracker.RemoveFinishedEmergencies();
+                var timeout = _emergencyTracker.GetWaitTimeout(untilNextRemoval);
+                await _signal.WaitAsync(isValid && isPolled ? timeout : LimitTo(timeout, RetryInterval), stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -49,20 +46,42 @@ public partial class PushoverService
                 Status = ServiceStatus.Error;
 
                 // Retrying cannot help until the token changes, which signals the loop.
-                await WaitForSignalAsync(Timeout.InfiniteTimeSpan, stoppingToken);
-            }
-            catch (Exception exception)
-            {
-                _logger.LogError(exception, "Pushover service failed");
-                _isValidationRequested = true;
-                StatusMessage = exception.Message;
-                Status = ServiceStatus.Error;
-                await WaitForSignalAsync(RetryInterval, stoppingToken);
+                await _signal.WaitAsync(Timeout.InfiniteTimeSpan, stoppingToken);
             }
         }
 
         StatusMessage = null;
         Status = ServiceStatus.Stopped;
+    }
+
+    /// <summary>
+    /// Validates the targets when requested; returns false when that failed and is retried, with the service in
+    /// <see cref="ServiceStatus.Error"/>.
+    /// </summary>
+    private async Task<bool> ValidateTargetsIfRequestedAsync(string token, CancellationToken cancellationToken)
+    {
+        if (!_isValidationRequested)
+        {
+            return true;
+        }
+
+        // Cleared before validating, so a change during validation requests another one.
+        _isValidationRequested = false;
+        Status = ServiceStatus.Starting;
+        StatusMessage = "Validating targets...";
+        try
+        {
+            await ValidateTargetsAsync(token, cancellationToken);
+            return true;
+        }
+        catch (Exception exception) when (IsRetriedFailure(exception, cancellationToken))
+        {
+            _logger.LogError(exception, "Validating the Pushover targets failed");
+            _isValidationRequested = true;
+            StatusMessage = exception.Message;
+            Status = ServiceStatus.Error;
+            return false;
+        }
     }
 
     private async Task ValidateTargetsAsync(string token, CancellationToken cancellationToken)
@@ -100,32 +119,32 @@ public partial class PushoverService
         exception.IsUserKeyInvalid ||
         (exception.StatusCode is { } statusCode && (int)statusCode is >= 400 and < 500 and not 429);
 
-    private async Task PollReceiptsAsync(string token, CancellationToken cancellationToken)
-    {
-        foreach (var emergency in _emergencyTracker.StartReceiptPolls(DateTimeOffset.UtcNow))
-        {
-            try
-            {
-                var response = await _client.GetReceiptAsync(token, emergency.Receipt, cancellationToken);
-                _emergencyTracker.ApplyReceipt(emergency, response);
-            }
-            catch (PushoverException exception)
-            {
-                _logger.LogWarning(exception, "Reading an emergency receipt of Pushover target {Target} failed", emergency.TargetKey);
-                _emergencyTracker.ApplyReceiptError(emergency, DateTimeOffset.UtcNow);
-            }
-        }
-    }
-
-    private async Task WaitForSignalAsync(TimeSpan timeout, CancellationToken cancellationToken)
+    /// <summary>
+    /// Reads the receipts that are due; returns false when polling failed unexpectedly, with the service in
+    /// <see cref="ServiceStatus.Error"/>.
+    /// </summary>
+    private async Task<bool> PollReceiptsAsync(string token, CancellationToken cancellationToken)
     {
         try
         {
-            await _signal.WaitAsync(timeout, cancellationToken);
+            await _emergencyTracker.PollReceiptsAsync(token, cancellationToken);
+            return true;
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (Exception exception) when (IsRetriedFailure(exception, cancellationToken))
         {
-            // The loop condition ends the loop.
+            _logger.LogError(exception, "Polling the Pushover emergency receipts failed");
+            StatusMessage = exception.Message;
+            Status = ServiceStatus.Error;
+            return false;
         }
     }
+
+    // A rejected token and the stop of the service are handled by the loop.
+    private static bool IsRetriedFailure(Exception exception, CancellationToken cancellationToken) =>
+        exception is not PushoverException { IsApplicationTokenInvalid: true } &&
+        !(exception is OperationCanceledException && cancellationToken.IsCancellationRequested);
+
+    private static TimeSpan LimitTo(TimeSpan timeout, TimeSpan limit) =>
+        timeout == Timeout.InfiniteTimeSpan || limit < timeout ? limit : timeout;
+
 }

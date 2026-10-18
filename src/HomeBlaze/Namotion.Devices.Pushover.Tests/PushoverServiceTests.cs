@@ -106,10 +106,8 @@ public class PushoverServiceTests
     {
         // Arrange
         var (service, _) = PushoverTestFactory.CreateService("rico");
-        var now = DateTimeOffset.UtcNow;
-
         // Act
-        var emergency = service.EmergencyTracker.Add("rico", "receipt1", title: null, "Fire", now, now + TimeSpan.FromHours(1));
+        var emergency = service.EmergencyTracker.Add("rico", "receipt1", title: null, "Fire", DateTimeOffset.UtcNow, TimeSpan.FromHours(1));
 
         // Assert
         Assert.Null(emergency.NotificationTitle);
@@ -229,6 +227,50 @@ public class PushoverServiceTests
         Assert.Single(handler.RequestsTo("/1/receipts/receipt1/cancel.json"));
         Assert.Equal(PushoverEmergencyStatus.Canceled, newTarget.Emergencies["receipt1"].Status);
         Assert.Equal(PushoverEmergencyStatus.Active, newTarget.Emergencies["receipt2"].Status);
+    }
+
+    [Fact]
+    public async Task WhenATargetInstanceIsReplacedForTheSameKey_ThenTheOldInstanceIsDetachedAndCannotSend()
+    {
+        // Arrange
+        var (service, handler) = PushoverTestFactory.CreateService("rico");
+        var oldTarget = service.Targets["rico"];
+
+        // Act
+        service.Targets = new Dictionary<string, PushoverTarget> { ["rico"] = new() { Name = "Rico", UserKey = "user-rico" } };
+
+        // Assert
+        Assert.Null(oldTarget.Service);
+        Assert.Null(oldTarget.Key);
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => oldTarget.SendNotificationAsync(new Notification { Message = "Hello" }, CancellationToken.None));
+        Assert.Contains("not part of a Pushover service", exception.Message);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public void WhenTheAcknowledgedEventIsSerialized_ThenItCarriesTheTargetKeyButNotTheTarget()
+    {
+        // Arrange
+        var (service, _) = PushoverTestFactory.CreateService("rico");
+        var target = service.Targets["rico"];
+        var emergency = service.EmergencyTracker.Add("rico", "receipt1", "Fire", "Kitchen", DateTimeOffset.UtcNow, TimeSpan.FromHours(1));
+        var acknowledgedEvent = new PushoverEmergencyAcknowledgedEvent
+        {
+            Timestamp = DateTimeOffset.UtcNow,
+            Target = target,
+            TargetKey = "rico",
+            Emergency = emergency,
+            Id = "receipt1"
+        };
+
+        // Act
+        var json = System.Text.Json.JsonSerializer.Serialize(acknowledgedEvent);
+
+        // Assert
+        Assert.Contains("\"TargetKey\":\"rico\"", json);
+        Assert.DoesNotContain("user-rico", json);
+        Assert.DoesNotContain("\"Target\":", json);
     }
 
     [Fact]

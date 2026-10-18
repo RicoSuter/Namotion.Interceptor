@@ -19,12 +19,19 @@ namespace Namotion.Devices.Pushover;
 [DisplayName("Pushover")]
 [SubjectIcon("NotificationsActive")]
 [InterceptorSubject]
-public partial class PushoverService : BackgroundService, IConfigurable, IMonitoredService, ITitleProvider, IIconProvider
+public partial class PushoverService :
+    BackgroundService,
+    IConfigurable,
+    IObservable<PushoverEmergencyAcknowledgedEvent>,
+    IMonitoredService,
+    ITitleProvider,
+    IIconProvider
 {
     private readonly PushoverClient _client;
     private readonly ILogger<PushoverService> _logger;
     private readonly PushoverEmergencyTracker _emergencyTracker;
-    private readonly SemaphoreSlim _signal = new(0, 1);
+    private readonly PushoverAcknowledgedEventStream _acknowledgedEvents;
+    private readonly PushoverSignal _signal = new();
     private volatile bool _isValidationRequested = true;
 
     [Configuration]
@@ -69,9 +76,13 @@ public partial class PushoverService : BackgroundService, IConfigurable, IMonito
     internal TimeSpan RetryInterval { get; set; } = TimeSpan.FromSeconds(30);
     internal TimeSpan FinishedEmergencyRetention { get; set; } = TimeSpan.FromHours(24);
 
-    // Not intercepted, for the same reason as Service on PushoverTarget: shared with the target through this
-    // property instead, so a subscriber exception can always be logged.
-    internal ILogger Logger => _logger;
+    /// <summary>
+    /// Measures the receipt polling, the expiry and the retention of the emergencies with its timestamps, and gives
+    /// the wall-clock times shown.
+    /// </summary>
+    internal TimeProvider TimeProvider { get; set; } = TimeProvider.System;
+
+    internal ILogger<PushoverService> Logger => _logger;
 
     internal PushoverEmergencyTracker EmergencyTracker => _emergencyTracker;
 
@@ -79,7 +90,8 @@ public partial class PushoverService : BackgroundService, IConfigurable, IMonito
     {
         _client = new PushoverClient(httpClientFactory);
         _logger = logger;
-        _emergencyTracker = new PushoverEmergencyTracker(this);
+        _emergencyTracker = new PushoverEmergencyTracker(this, _client);
+        _acknowledgedEvents = new PushoverAcknowledgedEventStream(logger);
 
         Name = string.Empty;
         ApplicationToken = null;
@@ -91,7 +103,7 @@ public partial class PushoverService : BackgroundService, IConfigurable, IMonito
     [Operation(Title = "Send to all targets", Icon = "Send", Position = 1)]
     public async Task SendToAllTargetsAsync(Notification notification, CancellationToken cancellationToken)
     {
-        ValidateNotification(notification);
+        PushoverMessageMapping.Validate(notification);
         var targets = Targets.Values.ToArray();
         if (targets.Length == 0)
         {
@@ -163,7 +175,7 @@ public partial class PushoverService : BackgroundService, IConfigurable, IMonito
     /// </summary>
     internal async Task<string?> SendAsync(PushoverTarget target, Notification notification, CancellationToken cancellationToken)
     {
-        ValidateNotification(notification);
+        PushoverMessageMapping.Validate(notification);
 
         var token = GetRequiredApplicationToken();
         var userKey = target.UserKey;
@@ -177,57 +189,33 @@ public partial class PushoverService : BackgroundService, IConfigurable, IMonito
         var request = PushoverMessageMapping.Create(token, userKey, notification, target.EmergencyRetry, expire, _logger);
         var response = await _client.SendMessageAsync(request, cancellationToken);
 
-        var now = DateTimeOffset.UtcNow;
+        var now = TimeProvider.GetUtcNow();
         target.LastSentAt = now;
         if (response.Receipt is not { } receipt)
         {
             return response.Request;
         }
 
-        _emergencyTracker.Add(targetKey, receipt, request.Title, request.Message, now, now + expire);
-        Signal();
+        _emergencyTracker.Add(targetKey, receipt, request.Title, request.Message, now, expire);
+        _signal.Set();
         return receipt;
     }
 
-    private static void ValidateNotification(Notification notification)
-    {
-        ArgumentNullException.ThrowIfNull(notification);
-        ArgumentException.ThrowIfNullOrWhiteSpace(notification.Message);
-        _ = PushoverMessageMapping.ToPushoverPriority(notification.Priority);
-    }
+    /// <summary>
+    /// Emits one event per acknowledged emergency notification of any target.
+    /// </summary>
+    public IDisposable Subscribe(IObserver<PushoverEmergencyAcknowledgedEvent> observer) =>
+        _acknowledgedEvents.Subscribe(observer, targetKey: null);
 
-    internal async Task CancelReceiptAsync(string receipt, CancellationToken cancellationToken)
-    {
-        var token = GetRequiredApplicationToken();
-        await _client.CancelReceiptAsync(token, receipt, cancellationToken);
-    }
+    internal PushoverAcknowledgedEventStream AcknowledgedEvents => _acknowledgedEvents;
 
-    private string GetRequiredApplicationToken() =>
+    internal string GetRequiredApplicationToken() =>
         ApplicationToken is { Length: > 0 } token ? token : throw new InvalidOperationException("The Pushover application token is not configured.");
 
     internal void RequestValidation()
     {
         _isValidationRequested = true;
-        Signal();
-    }
-
-    private void Signal()
-    {
-        // Avoids a first-chance exception on every redundant signal. The catch below is a backstop for the race
-        // between this check and the release.
-        if (_signal.CurrentCount != 0)
-        {
-            return;
-        }
-
-        try
-        {
-            _signal.Release();
-        }
-        catch (SemaphoreFullException)
-        {
-            // A signal is already pending; the loop handles every request when it wakes.
-        }
+        _signal.Set();
     }
 
     // The back-references are assigned here, not in OnTargetsChanged, so there is no window in which an attached
@@ -240,9 +228,10 @@ public partial class PushoverService : BackgroundService, IConfigurable, IMonito
         {
             foreach (var (key, previousTarget) in current)
             {
-                if (!newValue.ContainsKey(key))
+                if (!newValue.TryGetValue(key, out var target) || !ReferenceEquals(target, previousTarget))
                 {
                     previousTarget.Service = null;
+                    previousTarget.Key = null;
                 }
             }
         }

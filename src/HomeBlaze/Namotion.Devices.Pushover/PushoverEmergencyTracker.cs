@@ -10,6 +10,7 @@ namespace Namotion.Devices.Pushover;
 internal sealed class PushoverEmergencyTracker
 {
     private readonly PushoverService _service;
+    private readonly PushoverClient _client;
 
     // The send path, the operations, the configuration reload and the receipt polling run on different threads.
     // The stored sets, the target views and the state of the emergencies change only under this lock, so a late
@@ -24,10 +25,13 @@ internal sealed class PushoverEmergencyTracker
     // the lock.
     private Dictionary<string, PushoverTarget> _targets = new();
 
-    public PushoverEmergencyTracker(PushoverService service)
+    public PushoverEmergencyTracker(PushoverService service, PushoverClient client)
     {
         _service = service;
+        _client = client;
     }
+
+    public TimeProvider TimeProvider => _service.TimeProvider;
 
     /// <summary>
     /// Switches to the new targets of the service: a target instance that replaces another under the same key shows
@@ -70,9 +74,9 @@ internal sealed class PushoverEmergencyTracker
     /// Starts tracking a newly sent emergency notification under its target key and receipt. When the key was
     /// removed while the notification was being sent, the emergency is canceled in the background instead.
     /// </summary>
-    public PushoverEmergency Add(string targetKey, string receipt, string? title, string message, DateTimeOffset sentAt, DateTimeOffset expiresAt)
+    public PushoverEmergency Add(string targetKey, string receipt, string? title, string message, DateTimeOffset sentAt, TimeSpan expire)
     {
-        var emergency = new PushoverEmergency(this, targetKey, receipt, title, message, sentAt, expiresAt);
+        var emergency = new PushoverEmergency(this, targetKey, receipt, title, message, sentAt, expire);
         lock (_lock)
         {
             if (_targets.TryGetValue(targetKey, out var target))
@@ -91,23 +95,26 @@ internal sealed class PushoverEmergencyTracker
     }
 
     /// <summary>
-    /// Returns the active emergencies whose receipt is due for a poll, recording <paramref name="now"/> as their new
-    /// poll time. A receipt is due once the minimum polling interval of the service passed since its last poll, or
-    /// since the notification was sent, as it cannot be acknowledged before.
+    /// Returns the active emergencies whose receipt is due for a poll, recording now as their new poll time. A receipt
+    /// is due once the minimum polling interval of the service passed since its last poll, or since the notification
+    /// was sent, as it cannot be acknowledged before.
     /// </summary>
-    public PushoverEmergency[] StartReceiptPolls(DateTimeOffset now)
+    public PushoverEmergency[] StartReceiptPolls()
     {
         var minimumInterval = _service.MinimumReceiptPollingInterval;
+        var timeProvider = _service.TimeProvider;
         lock (_lock)
         {
+            var now = timeProvider.GetTimestamp();
             List<PushoverEmergency>? due = null;
             foreach (var emergencies in _emergenciesByTargetKey.Values)
             {
                 foreach (var emergency in emergencies.Values)
                 {
-                    if (IsActive(emergency) && now - (emergency.LastPolledAt ?? emergency.SentAt) >= minimumInterval)
+                    if (IsActive(emergency) &&
+                        timeProvider.GetElapsedTime(emergency.LastPolledTimestamp ?? emergency.SentTimestamp, now) >= minimumInterval)
                     {
-                        emergency.LastPolledAt = now;
+                        emergency.LastPolledTimestamp = now;
                         (due ??= []).Add(emergency);
                     }
                 }
@@ -117,53 +124,37 @@ internal sealed class PushoverEmergencyTracker
         }
     }
 
-    public void ApplyReceipt(PushoverEmergency emergency, PushoverResponse response)
+    /// <summary>
+    /// Reads the receipts that are due and applies them. A receipt that cannot be read is retried on the next poll,
+    /// and given up once its emergency expired; a rejected application token is thrown.
+    /// </summary>
+    public async Task PollReceiptsAsync(string token, CancellationToken cancellationToken)
     {
-        PushoverEmergencyAcknowledgedEvent? acknowledgedEvent = null;
-        lock (_lock)
+        foreach (var emergency in StartReceiptPolls())
         {
-            if (!IsActive(emergency))
+            try
             {
-                return;
+                var response = await _client.GetReceiptAsync(token, emergency.Receipt, cancellationToken);
+                ApplyReceipt(emergency, response);
             }
-
-            if (response.Acknowledged == 1)
+            catch (Exception exception) when (IsReceiptReadFailure(exception, cancellationToken))
             {
-                var acknowledgedAt = DateTimeOffset.FromUnixTimeSeconds(response.AcknowledgedAt);
-                emergency.AcknowledgedAt = acknowledgedAt;
-                emergency.AcknowledgedByDevice = response.AcknowledgedByDevice;
-                EndLocked(emergency, PushoverEmergencyStatus.Acknowledged);
-
-                if (_targets.TryGetValue(emergency.TargetKey, out var target))
-                {
-                    acknowledgedEvent = new PushoverEmergencyAcknowledgedEvent
-                    {
-                        Timestamp = acknowledgedAt,
-                        Target = target,
-                        Emergency = emergency,
-                        Id = emergency.Receipt,
-                        AcknowledgedByDevice = response.AcknowledgedByDevice
-                    };
-                }
+                _service.Logger.LogWarning(exception, "Reading an emergency receipt of Pushover target {Target} failed", emergency.TargetKey);
+                ApplyReceiptError(emergency);
             }
-            else if (response.Expired == 1)
-            {
-                EndLocked(emergency, PushoverEmergencyStatus.Expired);
-            }
-        }
-
-        if (acknowledgedEvent is not null)
-        {
-            acknowledgedEvent.Target.PublishAcknowledged(acknowledgedEvent);
         }
     }
 
-    public void ApplyReceiptError(PushoverEmergency emergency, DateTimeOffset now)
+    public void ApplyReceipt(PushoverEmergency emergency, PushoverResponse response) =>
+        End(emergency, response, statusUnlessAcknowledged: null);
+
+    public void ApplyReceiptError(PushoverEmergency emergency)
     {
+        var timeProvider = _service.TimeProvider;
         lock (_lock)
         {
             // A receipt that cannot be read is given up once the emergency has expired on the Pushover side.
-            if (IsActive(emergency) && now > emergency.ExpiresAt)
+            if (IsActive(emergency) && timeProvider.GetElapsedTime(emergency.SentTimestamp) > emergency.Expire)
             {
                 EndLocked(emergency, PushoverEmergencyStatus.Expired);
             }
@@ -180,13 +171,22 @@ internal sealed class PushoverEmergencyTracker
             return;
         }
 
-        await _service.CancelReceiptAsync(emergency.Receipt, cancellationToken);
-        lock (_lock)
+        var token = _service.GetRequiredApplicationToken();
+        await _client.CancelReceiptAsync(token, emergency.Receipt, cancellationToken);
+
+        // The recipient may have acknowledged the notification since the last poll, which the receipt still tells.
+        PushoverResponse? response = null;
+        try
         {
-            if (IsActive(emergency))
-            {
-                EndLocked(emergency, PushoverEmergencyStatus.Canceled);
-            }
+            response = await _client.GetReceiptAsync(token, emergency.Receipt, cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            _service.Logger.LogWarning(exception, "Reading the receipt of a canceled emergency of Pushover target {Target} failed", emergency.TargetKey);
+        }
+        finally
+        {
+            End(emergency, response, PushoverEmergencyStatus.Canceled);
         }
     }
 
@@ -205,34 +205,36 @@ internal sealed class PushoverEmergencyTracker
         CancelAllAsync(GetActiveEmergencies(targetKey), cancellationToken);
 
     /// <summary>
-    /// Removes the emergencies that ended at least the retention of the service before <paramref name="now"/>, and
-    /// returns when the next of the remaining ended ones is due for removal, or null when none is.
+    /// Removes the emergencies that ended at least the retention of the service ago, and returns how long until the
+    /// next of the remaining ended ones is due for removal, or null when none is.
     /// </summary>
-    public DateTimeOffset? RemoveFinishedEmergencies(DateTimeOffset now)
+    public TimeSpan? RemoveFinishedEmergencies()
     {
         var retention = _service.FinishedEmergencyRetention;
+        var timeProvider = _service.TimeProvider;
         lock (_lock)
         {
-            DateTimeOffset? nextRemovalAt = null;
+            var now = timeProvider.GetTimestamp();
+            TimeSpan? untilNextRemoval = null;
             List<(string TargetKey, Dictionary<string, PushoverEmergency> Remaining)>? changes = null;
             foreach (var (targetKey, emergencies) in _emergenciesByTargetKey)
             {
                 Dictionary<string, PushoverEmergency>? remaining = null;
                 foreach (var (receipt, emergency) in emergencies)
                 {
-                    if (emergency.EndedAt is not { } endedAt)
+                    if (emergency.EndedTimestamp is not { } endedTimestamp)
                     {
                         continue;
                     }
 
-                    var removalAt = endedAt + retention;
-                    if (removalAt <= now)
+                    var untilRemoval = retention - timeProvider.GetElapsedTime(endedTimestamp, now);
+                    if (untilRemoval <= TimeSpan.Zero)
                     {
                         (remaining ??= new Dictionary<string, PushoverEmergency>(emergencies)).Remove(receipt);
                     }
-                    else if (nextRemovalAt is null || removalAt < nextRemovalAt)
+                    else if (untilNextRemoval is null || untilRemoval < untilNextRemoval)
                     {
-                        nextRemovalAt = removalAt;
+                        untilNextRemoval = untilRemoval;
                     }
                 }
 
@@ -247,29 +249,20 @@ internal sealed class PushoverEmergencyTracker
                 Publish(targetKey, _targets[targetKey], remaining);
             }
 
-            return nextRemovalAt;
+            return untilNextRemoval;
         }
     }
 
     /// <summary>
     /// Returns how long the receipt polling loop may wait: until the next receipt poll while an emergency is active,
-    /// and no longer than until <paramref name="nextRemovalAt"/>; with neither pending, until a signal only.
+    /// and no longer than <paramref name="untilNextRemoval"/>; with neither pending, until a signal only.
     /// </summary>
-    public TimeSpan GetWaitTimeout(DateTimeOffset now, DateTimeOffset? nextRemovalAt)
+    public TimeSpan GetWaitTimeout(TimeSpan? untilNextRemoval)
     {
         var timeout = HasActiveEmergencies() ? _service.ReceiptPollingInterval : Timeout.InfiniteTimeSpan;
-        if (nextRemovalAt is { } removalAt)
+        if (untilNextRemoval is { } untilRemoval && (timeout == Timeout.InfiniteTimeSpan || untilRemoval < timeout))
         {
-            var untilRemoval = removalAt - now;
-            if (untilRemoval < TimeSpan.Zero)
-            {
-                untilRemoval = TimeSpan.Zero;
-            }
-
-            if (timeout == Timeout.InfiniteTimeSpan || untilRemoval < timeout)
-            {
-                timeout = untilRemoval;
-            }
+            timeout = untilRemoval;
         }
 
         return timeout;
@@ -359,12 +352,70 @@ internal sealed class PushoverEmergencyTracker
         }
     }
 
+    /// <summary>
+    /// Ends <paramref name="emergency"/> if it is still active: as acknowledged when <paramref name="response"/> says
+    /// so, raising the event, otherwise with <paramref name="statusUnlessAcknowledged"/>, or without one as expired
+    /// when the response says so.
+    /// </summary>
+    private void End(PushoverEmergency emergency, PushoverResponse? response, PushoverEmergencyStatus? statusUnlessAcknowledged)
+    {
+        PushoverEmergencyAcknowledgedEvent? acknowledgedEvent = null;
+        lock (_lock)
+        {
+            if (!IsActive(emergency))
+            {
+                return;
+            }
+
+            if (response is { Acknowledged: 1 })
+            {
+                var acknowledgedAt = DateTimeOffset.FromUnixTimeSeconds(response.AcknowledgedAt);
+                emergency.AcknowledgedAt = acknowledgedAt;
+                emergency.AcknowledgedByDevice = response.AcknowledgedByDevice;
+                EndLocked(emergency, PushoverEmergencyStatus.Acknowledged);
+
+                if (_targets.TryGetValue(emergency.TargetKey, out var target))
+                {
+                    acknowledgedEvent = new PushoverEmergencyAcknowledgedEvent
+                    {
+                        Timestamp = acknowledgedAt,
+                        Target = target,
+                        TargetKey = emergency.TargetKey,
+                        Emergency = emergency,
+                        Id = emergency.Receipt,
+                        AcknowledgedByDevice = response.AcknowledgedByDevice
+                    };
+                }
+            }
+            else if (statusUnlessAcknowledged is { } status)
+            {
+                EndLocked(emergency, status);
+            }
+            else if (response is { Expired: 1 })
+            {
+                EndLocked(emergency, PushoverEmergencyStatus.Expired);
+            }
+        }
+
+        if (acknowledgedEvent is not null)
+        {
+            _service.AcknowledgedEvents.Publish(acknowledgedEvent);
+        }
+    }
+
+    // A timeout surfaces as a cancellation that is not the requested one.
+    private static bool IsReceiptReadFailure(Exception exception, CancellationToken cancellationToken) =>
+        exception is PushoverException { IsApplicationTokenInvalid: false } or HttpRequestException ||
+        (exception is OperationCanceledException && !cancellationToken.IsCancellationRequested);
+
     private static bool IsActive(PushoverEmergency emergency) => emergency.Status == PushoverEmergencyStatus.Active;
 
     // Caller must hold _lock. Status is the discrete value readers wait on, so it is written last.
-    private static void EndLocked(PushoverEmergency emergency, PushoverEmergencyStatus status)
+    private void EndLocked(PushoverEmergency emergency, PushoverEmergencyStatus status)
     {
-        emergency.EndedAt = DateTimeOffset.UtcNow;
+        var timeProvider = _service.TimeProvider;
+        emergency.EndedAt = timeProvider.GetUtcNow();
+        emergency.EndedTimestamp = timeProvider.GetTimestamp();
         emergency.Status = status;
     }
 }
