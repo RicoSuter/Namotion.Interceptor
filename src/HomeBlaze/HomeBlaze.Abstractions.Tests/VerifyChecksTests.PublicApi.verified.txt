@@ -543,11 +543,11 @@ namespace HomeBlaze.Abstractions
     public interface IVirtualSubject { }
     public static class KnownAttributes
     {
-        public const string Configuration = "HB:Configuration";
+        public const string Configuration = "HomeBlaze:Configuration";
         public const string IsEnabled = "IsEnabled";
         public const string Maximum = "Maximum";
         public const string Minimum = "Minimum";
-        public const string State = "HB:State";
+        public const string State = "HomeBlaze:State";
     }
     public enum PathStyle
     {
