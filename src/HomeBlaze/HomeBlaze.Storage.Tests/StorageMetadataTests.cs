@@ -67,6 +67,23 @@ public class StorageMetadataTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenAPassLooksAtEveryFileAndTheIgnoredMetadataFileIsUnchanged_ThenItWarnsNoMore()
+    {
+        // Arrange
+        WriteFile("Motor.json", SerializeMotor("Motor 1"));
+        WriteFile("Motor.Metadata.json", """{ "navTitle": "Pump" }""");
+        var logger = new RecordingLogger<FluentStorageContainer>();
+        var storage = CreateStorage(logger: logger);
+        await storage.ConnectAsync(CancellationToken.None);
+
+        // Act
+        await storage.ReconcileAsync(allNamed: true);
+
+        // Assert
+        Assert.Single(logger.Warnings);
+    }
+
+    [Fact]
     public async Task WhenAMetadataFileHoldsASubject_ThenAWarningSaysSo()
     {
         // Arrange

@@ -130,14 +130,22 @@ internal sealed class StorageReconciler
                     }
                 }
                 // Neither a subject nor metadata: on a file system that ignores case, it is the metadata file of a subject.
+                // Its entry has no subject, so a new version is no change of the tree.
                 else if (StorageMetadataPath.IsReservedSubjectPath(listed.Path))
                 {
-                    if (isChanged)
+                    if (entry is null || entry.Version != listed.Version)
                     {
                         _logger?.LogWarning(
                             "Ignoring {Path}: rename it to end with .metadata.json in lower case to make it a metadata file",
                             listed.Path);
-                        _index.Set(new StorageEntry { Path = listed.Path, IsFolder = false, Version = listed.Version });
+                        if (entry is null)
+                        {
+                            _index.Set(new StorageEntry { Path = listed.Path, IsFolder = false, Version = listed.Version });
+                        }
+                        else
+                        {
+                            entry.Version = listed.Version;
+                        }
                     }
                 }
                 else if (entry?.Subject != null)
