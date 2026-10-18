@@ -117,6 +117,8 @@ public class FritzBoxConnectionCheckTests
     [InlineData("[fd00::1")]
     [InlineData("fe80::1%@evil.example")]
     [InlineData("[fe80::1%@evil.example]")]
+    [InlineData("fe80::1%@evil.example?")]
+    [InlineData("fe80::1%@evil.example#")]
     [InlineData("fe80::1%x?evil")]
     [InlineData("fe80::1%x#evil")]
     [InlineData("fe80::1%x\\evil")]

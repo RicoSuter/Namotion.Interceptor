@@ -108,10 +108,8 @@ public static class FritzBoxConnectionCheck
     }
 
     /// <returns>Whether the value is not empty and has no whitespace, control character, scheme, path, query or user.</returns>
-    /// <remarks>
-    /// <see cref="Uri.CheckHostName"/> accepts anything after the <c>%</c> of an IPv6 scope id, so a value like
-    /// <c>fe80::1%@evil.example</c> would otherwise send the credentials to another host.
-    /// </remarks>
+    // Uri.CheckHostName accepts anything after the % of an IPv6 scope id. In "fe80::1%@evil.example?" the ? (or #)
+    // makes Uri read "[fe80::1%" as user info and evil.example as the host, which would get the credentials.
     private static bool IsBareHost(string value) =>
         value.Length > 0 &&
         !value.Any(character => char.IsWhiteSpace(character) || char.IsControl(character)) &&

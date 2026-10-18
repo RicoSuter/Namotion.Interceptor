@@ -61,12 +61,12 @@ public class FritzBoxLoopTests
     }
 
     [Fact]
-    public async Task WhenTheHostAddressHidesAnotherHost_ThenNoLoginIsSent()
+    public async Task WhenTheHostAddressIsInvalid_ThenTheLoopReportsItWithoutConnecting()
     {
         // Arrange
         await using var fake = await FakeFritzBox.StartAsync();
         var router = CreateRouter(fake);
-        router.HostAddress = "fe80::1%@127.0.0.1";
+        router.HostAddress = "fe80::1%@127.0.0.1?";
 
         // Act
         await using var running = await RunAsync(router);
