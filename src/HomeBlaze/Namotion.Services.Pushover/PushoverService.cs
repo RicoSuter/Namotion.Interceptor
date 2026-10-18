@@ -21,13 +21,16 @@ namespace Namotion.Services.Pushover;
 public partial class PushoverService :
     BackgroundService,
     IConfigurable,
+    IObservable<PushoverEmergencyAcknowledgedEvent>,
     IMonitoredService,
     ITitleProvider,
     IIconProvider
 {
     private readonly PushoverClient _client;
     private readonly ILogger<PushoverService> _logger;
-    private readonly SemaphoreSlim _validationSignal = new(0, 1);
+    private readonly PushoverEmergencyTracker _emergencyTracker;
+    private readonly SemaphoreSlim _signal = new(0, 1);
+    private volatile bool _isValidationRequested = true;
 
     [Configuration]
     public partial string Name { get; set; }
@@ -65,13 +68,20 @@ public partial class PushoverService :
         _ => null
     };
 
-    // Test hook.
+    // Test hooks.
+    internal TimeSpan ReceiptPollingInterval { get; set; } = TimeSpan.FromSeconds(10);
     internal TimeSpan RetryInterval { get; set; } = TimeSpan.FromSeconds(30);
+    internal TimeProvider TimeProvider { get; set; } = TimeProvider.System;
+
+    internal ILogger<PushoverService> Logger => _logger;
+
+    internal PushoverEmergencyTracker EmergencyTracker => _emergencyTracker;
 
     public PushoverService(IHttpClientFactory httpClientFactory, ILogger<PushoverService> logger)
     {
         _client = new PushoverClient(httpClientFactory);
         _logger = logger;
+        _emergencyTracker = new PushoverEmergencyTracker(this, _client);
 
         Name = string.Empty;
         ApplicationToken = null;
@@ -90,27 +100,18 @@ public partial class PushoverService :
             throw new InvalidOperationException("No Pushover targets are configured.");
         }
 
-        // Sent to all at once and awaited together, so a failing target does not stop the others.
-        var items = targets.Values.ToArray();
-        var tasks = Array.ConvertAll(items, target => SendAsync(target, notification, cancellationToken));
-        try
-        {
-            await Task.WhenAll(tasks);
-        }
-        catch (Exception) when (!cancellationToken.IsCancellationRequested)
-        {
-            var failures = items
-                .Zip(tasks)
-                .Where(pair => !pair.Second.IsCompletedSuccessfully)
-                .Select(pair => (Target: pair.First, Exception: pair.Second.Exception?.InnerException ?? new TaskCanceledException(pair.Second)))
-                .ToArray();
-
-            var message = string.Join(" ", failures.Select(failure => $"{failure.Target.Title}: {failure.Exception.Message}"));
-            throw new PushoverException(
-                $"Sending to {failures.Length} of {items.Length} targets failed. {message}",
-                new AggregateException(failures.Select(failure => failure.Exception)));
-        }
+        await PushoverBatch.RunForEachTargetAsync(
+            targets, (key, target) => SendAsync(target, key, notification, cancellationToken), "Sending to", cancellationToken);
     }
+
+    /// <summary>
+    /// Stops the repeats of the emergency notifications of every target by their tags, also those sent before a
+    /// restart. When some targets fail, the others are still canceled and the error names the failed ones.
+    /// </summary>
+    [Operation(Title = "Cancel all emergencies", Icon = "NotificationsOff", Position = 2, RequiresConfirmation = true)]
+    public Task CancelAllEmergenciesAsync(CancellationToken cancellationToken) =>
+        PushoverBatch.RunForEachTargetAsync(
+            Targets, (key, _) => _emergencyTracker.CancelAllAsync(key, cancellationToken), "Canceling the emergencies of", cancellationToken);
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
     {
@@ -156,17 +157,11 @@ public partial class PushoverService :
 
     /// <summary>
     /// Sends <paramref name="notification"/> to <paramref name="target"/> and returns its id: the receipt of an
-    /// emergency notification, otherwise the request id.
+    /// emergency notification, which is then tracked under <paramref name="targetKey"/>, otherwise the request id.
     /// </summary>
-    internal async Task<string?> SendAsync(PushoverTarget target, Notification notification, CancellationToken cancellationToken)
+    internal async Task<string?> SendAsync(PushoverTarget target, string targetKey, Notification notification, CancellationToken cancellationToken)
     {
         PushoverMessageMapping.Validate(notification);
-
-        // Read from the committed Targets, so a target that a reload replaced or removed cannot send anymore.
-        if (!Targets.ContainsValue(target))
-        {
-            throw new InvalidOperationException($"The target '{target.Title}' is not part of a Pushover service.");
-        }
 
         var token = GetRequiredApplicationToken();
         var userKey = target.UserKey;
@@ -175,37 +170,74 @@ public partial class PushoverService :
             throw new InvalidOperationException($"The user key of the Pushover target '{target.Title}' is not configured.");
         }
 
-        var fields = PushoverMessageMapping.Create(token, userKey, notification, target.EmergencyRetry, target.EmergencyExpire, _logger);
-        var response = await _client.SendMessageAsync(fields, cancellationToken);
+        var isEmergency = notification.Priority == NotificationPriority.Emergency;
+        if (isEmergency)
+        {
+            _emergencyTracker.ReserveEmergency(targetKey, target.MaximumActiveEmergencies, target.Title);
+        }
 
-        target.LastSentAt = DateTimeOffset.UtcNow;
-        return response.Receipt ?? response.Request;
+        try
+        {
+            var expire = target.EmergencyExpire;
+            var fields = PushoverMessageMapping.Create(token, userKey, notification, target.EmergencyRetry, expire, targetKey, _logger);
+
+            // Not canceled by the caller once sending an emergency started, so one that Pushover accepted is always
+            // tracked and can be canceled; the HttpClient timeout still bounds the request.
+            var response = await _client.SendMessageAsync(fields, isEmergency ? CancellationToken.None : cancellationToken);
+
+            var now = TimeProvider.GetUtcNow();
+            target.LastSentAt = now;
+            if (response.Receipt is not { } receipt)
+            {
+                return response.Request;
+            }
+
+            _emergencyTracker.Add(targetKey, receipt, fields.GetValueOrDefault("title"), fields["message"], now, expire);
+            Signal();
+            return receipt;
+        }
+        finally
+        {
+            if (isEmergency)
+            {
+                _emergencyTracker.ReleaseReservation(targetKey);
+            }
+        }
     }
 
-    private string GetRequiredApplicationToken() =>
+    /// <summary>
+    /// Emits one event per acknowledged emergency notification of any target.
+    /// </summary>
+    public IDisposable Subscribe(IObserver<PushoverEmergencyAcknowledgedEvent> observer) =>
+        _emergencyTracker.Subscribe(observer, targetKey: null);
+
+    internal string GetRequiredApplicationToken() =>
         ApplicationToken is { Length: > 0 } token ? token : throw new InvalidOperationException("The Pushover application token is not configured.");
 
     internal void RequestValidation()
     {
+        _isValidationRequested = true;
+        Signal();
+    }
+
+    private void Signal()
+    {
         try
         {
-            _validationSignal.Release();
+            _signal.Release();
         }
         catch (SemaphoreFullException)
         {
-            // A validation is already pending.
+            // A signal is already pending.
         }
     }
 
-    // Set before Targets changes, so there is no window in which a target is reachable through Targets but cannot
-    // send yet.
+    // Assigned before Targets changes, so there is no window in which a target is reachable through Targets but its
+    // service or emergencies are not yet set.
     partial void OnTargetsChanging(ref Dictionary<string, PushoverTarget> newValue, ref bool cancel)
     {
         newValue ??= new Dictionary<string, PushoverTarget>();
-        foreach (var target in newValue.Values)
-        {
-            target.Service = this;
-        }
+        _emergencyTracker.SetTargets(newValue);
     }
 
     partial void OnApplicationTokenChanged(string? newValue) => RequestValidation();

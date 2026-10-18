@@ -18,20 +18,38 @@ internal sealed class PushoverClient
     }
 
     public Task<PushoverResponse> SendMessageAsync(IEnumerable<KeyValuePair<string, string>> fields, CancellationToken cancellationToken) =>
-        SendAsync("messages.json", new FormUrlEncodedContent(fields), cancellationToken);
+        SendAsync(HttpMethod.Post, "messages.json", new FormUrlEncodedContent(fields), cancellationToken);
 
     public Task<PushoverResponse> ValidateUserAsync(string token, string userKey, CancellationToken cancellationToken) =>
-        SendAsync("users/validate.json",
+        SendAsync(HttpMethod.Post, "users/validate.json",
             new FormUrlEncodedContent([new("token", token), new("user", userKey)]),
             cancellationToken);
 
-    private async Task<PushoverResponse> SendAsync(string path, HttpContent content, CancellationToken cancellationToken)
+    // The receipts endpoint takes the token only as a query parameter.
+    public Task<PushoverResponse> GetReceiptAsync(string token, string receipt, CancellationToken cancellationToken) =>
+        SendAsync(HttpMethod.Get, $"receipts/{Uri.EscapeDataString(receipt)}.json?token={Uri.EscapeDataString(token)}",
+            content: null, cancellationToken);
+
+    public Task<PushoverResponse> CancelReceiptAsync(string token, string receipt, CancellationToken cancellationToken) =>
+        SendAsync(HttpMethod.Post, $"receipts/{Uri.EscapeDataString(receipt)}/cancel.json",
+            new FormUrlEncodedContent([new("token", token)]),
+            cancellationToken);
+
+    /// <summary>
+    /// Stops the repeats of every emergency notification of the application that was sent with <paramref name="tag"/>.
+    /// </summary>
+    public Task<PushoverResponse> CancelByTagAsync(string token, string tag, CancellationToken cancellationToken) =>
+        SendAsync(HttpMethod.Post, $"receipts/cancel_by_tag/{Uri.EscapeDataString(tag)}.json",
+            new FormUrlEncodedContent([new("token", token)]),
+            cancellationToken);
+
+    private async Task<PushoverResponse> SendAsync(HttpMethod method, string path, HttpContent? content, CancellationToken cancellationToken)
     {
         await _connections.WaitAsync(cancellationToken);
         try
         {
             using var client = _httpClientFactory.CreateClient();
-            using var request = new HttpRequestMessage(HttpMethod.Post, BaseAddress + path) { Content = content };
+            using var request = new HttpRequestMessage(method, BaseAddress + path) { Content = content };
             using var response = await client.SendAsync(request, cancellationToken);
 
             var body = await ReadResponseAsync(response, cancellationToken);

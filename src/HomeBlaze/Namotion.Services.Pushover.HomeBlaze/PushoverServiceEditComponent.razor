@@ -117,7 +117,7 @@
             Service.ApplicationToken = _applicationToken;
         }
 
-        // Existing targets are kept as instances, so their state survives.
+        // Existing targets are kept as instances, so their state and subscriptions survive.
         var targets = new Dictionary<string, PushoverTarget>();
         foreach (var input in _targets)
         {

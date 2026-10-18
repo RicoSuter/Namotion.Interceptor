@@ -16,6 +16,7 @@ namespace Namotion.Services.Pushover;
 public partial class PushoverTarget :
     IConfigurable,
     INotificationPublisher,
+    IObservable<PushoverEmergencyAcknowledgedEvent>,
     IMonitoredService,
     ITitleProvider,
     IIconProvider
@@ -31,10 +32,13 @@ public partial class PushoverTarget :
     public static readonly TimeSpan MaximumEmergencyExpire = TimeSpan.FromHours(3);
 
     // Not intercepted: an intercepted property holding the service would attach it as a child of its own child.
-    internal PushoverService? Service { get; set; }
+    // One reference, so the service and the key are always read together.
+    private Membership? _membership;
 
-    private PushoverService RequiredService =>
-        Service ?? throw new InvalidOperationException($"The target '{Title}' is not part of a Pushover service.");
+    internal PushoverService? Service => _membership?.Service;
+
+    private Membership RequiredMembership =>
+        _membership ?? throw new InvalidOperationException($"The target '{Title}' is not part of a Pushover service.");
 
     [Configuration]
     public partial string Name { get; set; }
@@ -57,6 +61,13 @@ public partial class PushoverTarget :
     [Configuration]
     public partial TimeSpan EmergencyExpire { get; set; }
 
+    /// <summary>
+    /// How many emergency notifications may be active at once, at least 1. Sending another one fails before any
+    /// request.
+    /// </summary>
+    [Configuration]
+    public partial int MaximumActiveEmergencies { get; set; }
+
     [State(IsDiscrete = true)]
     public partial ServiceStatus Status { get; internal set; }
 
@@ -71,6 +82,13 @@ public partial class PushoverTarget :
 
     [State]
     public partial DateTimeOffset? LastSentAt { get; internal set; }
+
+    /// <summary>
+    /// The emergency notifications by receipt: the active ones and the newest 10 that ended. Replaced as a whole,
+    /// never changed in place.
+    /// </summary>
+    [State]
+    public partial Dictionary<string, PushoverEmergency> Emergencies { get; internal set; }
 
     [Derived]
     public string Title => string.IsNullOrEmpty(Name) ? "Pushover target" : Name;
@@ -91,21 +109,52 @@ public partial class PushoverTarget :
         UserKey = null;
         EmergencyRetry = TimeSpan.FromSeconds(60);
         EmergencyExpire = TimeSpan.FromHours(1);
+        MaximumActiveEmergencies = 5;
 
         Status = ServiceStatus.Stopped;
         StatusMessage = "Not validated yet";
         Devices = [];
         LastSentAt = null;
+        Emergencies = new Dictionary<string, PushoverEmergency>();
     }
 
-    public async Task<NotificationResult> SendNotificationAsync(Notification notification, CancellationToken cancellationToken) =>
-        new() { Id = await RequiredService.SendAsync(this, notification, cancellationToken) };
+    public async Task<NotificationResult> SendNotificationAsync(Notification notification, CancellationToken cancellationToken)
+    {
+        var membership = RequiredMembership;
+        return new() { Id = await membership.Service.SendAsync(this, membership.Key, notification, cancellationToken) };
+    }
+
+    /// <summary>
+    /// Stops the repeats of every emergency notification of this target by its tag, also those sent before a restart.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The target is not part of a Pushover service.</exception>
+    [Operation(Title = "Cancel all emergencies", Icon = "NotificationsOff", Position = 2, RequiresConfirmation = true)]
+    public Task CancelAllEmergenciesAsync(CancellationToken cancellationToken)
+    {
+        var membership = RequiredMembership;
+        return membership.Service.EmergencyTracker.CancelAllAsync(membership.Key, cancellationToken);
+    }
+
+    /// <summary>
+    /// Emits one event per acknowledged emergency notification of the key of this target. The subscription keeps
+    /// receiving them when a configuration reload replaces this instance under the same key.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The target is not part of a Pushover service.</exception>
+    public IDisposable Subscribe(IObserver<PushoverEmergencyAcknowledgedEvent> observer)
+    {
+        var membership = RequiredMembership;
+        return membership.Service.EmergencyTracker.Subscribe(observer, membership.Key);
+    }
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
     {
         Service?.RequestValidation();
         return Task.CompletedTask;
     }
+
+    internal void Attach(PushoverService service, string key) => _membership = new Membership(service, key);
+
+    internal void Detach() => _membership = null;
 
     internal void SetValidated(string[] devices)
     {
@@ -142,4 +191,14 @@ public partial class PushoverTarget :
             newValue = MaximumEmergencyExpire;
         }
     }
+
+    partial void OnMaximumActiveEmergenciesChanging(ref int newValue, ref bool cancel)
+    {
+        if (newValue < 1)
+        {
+            newValue = 1;
+        }
+    }
+
+    private sealed record Membership(PushoverService Service, string Key);
 }

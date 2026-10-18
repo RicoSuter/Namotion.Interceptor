@@ -27,4 +27,13 @@ internal sealed class PushoverResponse
 
     [JsonPropertyName("devices")]
     public string[]? Devices { get; init; }
+
+    [JsonPropertyName("acknowledged")]
+    public int Acknowledged { get; init; }
+
+    [JsonPropertyName("acknowledged_at")]
+    public long AcknowledgedAt { get; init; }
+
+    [JsonPropertyName("expired")]
+    public int Expired { get; init; }
 }

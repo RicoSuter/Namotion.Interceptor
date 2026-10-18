@@ -38,7 +38,7 @@ public class PushoverOperationTests
     }
 
     [Fact]
-    public void WhenServiceIsRegistered_ThenItOffersSendToAllButIsNoPublisher()
+    public void WhenServiceIsRegistered_ThenItOffersSendToAllAndCancelAllEmergenciesButIsNoPublisher()
     {
         // Arrange
         var (service, _) = CreateRegisteredService("rico");
@@ -48,7 +48,53 @@ public class PushoverOperationTests
 
         // Assert
         Assert.False(registered.TryGetProperty("SendToAllTargets")!.TryGetMethodMetadata()!.RequiresConfirmation);
+        Assert.True(registered.TryGetProperty("CancelAllEmergencies")!.TryGetMethodMetadata()!.RequiresConfirmation);
         Assert.Null(registered.TryGetProperty("SendNotification"));
+    }
+
+    [Fact]
+    public async Task WhenAnEmergencyIsCanceled_ThenItsCancelOperationIsDisabled()
+    {
+        // Arrange
+        var (service, handler) = CreateRegisteredService("rico");
+        handler.Respond = FakePushoverHandler.RespondWithNumberedReceipts();
+        var target = service.Targets["rico"];
+        await target.SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
+        var emergency = target.Emergencies["receipt1"];
+        var cancel = emergency.TryGetRegisteredSubject()!.TryGetProperty("Cancel")!;
+        Assert.True(cancel.TryGetMethodMetadata()!.RequiresConfirmation);
+        Assert.True(cancel.IsMethodEnabled());
+
+        // Act
+        await cancel.TryGetMethodMetadata()!.InvokeAsync([], serviceProvider: null, CancellationToken.None);
+
+        // Assert
+        Assert.Single(handler.RequestsTo("/1/receipts/receipt1/cancel.json"));
+        Assert.Equal(PushoverEmergencyStatus.Canceled, emergency.Status);
+        Assert.False(cancel.IsMethodEnabled());
+    }
+
+    [Fact]
+    public async Task WhenAConfigurationReloadReplacesTheTargetInstance_ThenItsEmergencyIsAttachedAgainWithItsState()
+    {
+        // Arrange
+        var (service, handler) = CreateRegisteredService("rico");
+        handler.Respond = FakePushoverHandler.RespondWithNumberedReceipts();
+        var oldTarget = service.Targets["rico"];
+        await oldTarget.SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
+        var emergency = oldTarget.Emergencies["receipt1"];
+        var newTarget = new PushoverTarget { Name = "Rico", UserKey = "user-rico" };
+
+        // Act
+        service.Targets = new Dictionary<string, PushoverTarget> { ["rico"] = newTarget };
+
+        // Assert
+        Assert.Same(emergency, newTarget.Emergencies["receipt1"]);
+        Assert.Empty(oldTarget.Emergencies);
+        Assert.NotNull(emergency.TryGetRegisteredSubject());
+        Assert.Equal("receipt1", emergency.Receipt);
+        Assert.Equal(PushoverEmergencyStatus.Active, emergency.Status);
+        Assert.True(emergency.TryGetRegisteredSubject()!.TryGetProperty("Cancel")!.IsMethodEnabled());
     }
 
     private static (PushoverService Service, FakePushoverHandler Handler) CreateRegisteredService(params string[] targetKeys)
