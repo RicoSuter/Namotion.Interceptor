@@ -22,6 +22,9 @@ public static class HomeBlazePaths
     /// <summary>Default plugin configuration file, relative to the data directory.</summary>
     public static readonly string DefaultPluginConfigurationFile = Path.Combine("Files", "Plugins.json");
 
+    /// <summary>Folder of the ASP.NET Core Data Protection keys, relative to the data directory.</summary>
+    public const string DataProtectionKeysDirectory = "DataProtection-Keys";
+
     /// <summary>
     /// Resolves the full path of the root configuration file. A relative setting resolves against the working directory.
     /// </summary>
@@ -39,5 +42,14 @@ public static class HomeBlazePaths
         var dataDirectory = Path.GetDirectoryName(GetRootConfigurationPath(configuration))!;
         var pluginConfigurationPath = configuration[PluginConfigurationPathKey];
         return Path.GetFullPath(string.IsNullOrWhiteSpace(pluginConfigurationPath) ? DefaultPluginConfigurationFile : pluginConfigurationPath, dataDirectory);
+    }
+
+    /// <summary>
+    /// Resolves the full path of the folder that keeps the ASP.NET Core Data Protection keys, in the data directory next to the root configuration file.
+    /// </summary>
+    public static string GetDataProtectionKeysPath(IConfiguration? configuration)
+    {
+        var dataDirectory = Path.GetDirectoryName(GetRootConfigurationPath(configuration))!;
+        return Path.Combine(dataDirectory, DataProtectionKeysDirectory);
     }
 }

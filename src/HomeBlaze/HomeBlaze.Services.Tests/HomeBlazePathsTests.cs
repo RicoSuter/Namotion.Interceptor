@@ -111,6 +111,33 @@ public class HomeBlazePathsTests
         Assert.Equal(pluginFile, path);
     }
 
+    [Fact]
+    public void WhenRootConfigFileIsSet_ThenDataProtectionKeysAreNextToIt()
+    {
+        // Arrange
+        var dataDirectory = Path.Combine(Path.GetTempPath(), "homeblaze-instance");
+        var configuration = CreateConfiguration(Path.Combine(dataDirectory, "Root.json"), pluginConfigurationPath: null);
+
+        // Act
+        var path = HomeBlazePaths.GetDataProtectionKeysPath(configuration);
+
+        // Assert
+        Assert.Equal(Path.Combine(dataDirectory, "DataProtection-Keys"), path);
+    }
+
+    [Fact]
+    public void WhenRootConfigFileIsNotSet_ThenDataProtectionKeysAreInDataDirectoryOfWorkingDirectory()
+    {
+        // Arrange
+        var configuration = CreateConfiguration(rootConfigFile: null, pluginConfigurationPath: null);
+
+        // Act
+        var path = HomeBlazePaths.GetDataProtectionKeysPath(configuration);
+
+        // Assert
+        Assert.Equal(Path.GetFullPath(Path.Combine("Data", "DataProtection-Keys")), path);
+    }
+
     private static IConfiguration CreateConfiguration(string? rootConfigFile, string? pluginConfigurationPath)
     {
         var configuration = new Mock<IConfiguration>();
