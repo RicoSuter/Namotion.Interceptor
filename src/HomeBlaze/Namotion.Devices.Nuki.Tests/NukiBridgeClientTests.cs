@@ -26,6 +26,10 @@ public class NukiBridgeClientTests
     [InlineData("[fe80::1]:65535", "http://[fe80::1]:65535/info?token=123456")]
     [InlineData("fe80::1", "http://[fe80::1]:8080/info?token=123456")]
     [InlineData(" http://nuki.local/ ", "http://nuki.local:8080/info?token=123456")]
+    [InlineData("bücher.de", "http://bücher.de:8080/info?token=123456")]
+    [InlineData("[fe80::1%eth0]", "http://[fe80::1]:8080/info?token=123456")]
+    [InlineData("fe80::1%eth0", "http://[fe80::1]:8080/info?token=123456")]
+    [InlineData("[fe80::1%eth0]:8081", "http://[fe80::1]:8081/info?token=123456")]
     public async Task WhenTokenModeIsPlain_ThenTheRequestGoesToTheNormalizedHostAddressWithTheTokenAsQueryParameter(string hostAddress, string expectedUri)
     {
         // Arrange
@@ -36,7 +40,12 @@ public class NukiBridgeClientTests
         await client.GetInfoAsync(CancellationToken.None);
 
         // Assert
-        Assert.Equal(expectedUri, Assert.Single(bridge.Requests).ToString());
+        var request = Assert.Single(bridge.Requests);
+        Assert.Equal(expectedUri, request.ToString());
+        Assert.True(NukiBridgeClient.TryParseHostAddress(hostAddress, out var host, out var port, out _));
+        Assert.Equal(host, request.DnsSafeHost);
+        Assert.Equal(port, request.Port);
+        Assert.Empty(request.UserInfo);
     }
 
     [Fact]
@@ -153,6 +162,11 @@ public class NukiBridgeClientTests
     [InlineData("", "without a path")]
     [InlineData("192.168.1.50:80:90", "without a path")]
     [InlineData("[not-an-ip]:8080", "without a path")]
+    [InlineData("[fe80::1%@evil.com/64]", "without a path")]
+    [InlineData("fe80::1%@evil.com/64", "without a path")]
+    [InlineData("[fe80::1%x y]", "without a path")]
+    [InlineData("[1::2%@evil.com:81/1]", "without a path")]
+    [InlineData("ftp://x", "without a path")]
     [InlineData("192.168.1.50:0", "from 1 to 65535")]
     [InlineData("192.168.1.50:65536", "from 1 to 65535")]
     [InlineData("192.168.1.50:", "from 1 to 65535")]

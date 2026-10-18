@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Net;
@@ -19,6 +20,8 @@ internal sealed class NukiBridgeClient
 
     /// <summary>The largest response accepted from the bridge or the discovery service, in bytes.</summary>
     public const int MaxResponseSize = 1024 * 1024;
+
+    private static readonly SearchValues<char> InvalidHostAddressCharacters = SearchValues.Create("/?#@\\");
 
     private static readonly TimeSpan ReadTimeout = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan ActionTimeout = TimeSpan.FromSeconds(60);
@@ -62,10 +65,8 @@ internal sealed class NukiBridgeClient
             portSeparator = -1;
         }
 
-        // Rejects a path, query, user name, spaces and malformed brackets, so the token never goes to another host.
         var hostPart = (portSeparator >= 0 ? address[..portSeparator] : address).ToString();
-        var hostType = Uri.CheckHostName(hostPart);
-        if (hostType == UriHostNameType.Unknown || (hostPart.StartsWith('[') && hostType != UriHostNameType.IPv6))
+        if (!IsValidHost(address, hostPart))
         {
             port = 0;
             errorMessage = "The host address must be a host name or IP address with an optional port, without a path, " +
@@ -95,6 +96,28 @@ internal sealed class NukiBridgeClient
         }
 
         return address.TrimEnd('/');
+    }
+
+    // Rejects a path, query, user name, spaces and malformed brackets, so the token never goes to another host. The
+    // character check covers the whole address because Uri.CheckHostName accepts these characters in an IPv6 scope id,
+    // and the request URI reads "::1%@evil.com/64" as a user name and the host evil.com.
+    private static bool IsValidHost(ReadOnlySpan<char> address, string hostPart)
+    {
+        if (address.ContainsAny(InvalidHostAddressCharacters))
+        {
+            return false;
+        }
+
+        foreach (var character in address)
+        {
+            if (char.IsWhiteSpace(character) || char.IsControl(character))
+            {
+                return false;
+            }
+        }
+
+        var hostType = Uri.CheckHostName(hostPart);
+        return hostType != UriHostNameType.Unknown && (!hostPart.StartsWith('[') || hostType == UriHostNameType.IPv6);
     }
 
     private static bool TryParsePort(ReadOnlySpan<char> text, out int port) =>
