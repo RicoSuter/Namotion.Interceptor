@@ -1281,7 +1281,6 @@ public partial class FluentStorageContainer :
         return $"'{name}' cannot be created: another subject in this folder, or the folder itself, already has its name in the tree.";
     }
 
-
     /// <summary>
     /// IStorageContainer - Deletes a subject by finding its path in the index.
     /// </summary>
