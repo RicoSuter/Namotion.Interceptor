@@ -438,6 +438,8 @@ public sealed class NavigationTestMetadataSubject(SubjectMetadata? metadata) : I
 {
     public SubjectMetadata? SubjectMetadata => metadata;
 
+    public IInterceptorSubject GetOwner() => throw new NotSupportedException();
+
     public Task SetMetadataAsync(JsonElement values, CancellationToken cancellationToken) => Task.CompletedTask;
 
     public Task SetOrderAsync(string[] names, CancellationToken cancellationToken) => Task.CompletedTask;

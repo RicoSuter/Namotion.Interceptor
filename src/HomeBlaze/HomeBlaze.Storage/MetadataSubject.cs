@@ -43,6 +43,9 @@ public sealed partial class MetadataSubject : IMetadataSubject
     /// <inheritdoc />
     public partial SubjectMetadata? SubjectMetadata { get; internal set; }
 
+    /// <inheritdoc />
+    public IInterceptorSubject GetOwner() => _owner;
+
     /// <summary>
     /// Gets every key of the metadata file of the owner as a JSON object, unknown keys included; an empty object
     /// without a file. For a folder or the root the order is left out.

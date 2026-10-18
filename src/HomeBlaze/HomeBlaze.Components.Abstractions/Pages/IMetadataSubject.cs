@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Namotion.Interceptor;
 
 namespace HomeBlaze.Components.Abstractions.Pages;
 
@@ -19,6 +20,12 @@ public interface IMetadataSubject
     /// for a folder or the root.
     /// </summary>
     SubjectMetadata? SubjectMetadata { get; }
+
+    /// <summary>
+    /// Gets the subject, folder or storage root that this metadata belongs to.
+    /// </summary>
+    /// <remarks>A method rather than a property, so that the registry does not list the owner as a child of its metadata.</remarks>
+    IInterceptorSubject GetOwner();
 
     /// <summary>
     /// Merges values, a JSON object, into the metadata file of the item at the top level: a key with a value is set,
