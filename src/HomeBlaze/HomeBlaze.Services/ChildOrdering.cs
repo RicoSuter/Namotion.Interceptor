@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Runtime.InteropServices;
 
 namespace HomeBlaze.Services;
 
@@ -8,13 +9,17 @@ namespace HomeBlaze.Services;
 /// </summary>
 public static class ChildOrdering
 {
+    // A longer order is put in a dictionary rather than searched for each child.
+    private const int MaxSearchedOrderLength = 16;
+
     /// <summary>
     /// Orders the children by the order of their container.
     /// </summary>
     /// <param name="children">The children.</param>
     /// <param name="childOrder">The names in the order of the container. Unknown and repeated names are ignored.</param>
     /// <param name="getName">Gets the name of a child in its container.</param>
-    /// <param name="getTitle">Gets the navigation title of a child.</param>
+    /// <param name="getTitle">Gets the navigation title of a child, called only for children that the order, the
+    /// readme and the index leave equal.</param>
     public static IEnumerable<T> Order<T>(
         IEnumerable<T> children,
         ImmutableArray<string> childOrder,
@@ -22,7 +27,7 @@ public static class ChildOrdering
         Func<T, string> getTitle)
     {
         Dictionary<string, int>? positions = null;
-        if (!childOrder.IsDefaultOrEmpty)
+        if (!childOrder.IsDefaultOrEmpty && childOrder.Length > MaxSearchedOrderLength)
         {
             positions = new Dictionary<string, int>(childOrder.Length, StringComparer.Ordinal);
             for (var index = 0; index < childOrder.Length; index++)
@@ -31,13 +36,61 @@ public static class ChildOrdering
             }
         }
 
-        return children
-            .Select(child => (Child: child, Name: getName(child)))
-            .OrderBy(item => positions is not null && positions.TryGetValue(item.Name, out var position) ? position : int.MaxValue)
-            .ThenBy(item => GetDefaultRank(item.Name))
-            .ThenBy(item => getTitle(item.Child), StringComparer.InvariantCulture)
-            .ThenBy(item => item.Name, StringComparer.Ordinal)
-            .Select(item => item.Child);
+        var entries = new List<Entry<T>>(children.TryGetNonEnumeratedCount(out var count) ? count : 0);
+        foreach (var child in children)
+        {
+            var name = getName(child);
+            var position = positions is not null ? positions.GetValueOrDefault(name, int.MaxValue)
+                : childOrder.IsDefaultOrEmpty ? -1
+                : childOrder.IndexOf(name, 0, StringComparer.Ordinal);
+            entries.Add(new Entry<T>(child, name, position < 0 ? int.MaxValue : position, GetDefaultRank(name), entries.Count));
+        }
+
+        var span = CollectionsMarshal.AsSpan(entries);
+        span.Sort(static (left, right) => left.Position != right.Position
+            ? left.Position.CompareTo(right.Position)
+            : left.Rank.CompareTo(right.Rank));
+
+        // The titles decide only within a run of children that are equal so far.
+        for (var start = 0; start < span.Length;)
+        {
+            var end = start + 1;
+            while (end < span.Length && span[end].Position == span[start].Position && span[end].Rank == span[start].Rank)
+            {
+                end++;
+            }
+
+            if (end - start > 1)
+            {
+                var run = span[start..end];
+                foreach (ref var entry in run)
+                {
+                    entry.Title = getTitle(entry.Child);
+                }
+
+                run.Sort(static (left, right) =>
+                {
+                    var result = StringComparer.InvariantCulture.Compare(left.Title, right.Title);
+                    if (result == 0)
+                    {
+                        result = string.CompareOrdinal(left.Name, right.Name);
+                    }
+
+                    // The sort is not stable, so the input order decides between children that are equal otherwise.
+                    return result != 0 ? result : left.Index.CompareTo(right.Index);
+                });
+            }
+
+            start = end;
+        }
+
+        var ordered = new T[span.Length];
+        for (var index = 0; index < span.Length; index++)
+        {
+            ordered[index] = span[index].Child;
+        }
+
+        return ordered;
     }
 
     private static int GetDefaultRank(string name)
@@ -46,5 +99,15 @@ public static class ChildOrdering
         return stem.Equals("readme", StringComparison.OrdinalIgnoreCase) ? 0
             : stem.Equals("index", StringComparison.OrdinalIgnoreCase) ? 1
             : 2;
+    }
+
+    private struct Entry<T>(T child, string name, int position, int rank, int index)
+    {
+        public readonly T Child = child;
+        public readonly string Name = name;
+        public readonly int Position = position;
+        public readonly int Rank = rank;
+        public readonly int Index = index;
+        public string? Title;
     }
 }

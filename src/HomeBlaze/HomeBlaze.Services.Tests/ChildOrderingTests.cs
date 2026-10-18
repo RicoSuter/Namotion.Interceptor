@@ -46,4 +46,36 @@ public class ChildOrderingTests
         // Assert
         Assert.Equal(["a", "b"], ordered);
     }
+
+    [Fact]
+    public void WhenTheOrderOrTheReadmeDecides_ThenNoTitleIsRead()
+    {
+        // Arrange
+        var titledNames = new List<string>();
+
+        // Act
+        var ordered = ChildOrdering.Order(["b.md", "Readme.md", "a.md", "c.md"], ["c.md"], static name => name, name =>
+        {
+            titledNames.Add(name);
+            return name;
+        }).ToArray();
+
+        // Assert
+        Assert.Equal(["c.md", "Readme.md", "a.md", "b.md"], ordered);
+        Assert.Equal(["a.md", "b.md"], titledNames.Order());
+    }
+
+    [Fact]
+    public void WhenTheOrderIsLong_ThenUnknownAndRepeatedNamesAreIgnoredAsWell()
+    {
+        // Arrange
+        var names = Enumerable.Range(0, 20).Select(index => $"{index:D2}.md").ToArray();
+        ImmutableArray<string> childOrder = ["gone.md", .. names.Reverse(), "00.md"];
+
+        // Act
+        var ordered = Order(names, childOrder);
+
+        // Assert
+        Assert.Equal(names.Reverse(), ordered);
+    }
 }
