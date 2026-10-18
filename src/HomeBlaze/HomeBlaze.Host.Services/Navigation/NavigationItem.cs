@@ -34,7 +34,8 @@ public class NavigationItem
     public bool IsPage { get; init; }
 
     /// <summary>
-    /// Whether this item represents a folder (can be expanded).
+    /// Whether this item has a descendant page in any location. The sidebar shows an item as a folder by
+    /// <see cref="HasNavigationBarPages"/> instead.
     /// </summary>
     public bool IsFolder { get; init; }
 

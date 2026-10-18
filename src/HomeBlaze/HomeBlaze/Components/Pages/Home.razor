@@ -1,11 +1,13 @@
 @page "/"
 
 @using HomeBlaze.Components.Abstractions.Pages
+@using Microsoft.Extensions.Logging
 
 @inherits HomeBlazorComponentBase
 
 @inject NavigationItemResolver NavigationResolver
 @inject NavigationManager Navigation
+@inject ILogger<Home> Logger
 
 @code {
     protected override void OnInitialized()
@@ -19,27 +21,31 @@
         if (Root == null)
             return;
 
-        // The first page of the top bar as it shows it: left aligned first, then right, each in navigation order.
-        var appBarItems = NavigationResolver.GetAppBarItems(Root);
-        var appBarPage = appBarItems.FirstOrDefault(i => i.Alignment == AppBarAlignment.Left) ?? appBarItems.FirstOrDefault();
+        // Outside the try: during prerendering a navigation throws to redirect the response.
+        Navigation.NavigateTo(GetDefaultPageUrl(Root));
+    }
 
-        if (appBarPage != null)
+    private string GetDefaultPageUrl(IInterceptorSubject root)
+    {
+        try
         {
-            Navigation.NavigateTo(appBarPage.PageUrl);
-            return;
+            // The first page of the top bar as it shows it: left aligned first, then right, each in navigation order.
+            var appBarItems = NavigationResolver.GetAppBarItems(root);
+            var appBarPage = appBarItems.FirstOrDefault(i => i.Alignment == AppBarAlignment.Left) ?? appBarItems.FirstOrDefault();
+            if (appBarPage != null)
+                return appBarPage.PageUrl;
+
+            var navBarPage = NavigationResolver.GetChildItems(root)
+                .FirstOrDefault(i => i is { IsPage: true, Location: NavigationLocation.NavBar });
+            if (navBarPage != null)
+                return navBarPage.PageUrl;
+        }
+        catch (Exception exception)
+        {
+            // The graph changes on other threads while this reads it, and the browser always opens.
+            Logger.LogWarning(exception, "Error getting the default page");
         }
 
-        // Try first NavBar page
-        var navBarPage = NavigationResolver.GetChildItems(Root)
-            .FirstOrDefault(i => i is { IsPage: true, Location: NavigationLocation.NavBar });
-
-        if (navBarPage != null)
-        {
-            Navigation.NavigateTo(navBarPage.PageUrl);
-            return;
-        }
-
-        // Fallback to browser
-        Navigation.NavigateTo("/browser");
+        return "/browser";
     }
 }

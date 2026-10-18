@@ -91,6 +91,21 @@ public class NavigationMetadataTests
         await _fixture.ReconcileStorageAsync();
     }
 
+    // Like RestoreDemoMetadataAsync, for a file that may not have existed before the test, which is deleted again.
+    private async Task RestoreFileAsync(string path, string? originalText)
+    {
+        if (originalText is null)
+        {
+            File.Delete(path);
+        }
+        else
+        {
+            await File.WriteAllTextAsync(path, originalText);
+        }
+
+        await _fixture.ReconcileStorageAsync();
+    }
+
     [Fact]
     public async Task WhenAChildIsDroppedOnTheUpperHalfOfTheFirstRow_ThenItGoesFirst()
     {
@@ -513,6 +528,8 @@ public class NavigationMetadataTests
         var root = (FluentStorageContainer)_fixture.ServerServices.GetRequiredService<RootManager>().Root!;
         var folder = (VirtualFolder)root.Children["Agents"];
         var agent = folder.Children["TestAgent"];
+        var sidecarPath = _fixture.GetPagePath(Path.Combine("Agents", "TestAgent.metadata.json"));
+        var originalSidecar = File.Exists(sidecarPath) ? await File.ReadAllTextAsync(sidecarPath) : null;
         try
         {
             var (page, pane) = await OpenPaneAsync("Agents/TestAgent");
@@ -537,7 +554,7 @@ public class NavigationMetadataTests
         }
         finally
         {
-            await folder.WriteChildMetadataAsync(agent, null, CancellationToken.None);
+            await RestoreFileAsync(sidecarPath, originalSidecar);
         }
     }
 }

@@ -1,6 +1,7 @@
 ﻿@using HomeBlaze.Components.Abstractions.Pages
 @using HomeBlaze.Host.Components.Browser
 @using HomeBlaze.Host.Components.TimeZones
+@using Microsoft.Extensions.Logging
 
 @inherits LayoutComponentBase
 
@@ -8,6 +9,7 @@
 @inject RootManager RootManager
 @inject NavigationItemResolver NavigationResolver
 @inject NavigationManager NavigationManager
+@inject ILogger<MainLayout> Logger
 
 @implements IDisposable
 
@@ -103,6 +105,7 @@
     private MudTheme? _theme;
     private bool _isRootLoaded;
     private bool _rootLoadFailed;
+    private IReadOnlyList<NavigationItem> _appBarItems = [];
 
     protected override void OnInitialized()
     {
@@ -241,7 +244,18 @@
         if (RootManager.Root == null)
             return [];
 
-        return NavigationResolver.GetAppBarItems(RootManager.Root);
+        try
+        {
+            _appBarItems = NavigationResolver.GetAppBarItems(RootManager.Root);
+        }
+        catch (Exception exception)
+        {
+            // The graph changes on other threads while this reads it. An exception escaping here would end the
+            // circuit or fail the prerendering, also of the error page, so the previous items stay until the next render.
+            Logger.LogWarning(exception, "Error getting the top bar items");
+        }
+
+        return _appBarItems;
     }
 
     // The error page is shown exactly when the system is unhealthy, so it must render even if the
