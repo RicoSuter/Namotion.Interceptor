@@ -3,6 +3,7 @@ using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.AI.Agents;
 using HomeBlaze.Services;
+using HomeBlaze.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
@@ -52,8 +53,11 @@ internal static class HomeBlazeMcpConfigurationFactory
             new SubjectTypeRegistryTypeProvider(typeRegistry)
         };
 
+        // The metadata subject is added explicitly: browse, search and list_types skip only the listed types, and a
+        // registry lists only the types of the assemblies it was given. A type listed twice does no harm.
         var excludeTypes = typeRegistry.RegisteredTypes
             .Where(type => ExcludeFromAttribute.IsExcluded(type, ExclusionTarget.Agents))
+            .Append(typeof(MetadataSubject))
             .ToArray();
 
         var invoker = new McpMethodInvoker(
