@@ -210,18 +210,6 @@ public partial class NukiBridge
         }
     }
 
-    /// <summary>
-    /// Reads the device list and updates the devices.
-    /// </summary>
-    internal async Task RefreshAsync(CancellationToken cancellationToken)
-    {
-        using (await EnterRequestGateAsync(cancellationToken))
-        {
-            MergeDevices(await GetConnectedClient().GetListAsync(cancellationToken));
-            LastUpdated = DateTimeOffset.UtcNow;
-        }
-    }
-
     // Runs while the gate of the action is still held, so that no poll reads the list in between. The client is read
     // again because the connection may have ended during the action.
     private async Task RefreshAfterActionAsync(NukiDevice device, int action, Action resetState)

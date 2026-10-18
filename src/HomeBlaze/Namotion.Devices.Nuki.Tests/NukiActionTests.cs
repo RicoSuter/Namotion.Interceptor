@@ -117,21 +117,26 @@ public class NukiActionTests
     }
 
     [Fact]
-    public async Task WhenAPollRunsDuringAnAction_ThenTheRequestsDoNotOverlap()
+    public async Task WhenAnActionStartsDuringAPoll_ThenItWaitsForThePollAndTheRequestsDoNotOverlap()
     {
         // Arrange
         var fake = new FakeNukiBridge { ListJson = NukiFixtures.SmartLock(state: 3) };
         await using var test = new TestBridge(fake);
+        test.Bridge.PollingInterval = TimeSpan.FromSeconds(NukiBridge.MinimumIntervalSeconds);
         await test.StartAsync();
+        var listGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        fake.ListGate = listGate;
+        await AsyncTestHelpers.WaitUntilAsync(() => fake.WaitingListRequests == 1, message: "No poll read the list.");
 
         // Act
-        await RunHeldActionAsync(
-            fake,
-            () => test.Lock.LockAsync(CancellationToken.None),
-            () => test.Lock.LockState == DoorLockState.Locking,
-            whileHeld: () => test.Bridge.RefreshAsync(CancellationToken.None));
+        var action = test.Lock.LockAsync(CancellationToken.None);
+        var stateDuringPoll = test.Lock.LockState;
+        fake.ListGate = null;
+        listGate.SetResult();
+        await action;
 
         // Assert
+        Assert.Equal(DoorLockState.Unlocked, stateDuringPoll);
         Assert.Equal(1, fake.MaxConcurrentRequests);
     }
 
@@ -156,16 +161,14 @@ public class NukiActionTests
         Assert.Equal(NukiOpenerState.Online, test.Opener.OpenerState);
     }
 
-    // Starts an action that the bridge holds, waits until it shows its transition, starts whileHeld, then lets the bridge
-    // finish the action and waits for both.
-    private static async Task RunHeldActionAsync(FakeNukiBridge fake, Func<Task> startAction, Func<bool> showsTransition, Func<Task>? whileHeld = null)
+    // Starts an action that the bridge holds, waits until it shows its transition, then lets the bridge finish the action.
+    private static async Task RunHeldActionAsync(FakeNukiBridge fake, Func<Task> startAction, Func<bool> showsTransition)
     {
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         fake.ActionGate = gate;
         var action = startAction();
         await AsyncTestHelpers.WaitUntilAsync(showsTransition);
-        var held = whileHeld?.Invoke() ?? Task.CompletedTask;
         gate.SetResult();
-        await Task.WhenAll(action, held);
+        await action;
     }
 }

@@ -101,9 +101,8 @@ public abstract partial class NukiDevice :
     private protected abstract void UpdateState(NukiLastKnownStateResponse? state);
 
     /// <summary>
-    /// Runs a lock action: shows the transition while the bridge runs it, throws when the device reports a failure,
-    /// and reads the device list right after it. When that read fails, the state is reset to unknown. An action that
-    /// is canceled or finds the bridge disconnected before it is sent changes nothing.
+    /// Runs a lock action through <see cref="NukiBridge.ExecuteActionAsync"/> and throws an
+    /// <see cref="InvalidOperationException"/> with <paramref name="failureMessage"/> when the device reports a failure.
     /// </summary>
     private protected async Task RunActionAsync(
         int action,

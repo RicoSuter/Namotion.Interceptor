@@ -12,6 +12,7 @@ internal sealed class FakeNukiBridge : HttpMessageHandler, IHttpClientFactory
     private readonly ConcurrentQueue<Uri> _requests = new();
     private int _concurrentRequests;
     private int _maxConcurrentRequests;
+    private int _waitingListRequests;
 
     public volatile string InfoJson = NukiFixtures.Info;
     public volatile string ListJson = NukiFixtures.List;
@@ -29,9 +30,16 @@ internal sealed class FakeNukiBridge : HttpMessageHandler, IHttpClientFactory
     /// completes the gate runs the waiting request's continuation inline.</remarks>
     public volatile TaskCompletionSource? ActionGate = null;
 
+    /// <summary>When set, a /list request waits for it.</summary>
+    /// <remarks>Create it with <see cref="TaskCreationOptions.RunContinuationsAsynchronously"/>, like <see cref="ActionGate"/>.</remarks>
+    public volatile TaskCompletionSource? ListGate = null;
+
     public Uri[] Requests => _requests.ToArray();
 
     public int MaxConcurrentRequests => Volatile.Read(ref _maxConcurrentRequests);
+
+    /// <summary>The /list requests that wait for <see cref="ListGate"/>.</summary>
+    public int WaitingListRequests => Volatile.Read(ref _waitingListRequests);
 
     public int CountRequests(string path) => _requests.Count(uri => uri.AbsolutePath == "/" + path);
 
@@ -56,6 +64,18 @@ internal sealed class FakeNukiBridge : HttpMessageHandler, IHttpClientFactory
                 if (ActionGate is { } gate)
                 {
                     await gate.Task.WaitAsync(cancellationToken);
+                }
+            }
+            else if (path == "list" && ListGate is { } listGate)
+            {
+                Interlocked.Increment(ref _waitingListRequests);
+                try
+                {
+                    await listGate.Task.WaitAsync(cancellationToken);
+                }
+                finally
+                {
+                    Interlocked.Decrement(ref _waitingListRequests);
                 }
             }
 
