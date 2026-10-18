@@ -8,27 +8,15 @@ using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Connectors.Tests;
 
-[CollectionDefinition(Name, DisableParallelization = true)]
-public sealed class ChangeDeliveryFilterRaceCollection
-{
-    private ChangeDeliveryFilterRaceCollection()
-    {
-    }
-
-    public const string Name = "ChangeDeliveryFilterRace";
-}
-
 /// <summary>
 /// A property's first publish races a transaction confirmation: the flush decides the older local write
 /// while the confirmation commits and is judged as an echo. Whichever way it interleaves, the source has
 /// to end at the model's value.
 /// </summary>
-/// <remarks>
-/// Not parallel: every step waits on the processor's dequeue loop and flush, which run on the thread
-/// pool and cannot be moved to dedicated threads, so concurrently running tests that block pool workers
-/// can delay a step past its timeout.
-/// </remarks>
-[Collection(ChangeDeliveryFilterRaceCollection.Name)]
+// Runs alone: each step waits for the processor's flush on the thread pool, so parallel tests that block
+// pool workers can push a step past StepTimeout.
+[CollectionDefinition(nameof(ChangeDeliveryFilterRaceTests), DisableParallelization = true)]
+[Collection(nameof(ChangeDeliveryFilterRaceTests))]
 public class ChangeDeliveryFilterRaceTests
 {
     private const string WriteStateKey = "ni.wstate";
@@ -40,7 +28,7 @@ public class ChangeDeliveryFilterRaceTests
     public async Task WhenAConfirmationCommitsWhileTheFlushIsMarkingTheFirstPublish_ThenTheSourceEndsAtTheModelValue(ChangeDeliveryRule rule)
     {
         // Arrange
-        await using var race = new Race(rule);
+        await using var race = await Race.StartAsync(rule);
         var gate = race.Gate;
         var subject = race.Subject;
 
@@ -88,7 +76,7 @@ public class ChangeDeliveryFilterRaceTests
     public async Task WhenAConfirmationCommitsBetweenTheFlushRevisionReadAndTheFirstPublishLock_ThenTheSourceEndsAtTheModelValue(ChangeDeliveryRule rule)
     {
         // Arrange
-        await using var race = new Race(rule);
+        await using var race = await Race.StartAsync(rule);
         var gate = race.Gate;
         var subject = race.Subject;
 
@@ -139,7 +127,7 @@ public class ChangeDeliveryFilterRaceTests
         private readonly Task _processing;
         private readonly object _source = new();
 
-        public Race(ChangeDeliveryRule rule)
+        private Race(ChangeDeliveryRule rule)
         {
             var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
             Subject = new GatedSubject(context, Gate);
@@ -161,6 +149,27 @@ public class ChangeDeliveryFilterRaceTests
                 maxQueueDepth: null,
                 logger: NullLogger.Instance);
             _processing = _processor.ProcessAsync(_cancellation.Token);
+        }
+
+        /// <summary>
+        /// Starts the processor and waits until it delivers, so its loops are running before a test arms the gate.
+        /// </summary>
+        public static async Task<Race> StartAsync(ChangeDeliveryRule rule)
+        {
+            var race = new Race(rule);
+
+            // Awaited rather than blocked on: the test thread can be a pool worker holding the processor's
+            // start in its local queue, which a later synchronous gate wait would strand.
+            try
+            {
+                await race.DeliverTailAsync("Started");
+                return race;
+            }
+            catch
+            {
+                await race.DisposeAsync();
+                throw;
+            }
         }
 
         public DataLookupGate Gate { get; } = new();
