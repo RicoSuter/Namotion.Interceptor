@@ -1,10 +1,10 @@
 using System.ComponentModel;
 using System.Globalization;
-using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 using HomeBlaze.Abstractions.Attributes;
 using Namotion.Interceptor;
 
@@ -32,9 +32,11 @@ public static class ParameterConverter
 
     private static readonly JsonSerializerOptions ObjectSerializerOptions = new()
     {
+        TypeInfoResolver = new DefaultJsonTypeInfoResolver(),
         PropertyNameCaseInsensitive = true,
+        UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
         NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals,
-        Converters = { new JsonStringEnumConverter() }
+        Converters = { new JsonStringEnumConverter(allowIntegerValues: false) }
     };
 
     // Weak, so that the types of an unloaded plugin are not kept alive.
@@ -50,20 +52,12 @@ public static class ParameterConverter
     }
 
     /// <summary>
-    /// Checks if a type is an object whose public settable members are all supported for UI input, so that it can be
-    /// entered member by member. A collection or array is excluded even though its members (such as
-    /// <see cref="List{T}.Capacity"/>) might otherwise qualify; it stays enterable as JSON through
-    /// <see cref="IsJsonObject"/>.
+    /// Checks if a type is an object whose members are all supported for UI input, so that it can be entered member by
+    /// member. A collection or array has no members; it stays enterable as JSON through <see cref="IsJsonObject"/>.
     /// </summary>
     public static bool IsSupportedObject(Type type)
     {
         if (!IsJsonObject(type))
-        {
-            return false;
-        }
-
-        var actualType = Nullable.GetUnderlyingType(type) ?? type;
-        if (typeof(System.Collections.IEnumerable).IsAssignableFrom(actualType))
         {
             return false;
         }
@@ -85,63 +79,37 @@ public static class ParameterConverter
     }
 
     /// <summary>
-    /// Gets the public settable members of an object type, including init-only members. The result is cached per type.
+    /// Gets the members System.Text.Json sets when it reads an object type, including init-only members, or none for
+    /// a type that is not read as a JSON object. The result is cached per type.
     /// </summary>
     public static IReadOnlyList<ObjectParameterMember> GetObjectMembers(Type type) =>
         ObjectMembersByType.GetValue(Nullable.GetUnderlyingType(type) ?? type, BuildObjectMembers);
 
     private static ObjectParameterMember[] BuildObjectMembers(Type type)
     {
-        return type
-            .GetProperties(BindingFlags.Public | BindingFlags.Instance)
-            .Where(property => property.GetMethod?.IsPublic == true && property.SetMethod?.IsPublic == true &&
-                               property.GetIndexParameters().Length == 0 &&
-                               property.GetCustomAttribute<JsonIgnoreAttribute>()?.Condition != JsonIgnoreCondition.Always)
-            // Keep these member rules in sync with McpMethodParameter.CreatePropertiesCore in Namotion.Interceptor.Mcp.
-            .GroupBy(property => property.Name)
-            .Select(group => group.Aggregate((best, next) => next.DeclaringType!.IsSubclassOf(best.DeclaringType!) ? next : best))
-            .Select(property => new ObjectParameterMember(
-                property.Name,
-                property.GetCustomAttribute<JsonPropertyNameAttribute>()?.Name ?? property.Name,
-                property.PropertyType,
-                property.IsDefined(typeof(RequiredMemberAttribute))))
+        var typeInfo = ObjectSerializerOptions.GetTypeInfo(type);
+        return typeInfo.Kind != JsonTypeInfoKind.Object ? [] : typeInfo.Properties
+            .Where(property => property.Set is not null)
+            .Select(property => new ObjectParameterMember(property.Name, property.PropertyType, property.IsRequired))
             .ToArray();
     }
 
     /// <summary>
     /// Tries to create an object from the string inputs of its members, keyed by <see cref="ObjectParameterMember.Name"/>.
-    /// A member without input keeps its default value; a required member without input fails, except a required
-    /// non-nullable <see cref="bool"/> member, whose unticked default (false) is written explicitly instead, since
-    /// a checkbox never actually omits a value. When <paramref name="isNullable"/> and every member has no input,
-    /// treating an unticked or empty <see cref="bool"/> member the same as no input, the object itself was not
-    /// provided and this returns true with a null value instead of applying members' defaults.
+    /// A member without input keeps its default value; a required member without input fails.
     /// </summary>
     public static bool TryCreateObject(
-        Type type, IReadOnlyDictionary<string, string?> inputs, bool isNullable, out object? value, out string? error)
+        Type type, IReadOnlyDictionary<string, string?> inputs, out object? value, out string? error)
     {
         value = null;
-        var members = GetObjectMembers(type);
-        if (isNullable && members.All(member => IsEffectivelyEmpty(member, inputs.GetValueOrDefault(member.Name))))
-        {
-            error = null;
-            return true;
-        }
-
         var json = new JsonObject();
-        foreach (var member in members)
+        foreach (var member in GetObjectMembers(type))
         {
             var input = inputs.GetValueOrDefault(member.Name);
             if (string.IsNullOrEmpty(input))
             {
                 if (member.IsRequired)
                 {
-                    if (member.Type == typeof(bool))
-                    {
-                        // System.Text.Json rejects a required member that is missing from the JSON.
-                        json[member.JsonName] = false;
-                        continue;
-                    }
-
                     error = $"{member.Name} is required";
                     return false;
                 }
@@ -157,7 +125,7 @@ public static class ParameterConverter
 
             try
             {
-                json[member.JsonName] = JsonSerializer.SerializeToNode(memberValue, member.Type, ObjectSerializerOptions);
+                json[member.Name] = JsonSerializer.SerializeToNode(memberValue, member.Type, ObjectSerializerOptions);
             }
             catch (Exception exception) when (exception is not OutOfMemoryException)
             {
@@ -169,20 +137,10 @@ public static class ParameterConverter
         return TryDeserialize(json, static (node, type) => node.Deserialize(type, ObjectSerializerOptions), type, out value, out error);
     }
 
-    private static bool IsEffectivelyEmpty(ObjectParameterMember member, string? input)
-    {
-        if (string.IsNullOrEmpty(input))
-        {
-            return true;
-        }
-
-        var underlyingType = Nullable.GetUnderlyingType(member.Type) ?? member.Type;
-        return underlyingType == typeof(bool) && string.Equals(input, "False", StringComparison.OrdinalIgnoreCase);
-    }
-
     /// <summary>
-    /// Tries to read an object from JSON text. Member names match in any case and enums are read by name. Empty text,
-    /// and a JSON <c>null</c> literal, are null, which only a nullable parameter accepts.
+    /// Tries to read an object from JSON text. Member names match in any case, an unknown member is rejected and enums
+    /// are read by name only. Empty text, and a JSON <c>null</c> literal, are null, which only a nullable parameter
+    /// accepts.
     /// </summary>
     public static bool TryParseJson(string? input, Type type, bool isNullable, out object? value, out string? error)
     {

@@ -1451,7 +1451,7 @@ namespace HomeBlaze.Components.Dialogs
         [Microsoft.AspNetCore.Components.Parameter]
         public HomeBlaze.Abstractions.Metadata.MethodMetadata? Method { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
-        protected override void OnParametersSet() { }
+        protected override void OnInitialized() { }
         public static System.Threading.Tasks.Task<MudBlazor.IDialogReference> ShowAsync(MudBlazor.IDialogService dialogService, HomeBlaze.Abstractions.Metadata.MethodMetadata method) { }
     }
     public class MethodResultDialog : Microsoft.AspNetCore.Components.ComponentBase

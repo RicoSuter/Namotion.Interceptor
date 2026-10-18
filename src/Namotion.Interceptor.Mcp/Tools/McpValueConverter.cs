@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 
 namespace Namotion.Interceptor.Mcp.Tools;
 
@@ -10,8 +11,10 @@ public static class McpValueConverter
 {
     // Members are listed to agents in camel case and bound in any case. An unknown member is rejected like an unknown
     // parameter, so a misspelled member cannot silently fall back to its default.
-    private static readonly JsonSerializerOptions SerializerOptions = new()
+    internal static readonly JsonSerializerOptions SerializerOptions = new()
     {
+        TypeInfoResolver = new DefaultJsonTypeInfoResolver(),
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         PropertyNameCaseInsensitive = true,
         UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
         Converters = { new JsonStringEnumConverter(allowIntegerValues: false) }
@@ -22,8 +25,9 @@ public static class McpValueConverter
     /// <see cref="TimeSpan"/>, <see cref="DateTime"/>, <see cref="Guid"/> or an enum, is read from its string form.
     /// Any other type may also arrive as a string holding its JSON, such as <c>"0.5"</c> or <c>"true"</c>, which some
     /// clients send. An enum accepts a defined name, ignoring case, or a defined number; a <see cref="FlagsAttribute"/>
-    /// enum also accepts combinations. An enum member of an object accepts only defined names, and an object with a
-    /// member its type does not have is rejected.
+    /// enum also accepts combinations. Nested values are stricter, for <c>set_property</c> values as for method
+    /// arguments: an enum member of an object or an enum element of a collection accepts only defined names, and an
+    /// object with a member its type does not have is rejected.
     /// </summary>
     /// <exception cref="JsonException">The value cannot be converted to <paramref name="type"/>.</exception>
     public static object? Deserialize(JsonElement value, Type type)

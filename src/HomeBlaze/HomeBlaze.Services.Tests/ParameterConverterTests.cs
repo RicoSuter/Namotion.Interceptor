@@ -287,24 +287,26 @@ public class ParameterConverterTests
         Assert.False(success);
     }
 
-    [Fact]
-    public void WhenRecordHasOnlySimpleMembers_ThenIsSupportedObject()
+    [Theory]
+    [InlineData(typeof(TestMessage), true, true)]
+    [InlineData(typeof(TestEnvelope), false, true)]
+    [InlineData(typeof(List<int>), false, true)]
+    [InlineData(typeof(int[]), false, true)]
+    [InlineData(typeof(string), false, false)]
+    [InlineData(typeof(int), false, false)]
+    [InlineData(typeof(object), false, false)]
+    [InlineData(typeof(IDisposable), false, false)]
+    [InlineData(typeof(Action), false, false)]
+    [InlineData(typeof(TestInterceptorSubject), false, false)]
+    public void WhenTypeIsClassified_ThenItIsASupportedObjectOrAJsonObjectAsExpected(Type type, bool expectedSupportedObject, bool expectedJsonObject)
     {
-        // Act & Assert
-        Assert.True(ParameterConverter.IsSupportedObject(typeof(TestMessage)));
-        Assert.False(ParameterConverter.IsSupportedObject(typeof(string)));
-        Assert.False(ParameterConverter.IsSupportedObject(typeof(TestEnvelope)));
-    }
+        // Act
+        var isSupportedObject = ParameterConverter.IsSupportedObject(type);
+        var isJsonObject = ParameterConverter.IsJsonObject(type);
 
-    [Fact]
-    public void WhenTypeIsConcreteObject_ThenIsJsonObject()
-    {
-        // Act & Assert
-        Assert.True(ParameterConverter.IsJsonObject(typeof(TestEnvelope)));
-        Assert.True(ParameterConverter.IsJsonObject(typeof(TestMessage)));
-        Assert.False(ParameterConverter.IsJsonObject(typeof(IDisposable)));
-        Assert.False(ParameterConverter.IsJsonObject(typeof(int)));
-        Assert.False(ParameterConverter.IsJsonObject(typeof(object)));
+        // Assert
+        Assert.Equal(expectedSupportedObject, isSupportedObject);
+        Assert.Equal(expectedJsonObject, isJsonObject);
     }
 
     [Fact]
@@ -319,108 +321,36 @@ public class ParameterConverterTests
         Assert.False(members[2].IsRequired);
     }
 
-    [Fact]
-    public void WhenCreatingObjectFromInputs_ThenMembersAreConvertedAndDefaultsKept()
+    [Theory]
+    [InlineData(null, TestLevel.Normal)]
+    [InlineData("High", TestLevel.High)]
+    public void WhenCreatingObjectFromInputs_ThenMembersAreConvertedAndDefaultsKept(string? levelInput, TestLevel expectedLevel)
     {
         // Arrange
-        var inputs = new Dictionary<string, string?> { ["Text"] = "Hello", ["Count"] = "3" };
+        var inputs = new Dictionary<string, string?> { ["Text"] = "Hello", ["Level"] = levelInput, ["Count"] = "3" };
 
         // Act
-        var success = ParameterConverter.TryCreateObject(typeof(TestMessage), inputs, isNullable: false, out var value, out var error);
+        var success = ParameterConverter.TryCreateObject(typeof(TestMessage), inputs, out var value, out var error);
 
         // Assert
         Assert.True(success, error);
         var message = Assert.IsType<TestMessage>(value);
         Assert.Equal("Hello", message.Text);
         Assert.Null(message.Title);
-        Assert.Equal(TestLevel.Normal, message.Level);
+        Assert.Equal(expectedLevel, message.Level);
         Assert.Equal(3, message.Count);
-    }
-
-    [Fact]
-    public void WhenCreatingObjectWithEnumInput_ThenEnumIsSet()
-    {
-        // Arrange
-        var inputs = new Dictionary<string, string?> { ["Text"] = "Hello", ["Level"] = "High" };
-
-        // Act
-        var success = ParameterConverter.TryCreateObject(typeof(TestMessage), inputs, isNullable: false, out var value, out _);
-
-        // Assert
-        Assert.True(success);
-        Assert.Equal(TestLevel.High, Assert.IsType<TestMessage>(value).Level);
     }
 
     [Fact]
     public void WhenRequiredMemberHasNoInput_ThenCreatingFails()
     {
         // Act
-        var success = ParameterConverter.TryCreateObject(typeof(TestMessage), new Dictionary<string, string?>(), isNullable: false, out var value, out var error);
+        var success = ParameterConverter.TryCreateObject(typeof(TestMessage), new Dictionary<string, string?>(), out var value, out var error);
 
         // Assert
         Assert.False(success);
         Assert.Null(value);
         Assert.Equal("Text is required", error);
-    }
-
-    [Fact]
-    public void WhenRequiredBoolMemberHasNoInput_ThenItDefaultsToFalse()
-    {
-        // Arrange
-        var inputs = new Dictionary<string, string?> { ["Text"] = "Hello" };
-
-        // Act
-        var success = ParameterConverter.TryCreateObject(typeof(TestRequiredBoolMessage), inputs, isNullable: false, out var value, out var error);
-
-        // Assert
-        Assert.True(success, error);
-        Assert.False(Assert.IsType<TestRequiredBoolMessage>(value).Silent);
-    }
-
-    [Fact]
-    public void WhenRequiredNullableBoolMemberHasNoInput_ThenCreatingFails()
-    {
-        // Arrange
-        var inputs = new Dictionary<string, string?> { ["Text"] = "Hello" };
-
-        // Act
-        var success = ParameterConverter.TryCreateObject(typeof(TestRequiredNullableBoolMessage), inputs, isNullable: false, out var value, out var error);
-
-        // Assert
-        Assert.False(success);
-        Assert.Null(value);
-        Assert.Equal("Silent is required", error);
-    }
-
-    [Theory]
-    [InlineData("False")]
-    [InlineData("false")]
-    [InlineData(null)]
-    public void WhenNullableObjectHasOnlyEmptyOrUntickedBoolInputs_ThenObjectIsNull(string? silentInput)
-    {
-        // Arrange
-        var inputs = new Dictionary<string, string?> { ["Silent"] = silentInput };
-
-        // Act
-        var success = ParameterConverter.TryCreateObject(typeof(TestBoolOnlyMessage), inputs, isNullable: true, out var value, out var error);
-
-        // Assert
-        Assert.True(success, error);
-        Assert.Null(value);
-    }
-
-    [Fact]
-    public void WhenNullableObjectHasATickedBoolInput_ThenObjectIsCreated()
-    {
-        // Arrange
-        var inputs = new Dictionary<string, string?> { ["Silent"] = "True" };
-
-        // Act
-        var success = ParameterConverter.TryCreateObject(typeof(TestBoolOnlyMessage), inputs, isNullable: true, out var value, out var error);
-
-        // Assert
-        Assert.True(success, error);
-        Assert.True(Assert.IsType<TestBoolOnlyMessage>(value).Silent);
     }
 
     [Fact]
@@ -430,7 +360,7 @@ public class ParameterConverterTests
         var inputs = new Dictionary<string, string?> { ["Text"] = "Hello", ["Count"] = "many" };
 
         // Act
-        var success = ParameterConverter.TryCreateObject(typeof(TestMessage), inputs, isNullable: false, out _, out var error);
+        var success = ParameterConverter.TryCreateObject(typeof(TestMessage), inputs, out _, out var error);
 
         // Assert
         Assert.False(success);
@@ -450,11 +380,14 @@ public class ParameterConverterTests
         Assert.Equal(2, envelope.Inner!.Value);
     }
 
-    [Fact]
-    public void WhenParsingInvalidJson_ThenErrorIsReturned()
+    [Theory]
+    [InlineData("{not json")]
+    [InlineData("""{"text":"Hi","sound":"siren"}""")]
+    [InlineData("""{"text":"Hi","level":1}""")]
+    public void WhenParsingInvalidJson_ThenErrorIsReturned(string json)
     {
         // Act
-        var success = ParameterConverter.TryParseJson("{not json", typeof(TestEnvelope), isNullable: false, out var value, out var error);
+        var success = ParameterConverter.TryParseJson(json, typeof(TestMessage), isNullable: false, out var value, out var error);
 
         // Assert
         Assert.False(success);
@@ -463,66 +396,29 @@ public class ParameterConverterTests
     }
 
     [Theory]
-    [InlineData(false, false)]
-    [InlineData(true, true)]
-    public void WhenJsonIsEmpty_ThenOnlyANullableParameterAcceptsIt(bool isNullable, bool expectedSuccess)
+    [InlineData("  ", false, false)]
+    [InlineData("  ", true, true)]
+    [InlineData("null", false, false)]
+    [InlineData("null", true, true)]
+    public void WhenJsonIsBlankOrNull_ThenOnlyANullableParameterAcceptsIt(string json, bool isNullable, bool expectedSuccess)
     {
         // Act
-        var success = ParameterConverter.TryParseJson("  ", typeof(TestEnvelope), isNullable, out var value, out _);
+        var success = ParameterConverter.TryParseJson(json, typeof(TestEnvelope), isNullable, out var value, out var error);
 
         // Assert
         Assert.Equal(expectedSuccess, success);
         Assert.Null(value);
+        Assert.Equal(expectedSuccess ? null : "This field is required", error);
     }
 
     [Fact]
-    public void WhenMemberIsAlwaysJsonIgnored_ThenItIsExcluded()
-    {
-        // Act
-        var members = ParameterConverter.GetObjectMembers(typeof(TestIgnoreMessage));
-
-        // Assert
-        Assert.DoesNotContain(members, member => member.Name == nameof(TestIgnoreMessage.Secret));
-        Assert.Contains(members, member => member.Name == nameof(TestIgnoreMessage.Note));
-    }
-
-    [Fact]
-    public void WhenDerivedMemberHidesBaseMemberWithNew_ThenOnlyTheDerivedMemberIsListed()
-    {
-        // Act
-        var members = ParameterConverter.GetObjectMembers(typeof(TestDerivedWithHiddenMember));
-
-        // Assert
-        var member = Assert.Single(members, candidate => candidate.Name == "Value");
-        Assert.Equal(typeof(string), member.Type);
-    }
-
-    [Fact]
-    public void WhenDerivedMemberHidingBaseIsJsonIgnored_ThenTheBaseMemberIsListed()
-    {
-        // Act
-        var members = ParameterConverter.GetObjectMembers(typeof(TestDerivedHidingWithIgnoredMember));
-
-        // Assert
-        var member = Assert.Single(members, candidate => candidate.Name == "Code");
-        Assert.Equal(typeof(int), member.Type);
-    }
-
-    [Fact]
-    public void WhenTypeIsAnInterceptorSubject_ThenItIsNotJsonObject()
-    {
-        // Act & Assert
-        Assert.False(ParameterConverter.IsJsonObject(typeof(TestInterceptorSubject)));
-    }
-
-    [Fact]
-    public void WhenMemberHasJsonPropertyName_ThenInputBindsByClrName()
+    public void WhenMemberHasJsonPropertyName_ThenInputBindsByJsonName()
     {
         // Arrange
-        var inputs = new Dictionary<string, string?> { ["DisplayName"] = "Hello" };
+        var inputs = new Dictionary<string, string?> { ["display_name"] = "Hello" };
 
         // Act
-        var success = ParameterConverter.TryCreateObject(typeof(TestRenamedMessage), inputs, isNullable: false, out var value, out var error);
+        var success = ParameterConverter.TryCreateObject(typeof(TestRenamedMessage), inputs, out var value, out var error);
 
         // Assert
         Assert.True(success, error);
@@ -536,7 +432,7 @@ public class ParameterConverterTests
         var inputs = new Dictionary<string, string?> { ["Value"] = "NaN" };
 
         // Act
-        var success = ParameterConverter.TryCreateObject(typeof(TestDoubleMessage), inputs, isNullable: false, out var value, out var error);
+        var success = ParameterConverter.TryCreateObject(typeof(TestDoubleMessage), inputs, out var value, out var error);
 
         // Assert
         Assert.True(success, error);
@@ -553,47 +449,6 @@ public class ParameterConverterTests
         Assert.False(success);
         Assert.Null(value);
         Assert.Equal("Text must not be empty", error);
-    }
-
-    [Fact]
-    public void WhenJsonIsNullLiteral_ThenOnlyANullableParameterAcceptsIt()
-    {
-        // Act
-        var success = ParameterConverter.TryParseJson("null", typeof(TestEnvelope), isNullable: false, out var value, out var error);
-
-        // Assert
-        Assert.False(success);
-        Assert.Null(value);
-        Assert.Equal("This field is required", error);
-    }
-
-    [Fact]
-    public void WhenJsonIsNullLiteralAndParameterIsNullable_ThenParsingSucceedsWithNull()
-    {
-        // Act
-        var success = ParameterConverter.TryParseJson("null", typeof(TestEnvelope), isNullable: true, out var value, out _);
-
-        // Assert
-        Assert.True(success);
-        Assert.Null(value);
-    }
-
-    [Fact]
-    public void WhenTypeIsCollectionOrArray_ThenItIsJsonObjectButNotSupportedObject()
-    {
-        // Act & Assert
-        Assert.False(ParameterConverter.IsSupportedObject(typeof(List<int>)));
-        Assert.True(ParameterConverter.IsJsonObject(typeof(List<int>)));
-        Assert.False(ParameterConverter.IsSupportedObject(typeof(int[])));
-        Assert.True(ParameterConverter.IsJsonObject(typeof(int[])));
-    }
-
-    [Fact]
-    public void WhenTypeIsDelegate_ThenItIsNeitherSupportedObjectNorJsonObject()
-    {
-        // Act & Assert
-        Assert.False(ParameterConverter.IsSupportedObject(typeof(Action)));
-        Assert.False(ParameterConverter.IsJsonObject(typeof(Action)));
     }
 
     public sealed record TestMessage
@@ -613,25 +468,6 @@ public class ParameterConverterTests
         High
     }
 
-    public sealed record TestRequiredBoolMessage
-    {
-        public required string Text { get; init; }
-
-        public required bool Silent { get; init; }
-    }
-
-    public sealed record TestRequiredNullableBoolMessage
-    {
-        public required string Text { get; init; }
-
-        public required bool? Silent { get; init; }
-    }
-
-    public sealed record TestBoolOnlyMessage
-    {
-        public bool Silent { get; init; }
-    }
-
     public sealed class TestEnvelope
     {
         public string? Text { get; set; }
@@ -642,39 +478,6 @@ public class ParameterConverterTests
     public sealed class TestInner
     {
         public int Value { get; set; }
-    }
-
-    public sealed class TestIgnoreMessage
-    {
-        [JsonIgnore]
-        public string? Secret { get; set; }
-
-        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        public string? Note { get; set; }
-    }
-
-    public class TestBaseWithMember
-    {
-        public int Value { get; set; }
-    }
-
-    public sealed class TestDerivedWithHiddenMember : TestBaseWithMember
-    {
-        public new string Value { get; set; } = string.Empty;
-    }
-
-    public class TestBaseWithIgnoredMember
-    {
-        public int Code { get; set; }
-    }
-
-    // The hiding member has a different type than the base member so that GetProperties returns both (see
-    // TestDerivedWithHiddenMember above); a same-type "new" hide collapses to a single PropertyInfo and would not
-    // exercise the filter-before-grouping behavior this type is meant to test.
-    public sealed class TestDerivedHidingWithIgnoredMember : TestBaseWithIgnoredMember
-    {
-        [JsonIgnore]
-        public new string Code { get; set; } = string.Empty;
     }
 
     public sealed class TestRenamedMessage

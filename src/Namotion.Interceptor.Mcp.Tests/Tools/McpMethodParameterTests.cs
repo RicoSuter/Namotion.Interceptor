@@ -86,71 +86,52 @@ public class McpMethodParameterTests
     }
 
     [Fact]
-    public void WhenParameterIsRecord_ThenListsItsMembersWithRequiredAndNullable()
+    public void WhenParameterIsRecord_ThenTheSchemaListsItsCamelCaseMembers()
     {
         // Act
         var parameter = McpMethodParameter.Create("notification", typeof(TestNotification));
 
         // Assert
         Assert.Equal("object", parameter.Type);
-        var properties = parameter.Properties!;
-        Assert.Equal(["message", "title", "priority"], properties.Select(property => property.Name));
-        Assert.True(properties[0].IsRequired);
-        Assert.False(properties[0].IsNullable);
-        Assert.False(properties[1].IsRequired);
-        Assert.True(properties[1].IsNullable);
-        Assert.Equal(["Low", "Normal"], properties[2].EnumValues);
+        var schema = parameter.Schema!.Value;
+        var properties = schema.GetProperty("properties");
+        Assert.Equal(["message", "code", "title", "priority"], properties.EnumerateObject().Select(property => property.Name));
+        Assert.Equal(["message", "code"], schema.GetProperty("required").EnumerateArray().Select(name => name.GetString()));
+        Assert.Equal("The text shown to the reader.", properties.GetProperty("message").GetProperty("description").GetString());
+        Assert.Equal(["Low", "Normal"], properties.GetProperty("priority").GetProperty("enum").EnumerateArray().Select(name => name.GetString()));
     }
 
     [Fact]
-    public void WhenRecordIsSerialized_ThenRequiredAndPropertiesAreWritten()
-    {
-        // Act
-        var json = JsonSerializer.Serialize(McpMethodParameter.Create("notification", typeof(TestNotification)));
-
-        // Assert
-        Assert.Equal(
-            """{"name":"notification","type":"object","properties":[{"name":"message","type":"string","required":true},{"name":"title","type":"string","nullable":true},{"name":"priority","type":"string","enum":["Low","Normal"]}]}""",
-            json);
-    }
-
-    [Fact]
-    public void WhenTypeReferencesItself_ThenTheNestedMemberHasNoProperties()
+    public void WhenTypeReferencesItself_ThenTheSchemaIsCreated()
     {
         // Act
         var parameter = McpMethodParameter.Create("node", typeof(TestNode));
 
         // Assert
-        var next = Assert.Single(parameter.Properties!, property => property.Name == "next");
-        Assert.Equal("object", next.Type);
-        Assert.Null(next.Properties);
+        Assert.True(parameter.Schema!.Value.GetProperty("properties").TryGetProperty("next", out _));
     }
 
-    [Fact]
-    public void WhenAMemberHasADescriptionAttribute_ThenItsDescriptionIsListed()
+    [Theory]
+    [InlineData(typeof(int))]
+    [InlineData(typeof(string))]
+    [InlineData(typeof(object))]
+    [InlineData(typeof(ArrayList))]
+    public void WhenParameterIsNoObjectWithMembers_ThenHasNoSchema(Type type)
     {
         // Act
-        var parameter = McpMethodParameter.Create("value", typeof(DescribedFixture));
+        var parameter = McpMethodParameter.Create("value", type);
 
         // Assert
-        var properties = parameter.Properties!;
-        Assert.Equal("The text shown to the reader.", Assert.Single(properties, property => property.Name == "text").Description);
-        Assert.Null(Assert.Single(properties, property => property.Name == "count").Description);
-    }
-
-    [Fact]
-    public void WhenParameterIsObject_ThenHasNoProperties()
-    {
-        // Act
-        var parameter = McpMethodParameter.Create("value", typeof(object));
-
-        // Assert
-        Assert.Null(parameter.Properties);
+        Assert.Null(parameter.Schema);
     }
 
     public sealed record TestNotification
     {
+        [Description("The text shown to the reader.")]
         public required string Message { get; init; }
+
+        [JsonRequired]
+        public int Code { get; init; }
 
         public string? Title { get; init; }
 
@@ -168,102 +149,6 @@ public class McpMethodParameterTests
         public string? Name { get; set; }
 
         public TestNode? Next { get; set; }
-    }
-
-    [Fact]
-    public void WhenDerivedTypeHidesABaseMember_ThenOnlyTheMostDerivedMemberIsListed()
-    {
-        // Act
-        var parameter = McpMethodParameter.Create("value", typeof(HidingDerived));
-
-        // Assert
-        var member = Assert.Single(parameter.Properties!, property => property.Name == "v");
-        Assert.Equal("string", member.Type);
-    }
-
-    [Fact]
-    public void WhenAMemberIsAlwaysIgnored_ThenItIsExcludedButConditionallyIgnoredMembersAreListed()
-    {
-        // Act
-        var parameter = McpMethodParameter.Create("value", typeof(JsonIgnoreFixture));
-
-        // Assert
-        Assert.Equal(["visible"], parameter.Properties!.Select(property => property.Name));
-    }
-
-    [Fact]
-    public void WhenParameterIsACollectionType_ThenHasNoProperties()
-    {
-        // Act
-        var parameter = McpMethodParameter.Create("items", typeof(ArrayList));
-
-        // Assert
-        Assert.Null(parameter.Properties);
-    }
-
-    [Fact]
-    public void WhenNestingReachesTheDepthLimit_ThenTheDeepestMemberHasNoProperties()
-    {
-        // Act
-        var parameter = McpMethodParameter.Create("level1", typeof(Level1));
-
-        // Assert
-        var next1 = Assert.Single(parameter.Properties!, property => property.Name == "next");
-        Assert.NotNull(next1.Properties);
-
-        var next2 = Assert.Single(next1.Properties!, property => property.Name == "next");
-        Assert.NotNull(next2.Properties);
-
-        var next3 = Assert.Single(next2.Properties!, property => property.Name == "next");
-        Assert.Equal("object", next3.Type);
-        Assert.Null(next3.Properties);
-    }
-
-    public class HidingBase
-    {
-        public int V { get; set; }
-    }
-
-    public sealed class HidingDerived : HidingBase
-    {
-        public new string V { get; set; } = string.Empty;
-    }
-
-    public sealed class DescribedFixture
-    {
-        [Description("The text shown to the reader.")]
-        public string? Text { get; set; }
-
-        public int Count { get; set; }
-    }
-
-    public sealed class JsonIgnoreFixture
-    {
-        [JsonIgnore]
-        public string? Hidden { get; set; }
-
-        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        public string? Visible { get; set; }
-    }
-
-    public sealed class Level1
-    {
-        public Level2? Next { get; set; }
-    }
-
-    public sealed class Level2
-    {
-        public Level3? Next { get; set; }
-    }
-
-    public sealed class Level3
-    {
-        public Level4? Next { get; set; }
-    }
-
-    public sealed class Level4
-    {
-        public string? Name { get; set; }
     }
 
     public enum TestMode

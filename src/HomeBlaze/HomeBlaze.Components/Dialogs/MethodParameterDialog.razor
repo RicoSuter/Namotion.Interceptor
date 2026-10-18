@@ -74,7 +74,6 @@
     private readonly Dictionary<string, string?> _inputValues = new();
     private readonly Dictionary<string, string?> _errors = new();
 
-    private MethodMetadata? _lastMethod;
     private ParameterInput[] _inputs = [];
 
     private enum InputKind
@@ -95,23 +94,12 @@
 
     private sealed record ParameterInput(MethodParameter Parameter, InputKind Kind, InputField[] Fields);
 
-    private IEnumerable<MethodParameter> InputParameters =>
-        Method?.Parameters.Where(p => p.RequiresInput) ?? [];
-
-    protected override void OnParametersSet()
+    protected override void OnInitialized()
     {
-        if (!ReferenceEquals(Method, _lastMethod))
+        _inputs = Method?.Parameters.Where(parameter => parameter.RequiresInput).Select(CreateParameterInput).ToArray() ?? [];
+        foreach (var field in _inputs.SelectMany(input => input.Fields).Where(field => field.Type == typeof(bool)))
         {
-            _lastMethod = Method;
-            _inputs = Method == null ? [] : InputParameters.Select(CreateParameterInput).ToArray();
-
-            foreach (var input in _inputs)
-            {
-                if (input.Kind == InputKind.Simple && input.Fields[0].Type == typeof(bool) && !_inputValues.ContainsKey(input.Parameter.Name))
-                {
-                    _inputValues[input.Parameter.Name] = "false";
-                }
-            }
+            _inputValues[field.Key] = "false";
         }
 
         ValidateAll();
@@ -132,7 +120,7 @@
 
     private static InputKind GetInputKind(MethodParameter parameter) =>
         ParameterConverter.IsSupported(parameter.Type) ? InputKind.Simple
-        : ParameterConverter.IsSupportedObject(parameter.Type) ? InputKind.Members
+        : !parameter.IsNullable && ParameterConverter.IsSupportedObject(parameter.Type) ? InputKind.Members
         : ParameterConverter.IsJsonObject(parameter.Type) ? InputKind.Json
         : InputKind.Unsupported;
 
@@ -142,13 +130,8 @@
     private static IEnumerable<InputField> CreateMemberFields(MethodParameter parameter) =>
         ParameterConverter.GetObjectMembers(parameter.Type).Select(member => CreateMemberField(parameter, member));
 
-    // An optional object parameter can be left out entirely, so none of its members are individually required
-    // even when the member itself is required once the object is provided; that check happens in TryCreateObject.
-    private static InputField CreateMemberField(MethodParameter parameter, ObjectParameterMember member)
-    {
-        var isRequired = member.IsRequired && !parameter.IsNullable;
-        return new InputField(GetMemberKey(parameter, member), GetLabel(member.Name, isRequired), member.Type, null, isRequired);
-    }
+    private static InputField CreateMemberField(MethodParameter parameter, ObjectParameterMember member) =>
+        new(GetMemberKey(parameter, member), GetLabel(member.Name, member.IsRequired), member.Type, null, member.IsRequired);
 
     private static string GetMemberKey(MethodParameter parameter, ObjectParameterMember member) =>
         $"{parameter.Name}.{member.Name}";
@@ -256,10 +239,7 @@
         var input = _inputValues.GetValueOrDefault(field.Key);
         if (string.IsNullOrEmpty(input))
         {
-            // A non-nullable bool field's checkbox always has a value, so it is never reported as missing or
-            // required; a bool? field renders the same checkbox but can still be left unset and so is validated
-            // like any other required member.
-            if (field.IsRequired && field.Type != typeof(bool))
+            if (field.IsRequired)
             {
                 _errors[field.Key] = "This field is required";
             }
@@ -276,7 +256,7 @@
     {
         var members = ParameterConverter.GetObjectMembers(parameter.Type);
         var inputs = members.ToDictionary(member => member.Name, member => GetStringValue(GetMemberKey(parameter, member)));
-        return ParameterConverter.TryCreateObject(parameter.Type, inputs, parameter.IsNullable, out value, out error);
+        return ParameterConverter.TryCreateObject(parameter.Type, inputs, out value, out error);
     }
 
     private bool HasError(string key) => _errors.ContainsKey(key);
