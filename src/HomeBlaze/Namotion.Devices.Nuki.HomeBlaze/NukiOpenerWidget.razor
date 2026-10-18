@@ -9,7 +9,7 @@
         <MudStack Spacing="2">
             <MudStack Row="true" AlignItems="AlignItems.Center">
                 <MudIcon Icon="@(isRinging ? Icons.Material.Filled.NotificationsActive : Icons.Material.Filled.Notifications)"
-                         Color="@GetColor(opener.IconColor)" Class="mr-2" />
+                         Color="@NukiWidgetColors.FromIconColor(opener.IconColor)" Class="mr-2" />
                 <MudText Typo="Typo.h6">@opener.Title</MudText>
                 <MudSpacer />
                 <MudChip T="string" Size="Size.Small" Variant="Variant.Filled">@GetStateText(opener.OpenerState)</MudChip>
@@ -48,7 +48,4 @@
         NukiOpenerState.BootRun => "Booting",
         _ => "Unknown"
     };
-
-    private static Color GetColor(string? iconColor) =>
-        Enum.TryParse<Color>(iconColor, out var color) ? color : Color.Default;
 }

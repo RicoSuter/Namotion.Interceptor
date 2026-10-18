@@ -5,7 +5,7 @@
 @if (Subject is NukiSmartLock smartLock)
 {
     var lockState = smartLock.LockState;
-    var iconColor = GetColor(smartLock.IconColor);
+    var iconColor = NukiWidgetColors.FromIconColor(smartLock.IconColor);
     <MudPaper Class="pa-4">
         <MudStack Spacing="2">
             <MudStack Row="true" AlignItems="AlignItems.Center">
@@ -60,13 +60,7 @@
     private static string GetDoorText(DoorState? doorState) => doorState switch
     {
         DoorState.Open => "Open",
-        DoorState.Opening => "Opening",
-        DoorState.PartiallyOpen => "Partially open",
-        DoorState.Closing => "Closing",
         DoorState.Closed => "Closed",
         _ => "–"
     };
-
-    private static Color GetColor(string? iconColor) =>
-        Enum.TryParse<Color>(iconColor, out var color) ? color : Color.Default;
 }
