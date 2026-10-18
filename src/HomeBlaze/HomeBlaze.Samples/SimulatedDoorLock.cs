@@ -42,7 +42,12 @@ public partial class SimulatedDoorLock : IConfigurable, IDoorLock, IDoorLatchCon
     public string? Title => Name;
 
     [Derived]
-    public string? IconName => LockState == DoorLockState.Locked ? "Lock" : "LockOpen";
+    public string? IconName => LockState switch
+    {
+        DoorLockState.Locked => "Lock",
+        DoorLockState.Jammed => "LockReset",
+        _ => "LockOpen"
+    };
 
     [Derived]
     [PropertyAttribute("Lock", KnownAttributes.IsEnabled)]

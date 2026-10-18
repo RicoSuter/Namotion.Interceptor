@@ -208,12 +208,14 @@ Widgets of this tab: [ValueList](../Docs/administration/widgets/value-list.md), 
 :::::::: HomeBlaze.Components.Control Path=/Demo/ExhaustFan/GetDiagnostics
 ::::
 
+A wider screen shows the load of each motor as a gauge, which its slider sets. Power, mode and load are runtime values of a motor: they last until the next restart, see [Basics](../Docs/administration/widgets/basics.md#control-writes). The emergency stop runs at once without confirmation, and **Power** brings the motor back. **Get Diagnostics** shows what the motor reports. Widgets of this tab: [Gauge](../Docs/administration/widgets/gauge.md), [Switch](../Docs/administration/widgets/switch.md), [Select](../Docs/administration/widgets/select.md), [Slider](../Docs/administration/widgets/slider.md), [OperationButton](../Docs/administration/widgets/operation-button.md), [Control](../Docs/administration/widgets/control.md), [Indicator](../Docs/administration/widgets/indicator.md), [Card](../Docs/administration/widgets/card.md), [FlowLayout](../Docs/administration/widgets/flow-layout.md), [GridLayout](../Docs/administration/widgets/grid-layout.md), [DoorLock](../Docs/administration/widgets/door-lock.md) and [Responsive](../Docs/administration/widgets/responsive.md).
+
 :::: HomeBlaze.Components.GridLayout Rows=1 Columns=1 CellAspectRatio=1:1
 ::::: Cell Row=0 Column=0
 :::::: HomeBlaze.Components.DoorLock Path=/Demo/FrontDoor
 ::::
 
-The front door is a simulated lock. Its [DoorLock](../Docs/administration/widgets/door-lock.md) tile locks or unlocks it with one click. A wider screen shows the load of each motor as a gauge, which its slider sets. Power, mode and load are runtime values of a motor: they last until the next restart, see [Basics](../Docs/administration/widgets/basics.md#control-writes). The emergency stop runs at once without confirmation, and **Power** brings the motor back. **Get Diagnostics** shows what the motor reports. Widgets of this tab: [Gauge](../Docs/administration/widgets/gauge.md), [Switch](../Docs/administration/widgets/switch.md), [Select](../Docs/administration/widgets/select.md), [Slider](../Docs/administration/widgets/slider.md), [OperationButton](../Docs/administration/widgets/operation-button.md), [Control](../Docs/administration/widgets/control.md), [Indicator](../Docs/administration/widgets/indicator.md), [Card](../Docs/administration/widgets/card.md), [FlowLayout](../Docs/administration/widgets/flow-layout.md), [GridLayout](../Docs/administration/widgets/grid-layout.md), [DoorLock](../Docs/administration/widgets/door-lock.md) and [Responsive](../Docs/administration/widgets/responsive.md).
+The front door is a simulated lock, which its [DoorLock](../Docs/administration/widgets/door-lock.md) tile locks or unlocks with one click.
 ::: Tab#history Title="History" Icon=Timeline
 :::: HomeBlaze.Components.Card Title="Speeds, Last Hour" Icon=Timeline
 ::::: HomeBlaze.History.Blazor.HistoryChart#trends Range=1h Height=320

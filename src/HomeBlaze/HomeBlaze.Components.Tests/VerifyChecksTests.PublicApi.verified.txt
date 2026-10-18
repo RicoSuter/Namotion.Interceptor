@@ -1348,7 +1348,7 @@ namespace HomeBlaze.Components.Components
         [Microsoft.AspNetCore.Components.Parameter]
         public Namotion.Interceptor.IInterceptorSubject? Badge { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
-        public Microsoft.AspNetCore.Components.RenderFragment? BadgeContent { get; set; }
+        public string? BadgeIcon { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public bool? Checked { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
