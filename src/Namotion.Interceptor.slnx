@@ -95,6 +95,8 @@
     <Project Path="HomeBlaze/Namotion.Devices.FritzBox/Namotion.Devices.FritzBox.csproj" />
     <Project Path="HomeBlaze/Namotion.Devices.FritzBox.Tests/Namotion.Devices.FritzBox.Tests.csproj" />
     <Project Path="HomeBlaze/Namotion.Devices.FritzBox.HomeBlaze/Namotion.Devices.FritzBox.HomeBlaze.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.Pushover/Namotion.Devices.Pushover.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.Pushover.Tests/Namotion.Devices.Pushover.Tests.csproj" />
   </Folder>
   <Folder Name="/HomeBlaze/History/">
     <Project Path="HomeBlaze/HomeBlaze.History/HomeBlaze.History.csproj" />
