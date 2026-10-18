@@ -61,10 +61,10 @@
     /// <summary>Whether a switch tile is on, which makes the button a switch; null for a plain button.</summary>
     [Parameter] public bool? Checked { get; set; }
 
-    /// <summary>The accessible name when the tile shows no label, such as the title of the operation of an icon tile.</summary>
+    /// <summary>The accessible name, which replaces the content of the tile as its name, such as the title of the operation of an icon tile.</summary>
     [Parameter] public string? AccessibleName { get; set; }
 
-    /// <summary>The accessible description of the button, such as the state that the subtitle shows when <see cref="AccessibleName"/> replaces the content as the name.</summary>
+    /// <summary>The accessible description, such as the state that the subtitle shows, which <see cref="AccessibleName"/> hides from the name.</summary>
     [Parameter] public string? AccessibleDescription { get; set; }
 
     [Parameter] public string? Tooltip { get; set; }
