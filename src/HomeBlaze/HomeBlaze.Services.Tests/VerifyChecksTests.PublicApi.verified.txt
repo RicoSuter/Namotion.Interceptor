@@ -67,11 +67,25 @@ namespace HomeBlaze.Services
         public static string GetPluginConfigurationPath(Microsoft.Extensions.Configuration.IConfiguration configuration) { }
         public static string GetRootConfigurationPath(Microsoft.Extensions.Configuration.IConfiguration? configuration) { }
     }
+    public sealed class ObjectParameterMember : System.IEquatable<HomeBlaze.Services.ObjectParameterMember>
+    {
+        public ObjectParameterMember(string Name, string JsonName, System.Type Type, bool IsRequired, bool IsNullable) { }
+        public bool IsNullable { get; init; }
+        public bool IsRequired { get; init; }
+        public string JsonName { get; init; }
+        public string Name { get; init; }
+        public System.Type Type { get; init; }
+    }
     public static class ParameterConverter
     {
+        public static System.Collections.Generic.IReadOnlyList<HomeBlaze.Services.ObjectParameterMember> GetObjectMembers(System.Type type) { }
+        public static bool IsJsonObject(System.Type type) { }
         public static bool IsSupported(System.Type type) { }
+        public static bool IsSupportedObject(System.Type type) { }
         public static bool TryConvert(string? input, System.Type targetType, out object? value) { }
         public static bool TryConvert(string? input, System.Type targetType, HomeBlaze.Abstractions.Attributes.StateUnit? unit, out object? value) { }
+        public static bool TryCreateObject(System.Type type, System.Collections.Generic.IReadOnlyDictionary<string, string?> inputs, out object? value, out string? error) { }
+        public static bool TryParseJson(string? input, System.Type type, bool isNullable, out object? value, out string? error) { }
     }
     public static class RegisteredSubjectMethodExtensions
     {

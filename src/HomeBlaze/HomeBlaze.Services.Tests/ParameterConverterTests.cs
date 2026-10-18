@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using HomeBlaze.Abstractions.Attributes;
 
 namespace HomeBlaze.Services.Tests;
@@ -283,5 +284,206 @@ public class ParameterConverterTests
 
         // Assert
         Assert.False(success);
+    }
+
+    [Fact]
+    public void WhenRecordHasOnlySimpleMembers_ThenIsSupportedObject()
+    {
+        // Act & Assert
+        Assert.True(ParameterConverter.IsSupportedObject(typeof(TestMessage)));
+        Assert.False(ParameterConverter.IsSupportedObject(typeof(string)));
+        Assert.False(ParameterConverter.IsSupportedObject(typeof(TestEnvelope)));
+    }
+
+    [Fact]
+    public void WhenTypeIsConcreteObject_ThenIsJsonObject()
+    {
+        // Act & Assert
+        Assert.True(ParameterConverter.IsJsonObject(typeof(TestEnvelope)));
+        Assert.True(ParameterConverter.IsJsonObject(typeof(TestMessage)));
+        Assert.False(ParameterConverter.IsJsonObject(typeof(IDisposable)));
+        Assert.False(ParameterConverter.IsJsonObject(typeof(int)));
+        Assert.False(ParameterConverter.IsJsonObject(typeof(object)));
+    }
+
+    [Fact]
+    public void WhenGettingObjectMembers_ThenRequiredAndNullableAreDescribed()
+    {
+        // Act
+        var members = ParameterConverter.GetObjectMembers(typeof(TestMessage));
+
+        // Assert
+        Assert.Equal(["Text", "Title", "Level", "Count"], members.Select(member => member.Name));
+        Assert.True(members[0].IsRequired);
+        Assert.False(members[0].IsNullable);
+        Assert.True(members[1].IsNullable);
+        Assert.False(members[2].IsRequired);
+        Assert.True(members[3].IsNullable);
+    }
+
+    [Fact]
+    public void WhenCreatingObjectFromInputs_ThenMembersAreConvertedAndDefaultsKept()
+    {
+        // Arrange
+        var inputs = new Dictionary<string, string?> { ["Text"] = "Hello", ["Count"] = "3" };
+
+        // Act
+        var success = ParameterConverter.TryCreateObject(typeof(TestMessage), inputs, out var value, out var error);
+
+        // Assert
+        Assert.True(success, error);
+        var message = Assert.IsType<TestMessage>(value);
+        Assert.Equal("Hello", message.Text);
+        Assert.Null(message.Title);
+        Assert.Equal(TestLevel.Normal, message.Level);
+        Assert.Equal(3, message.Count);
+    }
+
+    [Fact]
+    public void WhenCreatingObjectWithEnumInput_ThenEnumIsSet()
+    {
+        // Arrange
+        var inputs = new Dictionary<string, string?> { ["Text"] = "Hello", ["Level"] = "High" };
+
+        // Act
+        var success = ParameterConverter.TryCreateObject(typeof(TestMessage), inputs, out var value, out _);
+
+        // Assert
+        Assert.True(success);
+        Assert.Equal(TestLevel.High, Assert.IsType<TestMessage>(value).Level);
+    }
+
+    [Fact]
+    public void WhenRequiredMemberHasNoInput_ThenCreatingFails()
+    {
+        // Act
+        var success = ParameterConverter.TryCreateObject(typeof(TestMessage), new Dictionary<string, string?>(), out var value, out var error);
+
+        // Assert
+        Assert.False(success);
+        Assert.Null(value);
+        Assert.Equal("Text is required", error);
+    }
+
+    [Fact]
+    public void WhenMemberInputIsInvalid_ThenCreatingFails()
+    {
+        // Arrange
+        var inputs = new Dictionary<string, string?> { ["Text"] = "Hello", ["Count"] = "many" };
+
+        // Act
+        var success = ParameterConverter.TryCreateObject(typeof(TestMessage), inputs, out _, out var error);
+
+        // Assert
+        Assert.False(success);
+        Assert.Equal("Invalid value for Count", error);
+    }
+
+    [Fact]
+    public void WhenParsingValidJson_ThenObjectIsCreatedWithAnyNameCase()
+    {
+        // Act
+        var success = ParameterConverter.TryParseJson("""{"text":"Hi","inner":{"value":2}}""", typeof(TestEnvelope), isNullable: false, out var value, out var error);
+
+        // Assert
+        Assert.True(success, error);
+        var envelope = Assert.IsType<TestEnvelope>(value);
+        Assert.Equal("Hi", envelope.Text);
+        Assert.Equal(2, envelope.Inner!.Value);
+    }
+
+    [Fact]
+    public void WhenParsingInvalidJson_ThenErrorIsReturned()
+    {
+        // Act
+        var success = ParameterConverter.TryParseJson("{not json", typeof(TestEnvelope), isNullable: false, out var value, out var error);
+
+        // Assert
+        Assert.False(success);
+        Assert.Null(value);
+        Assert.False(string.IsNullOrEmpty(error));
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, true)]
+    public void WhenJsonIsEmpty_ThenOnlyANullableParameterAcceptsIt(bool isNullable, bool expectedSuccess)
+    {
+        // Act
+        var success = ParameterConverter.TryParseJson("  ", typeof(TestEnvelope), isNullable, out var value, out _);
+
+        // Assert
+        Assert.Equal(expectedSuccess, success);
+        Assert.Null(value);
+    }
+
+    [Fact]
+    public void WhenMemberIsAlwaysJsonIgnored_ThenItIsExcluded()
+    {
+        // Act
+        var members = ParameterConverter.GetObjectMembers(typeof(TestIgnoreMessage));
+
+        // Assert
+        Assert.DoesNotContain(members, member => member.Name == nameof(TestIgnoreMessage.Secret));
+        Assert.Contains(members, member => member.Name == nameof(TestIgnoreMessage.Note));
+    }
+
+    [Fact]
+    public void WhenDerivedMemberHidesBaseMemberWithNew_ThenOnlyTheDerivedMemberIsListed()
+    {
+        // Act
+        var members = ParameterConverter.GetObjectMembers(typeof(TestDerivedWithHiddenMember));
+
+        // Assert
+        var member = Assert.Single(members, candidate => candidate.Name == "V");
+        Assert.Equal(typeof(string), member.Type);
+    }
+
+    public sealed record TestMessage
+    {
+        public required string Text { get; init; }
+
+        public string? Title { get; init; }
+
+        public TestLevel Level { get; init; } = TestLevel.Normal;
+
+        public int? Count { get; init; }
+    }
+
+    public enum TestLevel
+    {
+        Normal,
+        High
+    }
+
+    public sealed class TestEnvelope
+    {
+        public string? Text { get; set; }
+
+        public TestInner? Inner { get; set; }
+    }
+
+    public sealed class TestInner
+    {
+        public int Value { get; set; }
+    }
+
+    public sealed class TestIgnoreMessage
+    {
+        [JsonIgnore]
+        public string? Secret { get; set; }
+
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Note { get; set; }
+    }
+
+    public class TestBaseWithMember
+    {
+        public int V { get; set; }
+    }
+
+    public sealed class TestDerivedWithHiddenMember : TestBaseWithMember
+    {
+        public new string V { get; set; } = string.Empty;
     }
 }
