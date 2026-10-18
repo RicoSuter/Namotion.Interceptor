@@ -80,7 +80,7 @@ The service makes no requests of its own besides validating the targets at start
 
 ```json
 {
-  "$type": "Namotion.Devices.Pushover.PushoverService",
+  "$type": "Namotion.Services.Pushover.PushoverService",
   "name": "Pushover",
   "applicationToken": "your-application-token",
   "targets": {

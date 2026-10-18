@@ -2,7 +2,7 @@ using System.Globalization;
 using HomeBlaze.Abstractions.Messaging;
 using Microsoft.Extensions.Logging;
 
-namespace Namotion.Devices.Pushover.Client;
+namespace Namotion.Services.Pushover.Client;
 
 internal static class PushoverMessageMapping
 {

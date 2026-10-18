@@ -4,7 +4,7 @@ using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Messaging;
 using Namotion.Interceptor.Attributes;
 
-namespace Namotion.Devices.Pushover;
+namespace Namotion.Services.Pushover;
 
 /// <summary>
 /// A Pushover user or group that receives notifications through its <see cref="PushoverService"/>.

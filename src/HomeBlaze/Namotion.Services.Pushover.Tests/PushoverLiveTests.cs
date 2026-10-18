@@ -1,11 +1,11 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Messaging;
 using Microsoft.Extensions.Logging.Abstractions;
-using Namotion.Devices.Pushover.Tests.Testing;
+using Namotion.Services.Pushover.Tests.Testing;
 using Namotion.Interceptor.Testing;
 using Xunit;
 
-namespace Namotion.Devices.Pushover.Tests;
+namespace Namotion.Services.Pushover.Tests;
 
 /// <summary>
 /// Runs against the real Pushover API with the tokens in PUSHOVER_APPLICATION_TOKEN and PUSHOVER_USER_KEY; without

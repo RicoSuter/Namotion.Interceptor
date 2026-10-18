@@ -1,6 +1,6 @@
 using System.Text.Json.Serialization;
 
-namespace Namotion.Devices.Pushover.Client;
+namespace Namotion.Services.Pushover.Client;
 
 [JsonSerializable(typeof(PushoverResponse))]
 internal sealed partial class PushoverJsonContext : JsonSerializerContext;

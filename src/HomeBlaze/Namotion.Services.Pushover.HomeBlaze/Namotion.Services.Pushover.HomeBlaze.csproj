@@ -6,7 +6,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Namotion.Devices.Pushover\Namotion.Devices.Pushover.csproj" />
+    <ProjectReference Include="..\Namotion.Services.Pushover\Namotion.Services.Pushover.csproj" />
     <ProjectReference Include="..\HomeBlaze.Components.Abstractions\HomeBlaze.Components.Abstractions.csproj" />
   </ItemGroup>
 

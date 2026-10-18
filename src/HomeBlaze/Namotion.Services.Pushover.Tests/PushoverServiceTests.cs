@@ -1,10 +1,10 @@
 using System.Net;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Messaging;
-using Namotion.Devices.Pushover.Tests.Testing;
+using Namotion.Services.Pushover.Tests.Testing;
 using Xunit;
 
-namespace Namotion.Devices.Pushover.Tests;
+namespace Namotion.Services.Pushover.Tests;
 
 public class PushoverServiceTests
 {

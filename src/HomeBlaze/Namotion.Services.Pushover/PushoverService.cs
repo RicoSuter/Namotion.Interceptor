@@ -5,10 +5,10 @@ using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Messaging;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Namotion.Devices.Pushover.Client;
+using Namotion.Services.Pushover.Client;
 using Namotion.Interceptor.Attributes;
 
-namespace Namotion.Devices.Pushover;
+namespace Namotion.Services.Pushover;
 
 /// <summary>
 /// A Pushover application that sends notifications to its targets.

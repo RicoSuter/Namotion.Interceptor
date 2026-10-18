@@ -1,7 +1,7 @@
 using System.Net;
-using Namotion.Devices.Pushover.Client;
+using Namotion.Services.Pushover.Client;
 
-namespace Namotion.Devices.Pushover;
+namespace Namotion.Services.Pushover;
 
 /// <summary>
 /// The Pushover API rejected a request, or sending to some targets failed.

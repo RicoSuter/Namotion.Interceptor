@@ -2,7 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Hosting;
 
-namespace Namotion.Devices.Pushover;
+namespace Namotion.Services.Pushover;
 
 public static class PushoverServiceCollectionExtensions
 {

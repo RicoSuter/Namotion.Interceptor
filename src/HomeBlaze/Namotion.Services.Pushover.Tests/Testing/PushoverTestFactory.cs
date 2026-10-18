@@ -1,6 +1,6 @@
 using Microsoft.Extensions.Logging.Abstractions;
 
-namespace Namotion.Devices.Pushover.Tests.Testing;
+namespace Namotion.Services.Pushover.Tests.Testing;
 
 internal static class PushoverTestFactory
 {

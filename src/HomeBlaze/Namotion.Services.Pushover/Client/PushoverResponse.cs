@@ -1,6 +1,6 @@
 using System.Text.Json.Serialization;
 
-namespace Namotion.Devices.Pushover.Client;
+namespace Namotion.Services.Pushover.Client;
 
 /// <summary>
 /// The response of every Pushover endpoint used here; each endpoint fills only its own members.

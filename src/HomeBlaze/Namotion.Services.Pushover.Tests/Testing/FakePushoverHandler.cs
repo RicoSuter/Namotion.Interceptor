@@ -2,7 +2,7 @@ using System.Net;
 using System.Text;
 using System.Web;
 
-namespace Namotion.Devices.Pushover.Tests.Testing;
+namespace Namotion.Services.Pushover.Tests.Testing;
 
 /// <summary>
 /// Records the requests to the Pushover API and answers them with <see cref="Respond"/>.

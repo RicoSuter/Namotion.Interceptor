@@ -1,7 +1,7 @@
 using System.Net.Http.Json;
 using System.Text.Json;
 
-namespace Namotion.Devices.Pushover.Client;
+namespace Namotion.Services.Pushover.Client;
 
 internal sealed class PushoverClient
 {

@@ -1,10 +1,10 @@
 using System.Net;
-using Namotion.Devices.Pushover.Client;
-using Namotion.Devices.Pushover.Tests.Testing;
+using Namotion.Services.Pushover.Client;
+using Namotion.Services.Pushover.Tests.Testing;
 using Namotion.Interceptor.Testing;
 using Xunit;
 
-namespace Namotion.Devices.Pushover.Tests;
+namespace Namotion.Services.Pushover.Tests;
 
 public class PushoverClientTests
 {

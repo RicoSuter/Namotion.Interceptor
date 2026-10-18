@@ -1,9 +1,9 @@
 using HomeBlaze.Abstractions.Messaging;
 using Microsoft.Extensions.Logging.Abstractions;
-using Namotion.Devices.Pushover.Client;
+using Namotion.Services.Pushover.Client;
 using Xunit;
 
-namespace Namotion.Devices.Pushover.Tests;
+namespace Namotion.Services.Pushover.Tests;
 
 public class PushoverMessageMappingTests
 {

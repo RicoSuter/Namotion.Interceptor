@@ -1,14 +1,14 @@
 using HomeBlaze.Abstractions.Messaging;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Lifecycle;
-using Namotion.Devices.Pushover.Tests.Testing;
+using Namotion.Services.Pushover.Tests.Testing;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Xunit;
 
-namespace Namotion.Devices.Pushover.Tests;
+namespace Namotion.Services.Pushover.Tests;
 
 /// <summary>
 /// Reads the operations of the service and its targets as the UI and the MCP tools do: from the method properties

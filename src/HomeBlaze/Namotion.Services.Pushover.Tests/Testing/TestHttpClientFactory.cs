@@ -1,4 +1,4 @@
-namespace Namotion.Devices.Pushover.Tests.Testing;
+namespace Namotion.Services.Pushover.Tests.Testing;
 
 internal sealed class TestHttpClientFactory(HttpMessageHandler handler) : IHttpClientFactory
 {

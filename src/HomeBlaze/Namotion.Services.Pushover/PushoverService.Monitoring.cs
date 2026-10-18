@@ -1,7 +1,7 @@
 using HomeBlaze.Abstractions;
 using Microsoft.Extensions.Logging;
 
-namespace Namotion.Devices.Pushover;
+namespace Namotion.Services.Pushover;
 
 public partial class PushoverService
 {
