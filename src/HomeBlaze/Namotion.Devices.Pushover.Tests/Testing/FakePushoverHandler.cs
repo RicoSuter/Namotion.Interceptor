@@ -1,6 +1,5 @@
 using System.Net;
 using System.Text;
-using System.Text.Json;
 
 namespace Namotion.Devices.Pushover.Tests.Testing;
 
@@ -17,6 +16,11 @@ internal sealed class FakePushoverHandler : HttpMessageHandler
 
     public Func<RecordedRequest, (HttpStatusCode StatusCode, string Body)> Respond { get; set; } =
         _ => (HttpStatusCode.OK, Success);
+
+    /// <summary>
+    /// The content type of every response; override to simulate a non-JSON error page.
+    /// </summary>
+    public string ResponseContentType { get; set; } = "application/json";
 
     /// <summary>
     /// Awaited before each response, so a test can hold requests open.
@@ -41,7 +45,8 @@ internal sealed class FakePushoverHandler : HttpMessageHandler
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         var body = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken);
-        var recorded = new RecordedRequest(request.Method, request.RequestUri!, body);
+        var contentType = request.Content?.Headers.ContentType?.MediaType;
+        var recorded = new RecordedRequest(request.Method, request.RequestUri!, body, contentType);
         lock (_lock)
         {
             _requests.Add(recorded);
@@ -59,7 +64,7 @@ internal sealed class FakePushoverHandler : HttpMessageHandler
             var (statusCode, responseBody) = Respond(recorded);
             return new HttpResponseMessage(statusCode)
             {
-                Content = new StringContent(responseBody, Encoding.UTF8, "application/json")
+                Content = new StringContent(responseBody, Encoding.UTF8, ResponseContentType)
             };
         }
         finally
@@ -72,9 +77,26 @@ internal sealed class FakePushoverHandler : HttpMessageHandler
     }
 }
 
-internal sealed record RecordedRequest(HttpMethod Method, Uri Uri, string? Body)
+internal sealed record RecordedRequest(HttpMethod Method, Uri Uri, string? Body, string? ContentType)
 {
     public string Path => Uri.AbsolutePath;
 
-    public JsonElement Json => JsonDocument.Parse(Body!).RootElement;
+    /// <summary>
+    /// The request body parsed as <c>application/x-www-form-urlencoded</c> fields.
+    /// </summary>
+    public IReadOnlyDictionary<string, string> Form => ParseForm(Body ?? string.Empty);
+
+    private static IReadOnlyDictionary<string, string> ParseForm(string body)
+    {
+        var fields = new Dictionary<string, string>();
+        foreach (var pair in body.Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var parts = pair.Split('=', 2);
+            var key = Uri.UnescapeDataString(parts[0]);
+            var value = parts.Length > 1 ? Uri.UnescapeDataString(parts[1].Replace('+', ' ')) : string.Empty;
+            fields[key] = value;
+        }
+
+        return fields;
+    }
 }

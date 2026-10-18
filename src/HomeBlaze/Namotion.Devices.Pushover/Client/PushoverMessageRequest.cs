@@ -1,33 +1,64 @@
-using System.Text.Json.Serialization;
+using System.Globalization;
 
 namespace Namotion.Devices.Pushover.Client;
 
 internal sealed class PushoverMessageRequest
 {
-    [JsonPropertyName("token")]
     public required string Token { get; init; }
 
-    [JsonPropertyName("user")]
     public required string User { get; init; }
 
-    [JsonPropertyName("message")]
     public required string Message { get; init; }
 
-    [JsonPropertyName("title")]
     public string? Title { get; init; }
 
-    [JsonPropertyName("priority")]
     public int? Priority { get; init; }
 
-    [JsonPropertyName("url")]
     public string? Url { get; init; }
 
-    [JsonPropertyName("url_title")]
     public string? UrlTitle { get; init; }
 
-    [JsonPropertyName("retry")]
     public int? Retry { get; init; }
 
-    [JsonPropertyName("expire")]
     public int? Expire { get; init; }
+
+    /// <summary>
+    /// The Pushover messages endpoint documents form fields, not a JSON body.
+    /// </summary>
+    internal IEnumerable<KeyValuePair<string, string>> ToFormFields()
+    {
+        yield return new KeyValuePair<string, string>("token", Token);
+        yield return new KeyValuePair<string, string>("user", User);
+        yield return new KeyValuePair<string, string>("message", Message);
+
+        if (Title is not null)
+        {
+            yield return new KeyValuePair<string, string>("title", Title);
+        }
+
+        if (Priority is { } priority)
+        {
+            yield return new KeyValuePair<string, string>("priority", priority.ToString(CultureInfo.InvariantCulture));
+        }
+
+        if (Url is not null)
+        {
+            yield return new KeyValuePair<string, string>("url", Url);
+        }
+
+        if (UrlTitle is not null)
+        {
+            yield return new KeyValuePair<string, string>("url_title", UrlTitle);
+        }
+
+        if (Retry is { } retry)
+        {
+            yield return new KeyValuePair<string, string>("retry", retry.ToString(CultureInfo.InvariantCulture));
+        }
+
+        if (Expire is { } expire)
+        {
+            yield return new KeyValuePair<string, string>("expire", expire.ToString(CultureInfo.InvariantCulture));
+        }
+    }
 }

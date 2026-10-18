@@ -76,4 +76,46 @@ public class PushoverMessageMappingTests
         // Assert
         Assert.Equal(new string('a', 8) + "…", shortened);
     }
+
+    [Fact]
+    public void WhenMaximumLengthIsOne_ThenTheResultIsJustTheEllipsisAndDoesNotThrow()
+    {
+        // Act
+        var shortened = PushoverMessageMapping.Shorten("abcdef", 1, "message", NullLogger.Instance);
+
+        // Assert
+        Assert.Equal("…", shortened);
+    }
+
+    [Fact]
+    public void WhenMaximumLengthIsZero_ThenTheResultIsEmptyAndDoesNotThrow()
+    {
+        // Act
+        var shortened = PushoverMessageMapping.Shorten("abcdef", 0, "message", NullLogger.Instance);
+
+        // Assert
+        Assert.Equal(string.Empty, shortened);
+    }
+
+    [Fact]
+    public void WhenUrlIsTooLong_ThenItAndItsUrlTitleAreOmittedInsteadOfBeingShortened()
+    {
+        // Act
+        var request = Map(new Notification { Message = "Hello", Url = "https://example.com/" + new string('a', 600), UrlTitle = "Open" });
+
+        // Assert
+        Assert.Null(request.Url);
+        Assert.Null(request.UrlTitle);
+    }
+
+    [Fact]
+    public void WhenUrlTitleIsTooLong_ThenItIsShortenedWhileTheUrlStaysIntact()
+    {
+        // Act
+        var request = Map(new Notification { Message = "Hello", Url = "https://example.com", UrlTitle = new string('a', 300) });
+
+        // Assert
+        Assert.Equal("https://example.com", request.Url);
+        Assert.Equal(PushoverMessageMapping.MaximumUrlTitleLength, request.UrlTitle!.Length);
+    }
 }

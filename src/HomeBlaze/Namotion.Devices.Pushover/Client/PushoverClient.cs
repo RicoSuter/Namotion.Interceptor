@@ -9,8 +9,8 @@ internal sealed class PushoverClient
 
     private readonly IHttpClientFactory _httpClientFactory;
 
-    // Pushover accepts at most two concurrent connections per client.
-    private readonly SemaphoreSlim _connections = new(2, 2);
+    // Static: Pushover accepts at most two concurrent connections per application, not per client instance.
+    private static readonly SemaphoreSlim Connections = new(2, 2);
 
     public PushoverClient(IHttpClientFactory httpClientFactory)
     {
@@ -18,12 +18,11 @@ internal sealed class PushoverClient
     }
 
     public Task<PushoverResponse> SendMessageAsync(PushoverMessageRequest request, CancellationToken cancellationToken) =>
-        SendAsync(HttpMethod.Post, "messages.json",
-            JsonContent.Create(request, PushoverJsonContext.Default.PushoverMessageRequest), cancellationToken);
+        SendAsync(HttpMethod.Post, "messages.json", new FormUrlEncodedContent(request.ToFormFields()), cancellationToken);
 
     public Task<PushoverResponse> ValidateUserAsync(string token, string userKey, CancellationToken cancellationToken) =>
         SendAsync(HttpMethod.Post, "users/validate.json",
-            JsonContent.Create(new PushoverUserRequest { Token = token, User = userKey }, PushoverJsonContext.Default.PushoverUserRequest),
+            new FormUrlEncodedContent(new PushoverUserRequest { Token = token, User = userKey }.ToFormFields()),
             cancellationToken);
 
     // The receipts endpoint takes the token only as a query parameter.
@@ -33,12 +32,12 @@ internal sealed class PushoverClient
 
     public Task<PushoverResponse> CancelReceiptAsync(string token, string receipt, CancellationToken cancellationToken) =>
         SendAsync(HttpMethod.Post, $"receipts/{Uri.EscapeDataString(receipt)}/cancel.json",
-            JsonContent.Create(new PushoverTokenRequest { Token = token }, PushoverJsonContext.Default.PushoverTokenRequest),
+            new FormUrlEncodedContent(new PushoverTokenRequest { Token = token }.ToFormFields()),
             cancellationToken);
 
     private async Task<PushoverResponse> SendAsync(HttpMethod method, string path, HttpContent? content, CancellationToken cancellationToken)
     {
-        await _connections.WaitAsync(cancellationToken);
+        await Connections.WaitAsync(cancellationToken);
         try
         {
             using var client = _httpClientFactory.CreateClient();
@@ -48,14 +47,14 @@ internal sealed class PushoverClient
             var body = await ReadResponseAsync(response, cancellationToken);
             if (!response.IsSuccessStatusCode || body is not { Status: 1 })
             {
-                throw new PushoverException(response.StatusCode, body);
+                throw new PushoverException(response.StatusCode, response.IsSuccessStatusCode, body);
             }
 
             return body;
         }
         finally
         {
-            _connections.Release();
+            Connections.Release();
         }
     }
 

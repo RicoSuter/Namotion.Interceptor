@@ -15,14 +15,16 @@ internal static class PushoverMessageMapping
     {
         var priority = ToPushoverPriority(notification.Priority);
         var isEmergency = notification.Priority == NotificationPriority.Emergency;
+        var (url, urlTitle) = CreateUrl(notification, logger);
+
         return new PushoverMessageRequest
         {
             Token = token,
             User = userKey,
             Message = Shorten(notification.Message, MaximumMessageLength, "message", logger)!,
             Title = Shorten(notification.Title, MaximumTitleLength, "title", logger),
-            Url = Shorten(notification.Url, MaximumUrlLength, "url", logger),
-            UrlTitle = Shorten(notification.UrlTitle, MaximumUrlTitleLength, "url title", logger),
+            Url = url,
+            UrlTitle = urlTitle,
             Priority = priority == 0 ? null : priority,
             Retry = isEmergency ? (int)emergencyRetry.TotalSeconds : null,
             Expire = isEmergency ? (int)emergencyExpire.TotalSeconds : null
@@ -46,13 +48,40 @@ internal static class PushoverMessageMapping
 
         logger.LogWarning("The Pushover {Field} has {Length} characters and is shortened to {MaximumLength}.", field, value.Length, maximumLength);
 
+        if (maximumLength <= 0)
+        {
+            // Not even the ellipsis fits; the shortened result must still never exceed maximumLength.
+            return string.Empty;
+        }
+
         var length = maximumLength - 1;
-        if (char.IsHighSurrogate(value[length - 1]))
+        if (length > 0 && char.IsHighSurrogate(value[length - 1]))
         {
             // Cutting between the two halves of a surrogate pair would leave an invalid character.
             length--;
         }
 
         return string.Concat(value.AsSpan(0, length), "…");
+    }
+
+    // Shortening a url would break the link it points to, so a url over the limit is omitted instead, along with its
+    // now-meaningless title; a url within the limit keeps its title shortened on its own.
+    private static (string? Url, string? UrlTitle) CreateUrl(Notification notification, ILogger logger)
+    {
+        var url = notification.Url;
+        if (url is null)
+        {
+            return (null, Shorten(notification.UrlTitle, MaximumUrlTitleLength, "url title", logger));
+        }
+
+        if (url.Length > MaximumUrlLength)
+        {
+            logger.LogWarning(
+                "The Pushover url has {Length} characters, longer than the {MaximumLength} limit, and is omitted instead of being shortened.",
+                url.Length, MaximumUrlLength);
+            return (null, null);
+        }
+
+        return (url, Shorten(notification.UrlTitle, MaximumUrlTitleLength, "url title", logger));
     }
 }
