@@ -1,0 +1,116 @@
+@using HomeBlaze.Abstractions.Devices.Locks
+@using HomeBlaze.Abstractions.Metadata
+@using HomeBlaze.Abstractions.Sensors
+@using HomeBlaze.Components.Controls
+@using HomeBlaze.Components.Operations
+@using Microsoft.AspNetCore.Components.Rendering
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(DoorLock))]
+@implements ISubjectComponent
+@implements IDisposable
+@inject SubjectPathResolver PathResolver
+@inject IDialogService DialogService
+@inject IServiceProvider ServiceProvider
+
+@{
+    var widget = Subject as DoorLock;
+}
+
+@if (widget is not null)
+{
+    // Read once per render and never kept: its render records the reads, so that it renders again when one changes.
+    var path = widget.Path;
+    var target = ResolveLock(widget, path);
+    var doorLock = target as IDoorLockState;
+    var appearance = DoorLockDisplay.Get(doorLock?.LockState, (target as IDoorSensor)?.DoorState);
+    var operation = GetOperation(target, appearance.Operation);
+    var label = !string.IsNullOrEmpty(widget.Label) ? widget.Label : (target as ITitleProvider)?.Title ?? path ?? string.Empty;
+    var subtitle = !string.IsNullOrEmpty(widget.Subtitle) ? widget.Subtitle : doorLock is null ? null : appearance.Subtitle;
+    _badgeIcon = appearance.BadgeIcon;
+
+    <TileView TestId="door-lock-tile"
+              AccessibleName="@label"
+              Label="@label"
+              Subtitle="@subtitle"
+              Icon="@appearance.DoorIcon"
+              Color="@appearance.Fill"
+              Disabled="@(IsEditing || _isRunning || operation is null)"
+              IsBusy="@_isRunning"
+              BadgeContent="@_badge"
+              OnClick="_clickCallback" />
+}
+
+@code {
+    private readonly CancellationTokenSource _lifetime = new();
+    // Created once: a template in the markup would allocate a new delegate on every render.
+    private readonly RenderFragment _badge;
+    private string _badgeIcon = Icons.Material.Filled.QuestionMark;
+    private bool _isRunning;
+    private EventCallback<MouseEventArgs> _clickCallback;
+
+    public DoorLockWidget()
+    {
+        _badge = RenderBadge;
+    }
+
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    [CascadingParameter(Name = "IsEditing")]
+    public bool IsEditing { get; set; }
+
+    protected override void OnInitialized()
+    {
+        _clickCallback = EventCallback.Factory.Create<MouseEventArgs>(this, RunAsync);
+    }
+
+    private IInterceptorSubject? ResolveLock(DoorLock widget, string? path) =>
+        string.IsNullOrEmpty(path) ? null : ValueReader.ResolveSubject(PathResolver, widget, path) as IDoorLockState as IInterceptorSubject;
+
+    // The operation a click invokes, or null when there is none or it is not enabled.
+    private static RegisteredSubjectProperty? GetOperation(IInterceptorSubject? target, string? name)
+    {
+        if (target is null || name is null)
+        {
+            return null;
+        }
+
+        var property = target.TryGetRegisteredProperty(name);
+        return property?.GetValue() is MethodMetadata && property.IsMethodEnabled() ? property : null;
+    }
+
+    private async Task RunAsync()
+    {
+        if (_isRunning || Subject is not DoorLock widget)
+        {
+            return;
+        }
+
+        var target = ResolveLock(widget, widget.Path);
+        var appearance = DoorLockDisplay.Get((target as IDoorLockState)?.LockState, (target as IDoorSensor)?.DoorState);
+        if (GetOperation(target, appearance.Operation)?.GetValue() is not MethodMetadata method)
+        {
+            return;
+        }
+
+        _isRunning = true;
+        try
+        {
+            await OperationInvoker.InvokeAsync(DialogService, ServiceProvider, method, _lifetime.Token);
+        }
+        finally
+        {
+            _isRunning = false;
+        }
+    }
+
+    private void RenderBadge(RenderTreeBuilder __builder)
+    {
+        <MudIcon Icon="@_badgeIcon" Size="Size.Small" data-testid="door-lock-badge" />
+    }
+
+    public void Dispose()
+    {
+        _lifetime.Cancel();
+        _lifetime.Dispose();
+    }
+}

@@ -1,5 +1,5 @@
 @* A tile that fills its place, with icon, label and subtitle centered. With OnClick it is one click target, with a
-   badge over its top right corner and, while it works, a progress circle over its bottom right corner; without OnClick it
+   badge (a subject or content) over its top right corner and, while it works, a progress circle over its bottom right corner; without OnClick it
    only shows its content and takes no input. The badge and the progress circle are siblings of the button, not inside
    it, so the markup stays valid; they take no pointer input, so a click on them reaches the button below. The style is
    on the root, so that they inherit the text color of the tile. A disabled tile (also a busy one and every tile in edit
@@ -36,6 +36,12 @@
     {
         <div class="tile-widget-badge" data-testid="tile-badge">
             <SubjectComponent Subject="@Badge" Type="SubjectComponentType.Widget" />
+        </div>
+    }
+    else if (BadgeContent is not null)
+    {
+        <div class="tile-widget-badge" data-testid="tile-badge">
+            @BadgeContent
         </div>
     }
 </div>
@@ -76,6 +82,9 @@
 
     /// <summary>The content of the badge slot, or null for none.</summary>
     [Parameter] public IInterceptorSubject? Badge { get; set; }
+
+    /// <summary>Content drawn as badge when no <see cref="Badge"/> subject is given, or null for none.</summary>
+    [Parameter] public RenderFragment? BadgeContent { get; set; }
 
     /// <summary>What a click does. Without it the tile is no button and takes no input.</summary>
     [Parameter] public EventCallback<MouseEventArgs> OnClick { get; set; }
