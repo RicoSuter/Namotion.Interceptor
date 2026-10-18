@@ -139,8 +139,31 @@ public class NukiActionTests
         Assert.False(fake.RequestsOverlapped);
     }
 
+    [Theory]
+    [InlineData("ActivateRingToOpen", 1)]
+    [InlineData("DeactivateRingToOpen", 2)]
+    [InlineData("OpenDoor", 3)]
+    [InlineData("ActivateContinuousMode", 4)]
+    [InlineData("DeactivateContinuousMode", 5)]
+    public async Task WhenAnOpenerActionRuns_ThenItSendsItsNumber(string operation, int action)
+    {
+        // Arrange
+        var fake = new FakeNukiBridge { ListJson = NukiFixtures.Opener(state: 1) };
+        await using var test = new TestBridge(fake);
+        await test.StartAsync();
+
+        // Act
+        await RunOpenerOperationAsync(test.Opener, operation);
+
+        // Assert
+        var query = HttpUtility.ParseQueryString(fake.Requests.Single(uri => uri.AbsolutePath == "/lockAction").Query);
+        Assert.Equal(action.ToString(CultureInfo.InvariantCulture), query["action"]);
+        Assert.Equal("2", query["nukiId"]);
+        Assert.Equal("2", query["deviceType"]);
+    }
+
     [Fact]
-    public async Task WhenOpenerOpensTheDoor_ThenItSendsTheElectricStrikeActuationAndShowsOpening()
+    public async Task WhenOpenerOpensTheDoor_ThenItShowsOpeningUntilTheBridgeReportsTheState()
     {
         // Arrange
         var fake = new FakeNukiBridge { ListJson = NukiFixtures.Opener(state: 1) };
@@ -154,9 +177,36 @@ public class NukiActionTests
 
         // Assert
         Assert.Equal(NukiOpenerState.Opening, stateDuringAction);
-        var query = HttpUtility.ParseQueryString(fake.Requests.Single(uri => uri.AbsolutePath == "/lockAction").Query);
-        Assert.Equal("3", query["action"]);
-        Assert.Equal("2", query["deviceType"]);
         Assert.Equal(NukiOpenerState.Online, test.Opener.OpenerState);
     }
+
+    [Fact]
+    public async Task WhenTheListCannotBeReadAfterAContinuousModeAction_ThenContinuousModeIsUnknown()
+    {
+        // Arrange
+        var fake = new FakeNukiBridge { ListJson = NukiFixtures.Opener(state: 1) };
+        await using var test = new TestBridge(fake);
+        await test.StartAsync();
+        var isContinuousModeActiveBefore = test.Opener.IsContinuousModeActive;
+        fake.StatusOverride = path => path == "list" && fake.CountRequests("lockAction") > 0 ? HttpStatusCode.InternalServerError : null;
+
+        // Act
+        await test.Opener.ActivateContinuousModeAsync(CancellationToken.None);
+
+        // Assert
+        Assert.False(isContinuousModeActiveBefore);
+        Assert.Null(test.Opener.IsContinuousModeActive);
+        Assert.Null(test.Opener.OpenerState);
+        Assert.False(test.Opener.ActivateContinuousMode_IsEnabled);
+    }
+
+    private static Task RunOpenerOperationAsync(NukiOpener opener, string operation) => operation switch
+    {
+        "ActivateRingToOpen" => opener.ActivateRingToOpenAsync(CancellationToken.None),
+        "DeactivateRingToOpen" => opener.DeactivateRingToOpenAsync(CancellationToken.None),
+        "OpenDoor" => opener.OpenDoorAsync(CancellationToken.None),
+        "ActivateContinuousMode" => opener.ActivateContinuousModeAsync(CancellationToken.None),
+        "DeactivateContinuousMode" => opener.DeactivateContinuousModeAsync(CancellationToken.None),
+        _ => throw new ArgumentOutOfRangeException(nameof(operation), operation, "Unknown operation.")
+    };
 }

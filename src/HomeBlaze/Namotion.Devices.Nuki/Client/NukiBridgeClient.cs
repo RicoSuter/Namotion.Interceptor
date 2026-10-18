@@ -21,6 +21,10 @@ internal sealed class NukiBridgeClient
     /// <summary>The largest response accepted from the bridge or the discovery service, in bytes.</summary>
     public const int MaxResponseSize = 1024 * 1024;
 
+    private const string InvalidHostMessage =
+        "The host address must be a host name or IP address with an optional port, without a path, query, user name " +
+        "or spaces. Enclose an IPv6 address with a port in brackets.";
+
     private static readonly SearchValues<char> InvalidHostAddressCharacters = SearchValues.Create("/?#@\\");
 
     private static readonly TimeSpan ReadTimeout = TimeSpan.FromSeconds(10);
@@ -34,29 +38,46 @@ internal sealed class NukiBridgeClient
 
     public NukiBridgeClient(HttpClient httpClient, string hostAddress, string? token, NukiTokenMode tokenMode)
     {
-        if (!TryParseHostAddress(hostAddress, out var host, out var port, out var errorMessage))
+        if (!TryParseHostAddress(hostAddress, out _, out _, out var baseAddress, out var errorMessage))
         {
             throw new ArgumentException(errorMessage, nameof(hostAddress));
         }
 
         _httpClient = httpClient;
-        _baseAddress = "http://" + (host.Contains(':') ? "[" + host + "]" : host) + ":" + port.ToString(CultureInfo.InvariantCulture) + "/";
+        _baseAddress = baseAddress;
         _token = token;
         _tokenMode = tokenMode;
     }
 
     /// <summary>
     /// Gets the host, without brackets, and the port (8080 by default) of a host name or IP address with an optional
-    /// port, optionally with an http or https scheme and a trailing slash, or a message why the host address is invalid.
+    /// port, optionally with an http scheme and a trailing slash, or a message why the host address is invalid.
     /// </summary>
     public static bool TryParseHostAddress(
         string? hostAddress,
         [NotNullWhen(true)] out string? host,
         out int port,
+        [NotNullWhen(false)] out string? errorMessage) =>
+        TryParseHostAddress(hostAddress, out host, out port, out _, out errorMessage);
+
+    private static bool TryParseHostAddress(
+        string? hostAddress,
+        [NotNullWhen(true)] out string? host,
+        out int port,
+        [NotNullWhen(true)] out string? baseAddress,
         [NotNullWhen(false)] out string? errorMessage)
     {
         host = null;
-        var address = TrimSchemeAndTrailingSlash(hostAddress.AsSpan().Trim());
+        baseAddress = null;
+        var address = hostAddress.AsSpan().Trim();
+        if (address.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        {
+            port = 0;
+            errorMessage = "The bridge offers no HTTPS; enter the address without https://.";
+            return false;
+        }
+
+        address = TrimSchemeAndTrailingSlash(address);
 
         // An IPv6 address carries a port only in brackets.
         var portSeparator = address.LastIndexOf(':');
@@ -69,8 +90,7 @@ internal sealed class NukiBridgeClient
         if (!IsValidHost(address, hostPart))
         {
             port = 0;
-            errorMessage = "The host address must be a host name or IP address with an optional port, without a path, " +
-                           "query, user name or spaces. Enclose an IPv6 address with a port in brackets.";
+            errorMessage = InvalidHostMessage;
             return false;
         }
 
@@ -81,18 +101,37 @@ internal sealed class NukiBridgeClient
             return false;
         }
 
-        host = hostPart.Trim('[', ']');
+        var trimmedHost = hostPart.Trim('[', ']');
+        if (!TryCreateBaseAddress(trimmedHost, port, out baseAddress))
+        {
+            errorMessage = InvalidHostMessage;
+            return false;
+        }
+
+        host = trimmedHost;
         errorMessage = null;
         return true;
     }
 
+    // Checks the address that requests are built from, in case the character check misses a way to move the host.
+    private static bool TryCreateBaseAddress(string host, int port, [NotNullWhen(true)] out string? baseAddress)
+    {
+        baseAddress = "http://" + (host.Contains(':') ? "[" + host + "]" : host) + ":" +
+                      port.ToString(CultureInfo.InvariantCulture) + "/";
+        if (Uri.TryCreate(baseAddress, UriKind.Absolute, out var uri) && uri.UserInfo.Length == 0 && uri.Port == port)
+        {
+            return true;
+        }
+
+        baseAddress = null;
+        return false;
+    }
+
     private static ReadOnlySpan<char> TrimSchemeAndTrailingSlash(ReadOnlySpan<char> address)
     {
-        var schemeEnd = address.IndexOf("://", StringComparison.Ordinal);
-        if (schemeEnd >= 0 && (address[..schemeEnd].Equals("http", StringComparison.OrdinalIgnoreCase) ||
-                               address[..schemeEnd].Equals("https", StringComparison.OrdinalIgnoreCase)))
+        if (address.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
         {
-            address = address[(schemeEnd + "://".Length)..];
+            address = address["http://".Length..];
         }
 
         return address.TrimEnd('/');

@@ -19,7 +19,7 @@ The setup reads the token from the bridge and picks the token mode: `Encrypted` 
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
-| `HostAddress` | string | null | IP address or host name of the bridge with an optional port (8080 by default), for example `192.168.1.50`, `nuki-bridge:8080` or `[fd00::5]:8080` (IPv6 with a port in brackets) |
+| `HostAddress` | string | null | IP address or host name of the bridge with an optional port (8080 by default), for example `192.168.1.50`, `nuki-bridge:8080` or `[fd00::5]:8080` (IPv6 with a port in brackets). An `http://` prefix is allowed, `https://` is not because the bridge offers no HTTPS |
 | `Token` | string (secret) | null | API token of the bridge |
 | `TokenMode` | `Encrypted` or `Plain` | `Encrypted` | How requests carry the token, see [Security](#security) |
 | `PollingInterval` | TimeSpan | 10 seconds | How often the device list is read. Keep it below 30 seconds to see every ring, see [Opener](#opener) |

@@ -83,7 +83,7 @@ public partial class NukiBridge : BackgroundService,
     internal ILogger<NukiBridge> Logger { get; }
 
     /// <summary>
-    /// The IP address or host name of the bridge, optionally with a port (8080 by default) and an http or https scheme.
+    /// The IP address or host name of the bridge, optionally with a port (8080 by default) and an http scheme.
     /// An IPv6 address with a port is enclosed in brackets.
     /// </summary>
     [Configuration]

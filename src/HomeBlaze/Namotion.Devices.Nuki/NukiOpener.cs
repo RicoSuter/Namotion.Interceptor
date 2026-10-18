@@ -105,7 +105,11 @@ public partial class NukiOpener : NukiDevice
         LastRingTime = state?.RingActionTimestamp;
     }
 
-    internal override void ResetActionState() => OpenerState = null;
+    internal override void ResetActionState()
+    {
+        OpenerState = null;
+        IsContinuousModeActive = null;
+    }
 
     private Task RunOpenerActionAsync(NukiOpenerAction action, Action? enterTransition, string failureMessage, CancellationToken cancellationToken) =>
         Bridge.ExecuteActionAsync(this, (int)action, enterTransition, failureMessage, cancellationToken);
