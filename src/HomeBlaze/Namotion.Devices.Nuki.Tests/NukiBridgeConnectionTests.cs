@@ -148,17 +148,13 @@ public class NukiBridgeConnectionTests
         var fake = new FakeNukiBridge { ListJson = NukiFixtures.SmartLock(state: 3) };
         await using var test = new TestBridge(fake);
         await test.StartAsync();
-        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        fake.ActionGate = gate;
-        var action = test.Lock.LockAsync(CancellationToken.None);
-        await AsyncTestHelpers.WaitUntilAsync(() => fake.CountRequests("lockAction") == 1, message: "The action was not sent.");
+        var heldAction = await test.StartHeldActionAsync(() => test.Lock.LockAsync(CancellationToken.None));
         var infoRequests = fake.CountRequests("info");
 
         // Act
         await test.Bridge.ApplyConfigurationAsync(CancellationToken.None);
         await AsyncTestHelpers.WaitUntilAsync(() => !test.Bridge.IsConnected, message: "The bridge did not disconnect.");
-        gate.SetResult();
-        await action;
+        await heldAction.ReleaseAsync();
 
         // Assert
         await AsyncTestHelpers.WaitUntilAsync(
@@ -167,16 +163,13 @@ public class NukiBridgeConnectionTests
     }
 
     [Fact]
-    public async Task WhenConfigurationChangesDuringAnAction_ThenTheStateIsNotResetBeforeTheReconnectReadsIt()
+    public async Task WhenConfigurationChangesDuringAnAction_ThenTheStateIsUnknownUntilTheReconnectReadsIt()
     {
         // Arrange
         var fake = new FakeNukiBridge { ListJson = NukiFixtures.SmartLock(state: 3) };
         await using var test = new TestBridge(fake);
         await test.StartAsync();
-        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        fake.ActionGate = gate;
-        var action = test.Lock.LockAsync(CancellationToken.None);
-        await AsyncTestHelpers.WaitUntilAsync(() => test.Lock.LockState == DoorLockState.Locking, message: "The action was not sent.");
+        var heldAction = await test.StartHeldActionAsync(() => test.Lock.LockAsync(CancellationToken.None));
         // The reconnect fails and waits long, so that no device list replaces the state while it is read.
         fake.StatusOverride = path => path == "info" ? HttpStatusCode.InternalServerError : null;
         test.Bridge.RetryInterval = TimeSpan.FromHours(1);
@@ -185,26 +178,30 @@ public class NukiBridgeConnectionTests
         // Act
         await test.Bridge.ApplyConfigurationAsync(CancellationToken.None);
         await AsyncTestHelpers.WaitUntilAsync(() => !test.Bridge.IsConnected, message: "The bridge did not disconnect.");
-        gate.SetResult();
-        await action;
+        await heldAction.ReleaseAsync();
 
         // Assert
         await AsyncTestHelpers.WaitUntilAsync(() => test.Bridge.Status == ServiceStatus.Error, message: "The reconnect did not run.");
-        Assert.Equal(DoorLockState.Locking, test.Lock.LockState);
+        Assert.Null(test.Lock.LockState);
         Assert.Equal(listRequests, fake.CountRequests("list"));
     }
 
-    [Fact]
-    public async Task WhenBridgeStopsDuringAnAction_ThenItStopsWithoutWaitingForTheAction()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenBridgeStopsDuringAnAction_ThenItStopsWithoutWaitingForTheAction(bool reconnecting)
     {
         // Arrange
         var fake = new FakeNukiBridge { ListJson = NukiFixtures.SmartLock(state: 3) };
         await using var test = new TestBridge(fake);
         await test.StartAsync();
-        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        fake.ActionGate = gate;
-        var action = test.Lock.LockAsync(CancellationToken.None);
-        await AsyncTestHelpers.WaitUntilAsync(() => fake.CountRequests("lockAction") == 1, message: "The action was not sent.");
+        var heldAction = await test.StartHeldActionAsync(() => test.Lock.LockAsync(CancellationToken.None));
+        if (reconnecting)
+        {
+            // The reconnect waits for the action before it connects again.
+            await test.Bridge.ApplyConfigurationAsync(CancellationToken.None);
+            await AsyncTestHelpers.WaitUntilAsync(() => !test.Bridge.IsConnected, message: "The bridge did not disconnect.");
+        }
 
         // Act
         var stop = test.Bridge.StopAsync(CancellationToken.None);
@@ -212,34 +209,25 @@ public class NukiBridgeConnectionTests
 
         // Assert
         Assert.Equal(ServiceStatus.Stopped, test.Bridge.Status);
-        gate.TrySetResult();
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => action);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(heldAction.ReleaseAsync);
         Assert.Null(test.Lock.LockState);
     }
 
     [Fact]
-    public async Task WhenBridgeStopsWhileAReconnectWaitsForAnAction_ThenItStopsWithoutWaitingForTheAction()
+    public async Task WhenBridgePolls_ThenInfoIsReadOnlyEveryFewPolls()
     {
         // Arrange
-        var fake = new FakeNukiBridge { ListJson = NukiFixtures.SmartLock(state: 3) };
-        await using var test = new TestBridge(fake);
-        await test.StartAsync();
-        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        fake.ActionGate = gate;
-        var action = test.Lock.LockAsync(CancellationToken.None);
-        await AsyncTestHelpers.WaitUntilAsync(() => fake.CountRequests("lockAction") == 1, message: "The action was not sent.");
-        await test.Bridge.ApplyConfigurationAsync(CancellationToken.None);
-        await AsyncTestHelpers.WaitUntilAsync(() => !test.Bridge.IsConnected, message: "The bridge did not disconnect.");
+        await using var test = new TestBridge();
+        test.Bridge.PollingInterval = TimeSpan.FromSeconds(1);
 
         // Act
-        var stop = test.Bridge.StopAsync(CancellationToken.None);
-        await AsyncTestHelpers.WaitUntilAsync(() => stop.IsCompleted, message: "The bridge waited for the action to stop.");
+        await test.StartAsync();
+        await AsyncTestHelpers.WaitUntilAsync(() => test.Fake.CountRequests("info") == 2, message: "The bridge did not read /info again.");
 
         // Assert
-        Assert.Equal(ServiceStatus.Stopped, test.Bridge.Status);
-        gate.TrySetResult();
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => action);
-        Assert.Null(test.Lock.LockState);
+        var requests = test.Fake.Requests.Select(uri => uri.AbsolutePath).ToArray();
+        var secondInfo = Array.LastIndexOf(requests, "/info");
+        Assert.Equal(1 + NukiBridge.InfoPollDivider, requests.Take(secondInfo).Count(path => path == "/list"));
     }
 
     [Theory]

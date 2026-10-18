@@ -51,7 +51,7 @@ public partial class NukiBridge : BackgroundService,
     /// </summary>
     public const int MaximumIntervalSeconds = 3600;
 
-    internal const int MaxConsecutivePollFailures = 3;
+    private const int MaxConsecutivePollFailures = 3;
 
     // /info changes slowly (uptime, versions), so it is read every this many polls only.
     internal const int InfoPollDivider = 6;
@@ -101,9 +101,11 @@ public partial class NukiBridge : BackgroundService,
     [Configuration]
     public partial NukiTokenMode TokenMode { get; set; }
 
+    /// <summary>The time between two polls; the bridge runs with its <see cref="GetEffectiveInterval">effective interval</see>.</summary>
     [Configuration]
     public partial TimeSpan PollingInterval { get; set; }
 
+    /// <summary>The time before a failed connection is retried; the bridge runs with its <see cref="GetEffectiveInterval">effective interval</see>.</summary>
     [Configuration]
     public partial TimeSpan RetryInterval { get; set; }
 

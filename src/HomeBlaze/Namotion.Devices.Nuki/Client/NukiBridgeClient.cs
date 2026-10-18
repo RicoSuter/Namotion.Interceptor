@@ -1,4 +1,3 @@
-using System.Buffers;
 using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
@@ -19,8 +18,6 @@ internal sealed class NukiBridgeClient
 
     /// <summary>The default delay before a request that the bridge answered with 503 is sent again.</summary>
     public static readonly TimeSpan DefaultBusyRetryDelay = TimeSpan.FromSeconds(1);
-
-    private const int StackAllocTokenBytes = 256;
 
     private static readonly TimeSpan ReadTimeout = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan ActionTimeout = TimeSpan.FromSeconds(60);
@@ -182,14 +179,11 @@ internal sealed class NukiBridgeClient
         Span<byte> nonce = stackalloc byte[SecretBox.NonceSize];
         RandomNumberGenerator.Fill(nonce);
 
-        var maxTokenBytes = Encoding.UTF8.GetMaxByteCount(token.Length);
-        var rented = maxTokenBytes > StackAllocTokenBytes ? ArrayPool<byte>.Shared.Rent(maxTokenBytes) : null;
-        Span<byte> tokenBytes = rented ?? stackalloc byte[StackAllocTokenBytes];
+        var tokenBytes = Encoding.UTF8.GetBytes(token);
         Span<byte> secretKey = stackalloc byte[SHA256.HashSizeInBytes];
         try
         {
-            var tokenByteCount = Encoding.UTF8.GetBytes(token, tokenBytes);
-            SHA256.HashData(tokenBytes[..tokenByteCount], secretKey);
+            SHA256.HashData(tokenBytes, secretKey);
             var ctoken = SecretBox.Seal(plaintext, nonce, secretKey);
 
             builder.Append("ctoken=").Append(Convert.ToHexStringLower(ctoken))
@@ -199,10 +193,6 @@ internal sealed class NukiBridgeClient
         {
             CryptographicOperations.ZeroMemory(tokenBytes);
             CryptographicOperations.ZeroMemory(secretKey);
-            if (rented is not null)
-            {
-                ArrayPool<byte>.Shared.Return(rented);
-            }
         }
     }
 

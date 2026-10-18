@@ -22,9 +22,6 @@ internal sealed class FakeNukiBridge : HttpMessageHandler, IHttpClientFactory
     /// <summary>Gets the status to answer a path with instead of its content, or null to answer normally.</summary>
     public volatile Func<string, HttpStatusCode?>? StatusOverride;
 
-    /// <summary>Called when a /lockAction request arrives, before <see cref="ActionGate"/> is awaited.</summary>
-    public volatile Action? OnAction = null;
-
     /// <summary>When set, a /lockAction request waits for it, like a bridge waits for the motor.</summary>
     /// <remarks>Create it with <see cref="TaskCreationOptions.RunContinuationsAsynchronously"/>, otherwise whatever
     /// completes the gate runs the waiting request's continuation inline.</remarks>
@@ -58,13 +55,9 @@ internal sealed class FakeNukiBridge : HttpMessageHandler, IHttpClientFactory
                 return new HttpResponseMessage(status);
             }
 
-            if (path == "lockAction")
+            if (path == "lockAction" && ActionGate is { } gate)
             {
-                OnAction?.Invoke();
-                if (ActionGate is { } gate)
-                {
-                    await gate.Task.WaitAsync(cancellationToken);
-                }
+                await gate.Task.WaitAsync(cancellationToken);
             }
             else if (path == "list" && ListGate is { } listGate)
             {

@@ -34,9 +34,12 @@ public class NukiActionTests
         };
 
         // Act
-        await RunHeldActionAsync(fake, startAction, () => test.Lock.LockState == transition);
+        var heldAction = await test.StartHeldActionAsync(startAction);
+        var stateDuringAction = test.Lock.LockState;
+        await heldAction.ReleaseAsync();
 
         // Assert
+        Assert.Equal(transition, stateDuringAction);
         var query = HttpUtility.ParseQueryString(fake.Requests.Single(uri => uri.AbsolutePath == "/lockAction").Query);
         Assert.Equal(action.ToString(CultureInfo.InvariantCulture), query["action"]);
         Assert.Equal("1", query["nukiId"]);
@@ -65,7 +68,7 @@ public class NukiActionTests
         var fake = new FakeNukiBridge { ListJson = NukiFixtures.SmartLock(state: 3) };
         await using var test = new TestBridge(fake);
         await test.StartAsync();
-        fake.OnAction = () => fake.StatusOverride = path => path == "list" ? HttpStatusCode.InternalServerError : null;
+        fake.StatusOverride = path => path == "list" && fake.CountRequests("lockAction") > 0 ? HttpStatusCode.InternalServerError : null;
 
         // Act
         await test.Lock.LockAsync(CancellationToken.None);
@@ -94,10 +97,7 @@ public class NukiActionTests
         var fake = new FakeNukiBridge { ListJson = NukiFixtures.SmartLock(state: 3) };
         await using var test = new TestBridge(fake);
         await test.StartAsync();
-        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        fake.ActionGate = gate;
-        var heldAction = test.Lock.LockAsync(CancellationToken.None);
-        await AsyncTestHelpers.WaitUntilAsync(() => test.Lock.LockState == DoorLockState.Locking, message: "The first action was not sent.");
+        var heldAction = await test.StartHeldActionAsync(() => test.Lock.LockAsync(CancellationToken.None));
         var listRequests = fake.CountRequests("list");
         using var cancellation = new CancellationTokenSource();
         var waitingAction = test.Lock.UnlatchAsync(cancellation.Token);
@@ -112,8 +112,7 @@ public class NukiActionTests
         Assert.Equal(DoorLockState.Locking, test.Lock.LockState);
         Assert.Equal(1, fake.CountRequests("lockAction"));
 
-        gate.SetResult();
-        await heldAction;
+        await heldAction.ReleaseAsync();
     }
 
     [Fact]
@@ -149,26 +148,15 @@ public class NukiActionTests
         await test.StartAsync();
 
         // Act
-        await RunHeldActionAsync(
-            fake,
-            () => test.Opener.OpenDoorAsync(CancellationToken.None),
-            () => test.Opener.OpenerState == NukiOpenerState.Opening);
+        var heldAction = await test.StartHeldActionAsync(() => test.Opener.OpenDoorAsync(CancellationToken.None));
+        var stateDuringAction = test.Opener.OpenerState;
+        await heldAction.ReleaseAsync();
 
         // Assert
+        Assert.Equal(NukiOpenerState.Opening, stateDuringAction);
         var query = HttpUtility.ParseQueryString(fake.Requests.Single(uri => uri.AbsolutePath == "/lockAction").Query);
         Assert.Equal("3", query["action"]);
         Assert.Equal("2", query["deviceType"]);
         Assert.Equal(NukiOpenerState.Online, test.Opener.OpenerState);
-    }
-
-    // Starts an action that the bridge holds, waits until it shows its transition, then lets the bridge finish the action.
-    private static async Task RunHeldActionAsync(FakeNukiBridge fake, Func<Task> startAction, Func<bool> showsTransition)
-    {
-        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        fake.ActionGate = gate;
-        var action = startAction();
-        await AsyncTestHelpers.WaitUntilAsync(showsTransition);
-        gate.SetResult();
-        await action;
     }
 }

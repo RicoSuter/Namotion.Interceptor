@@ -15,9 +15,6 @@ public partial class NukiBridge
 
     private volatile NukiBridgeClient? _client;
 
-    // Set before the first connection; tells a stop from a reconnect once the connection has ended.
-    private CancellationToken _stoppingToken;
-
     /// <inheritdoc />
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
     {
@@ -41,27 +38,17 @@ public partial class NukiBridge
     /// <param name="configured">The configured interval, such as <see cref="PollingInterval"/>.</param>
     /// <param name="fallback">The interval to use when the configured one is zero or negative.</param>
     /// <returns>The effective interval.</returns>
-    public static TimeSpan GetEffectiveInterval(TimeSpan configured, TimeSpan fallback)
-    {
-        if (configured <= TimeSpan.Zero)
-        {
-            return fallback;
-        }
-
-        var minimum = TimeSpan.FromSeconds(MinimumIntervalSeconds);
-        if (configured < minimum)
-        {
-            return minimum;
-        }
-
-        var maximum = TimeSpan.FromSeconds(MaximumIntervalSeconds);
-        return configured > maximum ? maximum : configured;
-    }
+    public static TimeSpan GetEffectiveInterval(TimeSpan configured, TimeSpan fallback) =>
+        configured <= TimeSpan.Zero
+            ? fallback
+            : TimeSpan.FromTicks(Math.Clamp(
+                configured.Ticks,
+                MinimumIntervalSeconds * TimeSpan.TicksPerSecond,
+                MaximumIntervalSeconds * TimeSpan.TicksPerSecond));
 
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _stoppingToken = stoppingToken;
         try
         {
             while (true)
@@ -180,47 +167,50 @@ public partial class NukiBridge
     }
 
     /// <summary>
-    /// Runs a lock action of a device and returns the result the bridge reports once the device has finished it.
-    /// <paramref name="enterTransition"/> runs right before the request is sent. Once the request was sent, the device
-    /// list is read whether the action succeeded or not; when that read fails or the bridge stopped meanwhile,
-    /// <paramref name="resetState"/> runs. When the connection ended meanwhile for a reconnect, the state is left to the
-    /// first device list of the reconnect.
+    /// Runs a lock action of a device and waits until the device has finished it. <paramref name="enterTransition"/>
+    /// runs right before the request is sent. Once the request was sent, the device list is read whether the action
+    /// succeeded or not; when that read fails or the connection has ended meanwhile, the state of the device becomes
+    /// unknown (<see cref="NukiDevice.ResetActionState"/>) until the next device list.
     /// </summary>
-    /// <exception cref="InvalidOperationException">The bridge is not connected; nothing was sent.</exception>
+    /// <exception cref="InvalidOperationException">The bridge is not connected and nothing was sent, or the device
+    /// reported a failure, with <paramref name="failureMessage"/> as the message.</exception>
     /// <exception cref="OperationCanceledException">The caller canceled, possibly before anything was sent.</exception>
-    internal async Task<NukiActionResponse> ExecuteActionAsync(
-        NukiDevice device, int action, Action? enterTransition, Action resetState, CancellationToken cancellationToken)
+    internal async Task ExecuteActionAsync(
+        NukiDevice device, int action, Action? enterTransition, string failureMessage, CancellationToken cancellationToken)
     {
+        NukiActionResponse result;
         using (await EnterRequestGateAsync(cancellationToken))
         {
             // Read under the gate, so that an action never uses a client whose connection has ended meanwhile.
-            var client = GetConnectedClient();
+            var client = _client ?? throw new InvalidOperationException(
+                StatusMessage is { } statusMessage ? "The bridge is not connected. " + statusMessage : "The bridge is not connected.");
 
             // Entered only while the gate is held, so that a poll that is still running cannot overwrite the transition
             // with the state from before the action.
             enterTransition?.Invoke();
             try
             {
-                return await client.LockActionAsync(device.NukiId, (int)device.DeviceType, action, cancellationToken);
+                result = await client.LockActionAsync(device.NukiId, (int)device.DeviceType, action, cancellationToken);
             }
             finally
             {
-                await RefreshAfterActionAsync(device, action, resetState);
+                await RefreshAfterActionAsync(device, action);
             }
+        }
+
+        if (!result.Success)
+        {
+            throw new InvalidOperationException(failureMessage);
         }
     }
 
-    // Runs while the gate of the action is still held, so that no poll reads the list in between. The client is read
-    // again because the connection may have ended during the action.
-    private async Task RefreshAfterActionAsync(NukiDevice device, int action, Action resetState)
+    // Runs while the gate of the action is still held, so that no poll reads the list in between, and a reconnect
+    // reads the list only after it. The client is read again because the connection may have ended during the action.
+    private async Task RefreshAfterActionAsync(NukiDevice device, int action)
     {
         if (_client is not { } client)
         {
-            if (_stoppingToken.IsCancellationRequested)
-            {
-                resetState();
-            }
-
+            device.ResetActionState();
             Logger.LogDebug("Nuki device {NukiId} is not read after action {Action}: the connection has ended.", device.NukiId, action);
             return;
         }
@@ -232,7 +222,7 @@ public partial class NukiBridge
         }
         catch (Exception exception)
         {
-            resetState();
+            device.ResetActionState();
             Logger.LogWarning(exception, "Nuki device {NukiId} could not be read after action {Action}.", device.NukiId, action);
         }
     }
@@ -252,10 +242,6 @@ public partial class NukiBridge
             ApplyInfo(await client.GetInfoAsync(cancellationToken));
         }
     }
-
-    private NukiBridgeClient GetConnectedClient() =>
-        _client ?? throw new InvalidOperationException(
-            StatusMessage is { } statusMessage ? "The bridge is not connected. " + statusMessage : "The bridge is not connected.");
 
     private async Task<RequestGateLease> EnterRequestGateAsync(CancellationToken cancellationToken)
     {

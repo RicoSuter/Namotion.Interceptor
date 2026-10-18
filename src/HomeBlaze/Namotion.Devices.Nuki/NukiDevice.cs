@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Globalization;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Common;
@@ -64,7 +65,7 @@ public abstract partial class NukiDevice :
     public string? AvailableSoftwareUpdate => null;
 
     [Derived]
-    public string? Title => Name ?? "Nuki " + NukiId;
+    public string? Title => Name ?? "Nuki " + NukiId.ToString(CultureInfo.InvariantCulture);
 
     [Derived]
     public bool IsConnected => Bridge.IsConnected && HasLastKnownState;
@@ -100,21 +101,6 @@ public abstract partial class NukiDevice :
 
     private protected abstract void UpdateState(NukiLastKnownStateResponse? state);
 
-    /// <summary>
-    /// Runs a lock action through <see cref="NukiBridge.ExecuteActionAsync"/> and throws an
-    /// <see cref="InvalidOperationException"/> with <paramref name="failureMessage"/> when the device reports a failure.
-    /// </summary>
-    private protected async Task RunActionAsync(
-        int action,
-        Action? enterTransition,
-        Action resetState,
-        string failureMessage,
-        CancellationToken cancellationToken)
-    {
-        var result = await Bridge.ExecuteActionAsync(this, action, enterTransition, resetState, cancellationToken);
-        if (!result.Success)
-        {
-            throw new InvalidOperationException(failureMessage);
-        }
-    }
+    /// <summary>Makes the state that a lock action changes unknown, when it cannot be read after the action.</summary>
+    internal abstract void ResetActionState();
 }

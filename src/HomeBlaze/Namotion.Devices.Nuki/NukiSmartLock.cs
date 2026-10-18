@@ -123,6 +123,8 @@ public partial class NukiSmartLock : NukiDevice, IDoorLock, IDoorLatchController
         IsKeypadBatteryCritical = state?.KeypadBatteryCritical;
     }
 
+    internal override void ResetActionState() => LockState = null;
+
     private Task RunLockActionAsync(NukiLockAction action, DoorLockState transition, string failureMessage, CancellationToken cancellationToken) =>
-        RunActionAsync((int)action, () => LockState = transition, () => LockState = null, failureMessage, cancellationToken);
+        Bridge.ExecuteActionAsync(this, (int)action, () => LockState = transition, failureMessage, cancellationToken);
 }

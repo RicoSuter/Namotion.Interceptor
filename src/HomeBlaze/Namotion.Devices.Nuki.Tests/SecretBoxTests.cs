@@ -1,4 +1,5 @@
 using Namotion.Devices.Nuki.Client;
+using Namotion.Devices.Nuki.Tests.Testing;
 using Xunit;
 
 namespace Namotion.Devices.Nuki.Tests;
@@ -53,7 +54,7 @@ public class SecretBoxTests
             var result = SecretBox.Seal(message, nonce, key);
 
             // Assert
-            Assert.Equal(SealWithNaClCore(message, nonce, key), result);
+            Assert.Equal(NaClReference.Seal(message, nonce, key), result);
         }
     }
 
@@ -64,20 +65,5 @@ public class SecretBoxTests
     {
         // Act & Assert
         Assert.Throws<ArgumentOutOfRangeException>(() => SecretBox.Seal([1, 2, 3], new byte[nonceLength], new byte[keyLength]));
-    }
-
-    // The same construction from the primitives of NaCl.Core: XSalsa20 over 32 zero bytes and the message gives the
-    // Poly1305 key and the ciphertext.
-    private static byte[] SealWithNaClCore(byte[] message, byte[] nonce, byte[] key)
-    {
-        var stream = new byte[32 + message.Length];
-        message.CopyTo(stream.AsSpan(32));
-        using var cipher = new NaCl.Core.XSalsa20(key, 0);
-        cipher.Encrypt(stream, nonce, stream);
-
-        var result = new byte[SecretBox.TagSize + message.Length];
-        stream.AsSpan(32).CopyTo(result.AsSpan(SecretBox.TagSize));
-        NaCl.Core.Poly1305.ComputeMac(stream.AsSpan(0, 32), stream.AsSpan(32), result.AsSpan(0, SecretBox.TagSize));
-        return result;
     }
 }

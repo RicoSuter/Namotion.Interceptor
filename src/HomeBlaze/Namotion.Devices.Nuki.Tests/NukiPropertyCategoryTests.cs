@@ -1,13 +1,6 @@
-using System.Text.Json;
 using HomeBlaze.Services;
-using HomeBlaze.Services.Lifecycle;
-using Microsoft.Extensions.Logging.Abstractions;
-using Namotion.Devices.Nuki.Model;
 using Namotion.Devices.Nuki.Tests.Testing;
-using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Tracking;
-using Namotion.Interceptor.Tracking.Lifecycle;
 using Xunit;
 
 namespace Namotion.Devices.Nuki.Tests;
@@ -24,12 +17,11 @@ public class NukiPropertyCategoryTests
     [InlineData("IsLocked", "Lock")]
     [InlineData(nameof(NukiSmartLock.DoorState), "Door")]
     [InlineData(nameof(NukiSmartLock.BatteryLevel), "Battery")]
-    public void WhenALockStatePropertyHasACategory_ThenThePanelReadsIt(string propertyName, string expectedCategory)
+    public async Task WhenALockStatePropertyHasACategory_ThenThePanelReadsIt(string propertyName, string expectedCategory)
     {
         // Arrange
-        var bridge = CreateBridgeWithDevices();
-        var smartLock = bridge.Locks["1"];
-        var property = smartLock.TryGetRegisteredSubject()!.TryGetProperty(propertyName)!;
+        await using var test = CreateBridgeWithDevices();
+        var property = test.Lock.TryGetRegisteredSubject()!.TryGetProperty(propertyName)!;
 
         // Act
         var category = property.GetStateMetadata()?.Category;
@@ -39,12 +31,11 @@ public class NukiPropertyCategoryTests
     }
 
     [Fact]
-    public void WhenTheUnlockOperationHasACategory_ThenThePanelReadsIt()
+    public async Task WhenTheUnlockOperationHasACategory_ThenThePanelReadsIt()
     {
         // Arrange
-        var bridge = CreateBridgeWithDevices();
-        var smartLock = bridge.Locks["1"];
-        var property = smartLock.TryGetRegisteredSubject()!.TryGetProperty("Unlock")!;
+        await using var test = CreateBridgeWithDevices();
+        var property = test.Lock.TryGetRegisteredSubject()!.TryGetProperty("Unlock")!;
 
         // Act
         var category = property.TryGetMethodMetadata()?.Category;
@@ -54,12 +45,11 @@ public class NukiPropertyCategoryTests
     }
 
     [Fact]
-    public void WhenTheOpenerOpenDoorOperationHasACategory_ThenThePanelReadsIt()
+    public async Task WhenTheOpenerOpenDoorOperationHasACategory_ThenThePanelReadsIt()
     {
         // Arrange
-        var bridge = CreateBridgeWithDevices();
-        var opener = bridge.Openers["2"];
-        var property = opener.TryGetRegisteredSubject()!.TryGetProperty("OpenDoor")!;
+        await using var test = CreateBridgeWithDevices();
+        var property = test.Opener.TryGetRegisteredSubject()!.TryGetProperty("OpenDoor")!;
 
         // Act
         var category = property.TryGetMethodMetadata()?.Category;
@@ -68,26 +58,10 @@ public class NukiPropertyCategoryTests
         Assert.Equal("Opener", category);
     }
 
-    /// <summary>Builds a bridge with a smart lock and an Opener merged in, wired like the host wires its subjects.</summary>
-    private static NukiBridge CreateBridgeWithDevices()
+    private static TestBridge CreateBridgeWithDevices()
     {
-        var context = InterceptorSubjectContext.Create()
-            .WithFullPropertyTracking()
-            .WithRegistry()
-            .WithLifecycle()
-            .WithService<IPropertyLifecycleHandler>(
-                () => new PropertyAttributeInitializer(),
-                handler => handler is PropertyAttributeInitializer)
-            .WithService<ILifecycleHandler>(
-                () => new MethodPropertyInitializer(),
-                handler => handler is MethodPropertyInitializer);
-
-        var bridge = new NukiBridge(new FakeNukiBridge(), NullLogger<NukiBridge>.Instance);
-        ((IInterceptorSubject)bridge).Context.AddFallbackContext(context);
-
-        bridge.MergeDevices(JsonSerializer.Deserialize(
-            NukiFixtures.List, NukiJsonContext.Default.NukiDeviceResponseArray)!);
-
-        return bridge;
+        var test = new TestBridge();
+        test.Merge(NukiFixtures.List);
+        return test;
     }
 }

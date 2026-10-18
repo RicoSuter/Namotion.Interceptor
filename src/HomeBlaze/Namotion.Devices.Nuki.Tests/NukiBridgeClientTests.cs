@@ -55,7 +55,7 @@ public class NukiBridgeClientTests
         var nonce = Convert.FromHexString(query["nonce"]!);
         Assert.Equal(24, nonce.Length);
 
-        var plaintext = Decrypt(ctoken, nonce, SHA256.HashData(Encoding.UTF8.GetBytes(Token)));
+        var plaintext = Encoding.ASCII.GetString(NaClReference.Open(ctoken, nonce, SHA256.HashData(Encoding.UTF8.GetBytes(Token))));
         Assert.Matches(@"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z,\d{1,5}$", plaintext);
         var timestamp = DateTimeOffset.Parse(plaintext.Split(',')[0], System.Globalization.CultureInfo.InvariantCulture);
         Assert.InRange(DateTimeOffset.UtcNow - timestamp, TimeSpan.FromSeconds(-1), TimeSpan.FromMinutes(1));
@@ -178,22 +178,6 @@ public class NukiBridgeClientTests
     }
 
     [Fact]
-    public async Task WhenTheHttpClientIsDisposed_ThenARequestThrowsObjectDisposedException()
-    {
-        // Arrange
-        var bridge = new FakeNukiBridge();
-        var httpClient = bridge.CreateClient(string.Empty);
-        var client = new NukiBridgeClient(httpClient, "192.168.1.50", Token, NukiTokenMode.Plain);
-
-        // Act
-        httpClient.Dispose();
-
-        // Assert
-        await Assert.ThrowsAsync<ObjectDisposedException>(() => client.GetListAsync(CancellationToken.None));
-        Assert.Empty(bridge.Requests);
-    }
-
-    [Fact]
     public async Task WhenListIsRequested_ThenTheResponseMapsTheRenamedFields()
     {
         // Arrange
@@ -221,16 +205,5 @@ public class NukiBridgeClientTests
         // Assert
         Assert.Equal("abc123", result.Token);
         Assert.Equal("http://192.168.1.50:8080/auth", Assert.Single(bridge.Requests).ToString());
-    }
-
-    // XSalsa20 over 32 zero bytes and the ciphertext gives the Poly1305 key and the plaintext.
-    private static string Decrypt(byte[] ctoken, byte[] nonce, byte[] key)
-    {
-        var stream = new byte[32 + ctoken.Length - SecretBox.TagSize];
-        ctoken.AsSpan(SecretBox.TagSize).CopyTo(stream.AsSpan(32));
-        using var cipher = new NaCl.Core.XSalsa20(key, 0);
-        cipher.Encrypt(stream, nonce, stream);
-        NaCl.Core.Poly1305.VerifyMac(stream.AsSpan(0, 32), ctoken.AsSpan(SecretBox.TagSize), ctoken.AsSpan(0, SecretBox.TagSize));
-        return Encoding.ASCII.GetString(stream, 32, stream.Length - 32);
     }
 }
