@@ -1,6 +1,7 @@
 using System.Net;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Messaging;
+using Microsoft.Extensions.Logging;
 using Namotion.Devices.Pushover.Tests.Testing;
 using Namotion.Interceptor.Testing;
 using Xunit;
@@ -97,17 +98,18 @@ public class PushoverServiceTests
         Assert.Equal("Smoke in the kitchen", emergency.Message);
         Assert.Equal(target.LastSentAt, emergency.SentAt);
         Assert.Equal(PushoverEmergencyStatus.Active, emergency.Status);
-        Assert.Same(target, emergency.Target);
+        Assert.Equal("rico", emergency.TargetKey);
     }
 
     [Fact]
     public void WhenAnEmergencyHasNoTitle_ThenItsDisplayTitleIsEmergency()
     {
         // Arrange
-        var target = new PushoverTarget();
+        var (service, _) = PushoverTestFactory.CreateService("rico");
+        var now = DateTimeOffset.UtcNow;
 
         // Act
-        var emergency = target.AddEmergency("receipt1", title: null, "Fire", DateTimeOffset.UtcNow);
+        var emergency = service.EmergencyTracker.Add("rico", "receipt1", title: null, "Fire", now, now + TimeSpan.FromHours(1));
 
         // Assert
         Assert.Null(emergency.Title);
@@ -218,7 +220,6 @@ public class PushoverServiceTests
         // Assert
         Assert.Same(emergencies["receipt1"], newTarget.Emergencies["receipt1"]);
         Assert.Same(emergencies["receipt2"], newTarget.Emergencies["receipt2"]);
-        Assert.All(newTarget.Emergencies.Values, emergency => Assert.Same(newTarget, emergency.Target));
         Assert.Empty(oldTarget.Emergencies);
 
         // Act: the moved emergency can still be canceled through the new instance.
@@ -228,6 +229,64 @@ public class PushoverServiceTests
         Assert.Single(handler.RequestsTo("/1/receipts/receipt1/cancel.json"));
         Assert.Equal(PushoverEmergencyStatus.Canceled, newTarget.Emergencies["receipt1"].Status);
         Assert.Equal(PushoverEmergencyStatus.Active, newTarget.Emergencies["receipt2"].Status);
+    }
+
+    [Fact]
+    public async Task WhenATargetInstanceIsReplacedWhileAnEmergencyIsBeingSent_ThenTheNewInstanceTracksPollsAndCancelsIt()
+    {
+        // Arrange
+        var (service, handler) = PushoverTestFactory.CreateService("rico");
+        handler.Respond = FakePushoverHandler.RespondWithReceipt("""{"status":1,"acknowledged":0,"expired":0}""");
+        await using var running = await PushoverTestFactory.StartAsync(service);
+        await AsyncTestHelpers.WaitUntilAsync(() => service.Status == ServiceStatus.Running);
+
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        handler.BeforeRespond = () => release.Task;
+        var oldTarget = service.Targets["rico"];
+        var sending = oldTarget.SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => handler.RequestsTo(MessagesPath).Length == 1);
+
+        var newTarget = new PushoverTarget { Name = "Rico", UserKey = "user-rico" };
+
+        // Act: a configuration reload replaces the target instance while the send is still waiting for Pushover.
+        service.Targets = new Dictionary<string, PushoverTarget> { ["rico"] = newTarget };
+        release.SetResult();
+        var result = await sending;
+
+        // Assert
+        var emergency = newTarget.Emergencies[result.Id!];
+        Assert.Empty(oldTarget.Emergencies);
+        await AsyncTestHelpers.WaitUntilAsync(() => handler.RequestsTo("/1/receipts/receipt1.json").Length >= 1);
+
+        // Act
+        await emergency.CancelAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Single(handler.RequestsTo("/1/receipts/receipt1/cancel.json"));
+        Assert.Equal(PushoverEmergencyStatus.Canceled, emergency.Status);
+    }
+
+    [Fact]
+    public async Task WhenATargetIsRemovedWhileAnEmergencyIsBeingSent_ThenTheEmergencyIsCanceled()
+    {
+        // Arrange
+        var (service, handler) = PushoverTestFactory.CreateService("rico");
+        handler.Respond = FakePushoverHandler.RespondWithReceipt("""{"status":1,"acknowledged":0,"expired":0}""");
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        handler.BeforeRespond = () => release.Task;
+        var target = service.Targets["rico"];
+        var sending = target.SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => handler.RequestsTo(MessagesPath).Length == 1);
+
+        // Act
+        service.Targets = new Dictionary<string, PushoverTarget>();
+        release.SetResult();
+        var result = await sending;
+
+        // Assert
+        Assert.Equal("receipt1", result.Id);
+        await AsyncTestHelpers.WaitUntilAsync(() => handler.RequestsTo("/1/receipts/receipt1/cancel.json").Length == 1);
+        Assert.Empty(target.Emergencies);
     }
 
     [Fact]
@@ -273,11 +332,15 @@ public class PushoverServiceTests
 
         // Assert
         await AsyncTestHelpers.WaitUntilAsync(() => second.Status == PushoverEmergencyStatus.Canceled);
-        await AsyncTestHelpers.WaitUntilAsync(() => logger.Warnings.Any(warning => warning.Contains("removed target", StringComparison.Ordinal)));
+        await AsyncTestHelpers.WaitUntilAsync(() => logger.Warnings.Count == 1);
+        var warning = Assert.Single(logger.Entries, entry => entry.Level == LogLevel.Warning);
+        Assert.Contains("removed Pushover targets", warning.Message);
+        Assert.Contains("1 of 2", warning.Exception!.Message);
+        Assert.Contains("receipt not found", warning.Exception.Message);
     }
 
     [Fact]
-    public void WhenATargetWithoutActiveEmergenciesIsRemoved_ThenNoCancelRequestIsMade()
+    public void WhenATargetWithoutActiveEmergenciesIsRemoved_ThenNoCancelRequestIsMadeAndItsServiceReferenceIsCleared()
     {
         // Arrange
         var (service, handler) = PushoverTestFactory.CreateService("rico");
@@ -288,7 +351,7 @@ public class PushoverServiceTests
 
         // Assert
         Assert.DoesNotContain(handler.Requests, request => request.Path.Contains("cancel", StringComparison.Ordinal));
-        Assert.Same(service, target.Service);
+        Assert.Null(target.Service);
     }
 
     [Fact]

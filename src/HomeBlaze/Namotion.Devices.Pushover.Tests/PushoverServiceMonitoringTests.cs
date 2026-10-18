@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Net;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Messaging;
@@ -187,7 +186,7 @@ public class PushoverServiceMonitoringTests
         var result = await target.SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
 
         // Assert: wait on the event list (not a status property) so the emergency's other fields, written under the
-        // target's lock before the event is raised, are already settled once this proceeds.
+        // tracker's lock before the event is raised, are already settled once this proceeds.
         await AsyncTestHelpers.WaitUntilAsync(() => CountOf(events) == 1);
 
         var emergency = target.Emergencies["receipt1"];
@@ -282,36 +281,56 @@ public class PushoverServiceMonitoringTests
         // Arrange
         var (service, handler) = PushoverTestFactory.CreateService("rico");
         service.MinimumReceiptPollingInterval = TimeSpan.FromMilliseconds(300);
-        handler.Respond = FakePushoverHandler.RespondWithReceipt(NotAcknowledged);
         var target = service.Targets["rico"];
+
+        // The poll time the service recorded for each receipt request, read while that request is answered, so the
+        // assertions do not depend on how quickly the test notices a request.
+        var pollTimes = new List<DateTimeOffset>();
+        var respondWithReceipt = FakePushoverHandler.RespondWithReceipt(NotAcknowledged);
+        handler.Respond = request =>
+        {
+            if (request.Path == ReceiptPath)
+            {
+                lock (pollTimes)
+                {
+                    pollTimes.Add(target.Emergencies["receipt1"].LastPolledAt!.Value);
+                }
+            }
+
+            return respondWithReceipt(request);
+        };
 
         await using var running = await PushoverTestFactory.StartAsync(service);
         await AsyncTestHelpers.WaitUntilAsync(() => service.Status == ServiceStatus.Running);
         await target.SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
         await AsyncTestHelpers.WaitUntilAsync(() => handler.RequestsTo(ReceiptPath).Length == 1);
-        var sinceFirstPoll = Stopwatch.StartNew();
 
         // Act: a configuration apply signals the loop immediately, well within the minimum poll interval.
         service.RequestValidation();
 
         // Assert
         await AsyncTestHelpers.WaitUntilAsync(() => handler.RequestsTo(ReceiptPath).Length == 2);
-        Assert.True(sinceFirstPoll.Elapsed >= service.MinimumReceiptPollingInterval);
+        lock (pollTimes)
+        {
+            Assert.True(pollTimes[0] - target.Emergencies["receipt1"].SentAt >= service.MinimumReceiptPollingInterval);
+            Assert.True(pollTimes[1] - pollTimes[0] >= service.MinimumReceiptPollingInterval);
+        }
     }
 
     [Fact]
     public void WhenALateReceiptPollArrivesForAnEmergencyThatAlreadyEnded_ThenItIsIgnored()
     {
         // Arrange
-        var target = new PushoverTarget();
+        var (service, _) = PushoverTestFactory.CreateService("rico");
+        var target = service.Targets["rico"];
         var events = new List<PushoverEmergencyAcknowledgedEvent>();
         using var subscription = target.Subscribe(CreateListObserver(events));
         var now = DateTimeOffset.UtcNow;
-        target.AddEmergency("receipt1", "Fire", "Kitchen", now);
-        target.ApplyReceipt("receipt1", new PushoverResponse { Status = 1, Expired = 1 });
+        var added = service.EmergencyTracker.Add("rico", "receipt1", "Fire", "Kitchen", now, now + target.EmergencyExpire);
+        service.EmergencyTracker.ApplyReceipt(added, new PushoverResponse { Status = 1, Expired = 1 });
 
         // Act
-        target.ApplyReceipt("receipt1", new PushoverResponse
+        service.EmergencyTracker.ApplyReceipt(added, new PushoverResponse
         {
             Status = 1,
             Acknowledged = 1,
@@ -354,7 +373,8 @@ public class PushoverServiceMonitoringTests
             ? (HttpStatusCode.BadRequest, """{"status":0,"errors":["receipt not found"]}""")
             : (HttpStatusCode.OK, """{"status":1,"receipt":"receipt1"}""");
         var target = service.Targets["rico"];
-        target.AddEmergency("receipt1", null, "Fire", DateTimeOffset.UtcNow - target.EmergencyExpire - TimeSpan.FromSeconds(1));
+        var sentAt = DateTimeOffset.UtcNow - target.EmergencyExpire - TimeSpan.FromSeconds(1);
+        service.EmergencyTracker.Add("rico", "receipt1", null, "Fire", sentAt, sentAt + target.EmergencyExpire);
 
         // Act
         await using var running = await PushoverTestFactory.StartAsync(service);

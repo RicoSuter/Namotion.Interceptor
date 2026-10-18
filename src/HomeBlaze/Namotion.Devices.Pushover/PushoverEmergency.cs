@@ -62,25 +62,31 @@ public partial class PushoverEmergency : ITitleProvider, IIconProvider
     [PropertyAttribute("Cancel", KnownAttributes.IsEnabled)]
     public bool Cancel_IsEnabled => Status == PushoverEmergencyStatus.Active;
 
-    // Not intercepted, for the same reason as Service on PushoverTarget. The target owns the emergency; a
-    // configuration reload moves it to the target instance that replaces its owner.
-    internal PushoverTarget Target { get; set; }
+    private readonly PushoverEmergencyTracker _tracker;
 
-    // The members below are written only under the lock of the owning Target.
-    internal DateTimeOffset ExpiresAt { get; set; }
+    /// <summary>
+    /// The key of the target in <see cref="PushoverService.Targets"/>, which stays the same when a configuration
+    /// reload replaces the target instance.
+    /// </summary>
+    internal string TargetKey { get; }
 
+    internal DateTimeOffset ExpiresAt { get; }
+
+    // The members below are written only under the lock of the tracker.
     internal DateTimeOffset? LastPolledAt { get; set; }
 
     internal DateTimeOffset? EndedAt { get; set; }
 
-    internal PushoverEmergency(PushoverTarget target, string receipt, string? title, string message, DateTimeOffset sentAt)
+    internal PushoverEmergency(
+        PushoverEmergencyTracker tracker, string targetKey, string receipt, string? title, string message, DateTimeOffset sentAt, DateTimeOffset expiresAt)
     {
-        Target = target;
+        _tracker = tracker;
+        TargetKey = targetKey;
         Receipt = receipt;
         Title = title;
         Message = message;
         SentAt = sentAt;
-        ExpiresAt = sentAt + target.EmergencyExpire;
+        ExpiresAt = expiresAt;
 
         Status = PushoverEmergencyStatus.Active;
         AcknowledgedAt = null;
@@ -92,5 +98,5 @@ public partial class PushoverEmergency : ITitleProvider, IIconProvider
     /// </summary>
     [Operation(Title = "Cancel", Icon = "NotificationsOff", Position = 1)]
     public Task CancelAsync(CancellationToken cancellationToken) =>
-        Target.CancelEmergencyAsync(this, cancellationToken);
+        _tracker.CancelAsync(this, cancellationToken);
 }

@@ -23,6 +23,7 @@ public partial class PushoverService : BackgroundService, IConfigurable, IMonito
 {
     private readonly PushoverClient _client;
     private readonly ILogger<PushoverService> _logger;
+    private readonly PushoverEmergencyTracker _emergencyTracker;
     private readonly SemaphoreSlim _signal = new(0, 1);
     private volatile bool _isValidationRequested = true;
 
@@ -72,10 +73,13 @@ public partial class PushoverService : BackgroundService, IConfigurable, IMonito
     // property instead, so a subscriber exception can always be logged.
     internal ILogger Logger => _logger;
 
+    internal PushoverEmergencyTracker EmergencyTracker => _emergencyTracker;
+
     public PushoverService(IHttpClientFactory httpClientFactory, ILogger<PushoverService> logger)
     {
         _client = new PushoverClient(httpClientFactory);
         _logger = logger;
+        _emergencyTracker = new PushoverEmergencyTracker(this);
 
         Name = string.Empty;
         ApplicationToken = null;
@@ -108,7 +112,7 @@ public partial class PushoverService : BackgroundService, IConfigurable, IMonito
     /// </summary>
     [Operation(Title = "Cancel all emergencies", Icon = "NotificationsOff", Position = 2)]
     public Task CancelAllEmergenciesAsync(CancellationToken cancellationToken) =>
-        PushoverTarget.CancelActiveEmergenciesAsync(Targets.Values.ToArray(), cancellationToken);
+        _emergencyTracker.CancelAllAsync(cancellationToken);
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
     {
@@ -152,7 +156,11 @@ public partial class PushoverService : BackgroundService, IConfigurable, IMonito
         return uniqueKey;
     }
 
-    internal async Task<PushoverResponse> SendAsync(PushoverTarget target, Notification notification, CancellationToken cancellationToken)
+    /// <summary>
+    /// Sends <paramref name="notification"/> to <paramref name="target"/> and returns its id: the receipt of an
+    /// emergency notification, which is then tracked under the key of the target, otherwise the request id.
+    /// </summary>
+    internal async Task<string?> SendAsync(PushoverTarget target, Notification notification, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(notification);
         PushoverMessageMapping.ValidatePriority(notification.Priority);
@@ -164,18 +172,21 @@ public partial class PushoverService : BackgroundService, IConfigurable, IMonito
             throw new InvalidOperationException($"The user key of the Pushover target '{target.Title}' is not configured.");
         }
 
-        var request = PushoverMessageMapping.Create(token, userKey, notification, target.EmergencyRetry, target.EmergencyExpire, _logger);
+        var targetKey = target.Key ?? throw new InvalidOperationException($"The target '{target.Title}' is not part of a Pushover service.");
+        var expire = target.EmergencyExpire;
+        var request = PushoverMessageMapping.Create(token, userKey, notification, target.EmergencyRetry, expire, _logger);
         var response = await _client.SendMessageAsync(request, cancellationToken);
 
         var now = DateTimeOffset.UtcNow;
         target.LastSentAt = now;
-        if (response.Receipt is { } receipt)
+        if (response.Receipt is not { } receipt)
         {
-            target.AddEmergency(receipt, request.Title, request.Message, now);
-            Signal();
+            return response.Request;
         }
 
-        return response;
+        _emergencyTracker.Add(targetKey, receipt, request.Title, request.Message, now, now + expire);
+        Signal();
+        return receipt;
     }
 
     internal async Task CancelReceiptAsync(string receipt, CancellationToken cancellationToken)
@@ -212,8 +223,8 @@ public partial class PushoverService : BackgroundService, IConfigurable, IMonito
         }
     }
 
-    // The back-reference is assigned here, not in OnTargetsChanged, so there is no window in which an attached
-    // target is reachable through Targets but its Service is not yet set.
+    // The back-references are assigned here, not in OnTargetsChanged, so there is no window in which an attached
+    // target is reachable through Targets but its Service, Key or Emergencies are not yet set.
     partial void OnTargetsChanging(ref Dictionary<string, PushoverTarget> newValue, ref bool cancel)
     {
         newValue ??= new Dictionary<string, PushoverTarget>();
@@ -222,26 +233,20 @@ public partial class PushoverService : BackgroundService, IConfigurable, IMonito
         {
             foreach (var (key, previousTarget) in current)
             {
-                if (newValue.TryGetValue(key, out var newTarget))
-                {
-                    // Same key, new instance: a configuration reload replaced the target object, so its
-                    // emergencies must move over for polling and cancellation to keep working.
-                    if (!ReferenceEquals(newTarget, previousTarget))
-                    {
-                        newTarget.AdoptEmergenciesFrom(previousTarget);
-                    }
-                }
-                else if (previousTarget.CancelActiveEmergenciesAfterRemoval(this))
+                if (!newValue.ContainsKey(key))
                 {
                     previousTarget.Service = null;
                 }
             }
         }
 
-        foreach (var target in newValue.Values)
+        foreach (var (key, target) in newValue)
         {
             target.Service = this;
+            target.Key = key;
         }
+
+        _emergencyTracker.SetTargets(newValue);
     }
 
     partial void OnTargetsChanged(Dictionary<string, PushoverTarget> newValue)

@@ -32,9 +32,10 @@ public partial class PushoverService
                 StatusMessage = null;
                 Status = ServiceStatus.Running;
 
-                var hasActiveEmergencies = await PollReceiptsAsync(token, stoppingToken);
-                var nextRemovalAt = RemoveFinishedEmergencies();
-                await WaitForSignalAsync(GetWaitTimeout(hasActiveEmergencies, nextRemovalAt), stoppingToken);
+                await PollReceiptsAsync(token, stoppingToken);
+                var now = DateTimeOffset.UtcNow;
+                var nextRemovalAt = _emergencyTracker.RemoveFinishedEmergencies(now);
+                await WaitForSignalAsync(_emergencyTracker.GetWaitTimeout(now, nextRemovalAt), stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -99,68 +100,21 @@ public partial class PushoverService
         exception.IsUserKeyInvalid ||
         (exception.StatusCode is { } statusCode && (int)statusCode is >= 400 and < 500 and not 429);
 
-    private async Task<bool> PollReceiptsAsync(string token, CancellationToken cancellationToken)
+    private async Task PollReceiptsAsync(string token, CancellationToken cancellationToken)
     {
-        var hasActiveEmergencies = false;
-        var now = DateTimeOffset.UtcNow;
-        foreach (var target in Targets.Values)
+        foreach (var emergency in _emergencyTracker.StartReceiptPolls(DateTimeOffset.UtcNow))
         {
-            foreach (var receipt in target.StartReceiptPolls(now, MinimumReceiptPollingInterval))
+            try
             {
-                try
-                {
-                    var response = await _client.GetReceiptAsync(token, receipt, cancellationToken);
-                    target.ApplyReceipt(receipt, response);
-                }
-                catch (PushoverException exception)
-                {
-                    _logger.LogWarning(exception, "Reading an emergency receipt of Pushover target {Target} failed", target.Title);
-                    target.ApplyReceiptError(receipt, DateTimeOffset.UtcNow);
-                }
+                var response = await _client.GetReceiptAsync(token, emergency.Receipt, cancellationToken);
+                _emergencyTracker.ApplyReceipt(emergency, response);
             }
-
-            hasActiveEmergencies |= target.HasActiveEmergencies;
-        }
-
-        return hasActiveEmergencies;
-    }
-
-    private DateTimeOffset? RemoveFinishedEmergencies()
-    {
-        DateTimeOffset? nextRemovalAt = null;
-        var now = DateTimeOffset.UtcNow;
-        foreach (var target in Targets.Values)
-        {
-            if (target.RemoveFinishedEmergencies(now, FinishedEmergencyRetention) is { } removalAt &&
-                (nextRemovalAt is null || removalAt < nextRemovalAt))
+            catch (PushoverException exception)
             {
-                nextRemovalAt = removalAt;
+                _logger.LogWarning(exception, "Reading an emergency receipt of Pushover target {Target} failed", emergency.TargetKey);
+                _emergencyTracker.ApplyReceiptError(emergency, DateTimeOffset.UtcNow);
             }
         }
-
-        return nextRemovalAt;
-    }
-
-    // The earlier of the next receipt poll and the next removal of a finished emergency; with neither pending, the
-    // loop waits for a signal only.
-    private TimeSpan GetWaitTimeout(bool hasActiveEmergencies, DateTimeOffset? nextRemovalAt)
-    {
-        var timeout = hasActiveEmergencies ? ReceiptPollingInterval : Timeout.InfiniteTimeSpan;
-        if (nextRemovalAt is { } removalAt)
-        {
-            var untilRemoval = removalAt - DateTimeOffset.UtcNow;
-            if (untilRemoval < TimeSpan.Zero)
-            {
-                untilRemoval = TimeSpan.Zero;
-            }
-
-            if (timeout == Timeout.InfiniteTimeSpan || untilRemoval < timeout)
-            {
-                timeout = untilRemoval;
-            }
-        }
-
-        return timeout;
     }
 
     private async Task WaitForSignalAsync(TimeSpan timeout, CancellationToken cancellationToken)

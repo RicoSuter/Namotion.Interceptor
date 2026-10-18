@@ -92,7 +92,7 @@ Sending an `Emergency` notification adds a Pushover emergency subject to the tar
 
 While an emergency notification is active, the service reads its receipt every 10 seconds; otherwise it makes no requests. An emergency that is no longer active is removed from `Emergencies` 24 hours after it ended. `Emergencies` is kept in memory only: after a restart the list is empty, and an emergency that was still active keeps repeating on the phone until it is acknowledged or expires, without HomeBlaze tracking or canceling it.
 
-When a configuration reload replaces a target but keeps its key, its emergencies move to the new target and can still be canceled. When a target is removed, its active emergencies are canceled.
+The service tracks the emergencies by the key of their target. When a configuration reload replaces a target but keeps its key, the new target shows the same emergencies and can still cancel them, including one whose send was still running during the reload. When a target is removed, its active emergencies are canceled, including one whose send completes after the removal.
 
 ## Events
 
