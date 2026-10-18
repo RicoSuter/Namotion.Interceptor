@@ -54,7 +54,7 @@ public class McpServerConfiguration
     public string PathPrefix { get; init; } = "";
 
     /// <summary>
-    /// Subject types to exclude from browse and search results.
+    /// Subject types, and the types derived from them, to exclude from browse and search results and from list_types.
     /// </summary>
     public Type[] ExcludeTypes { get; init; } = [];
 

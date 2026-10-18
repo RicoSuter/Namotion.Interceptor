@@ -460,6 +460,61 @@ public class BrowseToolTests
     }
 
     [Fact]
+    public async Task WhenTheChildAtTheDepthBoundaryIsOfAnExcludedType_ThenItsPropertyIsLeftOut()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+
+        var room = new TestRoom(context) { Name = "Living Room", Temperature = 21.5m };
+        room.Device = new TestDevice(context) { DeviceName = "Light", IsOn = true };
+
+        var config = new McpServerConfiguration { PathProvider = DefaultPathProvider.Instance, ExcludeTypes = [typeof(TestDevice)] };
+        var browseTool = new McpToolFactory(room, config).CreateTools().First(t => t.Name == "browse");
+
+        // Act
+        var input = JsonSerializer.SerializeToElement(new { format = "json", depth = 0 });
+        var result = await browseTool.Handler(input, CancellationToken.None);
+        var json = JsonSerializer.SerializeToElement(result);
+
+        // Assert
+        var node = json.GetProperty("result");
+        Assert.False(node.TryGetProperty("properties", out var properties) && properties.TryGetProperty("Device", out _));
+    }
+
+    [Fact]
+    public async Task WhenSomeChildrenAtTheDepthBoundaryAreExcluded_ThenTheCollapsedPropertyCountsAndTypesOnlyTheOthers()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+
+        var group = new TestMixedGroup(context);
+        group.Items = new Dictionary<string, IInterceptorSubject>
+        {
+            ["Light"] = new TestDevice(context) { DeviceName = "Light" },
+            ["Kitchen"] = new TestSensor(context),
+            ["Cellar"] = new TestSensor(context)
+        };
+
+        var config = new McpServerConfiguration { PathProvider = DefaultPathProvider.Instance };
+        var browseTool = new McpToolFactory(group, config).CreateTools().First(t => t.Name == "browse");
+
+        // Act
+        var input = JsonSerializer.SerializeToElement(new { format = "json", depth = 0, excludeTypes = new[] { nameof(TestDevice) } });
+        var result = await browseTool.Handler(input, CancellationToken.None);
+        var json = JsonSerializer.SerializeToElement(result);
+
+        // Assert
+        var items = json.GetProperty("result").GetProperty("properties").GetProperty("Items");
+        Assert.True(items.GetProperty("isCollapsed").GetBoolean());
+        Assert.Equal(2, items.GetProperty("count").GetInt32());
+        Assert.Equal(nameof(TestSensor), items.GetProperty("itemType").GetString());
+    }
+
+    [Fact]
     public async Task WhenDepthBoundaryWithNullSingleChild_ThenChildIsOmitted()
     {
         // Arrange

@@ -50,7 +50,9 @@ internal class ListTypesTool
         var kind = input.TryGetProperty("kind", out var kindElement) ? kindElement.GetString() : "all";
         var typeSearch = input.TryGetProperty("type", out var typeSearchElement) ? typeSearchElement.GetString() : null;
 
-        var filteredTypes = allTypes.AsEnumerable();
+        // A type whose subjects browse and search leave out is not offered either.
+        var filteredTypes = allTypes.Where(typeInfo =>
+            !_configuration.ExcludeTypes.Any(excludedType => excludedType.IsAssignableFrom(typeInfo.Type)));
 
         if (kind == "interfaces")
         {

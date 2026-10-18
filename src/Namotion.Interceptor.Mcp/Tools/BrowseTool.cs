@@ -278,14 +278,31 @@ internal class BrowseTool
             }
             else if (property.Children.Length > 0)
             {
-                // Collapsed at depth boundary
-                var count = property.Children.Length;
-                string? itemType = null;
-                var firstType = property.Children[0].Subject.GetType();
-                if (property.Children.All(child => child.Subject.GetType() == firstType))
+                // Collapsed at depth boundary, with the count and the type of the children that are not excluded, as
+                // an expanded property would list them. A property left without one is not listed.
+                var count = 0;
+                Type? firstType = null;
+                var isOneType = true;
+                foreach (var child in property.Children)
                 {
-                    itemType = firstType.Name;
+                    if (child.Subject.TryGetRegisteredSubject() is { } childRegistered &&
+                        McpToolHelper.ShouldExcludeByType(childRegistered, _configuration.ExcludeTypes, options.ExcludeTypes))
+                    {
+                        continue;
+                    }
+
+                    var childType = child.Subject.GetType();
+                    firstType ??= childType;
+                    isOneType &= childType == firstType;
+                    count++;
                 }
+
+                if (firstType is null)
+                {
+                    continue;
+                }
+
+                var itemType = isOneType ? firstType.Name : null;
 
                 if (property.IsSubjectReference)
                 {

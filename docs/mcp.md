@@ -151,6 +151,8 @@ Browse the subject tree starting at a path. Use `text` format (default) for over
 | `excludeTypes` | (none) | Exclude subjects matching these type/interface names |
 | `maxSubjects` | server limit | Maximum subjects to return |
 
+Subjects of a type in `ExcludeTypes` of the configuration, or matching `excludeTypes`, are left out of the tree, also of the count and the item type of a property collapsed at the depth limit. A collapsed property left without a child is not listed.
+
 ### `search`
 
 Search across all subjects. Use `text` format (default) for overview, `json` for exact structured data.
@@ -248,7 +250,7 @@ An application can refuse writes to some properties with `PropertyWriteFilter` o
 
 ### `list_types`
 
-List available types from registered type providers. Interface types include property and method schemas; concrete types list their implemented interfaces.
+List available types from registered type providers. Interface types include property and method schemas; concrete types list their implemented interfaces. The types in `ExcludeTypes` of the configuration, and the types derived from them, are not listed.
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
@@ -279,6 +281,9 @@ var config = new McpServerConfiguration
 
     // Optional: refuse writes to some properties; return null to allow, else the reason for the client
     PropertyWriteFilter = property => property.Name == "Password" ? "Passwords cannot be changed." : null,
+
+    // Optional: subject types that browse, search and list_types leave out
+    ExcludeTypes = [typeof(MyInternalSubject)],
 
     // Safety limits
     MaxDepth = 10,
