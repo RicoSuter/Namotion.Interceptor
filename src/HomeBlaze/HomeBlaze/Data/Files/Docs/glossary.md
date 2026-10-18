@@ -60,7 +60,7 @@ Marks a property for display in the UI property panel. Options: `Name`, `Positio
 Marks a computed property that auto-updates when its dependencies change. Must be expression-bodied (`=>`).
 
 ### `[Operation]`
-Marks a method as an executable action from the UI. Options: `Title`, `Description`, `Icon`, `Position`, `RequiresConfirmation`, `Audience` (people, agents or both). An operation with `RequiresConfirmation` asks for confirmation in the UI and cannot be called through MCP, neither by AI agents nor by external clients, see [AI Agents](administration/ai-agents.md#tools-and-permissions).
+Marks a method as an executable action from the UI. Options: `Title`, `Description`, `Icon`, `Position`, `RequiresConfirmation`; `[ExcludeFrom]` beside it decides where it is offered. An operation with `RequiresConfirmation` asks for confirmation in the UI and cannot be called through MCP, neither by AI agents nor by external clients, see [AI Agents](administration/ai-agents.md#tools-and-permissions).
 
 ### `[Query]`
 Marks a method as a read-only query (no side effects). Similar to `[Operation]` but semantically non-mutating.
@@ -75,6 +75,9 @@ Associates metadata with another property (e.g., minimum/maximum values).
 [PropertyAttribute(nameof(TargetSpeed), "Minimum")]
 public partial int TargetSpeed_Minimum { get; set; }
 ```
+
+### `[ExcludeFrom]`
+Keeps a subject type or a method out of user interfaces, agents or both: `[ExcludeFrom(ExclusionTarget.UserInterface)]`, `Agents` or `All`. It decides where something is offered, not who may reach it. See [Building Subjects: Excluding Subjects and Methods](development/building-subjects.md#excluding-subjects-and-methods).
 
 ---
 
@@ -122,7 +125,11 @@ Set via markdown frontmatter on `.md` files — see [Markdown Pages — Frontmat
 
 ### Metadata File
 
-A `.metadata.json` in a folder holds the title, icon and order of the folder, and an `X.metadata.json` beside a subject file `X.json` holds the navigation title, icon, location and alignment of that subject. See [Navigation Order and Folder Metadata](administration/pages.md#navigation-order-and-folder-metadata).
+A `.metadata.json` in a folder holds the title, icon and order of the folder, and an `X.metadata.json` beside a subject file `X.json` holds the navigation title, icon, location and alignment of that subject. See [Navigation Order and Folder Metadata](administration/pages.md#navigation-order-and-folder-metadata). Agents change them through the [Metadata Subject](#metadata-subject).
+
+### Metadata Subject
+
+The subject at `<path>/HomeBlaze:Metadata` of every subject stored as a JSON file, every folder and the storage root, with the queries Get Metadata and Get Order and the operations Set Metadata and Set Order. The browser and the MCP tools `browse`, `search` and `list_types` do not list it; agents call it by its path. See [Ordering and Metadata by Agents](administration/pages.md#ordering-and-metadata-by-agents).
 
 ### Navigation Location
 

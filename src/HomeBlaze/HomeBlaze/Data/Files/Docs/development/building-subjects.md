@@ -465,7 +465,6 @@ public partial class Motor
 | `Icon` | MudBlazor icon name | `"Speed"`, `"Stop"` |
 | `Position` | Sort position in operations list | `1`, `2`, `3` |
 | `RequiresConfirmation` | Show confirmation dialog before executing | `true` |
-| `Audience` | Who the method is for: `People` (user interfaces such as the browser), `Agents` (agent interfaces such as MCP) or `All` (the default) | `MethodAudience.Agents` |
 
 **Key points:**
 - Operations appear as buttons in the subject's property panel, grouped by [category](#categories)
@@ -476,12 +475,13 @@ public partial class Motor
 - Operations with `RequiresConfirmation = true` show a confirmation dialog first and cannot be called through MCP, see [AI Agents](../administration/ai-agents.md#tools-and-permissions). Use it for operations a person must decide on, such as unlocking, rebooting or installing code. An implementation of an interface operation that requires confirmation, or an override of a base class operation that requires it, requires confirmation as well, also when it declares its own `[Operation]`; a `[Query]` that implements or overrides such an operation becomes an operation that requires confirmation
 - Do not require confirmation for safety actions such as an emergency stop; agents must be able to call them
 
-**Audience:**
+**Where a method is offered:**
 
-`Audience` is available on `[Operation]` and `[Query]`. A method for `People` only is listed in the browser and in the path picker of widgets, but not by MCP `list_methods`, and `invoke_query` and `invoke_operation` treat it as unknown. A method for `Agents` only is listed and run by MCP, but shows no button in the browser and is not offered by the path picker. A path to it that a person types into a widget, such as an operation button, still runs it. Use `Agents` for methods that give an agent what a person does through other controls, such as reading and changing the order of a folder that people change by dragging:
+A method is offered everywhere by default. `[ExcludeFrom(ExclusionTarget.Agents)]` on an `[Operation]` or `[Query]` keeps it out of MCP `list_methods` and `$methods`, and `invoke_query`, `invoke_operation` and the Markdown tools treat it as unknown. `[ExcludeFrom(ExclusionTarget.UserInterface)]` gives it no button in the browser and keeps it out of the path picker and the widget pickers, while agents still list and run it. A path to it that a person types into a widget, such as an operation button, still runs it: the attribute decides where a method is offered, not who may run it. Use `UserInterface` for a method that gives an agent what a person does through other controls, as the metadata subject does for the order that people change by dragging:
 
 ```csharp
-[Query(Title = "Get Order", Description = "Gets the names of the children in the order in which they are shown.", Audience = MethodAudience.Agents)]
+[Query(Title = "Get Order", Description = "Gets the names of the children in the order in which they are shown.")]
+[ExcludeFrom(ExclusionTarget.UserInterface)]
 public Task<string[]> GetOrderAsync(CancellationToken cancellationToken)
 ```
 
@@ -1059,24 +1059,28 @@ In an Edit component of your own, use the `SubjectPathField` component for a pat
 
 ---
 
-### Excluding Subjects from Browsing
+### Excluding Subjects and Methods
 
-Internal implementation subjects that should not appear in the UI browser panel or MCP tools can be marked with the `[ExcludeFromBrowsing]` attribute:
+`[ExcludeFrom(ExclusionTarget)]` on a subject class keeps the subjects of that type, and of the types derived from it, out of the given targets, and on an `[Operation]` or `[Query]` it does the same for the method:
 
 ```csharp
 using HomeBlaze.Abstractions.Attributes;
 
 [InterceptorSubject]
-[ExcludeFromBrowsing]
+[ExcludeFrom(ExclusionTarget.All)]
 public partial class HtmlSegment
 {
     // Internal implementation detail, not user-facing
 }
 ```
 
-This hides the subject from:
-- The Blazor browser/panel tree view
-- MCP `browse` and `search` tool results
+| Target | A subject type is not | A method is not |
+|--------|-----------------------|-----------------|
+| `UserInterface` | listed or counted as a child in the browser, offered by the path picker, or walked by the navigation | shown as a button, or offered by the path picker and the widget pickers |
+| `Agents` | listed by MCP `browse` and `search` and by the built-in agents | listed by `list_methods` and `$methods`, or run by `invoke_query`, `invoke_operation`, the Markdown tools and the built-in agents |
+| `All` | any of the above, also for targets added later | any of the above, also for targets added later |
+
+A subject excluded from agents is still reached by its explicit path, as the metadata subject at `<path>/HomeBlaze:Metadata` is. Code checks a subject with the extension `IsExcludedFrom(target)` and a type with `ExcludeFromAttribute.IsExcluded(type, target)`.
 
 Use this for internal subjects that are part of a parent subject's implementation but have no meaning to end users or AI agents (e.g., parsed HTML segments, render expressions).
 
