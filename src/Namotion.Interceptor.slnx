@@ -71,6 +71,9 @@
     <Project Path="HomeBlaze/Namotion.Devices.MyStrom/Namotion.Devices.MyStrom.csproj" />
     <Project Path="HomeBlaze/Namotion.Devices.MyStrom.Tests/Namotion.Devices.MyStrom.Tests.csproj" />
     <Project Path="HomeBlaze/Namotion.Devices.MyStrom.HomeBlaze/Namotion.Devices.MyStrom.HomeBlaze.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.Nuki/Namotion.Devices.Nuki.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.Nuki.Tests/Namotion.Devices.Nuki.Tests.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.Nuki.HomeBlaze/Namotion.Devices.Nuki.HomeBlaze.csproj" />
     <Project Path="HomeBlaze/Namotion.Devices.Sonos/Namotion.Devices.Sonos.csproj" />
     <Project Path="HomeBlaze/Namotion.Devices.Sonos.Tests/Namotion.Devices.Sonos.Tests.csproj" />
     <Project Path="HomeBlaze/Namotion.Devices.Sonos.HomeBlaze/Namotion.Devices.Sonos.HomeBlaze.csproj" />
@@ -95,9 +98,9 @@
     <Project Path="HomeBlaze/Namotion.Devices.FritzBox/Namotion.Devices.FritzBox.csproj" />
     <Project Path="HomeBlaze/Namotion.Devices.FritzBox.Tests/Namotion.Devices.FritzBox.Tests.csproj" />
     <Project Path="HomeBlaze/Namotion.Devices.FritzBox.HomeBlaze/Namotion.Devices.FritzBox.HomeBlaze.csproj" />
-    <Project Path="HomeBlaze/Namotion.Devices.Pushover/Namotion.Devices.Pushover.csproj" />
-    <Project Path="HomeBlaze/Namotion.Devices.Pushover.Tests/Namotion.Devices.Pushover.Tests.csproj" />
-    <Project Path="HomeBlaze/Namotion.Devices.Pushover.HomeBlaze/Namotion.Devices.Pushover.HomeBlaze.csproj" />
+    <Project Path="HomeBlaze/Namotion.Services.Pushover/Namotion.Services.Pushover.csproj" />
+    <Project Path="HomeBlaze/Namotion.Services.Pushover.Tests/Namotion.Services.Pushover.Tests.csproj" />
+    <Project Path="HomeBlaze/Namotion.Services.Pushover.HomeBlaze/Namotion.Services.Pushover.HomeBlaze.csproj" />
   </Folder>
   <Folder Name="/HomeBlaze/History/">
     <Project Path="HomeBlaze/HomeBlaze.History/HomeBlaze.History.csproj" />

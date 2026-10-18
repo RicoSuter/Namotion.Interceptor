@@ -10,13 +10,15 @@ namespace Namotion.Interceptor.Mcp.Tools;
 public static class McpValueConverter
 {
     // Members are listed to agents in camel case and bound in any case. An unknown member is rejected like an unknown
-    // parameter, so a misspelled member cannot silently fall back to its default.
+    // parameter, so a misspelled member cannot silently fall back to its default; for the same reason a constructor
+    // parameter without a default value is required.
     internal static readonly JsonSerializerOptions SerializerOptions = new()
     {
         TypeInfoResolver = new DefaultJsonTypeInfoResolver(),
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         PropertyNameCaseInsensitive = true,
         UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
+        RespectRequiredConstructorParameters = true,
         Converters = { new JsonStringEnumConverter(allowIntegerValues: false) }
     };
 
@@ -26,8 +28,9 @@ public static class McpValueConverter
     /// Any other type may also arrive as a string holding its JSON, such as <c>"0.5"</c> or <c>"true"</c>, which some
     /// clients send. An enum accepts a defined name, ignoring case, or a defined number; a <see cref="FlagsAttribute"/>
     /// enum also accepts combinations. Nested values are stricter, for <c>set_property</c> values as for method
-    /// arguments: an enum member of an object or an enum element of a collection accepts only defined names, and an
-    /// object with a member its type does not have is rejected.
+    /// arguments: an enum member of an object or an enum element of a collection accepts only defined names, an
+    /// object with a member its type does not have is rejected, and so is one that omits a constructor parameter
+    /// without a default value.
     /// </summary>
     /// <exception cref="JsonException">The value cannot be converted to <paramref name="type"/>.</exception>
     public static object? Deserialize(JsonElement value, Type type)

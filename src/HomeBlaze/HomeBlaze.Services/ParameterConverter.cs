@@ -35,11 +35,12 @@ public static class ParameterConverter
         TypeInfoResolver = new DefaultJsonTypeInfoResolver(),
         PropertyNameCaseInsensitive = true,
         UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
+        RespectRequiredConstructorParameters = true,
         NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals,
         Converters = { new JsonStringEnumConverter(allowIntegerValues: false) }
     };
 
-    // Weak, so that the types of an unloaded plugin are not kept alive.
+    // Weak keys do not hold the type, but the shared serializer options cache its metadata for the process lifetime.
     private static readonly ConditionalWeakTable<Type, ObjectParameterMember[]> ObjectMembersByType = new();
 
     /// <summary>
@@ -68,18 +69,23 @@ public static class ParameterConverter
 
     /// <summary>
     /// Checks if a value of the type can be entered as JSON: a concrete, non-delegate type that is no supported
-    /// simple value.
+    /// simple value, no by-ref, pointer or by-ref-like type and has no open generic parameters.
     /// </summary>
     public static bool IsJsonObject(Type type)
     {
         var actualType = Nullable.GetUnderlyingType(type) ?? type;
-        return !IsSupported(actualType) && actualType != typeof(object) && !actualType.IsPrimitive &&
+        return IsSerializable(actualType) && !IsSupported(actualType) && actualType != typeof(object) && !actualType.IsPrimitive &&
                !actualType.IsAbstract && !actualType.IsInterface && !typeof(Delegate).IsAssignableFrom(actualType) &&
                !typeof(IInterceptorSubject).IsAssignableFrom(actualType);
     }
 
+    // System.Text.Json throws an ArgumentException for any other type instead of describing it.
+    private static bool IsSerializable(Type type) =>
+        !type.IsByRef && !type.IsPointer && !type.IsByRefLike && !type.ContainsGenericParameters;
+
     /// <summary>
-    /// Gets the members System.Text.Json sets when it reads an object type, including init-only members, or none for
+    /// Gets the members System.Text.Json sets when it reads an object type, including init-only members and members set
+    /// only through the constructor, or none for
     /// a type that is not read as a JSON object or that System.Text.Json cannot describe. The result is cached per type.
     /// </summary>
     public static IReadOnlyList<ObjectParameterMember> GetObjectMembers(Type type) =>
@@ -87,6 +93,11 @@ public static class ParameterConverter
 
     private static ObjectParameterMember[] BuildObjectMembers(Type type)
     {
+        if (!IsSerializable(type))
+        {
+            return [];
+        }
+
         JsonTypeInfo typeInfo;
         try
         {
@@ -99,10 +110,14 @@ public static class ParameterConverter
         }
 
         return typeInfo.Kind != JsonTypeInfoKind.Object ? [] : typeInfo.Properties
-            .Where(property => property.Set is not null)
-            .Select(property => new ObjectParameterMember(property.Name, property.PropertyType, property.IsRequired))
+            .Where(property => property.Set is not null || property.AssociatedParameter is not null)
+            .Select(property => new ObjectParameterMember(property.Name, property.PropertyType, IsRequired(property)))
             .ToArray();
     }
+
+    // Mirrors how RespectRequiredConstructorParameters requires a constructor parameter.
+    private static bool IsRequired(JsonPropertyInfo property) =>
+        property.IsRequired || property.AssociatedParameter is { HasDefaultValue: false, IsMemberInitializer: false };
 
     /// <summary>
     /// Tries to create an object from the string inputs of its members, keyed by <see cref="ObjectParameterMember.Name"/>.

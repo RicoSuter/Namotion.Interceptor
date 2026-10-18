@@ -1,0 +1,29 @@
+using HomeBlaze.Abstractions.Messaging;
+
+namespace Namotion.Services.Pushover;
+
+/// <summary>
+/// A recipient acknowledged an emergency notification of a <see cref="PushoverTarget"/>. Emitted once per emergency.
+/// </summary>
+public sealed record PushoverEmergencyAcknowledgedEvent : IEvent
+{
+    /// <summary>
+    /// When the recipient acknowledged the notification.
+    /// </summary>
+    public required DateTimeOffset Timestamp { get; init; }
+
+    /// <summary>
+    /// The key of the target in <see cref="PushoverService.Targets"/>.
+    /// </summary>
+    public required string TargetKey { get; init; }
+
+    /// <summary>
+    /// The acknowledged emergency.
+    /// </summary>
+    public required PushoverEmergency Emergency { get; init; }
+
+    /// <summary>
+    /// The receipt of the emergency, the same as the <see cref="NotificationResult.Id"/> its send returned.
+    /// </summary>
+    public required string Id { get; init; }
+}

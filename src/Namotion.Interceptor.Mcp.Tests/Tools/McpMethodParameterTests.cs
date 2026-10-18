@@ -126,6 +126,38 @@ public class McpMethodParameterTests
     }
 
     [Fact]
+    public void WhenRecordIsPositional_ThenTheSchemaRequiresConstructorParametersWithoutDefault()
+    {
+        // Act
+        var parameter = McpMethodParameter.Create("command", typeof(TestCommand));
+
+        // Assert
+        var schema = parameter.Schema!.Value;
+        Assert.Equal(["target", "level", "mode"], schema.GetProperty("properties").EnumerateObject().Select(property => property.Name));
+        Assert.Equal(["target", "level"], schema.GetProperty("required").EnumerateArray().Select(name => name.GetString()));
+    }
+
+    [Fact]
+    public void WhenParameterIsByRefPointerByRefLikeOrOpenGeneric_ThenItHasNoSchema()
+    {
+        // Arrange
+        Type[] types =
+        [
+            typeof(int).MakeByRefType(),
+            typeof(int).MakePointerType(),
+            typeof(Span<int>),
+            typeof(List<>),
+            typeof(List<>).GetGenericArguments()[0]
+        ];
+
+        // Act
+        var parameters = types.Select(type => McpMethodParameter.Create("value", type)).ToArray();
+
+        // Assert
+        Assert.All(parameters, parameter => Assert.Null(parameter.Schema));
+    }
+
+    [Fact]
     public void WhenMemberNamesCollide_ThenTheParameterHasNoSchema()
     {
         // Act
@@ -148,6 +180,8 @@ public class McpMethodParameterTests
 
         public TestPriority Priority { get; init; }
     }
+
+    public sealed record TestCommand(string Target, int Level, string Mode = "Auto");
 
     public enum TestPriority
     {

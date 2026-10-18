@@ -119,7 +119,7 @@ The service and each target implement `IObservable<PushoverEmergencyAcknowledged
 
 ```json
 {
-  "$type": "Namotion.Devices.Pushover.PushoverService",
+  "$type": "Namotion.Services.Pushover.PushoverService",
   "name": "Pushover",
   "applicationToken": "your-application-token",
   "targets": {

@@ -44,7 +44,8 @@ public class OperationEnabledAttributeTests
         return application.GetReferencedAssemblies()
             .Where(name => name.Name is { } assemblyName &&
                 (assemblyName.StartsWith("HomeBlaze", StringComparison.Ordinal) ||
-                 assemblyName.StartsWith("Namotion.Devices", StringComparison.Ordinal)))
+                 assemblyName.StartsWith("Namotion.Devices", StringComparison.Ordinal) ||
+                 assemblyName.StartsWith("Namotion.Services", StringComparison.Ordinal)))
             .Select(Assembly.Load)
             .Prepend(application)
             .ToList();
