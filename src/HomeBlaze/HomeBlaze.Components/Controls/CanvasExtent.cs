@@ -37,11 +37,19 @@ internal static class CanvasExtent
         scale == CanvasScale.FitWidth && !isEditing && designWidth > 0;
 
     /// <summary>
-    /// Gets the factor a canvas is drawn at: the available width, or the least width when the available one is smaller,
-    /// over the design width for a canvas that <see cref="IsScaled"/>, else 1, also while the available width is unknown.
+    /// Gets the CSS width a canvas that <see cref="IsScaled"/> is drawn at: the width of its frame, which must be an
+    /// inline-size container, but no less than the least width.
     /// </summary>
-    public static double GetFactor(CanvasScale scale, bool isEditing, int designWidth, double availableWidth, int? minWidth) =>
-        IsScaled(scale, isEditing, designWidth) && availableWidth > 0
-            ? Math.Max(availableWidth, minWidth ?? 0) / designWidth
-            : 1;
+    public static string GetDrawnWidth(int? minWidth) =>
+        minWidth is { } pixels
+            ? string.Create(CultureInfo.InvariantCulture, $"max(100cqw, {pixels}px)")
+            : "100cqw";
+
+    /// <summary>
+    /// Gets the CSS number a canvas that <see cref="IsScaled"/> is drawn at: its <see cref="GetDrawnWidth"/> over its
+    /// design width.
+    /// </summary>
+    // CSS divides a length by a length only through the tangent of the angle between them.
+    public static string GetFactor(int designWidth, int? minWidth) =>
+        string.Create(CultureInfo.InvariantCulture, $"tan(atan2({GetDrawnWidth(minWidth)}, {designWidth}px))");
 }

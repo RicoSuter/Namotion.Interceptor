@@ -988,7 +988,7 @@ namespace HomeBlaze.Components.Components
         public System.Threading.Tasks.Task SaveAsync(System.Threading.CancellationToken cancellationToken) { }
     }
     [HomeBlaze.Components.Abstractions.Attributes.SubjectComponent(HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType.Widget, typeof(HomeBlaze.Components.CanvasLayout))]
-    public class CanvasLayoutWidget : Microsoft.AspNetCore.Components.ComponentBase, HomeBlaze.Components.Abstractions.ISubjectComponent, System.IAsyncDisposable
+    public class CanvasLayoutWidget : Microsoft.AspNetCore.Components.ComponentBase, HomeBlaze.Components.Abstractions.ISubjectComponent
     {
         public CanvasLayoutWidget() { }
         [Microsoft.AspNetCore.Components.CascadingParameter(Name="IsEditing")]
@@ -998,11 +998,7 @@ namespace HomeBlaze.Components.Components
         [Microsoft.AspNetCore.Components.Parameter]
         public Namotion.Interceptor.IInterceptorSubject? Subject { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
-        public System.Threading.Tasks.ValueTask DisposeAsync() { }
         protected override void OnAfterRender(bool firstRender) { }
-        protected override System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender) { }
-        [Microsoft.JSInterop.JSInvokable]
-        public System.Threading.Tasks.Task OnFrameWidthChanged(double width) { }
     }
     [HomeBlaze.Components.Abstractions.Attributes.SubjectComponent(HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType.Edit, typeof(HomeBlaze.Components.CanvasNode?))]
     public class CanvasNodeEditComponent : Microsoft.AspNetCore.Components.ComponentBase, HomeBlaze.Components.Abstractions.ISubjectComponent, HomeBlaze.Components.Abstractions.ISubjectEditComponent, System.IDisposable

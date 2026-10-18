@@ -475,6 +475,54 @@ public class CanvasLayoutTests
         await AssertWheelScrollsPageAsync(page, canvasBox.Right - 40, canvasBox.Bottom - 40);
     }
 
+    [Fact]
+    public async Task WhenCanvasThatFitsTheWidthIsInTheFirstTab_ThenItIsScaledToThePageWhenThePageLoads()
+    {
+        // Arrange
+        await _fixture.WriteDemoPageAsync(ScratchPage, CreateTabbedCanvasPage());
+
+        // Act
+        var page = await OpenTabbedCanvasPageAsync();
+
+        // Assert: the 1104 pixel design width is wider than the page, so an unscaled canvas would stand out of its frame.
+        await WaitForCanvasToFitItsFrameAsync(page.GetByTestId("canvas-scale-frame").First);
+    }
+
+    [Fact]
+    public async Task WhenPageIsNotInteractiveYet_ThenACanvasThatFitsTheWidthIsAlreadyScaledToThePage()
+    {
+        // Arrange: without the connection to the server the page stays as it was prerendered.
+        await _fixture.WriteDemoPageAsync(ScratchPage, CreateTabbedCanvasPage());
+        var page = await _fixture.CreatePageAsync(new BrowserNewContextOptions
+        {
+            ViewportSize = new ViewportSize { Width = ViewportWidth, Height = ViewportHeight },
+        });
+        await page.RouteAsync("**/_blazor/**", route => route.AbortAsync());
+
+        // Act
+        await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/{ScratchPage}");
+
+        // Assert
+        await WaitForCanvasToFitItsFrameAsync(page.GetByTestId("canvas-scale-frame").First);
+    }
+
+    [Fact]
+    public async Task WhenTabWithACanvasThatFitsTheWidthIsSelected_ThenTheCanvasIsScaledToThePage()
+    {
+        // Arrange
+        await _fixture.WriteDemoPageAsync(ScratchPage, CreateTabbedCanvasPage());
+        var page = await OpenTabbedCanvasPageAsync();
+        await WaitForCanvasToFitItsFrameAsync(page.GetByTestId("canvas-scale-frame").First);
+
+        // Act
+        await page.GetByTestId("tab-layout").GetByRole(AriaRole.Tab, new() { Name = "B" }).ClickAsync();
+
+        // Assert
+        var frame = page.GetByTestId("canvas-scale-frame").Filter(new() { HasText = "Right edge B" });
+        await Assertions.Expect(frame).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await WaitForCanvasToFitItsFrameAsync(frame);
+    }
+
     private async Task AssertWheelScrollsPageAsync(Func<Box, (double X, double Y)> getTarget)
     {
         var page = await OpenCanvasPageAsync(withTextBelow: true);
@@ -661,6 +709,52 @@ public class CanvasLayoutTests
     private static Task<double> GetScrollPositionAsync(IPage page)
     {
         return page.EvaluateAsync<double>($"() => ({ScrollPositionScript})('.canvas-layout-container')");
+    }
+
+    private async Task<IPage> OpenTabbedCanvasPageAsync()
+    {
+        var page = await _fixture.CreatePageAsync(new BrowserNewContextOptions
+        {
+            ViewportSize = new ViewportSize { Width = ViewportWidth, Height = ViewportHeight },
+        });
+        await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/{ScratchPage}");
+        await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+        await page.WaitUntilInteractiveAsync(Timeout);
+        return page;
+    }
+
+    // The transformed canvas is as wide as its frame once it is scaled to it, and as wide as its design width before.
+    private static async Task WaitForCanvasToFitItsFrameAsync(ILocator frame)
+    {
+        await frame.Locator(".canvas-node").First.WaitForAsync(new() { Timeout = Timeout });
+        await frame.Page.WaitForFunctionAsync(
+            """
+            frame => {
+                const frameWidth = frame.getBoundingClientRect().width;
+                const canvasWidth = frame.querySelector('.canvas-layout-container').getBoundingClientRect().width;
+                return frameWidth > 0 && frameWidth < 1100 && Math.abs(canvasWidth - frameWidth) < 2;
+            }
+            """,
+            await frame.ElementHandleAsync(),
+            new() { Timeout = Timeout });
+    }
+
+    // Each tab holds a canvas whose node stands at the right edge of its 1104 pixel design width.
+    private static string CreateTabbedCanvasPage()
+    {
+        var builder = new StringBuilder();
+        builder.Append("---\ntitle: Scratch\n---\n\n# Scratch\n\n");
+        builder.Append(":: HomeBlaze.Components.TabLayout\n");
+        foreach (var name in new[] { "A", "B" })
+        {
+            builder.Append($"::: Tab#tab{name} Title=\"{name}\"\n");
+            builder.Append($":::: HomeBlaze.Components.CanvasLayout#canvas{name} Width=1104 Scale=FitWidth MinHeight=300\n");
+            builder.Append("::::: Node X=900 Y=0 Width=200 Height=140\n");
+            builder.Append($":::::: HomeBlaze.Components.Card Title=\"Right edge {name}\"\n");
+        }
+
+        builder.Append("::\n");
+        return builder.ToString();
     }
 
     private static string CreateCanvasPage(bool withTextBelow, bool withOperableWidgets, bool withControlsWidget)
