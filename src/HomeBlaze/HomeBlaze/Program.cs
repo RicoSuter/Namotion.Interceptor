@@ -56,9 +56,14 @@ var seedDirectory = builder.Configuration[HomeBlazePaths.SeedDirectoryKey];
 var seededFileCount = DataDirectorySeeder.SeedIfMissing(rootConfigurationPath, seedDirectory);
 
 // Kept in the data directory so antiforgery tokens and protected state survive a restart or an image update.
-builder.Services.AddDataProtection()
+var dataProtectionBuilder = builder.Services.AddDataProtection()
     .SetApplicationName("HomeBlaze")
     .PersistKeysToFileSystem(new DirectoryInfo(HomeBlazePaths.GetDataProtectionKeysPath(builder.Configuration)));
+if (OperatingSystem.IsWindows())
+{
+    // A custom key folder turns off the default DPAPI encryption at rest, which only Windows offers.
+    dataProtectionBuilder.ProtectKeysWithDpapi();
+}
 
 var pluginConfigPath = HomeBlazePaths.GetPluginConfigurationPath(builder.Configuration);
 

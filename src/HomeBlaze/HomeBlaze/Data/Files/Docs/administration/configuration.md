@@ -64,6 +64,8 @@ Data/
 
 When running from source, the data folder is `src/HomeBlaze/HomeBlaze/Data`. The container image uses `/data`; see [Installation](installation.md#data-folder).
 
+`DataProtection-Keys/` holds the secret keys that sign the browser's connection to the UI, so treat the folder and every backup of it like a password. To revoke the keys, for example after a backup leaked or in a copy of the data folder that runs as a second instance, stop HomeBlaze, delete the folder and start it again. Open browser tabs then need a reload.
+
 ---
 
 ## HomeBlaze:RootConfigFile

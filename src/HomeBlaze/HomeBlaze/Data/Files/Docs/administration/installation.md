@@ -35,7 +35,7 @@ Everything HomeBlaze keeps lives in the folder mounted at `/data` (`./data` in t
 
 On the first start, when `Root.json` does not exist, HomeBlaze copies a starting set into the folder: a welcome page, a help page, this documentation, an empty plugin list, a SQLite history store that records to `History/Sqlite`, a `Host system` subject in `Servers/HostSystem.json` and an `Installation` subject in `Servers/Installation.json` (see [Version and Updates](updates.md)). Existing files are never overwritten, except for the documentation described below. The demo devices and sample plugins are only available when running from source.
 
-Back up HomeBlaze by copying this folder. Stop HomeBlaze first (`docker compose stop`) so the SQLite history is copied in a consistent state. The container runs as root, so on Linux the files in `./data` belong to root and editing them on the host needs `sudo`.
+Back up HomeBlaze by copying this folder. Stop HomeBlaze first (`docker compose stop`) so the SQLite history is copied in a consistent state. The container runs as root, so on Linux the files in `./data` belong to root and editing them on the host needs `sudo`. A backup contains the secret keys in `DataProtection-Keys`, so store it as carefully as the installation itself; see [Configuration](configuration.md#data-folder) for how to revoke them.
 
 The documentation in `Files/Docs` belongs to the image. On every start, HomeBlaze deletes the folder and copies the documentation of the running image into it, so keep your own pages outside `Files/Docs`: anything added or changed there is lost on the next start. If that fails, for example because the disk is full, HomeBlaze logs a warning and starts anyway.
 
