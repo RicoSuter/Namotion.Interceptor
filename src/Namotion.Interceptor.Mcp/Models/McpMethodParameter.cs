@@ -110,8 +110,10 @@ public sealed record McpMethodParameter
             return CreatePropertiesCore(type, depth, visitedTypes);
         }
 
+        // The factory is static so it cannot capture this call's depth or visitedTypes: only depth 0 ever reaches
+        // here, so the factory recreates both as their fixed depth-0 values (0 and a fresh, empty set) itself.
         return PropertiesByTypeAtDepthZero
-            .GetValue(type, cachedType => new StrongBox<McpMethodParameter[]?>(CreatePropertiesCore(cachedType, depth, visitedTypes)))
+            .GetValue(type, static cachedType => new StrongBox<McpMethodParameter[]?>(CreatePropertiesCore(cachedType, 0, [])))
             .Value;
     }
 
@@ -134,8 +136,8 @@ public sealed record McpMethodParameter
                                    property.GetIndexParameters().Length == 0 &&
                                    property.GetCustomAttribute<JsonIgnoreAttribute>()?.Condition != JsonIgnoreCondition.Always)
                 // A derived type may hide a same-named base member with `new`; GetProperties returns both, so keep the
-                // most derived one. Same member rules as ParameterConverter.BuildObjectMembers in HomeBlaze.Services
-                // (see that file); kept as two copies because the project boundary prevents sharing code.
+                // most derived one. Keep these rules in sync with the UI-side member walker that builds operation
+                // arguments from form input; kept as two copies because the project boundary prevents sharing code.
                 .GroupBy(property => property.Name)
                 .Select(group => group.Aggregate((best, next) => next.DeclaringType!.IsSubclassOf(best.DeclaringType!) ? next : best))
                 .Select(property => Create(

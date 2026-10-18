@@ -93,8 +93,6 @@ public static class ParameterConverter
 
     private static ObjectParameterMember[] BuildObjectMembers(Type type)
     {
-        // Owned by this call: the context caches the members it reads and is not thread-safe.
-        var nullabilityContext = new NullabilityInfoContext();
         return type
             .GetProperties(BindingFlags.Public | BindingFlags.Instance)
             .Where(property => property.GetMethod?.IsPublic == true && property.SetMethod?.IsPublic == true &&
@@ -109,9 +107,7 @@ public static class ParameterConverter
                 property.Name,
                 property.GetCustomAttribute<JsonPropertyNameAttribute>()?.Name ?? property.Name,
                 property.PropertyType,
-                property.IsDefined(typeof(RequiredMemberAttribute)),
-                Nullable.GetUnderlyingType(property.PropertyType) != null ||
-                nullabilityContext.Create(property).WriteState == NullabilityState.Nullable))
+                property.IsDefined(typeof(RequiredMemberAttribute))))
             .ToArray();
     }
 
@@ -125,16 +121,17 @@ public static class ParameterConverter
     /// <summary>
     /// Tries to create an object from the string inputs of its members, keyed by <see cref="ObjectParameterMember.Name"/>.
     /// A member without input keeps its default value; a required member without input fails, except a required
-    /// <see cref="bool"/> member, whose default (false) applies instead, since a checkbox always has a value. When
-    /// <paramref name="isNullable"/> and no member has any input, the object itself was not provided and this
-    /// returns true with a null value instead of applying members' defaults.
+    /// non-nullable <see cref="bool"/> member, whose unticked default (false) is written explicitly instead, since
+    /// a checkbox never actually omits a value. When <paramref name="isNullable"/> and every member has no input,
+    /// treating an unticked or empty <see cref="bool"/> member the same as no input, the object itself was not
+    /// provided and this returns true with a null value instead of applying members' defaults.
     /// </summary>
     public static bool TryCreateObject(
         Type type, IReadOnlyDictionary<string, string?> inputs, bool isNullable, out object? value, out string? error)
     {
         value = null;
         var members = GetObjectMembers(type);
-        if (isNullable && members.All(member => string.IsNullOrEmpty(inputs.GetValueOrDefault(member.Name))))
+        if (isNullable && members.All(member => IsEffectivelyEmpty(member, inputs.GetValueOrDefault(member.Name))))
         {
             error = null;
             return true;
@@ -146,8 +143,16 @@ public static class ParameterConverter
             var input = inputs.GetValueOrDefault(member.Name);
             if (string.IsNullOrEmpty(input))
             {
-                if (member.IsRequired && member.Type != typeof(bool))
+                if (member.IsRequired)
                 {
+                    if (member.Type == typeof(bool))
+                    {
+                        // An unticked checkbox carries no input, but System.Text.Json rejects a required member
+                        // that is missing from the JSON entirely, so the unticked default is written explicitly.
+                        json[member.JsonName] = false;
+                        continue;
+                    }
+
                     error = $"{member.Name} is required";
                     return false;
                 }
@@ -173,6 +178,19 @@ public static class ParameterConverter
         }
 
         return TryDeserialize(json.ToJsonString(), type, out value, out error);
+    }
+
+    // A checkbox posts "False" (or "false") once unticked instead of leaving its input empty, so a bool or bool?
+    // member in that state is treated the same as no input when deciding whether the whole object was entered.
+    private static bool IsEffectivelyEmpty(ObjectParameterMember member, string? input)
+    {
+        if (string.IsNullOrEmpty(input))
+        {
+            return true;
+        }
+
+        var underlyingType = Nullable.GetUnderlyingType(member.Type) ?? member.Type;
+        return underlyingType == typeof(bool) && string.Equals(input, "False", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

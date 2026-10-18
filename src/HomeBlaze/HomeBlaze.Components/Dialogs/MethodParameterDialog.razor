@@ -259,8 +259,10 @@
         var input = _inputValues.GetValueOrDefault(field.Key);
         if (string.IsNullOrEmpty(input))
         {
-            // A checkbox always has a value, so a bool field is never reported as missing or required.
-            if (field.IsRequired && (Nullable.GetUnderlyingType(field.Type) ?? field.Type) != typeof(bool))
+            // A non-nullable bool field's checkbox always has a value, so it is never reported as missing or
+            // required; a bool? field renders the same checkbox but can still be left unset and so is validated
+            // like any other required member.
+            if (field.IsRequired && field.Type != typeof(bool))
             {
                 _errors[field.Key] = "This field is required";
             }

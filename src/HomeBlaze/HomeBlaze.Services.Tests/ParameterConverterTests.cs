@@ -308,7 +308,7 @@ public class ParameterConverterTests
     }
 
     [Fact]
-    public void WhenGettingObjectMembers_ThenRequiredAndNullableAreDescribed()
+    public void WhenGettingObjectMembers_ThenRequiredIsDescribed()
     {
         // Act
         var members = ParameterConverter.GetObjectMembers(typeof(TestMessage));
@@ -316,10 +316,7 @@ public class ParameterConverterTests
         // Assert
         Assert.Equal(["Text", "Title", "Level", "Count"], members.Select(member => member.Name));
         Assert.True(members[0].IsRequired);
-        Assert.False(members[0].IsNullable);
-        Assert.True(members[1].IsNullable);
         Assert.False(members[2].IsRequired);
-        Assert.True(members[3].IsNullable);
     }
 
     [Fact]
@@ -364,6 +361,66 @@ public class ParameterConverterTests
         Assert.False(success);
         Assert.Null(value);
         Assert.Equal("Text is required", error);
+    }
+
+    [Fact]
+    public void WhenRequiredBoolMemberHasNoInput_ThenItDefaultsToFalse()
+    {
+        // Arrange
+        var inputs = new Dictionary<string, string?> { ["Text"] = "Hello" };
+
+        // Act
+        var success = ParameterConverter.TryCreateObject(typeof(TestRequiredBoolMessage), inputs, out var value, out var error);
+
+        // Assert
+        Assert.True(success, error);
+        Assert.False(Assert.IsType<TestRequiredBoolMessage>(value).Silent);
+    }
+
+    [Fact]
+    public void WhenRequiredNullableBoolMemberHasNoInput_ThenCreatingFails()
+    {
+        // Arrange
+        var inputs = new Dictionary<string, string?> { ["Text"] = "Hello" };
+
+        // Act
+        var success = ParameterConverter.TryCreateObject(typeof(TestRequiredNullableBoolMessage), inputs, out var value, out var error);
+
+        // Assert
+        Assert.False(success);
+        Assert.Null(value);
+        Assert.Equal("Silent is required", error);
+    }
+
+    [Theory]
+    [InlineData("False")]
+    [InlineData("false")]
+    [InlineData(null)]
+    public void WhenNullableObjectHasOnlyEmptyOrUntickedBoolInputs_ThenObjectIsNull(string? silentInput)
+    {
+        // Arrange
+        var inputs = new Dictionary<string, string?> { ["Silent"] = silentInput };
+
+        // Act
+        var success = ParameterConverter.TryCreateObject(typeof(TestBoolOnlyMessage), inputs, isNullable: true, out var value, out var error);
+
+        // Assert
+        Assert.True(success, error);
+        Assert.Null(value);
+    }
+
+    [Fact]
+    public void WhenNullableObjectHasATickedBoolInput_ThenObjectIsCreated()
+    {
+        // Arrange
+        var inputs = new Dictionary<string, string?> { ["Silent"] = "True" };
+
+        // Act
+        var success = ParameterConverter.TryCreateObject(typeof(TestBoolOnlyMessage), inputs, isNullable: true, out var value, out var error);
+
+        // Assert
+        Assert.True(success, error);
+        Assert.True(Assert.IsType<TestBoolOnlyMessage>(value).Silent);
     }
 
     [Fact]
@@ -554,6 +611,25 @@ public class ParameterConverterTests
     {
         Normal,
         High
+    }
+
+    public sealed record TestRequiredBoolMessage
+    {
+        public required string Text { get; init; }
+
+        public required bool Silent { get; init; }
+    }
+
+    public sealed record TestRequiredNullableBoolMessage
+    {
+        public required string Text { get; init; }
+
+        public required bool? Silent { get; init; }
+    }
+
+    public sealed record TestBoolOnlyMessage
+    {
+        public bool Silent { get; init; }
     }
 
     public sealed class TestEnvelope

@@ -69,8 +69,7 @@ namespace HomeBlaze.Services
     }
     public sealed class ObjectParameterMember : System.IEquatable<HomeBlaze.Services.ObjectParameterMember>
     {
-        public ObjectParameterMember(string Name, string JsonName, System.Type Type, bool IsRequired, bool IsNullable) { }
-        public bool IsNullable { get; init; }
+        public ObjectParameterMember(string Name, string JsonName, System.Type Type, bool IsRequired) { }
         public bool IsRequired { get; init; }
         public string JsonName { get; init; }
         public string Name { get; init; }
