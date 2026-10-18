@@ -69,12 +69,7 @@ internal static class PushoverMessageMapping
     private static (string? Url, string? UrlTitle) CreateUrl(Notification notification, ILogger logger)
     {
         var url = notification.Url;
-        if (url is null)
-        {
-            return (null, Shorten(notification.UrlTitle, MaximumUrlTitleLength, "url title", logger));
-        }
-
-        if (url.Length > MaximumUrlLength)
+        if (url is { Length: > MaximumUrlLength })
         {
             logger.LogWarning(
                 "The Pushover url has {Length} characters, longer than the {MaximumLength} limit, and is omitted instead of being shortened.",

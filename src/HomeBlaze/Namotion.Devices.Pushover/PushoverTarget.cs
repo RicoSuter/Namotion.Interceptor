@@ -25,8 +25,15 @@ public partial class PushoverTarget :
     ITitleProvider,
     IIconProvider
 {
-    internal static readonly TimeSpan MinimumEmergencyRetry = TimeSpan.FromSeconds(30);
-    internal static readonly TimeSpan MaximumEmergencyExpire = TimeSpan.FromHours(3);
+    /// <summary>
+    /// The lowest <see cref="EmergencyRetry"/> Pushover allows.
+    /// </summary>
+    public static readonly TimeSpan MinimumEmergencyRetry = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// The highest <see cref="EmergencyExpire"/> Pushover allows.
+    /// </summary>
+    public static readonly TimeSpan MaximumEmergencyExpire = TimeSpan.FromHours(3);
 
     private readonly Subject<PushoverEmergencyAcknowledgedEvent> _acknowledgedEvents = new();
 
@@ -40,8 +47,8 @@ public partial class PushoverTarget :
     // Not intercepted: an intercepted property holding the service would attach it as a child of its own child.
     internal PushoverService? Service { get; set; }
 
-    // Not intercepted, for the same reason as Service; set together with it so a subscriber exception can always be logged.
-    internal ILogger? Logger { get; set; }
+    private PushoverService RequiredService =>
+        Service ?? throw new InvalidOperationException($"The target '{Title}' is not part of a Pushover service.");
 
     [Configuration]
     public partial string Name { get; set; }
@@ -140,11 +147,8 @@ public partial class PushoverTarget :
         IsEmergencyExpired = false;
     }
 
-    public Task SendNotificationAsync(Notification notification, CancellationToken cancellationToken)
-    {
-        var service = Service ?? throw new InvalidOperationException($"The target '{Title}' is not part of a Pushover service.");
-        return service.SendAsync(this, notification, cancellationToken);
-    }
+    public Task SendNotificationAsync(Notification notification, CancellationToken cancellationToken) =>
+        RequiredService.SendAsync(this, notification, cancellationToken);
 
     [Operation(Title = "Cancel emergency", Icon = "NotificationsOff", Position = 2)]
     public async Task CancelEmergencyAsync(CancellationToken cancellationToken)
@@ -154,15 +158,27 @@ public partial class PushoverTarget :
             return;
         }
 
-        var service = Service ?? throw new InvalidOperationException($"The target '{Title}' is not part of a Pushover service.");
-        await service.CancelReceiptAsync(receipt, cancellationToken);
+        await RequiredService.CancelReceiptAsync(receipt, cancellationToken);
         CloseEmergency(receipt);
     }
 
     // Each subscriber is wrapped so that one throwing from OnNext cannot stop the subject from notifying the
     // others, or propagate into the receipt-polling loop that raises the event.
     public IDisposable Subscribe(IObserver<PushoverEmergencyAcknowledgedEvent> observer) =>
-        _acknowledgedEvents.Subscribe(new SafeAcknowledgedObserver(this, observer));
+        _acknowledgedEvents.Subscribe(
+            value =>
+            {
+                try
+                {
+                    observer.OnNext(value);
+                }
+                catch (Exception exception)
+                {
+                    Service?.Logger.LogWarning(exception, "A Pushover emergency acknowledgement subscriber of target {Target} threw", Title);
+                }
+            },
+            observer.OnError,
+            observer.OnCompleted);
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
     {
@@ -252,9 +268,7 @@ public partial class PushoverTarget :
             }
             else if (response.Expired == 1)
             {
-                _emergencyReceipt = null;
-                IsEmergencyExpired = true;
-                IsEmergencyActive = false;
+                EndEmergency(isExpired: true);
             }
         }
 
@@ -271,9 +285,7 @@ public partial class PushoverTarget :
             // A receipt that cannot be read is given up once the emergency has expired on the Pushover side.
             if (_emergencyReceipt == receipt && now > _emergencyExpiresAt)
             {
-                _emergencyReceipt = null;
-                IsEmergencyExpired = true;
-                IsEmergencyActive = false;
+                EndEmergency(isExpired: true);
             }
         }
     }
@@ -284,10 +296,21 @@ public partial class PushoverTarget :
         {
             if (_emergencyReceipt == receipt)
             {
-                _emergencyReceipt = null;
-                IsEmergencyActive = false;
+                EndEmergency(isExpired: false);
             }
         }
+    }
+
+    // Caller must hold _emergencyLock.
+    private void EndEmergency(bool isExpired)
+    {
+        _emergencyReceipt = null;
+        if (isExpired)
+        {
+            IsEmergencyExpired = true;
+        }
+
+        IsEmergencyActive = false;
     }
 
     partial void OnEmergencyRetryChanging(ref TimeSpan newValue, ref bool cancel)
@@ -311,26 +334,4 @@ public partial class PushoverTarget :
     }
 
     partial void OnDevicesChanging(ref string[] newValue, ref bool cancel) => newValue ??= [];
-
-    // Wraps a subscriber so that its exception is logged and swallowed instead of reaching the Subject, which
-    // would otherwise stop notifying the subscribers after this one and propagate into the receipt-polling loop.
-    private sealed class SafeAcknowledgedObserver(PushoverTarget target, IObserver<PushoverEmergencyAcknowledgedEvent> inner)
-        : IObserver<PushoverEmergencyAcknowledgedEvent>
-    {
-        public void OnNext(PushoverEmergencyAcknowledgedEvent value)
-        {
-            try
-            {
-                inner.OnNext(value);
-            }
-            catch (Exception exception)
-            {
-                target.Logger?.LogWarning(exception, "A Pushover emergency acknowledgement subscriber of target {Target} threw", target.Title);
-            }
-        }
-
-        public void OnError(Exception error) => inner.OnError(error);
-
-        public void OnCompleted() => inner.OnCompleted();
-    }
 }

@@ -10,9 +10,6 @@ internal sealed class PushoverResponse
     [JsonPropertyName("status")]
     public int Status { get; init; }
 
-    [JsonPropertyName("request")]
-    public string? Request { get; init; }
-
     [JsonPropertyName("errors")]
     public string[]? Errors { get; init; }
 

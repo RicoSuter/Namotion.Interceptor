@@ -8,22 +8,13 @@ namespace Namotion.Devices.Pushover;
 /// </summary>
 public sealed class PushoverException : Exception
 {
-    public PushoverException()
-    {
-    }
-
-    public PushoverException(string message)
-        : base(message)
-    {
-    }
-
     public PushoverException(string message, Exception innerException)
         : base(message, innerException)
     {
     }
 
-    internal PushoverException(HttpStatusCode statusCode, bool isSuccessStatusCode, PushoverResponse? response)
-        : base(BuildMessage(statusCode, isSuccessStatusCode, response))
+    internal PushoverException(HttpStatusCode statusCode, PushoverResponse? response)
+        : base(BuildMessage(statusCode, response))
     {
         StatusCode = statusCode;
         IsApplicationTokenInvalid = response?.Token == "invalid";
@@ -45,7 +36,7 @@ public sealed class PushoverException : Exception
     /// </summary>
     public bool IsUserKeyInvalid { get; }
 
-    private static string BuildMessage(HttpStatusCode statusCode, bool isSuccessStatusCode, PushoverResponse? response)
+    private static string BuildMessage(HttpStatusCode statusCode, PushoverResponse? response)
     {
         if (response?.Errors is { Length: > 0 } errors)
         {
@@ -53,7 +44,7 @@ public sealed class PushoverException : Exception
         }
 
         // A 2xx response without errors still means rejection when its status is not 1; that reads differently from a transport-level failure.
-        return isSuccessStatusCode
+        return (int)statusCode is >= 200 and <= 299
             ? $"Pushover rejected the request (HTTP {(int)statusCode})."
             : $"Pushover returned HTTP {(int)statusCode}.";
     }

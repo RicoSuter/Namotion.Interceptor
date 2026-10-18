@@ -1,6 +1,7 @@
 using HomeBlaze.Abstractions.Messaging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Devices.Pushover.Client;
+using Namotion.Devices.Pushover.Tests.Testing;
 using Xunit;
 
 namespace Namotion.Devices.Pushover.Tests;
@@ -44,7 +45,7 @@ public class PushoverMessageMappingTests
     public void WhenNotificationIsEmergency_ThenRetryAndExpireAreSet()
     {
         // Act
-        var request = Map(new Notification { Message = "Fire", Priority = NotificationPriority.Emergency });
+        var request = Map(PushoverTestFactory.EmergencyNotification);
 
         // Assert
         Assert.Equal(2, request.Priority);

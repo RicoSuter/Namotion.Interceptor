@@ -169,35 +169,19 @@ public class PushoverClientTests
         Assert.Equal("app", request.Form["token"]);
     }
 
-    [Fact]
-    public async Task WhenManyRequestsRunAtOnce_ThenAtMostTwoAreOpen()
+    [Theory]
+    [InlineData(1)]
+    [InlineData(4)]
+    public async Task WhenManyRequestsRunAtOnce_ThenAtMostTwoAreOpen(int clientCount)
     {
-        // Arrange
+        // Arrange: one client sending 4 messages, or (when clientCount is 4) each message from its own client
+        // instance, to prove the connection limit is shared across client instances and not just within one.
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var handler = new FakePushoverHandler { BeforeRespond = () => release.Task };
-        var client = new PushoverClient(new TestHttpClientFactory(handler));
+        var clients = Enumerable.Range(0, clientCount).Select(_ => new PushoverClient(new TestHttpClientFactory(handler))).ToArray();
 
         // Act
-        var sends = Enumerable.Range(0, 4).Select(_ => client.SendMessageAsync(CreateRequest(), CancellationToken.None)).ToArray();
-        await AsyncTestHelpers.WaitUntilAsync(() => handler.Requests.Count == 2);
-        release.SetResult();
-        await Task.WhenAll(sends);
-
-        // Assert
-        Assert.Equal(4, handler.Requests.Count);
-        Assert.Equal(2, handler.MaximumConcurrentRequests);
-    }
-
-    [Fact]
-    public async Task WhenRequestsComeFromDifferentClientInstances_ThenTheConnectionLimitIsSharedAcrossThem()
-    {
-        // Arrange
-        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var handler = new FakePushoverHandler { BeforeRespond = () => release.Task };
-        var clients = Enumerable.Range(0, 4).Select(_ => new PushoverClient(new TestHttpClientFactory(handler))).ToArray();
-
-        // Act
-        var sends = clients.Select(client => client.SendMessageAsync(CreateRequest(), CancellationToken.None)).ToArray();
+        var sends = Enumerable.Range(0, 4).Select(i => clients[i % clientCount].SendMessageAsync(CreateRequest(), CancellationToken.None)).ToArray();
         await AsyncTestHelpers.WaitUntilAsync(() => handler.Requests.Count == 2);
         release.SetResult();
         await Task.WhenAll(sends);

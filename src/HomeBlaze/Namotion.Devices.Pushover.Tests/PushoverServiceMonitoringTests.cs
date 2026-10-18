@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Net;
+using System.Reactive;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Messaging;
 using Namotion.Devices.Pushover.Client;
@@ -22,20 +23,14 @@ public class PushoverServiceMonitoringTests
         handler.Respond = _ => (HttpStatusCode.OK, """{"status":1,"devices":["phone"]}""");
 
         // Act
-        await service.StartAsync(CancellationToken.None);
-        try
-        {
-            // Assert
-            await AsyncTestHelpers.WaitUntilAsync(() => service.Status == ServiceStatus.Running);
-            var target = service.Targets["rico"];
-            Assert.Equal(ServiceStatus.Running, target.Status);
-            Assert.Equal(["phone"], target.Devices);
-            Assert.Null(target.StatusMessage);
-        }
-        finally
-        {
-            await service.StopAsync(CancellationToken.None);
-        }
+        await using var running = await PushoverTestFactory.StartAsync(service);
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => service.Status == ServiceStatus.Running);
+        var target = service.Targets["rico"];
+        Assert.Equal(ServiceStatus.Running, target.Status);
+        Assert.Equal(["phone"], target.Devices);
+        Assert.Null(target.StatusMessage);
     }
 
     [Fact]
@@ -46,18 +41,12 @@ public class PushoverServiceMonitoringTests
         handler.Respond = _ => (HttpStatusCode.BadRequest, """{"user":"invalid","errors":["user key is invalid"],"status":0}""");
 
         // Act
-        await service.StartAsync(CancellationToken.None);
-        try
-        {
-            // Assert
-            await AsyncTestHelpers.WaitUntilAsync(() => service.Targets["rico"].Status == ServiceStatus.Error);
-            Assert.Equal("user key is invalid", service.Targets["rico"].StatusMessage);
-            await AsyncTestHelpers.WaitUntilAsync(() => service.Status == ServiceStatus.Running);
-        }
-        finally
-        {
-            await service.StopAsync(CancellationToken.None);
-        }
+        await using var running = await PushoverTestFactory.StartAsync(service);
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => service.Targets["rico"].Status == ServiceStatus.Error);
+        Assert.Equal("user key is invalid", service.Targets["rico"].StatusMessage);
+        await AsyncTestHelpers.WaitUntilAsync(() => service.Status == ServiceStatus.Running);
     }
 
     [Fact]
@@ -80,21 +69,15 @@ public class PushoverServiceMonitoringTests
         };
 
         // Act
-        await service.StartAsync(CancellationToken.None);
-        try
-        {
-            // Assert
-            await AsyncTestHelpers.WaitUntilAsync(() => service.Targets["rico"].Status == ServiceStatus.Running);
-            var target = service.Targets["rico"];
-            Assert.Equal("user-rico", target.UserKey);
-            Assert.Null(target.StatusMessage);
-            Assert.Equal(["phone"], target.Devices);
-            Assert.True(validationAttempts >= 2);
-        }
-        finally
-        {
-            await service.StopAsync(CancellationToken.None);
-        }
+        await using var running = await PushoverTestFactory.StartAsync(service);
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => service.Targets["rico"].Status == ServiceStatus.Running);
+        var target = service.Targets["rico"];
+        Assert.Equal("user-rico", target.UserKey);
+        Assert.Null(target.StatusMessage);
+        Assert.Equal(["phone"], target.Devices);
+        Assert.True(validationAttempts >= 2);
     }
 
     [Fact]
@@ -105,17 +88,11 @@ public class PushoverServiceMonitoringTests
         handler.Respond = _ => (HttpStatusCode.BadRequest, """{"token":"invalid","errors":["application token is invalid"],"status":0}""");
 
         // Act
-        await service.StartAsync(CancellationToken.None);
-        try
-        {
-            // Assert
-            await AsyncTestHelpers.WaitUntilAsync(() => service.Status == ServiceStatus.Error);
-            Assert.Equal("The application token is invalid", service.StatusMessage);
-        }
-        finally
-        {
-            await service.StopAsync(CancellationToken.None);
-        }
+        await using var running = await PushoverTestFactory.StartAsync(service);
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => service.Status == ServiceStatus.Error);
+        Assert.Equal("The application token is invalid", service.StatusMessage);
     }
 
     [Fact]
@@ -126,18 +103,12 @@ public class PushoverServiceMonitoringTests
         service.ApplicationToken = null;
 
         // Act
-        await service.StartAsync(CancellationToken.None);
-        try
-        {
-            // Assert
-            await AsyncTestHelpers.WaitUntilAsync(() => service.StatusMessage == "No application token configured");
-            Assert.Equal(ServiceStatus.Stopped, service.Status);
-            Assert.Empty(handler.Requests);
-        }
-        finally
-        {
-            await service.StopAsync(CancellationToken.None);
-        }
+        await using var running = await PushoverTestFactory.StartAsync(service);
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => service.StatusMessage == "No application token configured");
+        Assert.Equal(ServiceStatus.Stopped, service.Status);
+        Assert.Empty(handler.Requests);
     }
 
     [Fact]
@@ -147,22 +118,15 @@ public class PushoverServiceMonitoringTests
         var (service, _) = PushoverTestFactory.CreateService("rico");
         service.ApplicationToken = null;
 
-        await service.StartAsync(CancellationToken.None);
-        try
-        {
-            await AsyncTestHelpers.WaitUntilAsync(() => service.StatusMessage == "No application token configured");
+        await using var running = await PushoverTestFactory.StartAsync(service);
+        await AsyncTestHelpers.WaitUntilAsync(() => service.StatusMessage == "No application token configured");
 
-            // Act
-            service.ApplicationToken = "app-token";
-            await service.Targets["rico"].ApplyConfigurationAsync(CancellationToken.None);
+        // Act
+        service.ApplicationToken = "app-token";
+        await service.Targets["rico"].ApplyConfigurationAsync(CancellationToken.None);
 
-            // Assert
-            await AsyncTestHelpers.WaitUntilAsync(() => service.Status == ServiceStatus.Running);
-        }
-        finally
-        {
-            await service.StopAsync(CancellationToken.None);
-        }
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => service.Status == ServiceStatus.Running);
     }
 
     [Fact]
@@ -170,21 +134,14 @@ public class PushoverServiceMonitoringTests
     {
         // Arrange
         var (service, handler) = PushoverTestFactory.CreateService("rico");
-        await service.StartAsync(CancellationToken.None);
-        try
-        {
-            await AsyncTestHelpers.WaitUntilAsync(() => handler.RequestsTo(ValidatePath).Length == 1);
+        await using var running = await PushoverTestFactory.StartAsync(service);
+        await AsyncTestHelpers.WaitUntilAsync(() => handler.RequestsTo(ValidatePath).Length == 1);
 
-            // Act
-            await service.Targets["rico"].ApplyConfigurationAsync(CancellationToken.None);
+        // Act
+        await service.Targets["rico"].ApplyConfigurationAsync(CancellationToken.None);
 
-            // Assert
-            await AsyncTestHelpers.WaitUntilAsync(() => handler.RequestsTo(ValidatePath).Length == 2);
-        }
-        finally
-        {
-            await service.StopAsync(CancellationToken.None);
-        }
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => handler.RequestsTo(ValidatePath).Length == 2);
     }
 
     [Fact]
@@ -194,18 +151,11 @@ public class PushoverServiceMonitoringTests
         var (service, handler) = PushoverTestFactory.CreateService("rico");
 
         // Act
-        await service.StartAsync(CancellationToken.None);
-        try
-        {
-            await AsyncTestHelpers.WaitUntilAsync(() => service.Status == ServiceStatus.Running);
+        await using var running = await PushoverTestFactory.StartAsync(service);
 
-            // Assert
-            Assert.DoesNotContain(handler.Requests, request => request.Path.StartsWith("/1/receipts/", StringComparison.Ordinal));
-        }
-        finally
-        {
-            await service.StopAsync(CancellationToken.None);
-        }
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => service.Status == ServiceStatus.Running);
+        Assert.DoesNotContain(handler.Requests, request => request.Path.StartsWith("/1/receipts/", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -225,45 +175,38 @@ public class PushoverServiceMonitoringTests
 
         var target = service.Targets["rico"];
         var events = new List<PushoverEmergencyAcknowledgedEvent>();
-        using var subscription = target.Subscribe(new ListObserver(events));
+        using var subscription = target.Subscribe(CreateListObserver(events));
 
-        await service.StartAsync(CancellationToken.None);
-        try
+        await using var running = await PushoverTestFactory.StartAsync(service);
+        await AsyncTestHelpers.WaitUntilAsync(() => service.Status == ServiceStatus.Running);
+
+        // Act
+        await target.SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
+
+        // Assert: wait on the event list (not a flag property) so the target's other emergency fields,
+        // written under the same lock before the event is raised, are already settled once this proceeds.
+        await AsyncTestHelpers.WaitUntilAsync(() =>
         {
-            await AsyncTestHelpers.WaitUntilAsync(() => service.Status == ServiceStatus.Running);
-
-            // Act
-            await target.SendNotificationAsync(new Notification { Message = "Fire", Priority = NotificationPriority.Emergency }, CancellationToken.None);
-
-            // Assert: wait on the event list (not a flag property) so the target's other emergency fields,
-            // written under the same lock before the event is raised, are already settled once this proceeds.
-            await AsyncTestHelpers.WaitUntilAsync(() =>
-            {
-                lock (events)
-                {
-                    return events.Count == 1;
-                }
-            });
-
-            Assert.True(target.IsEmergencyAcknowledged);
-            Assert.False(target.IsEmergencyActive);
-            Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(1700000000), target.EmergencyAcknowledgedAt);
-            Assert.Equal("phone", target.EmergencyAcknowledgedByDevice);
-            Assert.Null(target.EmergencyReceipt);
-
-            PushoverEmergencyAcknowledgedEvent acknowledged;
             lock (events)
             {
-                acknowledged = Assert.Single(events);
+                return events.Count == 1;
             }
+        });
 
-            Assert.Same(target, acknowledged.Target);
-            Assert.Equal("phone", acknowledged.AcknowledgedByDevice);
-        }
-        finally
+        Assert.True(target.IsEmergencyAcknowledged);
+        Assert.False(target.IsEmergencyActive);
+        Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(1700000000), target.EmergencyAcknowledgedAt);
+        Assert.Equal("phone", target.EmergencyAcknowledgedByDevice);
+        Assert.Null(target.EmergencyReceipt);
+
+        PushoverEmergencyAcknowledgedEvent acknowledged;
+        lock (events)
         {
-            await service.StopAsync(CancellationToken.None);
+            acknowledged = Assert.Single(events);
         }
+
+        Assert.Same(target, acknowledged.Target);
+        Assert.Equal("phone", acknowledged.AcknowledgedByDevice);
     }
 
     [Fact]
@@ -271,43 +214,32 @@ public class PushoverServiceMonitoringTests
     {
         // Arrange
         var (service, handler) = PushoverTestFactory.CreateService("rico");
-        handler.Respond = request => request.Path switch
-        {
-            "/1/messages.json" => (HttpStatusCode.OK, """{"status":1,"receipt":"receipt1"}"""),
-            ReceiptPath => (HttpStatusCode.OK, """{"status":1,"acknowledged":1,"acknowledged_at":1700000000,"acknowledged_by_device":"phone","expired":0}"""),
-            _ => (HttpStatusCode.OK, FakePushoverHandler.Success)
-        };
+        handler.Respond = FakePushoverHandler.RespondWithReceipt(
+            """{"status":1,"acknowledged":1,"acknowledged_at":1700000000,"acknowledged_by_device":"phone","expired":0}""");
 
         var target = service.Targets["rico"];
         var events = new List<PushoverEmergencyAcknowledgedEvent>();
 
         // The throwing subscriber is registered first so a bare try/catch around the publish call alone would
         // not be enough: the fix must stop that subscriber's exception from also silencing the one after it.
-        using var throwingSubscription = target.Subscribe(new ThrowingObserver());
-        using var subscription = target.Subscribe(new ListObserver(events));
+        using var throwingSubscription = target.Subscribe(CreateThrowingObserver());
+        using var subscription = target.Subscribe(CreateListObserver(events));
 
-        await service.StartAsync(CancellationToken.None);
-        try
+        await using var running = await PushoverTestFactory.StartAsync(service);
+        await AsyncTestHelpers.WaitUntilAsync(() => service.Status == ServiceStatus.Running);
+
+        // Act
+        await target.SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() =>
         {
-            await AsyncTestHelpers.WaitUntilAsync(() => service.Status == ServiceStatus.Running);
-
-            // Act
-            await target.SendNotificationAsync(new Notification { Message = "Fire", Priority = NotificationPriority.Emergency }, CancellationToken.None);
-
-            // Assert
-            await AsyncTestHelpers.WaitUntilAsync(() =>
+            lock (events)
             {
-                lock (events)
-                {
-                    return events.Count == 1;
-                }
-            });
-            Assert.Equal(ServiceStatus.Running, service.Status);
-        }
-        finally
-        {
-            await service.StopAsync(CancellationToken.None);
-        }
+                return events.Count == 1;
+            }
+        });
+        Assert.Equal(ServiceStatus.Running, service.Status);
     }
 
     [Fact]
@@ -316,33 +248,21 @@ public class PushoverServiceMonitoringTests
         // Arrange
         var (service, handler) = PushoverTestFactory.CreateService("rico");
         service.MinimumReceiptPollingInterval = TimeSpan.FromMilliseconds(300);
-        handler.Respond = request => request.Path switch
-        {
-            "/1/messages.json" => (HttpStatusCode.OK, """{"status":1,"receipt":"receipt1"}"""),
-            ReceiptPath => (HttpStatusCode.OK, """{"status":1,"acknowledged":0,"expired":0}"""),
-            _ => (HttpStatusCode.OK, FakePushoverHandler.Success)
-        };
+        handler.Respond = FakePushoverHandler.RespondWithReceipt("""{"status":1,"acknowledged":0,"expired":0}""");
         var target = service.Targets["rico"];
 
-        await service.StartAsync(CancellationToken.None);
-        try
-        {
-            await AsyncTestHelpers.WaitUntilAsync(() => service.Status == ServiceStatus.Running);
-            await target.SendNotificationAsync(new Notification { Message = "Fire", Priority = NotificationPriority.Emergency }, CancellationToken.None);
-            await AsyncTestHelpers.WaitUntilAsync(() => handler.RequestsTo(ReceiptPath).Length == 1);
-            var sinceFirstPoll = Stopwatch.StartNew();
+        await using var running = await PushoverTestFactory.StartAsync(service);
+        await AsyncTestHelpers.WaitUntilAsync(() => service.Status == ServiceStatus.Running);
+        await target.SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => handler.RequestsTo(ReceiptPath).Length == 1);
+        var sinceFirstPoll = Stopwatch.StartNew();
 
-            // Act: a configuration apply signals the loop immediately, well within the minimum poll interval.
-            service.RequestValidation();
+        // Act: a configuration apply signals the loop immediately, well within the minimum poll interval.
+        service.RequestValidation();
 
-            // Assert
-            await AsyncTestHelpers.WaitUntilAsync(() => handler.RequestsTo(ReceiptPath).Length == 2);
-            Assert.True(sinceFirstPoll.Elapsed >= service.MinimumReceiptPollingInterval);
-        }
-        finally
-        {
-            await service.StopAsync(CancellationToken.None);
-        }
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => handler.RequestsTo(ReceiptPath).Length == 2);
+        Assert.True(sinceFirstPoll.Elapsed >= service.MinimumReceiptPollingInterval);
     }
 
     [Fact]
@@ -374,32 +294,21 @@ public class PushoverServiceMonitoringTests
     {
         // Arrange
         var (service, handler) = PushoverTestFactory.CreateService("rico");
-        handler.Respond = request => request.Path switch
-        {
-            "/1/messages.json" => (HttpStatusCode.OK, """{"status":1,"receipt":"receipt1"}"""),
-            ReceiptPath => (HttpStatusCode.OK, """{"status":1,"acknowledged":0,"expired":1}"""),
-            _ => (HttpStatusCode.OK, FakePushoverHandler.Success)
-        };
+        handler.Respond = FakePushoverHandler.RespondWithReceipt("""{"status":1,"acknowledged":0,"expired":1}""");
         var target = service.Targets["rico"];
 
-        await service.StartAsync(CancellationToken.None);
-        try
-        {
-            // Act
-            await target.SendNotificationAsync(new Notification { Message = "Fire", Priority = NotificationPriority.Emergency }, CancellationToken.None);
+        await using var running = await PushoverTestFactory.StartAsync(service);
 
-            // Assert: wait on the receipt getter (which takes the emergency lock) rather than the IsEmergencyExpired
-            // flag alone, so the other fields written under that lock are already settled once this proceeds.
-            await AsyncTestHelpers.WaitUntilAsync(() => target.EmergencyReceipt is null);
+        // Act
+        await target.SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
 
-            Assert.True(target.IsEmergencyExpired);
-            Assert.False(target.IsEmergencyActive);
-            Assert.False(target.IsEmergencyAcknowledged);
-        }
-        finally
-        {
-            await service.StopAsync(CancellationToken.None);
-        }
+        // Assert: wait on the receipt getter (which takes the emergency lock) rather than the IsEmergencyExpired
+        // flag alone, so the other fields written under that lock are already settled once this proceeds.
+        await AsyncTestHelpers.WaitUntilAsync(() => target.EmergencyReceipt is null);
+
+        Assert.True(target.IsEmergencyExpired);
+        Assert.False(target.IsEmergencyActive);
+        Assert.False(target.IsEmergencyAcknowledged);
     }
 
     [Fact]
@@ -411,7 +320,7 @@ public class PushoverServiceMonitoringTests
             ? (HttpStatusCode.OK, """{"status":1,"receipt":"receipt1"}""")
             : (HttpStatusCode.OK, FakePushoverHandler.Success);
         var target = service.Targets["rico"];
-        await target.SendNotificationAsync(new Notification { Message = "Fire", Priority = NotificationPriority.Emergency }, CancellationToken.None);
+        await target.SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
 
         // Act
         await target.CancelEmergencyAsync(CancellationToken.None);
@@ -422,35 +331,21 @@ public class PushoverServiceMonitoringTests
         Assert.Null(target.EmergencyReceipt);
     }
 
-    private sealed class ListObserver(List<PushoverEmergencyAcknowledgedEvent> events) : IObserver<PushoverEmergencyAcknowledgedEvent>
-    {
-        public void OnNext(PushoverEmergencyAcknowledgedEvent value)
-        {
-            lock (events)
+    private static IObserver<PushoverEmergencyAcknowledgedEvent> CreateListObserver(List<PushoverEmergencyAcknowledgedEvent> events) =>
+        Observer.Create<PushoverEmergencyAcknowledgedEvent>(
+            value =>
             {
-                events.Add(value);
-            }
-        }
+                lock (events)
+                {
+                    events.Add(value);
+                }
+            },
+            _ => { },
+            () => { });
 
-        public void OnError(Exception error)
-        {
-        }
-
-        public void OnCompleted()
-        {
-        }
-    }
-
-    private sealed class ThrowingObserver : IObserver<PushoverEmergencyAcknowledgedEvent>
-    {
-        public void OnNext(PushoverEmergencyAcknowledgedEvent value) => throw new InvalidOperationException("Subscriber failure.");
-
-        public void OnError(Exception error)
-        {
-        }
-
-        public void OnCompleted()
-        {
-        }
-    }
+    private static IObserver<PushoverEmergencyAcknowledgedEvent> CreateThrowingObserver() =>
+        Observer.Create<PushoverEmergencyAcknowledgedEvent>(
+            _ => throw new InvalidOperationException("Subscriber failure."),
+            _ => { },
+            () => { });
 }

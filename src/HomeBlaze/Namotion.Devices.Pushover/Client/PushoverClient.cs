@@ -9,7 +9,8 @@ internal sealed class PushoverClient
 
     private readonly IHttpClientFactory _httpClientFactory;
 
-    // Static: Pushover accepts at most two concurrent connections per application, not per client instance.
+    // Static, so the limit is shared per process: Pushover accepts at most two concurrent connections per
+    // application, across every PushoverClient instance, not two per instance.
     private static readonly SemaphoreSlim Connections = new(2, 2);
 
     public PushoverClient(IHttpClientFactory httpClientFactory)
@@ -22,7 +23,7 @@ internal sealed class PushoverClient
 
     public Task<PushoverResponse> ValidateUserAsync(string token, string userKey, CancellationToken cancellationToken) =>
         SendAsync(HttpMethod.Post, "users/validate.json",
-            new FormUrlEncodedContent(new PushoverUserRequest { Token = token, User = userKey }.ToFormFields()),
+            new FormUrlEncodedContent([new("token", token), new("user", userKey)]),
             cancellationToken);
 
     // The receipts endpoint takes the token only as a query parameter.
@@ -32,7 +33,7 @@ internal sealed class PushoverClient
 
     public Task<PushoverResponse> CancelReceiptAsync(string token, string receipt, CancellationToken cancellationToken) =>
         SendAsync(HttpMethod.Post, $"receipts/{Uri.EscapeDataString(receipt)}/cancel.json",
-            new FormUrlEncodedContent(new PushoverTokenRequest { Token = token }.ToFormFields()),
+            new FormUrlEncodedContent([new("token", token)]),
             cancellationToken);
 
     private async Task<PushoverResponse> SendAsync(HttpMethod method, string path, HttpContent? content, CancellationToken cancellationToken)
@@ -47,7 +48,7 @@ internal sealed class PushoverClient
             var body = await ReadResponseAsync(response, cancellationToken);
             if (!response.IsSuccessStatusCode || body is not { Status: 1 })
             {
-                throw new PushoverException(response.StatusCode, response.IsSuccessStatusCode, body);
+                throw new PushoverException(response.StatusCode, body);
             }
 
             return body;

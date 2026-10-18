@@ -64,7 +64,7 @@ public class PushoverServiceTests
         var target = service.Targets["rico"];
 
         // Act
-        await target.SendNotificationAsync(new Notification { Message = "Fire", Priority = NotificationPriority.Emergency }, CancellationToken.None);
+        await target.SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
 
         // Assert
         var request = Assert.Single(handler.RequestsTo(MessagesPath));

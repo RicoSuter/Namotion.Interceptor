@@ -60,7 +60,7 @@ public class PushoverOperationTests
         Assert.False(cancelEmergency.IsMethodEnabled());
 
         // Act
-        await target.SendNotificationAsync(new Notification { Message = "Fire", Priority = NotificationPriority.Emergency }, CancellationToken.None);
+        await target.SendNotificationAsync(PushoverTestFactory.EmergencyNotification, CancellationToken.None);
 
         // Assert
         Assert.True(cancelEmergency.IsMethodEnabled());

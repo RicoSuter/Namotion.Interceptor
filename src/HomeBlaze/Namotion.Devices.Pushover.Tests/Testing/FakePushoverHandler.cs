@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using System.Web;
 
 namespace Namotion.Devices.Pushover.Tests.Testing;
 
@@ -9,6 +10,18 @@ namespace Namotion.Devices.Pushover.Tests.Testing;
 internal sealed class FakePushoverHandler : HttpMessageHandler
 {
     public const string Success = """{"status":1,"request":"test"}""";
+
+    /// <summary>
+    /// A responder for the common emergency flow: sending a message always returns receipt "receipt1", polling its
+    /// receipt returns <paramref name="receiptBody"/>, and every other request succeeds.
+    /// </summary>
+    public static Func<RecordedRequest, (HttpStatusCode StatusCode, string Body)> RespondWithReceipt(string receiptBody) =>
+        request => request.Path switch
+        {
+            "/1/messages.json" => (HttpStatusCode.OK, """{"status":1,"receipt":"receipt1"}"""),
+            "/1/receipts/receipt1.json" => (HttpStatusCode.OK, receiptBody),
+            _ => (HttpStatusCode.OK, Success)
+        };
 
     private readonly Lock _lock = new();
     private readonly List<RecordedRequest> _requests = [];
@@ -88,15 +101,9 @@ internal sealed record RecordedRequest(HttpMethod Method, Uri Uri, string? Body,
 
     private static IReadOnlyDictionary<string, string> ParseForm(string body)
     {
-        var fields = new Dictionary<string, string>();
-        foreach (var pair in body.Split('&', StringSplitOptions.RemoveEmptyEntries))
-        {
-            var parts = pair.Split('=', 2);
-            var key = Uri.UnescapeDataString(parts[0]);
-            var value = parts.Length > 1 ? Uri.UnescapeDataString(parts[1].Replace('+', ' ')) : string.Empty;
-            fields[key] = value;
-        }
-
-        return fields;
+        var query = HttpUtility.ParseQueryString(body);
+        return query.AllKeys
+            .Where(key => key is not null)
+            .ToDictionary(key => key!, key => query[key] ?? string.Empty);
     }
 }

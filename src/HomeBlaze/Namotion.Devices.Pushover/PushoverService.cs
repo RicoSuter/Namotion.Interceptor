@@ -61,13 +61,15 @@ public partial class PushoverService : BackgroundService, IConfigurable, IMonito
         _ => null
     };
 
-    // Not intercepted, so tests can poll faster than the five seconds the receipts API allows.
+    // Not intercepted, so tests can run faster than production timing: polling faster than the five seconds the
+    // receipts API allows, below its real five-second minimum, and without waiting out the retry delay after a failure.
     internal TimeSpan ReceiptPollingInterval { get; set; } = TimeSpan.FromSeconds(10);
-
-    // Not intercepted, so tests can lower it below the Pushover receipts API's real five-second minimum.
     internal TimeSpan MinimumReceiptPollingInterval { get; set; } = TimeSpan.FromSeconds(5);
-
     internal TimeSpan RetryInterval { get; set; } = TimeSpan.FromSeconds(30);
+
+    // Not intercepted, for the same reason as Service on PushoverTarget: shared with the target through this
+    // property instead, so a subscriber exception can always be logged.
+    internal ILogger Logger => _logger;
 
     public PushoverService(IHttpClientFactory httpClientFactory, ILogger<PushoverService> logger)
     {
@@ -97,22 +99,16 @@ public partial class PushoverService : BackgroundService, IConfigurable, IMonito
         }
         catch (Exception) when (!cancellationToken.IsCancellationRequested)
         {
-            var failedPairs = targets
+            var failures = targets
                 .Zip(sends)
                 .Where(pair => !pair.Second.IsCompletedSuccessfully)
+                .Select(pair => (Target: pair.First, Exception: pair.Second.Exception?.InnerException ?? new TaskCanceledException(pair.Second)))
                 .ToArray();
 
-            var failures = failedPairs
-                .Select(pair => $"{pair.First.Title}: {pair.Second.Exception?.InnerException?.Message ?? "canceled"}")
-                .ToArray();
-
-            var innerExceptions = failedPairs
-                .Select(pair => pair.Second.Exception?.InnerException ?? new TaskCanceledException(pair.Second))
-                .ToArray();
-
+            var message = string.Join(" ", failures.Select(failure => $"{failure.Target.Title}: {failure.Exception.Message}"));
             throw new PushoverException(
-                $"Sending to {failures.Length} of {targets.Length} targets failed. {string.Join(" ", failures)}",
-                new AggregateException(innerExceptions));
+                $"Sending to {failures.Length} of {targets.Length} targets failed. {message}",
+                new AggregateException(failures.Select(failure => failure.Exception)));
         }
     }
 
@@ -162,12 +158,7 @@ public partial class PushoverService : BackgroundService, IConfigurable, IMonito
     {
         ArgumentNullException.ThrowIfNull(notification);
 
-        var token = ApplicationToken;
-        if (string.IsNullOrEmpty(token))
-        {
-            throw new InvalidOperationException("The Pushover application token is not configured.");
-        }
-
+        var token = GetRequiredApplicationToken();
         var userKey = target.UserKey;
         if (string.IsNullOrEmpty(userKey))
         {
@@ -188,14 +179,12 @@ public partial class PushoverService : BackgroundService, IConfigurable, IMonito
 
     internal async Task CancelReceiptAsync(string receipt, CancellationToken cancellationToken)
     {
-        var token = ApplicationToken;
-        if (string.IsNullOrEmpty(token))
-        {
-            throw new InvalidOperationException("The Pushover application token is not configured.");
-        }
-
+        var token = GetRequiredApplicationToken();
         await _client.CancelReceiptAsync(token, receipt, cancellationToken);
     }
+
+    private string GetRequiredApplicationToken() =>
+        ApplicationToken is { Length: > 0 } token ? token : throw new InvalidOperationException("The Pushover application token is not configured.");
 
     internal void RequestValidation()
     {
@@ -223,14 +212,13 @@ public partial class PushoverService : BackgroundService, IConfigurable, IMonito
     }
 
     // The back-reference is assigned here, not in OnTargetsChanged, so there is no window in which an attached
-    // target is reachable through Targets but its Service (and Logger) are not yet set.
+    // target is reachable through Targets but its Service is not yet set.
     partial void OnTargetsChanging(ref Dictionary<string, PushoverTarget> newValue, ref bool cancel)
     {
         newValue ??= new Dictionary<string, PushoverTarget>();
         foreach (var target in newValue.Values)
         {
             target.Service = this;
-            target.Logger = _logger;
         }
     }
 

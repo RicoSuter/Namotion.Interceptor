@@ -12,8 +12,8 @@ public partial class PushoverService
             var token = ApplicationToken;
             if (string.IsNullOrEmpty(token))
             {
-                Status = ServiceStatus.Stopped;
                 StatusMessage = "No application token configured";
+                Status = ServiceStatus.Stopped;
                 await WaitForSignalAsync(Timeout.InfiniteTimeSpan, stoppingToken);
                 continue;
             }
@@ -29,8 +29,8 @@ public partial class PushoverService
                     await ValidateTargetsAsync(token, stoppingToken);
                 }
 
-                Status = ServiceStatus.Running;
                 StatusMessage = null;
+                Status = ServiceStatus.Running;
 
                 var hasOpenEmergencies = await PollReceiptsAsync(token, stoppingToken);
                 await WaitForSignalAsync(hasOpenEmergencies ? ReceiptPollingInterval : Timeout.InfiniteTimeSpan, stoppingToken);
@@ -43,9 +43,6 @@ public partial class PushoverService
             {
                 _logger.LogError(exception, "Pushover rejected the application token");
                 _isValidationRequested = true;
-
-                // Status is the discrete value readers wait on; writing it last avoids a window where a waiter
-                // sees the new Status with the previous StatusMessage still in place.
                 StatusMessage = "The application token is invalid";
                 Status = ServiceStatus.Error;
 
@@ -62,8 +59,8 @@ public partial class PushoverService
             }
         }
 
-        Status = ServiceStatus.Stopped;
         StatusMessage = null;
+        Status = ServiceStatus.Stopped;
     }
 
     private async Task ValidateTargetsAsync(string token, CancellationToken cancellationToken)
@@ -85,10 +82,7 @@ public partial class PushoverService
             }
             catch (PushoverException exception) when (!exception.IsApplicationTokenInvalid)
             {
-                // A rejected user key is permanent, as is any other 4xx response except 429 (rate limited); both
-                // mean retrying with the same request cannot succeed. Anything else, including a 5xx outage or a
-                // 429, is transient, so it is rethrown for the generic catch below to retry after RetryInterval
-                // with validation requested again, instead of marking the target permanently failed.
+                // 4xx except 429 cannot succeed on retry; anything else is rethrown to retry with validation requested.
                 if (!IsPermanentValidationFailure(exception))
                 {
                     throw;
@@ -111,21 +105,18 @@ public partial class PushoverService
         foreach (var target in Targets.Values)
         {
             var receipt = target.TryStartReceiptPoll(now, MinimumReceiptPollingInterval);
-            if (receipt is null)
+            if (receipt is not null)
             {
-                hasOpenEmergencies |= target.IsEmergencyActive;
-                continue;
-            }
-
-            try
-            {
-                var response = await _client.GetReceiptAsync(token, receipt, cancellationToken);
-                target.ApplyReceipt(receipt, response);
-            }
-            catch (PushoverException exception)
-            {
-                _logger.LogWarning(exception, "Reading the emergency receipt of Pushover target {Target} failed", target.Title);
-                target.ApplyReceiptError(receipt, DateTimeOffset.UtcNow);
+                try
+                {
+                    var response = await _client.GetReceiptAsync(token, receipt, cancellationToken);
+                    target.ApplyReceipt(receipt, response);
+                }
+                catch (PushoverException exception)
+                {
+                    _logger.LogWarning(exception, "Reading the emergency receipt of Pushover target {Target} failed", target.Title);
+                    target.ApplyReceiptError(receipt, DateTimeOffset.UtcNow);
+                }
             }
 
             hasOpenEmergencies |= target.IsEmergencyActive;

@@ -1,8 +1,10 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Messaging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Namotion.Devices.Pushover.Tests.Testing;
 using Namotion.Interceptor.Testing;
 using Xunit;
+using Observer = System.Reactive.Observer;
 
 namespace Namotion.Devices.Pushover.Tests;
 
@@ -20,14 +22,9 @@ public class PushoverLiveTests
 
     private static bool HasTokens => !string.IsNullOrEmpty(ApplicationToken) && !string.IsNullOrEmpty(UserKey);
 
-    private sealed class HttpClientFactory : IHttpClientFactory
-    {
-        public HttpClient CreateClient(string name) => new();
-    }
-
     private static PushoverService CreateService(string userKey)
     {
-        var service = new PushoverService(new HttpClientFactory(), NullLogger<PushoverService>.Instance)
+        var service = new PushoverService(new TestHttpClientFactory(new HttpClientHandler()), NullLogger<PushoverService>.Instance)
         {
             ApplicationToken = ApplicationToken
         };
@@ -52,19 +49,13 @@ public class PushoverLiveTests
         var service = CreateService(UserKey!);
 
         // Act
-        await service.StartAsync(CancellationToken.None);
-        try
-        {
-            // Assert
-            var target = service.Targets["live"];
-            await AsyncTestHelpers.WaitUntilAsync(() => target.Status != ServiceStatus.Stopped);
-            Assert.Equal(ServiceStatus.Running, target.Status);
-            Assert.NotEmpty(target.Devices);
-        }
-        finally
-        {
-            await service.StopAsync(CancellationToken.None);
-        }
+        await using var running = await PushoverTestFactory.StartAsync(service);
+
+        // Assert
+        var target = service.Targets["live"];
+        await AsyncTestHelpers.WaitUntilAsync(() => target.Status != ServiceStatus.Stopped);
+        Assert.Equal(ServiceStatus.Running, target.Status);
+        Assert.NotEmpty(target.Devices);
     }
 
     [Fact]
@@ -79,18 +70,12 @@ public class PushoverLiveTests
         var service = CreateService("uQiRzpo4DXghDmr9QzzfQu27cmVRsG");
 
         // Act
-        await service.StartAsync(CancellationToken.None);
-        try
-        {
-            // Assert
-            var target = service.Targets["live"];
-            await AsyncTestHelpers.WaitUntilAsync(() => target.Status == ServiceStatus.Error);
-            Assert.False(string.IsNullOrEmpty(target.StatusMessage));
-        }
-        finally
-        {
-            await service.StopAsync(CancellationToken.None);
-        }
+        await using var running = await PushoverTestFactory.StartAsync(service);
+
+        // Assert
+        var target = service.Targets["live"];
+        await AsyncTestHelpers.WaitUntilAsync(() => target.Status == ServiceStatus.Error);
+        Assert.False(string.IsNullOrEmpty(target.StatusMessage));
     }
 
     [Fact]
@@ -130,27 +115,24 @@ public class PushoverLiveTests
         var service = CreateService(UserKey!);
         var target = service.Targets["live"];
         var acknowledged = new TaskCompletionSource<PushoverEmergencyAcknowledgedEvent>(TaskCreationOptions.RunContinuationsAsynchronously);
-        using var subscription = target.Subscribe(new Observer(acknowledged));
-        await service.StartAsync(CancellationToken.None);
-        try
-        {
-            // Act
-            await target.SendNotificationAsync(new Notification
-            {
-                Message = "Acknowledge this emergency test on your phone.",
-                Title = "Namotion emergency test",
-                Priority = NotificationPriority.Emergency
-            }, CancellationToken.None);
+        using var subscription = target.Subscribe(Observer.Create<PushoverEmergencyAcknowledgedEvent>(
+            value => acknowledged.TrySetResult(value),
+            error => acknowledged.TrySetException(error),
+            () => { }));
+        await using var running = await PushoverTestFactory.StartAsync(service);
 
-            // Assert
-            var acknowledgedEvent = await acknowledged.Task.WaitAsync(TimeSpan.FromMinutes(5));
-            Assert.True(target.IsEmergencyAcknowledged);
-            Assert.False(string.IsNullOrEmpty(acknowledgedEvent.AcknowledgedByDevice));
-        }
-        finally
+        // Act
+        await target.SendNotificationAsync(new Notification
         {
-            await service.StopAsync(CancellationToken.None);
-        }
+            Message = "Acknowledge this emergency test on your phone.",
+            Title = "Namotion emergency test",
+            Priority = NotificationPriority.Emergency
+        }, CancellationToken.None);
+
+        // Assert
+        var acknowledgedEvent = await acknowledged.Task.WaitAsync(TimeSpan.FromMinutes(5));
+        Assert.True(target.IsEmergencyAcknowledged);
+        Assert.False(string.IsNullOrEmpty(acknowledgedEvent.AcknowledgedByDevice));
     }
 
     [Fact]
@@ -176,16 +158,5 @@ public class PushoverLiveTests
 
         // Assert
         Assert.False(target.IsEmergencyActive);
-    }
-
-    private sealed class Observer(TaskCompletionSource<PushoverEmergencyAcknowledgedEvent> completion) : IObserver<PushoverEmergencyAcknowledgedEvent>
-    {
-        public void OnNext(PushoverEmergencyAcknowledgedEvent value) => completion.TrySetResult(value);
-
-        public void OnError(Exception error) => completion.TrySetException(error);
-
-        public void OnCompleted()
-        {
-        }
     }
 }
