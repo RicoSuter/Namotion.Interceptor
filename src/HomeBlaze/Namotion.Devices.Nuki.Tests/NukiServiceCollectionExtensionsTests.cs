@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Xunit;
 
 namespace Namotion.Devices.Nuki.Tests;
@@ -6,7 +7,7 @@ namespace Namotion.Devices.Nuki.Tests;
 public class NukiServiceCollectionExtensionsTests
 {
     [Fact]
-    public void WhenAddNukiBridge_ThenConfigureIsApplied()
+    public void WhenAddNukiBridge_ThenTheConfiguredBridgeIsRegisteredAsSingletonAndHostedService()
     {
         // Arrange
         var services = new ServiceCollection();
@@ -25,5 +26,7 @@ public class NukiServiceCollectionExtensionsTests
         Assert.Equal("192.168.1.50", bridge.HostAddress);
         Assert.Equal(NukiTokenMode.Plain, bridge.TokenMode);
         Assert.Equal(NukiBridge.DefaultPollingInterval, bridge.PollingInterval);
+        Assert.Same(bridge, serviceProvider.GetRequiredService<NukiBridge>());
+        Assert.Same(bridge, Assert.Single(serviceProvider.GetServices<IHostedService>()));
     }
 }

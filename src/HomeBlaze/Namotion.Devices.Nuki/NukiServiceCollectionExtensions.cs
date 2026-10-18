@@ -4,10 +4,14 @@ using Namotion.Interceptor.Hosting;
 
 namespace Namotion.Devices.Nuki;
 
+/// <summary>
+/// Registers a <see cref="NukiBridge"/> with dependency injection.
+/// </summary>
 public static class NukiServiceCollectionExtensions
 {
     /// <summary>
-    /// Adds a Nuki bridge as hosted subject.
+    /// Registers a <see cref="NukiBridge"/> as a singleton and hosted service, as
+    /// <see cref="HostedSubjectServiceCollectionExtensions.AddHostedSubject{T}"/> does.
     /// </summary>
     public static IServiceCollection AddNukiBridge(
         this IServiceCollection services,
