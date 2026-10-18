@@ -87,6 +87,35 @@ public class NukiActionTests
     }
 
     [Fact]
+    public async Task WhenAnActionIsCanceledWhileWaitingForAnotherAction_ThenItEndsWithoutReadingTheListOrChangingTheState()
+    {
+        // Arrange
+        var fake = new FakeNukiBridge { ListJson = NukiFixtures.SmartLock(state: 3) };
+        await using var test = new TestBridge(fake);
+        await test.StartAsync();
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        fake.ActionGate = gate;
+        var heldAction = test.Lock.LockAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => test.Lock.LockState == DoorLockState.Locking, message: "The first action was not sent.");
+        var listRequests = fake.CountRequests("list");
+        using var cancellation = new CancellationTokenSource();
+        var waitingAction = test.Lock.UnlatchAsync(cancellation.Token);
+
+        // Act
+        await cancellation.CancelAsync();
+        await AsyncTestHelpers.WaitUntilAsync(() => waitingAction.IsCompleted, message: "The canceled action did not end while the other one runs.");
+
+        // Assert
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => waitingAction);
+        Assert.Equal(listRequests, fake.CountRequests("list"));
+        Assert.Equal(DoorLockState.Locking, test.Lock.LockState);
+        Assert.Equal(1, fake.CountRequests("lockAction"));
+
+        gate.SetResult();
+        await heldAction;
+    }
+
+    [Fact]
     public async Task WhenAPollRunsDuringAnAction_ThenTheRequestsDoNotOverlap()
     {
         // Arrange

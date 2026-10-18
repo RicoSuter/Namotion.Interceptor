@@ -85,6 +85,25 @@ public class NukiBridgeConnectionTests
     }
 
     [Fact]
+    public async Task WhenInfoAnswersButTheListFails_ThenTheBridgeIsNotConnected()
+    {
+        // Arrange
+        await using var test = new TestBridge();
+        test.Fake.StatusOverride = path => path == "list" ? HttpStatusCode.InternalServerError : null;
+        // Long, so that no retry resets the status while it is read.
+        test.Bridge.RetryInterval = TimeSpan.FromHours(1);
+
+        // Act
+        await test.Bridge.StartAsync(CancellationToken.None);
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => test.Bridge.Status == ServiceStatus.Error, message: "The connection did not fail.");
+        Assert.False(test.Bridge.IsConnected);
+        Assert.Equal(1, test.Fake.CountRequests("info"));
+        Assert.Equal(1, test.Fake.CountRequests("list"));
+    }
+
+    [Fact]
     public async Task WhenPollFailsThreeTimes_ThenBridgeDisconnectsAndReconnectsOnceItAnswers()
     {
         // Arrange
@@ -145,6 +164,29 @@ public class NukiBridgeConnectionTests
         await AsyncTestHelpers.WaitUntilAsync(
             () => test.Bridge.IsConnected && fake.CountRequests("info") > infoRequests,
             message: "The bridge did not reconnect.");
+    }
+
+    [Fact]
+    public async Task WhenBridgeStopsDuringAnAction_ThenItStopsWithoutWaitingForTheAction()
+    {
+        // Arrange
+        var fake = new FakeNukiBridge { ListJson = NukiFixtures.SmartLock(state: 3) };
+        await using var test = new TestBridge(fake);
+        await test.StartAsync();
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        fake.ActionGate = gate;
+        var action = test.Lock.LockAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => fake.CountRequests("lockAction") == 1, message: "The action was not sent.");
+
+        // Act
+        var stop = test.Bridge.StopAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => stop.IsCompleted, message: "The bridge waited for the action to stop.");
+
+        // Assert
+        Assert.Equal(ServiceStatus.Stopped, test.Bridge.Status);
+        gate.TrySetResult();
+        await Assert.ThrowsAnyAsync<Exception>(() => action);
+        Assert.Null(test.Lock.LockState);
     }
 
     [Theory]

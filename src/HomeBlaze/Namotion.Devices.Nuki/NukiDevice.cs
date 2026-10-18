@@ -2,7 +2,6 @@ using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Common;
 using HomeBlaze.Abstractions.Networking;
-using Microsoft.Extensions.Logging;
 using Namotion.Devices.Nuki.Model;
 using Namotion.Interceptor.Attributes;
 
@@ -99,7 +98,8 @@ public abstract partial class NukiDevice :
 
     /// <summary>
     /// Runs a lock action: shows the transition while the bridge runs it, throws when the device reports a failure,
-    /// and reads the device list right after it. When that read fails, the state is reset to unknown.
+    /// and reads the device list right after it. When that read fails, the state is reset to unknown. An action that
+    /// is canceled or finds the bridge disconnected before it is sent changes nothing.
     /// </summary>
     private protected async Task RunActionAsync(
         int action,
@@ -108,26 +108,10 @@ public abstract partial class NukiDevice :
         string failureMessage,
         CancellationToken cancellationToken)
     {
-        Bridge.ThrowIfNotConnected();
-        try
+        var result = await Bridge.ExecuteActionAsync(this, action, enterTransition, resetState, cancellationToken);
+        if (!result.Success)
         {
-            var result = await Bridge.ExecuteActionAsync(this, action, enterTransition, cancellationToken);
-            if (!result.Success)
-            {
-                throw new InvalidOperationException(failureMessage);
-            }
-        }
-        finally
-        {
-            try
-            {
-                await Bridge.RefreshAsync(CancellationToken.None);
-            }
-            catch (Exception exception)
-            {
-                resetState();
-                Bridge.Logger.LogWarning(exception, "Nuki device {NukiId} could not be read after action {Action}.", NukiId, action);
-            }
+            throw new InvalidOperationException(failureMessage);
         }
     }
 }

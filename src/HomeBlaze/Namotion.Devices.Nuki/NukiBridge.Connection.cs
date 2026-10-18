@@ -63,7 +63,9 @@ public partial class NukiBridge
             while (true)
             {
                 stoppingToken.ThrowIfCancellationRequested();
-                if (string.IsNullOrWhiteSpace(HostAddress) || string.IsNullOrEmpty(Token))
+                var hostAddress = HostAddress;
+                var token = Token;
+                if (string.IsNullOrWhiteSpace(hostAddress) || string.IsNullOrEmpty(token))
                 {
                     Status = ServiceStatus.Error;
                     StatusMessage = "Host address and token are required.";
@@ -71,7 +73,7 @@ public partial class NukiBridge
                     continue;
                 }
 
-                if (!await ConnectAndPollAsync(HostAddress, Token, stoppingToken))
+                if (!await ConnectAndPollAsync(hostAddress, token, stoppingToken))
                 {
                     await _configurationChangedSignal.WaitAsync(GetEffectiveInterval(RetryInterval, DefaultRetryInterval), stoppingToken);
                 }
@@ -98,6 +100,8 @@ public partial class NukiBridge
             Status = ServiceStatus.Starting;
             StatusMessage = null;
             await RefreshInfoAsync(client, stoppingToken);
+            await RefreshListAsync(client, stoppingToken);
+            LastUpdated = DateTimeOffset.UtcNow;
 
             _client = client;
             IsConnected = true;
@@ -122,20 +126,25 @@ public partial class NukiBridge
             _client = null;
             IsConnected = false;
 
-            // Disposing the HTTP client cancels a request that is still in flight, such as a lock action that waits
-            // for the motor. No new request takes this client once it is cleared, so waiting once for the gate lets
-            // the last one finish; its own timeout bounds the wait, which is why no token is passed.
-            await _requestGate.WaitAsync(CancellationToken.None);
-            _requestGate.Release();
+            // The HTTP client is disposed when this method returns, which cancels a request still in flight, such as
+            // a lock action waiting for the motor. Before a reconnect, wait once for the gate so that the last request
+            // finishes first; no new request takes the cleared client, and the request's own timeout bounds the wait.
+            // On stop the device goes away and the motor finishes anyway, so stopping does not wait.
+            if (!stoppingToken.IsCancellationRequested)
+            {
+                await _requestGate.WaitAsync(CancellationToken.None);
+                _requestGate.Release();
+            }
         }
     }
 
     private async Task RunPollingLoopAsync(NukiBridgeClient client, CancellationToken stoppingToken)
     {
         var failures = 0;
-        var poll = 1;
-        while (true)
+        var poll = 0;
+        while (!await _configurationChangedSignal.WaitAsync(GetEffectiveInterval(PollingInterval, DefaultPollingInterval), stoppingToken))
         {
+            poll++;
             try
             {
                 await RefreshListAsync(client, stoppingToken);
@@ -166,24 +175,18 @@ public partial class NukiBridge
                     "Nuki bridge {HostAddress} poll failed ({FailureCount} of {MaxFailureCount}).",
                     HostAddress, failures, MaxConsecutivePollFailures);
             }
-
-            if (await _configurationChangedSignal.WaitAsync(GetEffectiveInterval(PollingInterval, DefaultPollingInterval), stoppingToken))
-            {
-                return;
-            }
-
-            poll++;
         }
     }
 
-    internal void ThrowIfNotConnected() => GetConnectedClient();
-
     /// <summary>
     /// Runs a lock action of a device and returns the result the bridge reports once the device has finished it.
-    /// <paramref name="enterTransition"/> runs right before the request is sent.
+    /// <paramref name="enterTransition"/> runs right before the request is sent. Once the request was sent, the device
+    /// list is read whether the action succeeded or not; when that read fails, <paramref name="resetState"/> runs.
     /// </summary>
+    /// <exception cref="InvalidOperationException">The bridge is not connected; nothing was sent.</exception>
+    /// <exception cref="OperationCanceledException">The caller canceled, possibly before anything was sent.</exception>
     internal async Task<NukiActionResponse> ExecuteActionAsync(
-        NukiDevice device, int action, Action? enterTransition, CancellationToken cancellationToken)
+        NukiDevice device, int action, Action? enterTransition, Action resetState, CancellationToken cancellationToken)
     {
         using (await EnterRequestGateAsync(cancellationToken))
         {
@@ -193,7 +196,14 @@ public partial class NukiBridge
             // Entered only while the gate is held, so that a poll that is still running cannot overwrite the transition
             // with the state from before the action.
             enterTransition?.Invoke();
-            return await client.LockActionAsync(device.NukiId, (int)device.DeviceType, action, cancellationToken);
+            try
+            {
+                return await client.LockActionAsync(device.NukiId, (int)device.DeviceType, action, cancellationToken);
+            }
+            finally
+            {
+                await RefreshAfterActionAsync(device, action, resetState);
+            }
         }
     }
 
@@ -202,8 +212,27 @@ public partial class NukiBridge
     /// </summary>
     internal async Task RefreshAsync(CancellationToken cancellationToken)
     {
-        await RefreshListAsync(GetConnectedClient(), cancellationToken);
-        LastUpdated = DateTimeOffset.UtcNow;
+        using (await EnterRequestGateAsync(cancellationToken))
+        {
+            MergeDevices(await GetConnectedClient().GetListAsync(cancellationToken));
+            LastUpdated = DateTimeOffset.UtcNow;
+        }
+    }
+
+    // Runs while the gate of the action is still held, so that no poll reads the list in between. The client is read
+    // again because the connection may have ended during the action.
+    private async Task RefreshAfterActionAsync(NukiDevice device, int action, Action resetState)
+    {
+        try
+        {
+            MergeDevices(await GetConnectedClient().GetListAsync(CancellationToken.None));
+            LastUpdated = DateTimeOffset.UtcNow;
+        }
+        catch (Exception exception)
+        {
+            resetState();
+            Logger.LogWarning(exception, "Nuki device {NukiId} could not be read after action {Action}.", device.NukiId, action);
+        }
     }
 
     private async Task RefreshListAsync(NukiBridgeClient client, CancellationToken cancellationToken)
