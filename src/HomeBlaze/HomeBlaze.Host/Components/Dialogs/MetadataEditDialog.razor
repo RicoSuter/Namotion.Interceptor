@@ -6,7 +6,7 @@
 
 <MudDialog data-testid="metadata-edit-dialog">
     <DialogContent>
-        @if (Child is null)
+        @if (Folder is not null)
         {
             <MudTextField @bind-Value="_title"
                           Label="Title"
@@ -28,7 +28,7 @@
                       AdornmentIcon="@SubjectIconExtensions.ResolveMudBlazorIcon(GetValue(_icon) ?? IconPlaceholder)"
                       HelperText="A MudBlazor icon name, such as Dashboard or Settings"
                       data-testid="metadata-icon" />
-        @if (Child is not null)
+        @if (Folder is null)
         {
             <MudSelect T="NavigationLocation?"
                        @bind-Value="_location"
@@ -60,11 +60,8 @@
 @code {
     [CascadingParameter] private IMudDialogInstance? MudDialog { get; set; }
 
-    /// <summary>The folder whose own metadata is edited when <see cref="Child"/> is null, else the container of the child.</summary>
-    [Parameter, EditorRequired] public IMetadataContainer Container { get; set; } = default!;
-
-    /// <summary>The subject whose metadata is edited, null for the container itself.</summary>
-    [Parameter] public IInterceptorSubject? Child { get; set; }
+    /// <summary>The folder or the subject whose metadata is edited. A storage is edited as the subject of its file.</summary>
+    [Parameter, EditorRequired] public IInterceptorSubject Owner { get; set; } = default!;
 
     [Parameter] public string? TitlePlaceholder { get; set; }
 
@@ -79,15 +76,18 @@
     private AppBarAlignment? _alignment;
     private bool _isSaving;
 
+    // As in SubjectPropertyPanel.GetMetadataTarget, null for a subject.
+    private IMetadataContainer? Folder => Owner is IMetadataContainer folder and not IConfigurable ? folder : null;
+
     protected override void OnInitialized()
     {
-        if (Child is null)
+        if (Folder is { } folder)
         {
-            _title = Container.Metadata?.Title;
-            _navigationTitle = Container.Metadata?.NavigationTitle;
-            _icon = Container.Metadata?.Icon;
+            _title = folder.Metadata?.Title;
+            _navigationTitle = folder.Metadata?.NavigationTitle;
+            _icon = folder.Metadata?.Icon;
         }
-        else if (Child.TryGetSubjectMetadata() is { } metadata)
+        else if (Owner.TryGetSubjectMetadata() is { } metadata)
         {
             _navigationTitle = metadata.NavigationTitle;
             _icon = metadata.Icon;
@@ -103,7 +103,7 @@
         if (_isSaving)
             return;
 
-        if ((Child ?? Container as IInterceptorSubject)?.TryGetMetadataSubject() is not { } metadataSubject)
+        if (Owner.TryGetMetadataSubject() is not { } metadataSubject)
         {
             Snackbar.Add("Error saving metadata: the item is no longer in a storage.", Severity.Error);
             return;
@@ -113,20 +113,21 @@
         try
         {
             // Every field the dialog shows, so that a field left empty removes its key and the other keys stay.
-            var values = Child is null
-                ? new JsonObject
-                {
-                    [MetadataKeys.Title] = GetValue(_title),
-                    [MetadataKeys.NavigationTitle] = GetValue(_navigationTitle),
-                    [MetadataKeys.Icon] = GetValue(_icon)
-                }
-                : new JsonObject
-                {
-                    [MetadataKeys.NavigationTitle] = GetValue(_navigationTitle),
-                    [MetadataKeys.Icon] = GetValue(_icon),
-                    [MetadataKeys.Location] = _location?.ToString(),
-                    [MetadataKeys.Alignment] = _location == NavigationLocation.AppBar ? _alignment?.ToString() : null
-                };
+            var values = new JsonObject
+            {
+                [MetadataKeys.NavigationTitle] = GetValue(_navigationTitle),
+                [MetadataKeys.Icon] = GetValue(_icon)
+            };
+            if (Folder is not null)
+            {
+                values.Insert(0, MetadataKeys.Title, GetValue(_title));
+            }
+            else
+            {
+                values[MetadataKeys.Location] = _location?.ToString();
+                values[MetadataKeys.Alignment] = _location == NavigationLocation.AppBar ? _alignment?.ToString() : null;
+            }
+
             await metadataSubject.SetMetadataAsync(JsonElement.Parse(values.ToJsonString()), CancellationToken.None);
             MudDialog?.Close(DialogResult.Ok(true));
         }
@@ -144,12 +145,11 @@
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     /// <summary>
-    /// Shows the dialog for the metadata of a container itself, or of a subject stored in it.
+    /// Shows the dialog for the metadata of a folder, or of a subject stored in one.
     /// </summary>
     public static Task<IDialogReference> ShowAsync(
         IDialogService dialogService,
-        IMetadataContainer container,
-        IInterceptorSubject? child,
+        IInterceptorSubject owner,
         string title,
         string? titlePlaceholder,
         string? navigationTitlePlaceholder,
@@ -157,8 +157,7 @@
     {
         var parameters = new DialogParameters<MetadataEditDialog>
         {
-            { x => x.Container, container },
-            { x => x.Child, child },
+            { x => x.Owner, owner },
             { x => x.TitlePlaceholder, titlePlaceholder },
             { x => x.NavigationTitlePlaceholder, navigationTitlePlaceholder },
             { x => x.IconPlaceholder, iconPlaceholder }

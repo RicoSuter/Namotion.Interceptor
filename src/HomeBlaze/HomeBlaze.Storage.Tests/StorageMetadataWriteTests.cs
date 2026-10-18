@@ -28,7 +28,7 @@ public class StorageMetadataWriteTests : StorageTestBase
         // Assert
         Assert.Equal("Documentation", docs.Title);
         Assert.Equal("MenuBook", docs.IconName);
-        Assert.Equal(new FolderMetadata { Title = "Documentation", Icon = "MenuBook" }, ReadMetadataFile("Docs/.metadata.json").ToFolderMetadata());
+        Assert.Equal(new FolderMetadata { Title = "Documentation", Icon = "MenuBook" }, ReadMetadataFile("Docs/.metadata.json").FolderMetadata);
     }
 
     [Fact]
@@ -216,7 +216,7 @@ public class StorageMetadataWriteTests : StorageTestBase
         // Assert
         string[] expectedOrder = ["c.md", "a.md", "b.md"];
         Assert.Equal(expectedOrder, storage.ChildOrder.ToArray());
-        Assert.Equal(expectedOrder, ReadMetadataFile(".metadata.json").ToChildOrder().ToArray());
+        Assert.Equal(expectedOrder, ReadMetadataFile(".metadata.json").ChildOrder.ToArray());
     }
 
     [Fact]

@@ -31,40 +31,6 @@ public class NavigationItemResolver
     /// </summary>
     public IEnumerable<NavigationItem> GetChildItems(IInterceptorSubject parent)
     {
-        return GetChildItemList(parent);
-    }
-
-    /// <summary>
-    /// Gets every page of the tree below <paramref name="root"/> that appears in the top bar, in navigation order:
-    /// depth first, each level in the order of <see cref="GetChildItems"/>. A subject that is reached more than once
-    /// is listed once, at its first place.
-    /// </summary>
-    public IReadOnlyList<NavigationItem> GetAppBarItems(IInterceptorSubject root)
-    {
-        var items = new List<NavigationItem>();
-        var visited = new HashSet<IInterceptorSubject>(ReferenceEqualityComparer.Instance) { root };
-        CollectAppBarItems(root, items, visited);
-        return items;
-    }
-
-    private void CollectAppBarItems(
-        IInterceptorSubject parent, List<NavigationItem> items, HashSet<IInterceptorSubject> visited)
-    {
-        foreach (var item in GetChildItemList(parent))
-        {
-            if (!visited.Add(item.Subject))
-                continue;
-
-            if (item is { IsPage: true, Location: NavigationLocation.AppBar })
-                items.Add(item);
-
-            if (item.IsFolder)
-                CollectAppBarItems(item.Subject, items, visited);
-        }
-    }
-
-    private List<NavigationItem> GetChildItemList(IInterceptorSubject parent)
-    {
         var registered = parent.TryGetRegisteredSubject();
         if (registered == null)
             return [];
@@ -124,6 +90,35 @@ public class NavigationItemResolver
             .Order(items, childOrder, static item => item.Key, static item => item.Item.Title)
             .Select(static item => item.Item)
             .ToList();
+    }
+
+    /// <summary>
+    /// Gets every page of the tree below <paramref name="root"/> that appears in the top bar, in navigation order:
+    /// depth first, each level in the order of <see cref="GetChildItems"/>. A subject that is reached more than once
+    /// is listed once, at its first place.
+    /// </summary>
+    public IReadOnlyList<NavigationItem> GetAppBarItems(IInterceptorSubject root)
+    {
+        var items = new List<NavigationItem>();
+        var visited = new HashSet<IInterceptorSubject>(ReferenceEqualityComparer.Instance) { root };
+        CollectAppBarItems(root, items, visited);
+        return items;
+    }
+
+    private void CollectAppBarItems(
+        IInterceptorSubject parent, List<NavigationItem> items, HashSet<IInterceptorSubject> visited)
+    {
+        foreach (var item in GetChildItems(parent))
+        {
+            if (!visited.Add(item.Subject))
+                continue;
+
+            if (item is { IsPage: true, Location: NavigationLocation.AppBar })
+                items.Add(item);
+
+            if (item.IsFolder)
+                CollectAppBarItems(item.Subject, items, visited);
+        }
     }
 
     private static bool ContainsPath(List<(NavigationItem Item, string Key)> items, string path)

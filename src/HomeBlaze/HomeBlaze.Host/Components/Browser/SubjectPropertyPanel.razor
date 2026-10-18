@@ -456,8 +456,7 @@
     // The container and the children the reorder list showed last, which a drop of the script refers to.
     private IMetadataContainer? _reorderContainer;
     private SubjectPropertyChild[]? _reorderedChildren;
-    private readonly Dictionary<SubjectPropertyChild, MudIconButton> _upArrows = [];
-    private readonly Dictionary<SubjectPropertyChild, MudIconButton> _downArrows = [];
+    private readonly Dictionary<(SubjectPropertyChild Child, bool IsUpArrow), MudIconButton> _arrows = [];
 
     // The arrow that takes the focus after the next render, the up arrow of the child when the flag is set.
     private (SubjectPropertyChild Child, bool IsUpArrow)? _arrowToFocus;
@@ -547,7 +546,7 @@
         }
 
         _arrowToFocus = null;
-        if ((arrow.IsUpArrow ? _upArrows : _downArrows).TryGetValue(arrow.Child, out var button))
+        if (_arrows.TryGetValue(arrow, out var button))
         {
             try
             {
@@ -736,8 +735,7 @@
         _isReordering = false;
         _reorderContainer = null;
         _reorderedChildren = null;
-        _upArrows.Clear();
-        _downArrows.Clear();
+        _arrows.Clear();
         _arrowToFocus = null;
     }
 
@@ -987,19 +985,12 @@
         if (Subject is null || GetMetadataTarget() is not { } target)
             return;
 
-        var key = _registeredSubject?.Parents.FirstOrDefault().Index?.ToString();
+        var isFolder = target.Child is null;
         var title = GetSubjectTitle();
-        if (target.Child is null)
-        {
-            await MetadataEditDialog.ShowAsync(DialogService, target.Container, null, $"Metadata of {title}",
-                titlePlaceholder: key, navigationTitlePlaceholder: title, iconPlaceholder: "Folder");
-        }
-        else
-        {
-            await MetadataEditDialog.ShowAsync(DialogService, target.Container, target.Child, $"Metadata of {title}",
-                titlePlaceholder: null, navigationTitlePlaceholder: title,
-                iconPlaceholder: (Subject as IIconProvider)?.IconName is { Length: > 0 } iconName ? iconName : "Article");
-        }
+        await MetadataEditDialog.ShowAsync(DialogService, Subject, $"Metadata of {title}",
+            titlePlaceholder: isFolder ? _registeredSubject?.Parents.FirstOrDefault().Index?.ToString() : null,
+            navigationTitlePlaceholder: title,
+            iconPlaceholder: isFolder ? "Folder" : (Subject as IIconProvider)?.IconName is { Length: > 0 } iconName ? iconName : "Article");
     }
 
     private bool CanShowHistory(RegisteredSubjectProperty property)
@@ -1150,7 +1141,7 @@
     {
         _reorderContainer = container;
         _reorderedChildren = children;
-        var canDrag = CanMoveChildren(container);
+        var canDrag = !_isMovingChild && IsConnected(container);
 
         // Stays enabled while a move is written, as a focused button that turns disabled loses the focus. A press
         // meanwhile is ignored.
@@ -1182,29 +1173,11 @@
                     <span class="subject-pane-move">
                         @if (childIndex > 0)
                         {
-                            var previousChild = children[childIndex - 1];
-                            var reachesTop = childIndex == 1;
-                            <MudIconButton @ref="_upArrows[child]"
-                                           Icon="@Icons.Material.Filled.ArrowUpward"
-                                           Size="Size.Small"
-                                           Class="subject-pane-move-up pa-0"
-                                           Disabled="@(!canPressArrows)"
-                                           OnClick="@(() => MoveChildByArrowAsync(container, child, previousChild, isUp: true, reachesTop))"
-                                           aria-label="@($"Move {childName} up")"
-                                           data-testid="move-child-up-button" />
+                            @RenderMoveArrow(container, child, children[childIndex - 1], isUp: true, reachesEnd: childIndex == 1, childName, canPressArrows)
                         }
                         @if (childIndex < children.Length - 1)
                         {
-                            var nextChild = children[childIndex + 1];
-                            var reachesBottom = childIndex == children.Length - 2;
-                            <MudIconButton @ref="_downArrows[child]"
-                                           Icon="@Icons.Material.Filled.ArrowDownward"
-                                           Size="Size.Small"
-                                           Class="subject-pane-move-down pa-0"
-                                           Disabled="@(!canPressArrows)"
-                                           OnClick="@(() => MoveChildByArrowAsync(container, child, nextChild, isUp: false, reachesBottom))"
-                                           aria-label="@($"Move {childName} down")"
-                                           data-testid="move-child-down-button" />
+                            @RenderMoveArrow(container, child, children[childIndex + 1], isUp: false, reachesEnd: childIndex == children.Length - 2, childName, canPressArrows)
                         }
                     </span>
                 </div>
@@ -1212,8 +1185,20 @@
         </div>
     };
 
-    private bool CanMoveChildren(IMetadataContainer container)
-        => !_isMovingChild && IsConnected(container);
+    private RenderFragment RenderMoveArrow(
+        IMetadataContainer container, SubjectPropertyChild child, SubjectPropertyChild neighbor, bool isUp, bool reachesEnd,
+        string childName, bool isEnabled) => __builder =>
+    {
+        var direction = isUp ? "up" : "down";
+        <MudIconButton @ref="_arrows[(child, isUp)]"
+                       Icon="@(isUp ? Icons.Material.Filled.ArrowUpward : Icons.Material.Filled.ArrowDownward)"
+                       Size="Size.Small"
+                       Class="@($"subject-pane-move-{direction} pa-0")"
+                       Disabled="@(!isEnabled)"
+                       OnClick="@(() => MoveChildByArrowAsync(container, child, neighbor, isUp, reachesEnd))"
+                       aria-label="@($"Move {childName} {direction}")"
+                       data-testid="@($"move-child-{direction}-button")" />
+    };
 
     // Called by the script with the names of the dragged child and of the child whose place it takes, which come from
     // the order the list showed when the drag started. Returns once the pane shows the new order, as the script shows

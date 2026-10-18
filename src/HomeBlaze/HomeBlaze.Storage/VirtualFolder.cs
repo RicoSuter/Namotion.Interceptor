@@ -64,13 +64,13 @@ public partial class VirtualFolder : ITitleProvider, IIconProvider, IStorageCont
     /// </summary>
     internal void ApplyMetadata(StorageMetadataDocument? document)
     {
-        var metadata = document?.ToFolderMetadata();
+        var metadata = document?.FolderMetadata;
         if (metadata != Metadata)
         {
             Metadata = metadata;
         }
 
-        var childOrder = document?.ToChildOrder() ?? [];
+        var childOrder = document?.ChildOrder ?? [];
         if (!childOrder.SequenceEqual(ChildOrder))
         {
             ChildOrder = childOrder;

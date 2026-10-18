@@ -61,11 +61,6 @@ internal sealed class StorageMetadataDocument
 
     private readonly JsonObject _root;
 
-    // Read when the document is created or changed rather than on each call, as every pass takes them for each file.
-    private FolderMetadata? _folderMetadata;
-    private SubjectMetadata? _subjectMetadata;
-    private ImmutableArray<string> _childOrder;
-
     public StorageMetadataDocument()
         : this(new JsonObject(NodeOptions))
     {
@@ -153,13 +148,13 @@ internal sealed class StorageMetadataDocument
     public bool HasKey(string key) => _root.ContainsKey(key);
 
     /// <summary>Gets the title, navTitle and icon of a folder; null without any.</summary>
-    public FolderMetadata? ToFolderMetadata() => _folderMetadata;
+    public FolderMetadata? FolderMetadata { get; private set; }
 
     /// <summary>Gets the navTitle, icon, location and alignment of a subject; null without any.</summary>
-    public SubjectMetadata? ToSubjectMetadata() => _subjectMetadata;
+    public SubjectMetadata? SubjectMetadata { get; private set; }
 
     /// <summary>Gets the names of <c>order</c>, leaving out the values that are no string.</summary>
-    public ImmutableArray<string> ToChildOrder() => _childOrder;
+    public ImmutableArray<string> ChildOrder { get; private set; }
 
     /// <summary>Sets <c>order</c> to the names, and removes it for none.</summary>
     public void SetOrder(IEnumerable<string> names)
@@ -309,6 +304,7 @@ internal sealed class StorageMetadataDocument
         return builder.ToString();
     }
 
+    // When the document is created or changed rather than on each get, as every pass takes the values for each file.
     private void ReadTypedValues()
     {
         var folderMetadata = new FolderMetadata
@@ -317,7 +313,7 @@ internal sealed class StorageMetadataDocument
             NavigationTitle = GetString(MetadataKeys.NavigationTitle),
             Icon = GetString(MetadataKeys.Icon)
         };
-        _folderMetadata = folderMetadata is { Title: null, NavigationTitle: null, Icon: null } ? null : folderMetadata;
+        FolderMetadata = folderMetadata is { Title: null, NavigationTitle: null, Icon: null } ? null : folderMetadata;
 
         var subjectMetadata = new SubjectMetadata
         {
@@ -326,9 +322,9 @@ internal sealed class StorageMetadataDocument
             Location = GetEnum<NavigationLocation>(MetadataKeys.Location),
             Alignment = GetEnum<AppBarAlignment>(MetadataKeys.Alignment)
         };
-        _subjectMetadata = subjectMetadata is { NavigationTitle: null, Icon: null, Location: null, Alignment: null } ? null : subjectMetadata;
+        SubjectMetadata = subjectMetadata is { NavigationTitle: null, Icon: null, Location: null, Alignment: null } ? null : subjectMetadata;
 
-        _childOrder = [];
+        ChildOrder = [];
         if (_root[MetadataKeys.Order] is JsonArray order)
         {
             var names = ImmutableArray.CreateBuilder<string>(order.Count);
@@ -340,7 +336,7 @@ internal sealed class StorageMetadataDocument
                 }
             }
 
-            _childOrder = names.DrainToImmutable();
+            ChildOrder = names.DrainToImmutable();
         }
     }
 

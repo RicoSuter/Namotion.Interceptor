@@ -507,7 +507,7 @@ public partial class FluentStorageContainer :
     /// </summary>
     internal void ApplyMetadata(StorageMetadataDocument? document)
     {
-        var childOrder = document?.ToChildOrder() ?? [];
+        var childOrder = document?.ChildOrder ?? [];
         if (!childOrder.SequenceEqual(ChildOrder))
         {
             ChildOrder = childOrder;
@@ -664,7 +664,12 @@ public partial class FluentStorageContainer :
 
         var folder = owner as VirtualFolder ?? throw new StorageRefusedException("Only a folder or the root of a storage has an order.");
         var path = StoragePath.Normalize(folder.RelativePath);
-        return ReferenceEquals(GetPlacedFolder(connection, path), folder)
+        if (!connection.Index.TryGet(path, out var entry) || entry is not { IsFolder: true, IsPlaced: true, Subject: VirtualFolder placedFolder })
+        {
+            throw new StorageRefusedException($"No folder at '{path}'.");
+        }
+
+        return ReferenceEquals(placedFolder, folder)
             ? path
             : throw new StorageRefusedException($"The folder '{path}' is no longer in the storage.");
     }
@@ -745,7 +750,7 @@ public partial class FluentStorageContainer :
             // The other children follow in the order of the file as it is now.
             var path = StorageMetadataPath.GetFolderFilePath(folder);
             var document = await connection.Reconciler.ReadMetadataFileAsync(path, token);
-            var shownNames = GetShownNames(children, document.ToChildOrder());
+            var shownNames = GetShownNames(children, document.ChildOrder);
             document.SetOrder([.. requestedNames, .. shownNames.Where(name => !listedNames.Contains(name))]);
             await WriteMetadataDocumentAsync(connection, path, document, token);
         }, cancellationToken);
@@ -765,11 +770,6 @@ public partial class FluentStorageContainer :
             .Order(children, childOrder, static child => child.Key, static child => child.Value.GetNavigationTitle(child.Key))
             .Select(static child => child.Key)
             .ToList();
-
-    private static VirtualFolder GetPlacedFolder(StorageConnection connection, string folder)
-        => connection.Index.TryGet(folder, out var entry) && entry is { IsFolder: true, IsPlaced: true, Subject: VirtualFolder virtualFolder }
-            ? virtualFolder
-            : throw new StorageRefusedException($"No folder at '{folder}'.");
 
     // Runs on the worker. A file that would be empty is deleted, so that a metadata file exists only while it holds something.
     private async Task WriteMetadataDocumentAsync(

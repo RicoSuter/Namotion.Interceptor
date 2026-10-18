@@ -56,11 +56,11 @@ public class StorageMetadataDocumentTests
         var document = Parse(json);
 
         // Assert
-        Assert.Equal(new FolderMetadata { Title = "Devices", NavigationTitle = "Devs", Icon = "Devices" }, document.ToFolderMetadata());
+        Assert.Equal(new FolderMetadata { Title = "Devices", NavigationTitle = "Devs", Icon = "Devices" }, document.FolderMetadata);
         Assert.Equal(
             new SubjectMetadata { NavigationTitle = "Devs", Icon = "Devices", Location = NavigationLocation.AppBar, Alignment = AppBarAlignment.Right },
-            document.ToSubjectMetadata());
-        Assert.Equal(["Readme.md", "Pumps"], document.ToChildOrder().ToArray());
+            document.SubjectMetadata);
+        Assert.Equal(["Readme.md", "Pumps"], document.ChildOrder.ToArray());
     }
 
     [Fact]
@@ -74,7 +74,7 @@ public class StorageMetadataDocumentTests
 
         // Assert
         Assert.True(isParsed);
-        Assert.Equal("Docs", document!.ToFolderMetadata()?.Title);
+        Assert.Equal("Docs", document!.FolderMetadata?.Title);
     }
 
     [Theory]
@@ -129,9 +129,9 @@ public class StorageMetadataDocumentTests
         var document = Parse("""{ "title": " ", "navTitle": 5, "icon": "\ud800", "location": 1, "alignment": "Up", "order": ["a", null, 2] }""");
 
         // Act
-        var folder = document.ToFolderMetadata();
-        var subject = document.ToSubjectMetadata();
-        var order = document.ToChildOrder();
+        var folder = document.FolderMetadata;
+        var subject = document.SubjectMetadata;
+        var order = document.ChildOrder;
 
         // Assert
         Assert.Null(folder);
@@ -263,7 +263,7 @@ public class StorageMetadataDocumentTests
 
         // Assert
         Assert.True(document.Serialize().Length > 16 * 1024);
-        Assert.Equal(Values(values).GetProperty("title").GetString(), document.ToFolderMetadata()?.Title);
+        Assert.Equal(Values(values).GetProperty("title").GetString(), document.FolderMetadata?.Title);
     }
 
     [Fact]

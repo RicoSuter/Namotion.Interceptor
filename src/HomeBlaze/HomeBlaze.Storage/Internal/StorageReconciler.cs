@@ -313,7 +313,7 @@ internal sealed class StorageReconciler
             }
             else if (entry.HasSidecar && MetadataSubject.Ensure(entry.Subject!) is { } metadataSubject)
             {
-                var metadata = FindMetadata(StorageMetadataPath.GetSubjectFilePath(entry.Path))?.ToSubjectMetadata();
+                var metadata = FindMetadata(StorageMetadataPath.GetSubjectFilePath(entry.Path))?.SubjectMetadata;
                 if (metadata != metadataSubject.SubjectMetadata)
                 {
                     metadataSubject.SubjectMetadata = metadata;
@@ -471,8 +471,7 @@ internal sealed class StorageReconciler
                 continue;
             }
 
-            // The path filter only inspects segments and cannot tell a folder from a file, so a directory named
-            // like the folder metadata file would otherwise pass through and shadow the file of its parent.
+            // A directory named .metadata.json, which the path filter cannot tell from the file, would shadow it.
             if (blob.IsFolder && string.Equals(StoragePath.GetName(path), StorageMetadataPath.FolderFileName, StringComparison.Ordinal))
             {
                 continue;

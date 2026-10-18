@@ -102,17 +102,21 @@ class RowDrag {
         this.pointerY = event.clientY;
         this.isStarted = false;
 
-        // Ends every listener of the drag at once, see removeGestureListeners.
+        // Ends every listener of the drag at once.
         this.listeners = new AbortController();
         const options = { signal: this.listeners.signal };
         document.addEventListener('pointermove', event => this.onPointerMove(event), options);
         document.addEventListener('pointerup', event => this.onPointerUp(event), options);
-        document.addEventListener('pointercancel', event => this.onPointerCancel(event), options);
+        document.addEventListener('pointercancel', event => {
+            if (event.pointerId === this.pointerId) {
+                this.end();
+            }
+        }, options);
 
         // A context menu or a switch to another window can swallow the release of the button, after which the next
         // click would drop the row.
         document.addEventListener('contextmenu', event => this.onContextMenu(event), options);
-        window.addEventListener('blur', () => this.onInterruption(), options);
+        window.addEventListener('blur', () => this.end(), options);
     }
 
     onPointerMove(event) {
@@ -184,7 +188,7 @@ class RowDrag {
         document.addEventListener('keydown', event => this.onKeyDown(event), { capture: true, signal });
 
         // Scroll events do not bubble, so the listener captures the scrolling of any element, the pane among them.
-        document.addEventListener('scroll', () => this.onScroll(), { capture: true, signal });
+        document.addEventListener('scroll', () => this.update(), { capture: true, signal });
 
         // A render that changes the rows while the drag is under way ends it, as the place it would drop on is gone.
         // A render that shows the new order once the drop is written ends the drop.
@@ -275,7 +279,7 @@ class RowDrag {
     // jump back to its old place meanwhile. The call ends after the render of the new order, or after a move that
     // failed or was ignored, which leave the order as it was.
     drop(gap) {
-        this.removeGestureListeners();
+        this.listeners.abort();
         cancelAnimationFrame(this.animationFrame);
         this.indicator.style.display = 'none';
 
@@ -293,16 +297,6 @@ class RowDrag {
             .finally(() => this.end());
     }
 
-    onPointerCancel(event) {
-        if (event.pointerId === this.pointerId) {
-            this.end();
-        }
-    }
-
-    onInterruption() {
-        this.end();
-    }
-
     // A long press, the usual start of a drag by touch or by pen, opens the context menu as well, which is suppressed.
     onContextMenu(event) {
         if (this.pointerType === 'mouse') {
@@ -317,10 +311,6 @@ class RowDrag {
         if (event.target === this.row) {
             this.end();
         }
-    }
-
-    onScroll() {
-        this.update();
     }
 
     onKeyDown(event) {
@@ -343,17 +333,13 @@ class RowDrag {
         }
     }
 
-    removeGestureListeners() {
-        this.listeners.abort();
-    }
-
     end() {
         if (activeDrag !== this) {
             return;
         }
 
         activeDrag = null;
-        this.removeGestureListeners();
+        this.listeners.abort();
         if (!this.isStarted) {
             return;
         }

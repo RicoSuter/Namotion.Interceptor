@@ -161,30 +161,23 @@ public class MethodPropertyInitializer : ILifecycleHandler
             // An explicit implementation is not a public class method, so the interface method decides for it.
             var classMethod = implementation is { IsPublic: true, DeclaringType.IsInterface: false } ? implementation : null;
 
+            var excludedFrom = GetExcludedFrom(method) | (classMethod is not null ? GetExcludedFrom(classMethod) : ExclusionTarget.None);
+            foreach (var implementedMethod in implementedMethods)
+            {
+                excludedFrom |= GetExcludedFrom(implementedMethod);
+            }
+
             return new MethodTraits(
                 FindCategory(method, isInterfaceMethod, classMethod, implementedMethods),
                 RequiresConfirmation(method) ||
                 (classMethod is not null && AnyOverriddenMethodRequiresConfirmation(classMethod)) ||
                 implementedMethods.Exists(RequiresConfirmation),
                 CreateParameters(method),
-                GetExcludedFrom(method) |
-                (classMethod is not null ? GetExcludedFrom(classMethod) : ExclusionTarget.None) |
-                GetExcludedFrom(implementedMethods));
+                excludedFrom);
         }
 
         private static ExclusionTarget GetExcludedFrom(MethodInfo method) =>
             method.GetCustomAttribute<ExcludeFromAttribute>()?.Targets ?? ExclusionTarget.None;
-
-        private static ExclusionTarget GetExcludedFrom(List<MethodInfo> methods)
-        {
-            var targets = ExclusionTarget.None;
-            foreach (var method in methods)
-            {
-                targets |= GetExcludedFrom(method);
-            }
-
-            return targets;
-        }
 
         private static MethodParameter[] CreateParameters(MethodInfo method)
         {

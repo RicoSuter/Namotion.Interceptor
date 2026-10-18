@@ -46,13 +46,8 @@ public sealed partial class MetadataSubject : IMetadataSubject
     /// <inheritdoc />
     public IInterceptorSubject GetOwner() => _owner;
 
-    /// <summary>
-    /// Gets every key of the metadata file of the owner as a JSON object, unknown keys included; an empty object
-    /// without a file. For a folder or the root the order is left out.
-    /// </summary>
-    /// <exception cref="ArgumentException">
-    /// The owner is no longer in a storage, the storage is not connected, or the metadata file could not be read.
-    /// </exception>
+    /// <summary>Gets every key of the metadata file of the owner as a JSON object.</summary>
+    /// <exception cref="ArgumentException">The call is refused; the message says why.</exception>
     [Query(Title = "Get Metadata", Description = GetMetadataDescription, Position = 1)]
     [ExcludeFrom(ExclusionTarget.UserInterface)]
     public Task<JsonElement> GetMetadataAsync(CancellationToken cancellationToken)
@@ -64,12 +59,8 @@ public sealed partial class MetadataSubject : IMetadataSubject
     public Task SetMetadataAsync(JsonElement values, CancellationToken cancellationToken)
         => RunAsync(() => ResolveStorage().SetMetadataAsync(_owner, values, cancellationToken));
 
-    /// <summary>
-    /// Gets the names of the children of the folder or root in the order in which they are shown.
-    /// </summary>
-    /// <exception cref="ArgumentException">
-    /// The owner is no folder or root, the storage is not connected, or the folder is no longer in it.
-    /// </exception>
+    /// <summary>Gets the names of the children of the folder or root in the order in which they are shown.</summary>
+    /// <exception cref="ArgumentException">The call is refused; the message says why.</exception>
     [Query(Title = "Get Order", Description = GetOrderDescription, Position = 3)]
     [ExcludeFrom(ExclusionTarget.UserInterface)]
     public Task<string[]> GetOrderAsync(CancellationToken cancellationToken)

@@ -242,7 +242,7 @@ public class MetadataSubjectTests : StorageTestBase
         Assert.Equal("Pump", replaced.TryGetSubjectMetadata()?.NavigationTitle);
         await Assert.ThrowsAsync<ArgumentException>(() =>
             oldMetadataSubject.SetMetadataAsync(Values("""{ "navTitle": "Old" }"""), CancellationToken.None));
-        Assert.Equal("Pump", ReadMetadataFile("Motor.metadata.json").ToSubjectMetadata()?.NavigationTitle);
+        Assert.Equal("Pump", ReadMetadataFile("Motor.metadata.json").SubjectMetadata?.NavigationTitle);
     }
 
     [Fact]
@@ -289,7 +289,7 @@ public class MetadataSubjectTests : StorageTestBase
 
             // Assert
             Assert.Equal("Archive", nested.TryGetSubjectMetadata()?.NavigationTitle);
-            Assert.Equal("Archive", ReadMetadataFile("Nested.metadata.json").ToSubjectMetadata()?.NavigationTitle);
+            Assert.Equal("Archive", ReadMetadataFile("Nested.metadata.json").SubjectMetadata?.NavigationTitle);
             Assert.Equal(["b.md", "a.md"], nested.ChildOrder.ToArray());
             Assert.True(File.Exists(Path.Combine(nestedDirectory.FullName, ".metadata.json")));
             Assert.False(File.Exists(GetFullPath(".metadata.json")));
