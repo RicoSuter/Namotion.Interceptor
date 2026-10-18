@@ -17,9 +17,6 @@ internal sealed class NukiBridgeClient
 {
     public const int DefaultPort = 8080;
 
-    /// <summary>The default delay before a request that the bridge answered with 503 is sent again.</summary>
-    public static readonly TimeSpan DefaultBusyRetryDelay = TimeSpan.FromSeconds(1);
-
     /// <summary>The largest response accepted from the bridge or the discovery service, in bytes.</summary>
     public const int MaxResponseSize = 1024 * 1024;
 
@@ -31,9 +28,8 @@ internal sealed class NukiBridgeClient
     private readonly string _baseAddress;
     private readonly string? _token;
     private readonly NukiTokenMode _tokenMode;
-    private readonly TimeSpan _busyRetryDelay;
 
-    public NukiBridgeClient(HttpClient httpClient, string hostAddress, string? token, NukiTokenMode tokenMode, TimeSpan? busyRetryDelay = null)
+    public NukiBridgeClient(HttpClient httpClient, string hostAddress, string? token, NukiTokenMode tokenMode)
     {
         if (!TryParseHostAddress(hostAddress, out var host, out var port, out var errorMessage))
         {
@@ -44,7 +40,6 @@ internal sealed class NukiBridgeClient
         _baseAddress = "http://" + (host.Contains(':') ? "[" + host + "]" : host) + ":" + port.ToString(CultureInfo.InvariantCulture) + "/";
         _token = token;
         _tokenMode = tokenMode;
-        _busyRetryDelay = busyRetryDelay ?? DefaultBusyRetryDelay;
     }
 
     /// <summary>
@@ -106,22 +101,18 @@ internal sealed class NukiBridgeClient
         int.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out port) && port is >= 1 and <= 65535;
 
     public Task<NukiInfoResponse> GetInfoAsync(CancellationToken cancellationToken) =>
-        GetAsync("info", null, ReadTimeout, NukiJsonContext.Default.NukiInfoResponse, retryWhenBusy: true, cancellationToken);
+        GetAsync("info", null, ReadTimeout, NukiJsonContext.Default.NukiInfoResponse, cancellationToken);
 
     public Task<NukiDeviceResponse[]> GetListAsync(CancellationToken cancellationToken) =>
-        GetAsync("list", null, ReadTimeout, NukiJsonContext.Default.NukiDeviceResponseArray, retryWhenBusy: true, cancellationToken);
+        GetAsync("list", null, ReadTimeout, NukiJsonContext.Default.NukiDeviceResponseArray, cancellationToken);
 
-    /// <summary>
-    /// Runs a lock action and waits until the device has finished it. Not sent again when the bridge answers 503, as
-    /// the device may run the action late.
-    /// </summary>
+    /// <summary>Runs a lock action and waits until the device has finished it.</summary>
     public Task<NukiActionResponse> LockActionAsync(long nukiId, int deviceType, int action, CancellationToken cancellationToken) =>
         GetAsync(
             "lockAction",
             string.Create(CultureInfo.InvariantCulture, $"nukiId={nukiId}&deviceType={deviceType}&action={action}&nowait=0"),
             ActionTimeout,
             NukiJsonContext.Default.NukiActionResponse,
-            retryWhenBusy: false,
             cancellationToken);
 
     /// <summary>
@@ -129,42 +120,29 @@ internal sealed class NukiBridgeClient
     /// client without a token.
     /// </summary>
     public Task<NukiAuthResponse> AuthAsync(CancellationToken cancellationToken) =>
-        GetAsync("auth", null, AuthTimeout, NukiJsonContext.Default.NukiAuthResponse, retryWhenBusy: true, cancellationToken);
+        GetAsync("auth", null, AuthTimeout, NukiJsonContext.Default.NukiAuthResponse, cancellationToken);
 
     private async Task<T> GetAsync<T>(
-        string path, string? query, TimeSpan timeout, JsonTypeInfo<T> typeInfo, bool retryWhenBusy, CancellationToken cancellationToken)
+        string path, string? query, TimeSpan timeout, JsonTypeInfo<T> typeInfo, CancellationToken cancellationToken)
     {
-        var attempt = 1;
-        while (true)
+        using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutSource.CancelAfter(timeout);
+        try
         {
-            using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeoutSource.CancelAfter(timeout);
-            try
+            using var response = await _httpClient.GetAsync(BuildAddress(path, query), HttpCompletionOption.ResponseHeadersRead, timeoutSource.Token);
+            if (!response.IsSuccessStatusCode)
             {
-                // Built per attempt: an encrypted token is valid for one request only.
-                var address = BuildAddress(path, query);
-                using var response = await _httpClient.GetAsync(address, HttpCompletionOption.ResponseHeadersRead, timeoutSource.Token);
-                if (response.StatusCode == HttpStatusCode.ServiceUnavailable && retryWhenBusy && attempt == 1)
-                {
-                    attempt++;
-                    await Task.Delay(_busyRetryDelay, cancellationToken);
-                    continue;
-                }
-
-                if (!response.IsSuccessStatusCode)
-                {
-                    throw CreateException(path, response.StatusCode);
-                }
-
-                await response.Content.LoadIntoBufferAsync(MaxResponseSize, timeoutSource.Token);
-                return await response.Content.ReadFromJsonAsync(typeInfo, timeoutSource.Token)
-                    ?? throw new InvalidDataException($"The bridge answered /{path} without content.");
+                throw CreateException(path, response.StatusCode);
             }
-            // A request that the disposal of the HTTP client cancels, on a reconnect or a stop, did not time out.
-            catch (OperationCanceledException exception) when (timeoutSource.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
-            {
-                throw new TimeoutException($"The bridge did not answer /{path} within {timeout.TotalSeconds:0} seconds.", exception);
-            }
+
+            await response.Content.LoadIntoBufferAsync(MaxResponseSize, timeoutSource.Token);
+            return await response.Content.ReadFromJsonAsync(typeInfo, timeoutSource.Token)
+                ?? throw new InvalidDataException($"The bridge answered /{path} without content.");
+        }
+        // A request that the disposal of the HTTP client cancels, on a reconnect or a stop, did not time out.
+        catch (OperationCanceledException exception) when (timeoutSource.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        {
+            throw new TimeoutException($"The bridge did not answer /{path} within {timeout.TotalSeconds:0} seconds.", exception);
         }
     }
 

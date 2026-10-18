@@ -78,7 +78,7 @@ A device is a child of its bridge, so its path is the path of the bridge, then `
 | `LockNGo` | Yes | Unlocks the door and locks it again after a short time |
 | `LockNGoWithUnlatch` | Yes | Like `LockNGo`, and pulls the latch |
 
-While an operation runs, `LockState` shows its transition (for example Locking). The bridge answers once the lock has finished, and the state is read from the bridge right after it. An operation that the lock reports as failed shows an error. An operation is never sent twice: when the bridge answers that it is busy, the operation fails and can be run again, while reads are retried once.
+While an operation runs, `LockState` shows its transition (for example Locking). The bridge answers once the lock has finished, and the state is read from the bridge right after it. An operation that the lock reports as failed shows an error. When the bridge answers that it is busy, the request fails and is not sent again: run the operation again, and the next poll reads the state.
 
 `LockNGo` and `LockNGoWithUnlatch` are available while the lock is locked. `Lock` and `Unlock` stay available while it is jammed, so that the move can be retried as in the Nuki app.
 

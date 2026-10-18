@@ -23,8 +23,7 @@ internal sealed class TestBridge : IAsyncDisposable
             TokenMode = NukiTokenMode.Plain,
             // Long, so that only the first poll after connecting runs unless a test shortens it.
             PollingInterval = TimeSpan.FromHours(1),
-            RetryInterval = TimeSpan.FromSeconds(NukiBridge.MinimumIntervalSeconds),
-            BusyRetryDelay = TimeSpan.Zero
+            RetryInterval = TimeSpan.FromSeconds(NukiBridge.MinimumIntervalSeconds)
         };
         ((IInterceptorSubject)Bridge).Context.AddFallbackContext(SubjectContextFactory.Create(new ServiceCollection()));
     }

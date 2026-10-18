@@ -86,9 +86,6 @@ public partial class NukiBridge : BackgroundService,
 
     internal ILogger<NukiBridge> Logger { get; }
 
-    /// <summary>The delay before a request that the bridge answered with 503 is sent again.</summary>
-    internal TimeSpan BusyRetryDelay { get; set; } = NukiBridgeClient.DefaultBusyRetryDelay;
-
     /// <summary>
     /// The IP address or host name of the bridge, optionally with a port (8080 by default) and an http or https scheme.
     /// An IPv6 address with a port is enclosed in brackets.

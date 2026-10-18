@@ -13,7 +13,7 @@ public class NukiBridgeClientTests
     private const string Token = "123456";
 
     private static NukiBridgeClient CreateClient(FakeNukiBridge bridge, NukiTokenMode tokenMode, string hostAddress = "192.168.1.50")
-        => new(bridge.CreateClient(string.Empty), hostAddress, Token, tokenMode, busyRetryDelay: TimeSpan.Zero);
+        => new(bridge.CreateClient(string.Empty), hostAddress, Token, tokenMode);
 
     [Theory]
     [InlineData("192.168.1.50", "http://192.168.1.50:8080/info?token=123456")]
@@ -64,26 +64,7 @@ public class NukiBridgeClientTests
     }
 
     [Fact]
-    public async Task WhenBridgeIsBusyOnce_ThenTheRequestIsRetriedWithANewToken()
-    {
-        // Arrange
-        var bridge = new FakeNukiBridge();
-        var calls = 0;
-        bridge.StatusOverride = path => Interlocked.Increment(ref calls) == 1 ? HttpStatusCode.ServiceUnavailable : null;
-        var client = CreateClient(bridge, NukiTokenMode.Encrypted);
-
-        // Act
-        var devices = await client.GetListAsync(CancellationToken.None);
-
-        // Assert
-        Assert.Equal(2, devices.Length);
-        Assert.Equal(2, bridge.CountRequests("list"));
-        var nonces = bridge.Requests.Select(uri => HttpUtility.ParseQueryString(uri.Query)["nonce"]).ToArray();
-        Assert.NotEqual(nonces[0], nonces[1]);
-    }
-
-    [Fact]
-    public async Task WhenBridgeStaysBusy_ThenTheSecondAttemptThrows()
+    public async Task WhenBridgeIsBusy_ThenTheRequestFailsWithoutBeingSentAgain()
     {
         // Arrange
         var bridge = new FakeNukiBridge { StatusOverride = _ => HttpStatusCode.ServiceUnavailable };
@@ -92,7 +73,8 @@ public class NukiBridgeClientTests
         // Act & Assert
         var exception = await Assert.ThrowsAsync<HttpRequestException>(() => client.GetListAsync(CancellationToken.None));
         Assert.Equal(HttpStatusCode.ServiceUnavailable, exception.StatusCode);
-        Assert.Equal(2, bridge.CountRequests("list"));
+        Assert.Contains("The bridge is busy", exception.Message);
+        Assert.Equal(1, bridge.CountRequests("list"));
     }
 
     [Fact]
@@ -143,20 +125,6 @@ public class NukiBridgeClientTests
 
         // Assert
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => lockActionTask);
-    }
-
-    [Fact]
-    public async Task WhenBridgeIsBusyDuringALockAction_ThenTheActionIsNotSentAgain()
-    {
-        // Arrange
-        var bridge = new FakeNukiBridge { StatusOverride = _ => HttpStatusCode.ServiceUnavailable };
-        var client = CreateClient(bridge, NukiTokenMode.Plain);
-
-        // Act & Assert
-        var exception = await Assert.ThrowsAsync<HttpRequestException>(
-            () => client.LockActionAsync(nukiId: 1, deviceType: 0, action: 2, CancellationToken.None));
-        Assert.Equal(HttpStatusCode.ServiceUnavailable, exception.StatusCode);
-        Assert.Equal(1, bridge.CountRequests("lockAction"));
     }
 
     [Fact]

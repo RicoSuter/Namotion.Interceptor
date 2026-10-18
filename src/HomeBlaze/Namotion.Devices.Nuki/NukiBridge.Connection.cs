@@ -100,7 +100,7 @@ public partial class NukiBridge
     private async Task<bool> ConnectAndPollAsync(string hostAddress, string token, CancellationToken stoppingToken)
     {
         using var httpClient = _httpClientFactory.CreateClient();
-        var client = new NukiBridgeClient(httpClient, hostAddress, token, TokenMode, BusyRetryDelay);
+        var client = new NukiBridgeClient(httpClient, hostAddress, token, TokenMode);
         try
         {
             StatusMessage = null;
