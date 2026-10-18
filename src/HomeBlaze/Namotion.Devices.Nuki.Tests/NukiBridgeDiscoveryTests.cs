@@ -109,33 +109,44 @@ public class NukiBridgeDiscoveryTests
     }
 
     [Fact]
-    public async Task WhenBridgeAcceptsTheEncryptedToken_ThenTheTokenModeIsEncrypted()
+    public async Task WhenBridgeAcceptsTheEncryptedToken_ThenTheTokenModeIsEncryptedWithoutWarning()
     {
         // Arrange
         var fake = new FakeNukiBridge();
 
         // Act
-        var mode = await NukiBridgeDiscovery.DetectTokenModeAsync(fake.CreateClient(string.Empty), "192.168.1.50", "abc123", CancellationToken.None);
+        var detection = await NukiBridgeDiscovery.DetectTokenModeAsync(fake.CreateClient(string.Empty), "192.168.1.50", "abc123", CancellationToken.None);
 
         // Assert
-        Assert.Equal(NukiTokenMode.Encrypted, mode);
+        Assert.Equal(new NukiTokenModeDetection(NukiTokenMode.Encrypted, Warning: null), detection);
         Assert.Single(fake.Requests);
     }
 
     [Theory]
-    [InlineData(NukiFixtures.SoftwareInfo, NukiTokenMode.Plain)]
-    [InlineData(NukiFixtures.Info, NukiTokenMode.Encrypted)]
-    public async Task WhenBridgeRejectsTheEncryptedToken_ThenItsBridgeTypeReadWithThePlainTokenDecides(string infoJson, NukiTokenMode expected)
+    [InlineData(NukiFixtures.SoftwareInfo, NukiTokenMode.Plain, null)]
+    [InlineData(NukiFixtures.Info, NukiTokenMode.Encrypted, "clock")]
+    [InlineData("""{"bridgeType": 3}""", NukiTokenMode.Plain, "unknown bridge type")]
+    public async Task WhenBridgeRejectsTheEncryptedToken_ThenItsBridgeTypeReadWithThePlainTokenDecides(
+        string infoJson, NukiTokenMode expectedMode, string? expectedWarning)
     {
         // Arrange
         var fake = new FakeNukiBridge { InfoJson = infoJson };
         fake.StatusOverride = _ => fake.CountRequests("info") == 1 ? HttpStatusCode.Unauthorized : null;
 
         // Act
-        var mode = await NukiBridgeDiscovery.DetectTokenModeAsync(fake.CreateClient(string.Empty), "192.168.1.50", "abc123", CancellationToken.None);
+        var detection = await NukiBridgeDiscovery.DetectTokenModeAsync(fake.CreateClient(string.Empty), "192.168.1.50", "abc123", CancellationToken.None);
 
         // Assert
-        Assert.Equal(expected, mode);
+        Assert.Equal(expectedMode, detection.Mode);
+        if (expectedWarning is null)
+        {
+            Assert.Null(detection.Warning);
+        }
+        else
+        {
+            Assert.Contains(expectedWarning, detection.Warning);
+        }
+
         Assert.Contains("token=abc123", fake.Requests[1].Query);
     }
 

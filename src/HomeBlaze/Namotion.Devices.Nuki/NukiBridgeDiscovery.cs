@@ -66,24 +66,33 @@ public static class NukiBridgeDiscovery
     /// <summary>
     /// Finds the token mode for a bridge: <see cref="NukiTokenMode.Encrypted"/> when it accepts an encrypted token.
     /// When it rejects the encrypted token, its type is read with the plain token: a software bridge, which requires
-    /// <see cref="NukiTokenMode.Plain"/>, gives Plain; a hardware bridge gives Encrypted, as it supports encrypted
-    /// tokens and most likely rejected the token because its clock is off.
+    /// <see cref="NukiTokenMode.Plain"/>, gives Plain; a hardware bridge gives Encrypted with a warning, as it supports
+    /// encrypted tokens and most likely rejected the token because its clock is off; an unknown type gives Plain with a
+    /// warning, as the bridge accepted the plain token.
     /// </summary>
     /// <exception cref="HttpRequestException">The bridge rejected the plain token too, or answered with an error.</exception>
     /// <exception cref="TimeoutException">The bridge did not answer in time.</exception>
-    public static async Task<NukiTokenMode> DetectTokenModeAsync(HttpClient httpClient, string hostAddress, string token, CancellationToken cancellationToken)
+    public static async Task<NukiTokenModeDetection> DetectTokenModeAsync(HttpClient httpClient, string hostAddress, string token, CancellationToken cancellationToken)
     {
         try
         {
             await new NukiBridgeClient(httpClient, hostAddress, token, NukiTokenMode.Encrypted).GetInfoAsync(cancellationToken);
-            return NukiTokenMode.Encrypted;
+            return new NukiTokenModeDetection(NukiTokenMode.Encrypted, Warning: null);
         }
         catch (HttpRequestException exception) when (exception.StatusCode == HttpStatusCode.Unauthorized)
         {
             var info = await new NukiBridgeClient(httpClient, hostAddress, token, NukiTokenMode.Plain).GetInfoAsync(cancellationToken);
-            return NukiStateMapping.ToBridgeType(info.BridgeType) == NukiBridgeType.Hardware
-                ? NukiTokenMode.Encrypted
-                : NukiTokenMode.Plain;
+            return NukiStateMapping.ToBridgeType(info.BridgeType) switch
+            {
+                NukiBridgeType.Hardware => new NukiTokenModeDetection(
+                    NukiTokenMode.Encrypted,
+                    "The hardware bridge rejected the encrypted token, probably because its clock is off. Using Encrypted; " +
+                    "requests fail until the clock of the bridge is correct, or switch to Plain in the settings."),
+                NukiBridgeType.Software => new NukiTokenModeDetection(NukiTokenMode.Plain, Warning: null),
+                _ => new NukiTokenModeDetection(
+                    NukiTokenMode.Plain,
+                    "The bridge rejected the encrypted token and reports an unknown bridge type. Using Plain, which it accepted.")
+            };
         }
     }
 }

@@ -169,7 +169,9 @@
 
             try
             {
-                _tokenMode = await NukiBridgeDiscovery.DetectTokenModeAsync(httpClient, hostAddress, token, cancellationToken);
+                var detection = await NukiBridgeDiscovery.DetectTokenModeAsync(httpClient, hostAddress, token, cancellationToken);
+                _tokenMode = detection.Mode;
+                _warningMessage = detection.Warning is { } warning ? "Paired. " + warning : null;
             }
             catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
             {
