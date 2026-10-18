@@ -24,6 +24,7 @@ public class NukiOperationEnabledTests
     [InlineData(1, "LockNGo", true)]
     [InlineData(3, "LockNGo", false)]
     [InlineData(1, "LockNGoWithUnlatch", true)]
+    [InlineData(3, "LockNGoWithUnlatch", false)]
     [InlineData(1, "ToggleLock", true)]
     [InlineData(3, "ToggleLock", true)]
     [InlineData(7, "ToggleLock", false)]
@@ -94,6 +95,23 @@ public class NukiOperationEnabledTests
 
         // Assert
         var method = (HomeBlaze.Abstractions.Metadata.MethodMetadata)test.Lock.TryGetRegisteredSubject()!.TryGetProperty(operation)!.GetValue()!;
+        Assert.True(method.RequiresConfirmation);
+    }
+
+    [Theory]
+    [InlineData("OpenDoor")]
+    [InlineData("ActivateRingToOpen")]
+    [InlineData("ActivateContinuousMode")]
+    public async Task WhenAnOpenerOperationLetsSomeoneIn_ThenItRequiresConfirmation(string operation)
+    {
+        // Arrange
+        await using var test = new TestBridge();
+
+        // Act
+        test.Merge(NukiFixtures.Opener(state: 1));
+
+        // Assert
+        var method = (HomeBlaze.Abstractions.Metadata.MethodMetadata)test.Opener.TryGetRegisteredSubject()!.TryGetProperty(operation)!.GetValue()!;
         Assert.True(method.RequiresConfirmation);
     }
 }

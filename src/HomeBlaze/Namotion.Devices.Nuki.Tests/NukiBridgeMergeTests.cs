@@ -1,6 +1,7 @@
 using HomeBlaze.Abstractions.Devices.Locks;
 using HomeBlaze.Abstractions.Sensors;
 using Namotion.Devices.Nuki.Tests.Testing;
+using Namotion.Interceptor.Registry;
 using Xunit;
 
 namespace Namotion.Devices.Nuki.Tests;
@@ -30,8 +31,8 @@ public class NukiBridgeMergeTests
         var opener = Assert.Single(test.Bridge.Openers).Value;
         Assert.Equal("Community door", opener.Title);
         Assert.Equal(NukiOpenerState.RingToOpenActive, opener.OpenerState);
-        Assert.True(opener.IsContinuousModeActive == true);
-        Assert.True(opener.IsRinging == false);
+        Assert.True(opener.IsContinuousModeActive);
+        Assert.False(opener.IsRinging);
         Assert.Equal(new DateTimeOffset(2020, 4, 27, 16, 13, 0, TimeSpan.Zero), opener.LastRingTime);
     }
 
@@ -55,11 +56,13 @@ public class NukiBridgeMergeTests
     }
 
     [Fact]
-    public async Task WhenADeviceIsMissingFromTheList_ThenItIsRemoved()
+    public async Task WhenADeviceIsMissingFromTheList_ThenItIsRemovedAndDetached()
     {
         // Arrange
         await using var test = new TestBridge();
         test.Merge(NukiFixtures.List);
+        var opener = test.Opener;
+        Assert.NotNull(opener.TryGetRegisteredSubject());
 
         // Act
         test.Merge(NukiFixtures.SmartLock(state: 1));
@@ -67,6 +70,61 @@ public class NukiBridgeMergeTests
         // Assert
         Assert.Single(test.Bridge.Locks);
         Assert.Empty(test.Bridge.Openers);
+        Assert.Null(opener.TryGetRegisteredSubject());
+    }
+
+    [Fact]
+    public async Task WhenADeviceIsAdded_ThenTheOtherInstancesAreKeptAndTheNewOneIsConnected()
+    {
+        // Arrange
+        await using var test = new TestBridge();
+        test.Merge(NukiFixtures.SmartLock(state: 1));
+        test.Bridge.IsConnected = true;
+        var smartLock = test.Lock;
+
+        // Act
+        test.Merge(NukiFixtures.Combine(NukiFixtures.SmartLock(state: 1), NukiFixtures.SmartLock(state: 3, nukiId: 3)));
+
+        // Assert
+        Assert.Same(smartLock, test.Lock);
+        var addedLock = test.Bridge.Locks["3"];
+        Assert.NotNull(addedLock.TryGetRegisteredSubject());
+        Assert.True(addedLock.IsConnected);
+        Assert.Equal(DoorLockState.Unlocked, addedLock.LockState);
+    }
+
+    [Fact]
+    public async Task WhenBridgeReportsNoStateForADevice_ThenTheDeviceIsNotConnectedAndItsStateIsUnknown()
+    {
+        // Arrange
+        await using var test = new TestBridge();
+        test.Merge(NukiFixtures.SmartLockWithoutState());
+
+        // Act
+        test.Bridge.IsConnected = true;
+
+        // Assert
+        Assert.False(test.Lock.IsConnected);
+        Assert.Equal("The bridge reports no state for the device.", test.Lock.StatusMessage);
+        Assert.Null(test.Lock.LockState);
+        Assert.Null(test.Lock.DoorState);
+        Assert.Null(test.Lock.BatteryLevel);
+        Assert.Equal("Back door", test.Lock.Title);
+    }
+
+    [Fact]
+    public async Task WhenSomeoneRingsAtAnOpener_ThenItIsRingingAndItsIconIsAWarning()
+    {
+        // Arrange
+        await using var test = new TestBridge();
+
+        // Act
+        test.Merge(NukiFixtures.Opener(state: 1, ringing: true));
+
+        // Assert
+        Assert.True(test.Opener.IsRinging);
+        Assert.Equal("NotificationsActive", test.Opener.IconName);
+        Assert.Equal("Warning", test.Opener.IconColor);
     }
 
     [Theory]
@@ -99,6 +157,7 @@ public class NukiBridgeMergeTests
         // Assert
         Assert.NotSame(smartLock, test.Lock);
         Assert.Equal(NukiDeviceType.SmartLock3, test.Lock.DeviceType);
+        Assert.Null(smartLock.TryGetRegisteredSubject());
     }
 
     [Fact]
@@ -128,9 +187,9 @@ public class NukiBridgeMergeTests
         Assert.Equal(DoorLockState.Jammed, test.Lock.LockState);
         Assert.Equal(DoorState.Open, test.Lock.DoorState);
         Assert.Equal(0.42m, test.Lock.BatteryLevel);
-        Assert.True(test.Lock.IsBatteryCritical == true);
-        Assert.True(test.Lock.IsBatteryCharging == true);
-        Assert.True(test.Lock.IsKeypadBatteryCritical == true);
+        Assert.True(test.Lock.IsBatteryCritical);
+        Assert.True(test.Lock.IsBatteryCharging);
+        Assert.True(test.Lock.IsKeypadBatteryCritical);
     }
 
     [Fact]

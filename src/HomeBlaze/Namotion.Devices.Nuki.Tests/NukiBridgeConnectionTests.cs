@@ -42,7 +42,7 @@ public class NukiBridgeConnectionTests
         Assert.Equal("2.14.0", test.Bridge.SoftwareVersion);
         Assert.Equal("2.2.0", test.Bridge.WifiFirmwareVersion);
         Assert.Equal(TimeSpan.FromSeconds(120), test.Bridge.Uptime);
-        Assert.True(test.Bridge.IsServerConnected == true);
+        Assert.True(test.Bridge.IsServerConnected);
         Assert.Equal("Nuki Bridge (12345678)", test.Bridge.Title);
         Assert.Equal("192.168.1.50", test.Bridge.IpAddress);
         Assert.Equal(1m, test.Bridge.Power);

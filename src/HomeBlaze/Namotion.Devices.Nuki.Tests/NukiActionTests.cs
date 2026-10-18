@@ -23,23 +23,24 @@ public class NukiActionTests
         var fake = new FakeNukiBridge { ListJson = NukiFixtures.SmartLock(state: reportedState) };
         await using var test = new TestBridge(fake);
         await test.StartAsync();
+        Func<Task> startAction = operation switch
+        {
+            "Lock" => () => test.Lock.LockAsync(CancellationToken.None),
+            "Unlock" => () => test.Lock.UnlockAsync(CancellationToken.None),
+            "Unlatch" => () => test.Lock.UnlatchAsync(CancellationToken.None),
+            "LockNGo" => () => test.Lock.LockNGoAsync(CancellationToken.None),
+            "LockNGoWithUnlatch" => () => test.Lock.LockNGoWithUnlatchAsync(CancellationToken.None),
+            _ => throw new ArgumentOutOfRangeException(nameof(operation), operation, "Unknown operation.")
+        };
 
         // Act
-        await RunHeldActionAsync(
-            fake,
-            () => operation switch
-            {
-                "Lock" => test.Lock.LockAsync(CancellationToken.None),
-                "Unlock" => test.Lock.UnlockAsync(CancellationToken.None),
-                "Unlatch" => test.Lock.UnlatchAsync(CancellationToken.None),
-                "LockNGo" => test.Lock.LockNGoAsync(CancellationToken.None),
-                _ => test.Lock.LockNGoWithUnlatchAsync(CancellationToken.None)
-            },
-            () => test.Lock.LockState == transition);
+        await RunHeldActionAsync(fake, startAction, () => test.Lock.LockState == transition);
 
         // Assert
         var query = HttpUtility.ParseQueryString(fake.Requests.Single(uri => uri.AbsolutePath == "/lockAction").Query);
         Assert.Equal(action.ToString(CultureInfo.InvariantCulture), query["action"]);
+        Assert.Equal("1", query["nukiId"]);
+        Assert.Equal("0", query["deviceType"]);
         Assert.Equal(reported, test.Lock.LockState);
     }
 
