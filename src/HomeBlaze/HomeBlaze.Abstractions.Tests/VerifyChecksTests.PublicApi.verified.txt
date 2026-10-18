@@ -28,6 +28,7 @@ namespace HomeBlaze.Abstractions.Attributes
     [System.Flags]
     public enum ExclusionTarget
     {
+        None = 0,
         UserInterface = 1,
         Agents = 2,
         All = -1,

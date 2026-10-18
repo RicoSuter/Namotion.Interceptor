@@ -621,7 +621,7 @@ public class HomeBlazeMcpToolProviderTests
     {
         // Arrange
         var (room, factory) = CreateTestSetup(isReadOnly: false);
-        AddMethod(room, "Everywhere", (ExclusionTarget)0, () => { });
+        AddMethod(room, "Everywhere", ExclusionTarget.None, () => { });
         AddMethod(room, "NotForAgents", ExclusionTarget.Agents, () => { });
         AddMethod(room, "NotInUserInterface", ExclusionTarget.UserInterface, () => { });
         var tool = factory.CreateTools().First(t => t.Name == "list_methods");

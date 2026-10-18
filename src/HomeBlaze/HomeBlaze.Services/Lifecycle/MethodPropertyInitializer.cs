@@ -132,7 +132,7 @@ public class MethodPropertyInitializer : ILifecycleHandler
         return returnType;
     }
 
-    /// <summary>The category, the confirmation and the parameters of a discovered method of one subject type.</summary>
+    /// <summary>The category, the confirmation, the parameters and the exclusion of a discovered method of one subject type.</summary>
     private readonly record struct MethodTraits(string? Category, bool RequiresConfirmation, MethodParameter[] Parameters, ExclusionTarget ExcludedFrom);
 
     /// <summary>The interface maps of a subject type and the traits of its methods, computed once per method.</summary>
@@ -167,7 +167,23 @@ public class MethodPropertyInitializer : ILifecycleHandler
                 (classMethod is not null && AnyOverriddenMethodRequiresConfirmation(classMethod)) ||
                 implementedMethods.Exists(RequiresConfirmation),
                 CreateParameters(method),
-                method.GetCustomAttribute<ExcludeFromAttribute>()?.Targets ?? default(ExclusionTarget));
+                GetExcludedFrom(method) |
+                (classMethod is not null ? GetExcludedFrom(classMethod) : ExclusionTarget.None) |
+                GetExcludedFrom(implementedMethods));
+        }
+
+        private static ExclusionTarget GetExcludedFrom(MethodInfo method) =>
+            method.GetCustomAttribute<ExcludeFromAttribute>()?.Targets ?? ExclusionTarget.None;
+
+        private static ExclusionTarget GetExcludedFrom(List<MethodInfo> methods)
+        {
+            var targets = ExclusionTarget.None;
+            foreach (var method in methods)
+            {
+                targets |= GetExcludedFrom(method);
+            }
+
+            return targets;
         }
 
         private static MethodParameter[] CreateParameters(MethodInfo method)

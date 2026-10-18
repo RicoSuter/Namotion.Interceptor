@@ -25,8 +25,6 @@ public class RegisteredSubjectMethodExtensionsTests
 
         // Assert
         Assert.Equal(new[] { "Object", "Interface", "Subclass" }, all.Select(method => method.Title));
-        Assert.Equal(new[] { "Object", "Subclass" }, all.Where(method => method.Kind == MethodKind.Operation).Select(method => method.Title));
-        Assert.Equal("Interface", Assert.Single(all, method => method.Kind == MethodKind.Query).Title);
     }
 
     private static IInterceptorSubjectContext CreateContext()

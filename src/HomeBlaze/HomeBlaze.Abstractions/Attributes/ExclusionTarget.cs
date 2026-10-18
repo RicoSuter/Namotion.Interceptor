@@ -7,6 +7,11 @@ namespace HomeBlaze.Abstractions.Attributes;
 public enum ExclusionTarget
 {
     /// <summary>
+    /// No target: offered everywhere.
+    /// </summary>
+    None = 0,
+
+    /// <summary>
     /// User interfaces: a type is not listed or counted as a child in the browser, not offered by the path picker and
     /// not walked by navigation; a method is not shown as a button and not offered by the path picker or the widget
     /// pickers.

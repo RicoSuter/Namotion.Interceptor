@@ -148,7 +148,7 @@ public class HomeBlazeMcpConfigurationFactoryTests
     }
 
     [Fact]
-    public void WhenATypeIsExcludedFromAgents_ThenBrowseAndSearchDoNotListIt()
+    public void WhenATypeIsExcludedFromAgents_ThenItIsInTheExcludedTypes()
     {
         // Arrange
         var (room, _) = HomeBlazeMcpToolProviderTests.CreateTestSetup(isReadOnly: false);

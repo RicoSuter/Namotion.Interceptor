@@ -76,9 +76,37 @@ public class MethodPropertyInitializerTests
         var notForAgents = registered.TryGetProperty("NotForAgents")?.GetValue() as MethodMetadata;
 
         // Assert
-        Assert.Equal((ExclusionTarget)0, everywhere?.ExcludedFrom);
+        Assert.Equal(ExclusionTarget.None, everywhere?.ExcludedFrom);
         Assert.Equal(ExclusionTarget.UserInterface, notInUserInterface?.ExcludedFrom);
         Assert.Equal(ExclusionTarget.Agents, notForAgents?.ExcludedFrom);
+    }
+
+    [Fact]
+    public void WhenAnInterfaceMethodIsExcludedAndItsImplementationIsAnOperation_ThenTheExclusionApplies()
+    {
+        // Arrange
+        var registered = new ReattributedExclusionMethodSubject(CreateContext()).TryGetRegisteredSubject()!;
+
+        // Act
+        var metadata = registered.TryGetProperty("Mute")?.GetValue() as MethodMetadata;
+
+        // Assert
+        Assert.Equal("Class Mute", metadata?.Title);
+        Assert.Equal(ExclusionTarget.Agents, metadata?.ExcludedFrom);
+    }
+
+    [Fact]
+    public void WhenAnImplementationIsExcludedAndOnlyItsInterfaceMethodIsAnOperation_ThenTheExclusionApplies()
+    {
+        // Arrange
+        var registered = new ReattributedExclusionMethodSubject(CreateContext()).TryGetRegisteredSubject()!;
+
+        // Act
+        var metadata = registered.TryGetProperty("Unmute")?.GetValue() as MethodMetadata;
+
+        // Assert
+        Assert.Equal("Interface Unmute", metadata?.Title);
+        Assert.Equal(ExclusionTarget.UserInterface, metadata?.ExcludedFrom);
     }
 
     [Fact]
@@ -855,6 +883,26 @@ public class MethodPropertyInitializerTests
     {
         return (MethodMetadata)subject.TryGetRegisteredSubject()!.TryGetProperty(propertyName)!.GetValue()!;
     }
+}
+
+public interface IExclusionMethodInterface
+{
+    [Operation(Title = "Interface Mute")]
+    [ExcludeFrom(ExclusionTarget.Agents)]
+    Task MuteAsync();
+
+    [Operation(Title = "Interface Unmute")]
+    Task UnmuteAsync();
+}
+
+[InterceptorSubject]
+public partial class ReattributedExclusionMethodSubject : IExclusionMethodInterface
+{
+    [Operation(Title = "Class Mute")]
+    public Task MuteAsync() => Task.CompletedTask;
+
+    [ExcludeFrom(ExclusionTarget.UserInterface)]
+    public Task UnmuteAsync() => Task.CompletedTask;
 }
 
 public interface ICategoryOnlyMethodInterface

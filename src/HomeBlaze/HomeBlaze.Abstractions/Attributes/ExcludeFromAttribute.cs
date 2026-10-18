@@ -12,8 +12,7 @@ namespace HomeBlaze.Abstractions.Attributes;
 [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method, Inherited = true)]
 public sealed class ExcludeFromAttribute(ExclusionTarget targets) : Attribute
 {
-    // Per type, as a user interface checks every child it shows. Weak, so that the types of an unloaded plugin are not
-    // kept alive. The value is the boxed ExclusionTarget, as the table holds only references.
+    // Weak, so that the types of an unloaded plugin are not kept alive.
     private static readonly ConditionalWeakTable<Type, object> TargetsByType = new();
 
     /// <summary>
@@ -27,7 +26,7 @@ public sealed class ExcludeFromAttribute(ExclusionTarget targets) : Attribute
     public static bool IsExcluded(Type type, ExclusionTarget target)
     {
         var targets = (ExclusionTarget)TargetsByType.GetValue(type, static candidate =>
-            candidate.GetCustomAttribute<ExcludeFromAttribute>(inherit: true)?.Targets ?? default(ExclusionTarget));
+            candidate.GetCustomAttribute<ExcludeFromAttribute>(inherit: true)?.Targets ?? ExclusionTarget.None);
         return (targets & target) != 0;
     }
 }

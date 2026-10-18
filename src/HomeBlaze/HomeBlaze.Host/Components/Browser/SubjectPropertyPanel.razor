@@ -715,7 +715,7 @@
         return children.ToArray();
     }
 
-    // A child whose type is excluded from user interfaces, such as the metadata of a folder, is neither listed nor counted.
+    // A child whose type is excluded from user interfaces is neither listed nor counted.
     private static bool IsListed(SubjectPropertyChild child)
         => !ExcludeFromAttribute.IsExcluded(child.Subject.GetType(), ExclusionTarget.UserInterface);
 
@@ -938,7 +938,13 @@
             {
                 // Read for the same reason as in GetVisibleChildren.
                 _ = p.GetValue();
-                return p.Children.Length;
+                var count = 0;
+                foreach (var propertyChild in p.Children)
+                {
+                    if (IsListed(propertyChild)) count++;
+                }
+
+                return count;
             });
     }
 

@@ -90,7 +90,7 @@ internal sealed class McpMethodInvoker
         RegisteredSubject subject, string methodName, MethodKind allowedKind, JsonElement argumentsElement, CancellationToken cancellationToken)
     {
         var methodProperty = subject.TryGetProperty(methodName);
-        // A method excluded from agents is not offered to them, so it is unknown to them.
+        // Reported as not found, not as excluded.
         if (methodProperty?.TryGetMethodMetadata() is not { } method || method.IsExcludedFrom(ExclusionTarget.Agents))
         {
             return new { error = $"Method not found: {methodName}" };
