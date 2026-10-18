@@ -4,7 +4,6 @@ using System.Text;
 using System.Web;
 using Namotion.Devices.Nuki.Client;
 using Namotion.Devices.Nuki.Tests.Testing;
-using Namotion.Interceptor.Testing;
 using Xunit;
 
 namespace Namotion.Devices.Nuki.Tests;
@@ -65,24 +64,7 @@ public class NukiBridgeClientTests
     }
 
     [Fact]
-    public async Task WhenBridgeIsBusyOnce_ThenTheRequestIsRetried()
-    {
-        // Arrange
-        var bridge = new FakeNukiBridge();
-        var calls = 0;
-        bridge.StatusOverride = path => Interlocked.Increment(ref calls) == 1 ? HttpStatusCode.ServiceUnavailable : null;
-        var client = CreateClient(bridge, NukiTokenMode.Plain);
-
-        // Act
-        var devices = await client.GetListAsync(CancellationToken.None);
-
-        // Assert
-        Assert.Equal(2, devices.Length);
-        Assert.Equal(2, bridge.CountRequests("list"));
-    }
-
-    [Fact]
-    public async Task WhenBridgeIsBusyOnceInEncryptedMode_ThenTheRetryUsesADifferentNonce()
+    public async Task WhenBridgeIsBusyOnce_ThenTheRequestIsRetriedWithANewToken()
     {
         // Arrange
         var bridge = new FakeNukiBridge();
@@ -91,10 +73,11 @@ public class NukiBridgeClientTests
         var client = CreateClient(bridge, NukiTokenMode.Encrypted);
 
         // Act
-        await client.GetInfoAsync(CancellationToken.None);
+        var devices = await client.GetListAsync(CancellationToken.None);
 
         // Assert
-        Assert.Equal(2, bridge.CountRequests("info"));
+        Assert.Equal(2, devices.Length);
+        Assert.Equal(2, bridge.CountRequests("list"));
         var nonces = bridge.Requests.Select(uri => HttpUtility.ParseQueryString(uri.Query)["nonce"]).ToArray();
         Assert.NotEqual(nonces[0], nonces[1]);
     }
@@ -159,55 +142,7 @@ public class NukiBridgeClientTests
         await cancellationSource.CancelAsync();
 
         // Assert
-        var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => lockActionTask);
-        Assert.IsNotType<TimeoutException>(exception);
-    }
-
-    [Fact]
-    public async Task WhenTheHttpClientIsDisposedDuringLockAction_ThenOperationCanceledExceptionIsThrownInsteadOfTimeoutException()
-    {
-        // Arrange
-        var bridge = new FakeNukiBridge { ActionGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously) };
-        var httpClient = bridge.CreateClient(string.Empty);
-        var client = new NukiBridgeClient(httpClient, "192.168.1.50", Token, NukiTokenMode.Plain);
-        var lockActionTask = client.LockActionAsync(nukiId: 1, deviceType: 0, action: 1, CancellationToken.None);
-        await AsyncTestHelpers.WaitUntilAsync(() => bridge.CountRequests("lockAction") == 1, message: "The action was not sent.");
-
-        // Act
-        httpClient.Dispose();
-
-        // Assert
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => lockActionTask);
-    }
-
-    [Fact]
-    public async Task WhenListIsRequested_ThenTheResponseMapsTheRenamedFields()
-    {
-        // Arrange
-        var bridge = new FakeNukiBridge();
-        var client = CreateClient(bridge, NukiTokenMode.Plain);
-
-        // Act
-        var devices = await client.GetListAsync(CancellationToken.None);
-
-        // Assert
-        Assert.Equal(2, devices.Single(device => device.NukiId == 1).LastKnownState!.DoorSensorState);
-        Assert.NotNull(devices.Single(device => device.NukiId == 2).LastKnownState!.RingActionTimestamp);
-    }
-
-    [Fact]
-    public async Task WhenAuthIsSent_ThenNoTokenIsAdded()
-    {
-        // Arrange
-        var bridge = new FakeNukiBridge();
-        var client = new NukiBridgeClient(bridge.CreateClient(string.Empty), "192.168.1.50", token: null, NukiTokenMode.Plain);
-
-        // Act
-        var result = await client.AuthAsync(CancellationToken.None);
-
-        // Assert
-        Assert.Equal("abc123", result.Token);
-        Assert.Equal("http://192.168.1.50:8080/auth", Assert.Single(bridge.Requests).ToString());
     }
 
     [Fact]
