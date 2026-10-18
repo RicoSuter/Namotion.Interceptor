@@ -10,7 +10,6 @@
     <PackageReference Include="Microsoft.Extensions.Http" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
     <PackageReference Include="SonarAnalyzer.CSharp" PrivateAssets="all" />
-    <PackageReference Include="System.Reactive" />
   </ItemGroup>
 
   <ItemGroup>

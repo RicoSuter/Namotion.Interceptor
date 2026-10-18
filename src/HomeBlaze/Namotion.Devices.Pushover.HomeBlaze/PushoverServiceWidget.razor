@@ -26,35 +26,10 @@
 
         @foreach (var target in targets?.Values ?? Enumerable.Empty<PushoverTarget>())
         {
-            var emergencies = target.Emergencies.Values;
-            var latestAcknowledged = emergencies
-                .Where(emergency => emergency.Status == PushoverEmergencyStatus.Acknowledged)
-                .MaxBy(emergency => emergency.AcknowledgedAt);
-
             <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
                 <MudIcon Icon="@Icons.Material.Filled.Person" Size="Size.Small" Color="@GetStatusColor(target.Status)" />
                 <MudText>@target.Title</MudText>
             </MudStack>
-
-            @foreach (var emergency in emergencies.Where(emergency => emergency.Status == PushoverEmergencyStatus.Active).OrderBy(emergency => emergency.SentAt))
-            {
-                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="ml-6">
-                    <MudIcon Icon="@Icons.Material.Filled.NotificationImportant" Size="Size.Small" Color="Color.Error" />
-                    <MudText Typo="Typo.body2">@emergency.Title</MudText>
-                    <MudSpacer />
-                    <MudText Typo="Typo.caption">@emergency.SentAt.ToLocalTime().ToString("g")</MudText>
-                </MudStack>
-            }
-
-            @if (latestAcknowledged is not null)
-            {
-                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="ml-6">
-                    <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Size="Size.Small" Color="Color.Success" />
-                    <MudText Typo="Typo.body2">@latestAcknowledged.Title</MudText>
-                    <MudSpacer />
-                    <MudText Typo="Typo.caption">Acknowledged @latestAcknowledged.AcknowledgedAt?.ToLocalTime().ToString("g")</MudText>
-                </MudStack>
-            }
         }
 
         @if (targets?.Count == 0)

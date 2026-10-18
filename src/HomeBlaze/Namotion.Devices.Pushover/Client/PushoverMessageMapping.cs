@@ -12,26 +12,10 @@ internal static class PushoverMessageMapping
     internal const int MaximumUrlTitleLength = 100;
 
     private const int EmergencyPriority = 2;
-    private const string EmergencyTagPrefix = "target-";
-
-    /// <summary>
-    /// The tag every emergency notification of the target with <paramref name="targetKey"/> is sent with: the key in
-    /// lowercase after <c>target-</c>, with every character other than a letter, a digit or a dash replaced by a dash.
-    /// </summary>
-    public static string GetEmergencyTag(string targetKey) =>
-        string.Create(EmergencyTagPrefix.Length + targetKey.Length, targetKey, static (tag, key) =>
-        {
-            EmergencyTagPrefix.CopyTo(tag);
-            for (var index = 0; index < key.Length; index++)
-            {
-                var character = char.ToLowerInvariant(key[index]);
-                tag[EmergencyTagPrefix.Length + index] = char.IsAsciiLetterLower(character) || char.IsAsciiDigit(character) ? character : '-';
-            }
-        });
 
     /// <summary>
     /// Creates the form fields of the messages endpoint, leaving out each value that is not set. An emergency also
-    /// gets its retry, expire and the tag of the target with <paramref name="targetKey"/>.
+    /// gets its retry and expire.
     /// </summary>
     public static Dictionary<string, string> Create(
         string token,
@@ -39,7 +23,6 @@ internal static class PushoverMessageMapping
         Notification notification,
         TimeSpan emergencyRetry,
         TimeSpan emergencyExpire,
-        string targetKey,
         ILogger logger)
     {
         var priority = ToPushoverPriority(notification.Priority);
@@ -63,7 +46,6 @@ internal static class PushoverMessageMapping
         {
             fields["retry"] = ((int)emergencyRetry.TotalSeconds).ToString(CultureInfo.InvariantCulture);
             fields["expire"] = ((int)emergencyExpire.TotalSeconds).ToString(CultureInfo.InvariantCulture);
-            fields["tags"] = GetEmergencyTag(targetKey);
         }
 
         return fields;

@@ -98,65 +98,6 @@ public class PushoverClientTests
     }
 
     [Fact]
-    public async Task WhenGettingReceipt_ThenTokenIsPassedAsQuery()
-    {
-        // Arrange
-        var handler = new FakePushoverHandler
-        {
-            Respond = _ => (HttpStatusCode.OK, """{"status":1,"acknowledged":1,"acknowledged_at":1700000000,"expired":0}""")
-        };
-        var client = new PushoverClient(new TestHttpClientFactory(handler));
-
-        // Act
-        var response = await client.GetReceiptAsync("app", "receipt1", CancellationToken.None);
-
-        // Assert
-        var request = Assert.Single(handler.Requests);
-        Assert.Equal(HttpMethod.Get, request.Method);
-        Assert.Equal("https://api.pushover.net/1/receipts/receipt1.json?token=app", request.Uri.ToString());
-        Assert.Equal(1, response.Acknowledged);
-        Assert.Equal(1700000000, response.AcknowledgedAt);
-    }
-
-    [Fact]
-    public async Task WhenCancelingReceipt_ThenPostsToTheCancelEndpoint()
-    {
-        // Arrange
-        var handler = new FakePushoverHandler();
-        var client = new PushoverClient(new TestHttpClientFactory(handler));
-
-        // Act
-        await client.CancelReceiptAsync("app", "receipt1", CancellationToken.None);
-
-        // Assert
-        var request = Assert.Single(handler.Requests);
-        Assert.Equal("/1/receipts/receipt1/cancel.json", request.Path);
-        Assert.Equal("application/x-www-form-urlencoded", request.ContentType);
-        Assert.Equal("app", request.Form["token"]);
-    }
-
-    [Theory]
-    [InlineData("target-rico", "https://api.pushover.net/1/receipts/cancel_by_tag/target-rico.json")]
-    [InlineData("a b/c", "https://api.pushover.net/1/receipts/cancel_by_tag/a%20b%2Fc.json")]
-    public async Task WhenCancelingByTag_ThenPostsTheTokenToTheEscapedTagPath(string tag, string expectedUri)
-    {
-        // Arrange
-        var handler = new FakePushoverHandler();
-        var client = new PushoverClient(new TestHttpClientFactory(handler));
-
-        // Act
-        await client.CancelByTagAsync("app", tag, CancellationToken.None);
-
-        // Assert
-        var request = Assert.Single(handler.Requests);
-        Assert.Equal(HttpMethod.Post, request.Method);
-        Assert.Equal(expectedUri, request.Uri.AbsoluteUri);
-        Assert.Equal("application/x-www-form-urlencoded", request.ContentType);
-        Assert.Equal("app", Assert.Single(request.Form).Value);
-        Assert.Equal("token", Assert.Single(request.Form).Key);
-    }
-
-    [Fact]
     public async Task WhenManyRequestsRunAtOnce_ThenAtMostTwoAreOpen()
     {
         // Arrange
