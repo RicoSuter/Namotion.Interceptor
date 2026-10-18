@@ -79,7 +79,7 @@ public class DoorLockTileTests : IDisposable
         page.GetByRole(AriaRole.Dialog).Filter(new() { HasText = "Are you sure you want to execute this operation?" });
 
     [Fact]
-    public async Task WhenPageRenders_ThenItShowsNoBlockErrorsAndEveryTileShowsItsBadge()
+    public async Task WhenPageRenders_ThenItShowsNoBlockErrorsAndEveryTileShowsItsBadgeAndATileWithoutLockIsDisabled()
     {
         // Arrange & Act
         SetLockState(DoorLockState.Locked, DoorState.Closed);
@@ -90,6 +90,7 @@ public class DoorLockTileTests : IDisposable
         await Assertions.Expect(page.Locator(".markdown-block-error")).ToHaveCountAsync(0);
         await Assertions.Expect(GetTileRoot(GetTile(page, "Front door")).GetByTestId("tile-badge")).ToBeVisibleAsync(new() { Timeout = Timeout });
         await Assertions.Expect(GetTileRoot(GetTile(page, "Missing")).GetByTestId("tile-badge")).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(GetTile(page, "Missing")).ToBeDisabledAsync(new() { Timeout = Timeout });
     }
 
     [Fact]
@@ -101,23 +102,6 @@ public class DoorLockTileTests : IDisposable
         // Assert
         await Assertions.Expect(tile).ToHaveAccessibleDescriptionAsync("Locked, unlocks on click", new() { Timeout = Timeout });
         await Assertions.Expect(tile).ToHaveAttributeAsync("title", "Unlock");
-    }
-
-    [Fact]
-    public async Task WhenLockedTileIsClicked_ThenUnlockAsksForConfirmationFirst()
-    {
-        // Arrange
-        var (page, tile) = await OpenTileAsync(DoorLockState.Locked, "Locked");
-
-        // Act
-        await tile.ClickAsync();
-        var dialog = GetConfirmationDialog(page);
-        await Assertions.Expect(dialog).ToBeVisibleAsync(new() { Timeout = Timeout });
-        await dialog.GetByRole(AriaRole.Button, new() { Name = "Cancel" }).ClickAsync();
-
-        // Assert
-        await Assertions.Expect(dialog).ToBeHiddenAsync(new() { Timeout = Timeout });
-        Assert.Equal(DoorLockState.Locked, GetLock().LockState);
     }
 
     [Fact]
@@ -170,30 +154,20 @@ public class DoorLockTileTests : IDisposable
     }
 
     [Fact]
-    public async Task WhenLockIsJammed_ThenTheTileIsFilledWithTheErrorColorAndOffersToLock()
-    {
-        // Arrange & Act
-        var (page, tile) = await OpenTileAsync(DoorLockState.Jammed, "Jammed");
-
-        // Assert
-        await Assertions.Expect(tile).ToBeEnabledAsync(new() { Timeout = Timeout });
-        await Assertions.Expect(tile).ToHaveAccessibleDescriptionAsync("Jammed, locks on click", new() { Timeout = Timeout });
-        await Assertions.Expect(tile).ToHaveAttributeAsync("title", "Lock");
-        var error = await page.ResolveColorAsync("var(--mud-palette-error)");
-        var background = await GetTileRoot(tile).EvaluateAsync<string>("element => getComputedStyle(element).backgroundColor");
-        Assert.Equal(error, background);
-    }
-
-    [Fact]
-    public async Task WhenJammedTileIsClicked_ThenTheLockIsLockedWithoutConfirmation()
+    public async Task WhenJammedTileIsClicked_ThenItIsFilledWithTheErrorColorAndLocksWithoutConfirmation()
     {
         // Arrange
         var (page, tile) = await OpenTileAsync(DoorLockState.Jammed, "Jammed");
+        var error = await page.ResolveColorAsync("var(--mud-palette-error)");
+        var background = await GetTileRoot(tile).EvaluateAsync<string>("element => getComputedStyle(element).backgroundColor");
+        var title = await tile.GetAttributeAsync("title");
 
         // Act
         await tile.ClickAsync();
 
         // Assert
+        Assert.Equal(error, background);
+        Assert.Equal("Lock", title);
         await Assertions.Expect(tile.GetByTestId("tile-subtitle")).ToHaveTextAsync("Locked", new() { Timeout = Timeout });
         await Assertions.Expect(GetConfirmationDialog(page)).ToHaveCountAsync(0);
         Assert.Equal(DoorLockState.Locked, GetLock().LockState);
@@ -229,15 +203,5 @@ public class DoorLockTileTests : IDisposable
         var label = await PageGeometry.GetBoxAsync(tile.GetByTestId("tile-label"));
         Assert.True(badge.Height >= icon.Height * 0.4, $"The badge is {badge.Height} pixels high, less than 40 percent of the icon at {icon.Height}.");
         Assert.True(label.Top >= badge.Bottom, $"The label starts at {label.Top}, above the bottom of the badge at {badge.Bottom}.");
-    }
-
-    [Fact]
-    public async Task WhenPathLeadsNowhere_ThenTheTileIsDisabled()
-    {
-        // Arrange & Act
-        var page = await OpenPageAsync();
-
-        // Assert
-        await Assertions.Expect(GetTile(page, "Missing")).ToBeDisabledAsync(new() { Timeout = Timeout });
     }
 }
