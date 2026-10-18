@@ -30,9 +30,6 @@ public sealed partial class MetadataSubject : IMetadataSubject
     private const string SetOrderDescription =
         "Sets the order in which the children of this folder or storage root are shown: the given names first, in the given order, then the other children in the order in which they are shown now. Each name must be the name of a child, as GetOrder returns it, and may be given only once. Only for a folder or the root.";
 
-    // Two storages give the same subject its metadata subject when a storage is the JSON file of another one.
-    private static readonly Lock EnsureLock = new();
-
     private readonly IInterceptorSubject _owner;
 
     private MetadataSubject(IInterceptorSubject owner)
@@ -85,8 +82,10 @@ public sealed partial class MetadataSubject : IMetadataSubject
             return null;
         }
 
-        // The check and the add are one step, as a second AddProperty of the name would add a second property.
-        lock (EnsureLock)
+        // The check and the add are one step, as a second AddProperty of the name would add a second property. Two
+        // storages ensure the same owner when a storage is the JSON file of another one. Per owner, as the attach
+        // handlers run within the add.
+        lock (registered)
         {
             if (registered.TryGetProperty(IMetadataSubject.PropertyName) is { } property)
             {

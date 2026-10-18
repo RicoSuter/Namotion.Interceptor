@@ -349,6 +349,41 @@ public class MetadataSubjectTests : StorageTestBase
         Assert.True(isStateIncluded);
     }
 
+    [Fact]
+    public void WhenTheMetadataSubjectOfAnOwnerIsAttached_ThenAnOwnerInAnotherContextGetsItsOwnMeanwhile()
+    {
+        // Arrange: a context runs its attach handlers one at a time, so the other owner is in a context of its own.
+        CreateStorage();
+        var first = CreateMotor("First");
+        var firstContext = Context!;
+        CreateStorage();
+        var second = CreateMotor("Second");
+        var handler = new EnsureOnAttach(first, () => MetadataSubject.Ensure(second));
+        firstContext.AddService<ILifecycleHandler>(handler);
+
+        // Act
+        var metadataSubject = MetadataSubject.Ensure(first);
+
+        // Assert
+        Assert.NotNull(metadataSubject);
+        Assert.True(handler.IsEnsuredMeanwhile);
+        Assert.NotNull(second.TryGetMetadataSubject());
+    }
+
+    // Ensures the metadata subject of another owner on another thread while the one of the owner is attached.
+    private sealed class EnsureOnAttach(IInterceptorSubject owner, Action ensure) : ILifecycleHandler
+    {
+        public bool IsEnsuredMeanwhile { get; private set; }
+
+        public void HandleLifecycleChange(SubjectLifecycleChange change)
+        {
+            if (change.IsContextAttach && change.Subject is MetadataSubject metadataSubject && ReferenceEquals(metadataSubject.GetOwner(), owner))
+            {
+                IsEnsuredMeanwhile = Task.Run(ensure).Wait(DeadlockTimeout);
+            }
+        }
+    }
+
     private sealed class CallOnDetach(IInterceptorSubject subject, Func<Task> call) : ILifecycleHandler
     {
         public Task? Call { get; private set; }
