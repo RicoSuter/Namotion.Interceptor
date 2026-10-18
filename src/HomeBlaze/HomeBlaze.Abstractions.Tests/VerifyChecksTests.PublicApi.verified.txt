@@ -25,6 +25,10 @@ namespace HomeBlaze.Abstractions.Attributes
     {
         public ExcludeFromExpressionsAttribute() { }
     }
+    public static class ExcludeFromExtensions
+    {
+        public static bool IsExcludedFrom(this Namotion.Interceptor.IInterceptorSubject subject, HomeBlaze.Abstractions.Attributes.ExclusionTarget target) { }
+    }
     [System.Flags]
     public enum ExclusionTarget
     {

@@ -1,14 +1,19 @@
 const registeredElements = new WeakSet();
 
-// Copies the value of a copy button within the element in the click itself, as browsers refuse to copy once the
-// click is over, which a round trip to the server would be. Reports whether the copy succeeded. An element is
-// registered once, however often it is passed.
-export function registerCopyButtons(element, dotNetReference) {
+// Registers the copy buttons and the dragging of rows within the element, once however often it is passed.
+export function register(element, dotNetReference) {
     if (registeredElements.has(element)) {
         return;
     }
 
     registeredElements.add(element);
+    addCopyListener(element, dotNetReference);
+    addDragListener(element, dotNetReference);
+}
+
+// Copies the value of a copy button within the element in the click itself, as browsers refuse to copy once the
+// click is over, which a round trip to the server would be. Reports whether the copy succeeded.
+function addCopyListener(element, dotNetReference) {
     element.addEventListener('click', event => {
         const button = event.target.closest('[data-copy-value]');
         if (button === null || !element.contains(button)) {
@@ -55,7 +60,6 @@ function copyBySelection(text) {
     return isCopied;
 }
 
-const draggingRegisteredElements = new WeakSet();
 const dragThreshold = 4;
 const autoScrollEdge = 48;
 const autoScrollMaximumSpeed = 16;
@@ -66,14 +70,8 @@ let activeDrag = null;
 
 // Moves a row of a reorder list within the element by dragging it: a mouse drags the whole row, a touch or a pen only
 // its handle, so that a swipe on a row still scrolls. A drop that changes the order calls OnChildDropped with the
-// name of the dragged child and the name of the child whose place it takes. An element is registered once, however
-// often it is passed.
-export function registerChildDragging(element, dotNetReference) {
-    if (draggingRegisteredElements.has(element)) {
-        return;
-    }
-
-    draggingRegisteredElements.add(element);
+// name of the dragged child and the name of the child whose place it takes.
+function addDragListener(element, dotNetReference) {
     element.addEventListener('pointerdown', event => {
         if (activeDrag !== null || !event.isPrimary || event.button !== 0) {
             return;
@@ -104,23 +102,17 @@ class RowDrag {
         this.pointerY = event.clientY;
         this.isStarted = false;
 
-        this.onPointerMove = this.onPointerMove.bind(this);
-        this.onPointerUp = this.onPointerUp.bind(this);
-        this.onPointerCancel = this.onPointerCancel.bind(this);
-        this.onKeyDown = this.onKeyDown.bind(this);
-        this.onInterruption = this.onInterruption.bind(this);
-        this.onContextMenu = this.onContextMenu.bind(this);
-        this.onScroll = this.onScroll.bind(this);
-        this.onLostPointerCapture = this.onLostPointerCapture.bind(this);
-        this.onAnimationFrame = this.onAnimationFrame.bind(this);
-        document.addEventListener('pointermove', this.onPointerMove);
-        document.addEventListener('pointerup', this.onPointerUp);
-        document.addEventListener('pointercancel', this.onPointerCancel);
+        // Ends every listener of the drag at once, see removeGestureListeners.
+        this.listeners = new AbortController();
+        const options = { signal: this.listeners.signal };
+        document.addEventListener('pointermove', event => this.onPointerMove(event), options);
+        document.addEventListener('pointerup', event => this.onPointerUp(event), options);
+        document.addEventListener('pointercancel', event => this.onPointerCancel(event), options);
 
         // A context menu or a switch to another window can swallow the release of the button, after which the next
         // click would drop the row.
-        document.addEventListener('contextmenu', this.onContextMenu);
-        window.addEventListener('blur', this.onInterruption);
+        document.addEventListener('contextmenu', event => this.onContextMenu(event), options);
+        window.addEventListener('blur', () => this.onInterruption(), options);
     }
 
     onPointerMove(event) {
@@ -187,17 +179,18 @@ class RowDrag {
             // The pointer is gone already, which ends the drag with its pointercancel.
         }
 
-        this.row.addEventListener('lostpointercapture', this.onLostPointerCapture);
-        document.addEventListener('keydown', this.onKeyDown, true);
+        const signal = this.listeners.signal;
+        this.row.addEventListener('lostpointercapture', event => this.onLostPointerCapture(event), { signal });
+        document.addEventListener('keydown', event => this.onKeyDown(event), { capture: true, signal });
 
         // Scroll events do not bubble, so the listener captures the scrolling of any element, the pane among them.
-        document.addEventListener('scroll', this.onScroll, true);
+        document.addEventListener('scroll', () => this.onScroll(), { capture: true, signal });
 
         // A render that changes the rows while the drag is under way ends it, as the place it would drop on is gone.
         // A render that shows the new order once the drop is written ends the drop.
         this.observer = new MutationObserver(() => this.onMutation());
         this.observer.observe(this.root, { childList: true, subtree: true });
-        this.animationFrame = requestAnimationFrame(this.onAnimationFrame);
+        this.animationFrame = requestAnimationFrame(() => this.onAnimationFrame());
     }
 
     update() {
@@ -254,7 +247,7 @@ class RowDrag {
             this.scroller.scrollTop += speed;
         }
 
-        this.animationFrame = requestAnimationFrame(this.onAnimationFrame);
+        this.animationFrame = requestAnimationFrame(() => this.onAnimationFrame());
     }
 
     onPointerUp(event) {
@@ -351,14 +344,7 @@ class RowDrag {
     }
 
     removeGestureListeners() {
-        document.removeEventListener('pointermove', this.onPointerMove);
-        document.removeEventListener('pointerup', this.onPointerUp);
-        document.removeEventListener('pointercancel', this.onPointerCancel);
-        document.removeEventListener('contextmenu', this.onContextMenu);
-        window.removeEventListener('blur', this.onInterruption);
-        this.row.removeEventListener('lostpointercapture', this.onLostPointerCapture);
-        document.removeEventListener('keydown', this.onKeyDown, true);
-        document.removeEventListener('scroll', this.onScroll, true);
+        this.listeners.abort();
     }
 
     end() {

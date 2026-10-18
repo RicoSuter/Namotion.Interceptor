@@ -219,10 +219,11 @@
                 var isInlinePathsProperty = parent.Subject != null &&
                     InlinePathsAttribute.IsInlinePathsProperty(parent.Subject.GetType(), parent.Property.Name);
 
-                // For collection/dictionary, show child subjects by index
+                // For collection/dictionary, show child subjects by index. A subject excluded from user interfaces, such
+                // as the metadata of a subject, is not offered, nor what it holds.
                 foreach (var child in parent.Property.Children)
                 {
-                    if (!IsOffered(child.Subject))
+                    if (child.Subject.IsExcludedFrom(ExclusionTarget.UserInterface))
                         continue;
 
                     string childPath;
@@ -284,7 +285,7 @@
                 {
                     foreach (var child in property.Children)
                     {
-                        if (!IsOffered(child.Subject))
+                        if (child.Subject.IsExcludedFrom(ExclusionTarget.UserInterface))
                             continue;
 
                         var childKey = child.Index?.ToString() ?? "";
@@ -295,7 +296,7 @@
                 }
 
                 // A reference to a subject that is not offered is left out with what it holds.
-                if (property is { IsSubjectReference: true, Children.Length: > 0 } && !IsOffered(property.Children[0].Subject))
+                if (property is { IsSubjectReference: true, Children.Length: > 0 } && property.Children[0].Subject.IsExcludedFrom(ExclusionTarget.UserInterface))
                     continue;
 
                 // Determine if property has state attribute
@@ -305,7 +306,7 @@
                 var isExpandable = false;
                 if (property.IsSubjectDictionary || property.IsSubjectCollection)
                 {
-                    isExpandable = property.Children.Any(child => IsOffered(child.Subject));
+                    isExpandable = property.Children.Any(child => !child.Subject.IsExcludedFrom(ExclusionTarget.UserInterface));
                 }
                 else if (property is { IsSubjectReference: true, Children.Length: > 0 })
                 {
@@ -511,12 +512,12 @@
                 return true;
 
             // Collection/Dictionary with children that are offered - will be shown
-            if ((p.IsSubjectDictionary || p.IsSubjectCollection) && p.Children.Any(child => IsOffered(child.Subject)))
+            if ((p.IsSubjectDictionary || p.IsSubjectCollection) && p.Children.Any(child => !child.Subject.IsExcludedFrom(ExclusionTarget.UserInterface)))
                 return true;
 
             // Reference with an offered, expandable subject - will be shown
             if (p is { IsSubjectReference: true, Children.Length: > 0 })
-                return IsOffered(p.Children[0].Subject) && HasExpandableProperties(p.Children[0].Subject);
+                return !p.Children[0].Subject.IsExcludedFrom(ExclusionTarget.UserInterface) && HasExpandableProperties(p.Children[0].Subject);
 
             // Property with attributes that can be selected - will be shown
             return !p.IsAttribute && !p.CanContainSubjects && HasListedAttributes(p);
@@ -541,11 +542,6 @@
     {
         return method is not null && !method.IsExcludedFrom(ExclusionTarget.UserInterface) && CanSelectProperty is not null && CanSelectProperty(property);
     }
-
-    // A subject whose type is excluded from user interfaces, such as the metadata of a subject, is not offered, nor what
-    // it holds.
-    private static bool IsOffered(IInterceptorSubject subject)
-        => !ExcludeFromAttribute.IsExcluded(subject.GetType(), ExclusionTarget.UserInterface);
 
     private static string GetMethodIcon(MethodMetadata method)
     {

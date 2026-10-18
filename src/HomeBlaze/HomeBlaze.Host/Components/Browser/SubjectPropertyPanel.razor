@@ -32,8 +32,6 @@
                     // A folder left with fewer than two children leaves the mode rather than return to it later.
                     StopReordering();
                 }
-
-                var isReordering = _isReordering;
             }
             <MudListSubheader Class="d-flex align-center gap-1" Style="flex-shrink: 0;">
                 @{
@@ -73,15 +71,15 @@
                 }
                 @if (reorderContainer is not null)
                 {
-                    var reorderLabel = isReordering ? "Done" : "Reorder";
+                    var reorderLabel = _isReordering ? "Done" : "Reorder";
                     @* Done stays enabled, so that a pane whose storage disconnects can still leave the mode. *@
                     <MudTooltip Text="@reorderLabel">
                         <MudIconButton OnClick="@ToggleReordering"
-                                       Icon="@(isReordering ? Icons.Material.Filled.Check : Icons.Material.Filled.SwapVert)"
-                                       Color="@(isReordering ? Color.Primary : Color.Default)"
+                                       Icon="@(_isReordering ? Icons.Material.Filled.Check : Icons.Material.Filled.SwapVert)"
+                                       Color="@(_isReordering ? Color.Primary : Color.Default)"
                                        Variant="Variant.Text"
                                        Size="Size.Small"
-                                       Disabled="@(!isReordering && !IsConnected(reorderContainer))"
+                                       Disabled="@(!_isReordering && !IsConnected(reorderContainer))"
                                        aria-label="@reorderLabel"
                                        data-testid="reorder-children-button" />
                     </MudTooltip>
@@ -136,7 +134,6 @@
                             @foreach (var (property, child) in section.SingleChildren)
                             {
                                 var isSelected = child.Subject == SelectedChild;
-                                var childCount = GetChildCount(child);
 
                                 <MudListItem Value="@child.Subject"
                                              OnClick="@(() => OnPropertyClick.InvokeAsync(new PropertyClickEventArgs(property.Name, child.Index, child.Subject)))"
@@ -149,11 +146,7 @@
                                             <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Color="Color.Primary" />
                                         </div>
                                     }
-                                    <span class="subject-pane-child-name" style="word-break: break-word;">@property.GetChildDisplayName(child)</span>
-                                    @if (childCount > 0)
-                                    {
-                                        <MudChip T="string" Size="Size.Small" Color="Color.Dark" Class="ml-4 my-0">@childCount</MudChip>
-                                    }
+                                    @RenderChildLabel(property, child)
                                 </MudListItem>
                                 <MudDivider />
                             }
@@ -171,7 +164,7 @@
                                 <MudChip T="string" Size="Size.Small" Color="Color.Dark" Class="my-0">@children.Length</MudChip>
                             </TitleContent>
                             <ChildContent>
-                                @if (isReordering && orderedContainer is not null)
+                                @if (_isReordering && orderedContainer is not null)
                                 {
                                     @RenderReorderList(property, children, orderedContainer)
                                 }
@@ -181,7 +174,6 @@
                                         @foreach (var child in children)
                                         {
                                             var isSelected = child.Subject == SelectedChild;
-                                            var childCount = GetChildCount(child);
 
                                             <MudListItem Value="@child.Subject"
                                                          OnClick="@(() => OnPropertyClick.InvokeAsync(new PropertyClickEventArgs(property.Name, child.Index, child.Subject)))"
@@ -194,11 +186,7 @@
                                                         <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Color="Color.Primary" />
                                                     </div>
                                                 }
-                                                <span class="subject-pane-child-name" style="word-break: break-word;">@property.GetChildDisplayName(child)</span>
-                                                @if (childCount > 0)
-                                                {
-                                                    <MudChip T="string" Size="Size.Small" Color="Color.Dark" Class="ml-4 my-0">@childCount</MudChip>
-                                                }
+                                                @RenderChildLabel(property, child)
                                             </MudListItem>
                                             <MudDivider />
                                         }
@@ -543,8 +531,7 @@
             }
 
             _dotNetReference ??= DotNetObjectReference.Create(this);
-            await _module.InvokeVoidAsync("registerCopyButtons", _rootElement, _dotNetReference);
-            await _module.InvokeVoidAsync("registerChildDragging", _rootElement, _dotNetReference);
+            await _module.InvokeVoidAsync("register", _rootElement, _dotNetReference);
         }
         catch (Exception exception) when (exception is JSDisconnectedException or OperationCanceledException or JSException)
         {
@@ -701,7 +688,8 @@
         // The children come from the registry, which is not a tracked read. Reading the property is, so the pane renders
         // again when a child is added, replaced or removed.
         _ = property.GetValue();
-        var children = property.Children.Where(IsListed);
+        // A child whose type is excluded from user interfaces is neither listed nor counted.
+        var children = property.Children.Where(static child => !child.Subject.IsExcludedFrom(ExclusionTarget.UserInterface));
 
         if (GetOrderedContainer(property) is { } container)
         {
@@ -714,10 +702,6 @@
 
         return children.ToArray();
     }
-
-    // A child whose type is excluded from user interfaces is neither listed nor counted.
-    private static bool IsListed(SubjectPropertyChild child)
-        => !ExcludeFromAttribute.IsExcluded(child.Subject.GetType(), ExclusionTarget.UserInterface);
 
     // The shown subject when it is a container whose children are listed and can be put in order, null otherwise.
     private static IMetadataContainer? GetReorderContainer(List<ChildSection> sections)
@@ -941,12 +925,22 @@
                 var count = 0;
                 foreach (var propertyChild in p.Children)
                 {
-                    if (IsListed(propertyChild)) count++;
+                    if (!propertyChild.Subject.IsExcludedFrom(ExclusionTarget.UserInterface)) count++;
                 }
 
                 return count;
             });
     }
+
+    private RenderFragment RenderChildLabel(RegisteredSubjectProperty property, SubjectPropertyChild child) => __builder =>
+    {
+        var childCount = GetChildCount(child);
+        <span class="subject-pane-child-name" style="word-break: break-word;">@property.GetChildDisplayName(child)</span>
+        @if (childCount > 0)
+        {
+            <MudChip T="string" Size="Size.Small" Color="Color.Dark" Class="ml-4 my-0">@childCount</MudChip>
+        }
+    };
 
     public record PropertyClickEventArgs(string PropertyName, object? Index, IInterceptorSubject Subject);
 
@@ -1170,7 +1164,6 @@
             {
                 var child = children[childIndex];
                 var isSelected = child.Subject == SelectedChild;
-                var childCount = GetChildCount(child);
                 var childName = property.GetChildDisplayName(child);
                 <div @key="child"
                      class="@(isSelected ? "subject-pane-reorder-row mud-primary-text" : "subject-pane-reorder-row")"
@@ -1184,11 +1177,7 @@
                              Color="@(isSelected ? Color.Primary : GetSubjectIconColor(child.Subject))"
                              Class="subject-pane-reorder-icon" />
                     <MudText Typo="Typo.body1" Class="subject-pane-reorder-name">
-                        <span class="subject-pane-child-name" style="word-break: break-word;">@childName</span>
-                        @if (childCount > 0)
-                        {
-                            <MudChip T="string" Size="Size.Small" Color="Color.Dark" Class="ml-4 my-0">@childCount</MudChip>
-                        }
+                        @RenderChildLabel(property, child)
                     </MudText>
                     <span class="subject-pane-move">
                         @if (childIndex > 0)

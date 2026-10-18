@@ -80,7 +80,7 @@ public class NavigationItemResolver
             foreach (var childInfo in prop.Children)
             {
                 var child = childInfo.Subject;
-                if (child == null || ExcludeFromAttribute.IsExcluded(child.GetType(), ExclusionTarget.UserInterface))
+                if (child == null || child.IsExcludedFrom(ExclusionTarget.UserInterface))
                     continue;
 
                 var key = childInfo.Index?.ToString() ?? prop.Name;
@@ -174,7 +174,7 @@ public class NavigationItemResolver
             foreach (var childInfo in prop.Children)
             {
                 var child = childInfo.Subject;
-                if (child == null || ExcludeFromAttribute.IsExcluded(child.GetType(), ExclusionTarget.UserInterface))
+                if (child == null || child.IsExcludedFrom(ExclusionTarget.UserInterface))
                     continue;
 
                 var isChildInNavigationBar = isInNavigationBar &&

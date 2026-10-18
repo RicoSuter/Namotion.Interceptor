@@ -37,10 +37,7 @@
                 {
                     @if (item.Alignment == AppBarAlignment.Left)
                     {
-                        <MudIconButton Icon="@SubjectIconExtensions.ResolveMudBlazorIcon(item.Icon)"
-                                       Href="@item.PageUrl"
-                                       Color="@(IsActive(item) ? Color.Primary : Color.Inherit)"
-                                       title="@item.Title"/>
+                        @RenderAppBarButton(item)
                     }
                 }
                 <MudSpacer/>
@@ -48,10 +45,7 @@
                 {
                     @if (item.Alignment == AppBarAlignment.Right)
                     {
-                        <MudIconButton Icon="@SubjectIconExtensions.ResolveMudBlazorIcon(item.Icon)"
-                                       Href="@item.PageUrl"
-                                       Color="@(IsActive(item) ? Color.Primary : Color.Inherit)"
-                                       title="@item.Title"/>
+                        @RenderAppBarButton(item)
                     }
                 }
                 <MudIconButton Icon="@(DeveloperModeIcon)"
@@ -269,4 +263,10 @@
         var currentPath = NavigationManager.ToBaseRelativePath(NavigationManager.Uri);
         return currentPath.Equals(item.PageUrl, StringComparison.OrdinalIgnoreCase);
     }
+
+    private RenderFragment RenderAppBarButton(NavigationItem item) =>
+        @<MudIconButton Icon="@SubjectIconExtensions.ResolveMudBlazorIcon(item.Icon)"
+                        Href="@item.PageUrl"
+                        Color="@(IsActive(item) ? Color.Primary : Color.Inherit)"
+                        title="@item.Title"/>;
 }
