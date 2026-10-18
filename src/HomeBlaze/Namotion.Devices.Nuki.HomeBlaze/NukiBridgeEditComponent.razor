@@ -13,7 +13,7 @@
                   Label="Token"
                   InputType="InputType.Password"
                   Placeholder="@(_hasToken ? "Unchanged" : null)"
-                  HelperText="Leave empty to keep the current token"
+                  HelperText="@(_hasToken ? "Leave empty to keep the current token" : "The API token from pairing or the Nuki app")"
                   Immediate="true"
                   Class="mt-4" />
 
@@ -110,7 +110,8 @@
         var bridge = BridgeSubject;
         if (bridge is not null && IsValid)
         {
-            bridge.HostAddress = _hostAddress?.Trim();
+            _hostAddress = _hostAddress?.Trim();
+            bridge.HostAddress = _hostAddress;
             if (!string.IsNullOrEmpty(_token))
             {
                 bridge.Token = _token;

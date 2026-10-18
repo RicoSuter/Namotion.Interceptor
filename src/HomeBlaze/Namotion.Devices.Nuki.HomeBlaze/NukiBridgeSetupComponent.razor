@@ -104,12 +104,13 @@
 
     protected override async Task OnInitializedAsync()
     {
+        var cancellationToken = _lifetime.Token;
         try
         {
             using var httpClient = HttpClientFactory.CreateClient();
-            _bridges = await NukiBridgeDiscovery.DiscoverAsync(httpClient, _lifetime.Token);
+            _bridges = await NukiBridgeDiscovery.DiscoverAsync(httpClient, cancellationToken);
         }
-        catch (Exception exception) when (!_lifetime.IsCancellationRequested)
+        catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
         {
             _discoveryError = $"The Nuki discovery service could not be reached ({exception.Message}).";
             _bridges = [];
@@ -141,6 +142,8 @@
 
     private async Task PairAsync()
     {
+        // Captured once: _lifetime is disposed with the component, possibly while a request is awaited.
+        var cancellationToken = _lifetime.Token;
         var hostAddress = _hostAddress?.Trim();
         if (string.IsNullOrEmpty(hostAddress))
         {
@@ -153,7 +156,7 @@
         try
         {
             using var httpClient = HttpClientFactory.CreateClient();
-            var token = await NukiBridgeDiscovery.PairAsync(httpClient, hostAddress, _lifetime.Token);
+            var token = await NukiBridgeDiscovery.PairAsync(httpClient, hostAddress, cancellationToken);
             if (token is null)
             {
                 _errorMessage = "The bridge did not confirm the pairing. Press its button within 30 seconds after selecting Pair.";
@@ -162,11 +165,12 @@
 
             try
             {
-                _tokenMode = await NukiBridgeDiscovery.DetectTokenModeAsync(httpClient, hostAddress, token, _lifetime.Token);
+                _tokenMode = await NukiBridgeDiscovery.DetectTokenModeAsync(httpClient, hostAddress, token, cancellationToken);
             }
-            catch (Exception exception) when (!_lifetime.IsCancellationRequested)
+            catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
             {
-                // Keeping the token spares another press of the bridge button. Hardware bridges use Encrypted.
+                // Keeping the token spares another press of the bridge button. The bridge did not reveal its type, so
+                // fall back to Encrypted, which hardware bridges use.
                 _tokenMode = NukiTokenMode.Encrypted;
                 _warningMessage = $"Paired, but the token mode could not be detected ({exception.Message}). " +
                                   "Using Encrypted; switch to Plain in the settings for a software bridge.";
@@ -177,7 +181,7 @@
             IsValidChanged?.Invoke(true);
             IsDirtyChanged?.Invoke(true);
         }
-        catch (Exception exception) when (!_lifetime.IsCancellationRequested)
+        catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
         {
             _errorMessage = $"Pairing failed: {exception.Message}";
         }
