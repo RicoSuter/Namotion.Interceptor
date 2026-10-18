@@ -310,7 +310,7 @@ public class SubjectRegistryExtensionsTests
         var property = subject.TryGetRegisteredSubject()!.TryGetProperty(nameof(IDoorSensor.IsClosed))!;
 
         // Act
-        subject.State = DoorState.Closed;
+        subject.DoorState = DoorState.Closed;
 
         // Assert
         Assert.True(property.IsDisplayable());
@@ -496,7 +496,7 @@ public partial class ExtensionsTestSubject
 [InterceptorSubject]
 public partial class DoorSensorTestSubject : IDoorSensor
 {
-    public partial DoorState? State { get; set; }
+    public partial DoorState? DoorState { get; set; }
 }
 
 [InterceptorSubject]

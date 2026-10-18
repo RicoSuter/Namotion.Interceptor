@@ -435,12 +435,20 @@ namespace HomeBlaze.Abstractions.Devices.Locks
 {
     public enum DoorLockState
     {
-        Unlocking = 0,
-        Unlocked = 1,
-        Locking = 2,
-        Locked = 3,
-        Unlatching = 4,
-        Unlatched = 5,
+        Locked = 0,
+        Locking = 1,
+        Unlocked = 2,
+        Unlocking = 3,
+        Unlatched = 4,
+        Unlatching = 5,
+        Jammed = 6,
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Pulls the latch of a door lock so that the door can be pushed open.")]
+    public interface IDoorLatchController
+    {
+        [HomeBlaze.Abstractions.Attributes.Operation(RequiresConfirmation=true)]
+        System.Threading.Tasks.Task UnlatchAsync(System.Threading.CancellationToken cancellationToken);
     }
     [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
     [System.ComponentModel.Description("Combined door lock with state and control operations.")]
@@ -851,7 +859,6 @@ namespace HomeBlaze.Abstractions.Sensors
         PartiallyOpen = 2,
         Closing = 3,
         Closed = 4,
-        Unknown = 5,
     }
     [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
     [System.ComponentModel.Description("Reports barometric pressure in hectopascals.")]
@@ -883,11 +890,11 @@ namespace HomeBlaze.Abstractions.Sensors
     [System.ComponentModel.Description("Reports door state (open, closed, partially open).")]
     public interface IDoorSensor
     {
+        [HomeBlaze.Abstractions.Attributes.State(Position=230)]
+        HomeBlaze.Abstractions.Sensors.DoorState? DoorState { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=231)]
         [Namotion.Interceptor.Attributes.Derived]
         bool? IsClosed { get; }
-        [HomeBlaze.Abstractions.Attributes.State(Position=230)]
-        HomeBlaze.Abstractions.Sensors.DoorState? State { get; }
     }
     [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
     [System.ComponentModel.Description("Reports electrical current in amperes.")]

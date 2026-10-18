@@ -1093,7 +1093,7 @@ Mark only types whose configuration is plain values and that do nothing but show
 A `{{ path }}` expression on a page and a [value widget](../administration/widgets/basics.md#value-widgets) show the value of a property they reach only when the property is displayable: a partial (intercepted) property, a `[Derived]` property or a property with `[State]`, on the class or through an interface. An expression shows nothing and a value widget shows a dash for:
 
 - A plain property, a public property without `[State]` that is no partial or `[Derived]` property. It is registered too but is no tracked value of the subject and can hold internal data, such as the text an agent is still writing. Mark a computed value that pages should show with `[Derived]`.
-- A default property of an interface without `[State]`, such as `bool? IsClosed => State switch { ... }`, unless it is marked with `[Derived]`. It is no partial property of the class, so it counts as a plain property otherwise.
+- A default property of an interface without `[State]`, such as `bool? IsClosed => DoorState switch { ... }`, unless it is marked with `[Derived]`. It is no partial property of the class, so it counts as a plain property otherwise.
 - A secret configuration property (`[Configuration(IsSecret = true)]`).
 - A property marked with `[ExcludeFromExpressions]`, for a value that can hold secrets in another form, such as the raw source of a file.
 

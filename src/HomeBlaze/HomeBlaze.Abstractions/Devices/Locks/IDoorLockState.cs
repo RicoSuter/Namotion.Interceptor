@@ -19,14 +19,14 @@ public interface IDoorLockState
     DoorLockState? LockState { get; }
 
     /// <summary>
-    /// Whether the lock is locked.
+    /// Whether the lock is locked. Null while the lock moves toward locked or unlocked, and when it is jammed or unknown.
     /// </summary>
     [Derived]
     [State(Position = 131)]
     bool? IsLocked => LockState switch
     {
         Locks.DoorLockState.Locked => true,
-        Locks.DoorLockState.Unlocked => false,
+        Locks.DoorLockState.Unlocked or Locks.DoorLockState.Unlatched or Locks.DoorLockState.Unlatching => false,
         _ => null
     };
 }

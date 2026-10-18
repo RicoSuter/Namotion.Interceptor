@@ -12,21 +12,21 @@ namespace HomeBlaze.Abstractions.Sensors;
 public interface IDoorSensor
 {
     /// <summary>
-    /// The current door state.
+    /// The current door state, or null when it is unknown.
     /// </summary>
     [State(Position = 230)]
-    DoorState? State { get; }
+    DoorState? DoorState { get; }
 
     /// <summary>
-    /// Whether the door is closed.
+    /// Whether the door is closed. A door that is moving is not closed.
     /// </summary>
     [Derived]
     [State(Position = 231)]
-    bool? IsClosed => State switch
+    bool? IsClosed => DoorState switch
     {
-        DoorState.Closed => true,
-        DoorState.Open => false,
-        DoorState.PartiallyOpen => false,
-        _ => null
+        // Qualified: the property of the same name hides the enum in this scope.
+        Sensors.DoorState.Closed => true,
+        null => null,
+        _ => false
     };
 }
