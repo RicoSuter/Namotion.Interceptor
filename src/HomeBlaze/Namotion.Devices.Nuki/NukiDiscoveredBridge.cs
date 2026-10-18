@@ -1,4 +1,6 @@
 using System.Globalization;
+using System.Net;
+using System.Net.Sockets;
 
 namespace Namotion.Devices.Nuki;
 
@@ -10,6 +12,9 @@ namespace Namotion.Devices.Nuki;
 /// <param name="Port">The port of the HTTP API.</param>
 public sealed record NukiDiscoveredBridge(long BridgeId, string IpAddress, int Port)
 {
-    /// <summary>The address to configure as <see cref="NukiBridge.HostAddress"/>.</summary>
-    public string HostAddress => IpAddress + ":" + Port.ToString(CultureInfo.InvariantCulture);
+    /// <summary>The address to configure as <see cref="NukiBridge.HostAddress"/>, with an IPv6 address in brackets.</summary>
+    public string HostAddress =>
+        (IPAddress.TryParse(IpAddress, out var address) && address.AddressFamily == AddressFamily.InterNetworkV6
+            ? "[" + IpAddress + "]"
+            : IpAddress) + ":" + Port.ToString(CultureInfo.InvariantCulture);
 }

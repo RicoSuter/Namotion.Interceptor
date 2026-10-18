@@ -17,7 +17,8 @@ public class NukiBridgeDiscoveryTests
               {"bridgeId": 42, "ip": "0.0.0.0", "port": 0, "dateUpdated": "2017-06-14T06:53:44Z"}],
              "errorCode": 0}
             """;
-        using var httpClient = new HttpClient(new JsonHandler(json));
+        var handler = new JsonHandler(json);
+        using var httpClient = new HttpClient(handler);
 
         // Act
         var bridges = await NukiBridgeDiscovery.DiscoverAsync(httpClient, CancellationToken.None);
@@ -26,6 +27,43 @@ public class NukiBridgeDiscoveryTests
         var bridge = Assert.Single(bridges);
         Assert.Equal(2117604523, bridge.BridgeId);
         Assert.Equal("192.168.1.50:8080", bridge.HostAddress);
+        Assert.Equal(new Uri(NukiBridgeDiscovery.DiscoveryAddress), handler.RequestUri);
+    }
+
+    [Fact]
+    public async Task WhenDiscoveryServiceDoesNotAnswerInTime_ThenATimeoutExceptionIsThrown()
+    {
+        // Arrange
+        using var httpClient = new HttpClient(new NeverAnsweringHandler());
+
+        // Act & Assert
+        await Assert.ThrowsAsync<TimeoutException>(
+            () => NukiBridgeDiscovery.DiscoverAsync(httpClient, TimeSpan.FromMilliseconds(1), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task WhenCallerCancelsTheDiscovery_ThenTheCancellationIsThrown()
+    {
+        // Arrange
+        using var httpClient = new HttpClient(new NeverAnsweringHandler());
+        using var cancellation = new CancellationTokenSource();
+        await cancellation.CancelAsync();
+
+        // Act & Assert
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => NukiBridgeDiscovery.DiscoverAsync(httpClient, TimeSpan.FromHours(1), cancellation.Token));
+    }
+
+    [Theory]
+    [InlineData("192.168.1.50", "192.168.1.50:8080")]
+    [InlineData("fe80::1", "[fe80::1]:8080")]
+    public void WhenBridgeIsDiscovered_ThenItsHostAddressCarriesThePort(string ipAddress, string expectedHostAddress)
+    {
+        // Act
+        var bridge = new NukiDiscoveredBridge(1, ipAddress, 8080);
+
+        // Assert
+        Assert.Equal(expectedHostAddress, bridge.HostAddress);
     }
 
     [Fact]
@@ -68,24 +106,40 @@ public class NukiBridgeDiscoveryTests
         Assert.Single(fake.Requests);
     }
 
-    [Fact]
-    public async Task WhenBridgeRejectsTheEncryptedToken_ThenThePlainTokenIsTried()
+    [Theory]
+    [InlineData(NukiFixtures.SoftwareInfo, NukiTokenMode.Plain)]
+    [InlineData(NukiFixtures.Info, NukiTokenMode.Encrypted)]
+    public async Task WhenBridgeRejectsTheEncryptedToken_ThenItsBridgeTypeReadWithThePlainTokenDecides(string infoJson, NukiTokenMode expected)
     {
         // Arrange
-        var fake = new FakeNukiBridge();
+        var fake = new FakeNukiBridge { InfoJson = infoJson };
         fake.StatusOverride = _ => fake.CountRequests("info") == 1 ? HttpStatusCode.Unauthorized : null;
 
         // Act
         var mode = await NukiBridgeDiscovery.DetectTokenModeAsync(fake.CreateClient(string.Empty), "192.168.1.50", "abc123", CancellationToken.None);
 
         // Assert
-        Assert.Equal(NukiTokenMode.Plain, mode);
+        Assert.Equal(expected, mode);
         Assert.Contains("token=abc123", fake.Requests[1].Query);
     }
 
     private sealed class JsonHandler(string json) : HttpMessageHandler
     {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
-            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(json, Encoding.UTF8, "application/json") });
+        public Uri? RequestUri { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            RequestUri = request.RequestUri;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(json, Encoding.UTF8, "application/json") });
+        }
+    }
+
+    private sealed class NeverAnsweringHandler : HttpMessageHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            await Task.Delay(Timeout.Infinite, cancellationToken);
+            throw new InvalidOperationException("Not reached.");
+        }
     }
 }

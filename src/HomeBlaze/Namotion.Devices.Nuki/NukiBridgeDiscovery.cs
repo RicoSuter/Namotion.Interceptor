@@ -13,20 +13,35 @@ public static class NukiBridgeDiscovery
     /// <summary>The Nuki discovery service, which lists the bridges seen from the public IP address of the caller.</summary>
     public const string DiscoveryAddress = "https://api.nuki.io/discover/bridges";
 
+    private static readonly TimeSpan DiscoveryTimeout = TimeSpan.FromSeconds(10);
+
     /// <summary>
     /// Lists the bridges that the Nuki discovery service knows for this network. Bridges with discovery disabled are
-    /// left out.
+    /// left out. The service has 10 seconds to answer.
     /// </summary>
-    public static async Task<IReadOnlyList<NukiDiscoveredBridge>> DiscoverAsync(HttpClient httpClient, CancellationToken cancellationToken)
-    {
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(TimeSpan.FromSeconds(10));
+    /// <exception cref="TimeoutException">The discovery service did not answer within 10 seconds.</exception>
+    /// <exception cref="HttpRequestException">The discovery service could not be reached or answered with an error.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
+    public static Task<IReadOnlyList<NukiDiscoveredBridge>> DiscoverAsync(HttpClient httpClient, CancellationToken cancellationToken) =>
+        DiscoverAsync(httpClient, DiscoveryTimeout, cancellationToken);
 
-        var response = await httpClient.GetFromJsonAsync(DiscoveryAddress, NukiJsonContext.Default.NukiDiscoveryResponse, timeout.Token);
-        return response?.Bridges?
-            .Where(bridge => !string.IsNullOrEmpty(bridge.Ip) && bridge.Ip != "0.0.0.0" && bridge.Port > 0)
-            .Select(bridge => new NukiDiscoveredBridge(bridge.BridgeId, bridge.Ip!, bridge.Port))
-            .ToArray() ?? [];
+    internal static async Task<IReadOnlyList<NukiDiscoveredBridge>> DiscoverAsync(
+        HttpClient httpClient, TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutSource.CancelAfter(timeout);
+        try
+        {
+            var response = await httpClient.GetFromJsonAsync(DiscoveryAddress, NukiJsonContext.Default.NukiDiscoveryResponse, timeoutSource.Token);
+            return response?.Bridges?
+                .Where(bridge => !string.IsNullOrEmpty(bridge.Ip) && bridge.Ip != "0.0.0.0" && bridge.Port > 0)
+                .Select(bridge => new NukiDiscoveredBridge(bridge.BridgeId, bridge.Ip!, bridge.Port))
+                .ToArray() ?? [];
+        }
+        catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new TimeoutException($"The Nuki discovery service did not answer within {timeout.TotalSeconds:0} seconds.", exception);
+        }
     }
 
     /// <summary>
@@ -42,9 +57,13 @@ public static class NukiBridgeDiscovery
     }
 
     /// <summary>
-    /// Finds the token mode a bridge accepts: <see cref="NukiTokenMode.Encrypted"/> when it accepts an encrypted token,
-    /// otherwise <see cref="NukiTokenMode.Plain"/> when it accepts the plain one, which a software bridge requires.
+    /// Finds the token mode for a bridge: <see cref="NukiTokenMode.Encrypted"/> when it accepts an encrypted token.
+    /// When it rejects the encrypted token, its type is read with the plain token: a software bridge, which requires
+    /// <see cref="NukiTokenMode.Plain"/>, gives Plain; a hardware bridge gives Encrypted, as it supports encrypted
+    /// tokens and most likely rejected the token because its clock is off.
     /// </summary>
+    /// <exception cref="HttpRequestException">The bridge rejected the plain token too, or answered with an error.</exception>
+    /// <exception cref="TimeoutException">The bridge did not answer in time.</exception>
     public static async Task<NukiTokenMode> DetectTokenModeAsync(HttpClient httpClient, string hostAddress, string token, CancellationToken cancellationToken)
     {
         try
@@ -54,8 +73,10 @@ public static class NukiBridgeDiscovery
         }
         catch (HttpRequestException exception) when (exception.StatusCode == HttpStatusCode.Unauthorized)
         {
-            await new NukiBridgeClient(httpClient, hostAddress, token, NukiTokenMode.Plain).GetInfoAsync(cancellationToken);
-            return NukiTokenMode.Plain;
+            var info = await new NukiBridgeClient(httpClient, hostAddress, token, NukiTokenMode.Plain).GetInfoAsync(cancellationToken);
+            return NukiStateMapping.ToBridgeType(info.BridgeType) == NukiBridgeType.Hardware
+                ? NukiTokenMode.Encrypted
+                : NukiTokenMode.Plain;
         }
     }
 }
