@@ -190,9 +190,9 @@ internal sealed class StorageMetadataDocument
     /// </summary>
     /// <exception cref="ArgumentException">
     /// values is no JSON object, gives a key twice without regard to case, sets <c>order</c> of a folder, has a known
-    /// key with a value of another kind, or exceeds a limit: 64 keys, key names of 64 characters, strings of 256
-    /// characters, values of 4 KB and a whole file of 16 KB, which a merge that does not make the file larger may
-    /// exceed. The message names the key.
+    /// key with a value of another kind, or exceeds a limit: 64 keys in the file and in values, key names of 64
+    /// characters, strings of 256 characters, values of 4 KB and a whole file of 16 KB, which a merge that does not
+    /// make the file larger may exceed. The message names the key.
     /// </exception>
     /// <exception cref="InvalidOperationException">A value cannot be written, such as a string with a lone surrogate.</exception>
     public void Merge(JsonElement values, StorageMetadataKind kind)
@@ -215,12 +215,18 @@ internal sealed class StorageMetadataDocument
 
             if (!givenKeys.Add(key))
             {
-                throw Refuse($"'{key}' is given more than once, without regard to case.");
+                throw Refuse($"{FormatNames([key])} is given more than once, without regard to case.");
+            }
+
+            // Before a null removes a key, so that a call with many keys is refused whatever their values.
+            if (givenKeys.Count > MaxKeyCount)
+            {
+                throw Refuse($"values has more than {MaxKeyCount} keys.");
             }
 
             if (kind == StorageMetadataKind.Folder && string.Equals(key, MetadataKeys.Order, StringComparison.OrdinalIgnoreCase))
             {
-                throw Refuse($"'{key}' cannot be set here; use Set Order.");
+                throw Refuse($"{FormatNames([key])} cannot be set here; use Set Order.");
             }
 
             var knownKey = Array.Find(knownKeys, candidate => string.Equals(candidate, key, StringComparison.OrdinalIgnoreCase));
@@ -233,17 +239,17 @@ internal sealed class StorageMetadataDocument
 
             if (GetText(value) is { Length: > MaxStringLength })
             {
-                throw Refuse($"The value of '{key}' is longer than {MaxStringLength} characters.");
+                throw Refuse($"The value of {FormatNames([key])} is longer than {MaxStringLength} characters.");
             }
 
             if (GetSize(value) > MaxValueSize)
             {
-                throw Refuse($"The value of '{key}' is larger than {MaxValueSize / 1024} KB.");
+                throw Refuse($"The value of {FormatNames([key])} is larger than {MaxValueSize / 1024} KB.");
             }
 
             if (!_root.ContainsKey(key) && _root.Count >= MaxKeyCount)
             {
-                throw Refuse($"'{key}' cannot be added: the metadata already has {MaxKeyCount} keys.");
+                throw Refuse($"{FormatNames([key])} cannot be added: the metadata already has {MaxKeyCount} keys.");
             }
 
             _root[knownKey ?? key] = value;
@@ -261,8 +267,8 @@ internal sealed class StorageMetadataDocument
     }
 
     /// <summary>
-    /// Formats names to show in a message, each in quotes and shortened to 64 characters, at most 10 of them; "none"
-    /// for no name.
+    /// Formats names to show in a message, each in quotes, shortened to 64 characters and with control characters
+    /// escaped as <c>\uXXXX</c>, at most 10 of them; "none" for no name.
     /// </summary>
     public static string FormatNames(IEnumerable<string> names)
     {
@@ -272,9 +278,32 @@ internal sealed class StorageMetadataDocument
             .Take(maxNameCount + 1)
             .Select(static (name, index) => index == maxNameCount
                 ? "…"
-                : $"'{(name.Length > maxNameLength ? name[..maxNameLength] + "…" : name)}'")
+                : $"'{EscapeControlCharacters(name.Length > maxNameLength ? name[..maxNameLength] + "…" : name)}'")
             .ToList();
         return formattedNames.Count > 0 ? string.Join(", ", formattedNames) : "none";
+    }
+
+    private static string EscapeControlCharacters(string text)
+    {
+        if (!text.Any(char.IsControl))
+        {
+            return text;
+        }
+
+        var builder = new StringBuilder(text.Length + 10);
+        foreach (var character in text)
+        {
+            if (char.IsControl(character))
+            {
+                builder.Append($"\\u{(int)character:X4}");
+            }
+            else
+            {
+                builder.Append(character);
+            }
+        }
+
+        return builder.ToString();
     }
 
     private void ReadTypedValues()

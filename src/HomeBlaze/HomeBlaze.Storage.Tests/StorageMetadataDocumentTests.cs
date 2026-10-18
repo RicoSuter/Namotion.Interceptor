@@ -21,6 +21,12 @@ public class StorageMetadataDocumentTests
         { $$"""{ "notes": [{{string.Join(", ", Enumerable.Repeat($"\"{new string('a', 200)}\"", 21))}}] }""", "'notes'" }
     };
 
+    public static TheoryData<string, string> ValuesWithAControlCharacterInAKey() => new()
+    {
+        { """{ "a\r\nb": 1, "A\r\nB": 2 }""", @"'A\u000D\u000AB'" },
+        { $$"""{ "a\r\nb": "{{new string('x', 257)}}" }""", @"'a\u000D\u000Ab'" }
+    };
+
     [Fact]
     public void WhenFileIsParsed_ThenKnownKeysAreReadWithoutRegardToCase()
     {
@@ -216,6 +222,42 @@ public class StorageMetadataDocumentTests
         // Act & Assert
         var exception = Assert.Throws<ArgumentException>(() => document.Merge(Values("""{ "extra": 1 }"""), StorageMetadataKind.Folder));
         Assert.Contains("'extra'", exception.Message);
+    }
+
+    [Fact]
+    public void WhenAMergeHasMoreThanSixtyFourKeys_ThenItIsRefusedAlsoWhenTheyAreNull()
+    {
+        // Arrange
+        var document = Parse("{}");
+        var values = "{" + string.Join(", ", Enumerable.Range(0, 65).Select(index => $"\"key{index}\": null")) + "}";
+
+        // Act & Assert
+        var exception = Assert.Throws<ArgumentException>(() => document.Merge(Values(values), StorageMetadataKind.Folder));
+        Assert.Contains("64 keys", exception.Message);
+    }
+
+    [Theory]
+    [MemberData(nameof(ValuesWithAControlCharacterInAKey))]
+    public void WhenARefusedKeyHasControlCharacters_ThenTheMessageShowsThemEscaped(string values, string expectedPart)
+    {
+        // Arrange
+        var document = Parse("{}");
+
+        // Act & Assert
+        var exception = Assert.Throws<ArgumentException>(() => document.Merge(Values(values), StorageMetadataKind.Folder));
+        Assert.Contains(expectedPart, exception.Message);
+        Assert.DoesNotContain('\r', exception.Message);
+        Assert.DoesNotContain('\n', exception.Message);
+    }
+
+    [Fact]
+    public void WhenNamesWithControlCharactersAreFormatted_ThenTheCharactersAreEscaped()
+    {
+        // Act
+        var formatted = StorageMetadataDocument.FormatNames(["a\r\nb", "c"]);
+
+        // Assert
+        Assert.Equal("'a\\u000D\\u000Ab', 'c'", formatted);
     }
 
     [Fact]
