@@ -78,41 +78,10 @@
 
             @* Each block gets the gap above it from GetGapClass, by the block before it. *@
             <div data-testid="subject-pane-content" style="flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;">
-                @* Primitive properties and methods (operations and queries) without a category *@
                 @{
                     var members = GetMemberGroups();
                     var previousBlock = PaneBlock.None;
                 }
-                @if (members.UncategorizedValues.Count > 0)
-                {
-                    @RenderValues(members.UncategorizedValues, GetGapClass(previousBlock, PaneBlock.Values))
-                    previousBlock = PaneBlock.Values;
-                }
-                @if (members.UncategorizedMethods.Count > 0)
-                {
-                    @RenderMethods(members.UncategorizedMethods, GetGapClass(previousBlock, PaneBlock.Methods))
-                    previousBlock = PaneBlock.Methods;
-                }
-
-                @* Categories: the values of a category and its methods below them *@
-                @foreach (var category in members.Categories)
-                {
-                    <div class="@GetGapClass(previousBlock, PaneBlock.Category)" data-testid="subject-pane-category">
-                        <MudText Typo="Typo.subtitle2" Color="Color.Primary" HtmlTag="h2" Class="px-4"
-                                 data-testid="subject-pane-category-title">@category.Name</MudText>
-                        @if (category.Values.Count > 0)
-                        {
-                            @RenderValues(category.Values, GetGapClass(PaneBlock.CategoryTitle, PaneBlock.Values))
-                        }
-                        @if (category.Methods.Count > 0)
-                        {
-                            @RenderMethods(category.Methods, GetGapClass(
-                                category.Values.Count > 0 ? PaneBlock.Values : PaneBlock.CategoryTitle, PaneBlock.Methods))
-                        }
-                    </div>
-                    previousBlock = PaneBlock.Category;
-                }
-
                 @* Child Collections *@
                 @foreach (var section in GetChildSections())
                 {
@@ -189,6 +158,37 @@
                             </ChildContent>
                         </MudExpansionPanel>
                     }
+                }
+
+                @* Primitive properties and methods (operations and queries) without a category *@
+                @if (members.UncategorizedValues.Count > 0)
+                {
+                    @RenderValues(members.UncategorizedValues, GetGapClass(previousBlock, PaneBlock.Values))
+                    previousBlock = PaneBlock.Values;
+                }
+                @if (members.UncategorizedMethods.Count > 0)
+                {
+                    @RenderMethods(members.UncategorizedMethods, GetGapClass(previousBlock, PaneBlock.Methods))
+                    previousBlock = PaneBlock.Methods;
+                }
+
+                @* Categories: the values of a category and its methods below them *@
+                @foreach (var category in members.Categories)
+                {
+                    <div class="@GetGapClass(previousBlock, PaneBlock.Category)" data-testid="subject-pane-category">
+                        <MudText Typo="Typo.subtitle2" Color="Color.Primary" HtmlTag="h2" Class="px-4"
+                                 data-testid="subject-pane-category-title">@category.Name</MudText>
+                        @if (category.Values.Count > 0)
+                        {
+                            @RenderValues(category.Values, GetGapClass(PaneBlock.CategoryTitle, PaneBlock.Values))
+                        }
+                        @if (category.Methods.Count > 0)
+                        {
+                            @RenderMethods(category.Methods, GetGapClass(
+                                category.Values.Count > 0 ? PaneBlock.Values : PaneBlock.CategoryTitle, PaneBlock.Methods))
+                        }
+                    </div>
+                    previousBlock = PaneBlock.Category;
                 }
 
                 @* Details Accordion *@
@@ -756,14 +756,14 @@
         Section
     }
 
-    // 16px around a category, 12px around a row of method buttons, 8px otherwise. The category arm comes first: a
-    // category after a row of buttons is 16px away.
+    // 16px around a category and between the children and the values below them, 12px around a row of method
+    // buttons, 8px otherwise. The category arm comes first: a category after a row of buttons is 16px away.
     private static string GetGapClass(PaneBlock previousBlock, PaneBlock block) => (previousBlock, block) switch
     {
         (PaneBlock.None, _) => "mt-2",
         (PaneBlock.CategoryTitle, PaneBlock.Values) => "mt-1",
         (PaneBlock.CategoryTitle, _) => "mt-2",
-        (PaneBlock.Category, _) or (_, PaneBlock.Category) => "mt-4",
+        (PaneBlock.Category, _) or (_, PaneBlock.Category) or (PaneBlock.Section, PaneBlock.Values) => "mt-4",
         (PaneBlock.Methods, _) or (_, PaneBlock.Methods) => "mt-3",
         _ => "mt-2"
     };

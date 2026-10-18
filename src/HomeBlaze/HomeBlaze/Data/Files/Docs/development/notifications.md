@@ -60,7 +60,14 @@ Since `SendNotificationAsync` is marked with `[Operation]`, it is:
 
 ### From AI Agents
 
-A [built-in agent](../administration/ai-agents.md) finds the publishers through its tools: `list_types` finds the `INotificationPublisher` interface, and `search` with that interface in its `types` parameter finds the subjects that implement it. `list_methods` shows the exact method name and parameters: the operation is registered without the `Async` suffix, as `SendNotification` with a `notification` parameter whose `schema` lists its members with their types and descriptions, for example `{"notification": {"message": "Door open", "priority": "High"}}`. The priority is given by name; a number or an unknown member is rejected. The agent calls it with `invoke_operation`, which returns the `NotificationResult` as its result, for example `{"success": true, "result": {"Id": "r1a2b3"}}`, and must be in the agent's `AllowedTools`; it is off by default, so an agent without it can only report findings on its page. Do not mark `SendNotificationAsync` with `RequiresConfirmation`, because operations that require confirmation cannot be called through MCP, see [AI Agents](../administration/ai-agents.md#tools-and-permissions).
+A [built-in agent](../administration/ai-agents.md) sends a notification with its tools:
+
+1. `list_types` finds the `INotificationPublisher` interface.
+2. `search` with that interface in its `types` parameter finds the publishers.
+3. `list_methods` shows the operation, registered without the `Async` suffix as `SendNotification` with a `notification` parameter. Its `schema` lists the members with their types and descriptions, for example `{"notification": {"message": "Door open", "priority": "High"}}`. The priority is given by name; a number or an unknown member is rejected.
+4. `invoke_operation` calls it and returns the `NotificationResult`, for example `{"success": true, "result": {"Id": "r1a2b3"}}`. The tool must be in the agent's `AllowedTools` and is off by default; without it, the agent can only report findings on its page.
+
+Do not mark `SendNotificationAsync` with `RequiresConfirmation`, because such operations cannot be called through MCP, see [AI Agents](../administration/ai-agents.md#tools-and-permissions).
 
 ### From Other Subjects
 
