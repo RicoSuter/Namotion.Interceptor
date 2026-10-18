@@ -15,8 +15,6 @@ namespace Namotion.Devices.Nuki.Tests.Testing;
 /// </summary>
 internal sealed class TestBridge : IAsyncDisposable
 {
-    private bool _started;
-
     public TestBridge(FakeNukiBridge? fake = null)
     {
         Fake = fake ?? new FakeNukiBridge();
@@ -36,7 +34,7 @@ internal sealed class TestBridge : IAsyncDisposable
             TokenMode = NukiTokenMode.Plain,
             // Long, so that only the first poll after connecting runs unless a test shortens it.
             PollingInterval = TimeSpan.FromHours(1),
-            RetryInterval = TimeSpan.FromMilliseconds(50),
+            RetryInterval = TimeSpan.FromSeconds(NukiBridge.MinimumIntervalSeconds),
             BusyRetryDelay = TimeSpan.Zero
         };
         ((IInterceptorSubject)Bridge).Context.AddFallbackContext(context);
@@ -53,7 +51,6 @@ internal sealed class TestBridge : IAsyncDisposable
     /// <summary>Starts the bridge and waits until its first poll has run.</summary>
     public async Task StartAsync()
     {
-        _started = true;
         await Bridge.StartAsync(CancellationToken.None);
         await AsyncTestHelpers.WaitUntilAsync(() => Bridge.IsConnected && Bridge.LastUpdated is not null, message: "The bridge did not connect.");
     }
@@ -64,10 +61,7 @@ internal sealed class TestBridge : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        if (_started)
-        {
-            await Bridge.StopAsync(CancellationToken.None);
-        }
+        await Bridge.StopAsync(CancellationToken.None);
 
         Bridge.Dispose();
     }

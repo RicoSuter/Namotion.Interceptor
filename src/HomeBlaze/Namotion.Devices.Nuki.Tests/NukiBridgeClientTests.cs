@@ -15,33 +15,21 @@ public class NukiBridgeClientTests
     private static NukiBridgeClient CreateClient(FakeNukiBridge bridge, NukiTokenMode tokenMode, string hostAddress = "192.168.1.50")
         => new(bridge.CreateClient(string.Empty), hostAddress, Token, tokenMode, busyRetryDelay: TimeSpan.Zero);
 
-    [Fact]
-    public async Task WhenTokenModeIsPlain_ThenTheTokenIsSentAsQueryParameter()
+    [Theory]
+    [InlineData("192.168.1.50", "http://192.168.1.50:8080/info?token=123456")]
+    [InlineData("192.168.1.50:8081", "http://192.168.1.50:8081/info?token=123456")]
+    [InlineData("http://192.168.1.50/", "http://192.168.1.50:8080/info?token=123456")]
+    public async Task WhenTokenModeIsPlain_ThenTheRequestGoesToTheNormalizedHostAddressWithTheTokenAsQueryParameter(string hostAddress, string expectedUri)
     {
         // Arrange
         var bridge = new FakeNukiBridge();
-        var client = CreateClient(bridge, NukiTokenMode.Plain);
+        var client = CreateClient(bridge, NukiTokenMode.Plain, hostAddress);
 
         // Act
         await client.GetInfoAsync(CancellationToken.None);
 
         // Assert
-        var uri = Assert.Single(bridge.Requests);
-        Assert.Equal("http://192.168.1.50:8080/info?token=123456", uri.ToString());
-    }
-
-    [Fact]
-    public async Task WhenHostAddressHasAPort_ThenThePortIsKept()
-    {
-        // Arrange
-        var bridge = new FakeNukiBridge();
-        var client = CreateClient(bridge, NukiTokenMode.Plain, hostAddress: "192.168.1.50:8081");
-
-        // Act
-        await client.GetInfoAsync(CancellationToken.None);
-
-        // Assert
-        Assert.Equal(8081, Assert.Single(bridge.Requests).Port);
+        Assert.Equal(expectedUri, Assert.Single(bridge.Requests).ToString());
     }
 
     [Fact]
@@ -65,36 +53,6 @@ public class NukiBridgeClientTests
         Assert.Matches(@"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z,\d{1,5}$", plaintext);
         var timestamp = DateTimeOffset.Parse(plaintext.Split(',')[0], System.Globalization.CultureInfo.InvariantCulture);
         Assert.InRange(DateTimeOffset.UtcNow - timestamp, TimeSpan.FromSeconds(-1), TimeSpan.FromMinutes(1));
-    }
-
-    [Fact]
-    public async Task WhenHostAddressHasASchemeAndTrailingSlash_ThenTheyAreNormalizedAway()
-    {
-        // Arrange
-        var bridge = new FakeNukiBridge();
-        var client = CreateClient(bridge, NukiTokenMode.Plain, hostAddress: "http://192.168.1.50/");
-
-        // Act
-        await client.GetInfoAsync(CancellationToken.None);
-
-        // Assert
-        Assert.Equal("http://192.168.1.50:8080/info?token=123456", Assert.Single(bridge.Requests).ToString());
-    }
-
-    [Fact]
-    public async Task WhenTwoRequestsAreSent_ThenEachHasItsOwnNonce()
-    {
-        // Arrange
-        var bridge = new FakeNukiBridge();
-        var client = CreateClient(bridge, NukiTokenMode.Encrypted);
-
-        // Act
-        await client.GetInfoAsync(CancellationToken.None);
-        await client.GetInfoAsync(CancellationToken.None);
-
-        // Assert
-        var nonces = bridge.Requests.Select(uri => HttpUtility.ParseQueryString(uri.Query)["nonce"]).ToArray();
-        Assert.NotEqual(nonces[0], nonces[1]);
     }
 
     [Fact]

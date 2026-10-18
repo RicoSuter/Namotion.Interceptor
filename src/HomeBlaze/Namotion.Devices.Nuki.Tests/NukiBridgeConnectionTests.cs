@@ -22,7 +22,6 @@ public class NukiBridgeConnectionTests
         await AsyncTestHelpers.WaitUntilAsync(() => test.Bridge.Status == ServiceStatus.Error);
         Assert.Equal("Host address and token are required.", test.Bridge.StatusMessage);
         Assert.Empty(test.Fake.Requests);
-        await test.Bridge.StopAsync(CancellationToken.None);
     }
 
     [Fact]
@@ -82,7 +81,6 @@ public class NukiBridgeConnectionTests
         await AsyncTestHelpers.WaitUntilAsync(() => test.Bridge.Status == ServiceStatus.Error);
         Assert.Contains("Token rejected", test.Bridge.StatusMessage);
         Assert.False(test.Bridge.IsConnected);
-        await test.Bridge.StopAsync(CancellationToken.None);
     }
 
     [Fact]
@@ -90,7 +88,7 @@ public class NukiBridgeConnectionTests
     {
         // Arrange
         await using var test = new TestBridge();
-        test.Bridge.PollingInterval = TimeSpan.FromMilliseconds(20);
+        test.Bridge.PollingInterval = TimeSpan.FromSeconds(NukiBridge.MinimumIntervalSeconds);
         // Long enough for the disconnected state to be observed before the reconnect.
         test.Bridge.RetryInterval = TimeSpan.FromSeconds(1);
         await test.StartAsync();
@@ -126,7 +124,7 @@ public class NukiBridgeConnectionTests
     public async Task WhenBridgeStops_ThenStatusIsStopped()
     {
         // Arrange
-        var test = new TestBridge();
+        await using var test = new TestBridge();
         await test.StartAsync();
 
         // Act
@@ -135,6 +133,5 @@ public class NukiBridgeConnectionTests
         // Assert
         Assert.Equal(ServiceStatus.Stopped, test.Bridge.Status);
         Assert.False(test.Bridge.IsConnected);
-        test.Bridge.Dispose();
     }
 }

@@ -32,8 +32,8 @@ internal static class NukiFixtures
     public const string ActionFailed = """{"success": false, "batteryCritical": false}""";
 
     /// <summary>A list with one smart lock.</summary>
-    public static string SmartLock(int state, int doorSensorState = 2, long nukiId = 1, int deviceType = 0) => $$$"""
-        [{"nukiId": {{{nukiId}}}, "deviceType": {{{deviceType}}}, "name": "Home", "firmwareVersion": "3.5.2",
+    public static string SmartLock(int state, int doorSensorState = 2, int deviceType = 0) => $$$"""
+        [{"nukiId": 1, "deviceType": {{{deviceType}}}, "name": "Home", "firmwareVersion": "3.5.2",
           "lastKnownState": {"mode": 2, "state": {{{state}}}, "batteryCritical": true, "batteryCharging": true,
             "batteryChargeState": 42, "keypadBatteryCritical": true, "doorsensorState": {{{doorSensorState}}},
             "timestamp": "2018-10-03T06:49:00+00:00"}}]
@@ -44,10 +44,10 @@ internal static class NukiFixtures
         "[" + string.Join(",", lists.Select(list => list.Trim().TrimStart('[').TrimEnd(']'))) + "]";
 
     /// <summary>A list with one Opener.</summary>
-    public static string Opener(int state, int mode = 2, bool ringing = false) => $$$"""
+    public static string Opener(int state, int mode = 2) => $$$"""
         [{"nukiId": 2, "deviceType": 2, "name": "Community door", "firmwareVersion": "1.6.4",
           "lastKnownState": {"mode": {{{mode}}}, "state": {{{state}}}, "batteryCritical": false,
-            "ringactionTimestamp": "2020-04-27T16:13:00+00:00", "ringactionState": {{{(ringing ? "true" : "false")}}},
+            "ringactionTimestamp": "2020-04-27T16:13:00+00:00", "ringactionState": false,
             "timestamp": "2018-10-03T06:49:00+00:00"}}]
         """;
 }

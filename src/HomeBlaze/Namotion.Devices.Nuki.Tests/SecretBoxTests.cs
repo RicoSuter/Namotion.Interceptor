@@ -57,18 +57,13 @@ public class SecretBoxTests
         }
     }
 
-    [Fact]
-    public void WhenTheKeyHasTheWrongLength_ThenSealThrows()
+    [Theory]
+    [InlineData(16, SecretBox.NonceSize)]
+    [InlineData(SecretBox.KeySize, 8)]
+    public void WhenTheKeyOrNonceHasTheWrongLength_ThenSealThrows(int keyLength, int nonceLength)
     {
         // Act & Assert
-        Assert.Throws<ArgumentOutOfRangeException>(() => SecretBox.Seal([1, 2, 3], new byte[SecretBox.NonceSize], new byte[16]));
-    }
-
-    [Fact]
-    public void WhenTheNonceHasTheWrongLength_ThenSealThrows()
-    {
-        // Act & Assert
-        Assert.Throws<ArgumentOutOfRangeException>(() => SecretBox.Seal([1, 2, 3], new byte[8], new byte[SecretBox.KeySize]));
+        Assert.Throws<ArgumentOutOfRangeException>(() => SecretBox.Seal([1, 2, 3], new byte[nonceLength], new byte[keyLength]));
     }
 
     // The same construction from the primitives of NaCl.Core: XSalsa20 over 32 zero bytes and the message gives the
