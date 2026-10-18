@@ -14,8 +14,6 @@ namespace Namotion.Devices.Nuki;
 [InterceptorSubject]
 public partial class NukiOpener : NukiDevice
 {
-    private const int ContinuousMode = 3;
-
     internal NukiOpener(NukiBridge bridge, long nukiId)
         : base(bridge, nukiId, NukiDeviceType.Opener)
     {
@@ -69,7 +67,7 @@ public partial class NukiOpener : NukiDevice
 
     [Operation(Title = "Open door", Description = "Actuates the electric strike so that the door can be pushed open.", Icon = "MeetingRoom", RequiresConfirmation = true, Position = 1)]
     public Task OpenDoorAsync(CancellationToken cancellationToken) =>
-        RunOpenerActionAsync(NukiOpenerAction.ElectricStrikeActuation, NukiOpenerState.Opening, "The Opener could not open the door.", cancellationToken);
+        RunOpenerActionAsync(NukiOpenerAction.ElectricStrikeActuation, () => OpenerState = NukiOpenerState.Opening, "The Opener could not open the door.", cancellationToken);
 
     [Operation(Title = "Activate ring to open", Description = "Opens the door the next time someone rings.", RequiresConfirmation = true, Position = 2)]
     public Task ActivateRingToOpenAsync(CancellationToken cancellationToken) =>
@@ -90,16 +88,11 @@ public partial class NukiOpener : NukiDevice
     private protected override void UpdateState(NukiLastKnownStateResponse? state)
     {
         OpenerState = NukiStateMapping.ToOpenerState(state?.State);
-        IsContinuousModeActive = state?.Mode is { } mode ? mode == ContinuousMode : null;
+        IsContinuousModeActive = NukiStateMapping.IsContinuousMode(state?.Mode);
         IsRinging = state?.RingActionState;
         LastRingTime = state?.RingActionTimestamp;
     }
 
-    private Task RunOpenerActionAsync(NukiOpenerAction action, NukiOpenerState? transition, string failureMessage, CancellationToken cancellationToken) =>
-        RunActionAsync(
-            (int)action,
-            transition is { } state ? () => OpenerState = state : null,
-            () => OpenerState = null,
-            failureMessage,
-            cancellationToken);
+    private Task RunOpenerActionAsync(NukiOpenerAction action, Action? enterTransition, string failureMessage, CancellationToken cancellationToken) =>
+        RunActionAsync((int)action, enterTransition, () => OpenerState = null, failureMessage, cancellationToken);
 }

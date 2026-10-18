@@ -9,7 +9,7 @@
         <MudStack Spacing="2">
             <MudStack Row="true" AlignItems="AlignItems.Center">
                 <MudIcon Icon="@(isRinging ? Icons.Material.Filled.NotificationsActive : Icons.Material.Filled.Notifications)"
-                         Color="@(isRinging ? Color.Warning : Color.Default)" Class="mr-2" />
+                         Color="@(Enum.TryParse<Color>(opener.IconColor, out var iconColor) ? iconColor : Color.Default)" Class="mr-2" />
                 <MudText Typo="Typo.h6">@opener.Title</MudText>
                 <MudSpacer />
                 <MudChip T="string" Size="Size.Small" Variant="Variant.Filled">@(opener.OpenerState?.ToString() ?? "Unknown")</MudChip>

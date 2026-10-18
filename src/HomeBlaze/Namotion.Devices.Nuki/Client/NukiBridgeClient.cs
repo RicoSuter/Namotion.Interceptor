@@ -17,6 +17,9 @@ internal sealed class NukiBridgeClient
 {
     public const int DefaultPort = 8080;
 
+    /// <summary>The default delay before a request that the bridge answered with 503 is sent again.</summary>
+    public static readonly TimeSpan DefaultBusyRetryDelay = TimeSpan.FromSeconds(1);
+
     private const int StackAllocTokenBytes = 256;
 
     private static readonly TimeSpan ReadTimeout = TimeSpan.FromSeconds(10);
@@ -35,7 +38,7 @@ internal sealed class NukiBridgeClient
         _baseAddress = "http://" + NormalizeHostAddress(hostAddress) + "/";
         _token = token;
         _tokenMode = tokenMode;
-        _busyRetryDelay = busyRetryDelay ?? TimeSpan.FromSeconds(1);
+        _busyRetryDelay = busyRetryDelay ?? DefaultBusyRetryDelay;
     }
 
     /// <summary>
@@ -142,8 +145,7 @@ internal sealed class NukiBridgeClient
         AppendEncryptedToken(builder, _token);
     }
 
-    // The secret key (SHA256 of the token) is derived fresh per request instead of cached, so it never outlives this
-    // call; both the UTF-8 token bytes and the key are zeroed below regardless of the token's length.
+    // Not cached: the key must not outlive the request.
     private static void AppendEncryptedToken(StringBuilder builder, string token)
     {
         var plaintext = Encoding.ASCII.GetBytes(string.Create(

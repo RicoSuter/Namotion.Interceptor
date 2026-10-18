@@ -25,6 +25,8 @@ The setup reads the token from the bridge and chooses the token mode: `Encrypted
 | `PollingInterval` | TimeSpan | 10 seconds | How often the device list is read. Keep it below 30 seconds, the time the bridge shows a ring of an Opener |
 | `RetryInterval` | TimeSpan | 30 seconds | Delay before reconnecting after the connection failed |
 
+Both intervals accept 1 second to 1 hour; values outside that range set in JSON are clamped, and zero or less uses the default.
+
 ## Bridge
 
 | Property | Description |

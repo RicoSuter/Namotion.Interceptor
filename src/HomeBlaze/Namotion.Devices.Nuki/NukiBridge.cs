@@ -41,19 +41,22 @@ public partial class NukiBridge : BackgroundService,
     /// <summary>The default <see cref="RetryInterval"/>.</summary>
     public static readonly TimeSpan DefaultRetryInterval = TimeSpan.FromSeconds(30);
 
+    /// <summary>
+    /// The shortest <see cref="PollingInterval"/> and <see cref="RetryInterval"/>, in seconds; a shorter one is raised to it.
+    /// </summary>
+    public const int MinimumIntervalSeconds = 1;
+
+    /// <summary>
+    /// The longest <see cref="PollingInterval"/> and <see cref="RetryInterval"/>, in seconds; a longer one is lowered to it.
+    /// </summary>
+    public const int MaximumIntervalSeconds = 3600;
+
     internal const int MaxConsecutivePollFailures = 3;
 
     // /info changes slowly (uptime, versions), so it is read every this many polls only.
     internal const int InfoPollDivider = 6;
 
     private readonly IHttpClientFactory _httpClientFactory;
-    private readonly SemaphoreSlim _configurationChangedSignal = new(0, 1);
-
-    // The bridge handles one request at a time and answers 503 otherwise. Every request holds this gate, and so does the
-    // merge of its result, so that an older device list never overwrites a newer one.
-    private readonly SemaphoreSlim _requestGate = new(1, 1);
-
-    private volatile NukiBridgeClient? _client;
 
     public NukiBridge(IHttpClientFactory httpClientFactory, ILogger<NukiBridge> logger)
     {
@@ -84,7 +87,7 @@ public partial class NukiBridge : BackgroundService,
     internal ILogger<NukiBridge> Logger { get; }
 
     /// <summary>The delay before a request that the bridge answered with 503 is sent again.</summary>
-    internal TimeSpan BusyRetryDelay { get; set; } = TimeSpan.FromSeconds(1);
+    internal TimeSpan BusyRetryDelay { get; set; } = NukiBridgeClient.DefaultBusyRetryDelay;
 
     /// <summary>The IP address or host name of the bridge, optionally with a port (8080 by default).</summary>
     [Configuration]
@@ -160,7 +163,7 @@ public partial class NukiBridge : BackgroundService,
     public decimal? TotalConsumedEnergy => null;
 
     [Derived]
-    public string? IpAddress => string.IsNullOrWhiteSpace(HostAddress) ? null : HostAddress.Split(':')[0].Trim();
+    public string? IpAddress => string.IsNullOrWhiteSpace(HostAddress) ? null : GetHost(NukiBridgeClient.NormalizeHostAddress(HostAddress));
 
     public string? MacAddress => null;
 
@@ -183,18 +186,7 @@ public partial class NukiBridge : BackgroundService,
     [Derived]
     public string? IconColor => IsConnected ? "Success" : null;
 
-    /// <inheritdoc />
-    public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
-    {
-        try
-        {
-            _configurationChangedSignal.Release();
-        }
-        catch (SemaphoreFullException)
-        {
-            // A change is already pending.
-        }
-
-        return Task.CompletedTask;
-    }
+    // A normalized address always carries a port.
+    private static string GetHost(string normalizedHostAddress) =>
+        normalizedHostAddress.AsSpan(0, normalizedHostAddress.IndexOf(':')).ToString();
 }

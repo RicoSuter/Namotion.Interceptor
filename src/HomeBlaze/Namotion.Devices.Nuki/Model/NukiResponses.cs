@@ -96,9 +96,6 @@ internal sealed class NukiActionResponse
 {
     [JsonPropertyName("success")]
     public bool Success { get; set; }
-
-    [JsonPropertyName("batteryCritical")]
-    public bool? BatteryCritical { get; set; }
 }
 
 internal sealed class NukiAuthResponse
@@ -114,9 +111,6 @@ internal sealed class NukiDiscoveryResponse
 {
     [JsonPropertyName("bridges")]
     public NukiDiscoveryBridgeResponse[]? Bridges { get; set; }
-
-    [JsonPropertyName("errorCode")]
-    public int ErrorCode { get; set; }
 }
 
 internal sealed class NukiDiscoveryBridgeResponse

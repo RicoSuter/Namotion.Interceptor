@@ -37,4 +37,14 @@ internal static class NukiStateMapping
         253 => NukiOpenerState.BootRun,
         _ => null
     };
+
+    public static NukiBridgeType? ToBridgeType(int bridgeType) => bridgeType switch
+    {
+        1 => NukiBridgeType.Hardware,
+        2 => NukiBridgeType.Software,
+        _ => null
+    };
+
+    /// <summary>Gets whether an Opener mode is continuous mode, or null when the mode is unknown.</summary>
+    public static bool? IsContinuousMode(int? mode) => mode is { } value ? value == 3 : null;
 }

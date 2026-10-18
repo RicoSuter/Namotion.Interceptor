@@ -67,7 +67,7 @@ public partial class NukiSmartLock : NukiDevice, IDoorLock, IDoorLatchController
 
     [Derived]
     [PropertyAttribute("ToggleLock", KnownAttributes.IsEnabled)]
-    public bool ToggleLock_IsEnabled => IsConnected && LockState is DoorLockState.Locked or DoorLockState.Unlocked;
+    public bool ToggleLock_IsEnabled => Unlatch_IsEnabled;
 
     [Derived]
     [PropertyAttribute("Unlatch", KnownAttributes.IsEnabled)]
@@ -75,11 +75,11 @@ public partial class NukiSmartLock : NukiDevice, IDoorLock, IDoorLatchController
 
     [Derived]
     [PropertyAttribute("LockNGo", KnownAttributes.IsEnabled)]
-    public bool LockNGo_IsEnabled => IsConnected && LockState is DoorLockState.Locked;
+    public bool LockNGo_IsEnabled => Unlock_IsEnabled;
 
     [Derived]
     [PropertyAttribute("LockNGoWithUnlatch", KnownAttributes.IsEnabled)]
-    public bool LockNGoWithUnlatch_IsEnabled => IsConnected && LockState is DoorLockState.Locked;
+    public bool LockNGoWithUnlatch_IsEnabled => Unlock_IsEnabled;
 
     public Task LockAsync(CancellationToken cancellationToken) =>
         RunLockActionAsync(NukiLockAction.Lock, DoorLockState.Locking, "The lock could not lock the door.", cancellationToken);

@@ -7,10 +7,10 @@
     <MudPaper Class="pa-4">
         <MudStack Spacing="2">
             <MudStack Row="true" AlignItems="AlignItems.Center">
-                <MudIcon Icon="@(lockState == DoorLockState.Locked ? Icons.Material.Filled.Lock : Icons.Material.Filled.LockOpen)" Class="mr-2" />
+                <MudIcon Icon="@GetIcon(lockState)" Class="mr-2" />
                 <MudText Typo="Typo.h6">@smartLock.Title</MudText>
                 <MudSpacer />
-                <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="@GetColor(lockState)">
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="@GetColor(smartLock.IconColor)">
                     @(lockState?.ToString() ?? "Unknown")
                 </MudChip>
             </MudStack>
@@ -47,11 +47,14 @@
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
 
-    private static Color GetColor(DoorLockState? lockState) => lockState switch
+    // The same icons as the IconName of the lock.
+    private static string GetIcon(DoorLockState? lockState) => lockState switch
     {
-        DoorLockState.Locked => Color.Success,
-        DoorLockState.Unlocked or DoorLockState.Unlatched => Color.Warning,
-        DoorLockState.Jammed => Color.Error,
-        _ => Color.Default
+        DoorLockState.Locked => Icons.Material.Filled.Lock,
+        DoorLockState.Jammed => Icons.Material.Filled.LockReset,
+        _ => Icons.Material.Filled.LockOpen
     };
+
+    private static Color GetColor(string? iconColor) =>
+        Enum.TryParse<Color>(iconColor, out var color) ? color : Color.Default;
 }

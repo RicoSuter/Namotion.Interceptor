@@ -23,10 +23,10 @@
     </MudSelect>
 
     <MudNumericField @bind-Value="_pollingIntervalSeconds" @bind-Value:after="OnFieldChanged"
-                     Label="Polling interval (seconds)" Min="1" Max="3600" Class="mt-4" />
+                     Label="Polling interval (seconds)" Min="NukiBridge.MinimumIntervalSeconds" Max="NukiBridge.MaximumIntervalSeconds" Class="mt-4" />
 
     <MudNumericField @bind-Value="_retryIntervalSeconds" @bind-Value:after="OnFieldChanged"
-                     Label="Retry interval (seconds)" Min="1" Max="3600" Class="mt-4" />
+                     Label="Retry interval (seconds)" Min="NukiBridge.MinimumIntervalSeconds" Max="NukiBridge.MaximumIntervalSeconds" Class="mt-4" />
 
     <MudDivider Class="my-4" />
 
@@ -68,8 +68,8 @@
 
     public bool IsValid => !string.IsNullOrWhiteSpace(_hostAddress) &&
                            (_hasToken || !string.IsNullOrEmpty(_token)) &&
-                           _pollingIntervalSeconds is >= 1 and <= 3600 &&
-                           _retryIntervalSeconds is >= 1 and <= 3600;
+                           _pollingIntervalSeconds is >= NukiBridge.MinimumIntervalSeconds and <= NukiBridge.MaximumIntervalSeconds &&
+                           _retryIntervalSeconds is >= NukiBridge.MinimumIntervalSeconds and <= NukiBridge.MaximumIntervalSeconds;
 
     public bool IsDirty => _hostAddress != _originalHostAddress ||
                            !string.IsNullOrEmpty(_token) ||
@@ -87,8 +87,8 @@
         _hostAddress = bridge?.HostAddress;
         _hasToken = !string.IsNullOrEmpty(bridge?.Token);
         _tokenMode = bridge?.TokenMode ?? NukiTokenMode.Encrypted;
-        _pollingIntervalSeconds = ToSeconds(bridge?.PollingInterval, NukiBridge.DefaultPollingInterval);
-        _retryIntervalSeconds = ToSeconds(bridge?.RetryInterval, NukiBridge.DefaultRetryInterval);
+        _pollingIntervalSeconds = LoadInterval(bridge?.PollingInterval, NukiBridge.DefaultPollingInterval);
+        _retryIntervalSeconds = LoadInterval(bridge?.RetryInterval, NukiBridge.DefaultRetryInterval);
 
         _originalHostAddress = _hostAddress;
         _originalTokenMode = _tokenMode;
@@ -96,8 +96,8 @@
         _originalRetryIntervalSeconds = _retryIntervalSeconds;
     }
 
-    private static int ToSeconds(TimeSpan? interval, TimeSpan fallback) =>
-        (int)(interval is { } value && value > TimeSpan.Zero ? value : fallback).TotalSeconds;
+    private static int LoadInterval(TimeSpan? stored, TimeSpan fallback) =>
+        (int)NukiBridge.GetEffectiveInterval(stored ?? fallback, fallback).TotalSeconds;
 
     private void OnFieldChanged()
     {
