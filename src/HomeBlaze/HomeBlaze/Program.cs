@@ -23,6 +23,8 @@ using Namotion.Devices.MyStrom;
 using Namotion.Devices.MyStrom.HomeBlaze;
 using Namotion.Devices.Nuki;
 using Namotion.Devices.Nuki.HomeBlaze;
+using Namotion.Services.Pushover;
+using Namotion.Services.Pushover.HomeBlaze;
 using Namotion.Devices.Shelly;
 using Namotion.Devices.Shelly.HomeBlaze;
 using Namotion.Devices.Sonos;
@@ -126,6 +128,8 @@ typeProvider
     .AddAssembly(typeof(MyStromSwitchWidget).Assembly)
     .AddAssembly(typeof(NukiBridge).Assembly)
     .AddAssembly(typeof(NukiBridgeWidget).Assembly)
+    .AddAssembly(typeof(PushoverService).Assembly)
+    .AddAssembly(typeof(PushoverServiceWidget).Assembly)
     .AddAssembly(typeof(ShellyDevice).Assembly)
     .AddAssembly(typeof(ShellyDeviceWidget).Assembly)
     .AddAssembly(typeof(SunSpecDevice).Assembly)
