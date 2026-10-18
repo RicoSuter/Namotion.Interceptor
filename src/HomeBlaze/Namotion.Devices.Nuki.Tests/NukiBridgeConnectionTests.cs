@@ -1,5 +1,6 @@
 using System.Net;
 using HomeBlaze.Abstractions;
+using HomeBlaze.Abstractions.Devices.Locks;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Devices.Nuki.Tests.Testing;
 using Namotion.Interceptor.Testing;
@@ -163,6 +164,34 @@ public class NukiBridgeConnectionTests
         await AsyncTestHelpers.WaitUntilAsync(
             () => test.Bridge.IsConnected && fake.CountRequests("info") > infoRequests,
             message: "The bridge did not reconnect.");
+    }
+
+    [Fact]
+    public async Task WhenConfigurationChangesDuringAnAction_ThenTheStateIsNotResetBeforeTheReconnectReadsIt()
+    {
+        // Arrange
+        var fake = new FakeNukiBridge { ListJson = NukiFixtures.SmartLock(state: 3) };
+        await using var test = new TestBridge(fake);
+        await test.StartAsync();
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        fake.ActionGate = gate;
+        var action = test.Lock.LockAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => test.Lock.LockState == DoorLockState.Locking, message: "The action was not sent.");
+        // The reconnect fails and waits long, so that no device list replaces the state while it is read.
+        fake.StatusOverride = path => path == "info" ? HttpStatusCode.InternalServerError : null;
+        test.Bridge.RetryInterval = TimeSpan.FromHours(1);
+        var listRequests = fake.CountRequests("list");
+
+        // Act
+        await test.Bridge.ApplyConfigurationAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => !test.Bridge.IsConnected, message: "The bridge did not disconnect.");
+        gate.SetResult();
+        await action;
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => test.Bridge.Status == ServiceStatus.Error, message: "The reconnect did not run.");
+        Assert.Equal(DoorLockState.Locking, test.Lock.LockState);
+        Assert.Equal(listRequests, fake.CountRequests("list"));
     }
 
     [Fact]

@@ -15,6 +15,9 @@ public partial class NukiBridge
 
     private volatile NukiBridgeClient? _client;
 
+    // Set before the first connection; tells a stop from a reconnect once the connection has ended.
+    private CancellationToken _stoppingToken;
+
     /// <inheritdoc />
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
     {
@@ -58,6 +61,7 @@ public partial class NukiBridge
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        _stoppingToken = stoppingToken;
         try
         {
             while (true)
@@ -178,7 +182,9 @@ public partial class NukiBridge
     /// <summary>
     /// Runs a lock action of a device and returns the result the bridge reports once the device has finished it.
     /// <paramref name="enterTransition"/> runs right before the request is sent. Once the request was sent, the device
-    /// list is read whether the action succeeded or not; when that read fails, <paramref name="resetState"/> runs.
+    /// list is read whether the action succeeded or not; when that read fails or the bridge stopped meanwhile,
+    /// <paramref name="resetState"/> runs. When the connection ended meanwhile for a reconnect, the state is left to the
+    /// first device list of the reconnect.
     /// </summary>
     /// <exception cref="InvalidOperationException">The bridge is not connected; nothing was sent.</exception>
     /// <exception cref="OperationCanceledException">The caller canceled, possibly before anything was sent.</exception>
@@ -220,9 +226,20 @@ public partial class NukiBridge
     // again because the connection may have ended during the action.
     private async Task RefreshAfterActionAsync(NukiDevice device, int action, Action resetState)
     {
+        if (_client is not { } client)
+        {
+            if (_stoppingToken.IsCancellationRequested)
+            {
+                resetState();
+            }
+
+            Logger.LogDebug("Nuki device {NukiId} is not read after action {Action}: the connection has ended.", device.NukiId, action);
+            return;
+        }
+
         try
         {
-            MergeDevices(await GetConnectedClient().GetListAsync(CancellationToken.None));
+            MergeDevices(await client.GetListAsync(CancellationToken.None));
             LastUpdated = DateTimeOffset.UtcNow;
         }
         catch (Exception exception)
