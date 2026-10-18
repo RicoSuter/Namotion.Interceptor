@@ -83,16 +83,40 @@
     pointer-events: none;
 }
 
-/* The badge covers the top right corner, so the content of a tile with a badge starts below a small icon or indicator
-   there, and content that does not fit overflows at the bottom instead of running under the badge. */
+/* A badge icon is half as large as the icon of the tile and moves away from the corner as it grows, from 20 pixels at
+   8 pixels from the corner to 40 pixels at 16 pixels. A subject as badge, such as an indicator, keeps its own size. The
+   sizes are set on the root, so that the face can keep the room for the badge. */
+.tile-widget {
+    --tile-badge-icon-size: calc(var(--place-icon, 2.5rem) / 2);
+    --tile-badge-icon-inset: calc(var(--place-icon, 2.5rem) / 5);
+}
+
+.tile-widget-badge-icon {
+    top: var(--tile-badge-icon-inset);
+    right: var(--tile-badge-icon-inset);
+    display: flex;
+}
+
+.tile-widget-badge-icon ::deep .mud-icon-root {
+    font-size: var(--tile-badge-icon-size);
+}
+
+/* The badge covers the top right corner, so the content of a tile with a badge starts below it, as far below it as it
+   is from the corner, and content that does not fit overflows at the bottom instead of running under the badge. The
+   36 pixels fit an indicator and equal the room for a badge icon at its least size. */
 .tile-widget-badged > .tile-widget-face {
     justify-content: safe center;
     padding-top: 36px;
 }
 
+.tile-widget-badged:has(> .tile-widget-badge-icon) > .tile-widget-face {
+    padding-top: calc(var(--tile-badge-icon-size) + 2 * var(--tile-badge-icon-inset));
+}
+
 /* A tile in a grid cell or a canvas node (a size container, SubjectComponent.razor.css) that is lower than its icon, its
    two lines and their room at their least sizes, such as in a square cell of a grid on a phone, leaves out the icon, so
-   that its text stays whole. A tile without text keeps its icon. A tile with a badge needs 24 pixels more. */
+   that its text stays whole. A tile without text keeps its icon. A tile with a badge needs 24 pixels more: below 140
+   pixels every size is at its least, also that of a badge icon, and above it the content grows slower than the place. */
 @container tile (height < 115px) {
     .tile-widget-face:has(> .tile-widget-label, > .tile-widget-subtitle) ::deep .tile-widget-icon {
         display: none;

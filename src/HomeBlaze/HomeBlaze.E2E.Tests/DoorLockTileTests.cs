@@ -217,6 +217,21 @@ public class DoorLockTileTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenTileIsLarge_ThenTheBadgeGrowsWithTheIconAndTheTextStaysBelowIt()
+    {
+        // Arrange & Act: two square columns on a desktop give tiles of several hundred pixels, in which the icon is at
+        // its largest.
+        var (_, tile) = await OpenTileAsync(DoorLockState.Locked, "Locked");
+
+        // Assert
+        var badge = await PageGeometry.GetBoxAsync(GetTileRoot(tile).GetByTestId("tile-badge").Locator("svg"));
+        var icon = await PageGeometry.GetBoxAsync(tile.GetByTestId("tile-icon"));
+        var label = await PageGeometry.GetBoxAsync(tile.GetByTestId("tile-label"));
+        Assert.True(badge.Height >= icon.Height * 0.4, $"The badge is {badge.Height} pixels high, less than 40 percent of the icon at {icon.Height}.");
+        Assert.True(label.Top >= badge.Bottom, $"The label starts at {label.Top}, above the bottom of the badge at {badge.Bottom}.");
+    }
+
+    [Fact]
     public async Task WhenPathLeadsNowhere_ThenTheTileIsDisabled()
     {
         // Arrange & Act
