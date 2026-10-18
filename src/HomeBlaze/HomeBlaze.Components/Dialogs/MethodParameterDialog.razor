@@ -98,9 +98,21 @@
 
         foreach (var parameter in InputParameters)
         {
-            if (GetInputKind(parameter) == InputKind.Simple && !_inputValues.ContainsKey(parameter.Name))
+            switch (GetInputKind(parameter))
             {
-                _inputValues[parameter.Name] = parameter.Type == typeof(bool) ? "false" : null;
+                case InputKind.Simple when !_inputValues.ContainsKey(parameter.Name):
+                    _inputValues[parameter.Name] = parameter.Type == typeof(bool) ? "false" : null;
+                    break;
+
+                case InputKind.Members:
+                    foreach (var field in CreateMemberFields(parameter))
+                    {
+                        if (field.Type == typeof(bool) && !_inputValues.ContainsKey(field.Key))
+                        {
+                            _inputValues[field.Key] = "false";
+                        }
+                    }
+                    break;
             }
         }
 
@@ -117,8 +129,15 @@
         new(parameter.Name, GetLabel(parameter.Name, !parameter.IsNullable), parameter.Type, parameter.Unit, !parameter.IsNullable);
 
     private static IEnumerable<InputField> CreateMemberFields(MethodParameter parameter) =>
-        ParameterConverter.GetObjectMembers(parameter.Type).Select(member =>
-            new InputField(GetMemberKey(parameter, member), GetLabel(member.Name, member.IsRequired), member.Type, null, member.IsRequired));
+        ParameterConverter.GetObjectMembers(parameter.Type).Select(member => CreateMemberField(parameter, member));
+
+    // An optional object parameter can be left out entirely, so none of its members are individually required
+    // even when the member itself is required once the object is provided; that check happens in TryCreateObject.
+    private static InputField CreateMemberField(MethodParameter parameter, ObjectParameterMember member)
+    {
+        var isRequired = member.IsRequired && !parameter.IsNullable;
+        return new InputField(GetMemberKey(parameter, member), GetLabel(member.Name, isRequired), member.Type, null, isRequired);
+    }
 
     private static string GetMemberKey(MethodParameter parameter, ObjectParameterMember member) =>
         $"{parameter.Name}.{member.Name}";
@@ -141,13 +160,19 @@
         }
         else if (valueType.IsEnum)
         {
+            // A plain enum member that is not required still has a default value once omitted, so its empty
+            // option reads "(Default)"; only a Nullable<T> enum actually becomes null, which reads "(None)".
+            var isNullableType = Nullable.GetUnderlyingType(field.Type) != null;
             <MudSelect T="string"
                        Label="@field.Label"
                        Value="@GetStringValue(field.Key)"
-                       ValueChanged="@(v => SetValue(field.Key, v))">
+                       ValueChanged="@(v => SetValue(field.Key, v))"
+                       Error="@HasError(field.Key)"
+                       ErrorText="@GetError(field.Key)"
+                       Required="@field.IsRequired">
                 @if (!field.IsRequired)
                 {
-                    <MudSelectItem Value="@((string?)null)">(None)</MudSelectItem>
+                    <MudSelectItem Value="@((string?)null)">@(isNullableType ? "(None)" : "(Default)")</MudSelectItem>
                 }
                 @foreach (var enumValue in Enum.GetNames(valueType))
                 {
