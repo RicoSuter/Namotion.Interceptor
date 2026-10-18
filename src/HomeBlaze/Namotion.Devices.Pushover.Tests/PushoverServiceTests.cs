@@ -57,6 +57,21 @@ public class PushoverServiceTests
     }
 
     [Fact]
+    public async Task WhenTargetSendsANormalNotification_ThenTheResultIdIsThePushoverRequestId()
+    {
+        // Arrange
+        var (service, handler) = PushoverTestFactory.CreateService("rico");
+        handler.Respond = _ => (HttpStatusCode.OK, """{"status":1,"request":"request1"}""");
+        var target = service.Targets["rico"];
+
+        // Act
+        var result = await target.SendNotificationAsync(new Notification { Message = "Door open" }, CancellationToken.None);
+
+        // Assert
+        Assert.Equal("request1", result.Id);
+    }
+
+    [Fact]
     public async Task WhenEmergencyIsSent_ThenRetryAndExpireAreSentAndEmergencyIsActive()
     {
         // Arrange

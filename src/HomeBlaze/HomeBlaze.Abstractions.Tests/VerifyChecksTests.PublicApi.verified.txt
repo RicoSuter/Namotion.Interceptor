@@ -735,7 +735,7 @@ namespace HomeBlaze.Abstractions.Messaging
     public interface INotificationPublisher
     {
         [HomeBlaze.Abstractions.Attributes.Operation]
-        System.Threading.Tasks.Task SendNotificationAsync(HomeBlaze.Abstractions.Messaging.Notification notification, System.Threading.CancellationToken cancellationToken);
+        System.Threading.Tasks.Task<HomeBlaze.Abstractions.Messaging.NotificationResult> SendNotificationAsync(HomeBlaze.Abstractions.Messaging.Notification notification, System.Threading.CancellationToken cancellationToken);
     }
     public sealed class Notification : System.IEquatable<HomeBlaze.Abstractions.Messaging.Notification>
     {
@@ -752,6 +752,11 @@ namespace HomeBlaze.Abstractions.Messaging
         Normal = 1,
         High = 2,
         Emergency = 3,
+    }
+    public sealed class NotificationResult : System.IEquatable<HomeBlaze.Abstractions.Messaging.NotificationResult>
+    {
+        public NotificationResult() { }
+        public string? Id { get; init; }
     }
 }
 namespace HomeBlaze.Abstractions.Metadata

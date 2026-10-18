@@ -16,7 +16,7 @@ HomeBlaze defines a standard interface for subjects that can send notifications 
 public interface INotificationPublisher
 {
     [Operation]
-    Task SendNotificationAsync(Notification notification, CancellationToken cancellationToken);
+    Task<NotificationResult> SendNotificationAsync(Notification notification, CancellationToken cancellationToken);
 }
 
 public sealed record Notification
@@ -26,6 +26,11 @@ public sealed record Notification
     public NotificationPriority Priority { get; init; } = NotificationPriority.Normal;
     public string? Url { get; init; }
     public string? UrlTitle { get; init; }
+}
+
+public sealed record NotificationResult
+{
+    public string? Id { get; init; }
 }
 ```
 
@@ -37,6 +42,8 @@ Members are added to `Notification` as optional members, so publishers and calle
 | `Normal` | Delivered with the recipient's default alert |
 | `High` | Delivered with an alert also during quiet hours |
 | `Emergency` | Repeated until acknowledged, where the channel supports it |
+
+`NotificationResult.Id` is the channel's identifier of the delivered notification, or null when the channel has none. Its format is channel-specific; for Pushover it is the receipt of an emergency notification and the request id otherwise, see [Pushover](../devices/Pushover.md). Acknowledgement events of a channel carry the same id, so a caller can tell which acknowledgement belongs to its send.
 
 A notification publisher is any subject that delivers messages to an external channel, for example [Pushover](../devices/Pushover.md), email, chat platforms, webhooks or SMS. Each channel has its own `[Configuration]` properties (server, API key, recipient), edited through the standard subject editor.
 
@@ -53,7 +60,7 @@ Since `SendNotificationAsync` is marked with `[Operation]`, it is:
 
 ### From AI Agents
 
-A [built-in agent](../administration/ai-agents.md) finds the publishers through its tools: `list_types` finds the `INotificationPublisher` interface, and `search` with that interface in its `types` parameter finds the subjects that implement it. `list_methods` shows the exact method name and parameters: the operation is registered without the `Async` suffix, as `SendNotification` with a `notification` parameter whose members are listed with their types, for example `{"notification": {"message": "Door open", "priority": "High"}}`. The agent calls it with `invoke_operation`, which must be in the agent's `AllowedTools`; it is off by default, so an agent without it can only report findings on its page. Do not mark `SendNotificationAsync` with `RequiresConfirmation`, because operations that require confirmation cannot be called through MCP, see [AI Agents](../administration/ai-agents.md#tools-and-permissions).
+A [built-in agent](../administration/ai-agents.md) finds the publishers through its tools: `list_types` finds the `INotificationPublisher` interface, and `search` with that interface in its `types` parameter finds the subjects that implement it. `list_methods` shows the exact method name and parameters: the operation is registered without the `Async` suffix, as `SendNotification` with a `notification` parameter whose members are listed with their types, for example `{"notification": {"message": "Door open", "priority": "High"}}`. The agent calls it with `invoke_operation`, which returns the `NotificationResult` as its result, for example `{"success": true, "result": {"Id": "r1a2b3"}}`, and must be in the agent's `AllowedTools`; it is off by default, so an agent without it can only report findings on its page. Do not mark `SendNotificationAsync` with `RequiresConfirmation`, because operations that require confirmation cannot be called through MCP, see [AI Agents](../administration/ai-agents.md#tools-and-permissions).
 
 ### From Other Subjects
 

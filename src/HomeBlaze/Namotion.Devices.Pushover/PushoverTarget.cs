@@ -147,8 +147,11 @@ public partial class PushoverTarget :
         IsEmergencyExpired = false;
     }
 
-    public Task SendNotificationAsync(Notification notification, CancellationToken cancellationToken) =>
-        RequiredService.SendAsync(this, notification, cancellationToken);
+    public async Task<NotificationResult> SendNotificationAsync(Notification notification, CancellationToken cancellationToken)
+    {
+        var response = await RequiredService.SendAsync(this, notification, cancellationToken);
+        return new NotificationResult { Id = response.Request };
+    }
 
     [Operation(Title = "Cancel emergency", Icon = "NotificationsOff", Position = 2)]
     public async Task CancelEmergencyAsync(CancellationToken cancellationToken)

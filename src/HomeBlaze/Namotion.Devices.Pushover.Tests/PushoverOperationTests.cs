@@ -18,7 +18,7 @@ namespace Namotion.Devices.Pushover.Tests;
 public class PushoverOperationTests
 {
     [Fact]
-    public async Task WhenTargetIsRegistered_ThenItsSendNotificationOperationTakesANotification()
+    public async Task WhenTargetIsRegistered_ThenItsSendNotificationOperationTakesANotificationAndReturnsTheResult()
     {
         // Arrange
         var (service, handler) = CreateRegisteredService("rico");
@@ -26,13 +26,15 @@ public class PushoverOperationTests
 
         // Act
         var method = registered.TryGetProperty("SendNotification")!.TryGetMethodMetadata()!;
-        await method.InvokeAsync([new Notification { Message = "From the UI" }], serviceProvider: null, CancellationToken.None);
+        var result = await method.InvokeAsync([new Notification { Message = "From the UI" }], serviceProvider: null, CancellationToken.None);
 
         // Assert
         var parameter = Assert.Single(method.Parameters, parameter => parameter.RequiresInput);
         Assert.Equal(typeof(Notification), parameter.Type);
+        Assert.Equal(typeof(NotificationResult), method.ResultType);
         Assert.False(method.RequiresConfirmation);
         Assert.Equal("From the UI", Assert.Single(handler.Requests).Form["message"]);
+        Assert.Equal("test", Assert.IsType<NotificationResult>(result).Id);
     }
 
     [Fact]

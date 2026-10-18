@@ -92,7 +92,7 @@ public partial class PushoverService : BackgroundService, IConfigurable, IMonito
             throw new InvalidOperationException("No Pushover targets are configured.");
         }
 
-        var sends = Array.ConvertAll(targets, target => target.SendNotificationAsync(notification, cancellationToken));
+        var sends = Array.ConvertAll(targets, target => SendAsync(target, notification, cancellationToken));
         try
         {
             await Task.WhenAll(sends);
@@ -154,7 +154,7 @@ public partial class PushoverService : BackgroundService, IConfigurable, IMonito
         return uniqueKey;
     }
 
-    internal async Task SendAsync(PushoverTarget target, Notification notification, CancellationToken cancellationToken)
+    internal async Task<PushoverResponse> SendAsync(PushoverTarget target, Notification notification, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(notification);
         PushoverMessageMapping.ValidatePriority(notification.Priority);
@@ -189,6 +189,8 @@ public partial class PushoverService : BackgroundService, IConfigurable, IMonito
                 }
             }
         }
+
+        return response;
     }
 
     internal async Task CancelReceiptAsync(string receipt, CancellationToken cancellationToken)

@@ -13,8 +13,9 @@ namespace HomeBlaze.Abstractions.Messaging;
 public interface INotificationPublisher
 {
     /// <summary>
-    /// Sends a notification.
+    /// Sends a notification and returns the channel's identifier of it, which the channel's acknowledgement events
+    /// carry as well.
     /// </summary>
     [Operation]
-    Task SendNotificationAsync(Notification notification, CancellationToken cancellationToken);
+    Task<NotificationResult> SendNotificationAsync(Notification notification, CancellationToken cancellationToken);
 }

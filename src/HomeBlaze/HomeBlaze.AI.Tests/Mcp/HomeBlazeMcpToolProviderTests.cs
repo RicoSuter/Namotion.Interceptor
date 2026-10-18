@@ -747,7 +747,7 @@ public class HomeBlazeMcpToolProviderTests
     }
 
     [Fact]
-    public async Task WhenInvokeOperationWithNotificationArgument_ThenMembersAreBound()
+    public async Task WhenInvokeOperationWithNotificationArgument_ThenMembersAreBoundAndTheResultIdIsReturned()
     {
         // Arrange
         var (room, factory) = CreateTestSetup(isReadOnly: false);
@@ -755,12 +755,13 @@ public class HomeBlazeMcpToolProviderTests
         AddMethod(room, new MethodMetadata(arguments =>
         {
             capturedNotification = arguments?[0];
-            return null;
+            return Task.FromResult(new NotificationResult { Id = "receipt1" });
         })
         {
             Kind = MethodKind.Operation,
             PropertyName = "SendNotification",
-            Parameters = [new MethodParameter { Name = "notification", Type = typeof(Notification) }]
+            Parameters = [new MethodParameter { Name = "notification", Type = typeof(Notification) }],
+            ResultType = typeof(NotificationResult)
         });
 
         var tool = factory.CreateTools().First(t => t.Name == "invoke_operation");
@@ -775,7 +776,9 @@ public class HomeBlazeMcpToolProviderTests
         var result = await tool.Handler(input, CancellationToken.None);
 
         // Assert
-        Assert.True(JsonSerializer.SerializeToElement(result).GetProperty("success").GetBoolean());
+        var json = JsonSerializer.SerializeToElement(result);
+        Assert.True(json.GetProperty("success").GetBoolean());
+        Assert.Equal("receipt1", json.GetProperty("result").GetProperty("Id").GetString());
         var notification = Assert.IsType<Notification>(capturedNotification);
         Assert.Equal("Door open", notification.Message);
         Assert.Equal(NotificationPriority.High, notification.Priority);
