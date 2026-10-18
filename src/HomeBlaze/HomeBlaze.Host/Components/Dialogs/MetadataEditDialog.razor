@@ -6,29 +6,29 @@
 
 <MudDialog data-testid="metadata-edit-dialog">
     <DialogContent>
-        @if (IsFolder)
+        @if (_folder is not null)
         {
             <MudTextField @bind-Value="_title"
                           Label="Title"
-                          Placeholder="@TitlePlaceholder"
+                          Placeholder="@_titlePlaceholder"
                           Clearable="true"
                           data-testid="metadata-title" />
         }
         <MudTextField @bind-Value="_navigationTitle"
                       Label="Navigation title"
-                      Placeholder="@NavigationTitlePlaceholder"
+                      Placeholder="@_navigationTitlePlaceholder"
                       Clearable="true"
                       data-testid="metadata-navigation-title" />
         <MudTextField @bind-Value="_icon"
                       Label="Icon"
-                      Placeholder="@IconPlaceholder"
+                      Placeholder="@_iconPlaceholder"
                       Clearable="true"
                       DebounceInterval="300"
                       Adornment="Adornment.End"
-                      AdornmentIcon="@SubjectIconExtensions.ResolveMudBlazorIcon(GetValue(_icon) ?? IconPlaceholder)"
+                      AdornmentIcon="@SubjectIconExtensions.ResolveMudBlazorIcon(GetValue(_icon) ?? _iconPlaceholder)"
                       HelperText="A MudBlazor icon name, such as Dashboard or Settings"
                       data-testid="metadata-icon" />
-        @if (!IsFolder)
+        @if (_folder is null)
         {
             <MudSelect T="NavigationLocation?"
                        @bind-Value="_location"
@@ -63,15 +63,10 @@
     /// <summary>The folder or the subject whose metadata is edited. A storage is edited as the subject of its file.</summary>
     [Parameter, EditorRequired] public IInterceptorSubject Owner { get; set; } = default!;
 
-    /// <summary>Whether the owner is a folder, an <see cref="IMetadataContainer"/> edited by its own metadata.</summary>
-    [Parameter] public bool IsFolder { get; set; }
-
-    [Parameter] public string? TitlePlaceholder { get; set; }
-
-    [Parameter] public string? NavigationTitlePlaceholder { get; set; }
-
-    [Parameter] public string IconPlaceholder { get; set; } = "Article";
-
+    private IMetadataContainer? _folder;
+    private string? _titlePlaceholder;
+    private string _navigationTitlePlaceholder = "";
+    private string _iconPlaceholder = "Article";
     private string? _title;
     private string? _navigationTitle;
     private string? _icon;
@@ -81,19 +76,29 @@
 
     protected override void OnInitialized()
     {
-        if (IsFolder)
+        _folder = GetFolder(Owner);
+        _navigationTitlePlaceholder = Owner.GetTitle();
+        if (_folder is not null)
         {
-            var metadata = ((IMetadataContainer)Owner).Metadata;
+            _titlePlaceholder = Owner.TryGetRegisteredSubject()?.Parents.FirstOrDefault().Index?.ToString();
+            _iconPlaceholder = "Folder";
+            var metadata = _folder.Metadata;
             _title = metadata?.Title;
             _navigationTitle = metadata?.NavigationTitle;
             _icon = metadata?.Icon;
         }
-        else if (Owner.TryGetSubjectMetadata() is { } metadata)
+        else
         {
-            _navigationTitle = metadata.NavigationTitle;
-            _icon = metadata.Icon;
-            _location = metadata.Location;
-            _alignment = metadata.Alignment;
+            if ((Owner as IIconProvider)?.IconName is { Length: > 0 } iconName)
+                _iconPlaceholder = iconName;
+
+            if (Owner.TryGetSubjectMetadata() is { } metadata)
+            {
+                _navigationTitle = metadata.NavigationTitle;
+                _icon = metadata.Icon;
+                _location = metadata.Location;
+                _alignment = metadata.Alignment;
+            }
         }
     }
 
@@ -119,7 +124,7 @@
                 [MetadataKeys.NavigationTitle] = GetValue(_navigationTitle),
                 [MetadataKeys.Icon] = GetValue(_icon)
             };
-            if (IsFolder)
+            if (_folder is not null)
             {
                 values.Insert(0, MetadataKeys.Title, GetValue(_title));
             }
@@ -146,25 +151,18 @@
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     /// <summary>
+    /// Gets the owner as a folder, an <see cref="IMetadataContainer"/> edited by its own metadata, or null for a
+    /// subject edited by the file beside it. A storage that is a file of another storage is such a subject.
+    /// </summary>
+    public static IMetadataContainer? GetFolder(IInterceptorSubject? owner)
+        => owner is IMetadataContainer folder and not IConfigurable ? folder : null;
+
+    /// <summary>
     /// Shows the dialog for the metadata of a folder, or of a subject stored in one.
     /// </summary>
-    public static Task<IDialogReference> ShowAsync(
-        IDialogService dialogService,
-        IInterceptorSubject owner,
-        bool isFolder,
-        string title,
-        string? titlePlaceholder,
-        string? navigationTitlePlaceholder,
-        string iconPlaceholder)
+    public static Task<IDialogReference> ShowAsync(IDialogService dialogService, IInterceptorSubject owner, string title)
     {
-        var parameters = new DialogParameters<MetadataEditDialog>
-        {
-            { x => x.Owner, owner },
-            { x => x.IsFolder, isFolder },
-            { x => x.TitlePlaceholder, titlePlaceholder },
-            { x => x.NavigationTitlePlaceholder, navigationTitlePlaceholder },
-            { x => x.IconPlaceholder, iconPlaceholder }
-        };
+        var parameters = new DialogParameters<MetadataEditDialog> { { x => x.Owner, owner } };
 
         var options = new DialogOptions
         {
