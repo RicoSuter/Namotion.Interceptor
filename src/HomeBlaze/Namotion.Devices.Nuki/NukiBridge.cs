@@ -52,12 +52,17 @@ public partial class NukiBridge : BackgroundService,
     // /info changes slowly (uptime, versions), so it is read every this many polls only.
     internal const int InfoPollDivider = 6;
 
-    private readonly IHttpClientFactory _httpClientFactory;
+    private readonly Func<HttpClient> _createHttpClient;
     private readonly ILogger<NukiBridge> _logger;
 
-    public NukiBridge(IHttpClientFactory httpClientFactory, ILogger<NukiBridge> logger)
+    public NukiBridge(ILogger<NukiBridge> logger)
+        : this(NukiBridgeHttpClient.Create, logger)
     {
-        _httpClientFactory = httpClientFactory;
+    }
+
+    internal NukiBridge(Func<HttpClient> createHttpClient, ILogger<NukiBridge> logger)
+    {
+        _createHttpClient = createHttpClient;
         _logger = logger;
 
         HostAddress = null;

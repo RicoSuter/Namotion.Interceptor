@@ -385,15 +385,14 @@ public class TileWidgetTests
         var (page, _, node) = await OpenScaledCanvasAsync(width, 900);
         var tile = node.GetByTestId("switch-tile");
 
-        // Act: the node has a border of 1 pixel on each side, which is scaled with the canvas (the node is 200 pixels wide),
-        // so the node is larger than the tile by that and no more. The page is still changing its width for a moment after
-        // the viewport has, so the boxes must agree for 20 frames in a row (polled once per frame).
+        // Act: the node draws no border, so the tile is as large as the node. The page is still changing its width for a
+        // moment after the viewport has, so the boxes must agree for 20 frames in a row (polled once per frame).
         await page.WaitForFunctionAsync(
             """
             ([node, tile]) => {
                 const nodeBox = node.getBoundingClientRect();
                 const tileBox = tile.getBoundingClientRect();
-                const tolerance = 2 * nodeBox.width / 200 + 0.5;
+                const tolerance = 0.5;
                 const fills = Math.abs(nodeBox.width - tileBox.width) <= tolerance && Math.abs(nodeBox.height - tileBox.height) <= tolerance;
                 node.__fillFrames = fills ? (node.__fillFrames ?? 0) + 1 : 0;
                 return node.__fillFrames >= 20;

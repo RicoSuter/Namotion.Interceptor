@@ -71,6 +71,12 @@ namespace HomeBlaze.History.Blazor
         public string Label { get; init; }
         public System.Collections.Generic.IReadOnlyList<System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Abstractions.HistoryPoint>> Runs { get; init; }
     }
+    public readonly struct HistoryChartPlaceholder : System.IEquatable<HomeBlaze.History.Blazor.HistoryChartPlaceholder>
+    {
+        public HistoryChartPlaceholder(bool HasLines, int BandCount) { }
+        public int BandCount { get; init; }
+        public bool HasLines { get; init; }
+    }
     [HomeBlaze.Abstractions.Attributes.ExcludeFromCreation]
     [HomeBlaze.Abstractions.Attributes.PageLayout]
     [Namotion.Interceptor.Attributes.InterceptorSubject]
@@ -117,6 +123,8 @@ namespace HomeBlaze.History.Blazor
         public string? LinesTitle { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public int? MaxHeight { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public HomeBlaze.History.Blazor.HistoryChartPlaceholder? Placeholder { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public bool ShowAxes { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]

@@ -79,18 +79,20 @@ else
 }
 
 <style>
+    /* Clips content that needs more room, but leaves 8 pixels for the shadow of a card that fills the cell. A clipping
+       cell is no scroll container, so without min-width: 0 its content would widen its column. */
     .grid-cell {
-        background: var(--mud-palette-surface);
-        border: 1px solid rgba(128,128,128,0.2);
-        border-radius: 4px;
+        min-width: 0;
         min-height: 100px;
-        overflow: hidden;
+        overflow: clip;
+        overflow-clip-margin: 8px;
         position: relative;
     }
 
     /* In edit mode: disable widget interaction */
     .grid-cell.editing {
         border: 2px dashed var(--mud-palette-primary);
+        border-radius: 4px;
     }
 
     .grid-cell.editing .grid-cell-content {
@@ -112,7 +114,8 @@ else
         align-items: center;
         justify-content: center;
         cursor: pointer;
-        border-style: dashed;
+        border: 1px dashed rgba(128,128,128,0.2);
+        border-radius: 4px;
     }
 
     .grid-cell.empty:hover {

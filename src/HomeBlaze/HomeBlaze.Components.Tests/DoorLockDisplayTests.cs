@@ -1,6 +1,7 @@
 using HomeBlaze.Abstractions.Devices.Locks;
 using HomeBlaze.Abstractions.Sensors;
 using HomeBlaze.Components.Controls;
+using HomeBlaze.Services.Display;
 using MudBlazor;
 using Xunit;
 
@@ -43,5 +44,72 @@ public class DoorLockDisplayTests
 
         // Assert
         Assert.Equal(new DoorLockAppearance(doorIcon, badgeIcon, fill, subtitle, description, operation), appearance);
+    }
+
+    private static ValueMap CreateMap() => new()
+    {
+        Cases =
+        [
+            new ValueMapCase { Value = "Locked", Text = "Secured", Color = "Tertiary", Icon = "Key" },
+            new ValueMapCase { Value = "unlocked", Text = "Not secured", Color = "Warning" },
+            new ValueMapCase { Value = "Locking", Color = "Info", Icon = "Sync" },
+            new ValueMapCase { Value = "Unlatched", Text = "Latch pulled" }
+        ]
+    };
+
+    [Theory]
+    [InlineData(DoorLockState.Locked, DoorState.Closed, ClosedDoor, Icons.Material.Filled.Key, Color.Tertiary, "Secured", "Secured, unlocks on click", "Unlock")]
+    [InlineData(DoorLockState.Locked, DoorState.Open, OpenDoor, Icons.Material.Filled.Key, Color.Tertiary, "Secured", "Secured, unlocks on click", "Unlock")]
+    [InlineData(DoorLockState.Unlocked, DoorState.Open, OpenDoor, Unlocked, Color.Warning, "Not secured", "Not secured, locks on click", "Lock")]
+    [InlineData(DoorLockState.Locking, DoorState.Open, OpenDoor, Icons.Material.Filled.Sync, Color.Info, "Locking…", "Locking…", null)]
+    [InlineData(DoorLockState.Unlatched, DoorState.Closed, ClosedDoor, Unlocked, Color.Default, "Latch pulled", "Latch pulled, locks on click", "Lock")]
+    public void WhenMapHasACaseForTheLockState_ThenTheCaseGivesTheTextFillAndBadgeWithoutTheOpenDoor(
+        DoorLockState lockState, DoorState doorState,
+        string doorIcon, string badgeIcon, Color fill, string subtitle, string description, string? operation)
+    {
+        // Arrange
+        var map = CreateMap();
+
+        // Act
+        var appearance = DoorLockDisplay.Get(lockState, doorState, map);
+
+        // Assert
+        Assert.Equal(new DoorLockAppearance(doorIcon, badgeIcon, fill, subtitle, description, operation), appearance);
+    }
+
+    [Theory]
+    [InlineData(DoorLockState.Jammed, DoorState.Open)]
+    [InlineData(DoorLockState.Unlocking, DoorState.Closed)]
+    [InlineData(null, DoorState.Open)]
+    public void WhenMapHasNoCaseForTheLockState_ThenTheTileShowsItsOwnAppearance(DoorLockState? lockState, DoorState doorState)
+    {
+        // Arrange
+        var map = CreateMap();
+
+        // Act
+        var appearance = DoorLockDisplay.Get(lockState, doorState, map);
+
+        // Assert
+        Assert.Equal(DoorLockDisplay.Get(lockState, doorState), appearance);
+    }
+
+    [Fact]
+    public void WhenMapHasACaseForEveryStateByItsRawText_ThenEveryStateIsMatched()
+    {
+        // Arrange
+        var states = Enum.GetValues<DoorLockState>();
+        var map = new ValueMap
+        {
+            Cases = [.. states.Select(state => new ValueMapCase { Value = RawValueFormatter.Format(state), Text = "mapped" })]
+        };
+
+        foreach (var state in states)
+        {
+            // Act
+            var appearance = DoorLockDisplay.Get(state, DoorState.Closed, map);
+
+            // Assert
+            Assert.Equal("mapped", appearance.Subtitle);
+        }
     }
 }

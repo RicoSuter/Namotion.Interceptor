@@ -1,5 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
 namespace Namotion.Devices.Nuki.Tests;
@@ -11,7 +13,7 @@ public class NukiServiceCollectionExtensionsTests
     {
         // Arrange
         var services = new ServiceCollection();
-        services.AddHttpClient();
+        services.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
 
         // Act
         services.AddNukiBridge(bridge =>

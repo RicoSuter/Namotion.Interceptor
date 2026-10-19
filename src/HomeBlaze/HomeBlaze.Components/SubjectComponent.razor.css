@@ -115,9 +115,8 @@
    their size, and the body takes the rest and scrolls. Without min-height: 0 an aspect ratio would let the content make
    the card higher. A card fills a cell or a node when it is its child, as in a layout of a configuration file, or the
    only block of its content on a page. A block that shows nothing has an empty wrapper, which the page hides, so only
-   the wrappers that are not empty count, unlike with :only-child. The padding of the content that such a card fills is
-   left out in MarkdownFilePageComponent.razor.css, for every place-filler. A card that fills its place gets
-   min-height: 0 from the rule of every place-filler below. */
+   the wrappers that are not empty count, unlike with :only-child. A card that fills its place gets min-height: 0 from
+   the rule of every place-filler below. */
 ::deep .card-widget.card-widget-sized {
     min-height: 0;
 }
@@ -137,9 +136,9 @@
 /* A widget that fills its place (a card, a tile: the class place-filler) or is centered in it (a gauge: the class
    place-centered) and is the only content of a grid cell or a canvas node takes the whole cell or node, unless a card has
    a height of its own, which the inline style gives. It ignores its own minimum height, which a place smaller than it
-   would clip, and an aspect ratio, which the inline style also gives. The cell or the node is the frame, so the widget
-   draws none. It is a size container and gives its content the sizes of the place, which grow with the smaller side of
-   the place, from their least sizes at about 150 pixels to twice them, so that a tile and a gauge side by side show the
+   would clip, and an aspect ratio, which the inline style also gives. It is a size container and gives its content the
+   sizes of the place, which grow with the smaller side of the place, from their least sizes at about 150 pixels to twice
+   them, so that a tile and a gauge side by side show the
    same kind of text in the same size: the primary line (the value of a value, the name of a switch), the secondary line
    (the label of a value, the state of a switch), the icon and the gap between them. A widget inside one of them, such as
    in the body of a card, has its own sizes again. */
@@ -155,8 +154,6 @@
     height: 100%;
     min-height: 0;
     aspect-ratio: auto !important;
-    border: 0;
-    box-shadow: none;
     container-type: size;
     --place-primary-text: clamp(1.125rem, 12cqmin, 2.25rem);
     --place-secondary-text: clamp(1rem, 10.5cqmin, 2rem);

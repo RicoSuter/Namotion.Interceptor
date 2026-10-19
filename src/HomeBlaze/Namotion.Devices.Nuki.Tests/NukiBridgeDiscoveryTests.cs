@@ -75,7 +75,7 @@ public class NukiBridgeDiscoveryTests
         var fake = new FakeNukiBridge();
 
         // Act
-        var token = await NukiBridgeDiscovery.PairAsync(fake.CreateClient(string.Empty), "192.168.1.50", CancellationToken.None);
+        var token = await NukiBridgeDiscovery.PairAsync(fake.CreateClient(), "192.168.1.50", CancellationToken.None);
 
         // Assert
         Assert.Equal("abc123", token);
@@ -89,7 +89,7 @@ public class NukiBridgeDiscoveryTests
         var fake = new FakeNukiBridge { AuthJson = """{"success": false}""" };
 
         // Act
-        var token = await NukiBridgeDiscovery.PairAsync(fake.CreateClient(string.Empty), "192.168.1.50", CancellationToken.None);
+        var token = await NukiBridgeDiscovery.PairAsync(fake.CreateClient(), "192.168.1.50", CancellationToken.None);
 
         // Assert
         Assert.Null(token);
@@ -102,7 +102,7 @@ public class NukiBridgeDiscoveryTests
         var fake = new FakeNukiBridge();
 
         // Act
-        var detection = await NukiBridgeDiscovery.DetectTokenModeAsync(fake.CreateClient(string.Empty), "192.168.1.50", "abc123", CancellationToken.None);
+        var detection = await NukiBridgeDiscovery.DetectTokenModeAsync(fake.CreateClient(), "192.168.1.50", "abc123", CancellationToken.None);
 
         // Assert
         Assert.Equal(new NukiTokenModeDetection(NukiTokenMode.Encrypted, Warning: null), detection);
@@ -120,7 +120,7 @@ public class NukiBridgeDiscoveryTests
         fake.StatusOverride = _ => fake.CountRequests("info") == 1 ? HttpStatusCode.Unauthorized : null;
 
         // Act
-        var detection = await NukiBridgeDiscovery.DetectTokenModeAsync(fake.CreateClient(string.Empty), "192.168.1.50", "abc123", CancellationToken.None);
+        var detection = await NukiBridgeDiscovery.DetectTokenModeAsync(fake.CreateClient(), "192.168.1.50", "abc123", CancellationToken.None);
 
         // Assert
         Assert.Equal(expectedMode, detection.Mode);
@@ -143,7 +143,7 @@ public class NukiBridgeDiscoveryTests
         var fake = new FakeNukiBridge { StatusOverride = _ => HttpStatusCode.Unauthorized };
 
         // Act
-        var detection = await NukiBridgeDiscovery.DetectTokenModeAsync(fake.CreateClient(string.Empty), "192.168.1.50", "abc123", CancellationToken.None);
+        var detection = await NukiBridgeDiscovery.DetectTokenModeAsync(fake.CreateClient(), "192.168.1.50", "abc123", CancellationToken.None);
 
         // Assert
         Assert.Equal(NukiTokenMode.Encrypted, detection.Mode);

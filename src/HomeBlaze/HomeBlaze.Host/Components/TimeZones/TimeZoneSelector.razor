@@ -6,6 +6,7 @@
 
 @inject ITimeZoneDisplay TimeZone
 @inject TimeZoneInterop Interop
+@inject BrowserPreferences Preferences
 @inject ILogger<TimeZoneSelector> Logger
 
 <MudMenu @ref="_menu" Icon="@Icons.Material.Filled.Schedule" Color="Color.Inherit"
@@ -97,7 +98,7 @@
             if (!string.IsNullOrWhiteSpace(browserZone))
             {
                 TimeZone.SetResolved(TimeZonePreference.Automatic, TimeZoneResolver.Resolve(browserZone));
-                await Interop.SetPreferenceCookieAsync(TimeZonePreference.Automatic.ToCookieValue());
+                await Preferences.SetAsync(BrowserPreferenceKeys.TimeZone, TimeZonePreference.Automatic.ToCookieValue());
             }
 
             await CloseMenuAsync();
@@ -112,11 +113,9 @@
     {
         try
         {
-            // Applied before it is persisted, so a failed cookie write still leaves the picked zone in
-            // effect for this session rather than discarding the choice entirely.
             var preference = TimeZonePreference.Specific(id);
             TimeZone.SetResolved(preference, TimeZoneResolver.Resolve(id));
-            await Interop.SetPreferenceCookieAsync(preference.ToCookieValue());
+            await Preferences.SetAsync(BrowserPreferenceKeys.TimeZone, preference.ToCookieValue());
             await CloseMenuAsync();
         }
         catch (Exception exception) when (IsInteropFailure(exception))
@@ -125,10 +124,9 @@
         }
     }
 
-    // The same reasoning as TimeZoneInitializer: a time zone that did not persist is cosmetic, while an
-    // exception out of a click handler tears the circuit down and replaces the application with an error
-    // page. OperationCanceledException is in the set because that is how the interop call timeout
-    // surfaces; it derives from neither JSException nor JSDisconnectedException.
+    // An exception out of a click handler tears the circuit down and replaces the application with an error page,
+    // which a failed detection or a menu closed on a lost circuit does not justify. OperationCanceledException is in the
+    // set because that is how the interop call timeout surfaces; it derives from neither JSException nor JSDisconnectedException.
     private static bool IsInteropFailure(Exception exception) =>
         exception is JSDisconnectedException or OperationCanceledException or JSException;
 
@@ -136,7 +134,7 @@
     {
         if (exception is JSException)
         {
-            Logger.LogWarning(exception, "Could not persist the selected time zone.");
+            Logger.LogWarning(exception, "Could not detect the browser time zone.");
         }
     }
 

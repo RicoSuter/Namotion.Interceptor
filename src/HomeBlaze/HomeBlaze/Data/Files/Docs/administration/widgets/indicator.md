@@ -76,7 +76,7 @@ The pump runs at {{ ../Pump/CurrentSpeed }} RPM.
 
 ## Behavior and Limits
 
-- **Text, color and icon**: They come from the matching case of the map, see [ValueMap](value-map.md). `Icon` is the icon that stays when no case gives one.
+- **Text, color and icon**: They come from the matching case of the map, see [ValueMap](value-map.md). `Icon` is the icon that stays when no case gives one. A [CSS color](value-map.md#behavior-and-limits) colors the icon, or fills the chip with black or white text.
 - **Without a map**: A boolean that is true has the color `Primary`, and every other value has `Default`. With a map the color comes from the case alone.
 - **No icon**: A chip without an icon shows its text only. An indicator of the kind `Icon` without an icon shows a plain circle.
 - **A missing value**: The chip shows a dash, see [Missing Values](basics.md#missing-values). The icon form shows its icon in the default color, with the path as tooltip. A chip with a value has no tooltip.

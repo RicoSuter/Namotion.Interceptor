@@ -2,11 +2,11 @@
    margin of its own. See "Spacing" in the widget basics. The rules are not nested, because CSS isolation does not
    rewrite nested rules correctly. */
 
-/* The title makes room for the time of the last change and the button of the edit modes, which stand in its corner. The
-   width follows the page head in the view modes, see GetPageHeadStyle in Pages.razor of the app, and changes with it. In
-   the split mode they stand above the editor instead, see Pages.razor.css of the app. */
+/* The title makes room for the button of the page menu, which stands in its corner. The width follows the page head in
+   the view modes, see GetPageHeadStyle in Pages.razor of the app, and changes with it. In the split mode the button
+   stands above the editor instead, see Pages.razor.css of the app. */
 .markdown-content > ::deep h1:first-of-type {
-    padding-right: 11rem;
+    padding-right: 3rem;
 }
 
 /* The blocks of a page are 1rem apart, from each other and from the text around them. */
@@ -58,14 +58,6 @@
 
 .markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment::after {
     margin-top: -1rem;
-}
-
-/* The content of a grid cell or a canvas node has the room of a card body at the edges, because the cell or the node
-   draws a frame. A widget that fills its place (class place-filler, such as a card or a tile) or is centered in it
-   (class place-centered, such as a gauge) and is the only content fills the cell or the node instead, by the rules and
-   the selector in SubjectComponent.razor.css of HomeBlaze.Components. */
-.markdown-content ::deep :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .markdown-fragment:not(:has(> .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty)) > :is(.place-filler, .place-centered))) {
-    padding: 12px;
 }
 
 /* The blocks of a card footer, such as buttons, stand in a row, and the footer padding is the space at its edges. */

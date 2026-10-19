@@ -414,6 +414,9 @@ jobs:
             if ($text -notmatch 'edge\+[0-9a-f]{40}') { throw "$name's informational version has no commit" }
             if ($text -match 'edge\+[0-9a-f]+\.[0-9a-f]') { throw "$name's informational version has a doubled commit" }
           }
+          # The container-publish job reads this label to decide whether edge moves.
+          $revision = docker inspect homeblaze:smoke --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}'
+          if ($revision -ne (git rev-parse HEAD)) { throw "The image revision label '$revision' is not the built commit" }
 
       - name: Build arm64 image archive
         run: |
@@ -425,7 +428,8 @@ jobs:
     timeout-minutes: 30
     # Forks cannot push to this package.
     if: github.repository_owner == 'RicoSuter' && (github.event_name == 'release' || (github.event_name == 'push' && github.ref == 'refs/heads/master'))
-    # Serializes publishing per ref; the Compute tags step decides whether the moving edge and latest tags may move.
+    # Serializes publishing per ref, so the edge commit the Compute tags step reads cannot change before this run pushes.
+    # A newly queued run cancels the pending one, so a burst of merges can skip a commit until the next push.
     concurrency:
       group: container-publish-${{ github.ref }}
       cancel-in-progress: false
@@ -456,7 +460,7 @@ jobs:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
           RELEASE_PRERELEASE: ${{ github.event.release.prerelease }}
         run: |
-          # Moving tags only follow the newest master commit or release, so re-running an older run cannot move them back.
+          # Moving tags never move back to an older commit or release, so re-running an older run is safe.
           if ($env:GITHUB_EVENT_NAME -eq "release") {
             $version = $env:RELEASE_TAG -replace '^v', ''
             $tags = $version
@@ -476,11 +480,19 @@ jobs:
           } else {
             $short = $env:GITHUB_SHA.Substring(0, 7)
             $tags = "sha-$short"
+            # Edge follows every newer green commit, so a failed run of a later commit does not hold it back.
             $masterHead = git ls-remote origin refs/heads/master
             if ($LASTEXITCODE -ne 0) { throw "Could not read the master head" }
-            if ($masterHead -and $masterHead.Split("`t")[0] -eq $env:GITHUB_SHA) {
-              $tags = "edge;$tags"
+            $moveEdge = $masterHead -like "$($env:GITHUB_SHA)*"
+            if (-not $moveEdge) {
+              # A missing edge image or unknown commit keeps edge instead of failing the publish.
+              $PSNativeCommandUseErrorActionPreference = $false
+              $edgeCommit = (skopeo --command-timeout 1m inspect --no-tags docker://ghcr.io/ricosuter/homeblaze:edge | ConvertFrom-Json).Labels.'org.opencontainers.image.revision'
+              $comparison = if ($edgeCommit -match '^[0-9a-f]{40}$') { gh api "repos/$($env:GITHUB_REPOSITORY)/compare/$edgeCommit...$($env:GITHUB_SHA)" --jq .status }
+              $moveEdge = $comparison -in "ahead", "identical"
             }
+            Write-Host "Move edge: $moveEdge, edge commit: '$edgeCommit', comparison: '$comparison'"
+            if ($moveEdge) { $tags = "edge;$tags" }
             # The SDK appends +<commit> itself.
             $informationalVersion = "edge"
             $libraryVersion = (gh release view --repo $env:GITHUB_REPOSITORY --json tagName -q .tagName) -replace '^v', ''

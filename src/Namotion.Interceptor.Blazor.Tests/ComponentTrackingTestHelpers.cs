@@ -16,6 +16,6 @@ internal static class ComponentTrackingTestHelpers
     public static Task SettleAsync(TestRenderer renderer)
     {
         var dispatcher = renderer.Services.GetRequiredService<ComponentTrackingDispatcher>();
-        return WaitAsync(() => dispatcher.IsIdle && renderer.UnacknowledgedBatchCount == 0);
+        return WaitAsync(() => dispatcher.IsIdle && renderer.IsSettled);
     }
 }

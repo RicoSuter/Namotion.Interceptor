@@ -46,6 +46,8 @@ namespace HomeBlaze.Components
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public bool IsSnapToGridEnabled { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
+        public int? MaxWidth { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
         public int? MinHeight { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public int? MinWidth { get; set; }
@@ -190,6 +192,9 @@ namespace HomeBlaze.Components
         public DoorLock(Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public string? Label { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        [HomeBlaze.Abstractions.Attributes.SubjectPath(typeof(HomeBlaze.Components.ValueMap))]
+        public string? Map { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         [HomeBlaze.Abstractions.Attributes.SubjectPath(typeof(HomeBlaze.Abstractions.Devices.Locks.IDoorLockState))]
         public string? Path { get; set; }
@@ -751,6 +756,17 @@ namespace HomeBlaze.Components
         Right = 2,
         Bottom = 3,
     }
+    public sealed class ValueColor
+    {
+        public string? Css { get; }
+        public bool IsDefault { get; }
+        public string? Style { get; }
+        public MudBlazor.Color Theme { get; }
+        public static HomeBlaze.Components.ValueColor Default { get; }
+        public override string ToString() { }
+        public static bool TryParse(string? text, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out HomeBlaze.Components.ValueColor? color) { }
+        public static HomeBlaze.Components.ValueColor op_Implicit(MudBlazor.Color color) { }
+    }
     [HomeBlaze.Abstractions.Attributes.PageLayout]
     [HomeBlaze.Abstractions.Attributes.SubjectIcon("List")]
     [Namotion.Interceptor.Attributes.InterceptorSubject]
@@ -804,7 +820,7 @@ namespace HomeBlaze.Components
         public ValueMapCase() { }
         public ValueMapCase(Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.Configuration]
-        public MudBlazor.Color Color { get; set; }
+        public string? Color { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public string? Icon { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
@@ -814,6 +830,7 @@ namespace HomeBlaze.Components
         public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
         public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
         public System.Threading.Tasks.Task ApplyConfigurationAsync(System.Threading.CancellationToken cancellationToken = default) { }
+        public HomeBlaze.Components.ValueColor GetColor() { }
         protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
         protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
         protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
@@ -823,7 +840,7 @@ namespace HomeBlaze.Components
     public static class ValueReader
     {
         public const string MissingText = "–";
-        public static MudBlazor.Color GetIndicatorColor(HomeBlaze.Components.ValueReading reading, string? map) { }
+        public static HomeBlaze.Components.ValueColor GetIndicatorColor(HomeBlaze.Components.ValueReading reading, string? map) { }
         public static string GetLabel(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? property, string? label, string? path) { }
         public static double? GetProgressPercent(object? value, double minimum, double maximum) { }
         public static HomeBlaze.Components.ValueReading Read(HomeBlaze.Services.SubjectPathResolver resolver, Namotion.Interceptor.IInterceptorSubject widget, string? path, string? map, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone) { }
@@ -835,8 +852,8 @@ namespace HomeBlaze.Components
     }
     public sealed class ValueReading : System.IEquatable<HomeBlaze.Components.ValueReading>
     {
-        public ValueReading(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? Property, object? Value, string Text, MudBlazor.Color Color, string? Icon, string? MapError) { }
-        public MudBlazor.Color Color { get; init; }
+        public ValueReading(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? Property, object? Value, string Text, HomeBlaze.Components.ValueColor Color, string? Icon, string? MapError) { }
+        public HomeBlaze.Components.ValueColor Color { get; init; }
         public string? Icon { get; init; }
         public bool IsMissing { get; }
         public string? MapError { get; init; }
@@ -985,7 +1002,7 @@ namespace HomeBlaze.Components.Components
         public System.Threading.Tasks.Task SaveAsync(System.Threading.CancellationToken cancellationToken) { }
     }
     [HomeBlaze.Components.Abstractions.Attributes.SubjectComponent(HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType.Widget, typeof(HomeBlaze.Components.CanvasLayout))]
-    public class CanvasLayoutWidget : Microsoft.AspNetCore.Components.ComponentBase, HomeBlaze.Components.Abstractions.ISubjectComponent, System.IAsyncDisposable
+    public class CanvasLayoutWidget : Microsoft.AspNetCore.Components.ComponentBase, HomeBlaze.Components.Abstractions.ISubjectComponent
     {
         public CanvasLayoutWidget() { }
         [Microsoft.AspNetCore.Components.CascadingParameter(Name="IsEditing")]
@@ -995,11 +1012,7 @@ namespace HomeBlaze.Components.Components
         [Microsoft.AspNetCore.Components.Parameter]
         public Namotion.Interceptor.IInterceptorSubject? Subject { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
-        public System.Threading.Tasks.ValueTask DisposeAsync() { }
         protected override void OnAfterRender(bool firstRender) { }
-        protected override System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender) { }
-        [Microsoft.JSInterop.JSInvokable]
-        public System.Threading.Tasks.Task OnFrameWidthChanged(double width) { }
     }
     [HomeBlaze.Components.Abstractions.Attributes.SubjectComponent(HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType.Edit, typeof(HomeBlaze.Components.CanvasNode?))]
     public class CanvasNodeEditComponent : Microsoft.AspNetCore.Components.ComponentBase, HomeBlaze.Components.Abstractions.ISubjectComponent, HomeBlaze.Components.Abstractions.ISubjectEditComponent, System.IDisposable
@@ -1354,7 +1367,7 @@ namespace HomeBlaze.Components.Components
         [Microsoft.AspNetCore.Components.Parameter]
         public bool? Checked { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
-        public MudBlazor.Color Color { get; set; }
+        public HomeBlaze.Components.ValueColor Color { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public bool Disabled { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]

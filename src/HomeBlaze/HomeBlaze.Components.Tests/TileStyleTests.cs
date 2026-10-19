@@ -74,4 +74,21 @@ public class TileStyleTests
         // Assert
         Assert.Same(first, second);
     }
+
+    [Theory]
+    [InlineData(Variant.Filled, "background: #ffffff80; color: rgba(0, 0, 0, 0.87)")]
+    [InlineData(Variant.Outlined, "background: var(--mud-palette-surface); color: #ffffff80; box-shadow: inset 0 0 0 2px #ffffff80")]
+    [InlineData(Variant.Text, "background: var(--mud-palette-surface); color: #ffffff80")]
+    public void WhenColorIsACssColor_ThenTheTileUsesItLikeAThemeColor(Variant variant, string expected)
+    {
+        // Arrange
+        ValueColor.TryParse("#ffffff80", out var color);
+
+        // Act
+        var style = TileStyle.GetStyle(color!, variant);
+
+        // Assert
+        Assert.Equal(expected, style);
+        Assert.Same(style, TileStyle.GetStyle(color!, variant));
+    }
 }

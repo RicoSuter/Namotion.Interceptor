@@ -32,7 +32,7 @@ The arguments of a `Cell` block:
 
 ## Samples
 
-A grid of two rows and two columns. The two cells of the first row show the two sample motors. The cell of the second row spans both columns and holds text with expressions:
+A grid of two rows and two columns. The two cells of the first row show the two sample motors. The cell of the second row spans both columns and holds a card with text with expressions:
 
 <!-- sample: live -->
 ~~~~markdown
@@ -42,6 +42,7 @@ A grid of two rows and two columns. The two cells of the first row show the two 
 ::: Cell Row=0 Column=1
 :::: HomeBlaze.Components.Widget Path=../Fan
 ::: Cell Row=1 Column=0 ColumnSpan=2
+:::: HomeBlaze.Components.Card Title="Targets"
 The pump is set to **{{ ../Pump/TargetSpeed }}** and the fan to **{{ ../Fan/TargetSpeed }}**.
 ::
 ~~~~
@@ -52,6 +53,7 @@ The pump is set to **{{ ../Pump/TargetSpeed }}** and the fan to **{{ ../Fan/Targ
 ::: Cell Row=0 Column=1
 :::: HomeBlaze.Components.Widget Path=../Fan
 ::: Cell Row=1 Column=0 ColumnSpan=2
+:::: HomeBlaze.Components.Card Title="Targets"
 The pump is set to **{{ ../Pump/TargetSpeed }}** and the fan to **{{ ../Fan/TargetSpeed }}**.
 ::
 
@@ -61,25 +63,26 @@ A grid with cells that keep their shape. `CellAspectRatio=1:1` makes each cell a
 ~~~~markdown
 :: HomeBlaze.Components.GridLayout#squaregrid Rows=1 Columns=3 CellAspectRatio=1:1
 ::: Cell Row=0 Column=0
-Living room
+:::: HomeBlaze.Components.Card Title="Living room"
 ::: Cell Row=0 Column=1
-Kitchen
+:::: HomeBlaze.Components.Card Title="Kitchen"
 ::: Cell Row=0 Column=2
-Garden
+:::: HomeBlaze.Components.Card Title="Garden"
 ::
 ~~~~
 
 :: HomeBlaze.Components.GridLayout#squaregrid Rows=1 Columns=3 CellAspectRatio=1:1
 ::: Cell Row=0 Column=0
-Living room
+:::: HomeBlaze.Components.Card Title="Living room"
 ::: Cell Row=0 Column=1
-Kitchen
+:::: HomeBlaze.Components.Card Title="Kitchen"
 ::: Cell Row=0 Column=2
-Garden
+:::: HomeBlaze.Components.Card Title="Garden"
 ::
 
 ## Behavior and Limits
 
+- **No frame**: A cell draws no border, no background and no room around its content, it only places it. Content that needs a surface brings its own: put it into a [Card](card.md), or use a tile.
 - **Equal rows and columns**: All columns have the same width. Without `CellAspectRatio` all rows have the same height and the grid is at least 400 pixels high.
 - **Cell aspect ratio**: With `CellAspectRatio=W:H` a row is as high as a column is wide times H/W, and follows the width of the page. The cells have no minimum height then.
 - **An invalid ratio**: A `CellAspectRatio` that is not two numbers above 0 with a colon between them shows `CellAspectRatio must look like 1:1` with the value in place of the grid, see [Value Widget Errors](../page-errors.md#value-widget-errors).

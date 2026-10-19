@@ -7,6 +7,7 @@
 @inject IJSRuntime JsRuntime
 @inject IDialogService DialogService
 @inject PropertyRowLayoutService RowLayout
+@inject BrowserPreferences Preferences
 
 @implements IDisposable
 @implements IAsyncDisposable
@@ -117,6 +118,7 @@
     protected override void OnInitialized()
     {
         base.OnInitialized();
+        RowLayout.Load(Preferences.Get(BrowserPreferenceKeys.RowLayout));
         NavigationManager.LocationChanged += OnLocationChanged;
         RowLayout.OnChange += OnRowLayoutChanged;
     }
@@ -126,19 +128,7 @@
     private async Task SetRowLayoutAsync(PropertyRowLayout layout)
     {
         RowLayout.SetLayout(layout);
-        if (_jsModule is null)
-        {
-            return;
-        }
-
-        try
-        {
-            await _jsModule.InvokeVoidAsync("saveRowLayout", PropertyRowLayoutInitializer.CookieName, RowLayout.StoredValue);
-        }
-        catch (Exception exception) when (exception is JSDisconnectedException or OperationCanceledException or JSException)
-        {
-            // A layout that cannot be remembered still applies to this visit.
-        }
+        await Preferences.SetAsync(BrowserPreferenceKeys.RowLayout, RowLayout.StoredValue);
     }
 
     protected override void OnParametersSet()

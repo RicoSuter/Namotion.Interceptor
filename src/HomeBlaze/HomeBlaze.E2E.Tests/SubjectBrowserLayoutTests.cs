@@ -1,7 +1,6 @@
 using System.Text.RegularExpressions;
 using HomeBlaze.Abstractions;
 using HomeBlaze.E2E.Tests.Infrastructure;
-using HomeBlaze.Host.Components.Browser;
 using HomeBlaze.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Playwright;
@@ -558,7 +557,7 @@ public class SubjectBrowserLayoutTests
         await WaitForRowLayoutAsync(page, isStacked);
         await page.WaitForFunctionAsync(
             "name => document.cookie.includes(`${name}=`)",
-            PropertyRowLayoutInitializer.CookieName,
+            "homeblaze.rowlayout",
             new() { Timeout = PageLoadTimeout });
 
         // Act
@@ -568,6 +567,28 @@ public class SubjectBrowserLayoutTests
         await page.WaitForFunctionAsync(SubjectBrowserPage.IsInteractive, null, new() { Timeout = PageLoadTimeout });
         await WaitUntilSettledAsync(page, paneCount: 3);
         await WaitForRowLayoutAsync(page, isStacked);
+    }
+
+    [Fact]
+    public async Task WhenTheBrowserIsLeftAndOpenedAgain_ThenTheChosenRowLayoutIsKept()
+    {
+        // Arrange
+        var page = await OpenAsync(MotorPath, 1280, 720, paneCount: 3);
+        await ChooseRowLayoutAsync(page, "row-layout-stacked");
+        await WaitForRowLayoutAsync(page, isStacked: true);
+
+        // Act
+        // A route no page claims, as where the home page redirects to depends on the pages other tests leave behind.
+        await page.EvaluateAsync("() => Blazor.navigateTo('/no-page-here')");
+        await Assertions.Expect(page.GetByRole(AriaRole.Alert).Filter(new() { HasText = "nothing at this address" }))
+            .ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
+        await Assertions.Expect(page.Locator("#scrollContainer")).ToHaveCountAsync(0, new() { Timeout = PageLoadTimeout });
+        await page.EvaluateAsync("path => Blazor.navigateTo(path)", $"/{MotorPath}");
+        await page.WaitForFunctionAsync(SubjectBrowserPage.IsInteractive, null, new() { Timeout = PageLoadTimeout });
+        await WaitUntilSettledAsync(page, paneCount: 3);
+
+        // Assert
+        await WaitForRowLayoutAsync(page, isStacked: true);
     }
 
     [Fact]

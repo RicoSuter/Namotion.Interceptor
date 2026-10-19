@@ -87,7 +87,7 @@ Rules of a tile:
 - **Size of the content**: In a grid cell or a canvas node the icon and the text grow with a large place, and a place that is too low for the icon leaves it out, see [Spacing](basics.md#spacing).
 - **One click target**: The whole tile toggles the state, also where the badge stands. A click on the badge reaches the tile.
 - **Room for the badge**: The content of a tile with a badge starts below the badge, so the label never runs under it, see [Spacing](basics.md#spacing).
-- **The fill**: A tile takes the color of the matched case of its map. Without a map, or without a matching case, it has the primary color while the value is true and the color of the surface while it is false. A matched case without a `Color` stays on the surface.
+- **The fill**: A tile takes the color of the matched case of its map. Without a map, or without a matching case, it has the primary color while the value is true and the color of the surface while it is false. A matched case without a `Color` stays on the surface. A [CSS color](value-map.md#behavior-and-limits) fills the tile with black or white text.
 - **The text**: The subtitle is `Subtitle`. Without it, a tile with a map shows the text of the matched case, else the formatted value.
 - **A missing value**: A value that is not set shows a `?` in place of the icon. The tile is disabled only when there is nothing to write or invoke, such as a path that leads nowhere. A writable `bool?` without a value, or a switch whose `On` operation is enabled, can still be turned on.
 - **Disabled**: A tile is disabled while the page is edited, while a toggle is pending, and when the write or the operation is not possible, for the same reasons as the toggle switch. A disabled tile keeps the fill of its state and is dimmed, its icon and text more than its fill, so a light that is on stays yellow while it cannot be switched. A progress circle at the bottom right shows a toggle that is pending, and a pending tile shows the state it goes to (fill, icon and subtitle) until the operation ends.
@@ -100,7 +100,7 @@ Rules of a tile:
 - **Invokes an operation**: With `On` and `Off`, turning the switch on invokes `On` and turning it off invokes `Off`, and the switch does not write the property. The switch shows the state it goes to until the operation ends, and then shows the property again. A device that reports its new state later moves the switch when it does.
 - **Enabled state**: With `On` and `Off`, the switch is disabled while the operation that a toggle would invoke is not enabled, for example `PowerOn` while the motor is powered, and while that operation does not exist.
 - **Confirmation**: An operation that asks for confirmation shows its dialog first. Cancel leaves the switch in its state.
-- **Toggle switch with a map**: A `Switch` with `Map` and without `Kind=Tile` takes the color of the matched case as its color, and `Primary` when no case matches. Subtitle, icon and badge are for tiles.
+- **Toggle switch with a map**: A `Switch` with `Map` and without `Kind=Tile` takes the color of the matched case as its color, a theme color or a CSS color, and `Primary` when no case matches. Subtitle, icon and badge are for tiles.
 - **Operations without input**: `On` and `Off` are operations whose parameters need no input. One of them alone shows `Set both On and Off, or neither`, and an operation that needs input shows `On needs an operation without input` with its path, in place of the switch, see [Value Widget Errors](../page-errors.md#value-widget-errors).
 
 ## Related

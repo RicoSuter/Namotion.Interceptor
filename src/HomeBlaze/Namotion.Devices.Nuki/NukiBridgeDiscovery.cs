@@ -60,7 +60,13 @@ public static class NukiBridgeDiscovery
     /// 30 seconds.
     /// </summary>
     /// <returns>The token, or null when the button was not pressed in time.</returns>
-    public static async Task<string?> PairAsync(HttpClient httpClient, string hostAddress, CancellationToken cancellationToken)
+    public static async Task<string?> PairAsync(string hostAddress, CancellationToken cancellationToken)
+    {
+        using var httpClient = NukiBridgeHttpClient.Create();
+        return await PairAsync(httpClient, hostAddress, cancellationToken);
+    }
+
+    internal static async Task<string?> PairAsync(HttpClient httpClient, string hostAddress, CancellationToken cancellationToken)
     {
         var client = new NukiBridgeClient(httpClient, hostAddress, token: null, NukiTokenMode.Plain);
         var result = await client.AuthAsync(cancellationToken);
@@ -73,7 +79,13 @@ public static class NukiBridgeDiscovery
     /// cannot be read. <see cref="NukiTokenModeDetection.Warning"/> is set when the bridge did not confirm the mode.
     /// </summary>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
-    public static async Task<NukiTokenModeDetection> DetectTokenModeAsync(HttpClient httpClient, string hostAddress, string token, CancellationToken cancellationToken)
+    public static async Task<NukiTokenModeDetection> DetectTokenModeAsync(string hostAddress, string token, CancellationToken cancellationToken)
+    {
+        using var httpClient = NukiBridgeHttpClient.Create();
+        return await DetectTokenModeAsync(httpClient, hostAddress, token, cancellationToken);
+    }
+
+    internal static async Task<NukiTokenModeDetection> DetectTokenModeAsync(HttpClient httpClient, string hostAddress, string token, CancellationToken cancellationToken)
     {
         try
         {
