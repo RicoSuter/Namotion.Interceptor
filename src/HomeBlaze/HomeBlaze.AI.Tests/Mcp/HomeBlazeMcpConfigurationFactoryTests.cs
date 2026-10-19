@@ -167,19 +167,6 @@ public class HomeBlazeMcpConfigurationFactoryTests
     }
 
     [Fact]
-    public void WhenAConfigurationIsCreated_ThenBrowseAndSearchDoNotListMetadataSubjects()
-    {
-        // Arrange
-        var (room, _) = HomeBlazeMcpToolProviderTests.CreateTestSetup(isReadOnly: false);
-
-        // Act
-        var configuration = HomeBlazeMcpConfigurationFactory.Create(CreateServices(), () => room, isReadOnly: false, forAgents: false);
-
-        // Assert
-        Assert.Contains(typeof(MetadataSubject), configuration.ExcludeTypes);
-    }
-
-    [Fact]
     public async Task WhenASubjectIsExcludedFromAgents_ThenItsMethodsAreStillCalledByItsPath()
     {
         // Arrange

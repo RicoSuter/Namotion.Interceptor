@@ -1,5 +1,8 @@
 using System.Collections.Immutable;
 using System.Runtime.InteropServices;
+using HomeBlaze.Components.Abstractions.Pages;
+using Namotion.Interceptor;
+using Namotion.Interceptor.Registry;
 
 namespace HomeBlaze.Services;
 
@@ -80,6 +83,23 @@ public static class ChildOrdering
         return ordered;
 
         string GetTitle(Entry<T> entry) => (titles ??= new string?[entries.Count])[entry.Index] ??= getTitle(entry.Child);
+    }
+
+    /// <summary>
+    /// Gets the names of the children of a container, the keys of its
+    /// <see cref="IMetadataContainer.ChildrenPropertyName"/> property, in the order in which they are shown.
+    /// </summary>
+    public static string[] GetShownNames(IInterceptorSubject container)
+    {
+        var children = container.TryGetRegisteredSubject()?.TryGetProperty(IMetadataContainer.ChildrenPropertyName)?.Children ?? [];
+        var childOrder = (container as IMetadataContainer)?.ChildOrder ?? [];
+        return Order(
+                children,
+                childOrder,
+                static child => child.Index?.ToString() ?? string.Empty,
+                static child => child.Subject.GetNavigationTitle(child.Index?.ToString()))
+            .Select(static child => child.Index?.ToString() ?? string.Empty)
+            .ToArray();
     }
 
     private static int GetDefaultRank(string name)

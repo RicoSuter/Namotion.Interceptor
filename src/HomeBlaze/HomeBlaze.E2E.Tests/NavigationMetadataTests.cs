@@ -5,7 +5,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Playwright;
 using Namotion.Interceptor.Testing;
 using NavigationLocation = HomeBlaze.Components.Abstractions.Pages.NavigationLocation;
-using IMetadataSubject = HomeBlaze.Components.Abstractions.Pages.IMetadataSubject;
 
 namespace HomeBlaze.E2E.Tests;
 
@@ -32,11 +31,7 @@ public class NavigationMetadataTests
     }
 
     // The names of the children of the folder in the order in which the pane shows them.
-    private static string[] GetShownChildNames(VirtualFolder folder)
-        => ChildOrdering
-            .Order(folder.Children, folder.ChildOrder, static child => child.Key, static child => child.Value.GetNavigationTitle(child.Key))
-            .Select(static child => child.Key)
-            .ToArray();
+    private static string[] GetShownChildNames(VirtualFolder folder) => ChildOrdering.GetShownNames(folder);
 
     private async Task<(IPage Page, ILocator Pane)> OpenPaneAsync(
         string subjectPath, BrowserNewContextOptions? contextOptions = null)
@@ -364,7 +359,7 @@ public class NavigationMetadataTests
         await Assertions.Expect(pane.Locator("h1")).ToContainTextAsync("Demonstration", new() { Timeout = PageLoadTimeout });
         await Assertions.Expect(page.Locator(".mud-navmenu").GetByRole(AriaRole.Button, new() { Name = "Demonstration" }))
             .ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
-        Assert.Equal("Demonstration", folder.Metadata?.Title);
+        Assert.Equal("Demonstration", folder.Title);
     });
 
     [Fact]
@@ -413,17 +408,5 @@ public class NavigationMetadataTests
         // Assert - one row per child: the metadata of the folder gets no row of its own.
         await Assertions.Expect(pane.Locator(".subject-pane-child-name"))
             .ToHaveCountAsync(folder.Children.Count, new() { Timeout = PageLoadTimeout });
-    }
-
-    [Theory]
-    [InlineData(IMetadataSubject.PropertyName)]
-    [InlineData("HomeBlaze%3AMetadata")]
-    public async Task WhenTheMetadataSubjectIsOpenedByItsUrl_ThenThePaneShowsIt(string segment)
-    {
-        // Act
-        var (_, pane) = await OpenPaneAsync($"Demo/Motor/{segment}");
-
-        // Assert
-        await Assertions.Expect(pane.Locator("h1")).ToContainTextAsync(nameof(MetadataSubject), new() { Timeout = PageLoadTimeout });
     }
 }

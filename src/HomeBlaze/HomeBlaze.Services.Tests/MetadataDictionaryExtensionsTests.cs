@@ -6,9 +6,7 @@ namespace HomeBlaze.Services.Tests;
 
 public class MetadataDictionaryExtensionsTests
 {
-    private static ImmutableDictionary<string, JsonElement> Metadata(string json)
-        => JsonElement.Parse(json).EnumerateObject()
-            .ToImmutableDictionary(property => property.Name, property => property.Value, StringComparer.OrdinalIgnoreCase);
+    private static ImmutableDictionary<string, JsonElement> Metadata(string json) => TestMetadata.Parse(json);
 
     [Fact]
     public void WhenKnownKeysHaveTheirShape_ThenTheyAreReadWithoutRegardToCase()

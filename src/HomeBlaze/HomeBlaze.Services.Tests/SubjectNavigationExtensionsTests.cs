@@ -18,7 +18,7 @@ public class SubjectNavigationExtensionsTests
     {
         // Arrange
         var subject = new NavigationTitledSubject(CreateContext()) { Title = "Motor 1", IconName = "Settings" };
-        TestMetadataSubject.Attach(subject, new SubjectMetadata { NavigationTitle = "Pump", Icon = "Water" });
+        TestMetadata.Set(subject, """{ "navTitle": "Pump", "icon": "Water" }""");
 
         // Act
         var title = subject.GetNavigationTitle("Motor");
@@ -62,7 +62,7 @@ public class SubjectNavigationExtensionsTests
     {
         // Arrange
         var subject = new NavigationTitledSubject(CreateContext());
-        TestMetadataSubject.Attach(subject, new SubjectMetadata { Location = NavigationLocation.AppBar, Alignment = AppBarAlignment.Right });
+        TestMetadata.Set(subject, """{ "location": "AppBar", "alignment": "Right" }""");
 
         // Act
         var location = subject.GetNavigationLocation();
@@ -77,10 +77,8 @@ public class SubjectNavigationExtensionsTests
     public void WhenFolderHasNavigationTitle_ThenItIsTheNavigationTitle()
     {
         // Arrange
-        var folder = new NavigationTestFolder(CreateContext())
-        {
-            Metadata = new FolderMetadata { Title = "All devices", NavigationTitle = "Devices" }
-        };
+        var folder = new NavigationTestFolder(CreateContext()) { Title = "All devices" };
+        TestMetadata.Set(folder, """{ "navTitle": "Devices" }""");
 
         // Act
         var title = folder.GetNavigationTitle("devices");
@@ -101,11 +99,9 @@ public partial class NavigationTitledSubject : ITitleProvider, IIconProvider
 [InterceptorSubject]
 public partial class NavigationTestFolder : IMetadataContainer, ITitleProvider
 {
-    public partial FolderMetadata? Metadata { get; set; }
-
     public partial ImmutableArray<string> ChildOrder { get; set; }
 
-    public string? Title => Metadata?.Title;
+    public partial string? Title { get; set; }
 
     public NavigationTestFolder()
     {

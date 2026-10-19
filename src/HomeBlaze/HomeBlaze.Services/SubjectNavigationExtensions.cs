@@ -12,19 +12,16 @@ public static class SubjectNavigationExtensions
     private const string DefaultIconName = "Article";
 
     /// <summary>
-    /// Gets the navigation title of a subject. Fallback chain: page navigation title, subject metadata, folder
-    /// metadata, <see cref="ITitleProvider"/>, the formatted key, the type name.
+    /// Gets the navigation title of a subject. Fallback chain: page navigation title, <c>navTitle</c> of its metadata,
+    /// <see cref="ITitleProvider"/>, the formatted key, the type name.
     /// </summary>
     public static string GetNavigationTitle(this IInterceptorSubject subject, string? propertyKey = null)
     {
         if (subject is IPage page && !string.IsNullOrEmpty(page.NavigationTitle))
             return page.NavigationTitle;
 
-        if (subject.TryGetSubjectMetadata()?.NavigationTitle is { Length: > 0 } metadataTitle)
+        if (subject.GetMetadata().GetString(MetadataKeys.NavigationTitle) is { } metadataTitle)
             return metadataTitle;
-
-        if (subject is IMetadataContainer { Metadata.NavigationTitle: { Length: > 0 } folderTitle })
-            return folderTitle;
 
         if (subject is ITitleProvider titleProvider && !string.IsNullOrEmpty(titleProvider.Title))
             return titleProvider.Title;
@@ -37,14 +34,14 @@ public static class SubjectNavigationExtensions
 
     /// <summary>
     /// Gets the semantic icon name of a subject in navigation (e.g., "Folder", "Article"), not the MudBlazor icon.
-    /// Fallback chain: page navigation icon, subject metadata, <see cref="IIconProvider"/>, <c>Article</c>.
+    /// Fallback chain: page navigation icon, <c>icon</c> of its metadata, <see cref="IIconProvider"/>, <c>Article</c>.
     /// </summary>
     public static string GetNavigationIconName(this IInterceptorSubject subject)
     {
         if (subject is IPage page && !string.IsNullOrEmpty(page.NavigationIconName))
             return page.NavigationIconName;
 
-        if (subject.TryGetSubjectMetadata()?.Icon is { Length: > 0 } metadataIcon)
+        if (subject.GetMetadata().GetString(MetadataKeys.Icon) is { } metadataIcon)
             return metadataIcon;
 
         if (subject is IIconProvider iconProvider && !string.IsNullOrEmpty(iconProvider.IconName))
@@ -61,7 +58,7 @@ public static class SubjectNavigationExtensions
         if (subject is IPage page)
             return page.PageLocation;
 
-        return subject.TryGetSubjectMetadata()?.Location ?? NavigationLocation.NavBar;
+        return subject.GetMetadata().GetEnum<NavigationLocation>(MetadataKeys.Location) ?? NavigationLocation.NavBar;
     }
 
     /// <summary>
@@ -72,7 +69,7 @@ public static class SubjectNavigationExtensions
         if (subject is IPage page)
             return page.AppBarAlignment;
 
-        return subject.TryGetSubjectMetadata()?.Alignment ?? AppBarAlignment.Left;
+        return subject.GetMetadata().GetEnum<AppBarAlignment>(MetadataKeys.Alignment) ?? AppBarAlignment.Left;
     }
 
     private static string FormatPropertyKey(string key)

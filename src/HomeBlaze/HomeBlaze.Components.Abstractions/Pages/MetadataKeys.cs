@@ -1,8 +1,7 @@
 namespace HomeBlaze.Components.Abstractions.Pages;
 
 /// <summary>
-/// The keys that HomeBlaze reads in a metadata file: the <c>.metadata.json</c> of a folder and the
-/// <c>X.metadata.json</c> beside <c>X.json</c>.
+/// The keys of metadata that HomeBlaze reads, see <see cref="IMetadataStore"/>. Metadata can hold other keys as well.
 /// </summary>
 public static class MetadataKeys
 {

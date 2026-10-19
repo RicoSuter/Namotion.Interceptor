@@ -1,5 +1,6 @@
 using System.Text;
 using HomeBlaze.Services;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
 
 namespace HomeBlaze.Storage.Internal;
@@ -30,6 +31,32 @@ internal static class MetadataPathKey
         }
 
         return builder.ToString();
+    }
+
+    /// <summary>
+    /// Gets the key of a subject inside a stored subject: the key of the path that <see cref="GetPath"/> gives; empty for
+    /// the stored subject itself, and null when the subject cannot be reached from it.
+    /// </summary>
+    public static string? GetKey(RegisteredSubject subject, RegisteredSubject storedSubject)
+        => GetPath(subject, storedSubject) is { } path ? (path.Length == 0 ? string.Empty : Normalize(path)) : null;
+
+    /// <summary>
+    /// Gets the path that the registry writes for a subject inside a stored subject, through the first parent of each
+    /// subject when that way reaches the stored subject, which an entry of the subject is written with; empty for the
+    /// stored subject itself, and null when the subject cannot be reached from it.
+    /// </summary>
+    public static string? GetPath(RegisteredSubject subject, RegisteredSubject storedSubject)
+    {
+        if (ReferenceEquals(subject, storedSubject))
+        {
+            return string.Empty;
+        }
+
+        // Read once, as a detach can change the parents between two reads.
+        var parents = subject.Parents;
+        return parents.Length > 0
+            ? parents[0].Property.TryGetPath(MetadataPaths.PathProvider, storedSubject.Subject, parents[0].Index)
+            : null;
     }
 
     /// <summary>Gets the key of a property of the subject with the key <paramref name="subjectKey"/>, which is empty for the stored subject.</summary>

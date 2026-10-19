@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Text.Json;
+using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Components.Abstractions.Attributes;
 using HomeBlaze.Components.Abstractions.Pages;
@@ -305,8 +306,9 @@ public class NavigationItemResolverTests
         // Arrange
         var shared = CreateFolder(new() { ["Readme.md"] = new NavigationTestPage(_context) });
         var topBarFolder = CreateFolder(new() { ["Shared"] = shared });
-        topBarFolder.TryGetRegisteredSubject()!.AddProperty<IMetadataSubject>(
-            IMetadataSubject.PropertyName, _ => new NavigationTestMetadataSubject(new SubjectMetadata { Location = NavigationLocation.AppBar }));
+        var metadata = JsonElement.Parse("""{ "location": "AppBar" }""").EnumerateObject()
+            .ToImmutableDictionary(property => property.Name, property => property.Value, StringComparer.OrdinalIgnoreCase);
+        topBarFolder.TryGetRegisteredSubject()!.AddProperty(KnownAttributes.Metadata, metadata.GetType(), _ => metadata, null);
 
         var root = CreateFolder(new()
         {
@@ -395,8 +397,6 @@ public partial class NavigationTestFolder : IMetadataContainer
 
     public partial ImmutableArray<string> ChildOrder { get; set; }
 
-    public FolderMetadata? Metadata => null;
-
     public NavigationTestFolder()
     {
         Children = new();
@@ -455,15 +455,4 @@ public partial class NavigationTestHiddenPage
 [SubjectComponent(SubjectComponentType.Page, typeof(NavigationTestHiddenPage))]
 public class NavigationTestHiddenPageComponent
 {
-}
-
-public sealed class NavigationTestMetadataSubject(SubjectMetadata? metadata) : IMetadataSubject
-{
-    public SubjectMetadata? SubjectMetadata => metadata;
-
-    public IInterceptorSubject GetOwner() => throw new NotSupportedException();
-
-    public Task SetMetadataAsync(JsonElement values, CancellationToken cancellationToken) => Task.CompletedTask;
-
-    public Task SetOrderAsync(string[] names, CancellationToken cancellationToken) => Task.CompletedTask;
 }

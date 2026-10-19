@@ -6,6 +6,7 @@ namespace HomeBlaze.Services
 {
     public static class ChildOrdering
     {
+        public static string[] GetShownNames(Namotion.Interceptor.IInterceptorSubject container) { }
         public static System.Collections.Generic.IEnumerable<T> Order<T>(System.Collections.Generic.IEnumerable<T> children, System.Collections.Immutable.ImmutableArray<string> childOrder, System.Func<T, string> getName, System.Func<T, string> getTitle) { }
     }
     public class ConfigurableSubjectSerializer
@@ -133,8 +134,10 @@ namespace HomeBlaze.Services
     }
     public static class SubjectMetadataExtensions
     {
-        public static HomeBlaze.Components.Abstractions.Pages.IMetadataSubject? TryGetMetadataSubject(this Namotion.Interceptor.IInterceptorSubject subject) { }
-        public static HomeBlaze.Components.Abstractions.Pages.SubjectMetadata? TryGetSubjectMetadata(this Namotion.Interceptor.IInterceptorSubject subject) { }
+        public static HomeBlaze.Components.Abstractions.Pages.IMetadataStore? FindMetadataStore(this Namotion.Interceptor.IInterceptorSubject subject) { }
+        public static System.Collections.Immutable.ImmutableDictionary<string, System.Text.Json.JsonElement>? GetMetadata(this Namotion.Interceptor.IInterceptorSubject subject) { }
+        public static System.Collections.Immutable.ImmutableDictionary<string, System.Text.Json.JsonElement>? GetMetadata(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
+        public static bool IsMetadata(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
     }
     public static class SubjectNavigationExtensions
     {

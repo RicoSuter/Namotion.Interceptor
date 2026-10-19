@@ -40,7 +40,7 @@ public class StorageMetadataTests : StorageTestBase
 
         // Assert
         Assert.Equal(["Motor"], storage.Children.Keys);
-        Assert.Null(storage.Children["Motor"].TryGetSubjectMetadata());
+        Assert.Null(storage.Children["Motor"].GetMetadata());
         var warning = Assert.Single(logger.Warnings);
         Assert.Contains("Motor.Metadata.json", warning);
         Assert.Contains("lower case", warning);
@@ -61,7 +61,7 @@ public class StorageMetadataTests : StorageTestBase
         // Assert
         var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
         Assert.Equal(["a.md"], docs.Children.Keys);
-        Assert.Null(docs.Metadata);
+        Assert.Null(docs.GetMetadata());
         var warning = Assert.Single(logger.Warnings);
         Assert.Contains("Docs/.Metadata.json", warning);
     }
@@ -102,6 +102,24 @@ public class StorageMetadataTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenAMetadataFileHasTwoEntriesForOneTarget_ThenAWarningSaysWhichOneApplies()
+    {
+        // Arrange
+        WriteFile("Motor.json", SerializeMotor("Motor 1"));
+        WriteFile("Motor.metadata.json", """{ "$subjects": { "Channels[0]": { "navTitle": "First" }, "Channels/0": { "navTitle": "Second" } } }""");
+        var logger = new RecordingLogger<FluentStorageContainer>();
+        var storage = CreateStorage(logger: logger);
+
+        // Act
+        await storage.ConnectAsync(CancellationToken.None);
+
+        // Assert
+        var warning = Assert.Single(logger.Warnings);
+        Assert.Contains("Motor.metadata.json", warning);
+        Assert.Contains("Channels/0", warning);
+    }
+
+    [Fact]
     public async Task WhenFolderHasMetadataFile_ThenFolderHasItsMetadataAndOrder()
     {
         // Arrange
@@ -114,7 +132,7 @@ public class StorageMetadataTests : StorageTestBase
 
         // Assert
         var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
-        Assert.Equal(new FolderMetadata { Title = "Documentation", NavigationTitle = "Docs", Icon = "MenuBook" }, docs.Metadata);
+        Assert.Equal("Docs", docs.GetMetadata().GetString(MetadataKeys.NavigationTitle));
         Assert.Equal("Documentation", docs.Title);
         Assert.Equal("MenuBook", docs.IconName);
         Assert.Equal(["b.md", "a.md"], docs.ChildOrder.ToArray());
@@ -131,26 +149,26 @@ public class StorageMetadataTests : StorageTestBase
 
         // Assert
         var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
-        Assert.Null(docs.Metadata);
+        Assert.Null(docs.GetMetadata());
         Assert.Equal("Docs", docs.Title);
         Assert.Equal("Folder", docs.IconName);
         Assert.Empty(docs.ChildOrder);
     }
 
     [Fact]
-    public async Task WhenRootHasMetadataFile_ThenRootHasItsOrderAndNoMetadata()
+    public async Task WhenRootHasMetadataFile_ThenRootHasItsMetadataAndOrder()
     {
         // Arrange
         WriteFile("a.md");
         WriteFile("b.md");
-        WriteFile(".metadata.json", """{ "title": "Ignored", "order": ["b.md"] }""");
+        WriteFile(".metadata.json", """{ "color": "red", "order": ["b.md"] }""");
 
         // Act
         var storage = await ConnectAsync();
 
         // Assert
         Assert.Equal(["b.md"], storage.ChildOrder.ToArray());
-        Assert.Null(storage.Metadata);
+        Assert.Equal("red", storage.GetMetadata().GetString("color"));
     }
 
     [Fact]
@@ -183,7 +201,7 @@ public class StorageMetadataTests : StorageTestBase
         await storage.ReconcileAsync(Named("Docs/.metadata.json"));
 
         // Assert
-        Assert.Null(docs.Metadata);
+        Assert.Null(docs.GetMetadata());
         Assert.Empty(docs.ChildOrder);
     }
 
@@ -199,7 +217,7 @@ public class StorageMetadataTests : StorageTestBase
 
         // Assert
         var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
-        Assert.Null(docs.Metadata);
+        Assert.Null(docs.GetMetadata());
         Assert.Equal(["a.md"], docs.Children.Keys);
     }
 
@@ -214,9 +232,11 @@ public class StorageMetadataTests : StorageTestBase
         var storage = await ConnectAsync();
 
         // Assert
-        Assert.Equal(
-            new SubjectMetadata { NavigationTitle = "Pump", Icon = "Water", Location = NavigationLocation.AppBar, Alignment = AppBarAlignment.Right },
-            storage.Children["Motor"].TryGetSubjectMetadata());
+        var motor = storage.Children["Motor"];
+        Assert.Equal("Pump", motor.GetNavigationTitle());
+        Assert.Equal("Water", motor.GetNavigationIconName());
+        Assert.Equal(NavigationLocation.AppBar, motor.GetNavigationLocation());
+        Assert.Equal(AppBarAlignment.Right, motor.GetAppBarAlignment());
     }
 
     [Fact]
@@ -231,13 +251,13 @@ public class StorageMetadataTests : StorageTestBase
         // Act
         WriteFile("Motor.metadata.json", """{ "navTitle": "Main pump" }""");
         await storage.ReconcileAsync(Named("Motor.metadata.json"));
-        var changed = motor.TryGetSubjectMetadata();
+        var changed = motor.GetMetadata();
         File.Delete(GetFullPath("Motor.metadata.json"));
         await storage.ReconcileAsync(Named("Motor.metadata.json"));
 
         // Assert
-        Assert.Equal("Main pump", changed?.NavigationTitle);
-        Assert.Null(motor.TryGetSubjectMetadata());
+        Assert.Equal("Main pump", changed.GetString(MetadataKeys.NavigationTitle));
+        Assert.Null(motor.GetMetadata());
     }
 
     [Fact]
@@ -249,12 +269,12 @@ public class StorageMetadataTests : StorageTestBase
         WriteFile("B/x.md");
         var storage = await ConnectAsync();
         var motor = Assert.IsType<VirtualFolder>(storage.Children["A"]).Children["Motor"];
-        Assert.Equal("Pump", motor.TryGetSubjectMetadata()?.NavigationTitle);
+        Assert.Equal("Pump", motor.GetMetadata().GetString(MetadataKeys.NavigationTitle));
 
         // Act
         File.Move(GetFullPath("A/Motor.json"), GetFullPath("B/Motor.json"));
         await storage.ReconcileAsync(Named("A/Motor.json", "B/Motor.json"));
-        var metadataAfterMove = motor.TryGetSubjectMetadata();
+        var metadataAfterMove = motor.GetMetadata();
         WriteFile("B/Motor.metadata.json", """{ "navTitle": "Moved" }""");
         await storage.ReconcileAsync(Named("B/Motor.metadata.json"));
 
@@ -262,7 +282,7 @@ public class StorageMetadataTests : StorageTestBase
         var b = Assert.IsType<VirtualFolder>(storage.Children["B"]);
         Assert.Same(motor, b.Children["Motor"]);
         Assert.Null(metadataAfterMove);
-        Assert.Equal("Moved", motor.TryGetSubjectMetadata()?.NavigationTitle);
+        Assert.Equal("Moved", motor.GetMetadata().GetString(MetadataKeys.NavigationTitle));
     }
 
     [Fact]
@@ -292,7 +312,7 @@ public class StorageMetadataTests : StorageTestBase
 
         // Assert
         var file = Assert.IsType<JsonFile>(storage.Children["Notes.json"]);
-        Assert.Equal("Pump", file.TryGetSubjectMetadata()?.NavigationTitle);
+        Assert.Equal("Pump", file.GetMetadata().GetString(MetadataKeys.NavigationTitle));
     }
 
     [Fact]
@@ -308,6 +328,6 @@ public class StorageMetadataTests : StorageTestBase
         // Assert
         var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
         Assert.Equal(["a.md"], docs.Children.Keys);
-        Assert.Null(docs.Metadata);
+        Assert.Null(docs.GetMetadata());
     }
 }

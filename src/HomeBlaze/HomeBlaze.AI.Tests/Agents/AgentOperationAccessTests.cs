@@ -2,14 +2,12 @@ using System.Text.Json;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.AI.Agents;
 using HomeBlaze.AI.Mcp;
-using HomeBlaze.Components.Abstractions.Pages;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Lifecycle;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor;
-using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Mcp;
 using Namotion.Interceptor.Mcp.Tools;
 using Namotion.Interceptor.Registry;
@@ -37,28 +35,6 @@ public class AgentOperationAccessTests
         // Assert
         Assert.Equal("Agents cannot run operations of agents.", result.GetProperty("error").GetString());
         Assert.Equal(0, agent.ResetCount);
-    }
-
-    [Fact]
-    public async Task WhenAnAgentCallsAnOperationOfTheMetadataOfAnAgent_ThenItIsRefusedAndItsQueriesRun()
-    {
-        // Arrange
-        var (root, agent, services) = CreateGraph();
-        var metadataSubject = new FakeMetadataSubject(agent);
-        agent.TryGetRegisteredSubject()!.AddProperty<IMetadataSubject>(IMetadataSubject.PropertyName, _ => metadataSubject);
-        var tools = CreateTools(services, root, forAgents: true);
-
-        // Act
-        var operationResult = JsonSerializer.SerializeToElement(await tools["invoke_operation"].Handler(
-            JsonSerializer.SerializeToElement(new { path = "/Agent/HomeBlaze:Metadata", method = "SetOrder", parameters = new { names = new[] { "a" } } }),
-            CancellationToken.None));
-        var queryResult = JsonSerializer.SerializeToElement(await tools["invoke_query"].Handler(
-            JsonSerializer.SerializeToElement(new { path = "/Agent/HomeBlaze:Metadata", method = "GetOrder" }), CancellationToken.None));
-
-        // Assert
-        Assert.Equal("Agents cannot run operations of agents.", operationResult.GetProperty("error").GetString());
-        Assert.Equal(0, metadataSubject.GetSetOrderCount());
-        Assert.True(queryResult.GetProperty("success").GetBoolean());
     }
 
     [Fact]
@@ -104,35 +80,5 @@ public class AgentOperationAccessTests
     {
         var configuration = HomeBlazeMcpConfigurationFactory.Create(services, () => root, isReadOnly: false, forAgents);
         return new McpToolFactory(root, configuration).CreateTools().ToDictionary(tool => tool.Name);
-    }
-}
-
-[InterceptorSubject]
-public partial class FakeMetadataSubject : IMetadataSubject
-{
-    private readonly IInterceptorSubject _owner;
-    private int _setOrderCount;
-
-    public FakeMetadataSubject(IInterceptorSubject owner)
-    {
-        _owner = owner;
-    }
-
-    public SubjectMetadata? SubjectMetadata => null;
-
-    public int GetSetOrderCount() => _setOrderCount;
-
-    public IInterceptorSubject GetOwner() => _owner;
-
-    public Task SetMetadataAsync(JsonElement values, CancellationToken cancellationToken) => Task.CompletedTask;
-
-    [Query]
-    public Task<string[]> GetOrderAsync(CancellationToken cancellationToken) => Task.FromResult<string[]>([]);
-
-    [Operation]
-    public Task SetOrderAsync(string[] names, CancellationToken cancellationToken)
-    {
-        _setOrderCount++;
-        return Task.CompletedTask;
     }
 }

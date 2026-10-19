@@ -1,24 +1,60 @@
-using System.Text.Json;
+using HomeBlaze.Abstractions;
 using HomeBlaze.Components.Abstractions.Pages;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Tracking;
 
 namespace HomeBlaze.Services.Tests;
 
 public class SubjectMetadataExtensionsTests
 {
     [Fact]
-    public void WhenSubjectIsNotRegistered_ThenItHasNoMetadataSubject()
+    public void WhenSubjectIsNotRegistered_ThenItHasNoMetadata()
     {
         // Arrange
         var subject = new MetadataTestSubject();
 
         // Act
-        var metadataSubject = subject.TryGetMetadataSubject();
+        var metadata = subject.GetMetadata();
 
         // Assert
-        Assert.Null(metadataSubject);
+        Assert.Null(metadata);
+    }
+
+    [Fact]
+    public void WhenSubjectAndPropertyHaveMetadata_ThenTheirValuesAreRead()
+    {
+        // Arrange
+        var subject = new MetadataTestSubject(InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry());
+        TestMetadata.Set(subject, """{ "navTitle": "Pump" }""");
+        var name = subject.TryGetRegisteredSubject()!.TryGetProperty(nameof(MetadataTestSubject.Name))!;
+        var values = TestMetadata.Parse("""{ "comment": "set by hand" }""");
+        name.AddAttribute(KnownAttributes.Metadata, values.GetType(), _ => values, null);
+
+        // Act
+        var subjectMetadata = subject.GetMetadata();
+        var propertyMetadata = name.GetMetadata();
+
+        // Assert
+        Assert.Equal("Pump", subjectMetadata.GetString(MetadataKeys.NavigationTitle));
+        Assert.Equal("set by hand", propertyMetadata.GetString("comment"));
+    }
+
+    [Fact]
+    public void WhenPropertiesAreChecked_ThenOnlyTheMetadataOfTheSubjectAndOfAPropertyIsMetadata()
+    {
+        // Arrange
+        var subject = new MetadataTestSubject(InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry());
+        TestMetadata.Set(subject, """{ "navTitle": "Pump" }""");
+        var registered = subject.TryGetRegisteredSubject()!;
+        var name = registered.TryGetProperty(nameof(MetadataTestSubject.Name))!;
+        var attribute = name.AddAttribute(KnownAttributes.Metadata, typeof(object), _ => null, null);
+
+        // Act & Assert
+        Assert.True(registered.TryGetProperty(KnownAttributes.Metadata)!.IsMetadata());
+        Assert.True(attribute.IsMetadata());
+        Assert.False(name.IsMetadata());
     }
 }
 
@@ -26,22 +62,4 @@ public class SubjectMetadataExtensionsTests
 public partial class MetadataTestSubject
 {
     public partial string? Name { get; set; }
-}
-
-/// <summary>A metadata subject with fixed metadata, in the property where a storage puts its own.</summary>
-public sealed class TestMetadataSubject(SubjectMetadata? metadata) : IMetadataSubject
-{
-    public SubjectMetadata? SubjectMetadata => metadata;
-
-    public IInterceptorSubject GetOwner() => throw new NotSupportedException();
-
-    public Task SetMetadataAsync(JsonElement values, CancellationToken cancellationToken) => Task.CompletedTask;
-
-    public Task SetOrderAsync(string[] names, CancellationToken cancellationToken) => Task.CompletedTask;
-
-    public static void Attach(IInterceptorSubject subject, SubjectMetadata? metadata)
-    {
-        var metadataSubject = new TestMetadataSubject(metadata);
-        subject.TryGetRegisteredSubject()!.AddProperty<IMetadataSubject>(IMetadataSubject.PropertyName, _ => metadataSubject);
-    }
 }

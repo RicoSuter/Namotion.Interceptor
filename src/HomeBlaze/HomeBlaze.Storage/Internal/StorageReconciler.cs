@@ -312,14 +312,12 @@ internal sealed class StorageReconciler
     }
 
     /// <summary>
-    /// Gives the root, every placed folder and every placed subject of a JSON file its metadata subject, also without a
-    /// metadata file, so that agents can create one. Then passes the content of the metadata files on: the order of
-    /// the root, the metadata and the order of every folder, and the metadata beside the JSON file of every subject.
-    /// A file that could not be read counts as none.
+    /// Passes the content of the metadata files on to what they describe: the root, every placed folder, and the
+    /// subject of every placed JSON file with what is inside it, which only when the file or the subject changed since
+    /// it was applied. A file that could not be read counts as none.
     /// </summary>
     private void ApplyMetadata()
     {
-        MetadataSubject.Ensure(_storage);
         _storage.ApplyMetadata(FindMetadata(StorageMetadataPath.GetFolderFilePath(string.Empty)));
         foreach (var entry in _index.Entries)
         {
@@ -330,32 +328,33 @@ internal sealed class StorageReconciler
 
             if (entry.Subject is VirtualFolder folder)
             {
-                MetadataSubject.Ensure(folder);
                 folder.ApplyMetadata(FindMetadata(StorageMetadataPath.GetFolderFilePath(entry.Path)));
             }
-            else if (entry.HasSidecar && MetadataSubject.Ensure(entry.Subject!) is { } metadataSubject)
+            else if (entry.HasSidecar)
             {
-                var metadata = FindMetadata(StorageMetadataPath.GetSubjectFilePath(entry.Path))?.SubjectMetadata;
-                if (metadata != metadataSubject.SubjectMetadata)
+                var file = FindMetadata(StorageMetadataPath.GetSubjectFilePath(entry.Path)) ?? StorageMetadataFile.Empty;
+                if (!ReferenceEquals(entry.AppliedMetadata, file))
                 {
-                    metadataSubject.SubjectMetadata = metadata;
+                    _storage.MetadataApplier.Apply(entry.Subject!, file);
+                    entry.AppliedMetadata = file;
                 }
             }
         }
     }
 
     // What the index holds for the metadata file at the path; null without one, and for one that could not be read.
-    private StorageMetadataDocument? FindMetadata(string path)
+    private StorageMetadataFile? FindMetadata(string path)
         => _index.TryGet(path, out var entry) ? entry.Metadata : null;
 
     /// <summary>
-    /// Reads and parses a metadata file from the storage. An empty document for a file that does not exist.
+    /// Reads a metadata file from the storage, and checks that it can be read and written back. Null for a file that
+    /// does not exist.
     /// </summary>
     /// <exception cref="InvalidOperationException">
     /// The file cannot be read as metadata or cannot be written back, the path is a folder, its folder is gone, or the
     /// index holds the file in another case under a name that is not a metadata file.
     /// </exception>
-    public async Task<StorageMetadataDocument> ReadMetadataFileAsync(string path, CancellationToken cancellationToken)
+    public async Task<byte[]?> ReadMetadataFileAsync(string path, CancellationToken cancellationToken)
     {
         if (_index.TryGet(path, out var entry) && entry.IsFolder)
         {
@@ -391,11 +390,11 @@ internal sealed class StorageReconciler
             // The disk client reads a directory as a file that does not exist, and a write to it fails as access denied.
             return await IsDirectoryOnDiskAsync(path, cancellationToken)
                 ? throw CreateUnreadableException(path)
-                : new StorageMetadataDocument();
+                : null;
         }
 
-        return StorageMetadataDocument.TryParse(content, out var document, out _) && CanBeWritten(document)
-            ? document
+        return StorageMetadataFile.TryParse(content, out _, out _) && StorageMetadataWriter.CanBeWritten(content)
+            ? content
             : throw CreateUnreadableException(path);
     }
 
@@ -436,21 +435,6 @@ internal sealed class StorageReconciler
 
         var blobs = await _client.ListAsync(new ListOptions { FolderPath = StoragePath.GetParent(path) }, cancellationToken);
         return blobs.Any(blob => blob.IsFolder && StoragePath.FromBlob(blob) == path);
-    }
-
-    // A value that cannot be written, such as a string with a lone surrogate, is found only by writing it. A pass does
-    // not look for it, so that such a file still applies.
-    private static bool CanBeWritten(StorageMetadataDocument document)
-    {
-        try
-        {
-            _ = document.Serialize();
-            return true;
-        }
-        catch (InvalidOperationException)
-        {
-            return false;
-        }
     }
 
     /// <summary>
@@ -700,15 +684,25 @@ internal sealed class StorageReconciler
             return;
         }
 
-        if (!StorageMetadataDocument.TryParse(content, out var metadata, out var error))
+        if (!StorageMetadataFile.TryParse(content, out var metadata, out var error))
         {
             _logger?.LogWarning(error, "Ignoring a metadata file that is not valid: {Path}", listed.Path);
         }
-        else if (metadata.HasKey("$type"))
+        else
         {
-            _logger?.LogWarning(
-                "The metadata file {Path} looks like a subject file; files named *.metadata.json are metadata files and are not loaded as subjects",
-                listed.Path);
+            if (metadata.HoldsSubjectType)
+            {
+                _logger?.LogWarning(
+                    "The metadata file {Path} looks like a subject file; files named *.metadata.json are metadata files and are not loaded as subjects",
+                    listed.Path);
+            }
+
+            foreach (var duplicatePath in metadata.DuplicatePaths)
+            {
+                _logger?.LogWarning(
+                    "The metadata file {Path} has another entry for the target of {Entry} before it; that one applies",
+                    listed.Path, duplicatePath);
+            }
         }
 
         // Replaced rather than changed: the index then marks the tree as unapplied, and Apply passes the metadata on.

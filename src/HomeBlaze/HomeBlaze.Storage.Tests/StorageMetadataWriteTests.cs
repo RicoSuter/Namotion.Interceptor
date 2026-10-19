@@ -24,12 +24,12 @@ public class StorageMetadataWriteTests : StorageTestBase
         var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
 
         // Act
-        await storage.SetMetadataAsync(docs, Values("""{ "title": "Documentation", "icon": "MenuBook" }"""), CancellationToken.None);
+        await storage.SetMetadataAsync(docs, null, Values("""{ "title": "Documentation", "icon": "MenuBook" }"""), CancellationToken.None);
 
         // Assert
         Assert.Equal("Documentation", docs.Title);
         Assert.Equal("MenuBook", docs.IconName);
-        Assert.Equal(new FolderMetadata { Title = "Documentation", Icon = "MenuBook" }, ReadMetadataFile("Docs/.metadata.json").FolderMetadata);
+        Assert.Equal("MenuBook", ReadMetadataFile("Docs/.metadata.json").Own.GetString(MetadataKeys.Icon));
     }
 
     [Fact]
@@ -43,7 +43,7 @@ public class StorageMetadataWriteTests : StorageTestBase
         WriteFile("Docs/.metadata.json", """{ "title": "Docs", "color": "red" }""");
 
         // Act
-        await storage.SetMetadataAsync(docs, Values("""{ "icon": "MenuBook" }"""), CancellationToken.None);
+        await storage.SetMetadataAsync(docs, null, Values("""{ "icon": "MenuBook" }"""), CancellationToken.None);
 
         // Assert
         Assert.Equal("{\n  \"title\": \"Docs\",\n  \"color\": \"red\",\n  \"icon\": \"MenuBook\"\n}\n", ReadText("Docs/.metadata.json"));
@@ -59,10 +59,11 @@ public class StorageMetadataWriteTests : StorageTestBase
         WriteFile("Docs/.metadata.json", """{ "navTitle": "Docs" }""");
 
         // Act
-        await storage.SetMetadataAsync(docs, Values("""{ "title": "Documentation" }"""), CancellationToken.None);
+        await storage.SetMetadataAsync(docs, null, Values("""{ "title": "Documentation" }"""), CancellationToken.None);
 
         // Assert
-        Assert.Equal(new FolderMetadata { Title = "Documentation", NavigationTitle = "Docs" }, docs.Metadata);
+        Assert.Equal("Documentation", docs.Title);
+        Assert.Equal("Docs", docs.GetNavigationTitle());
         Assert.Equal("{\n  \"navTitle\": \"Docs\",\n  \"title\": \"Documentation\"\n}\n", ReadText("Docs/.metadata.json"));
     }
 
@@ -75,13 +76,14 @@ public class StorageMetadataWriteTests : StorageTestBase
         var motor = Assert.IsType<VirtualFolder>(storage.Children["Devices"]).Children["Motor"];
 
         // Act
-        await storage.SetMetadataAsync(motor, Values("""{ "navTitle": "Pump", "icon": "Water" }"""), CancellationToken.None);
-        var written = motor.TryGetSubjectMetadata();
+        await storage.SetMetadataAsync(motor, null, Values("""{ "navTitle": "Pump", "icon": "Water" }"""), CancellationToken.None);
+        var written = motor.GetMetadata();
         await storage.ReconcileAsync(Named("Devices/Motor.metadata.json"));
 
         // Assert
-        Assert.Equal(new SubjectMetadata { NavigationTitle = "Pump", Icon = "Water" }, written);
-        Assert.Same(written, motor.TryGetSubjectMetadata());
+        Assert.Equal("Pump", written.GetString(MetadataKeys.NavigationTitle));
+        Assert.Equal("Water", written.GetString(MetadataKeys.Icon));
+        Assert.Same(written, motor.GetMetadata());
     }
 
     [Fact]
@@ -93,7 +95,7 @@ public class StorageMetadataWriteTests : StorageTestBase
 
         // Act & Assert
         await Assert.ThrowsAsync<StorageRefusedException>(() =>
-            storage.SetMetadataAsync(storage.Children["Readme.md"], Values("""{ "navTitle": "Home" }"""), CancellationToken.None));
+            storage.SetMetadataAsync(storage.Children["Readme.md"], null, Values("""{ "navTitle": "Home" }"""), CancellationToken.None));
     }
 
     [Fact]
@@ -105,11 +107,11 @@ public class StorageMetadataWriteTests : StorageTestBase
         var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
 
         // Act
-        await storage.SetMetadataAsync(docs, Values("""{ "title": null }"""), CancellationToken.None);
+        await storage.SetMetadataAsync(docs, null, Values("""{ "title": null }"""), CancellationToken.None);
 
         // Assert
         Assert.False(File.Exists(GetFullPath("Docs/.metadata.json")));
-        Assert.Null(docs.Metadata);
+        Assert.Null(docs.GetMetadata());
         Assert.Equal("Docs", docs.Title);
     }
 
@@ -125,12 +127,11 @@ public class StorageMetadataWriteTests : StorageTestBase
 
         // Act & Assert
         await Assert.ThrowsAsync<StorageRefusedException>(() =>
-            storage.SetMetadataAsync(docs, Values("""{ "title": "Documentation" }"""), CancellationToken.None));
+            storage.SetMetadataAsync(docs, null, Values("""{ "title": "Documentation" }"""), CancellationToken.None));
         Assert.False(Directory.Exists(GetFullPath("Docs")));
     }
 
     [Theory]
-    [InlineData("get")]
     [InlineData("set")]
     [InlineData("order")]
     [InlineData("subject")]
@@ -145,10 +146,9 @@ public class StorageMetadataWriteTests : StorageTestBase
         Directory.Delete(GetFullPath("Docs"), recursive: true);
         Func<Task> act = call switch
         {
-            "get" => () => storage.GetMetadataAsync(docs, CancellationToken.None),
-            "set" => () => storage.SetMetadataAsync(docs, Values("""{ "title": "Documentation" }"""), CancellationToken.None),
-            "order" => () => storage.SetChildOrderAsync(docs, ["a.md"], CancellationToken.None),
-            _ => () => storage.SetMetadataAsync(motor, Values("""{ "navTitle": "Pump" }"""), CancellationToken.None)
+            "set" => () => storage.SetMetadataAsync(docs, null, Values("""{ "title": "Documentation" }"""), CancellationToken.None),
+            "order" => () => MetadataStoreExtensions.SetOrderAsync(docs, ["a.md"], CancellationToken.None),
+            _ => () => storage.SetMetadataAsync(motor, null, Values("""{ "navTitle": "Pump" }"""), CancellationToken.None)
         };
 
         // Act & Assert
@@ -167,7 +167,7 @@ public class StorageMetadataWriteTests : StorageTestBase
 
         // Act
         var exception = await Assert.ThrowsAsync<StorageRefusedException>(() =>
-            storage.SetMetadataAsync(docs, Values("""{ "title": "Documentation" }"""), CancellationToken.None));
+            storage.SetMetadataAsync(docs, null, Values("""{ "title": "Documentation" }"""), CancellationToken.None));
 
         // Assert
         Assert.Contains("could not be read", exception.Message);
@@ -190,7 +190,7 @@ public class StorageMetadataWriteTests : StorageTestBase
 
         // Act
         var exception = await Assert.ThrowsAsync<StorageRefusedException>(() =>
-            storage.SetMetadataAsync(owner, Values("""{ "icon": "Water" }"""), CancellationToken.None));
+            storage.SetMetadataAsync(owner, null, Values("""{ "icon": "Water" }"""), CancellationToken.None));
 
         // Assert
         Assert.Contains($"'{actualPath}'", exception.Message);
@@ -212,16 +212,16 @@ public class StorageMetadataWriteTests : StorageTestBase
         var lower = docs.Children["motor"];
 
         // Act
-        var upperRead = await storage.GetMetadataAsync(upper, CancellationToken.None);
-        var lowerRead = await storage.GetMetadataAsync(lower, CancellationToken.None);
-        await storage.SetMetadataAsync(upper, Values("""{ "icon": "Water" }"""), CancellationToken.None);
-        await storage.SetMetadataAsync(lower, Values("""{ "icon": "Air" }"""), CancellationToken.None);
+        var upperRead = upper.GetNavigationTitle();
+        var lowerRead = lower.GetNavigationTitle();
+        await storage.SetMetadataAsync(upper, null, Values("""{ "icon": "Water" }"""), CancellationToken.None);
+        await storage.SetMetadataAsync(lower, null, Values("""{ "icon": "Air" }"""), CancellationToken.None);
 
         // Assert
-        Assert.Equal("Upper", upperRead.GetProperty("navTitle").GetString());
-        Assert.Equal("Lower", lowerRead.GetProperty("navTitle").GetString());
-        Assert.Equal(new SubjectMetadata { NavigationTitle = "Upper", Icon = "Water" }, ReadMetadataFile("Docs/Motor.metadata.json").SubjectMetadata);
-        Assert.Equal(new SubjectMetadata { NavigationTitle = "Lower", Icon = "Air" }, ReadMetadataFile("Docs/motor.metadata.json").SubjectMetadata);
+        Assert.Equal("Upper", upperRead);
+        Assert.Equal("Lower", lowerRead);
+        Assert.Equal("{\n  \"navTitle\": \"Upper\",\n  \"icon\": \"Water\"\n}\n", ReadText("Docs/Motor.metadata.json"));
+        Assert.Equal("{\n  \"navTitle\": \"Lower\",\n  \"icon\": \"Air\"\n}\n", ReadText("Docs/motor.metadata.json"));
     }
 
     [Fact]
@@ -238,16 +238,16 @@ public class StorageMetadataWriteTests : StorageTestBase
         var lower = docs.Children["motor"];
 
         // Act
-        var upperRead = await storage.GetMetadataAsync(upper, CancellationToken.None);
-        var lowerRead = await storage.GetMetadataAsync(lower, CancellationToken.None);
-        await storage.SetMetadataAsync(upper, Values("""{ "icon": "Water" }"""), CancellationToken.None);
-        await storage.SetMetadataAsync(lower, Values("""{ "icon": "Air" }"""), CancellationToken.None);
+        var upperRead = upper.GetNavigationTitle();
+        var lowerRead = lower.GetNavigationTitle();
+        await storage.SetMetadataAsync(upper, null, Values("""{ "icon": "Water" }"""), CancellationToken.None);
+        await storage.SetMetadataAsync(lower, null, Values("""{ "icon": "Air" }"""), CancellationToken.None);
 
         // Assert
-        Assert.Equal("Upper", upperRead.GetProperty("navTitle").GetString());
-        Assert.Equal("Lower", lowerRead.GetProperty("navTitle").GetString());
-        Assert.Equal(new SubjectMetadata { NavigationTitle = "Upper", Icon = "Water" }, ReadMetadataFile("Docs/Motor.metadata.json").SubjectMetadata);
-        Assert.Equal(new SubjectMetadata { NavigationTitle = "Lower", Icon = "Air" }, ReadMetadataFile("Docs/motor.metadata.json").SubjectMetadata);
+        Assert.Equal("Upper", upperRead);
+        Assert.Equal("Lower", lowerRead);
+        Assert.Equal("{\n  \"navTitle\": \"Upper\",\n  \"icon\": \"Water\"\n}\n", ReadText("Docs/Motor.metadata.json"));
+        Assert.Equal("{\n  \"navTitle\": \"Lower\",\n  \"icon\": \"Air\"\n}\n", ReadText("Docs/motor.metadata.json"));
     }
 
     [Fact]
@@ -263,8 +263,8 @@ public class StorageMetadataWriteTests : StorageTestBase
         var lower = Assert.IsType<VirtualFolder>(storage.Children["docs"]);
 
         // Act
-        await storage.SetMetadataAsync(upper, Values("""{ "icon": "Water" }"""), CancellationToken.None);
-        await storage.SetMetadataAsync(lower, Values("""{ "icon": "Air" }"""), CancellationToken.None);
+        await storage.SetMetadataAsync(upper, null, Values("""{ "icon": "Water" }"""), CancellationToken.None);
+        await storage.SetMetadataAsync(lower, null, Values("""{ "icon": "Air" }"""), CancellationToken.None);
 
         // Assert
         Assert.Contains("\"Upper\"", ReadText("Docs/.metadata.json"));
@@ -286,12 +286,12 @@ public class StorageMetadataWriteTests : StorageTestBase
         var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
 
         // Act
-        await storage.SetChildOrderAsync(docs, ["b.md", "d.md"], CancellationToken.None);
+        await MetadataStoreExtensions.SetOrderAsync(docs, ["b.md", "d.md"], CancellationToken.None);
 
         // Assert
         string[] expectedOrder = ["b.md", "d.md", "c.md", "a.md"];
         Assert.Equal(expectedOrder, docs.ChildOrder.ToArray());
-        Assert.Equal(expectedOrder, await storage.GetChildOrderAsync(docs, CancellationToken.None));
+        Assert.Equal(expectedOrder, ChildOrdering.GetShownNames(docs));
         Assert.Contains("\"color\": \"red\"", ReadText("Docs/.metadata.json"));
     }
 
@@ -305,16 +305,16 @@ public class StorageMetadataWriteTests : StorageTestBase
         var storage = await ConnectAsync();
 
         // Act
-        await storage.SetChildOrderAsync(storage, ["c.md"], CancellationToken.None);
+        await MetadataStoreExtensions.SetOrderAsync(storage, ["c.md"], CancellationToken.None);
 
         // Assert
         string[] expectedOrder = ["c.md", "a.md", "b.md"];
         Assert.Equal(expectedOrder, storage.ChildOrder.ToArray());
-        Assert.Equal(expectedOrder, ReadMetadataFile(".metadata.json").ChildOrder.ToArray());
+        Assert.Equal(expectedOrder, ReadMetadataFile(".metadata.json").Own.GetStringArray(MetadataKeys.Order).ToArray());
     }
 
     [Fact]
-    public async Task WhenTheOrderWasChangedByHandSinceThePass_ThenTheOtherChildrenFollowTheChangedOrder()
+    public async Task WhenTheOrderWasChangedByHandSinceThePass_ThenTheOtherChildrenFollowTheShownOrder()
     {
         // Arrange
         WriteFile("a.md");
@@ -325,10 +325,10 @@ public class StorageMetadataWriteTests : StorageTestBase
         WriteFile(".metadata.json", """{ "order": ["c.md", "b.md", "a.md"] }""");
 
         // Act
-        await storage.SetChildOrderAsync(storage, ["b.md"], CancellationToken.None);
+        await MetadataStoreExtensions.SetOrderAsync(storage, ["b.md"], CancellationToken.None);
 
         // Assert
-        Assert.Equal(["b.md", "c.md", "a.md"], storage.ChildOrder.ToArray());
+        Assert.Equal(["b.md", "a.md", "c.md"], storage.ChildOrder.ToArray());
     }
 
     [Fact]
@@ -342,7 +342,7 @@ public class StorageMetadataWriteTests : StorageTestBase
 
         // Act
         var exception = await Assert.ThrowsAsync<ArgumentException>(() =>
-            storage.SetChildOrderAsync(docs, ["b.md", "gone.md"], CancellationToken.None));
+            MetadataStoreExtensions.SetOrderAsync(docs, ["b.md", "gone.md"], CancellationToken.None));
 
         // Assert
         Assert.Contains("'gone.md'", exception.Message);
@@ -362,7 +362,7 @@ public class StorageMetadataWriteTests : StorageTestBase
 
         // Act
         var exception = await Assert.ThrowsAsync<ArgumentException>(() =>
-            storage.SetChildOrderAsync(docs, names, CancellationToken.None));
+            MetadataStoreExtensions.SetOrderAsync(docs, names, CancellationToken.None));
 
         // Assert
         Assert.Contains($"'09{new string('x', 62)}…'", exception.Message);
@@ -382,7 +382,7 @@ public class StorageMetadataWriteTests : StorageTestBase
 
         // Act
         var exception = await Assert.ThrowsAsync<ArgumentException>(() =>
-            storage.SetChildOrderAsync(docs, ["b.md", "a.md", "b.md"], CancellationToken.None));
+            MetadataStoreExtensions.SetOrderAsync(docs, ["b.md", "a.md", "b.md"], CancellationToken.None));
 
         // Assert
         Assert.Contains("'b.md'", exception.Message);
@@ -403,8 +403,8 @@ public class StorageMetadataWriteTests : StorageTestBase
         var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
 
         // Act
-        var folderOrder = await storage.GetChildOrderAsync(docs, CancellationToken.None);
-        var rootOrder = await storage.GetChildOrderAsync(storage, CancellationToken.None);
+        var folderOrder = ChildOrdering.GetShownNames(docs);
+        var rootOrder = ChildOrdering.GetShownNames(storage);
 
         // Assert
         Assert.Equal(["c.md", "a.md", "b.md"], folderOrder);
@@ -525,7 +525,7 @@ public class StorageMetadataWriteTests : StorageTestBase
         await Assert.ThrowsAsync<IOException>(() => storage.DeleteSubjectAsync(motor, CancellationToken.None));
 
         // Assert
-        Assert.Null(motor.TryGetSubjectMetadata());
+        Assert.Null(motor.GetMetadata());
     }
 
     [Fact]

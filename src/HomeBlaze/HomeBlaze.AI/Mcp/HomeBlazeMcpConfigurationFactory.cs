@@ -2,9 +2,7 @@ using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.AI.Agents;
-using HomeBlaze.Components.Abstractions.Pages;
 using HomeBlaze.Services;
-using HomeBlaze.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
@@ -22,9 +20,7 @@ internal static class HomeBlazeMcpConfigurationFactory
     private const string PathPrefix = "/";
 
     private static readonly Func<RegisteredSubject, MethodMetadata, string?> RefuseAgentOperation =
-        (subject, _) => subject.Subject is LlmAgentBase || (subject.Subject as IMetadataSubject)?.GetOwner() is LlmAgentBase
-            ? "Agents cannot run operations of agents."
-            : null;
+        (subject, _) => subject.Subject is LlmAgentBase ? "Agents cannot run operations of agents." : null;
 
     private static readonly Func<RegisteredSubjectProperty, string?> RefuseConfigurationWrite =
         property => property.IsConfigurationProperty() ? "It is a configuration property; set_property cannot change configuration, an operation of the subject may." : null;
@@ -40,7 +36,7 @@ internal static class HomeBlazeMcpConfigurationFactory
     /// <param name="isReadOnly">Whether set_property and operations are blocked.</param>
     /// <param name="forAgents">
     /// Whether the tools serve the built-in agents; invoke_operation and the Markdown tools then refuse every
-    /// operation of an agent (<see cref="LlmAgentBase"/>) and of its metadata subject.
+    /// operation of an agent (<see cref="LlmAgentBase"/>).
     /// </param>
     public static McpServerConfiguration Create(
         IServiceProvider serviceProvider,
@@ -56,11 +52,8 @@ internal static class HomeBlazeMcpConfigurationFactory
             new SubjectTypeRegistryTypeProvider(typeRegistry)
         };
 
-        // The metadata subject is added explicitly: browse, search and list_types skip only the listed types, and a
-        // registry lists only the types of the assemblies it was given.
         var excludeTypes = typeRegistry.RegisteredTypes
             .Where(type => ExcludeFromAttribute.IsExcluded(type, ExclusionTarget.Agents))
-            .Append(typeof(MetadataSubject))
             .ToArray();
 
         var invoker = new McpMethodInvoker(

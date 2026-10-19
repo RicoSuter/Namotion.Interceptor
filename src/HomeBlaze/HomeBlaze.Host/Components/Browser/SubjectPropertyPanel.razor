@@ -4,6 +4,7 @@
 @using HomeBlaze.History
 @using HomeBlaze.History.Blazor
 @using HomeBlaze.Components.Operations
+@using HomeBlaze.Storage
 @using HomeBlaze.Storage.Abstractions
 @using HomeBlaze.Components.Abstractions.TimeZones
 @using HomeBlaze.Components.Abstractions.Pages
@@ -37,7 +38,7 @@
                 @{
                     var canEdit = CanEdit();
                     var canDelete = Subject is IStorageFile or IConfigurable;
-                    var metadataContainer = GetMetadataContainer();
+                    var metadataStore = GetMetadataStore();
                 }
 
                 @* Stays an h1: the page focuses the first h1 after navigation. *@
@@ -57,14 +58,14 @@
                                        data-testid="edit-subject-button" />
                     </MudTooltip>
                 }
-                @if (metadataContainer is not null)
+                @if (metadataStore is not null)
                 {
                     <MudTooltip Text="Metadata">
                         <MudIconButton OnClick="@OpenMetadataDialogAsync"
                                        Icon="@Icons.Material.Filled.Label"
                                        Variant="Variant.Text"
                                        Size="Size.Small"
-                                       Disabled="@(!IsConnected(metadataContainer))"
+                                       Disabled="@(!IsConnected(metadataStore))"
                                        aria-label="Metadata"
                                        data-testid="edit-metadata-button" />
                     </MudTooltip>
@@ -96,7 +97,7 @@
                 }
                 @if (CanClose)
                 {
-                    @if (canEdit || canDelete || metadataContainer is not null || reorderContainer is not null)
+                    @if (canEdit || canDelete || metadataStore is not null || reorderContainer is not null)
                     {
                         <MudDivider Vertical="true" FlexItem="true" Class="mx-1 my-1" />
                     }
@@ -962,27 +963,13 @@
         await SubjectEditDialog.ShowAsync(DialogService, ComponentRegistry, Subject, $"Edit {title}");
     }
 
-    // The container that stores the metadata of the shown subject.
-    private IMetadataContainer? GetMetadataContainer()
-    {
-        if (MetadataEditDialog.GetFolder(Subject) is { } folder)
-            return folder;
-
-        if (Subject?.TryGetMetadataSubject() is not null && _registeredSubject is not null)
-        {
-            foreach (var parent in _registeredSubject.Parents)
-            {
-                if (GetOrderedContainer(parent.Property) is { } container)
-                    return container;
-            }
-        }
-
-        return null;
-    }
+    // The store that keeps the metadata of the shown subject, null when none does.
+    private IMetadataStore? GetMetadataStore()
+        => Subject?.FindMetadataStore() is { } store && store.CanStoreMetadata(Subject) ? store : null;
 
     private async Task OpenMetadataDialogAsync()
     {
-        if (Subject is null || GetMetadataContainer() is null)
+        if (Subject is null || GetMetadataStore() is null)
             return;
 
         await MetadataEditDialog.ShowAsync(DialogService, Subject, $"Metadata of {GetSubjectTitle()}");
@@ -1218,13 +1205,12 @@
         }
     }
 
-    // A folder reports the status of its storage. A container that is no storage has no connection to lose.
-    private static bool IsConnected(IMetadataContainer container)
+    // A folder reports the status of its storage. A container or store that is no storage has no connection to lose.
+    private static bool IsConnected(object container)
         => container is not IStorageContainer { Status: not StorageStatus.Connected };
 
     // Returns whether the order was written: the whole order the list shows, with the child in the place of the
-    // target, through the metadata subject of the container, as agents write it. Nothing is written when the child or
-    // the target is no longer a child of the container.
+    // target, as agents write it. Nothing is written when the child or the target is no longer a child of the container.
     private async Task<bool> MoveChildAsync(string name, string targetName)
     {
         if (_isMovingChild || _reorderContainer is not IInterceptorSubject container || _reorderedChildren is not { } children)
@@ -1251,9 +1237,7 @@
         _isMovingChild = true;
         try
         {
-            var metadataSubject = container.TryGetMetadataSubject()
-                ?? throw new InvalidOperationException("the folder has no metadata to keep its order in.");
-            await metadataSubject.SetOrderAsync([.. names], _lifetime.Token);
+            await container.SetOrderAsync([.. names], _lifetime.Token);
             return true;
         }
         catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)

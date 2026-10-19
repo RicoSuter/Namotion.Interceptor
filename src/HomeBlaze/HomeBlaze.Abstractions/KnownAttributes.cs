@@ -25,6 +25,12 @@ public static class KnownAttributes
     public const string Configuration = "HomeBlaze:Configuration";
 
     /// <summary>
+    /// Registry name of the metadata of a subject, a dynamic property, and of a property, an attribute. Its value is
+    /// an immutable dictionary of key to JSON value, or null for none.
+    /// </summary>
+    public const string Metadata = "HomeBlaze:Metadata";
+
+    /// <summary>
     /// Attribute name for the smallest value of a number property.
     /// </summary>
     public const string Minimum = "Minimum";

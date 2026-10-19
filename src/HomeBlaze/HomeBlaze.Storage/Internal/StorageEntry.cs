@@ -60,7 +60,13 @@ internal sealed class StorageEntry
     public bool HasSidecar => !IsFolder && !IsMetadata && StoragePath.IsJson(Path);
 
     /// <summary>The content of a metadata file, null when the file could not be read as one.</summary>
-    public StorageMetadataDocument? Metadata { get; set; }
+    public StorageMetadataFile? Metadata { get; set; }
+
+    /// <summary>
+    /// The metadata file applied last to the subject of a JSON file and to what is inside it,
+    /// <see cref="StorageMetadataFile.Empty"/> for none; null until it was applied.
+    /// </summary>
+    public StorageMetadataFile? AppliedMetadata { get; set; }
 
     /// <summary>True when the subject is in the tree under <see cref="Key"/>.</summary>
     public bool IsPlaced => Key != null && Subject != null;

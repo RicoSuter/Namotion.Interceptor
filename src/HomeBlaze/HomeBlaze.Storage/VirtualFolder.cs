@@ -2,10 +2,12 @@ using System.Collections.Immutable;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Components.Abstractions.Pages;
+using HomeBlaze.Services;
 using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Internal;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Attributes;
 
 namespace HomeBlaze.Storage;
@@ -34,16 +36,13 @@ public partial class VirtualFolder : ITitleProvider, IIconProvider, IStorageCont
     public partial Dictionary<string, IInterceptorSubject> Children { get; set; }
 
     /// <inheritdoc />
-    public partial FolderMetadata? Metadata { get; private set; }
-
-    /// <inheritdoc />
     public partial ImmutableArray<string> ChildOrder { get; private set; }
 
-    [Derived]
-    public string Title => Metadata?.Title ?? Path.GetFileName(RelativePath.TrimEnd('/'));
+    /// <summary>Gets the <c>title</c> of the metadata of the folder, else the name of the directory.</summary>
+    public string Title => this.GetMetadata().GetString(MetadataKeys.Title) ?? Path.GetFileName(RelativePath.TrimEnd('/'));
 
-    [Derived]
-    public string IconName => Metadata?.Icon ?? "Folder";
+    /// <summary>Gets the <c>icon</c> of the metadata of the folder, else <c>Folder</c>.</summary>
+    public string IconName => this.GetMetadata().GetString(MetadataKeys.Icon) ?? "Folder";
 
     public StorageStatus Status => Storage.Status;
 
@@ -62,15 +61,14 @@ public partial class VirtualFolder : ITitleProvider, IIconProvider, IStorageCont
     /// Takes the metadata and the order from the <c>.metadata.json</c> of the folder, or none without one. Called by
     /// the storage on its worker.
     /// </summary>
-    internal void ApplyMetadata(StorageMetadataDocument? document)
+    internal void ApplyMetadata(StorageMetadataFile? file)
     {
-        var metadata = document?.FolderMetadata;
-        if (metadata != Metadata)
+        if (this.TryGetRegisteredSubject() is { } registered)
         {
-            Metadata = metadata;
+            StorageMetadataValues.Set(registered, null, file?.Own);
         }
 
-        var childOrder = document?.ChildOrder ?? [];
+        var childOrder = file?.Own.GetStringArray(MetadataKeys.Order) ?? [];
         if (!childOrder.SequenceEqual(ChildOrder))
         {
             ChildOrder = childOrder;

@@ -6,7 +6,7 @@
 
 <MudDialog data-testid="metadata-edit-dialog">
     <DialogContent>
-        @if (_folder is not null)
+        @if (_isFolder)
         {
             <MudTextField @bind-Value="_title"
                           Label="Title"
@@ -28,7 +28,7 @@
                       AdornmentIcon="@SubjectIconExtensions.ResolveMudBlazorIcon(GetValue(_icon) ?? _iconPlaceholder)"
                       HelperText="A MudBlazor icon name, such as Dashboard or Settings"
                       data-testid="metadata-icon" />
-        @if (_folder is null)
+        @if (!_isFolder)
         {
             <MudSelect T="NavigationLocation?"
                        @bind-Value="_location"
@@ -60,10 +60,10 @@
 @code {
     [CascadingParameter] private IMudDialogInstance? MudDialog { get; set; }
 
-    /// <summary>The folder or the subject whose metadata is edited. A storage is edited as the subject of its file.</summary>
+    /// <summary>The folder or the subject whose metadata is edited. A storage is edited as a subject.</summary>
     [Parameter, EditorRequired] public IInterceptorSubject Owner { get; set; } = default!;
 
-    private IMetadataContainer? _folder;
+    private bool _isFolder;
     private string? _titlePlaceholder;
     private string _navigationTitlePlaceholder = "";
     private string _iconPlaceholder = "Article";
@@ -76,29 +76,25 @@
 
     protected override void OnInitialized()
     {
-        _folder = GetFolder(Owner);
+        _isFolder = IsFolder(Owner);
         _navigationTitlePlaceholder = Owner.GetTitle();
-        if (_folder is not null)
+
+        var metadata = Owner.GetMetadata();
+        _navigationTitle = metadata.GetString(MetadataKeys.NavigationTitle);
+        _icon = metadata.GetString(MetadataKeys.Icon);
+        if (_isFolder)
         {
             _titlePlaceholder = Owner.TryGetRegisteredSubject()?.Parents.FirstOrDefault().Index?.ToString();
             _iconPlaceholder = "Folder";
-            var metadata = _folder.Metadata;
-            _title = metadata?.Title;
-            _navigationTitle = metadata?.NavigationTitle;
-            _icon = metadata?.Icon;
+            _title = metadata.GetString(MetadataKeys.Title);
         }
         else
         {
             if ((Owner as IIconProvider)?.IconName is { Length: > 0 } iconName)
                 _iconPlaceholder = iconName;
 
-            if (Owner.TryGetSubjectMetadata() is { } metadata)
-            {
-                _navigationTitle = metadata.NavigationTitle;
-                _icon = metadata.Icon;
-                _location = metadata.Location;
-                _alignment = metadata.Alignment;
-            }
+            _location = metadata.GetEnum<NavigationLocation>(MetadataKeys.Location);
+            _alignment = metadata.GetEnum<AppBarAlignment>(MetadataKeys.Alignment);
         }
     }
 
@@ -109,7 +105,7 @@
         if (_isSaving)
             return;
 
-        if (Owner.TryGetMetadataSubject() is not { } metadataSubject)
+        if (Owner.FindMetadataStore() is not { } store)
         {
             Snackbar.Add("Error saving metadata: the item is no longer in a storage.", Severity.Error);
             return;
@@ -124,7 +120,7 @@
                 [MetadataKeys.NavigationTitle] = GetValue(_navigationTitle),
                 [MetadataKeys.Icon] = GetValue(_icon)
             };
-            if (_folder is not null)
+            if (_isFolder)
             {
                 values.Insert(0, MetadataKeys.Title, GetValue(_title));
             }
@@ -134,7 +130,7 @@
                 values[MetadataKeys.Alignment] = _location == NavigationLocation.AppBar ? _alignment?.ToString() : null;
             }
 
-            await metadataSubject.SetMetadataAsync(JsonElement.Parse(values.ToJsonString()), CancellationToken.None);
+            await store.SetMetadataAsync(Owner, null, JsonElement.Parse(values.ToJsonString()), CancellationToken.None);
             MudDialog?.Close(DialogResult.Ok(true));
         }
         catch (Exception exception)
@@ -151,14 +147,14 @@
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     /// <summary>
-    /// Gets the owner as a folder, an <see cref="IMetadataContainer"/> edited by its own metadata, or null for a
-    /// subject edited by the file beside it. A storage that is a file of another storage is such a subject.
+    /// Gets whether the owner is edited as a folder, with a title of its own, rather than as a subject. A storage is a
+    /// subject, also when it is the root.
     /// </summary>
-    public static IMetadataContainer? GetFolder(IInterceptorSubject? owner)
-        => owner is IMetadataContainer folder and not IConfigurable ? folder : null;
+    private static bool IsFolder(IInterceptorSubject owner)
+        => owner is IMetadataContainer and not IConfigurable;
 
     /// <summary>
-    /// Shows the dialog for the metadata of a folder, or of a subject stored in one.
+    /// Shows the dialog for the metadata of a folder or of a subject that a store keeps the metadata of.
     /// </summary>
     public static Task<IDialogReference> ShowAsync(IDialogService dialogService, IInterceptorSubject owner, string title)
     {
