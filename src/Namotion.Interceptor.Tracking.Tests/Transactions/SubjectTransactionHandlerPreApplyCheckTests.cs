@@ -6,9 +6,9 @@ using Namotion.Interceptor.Tracking.Transactions;
 namespace Namotion.Interceptor.Tracking.Tests.Transactions;
 
 /// <summary>
-/// Covers the handler check that runs again after the source writes, right before the local apply.
+/// Covers the pre-apply check: the handler check that runs again after the source writes, right before the local apply.
 /// </summary>
-public class SubjectTransactionHandlerSecondCheckTests
+public class SubjectTransactionHandlerPreApplyCheckTests
 {
     private static IInterceptorSubjectContext CreateContext()
     {
@@ -60,7 +60,7 @@ public class SubjectTransactionHandlerSecondCheckTests
     }
 
     [Fact]
-    public async Task WhenPropertyChangesOutsideTransactionDuringSourceWrite_ThenSecondCheckSeesLandedValue()
+    public async Task WhenPropertyChangesOutsideTransactionDuringSourceWrite_ThenPreApplyCheckSeesLandedValue()
     {
         // Arrange
         var handler = new RecordingHandler();
@@ -86,7 +86,7 @@ public class SubjectTransactionHandlerSecondCheckTests
     }
 
     [Fact]
-    public async Task WhenHandlerWritesDuringSecondCheck_ThenAllChangesFail()
+    public async Task WhenHandlerWritesDuringPreApplyCheck_ThenAllChangesFail()
     {
         // Arrange
         var calls = 0;
@@ -121,7 +121,7 @@ public class SubjectTransactionHandlerSecondCheckTests
     [Theory]
     [InlineData(TransactionFailureHandling.BestEffort)]
     [InlineData(TransactionFailureHandling.Rollback)]
-    public async Task WhenSecondCheckRejectsChange_ThenNoCheckedChangeLandsAndTransactionIsTerminal(TransactionFailureHandling failureHandling)
+    public async Task WhenPreApplyCheckRejectsChange_ThenNoCheckedChangeLandsAndTransactionIsTerminal(TransactionFailureHandling failureHandling)
     {
         // Arrange
         var calls = 0;
@@ -167,7 +167,7 @@ public class SubjectTransactionHandlerSecondCheckTests
     }
 
     [Fact]
-    public async Task WhenSecondCheckRejectsChangeInBestEffort_ThenNoApplyRunsAndEachWrittenSourceIsRevertedOnce()
+    public async Task WhenPreApplyCheckRejectsChangeInBestEffort_ThenNoApplyRunsAndEachWrittenSourceIsRevertedOnce()
     {
         // Arrange
         var calls = 0;
@@ -211,7 +211,7 @@ public class SubjectTransactionHandlerSecondCheckTests
     }
 
     [Fact]
-    public async Task WhenSourceWriteFails_ThenSecondCheckSeesOnlyLandingChangesAndLandedValueOfFailedProperty()
+    public async Task WhenSourceWriteFails_ThenPreApplyCheckSeesOnlyLandingChangesAndLandedValueOfFailedProperty()
     {
         // Arrange
         var person = default(Person)!;
@@ -254,7 +254,7 @@ public class SubjectTransactionHandlerSecondCheckTests
     }
 
     [Fact]
-    public async Task WhenSecondCheckRejectsUncheckedChange_ThenEveryCheckedChangeFails()
+    public async Task WhenPreApplyCheckRejectsUncheckedChange_ThenEveryCheckedChangeFails()
     {
         // Arrange
         var calls = 0;
@@ -322,7 +322,7 @@ public class SubjectTransactionHandlerSecondCheckTests
     }
 
     [Fact]
-    public async Task WhenDisposedFromAnotherFlowDuringSourceWrite_ThenSecondCheckIsSkippedAndSnapshotIsApplied()
+    public async Task WhenDisposedFromAnotherFlowDuringSourceWrite_ThenPreApplyCheckIsSkippedAndSnapshotIsApplied()
     {
         // Arrange
         var handler = new RecordingHandler();
@@ -345,7 +345,7 @@ public class SubjectTransactionHandlerSecondCheckTests
     }
 
     [Fact]
-    public async Task WhenDisposedFromAnotherFlowDuringSecondCheck_ThenItsRejectionIsKept()
+    public async Task WhenDisposedFromAnotherFlowDuringPreApplyCheck_ThenItsRejectionIsKept()
     {
         // Arrange
         var calls = 0;
@@ -378,7 +378,7 @@ public class SubjectTransactionHandlerSecondCheckTests
     }
 
     [Fact]
-    public async Task WhenSecondCheckRejectsChangeWithRollback_ThenChangeWithoutSourceIsReportedAsNotApplied()
+    public async Task WhenPreApplyCheckRejectsChangeWithRollback_ThenChangeWithoutSourceIsReportedAsNotApplied()
     {
         // Arrange
         var calls = 0;
@@ -418,7 +418,7 @@ public class SubjectTransactionHandlerSecondCheckTests
     }
 
     [Fact]
-    public async Task WhenSecondCheckThrowsOperationCanceled_ThenCommitFailsTerminally()
+    public async Task WhenPreApplyCheckThrowsOperationCanceled_ThenCommitFailsTerminally()
     {
         // Arrange
         var calls = 0;
@@ -524,7 +524,7 @@ public class SubjectTransactionHandlerSecondCheckTests
     }
 
     [Fact]
-    public async Task WhenSecondCheckRejectsChangeOfMarkingWriter_ThenWriterMarkedSlotIsReported()
+    public async Task WhenPreApplyCheckRejectsChangeOfMarkingWriter_ThenWriterMarkedSlotIsReported()
     {
         // Arrange
         var source = new object();
@@ -592,7 +592,7 @@ public class SubjectTransactionHandlerSecondCheckTests
     }
 
     [Fact]
-    public async Task WhenChangeIsCancelledByWriteBackWithWriter_ThenSecondCheckDoesNotReceiveItAndReadsLandedValue()
+    public async Task WhenChangeIsCancelledByWriteBackWithWriter_ThenPreApplyCheckDoesNotReceiveItAndReadsLandedValue()
     {
         // Arrange
         var changesSeen = new List<SubjectPropertyChange[]>();

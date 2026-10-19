@@ -389,7 +389,7 @@ public class TransactionValidationTests
     }
 
     [Fact]
-    public async Task WhenLimitIsLoweredWhileSourcesAreWritten_ThenSecondCheckRejectsAndRevertsSources()
+    public async Task WhenLimitIsLoweredWhileSourcesAreWritten_ThenPreApplyCheckRejectsAndRevertsSources()
     {
         // Arrange
         var context = CreateContext();
@@ -412,7 +412,7 @@ public class TransactionValidationTests
     }
 
     [Fact]
-    public async Task WhenSecondCheckRejectsLimitInBestEffort_ThenSpeedCheckedAgainstItDoesNotLandEither()
+    public async Task WhenPreApplyCheckRejectsLimitInBestEffort_ThenSpeedCheckedAgainstItDoesNotLandEither()
     {
         // Arrange
         var context = CreateContext();
@@ -473,7 +473,7 @@ public class TransactionValidationTests
     }
 
     [Fact]
-    public async Task WhenWriterConfirmsAcceptedChanges_ThenSecondCheckSeesCapturedOrigin()
+    public async Task WhenWriterConfirmsAcceptedChanges_ThenPreApplyCheckSeesCapturedOrigin()
     {
         // Arrange
         var context = CreateContext(validateLocalWritesOnly: true);

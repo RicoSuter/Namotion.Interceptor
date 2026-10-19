@@ -22,7 +22,7 @@ public sealed class SubjectTransaction : IDisposable
     private static SubjectTransaction? _commitModelAccessTransaction;
 
     [ThreadStatic]
-    private static SubjectTransaction? _commitValidationTransaction;
+    private static SubjectTransaction? _checkingTransaction;
 
     /// <summary>
     /// Gets a value indicating whether any transaction is currently active across all contexts.
@@ -72,9 +72,9 @@ public sealed class SubjectTransaction : IDisposable
     // once the commit finishes. Accessed only under _pendingChangesLock (no volatile needed; never read lock-free).
     private bool _disposeRequestedDuringCommit;
 
-    // The changes whose source write failed, set only while the handlers check the set right before the local apply.
-    // Read only by the committing thread inside its commit validation scope, so it needs no lock.
-    private IReadOnlyList<SubjectPropertyChange>? _commitValidationExcludedChanges;
+    // The changes whose source write failed, set only during the pre-apply check. Read only by the committing thread
+    // inside its check scope, so it needs no lock.
+    private IReadOnlyList<SubjectPropertyChange>? _checkExcludedChanges;
 
     /// <summary>
     /// Gets the current transaction in this execution context, or null if none is active.
@@ -141,9 +141,9 @@ public sealed class SubjectTransaction : IDisposable
     internal bool IsCommitModelAccessAuthorized => ReferenceEquals(_commitModelAccessTransaction, this);
 
     /// <summary>
-    /// Gets a value indicating whether this thread runs this transaction's handlers right before the local apply.
+    /// Gets a value indicating whether this thread runs this transaction's commit check or pre-apply check.
     /// </summary>
-    internal bool IsCommitValidationAuthorized => ReferenceEquals(_commitValidationTransaction, this);
+    internal bool IsCheckReadAuthorized => ReferenceEquals(_checkingTransaction, this);
 
     /// <summary>
     /// Gets the interceptor this transaction is bound to (for cross-context validation).
@@ -372,13 +372,12 @@ public sealed class SubjectTransaction : IDisposable
     }
 
     /// <summary>
-    /// Reads a pending value for the handlers that run right before the local apply, while the transaction is
-    /// committing. Returns false when the property is not part of the transaction, its change was cancelled, or its
+    /// Reads a pending value for the handlers during the commit check or the pre-apply check. Returns false when the property is not part of the transaction, its change was cancelled, or its
     /// source write failed.
     /// </summary>
-    internal bool TryGetCommitValidationValue<TProperty>(PropertyReference property, out TProperty value)
+    internal bool TryGetCheckedValue<TProperty>(PropertyReference property, out TProperty value)
     {
-        if (!IsExcludedFromCommitValidation(property))
+        if (!IsExcludedFromCheck(property))
         {
             lock (_pendingChangesLock)
             {
@@ -394,9 +393,9 @@ public sealed class SubjectTransaction : IDisposable
         return false;
     }
 
-    private bool IsExcludedFromCommitValidation(PropertyReference property)
+    private bool IsExcludedFromCheck(PropertyReference property)
     {
-        var excludedChanges = _commitValidationExcludedChanges;
+        var excludedChanges = _checkExcludedChanges;
         if (excludedChanges is null)
         {
             return false;
@@ -528,12 +527,11 @@ public sealed class SubjectTransaction : IDisposable
         }
     }
 
-    internal static void ThrowCaptureDuringCommitValidation()
+    internal static void ThrowWriteDuringCommitCheck()
     {
         throw new InvalidOperationException(
-            "Cannot write a transactional property while transaction handlers check the commit. " +
-            "Transaction handlers must not write properties. " +
-            "This is also reported when the transaction is used from another thread.");
+            "Cannot write a property while transaction handlers check the commit. " +
+            "Transaction handlers must not write properties.");
     }
 
     /// <summary>
@@ -850,7 +848,7 @@ public sealed class SubjectTransaction : IDisposable
         // What the handlers read can change while the sources are written (inbound updates, raw writes), so the
         // final set is checked again right before it lands. Its reads return the pending values of every checked
         // change, so a rejection invalidates the whole checked set in both failure handling modes.
-        var rejectionErrors = rollBackSourceFailure ? null : CheckBeforeLocalApply(changes.Span, failedSource);
+        var rejectionErrors = rollBackSourceFailure ? null : RunPreApplyCheck(changes.Span, failedSource);
         if (rollBackSourceFailure || rejectionErrors is not null)
         {
             var revert = await RevertSourceWritesSafelyAsync(writer, written, revertState, afterLocalApply: false, cancellationToken).ConfigureAwait(false);
@@ -1168,10 +1166,10 @@ public sealed class SubjectTransaction : IDisposable
     /// </summary>
     private void RunCommitHandlers(ReadOnlySpan<SubjectPropertyChange> changes, IReadOnlyList<SubjectPropertyChange>? excludedChanges)
     {
-        _commitValidationExcludedChanges = excludedChanges;
+        _checkExcludedChanges = excludedChanges;
         try
         {
-            using (EnterCommitValidationAccess())
+            using (EnterCommitCheck())
             {
                 foreach (var handler in _handlers)
                 {
@@ -1181,7 +1179,7 @@ public sealed class SubjectTransaction : IDisposable
         }
         finally
         {
-            _commitValidationExcludedChanges = null;
+            _checkExcludedChanges = null;
         }
     }
 
@@ -1190,7 +1188,7 @@ public sealed class SubjectTransaction : IDisposable
     /// returning the transaction's values for them. Returns null when they accept the set, or the errors of their
     /// rejection otherwise.
     /// </summary>
-    private IReadOnlyList<Exception>? CheckBeforeLocalApply(
+    private IReadOnlyList<Exception>? RunPreApplyCheck(
         ReadOnlySpan<SubjectPropertyChange> changes,
         IReadOnlyList<SubjectPropertyChange> failedSource)
     {
@@ -1365,26 +1363,26 @@ public sealed class SubjectTransaction : IDisposable
         }
     }
 
-    private CommitValidationAccessScope EnterCommitValidationAccess() => new(this);
+    private CommitCheckScope EnterCommitCheck() => new(this);
 
     /// <summary>
-    /// Lets this thread read the transaction's pending values while it runs the handlers right before the local
-    /// apply. The previous identity is restored on disposal. Callers must dispose the scope before awaiting.
+    /// Lets this thread read the transaction's pending values while it runs the commit check or the pre-apply check.
+    /// The previous identity is restored on disposal. Callers must dispose the scope before awaiting.
     /// </summary>
-    private readonly struct CommitValidationAccessScope : IDisposable
+    private readonly struct CommitCheckScope : IDisposable
     {
         private readonly SubjectTransaction? _previousTransaction;
 
-        [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S3010", Justification = "This scope deliberately installs the current thread's commit validation identity and restores the previous identity on disposal, including nested scopes.")]
-        public CommitValidationAccessScope(SubjectTransaction transaction)
+        [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S3010", Justification = "This scope deliberately installs the current thread's commit check identity and restores the previous identity on disposal, including nested scopes.")]
+        public CommitCheckScope(SubjectTransaction transaction)
         {
-            _previousTransaction = _commitValidationTransaction;
-            _commitValidationTransaction = transaction;
+            _previousTransaction = _checkingTransaction;
+            _checkingTransaction = transaction;
         }
 
         public void Dispose()
         {
-            _commitValidationTransaction = _previousTransaction;
+            _checkingTransaction = _previousTransaction;
         }
     }
 

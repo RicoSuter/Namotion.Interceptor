@@ -78,10 +78,10 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
             return true;
         }
 
-        if (transaction.IsCommitValidationAuthorized)
+        if (transaction.IsCheckReadAuthorized)
         {
-            value = transaction.TryGetCommitValidationValue<TProperty>(context.Property, out var validationValue)
-                ? validationValue
+            value = transaction.TryGetCheckedValue<TProperty>(context.Property, out var checkedValue)
+                ? checkedValue
                 : next(ref context);
             return true;
         }
@@ -169,9 +169,9 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
             return true;
         }
 
-        if (transaction.IsCommitValidationAuthorized)
+        if (transaction.IsCheckReadAuthorized)
         {
-            SubjectTransaction.ThrowCaptureDuringCommitValidation();
+            SubjectTransaction.ThrowWriteDuringCommitCheck();
         }
 
         return transaction.IsInactiveUnderLockOrThrowIfCommitting();
