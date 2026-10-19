@@ -73,9 +73,9 @@ public sealed class SubjectTransaction : IDisposable
     // IsInCommitScope matched on that same thread, so it needs no synchronization.
     private bool _isCheckingCommit;
 
-    // The changes whose source write failed, set only during the pre-apply check. Read only by the committing thread
-    // inside its check scope, so it needs no lock.
-    private IReadOnlyList<SubjectPropertyChange>? _checkExcludedChanges;
+    // The properties whose source write failed, set only during the pre-apply check. Read only by the committing
+    // thread inside its check scope, so it needs no lock.
+    private HashSet<PropertyReference>? _checkExcludedProperties;
 
     /// <summary>
     /// Gets the current transaction in this execution context, or null if none is active.
@@ -380,7 +380,7 @@ public sealed class SubjectTransaction : IDisposable
     /// </summary>
     internal bool TryGetCheckedValue<TProperty>(PropertyReference property, out TProperty value)
     {
-        if (!IsExcludedFromCheck(property))
+        if (_checkExcludedProperties is null || !_checkExcludedProperties.Contains(property))
         {
             lock (_pendingChangesLock)
             {
@@ -393,25 +393,6 @@ public sealed class SubjectTransaction : IDisposable
         }
 
         value = default!;
-        return false;
-    }
-
-    private bool IsExcludedFromCheck(PropertyReference property)
-    {
-        var excludedChanges = _checkExcludedChanges;
-        if (excludedChanges is null)
-        {
-            return false;
-        }
-
-        for (var index = 0; index < excludedChanges.Count; index++)
-        {
-            if (PropertyReference.Comparer.Equals(excludedChanges[index].Property, property))
-            {
-                return true;
-            }
-        }
-
         return false;
     }
 
@@ -1155,7 +1136,7 @@ public sealed class SubjectTransaction : IDisposable
             return;
         }
 
-        RunCommitHandlers(changes, excludedChanges: null);
+        RunCommitHandlers(changes, excludedProperties: null);
 
         if (IsDisposed)
         {
@@ -1165,11 +1146,11 @@ public sealed class SubjectTransaction : IDisposable
 
     /// <summary>
     /// Calls the handlers on this thread with reads returning the pending values, except those of
-    /// <paramref name="excludedChanges"/>, and writes throwing.
+    /// <paramref name="excludedProperties"/>, and writes throwing.
     /// </summary>
-    private void RunCommitHandlers(ReadOnlySpan<SubjectPropertyChange> changes, IReadOnlyList<SubjectPropertyChange>? excludedChanges)
+    private void RunCommitHandlers(ReadOnlySpan<SubjectPropertyChange> changes, HashSet<PropertyReference>? excludedProperties)
     {
-        _checkExcludedChanges = excludedChanges;
+        _checkExcludedProperties = excludedProperties;
         try
         {
             using (EnterCommitCheck())
@@ -1182,7 +1163,7 @@ public sealed class SubjectTransaction : IDisposable
         }
         finally
         {
-            _checkExcludedChanges = null;
+            _checkExcludedProperties = null;
         }
     }
 
@@ -1204,7 +1185,8 @@ public sealed class SubjectTransaction : IDisposable
         // The writer marks accepted snapshot slots as Confirmed, but handlers must see the captured origin, which the
         // pending changes still hold. Changes whose source write failed do not land, so the handlers neither receive
         // them nor read their values.
-        var (rentedArray, checkedCount) = RentLandingPendingChanges(failedSource);
+        var failedProperties = SubjectPropertyChangeOperations.CreatePropertySet(failedSource);
+        var (rentedArray, checkedCount) = RentLandingPendingChanges(failedProperties);
         try
         {
             if (checkedCount == 0)
@@ -1214,9 +1196,7 @@ public sealed class SubjectTransaction : IDisposable
 
             try
             {
-                RunCommitHandlers(
-                    new ReadOnlySpan<SubjectPropertyChange>(rentedArray, 0, checkedCount),
-                    failedSource.Count == 0 ? null : failedSource);
+                RunCommitHandlers(new ReadOnlySpan<SubjectPropertyChange>(rentedArray, 0, checkedCount), failedProperties);
                 return null;
             }
             catch (Exception exception)
@@ -1231,22 +1211,13 @@ public sealed class SubjectTransaction : IDisposable
     }
 
     /// <summary>
-    /// Copies the pending changes that are not cancelled and whose property is not in <paramref name="failedSource"/>
-    /// into a rented array, in insertion order. The caller returns the array to <see cref="ArrayPool{T}.Shared"/>.
+    /// Copies the pending changes that are not cancelled and whose property is not in
+    /// <paramref name="failedProperties"/> into a rented array, in insertion order. The caller returns the array to
+    /// <see cref="ArrayPool{T}.Shared"/>.
     /// </summary>
     private (SubjectPropertyChange[] RentedArray, int Count) RentLandingPendingChanges(
-        IReadOnlyList<SubjectPropertyChange> failedSource)
+        HashSet<PropertyReference>? failedProperties)
     {
-        HashSet<PropertyReference>? failedProperties = null;
-        if (failedSource.Count > 0)
-        {
-            failedProperties = new HashSet<PropertyReference>(failedSource.Count, PropertyReference.Comparer);
-            foreach (var change in failedSource)
-            {
-                failedProperties.Add(change.Property);
-            }
-        }
-
         lock (_pendingChangesLock)
         {
             var pendingChanges = _pendingChanges;

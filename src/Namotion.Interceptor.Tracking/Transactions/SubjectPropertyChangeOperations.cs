@@ -19,17 +19,26 @@ internal static class SubjectPropertyChangeOperations
     internal static (IReadOnlyList<SubjectPropertyChange> Successful, IReadOnlyList<SubjectPropertyChange> Failed, IReadOnlyList<Exception> Errors)
         ApplyLocalChanges(ReadOnlySpan<SubjectPropertyChange> changes, IReadOnlyList<SubjectPropertyChange>? exclude, SubjectTransaction? markingTransaction = null)
     {
-        HashSet<PropertyReference>? excluded = null;
-        if (exclude is { Count: > 0 })
+        return ApplyLocalChanges(changes, exclude is null ? null : CreatePropertySet(exclude), markingTransaction);
+    }
+
+    /// <summary>
+    /// Returns the properties of <paramref name="changes"/>, or null when there are none.
+    /// </summary>
+    internal static HashSet<PropertyReference>? CreatePropertySet(IReadOnlyList<SubjectPropertyChange> changes)
+    {
+        if (changes.Count == 0)
         {
-            excluded = new HashSet<PropertyReference>(exclude.Count, PropertyReference.Comparer);
-            foreach (var change in exclude)
-            {
-                excluded.Add(change.Property);
-            }
+            return null;
         }
 
-        return ApplyLocalChanges(changes, excluded, markingTransaction);
+        var properties = new HashSet<PropertyReference>(changes.Count, PropertyReference.Comparer);
+        foreach (var change in changes)
+        {
+            properties.Add(change.Property);
+        }
+
+        return properties;
     }
 
     [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S1541", Justification = "Extracting this failure bookkeeping reproduced slower single-source commits despite unchanged allocations; keep it inline unless an alternative passes the same benchmark comparison.")]
