@@ -472,7 +472,7 @@ public partial class Motor
 
 **On commit:** the transaction handlers check the final set first, while reads still return the pending values, so `MotorSpeed = 150` is checked against `MaxAllowedSpeed = 200` regardless of which was written first. Then conflicts are detected, sources are written, and the values are replayed in insertion order through the full interceptor chain, which writes the fields and fires notifications. The replayed values are not validated again.
 
-**Insertion order:** only the final value per property is stored (last write wins), and the replay position is determined by the first write to each property. Writing a property back to its landed value cancels its pending change, so a later write to it counts as a first write: it takes the then-landed value as its old value and moves to the end of the replay order.
+**Insertion order:** only the final value per property is stored (last write wins), and the replay position is determined by the first write to each property. Writing a property back to its landed value cancels its pending change. A later write to it restores the change in its original position with its original old value, so conflict detection still sees concurrent changes.
 
 ### Transaction Handlers
 
