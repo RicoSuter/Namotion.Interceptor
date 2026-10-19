@@ -9,14 +9,11 @@
 @inject ILogger<TimeZoneInitializer> Logger
 
 @code {
-    /// <summary>Key of the browser preference that stores the display time zone ("Automatic" or an IANA id).</summary>
-    public const string PreferenceKey = "timezone";
-
     protected override void OnInitialized()
     {
         // A pinned zone renders correctly on first paint. Automatic cannot be resolved here (the browser
         // zone is unknown without JS).
-        var preference = TimeZonePreference.FromCookieValue(Preferences.Get(PreferenceKey));
+        var preference = TimeZonePreference.FromCookieValue(Preferences.Get(BrowserPreferenceKeys.TimeZone));
         if (!preference.IsAutomatic)
         {
             TimeZone.SetResolved(preference, TimeZoneResolver.Resolve(preference.ZoneId));
@@ -43,7 +40,7 @@
                 if (!string.IsNullOrWhiteSpace(browserZone))
                 {
                     TimeZone.SetResolved(TimeZonePreference.Automatic, TimeZoneResolver.Resolve(browserZone));
-                    await Preferences.SetAsync(PreferenceKey, TimeZonePreference.Automatic.ToCookieValue());
+                    await Preferences.SetAsync(BrowserPreferenceKeys.TimeZone, TimeZonePreference.Automatic.ToCookieValue());
                 }
             }
             catch (JSDisconnectedException)

@@ -13,7 +13,7 @@ public sealed class TimeZoneInterop : IAsyncDisposable
     public TimeZoneInterop(IJSRuntime jsRuntime) => _jsRuntime = jsRuntime;
 
     private async ValueTask<IJSObjectReference> GetModuleAsync() =>
-        _module ??= await _jsRuntime.InvokeAsync<IJSObjectReference>("import", "./js/timezone.js");
+        _module ??= await _jsRuntime.InvokeAsync<IJSObjectReference>("import", "./_content/HomeBlaze.Host/js/timezone.js");
 
     /// <summary>Returns the browser's IANA zone id, or null if it cannot be read.</summary>
     public async ValueTask<string?> GetBrowserTimeZoneAsync()

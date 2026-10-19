@@ -30,7 +30,7 @@ Resolution and formatting are split between a pure, framework-free core in `Home
 | `TimeZonePreference` | `HomeBlaze.Components.Abstractions` | The choice: Automatic (follow browser) or a specific IANA id. Round-trips to a cookie value. |
 | `TimeZoneResolver` | `HomeBlaze.Components.Abstractions` | Resolves an IANA (or Windows) id to a `TimeZoneInfo`, never throwing (IANA to Windows fallback, then UTC). |
 | `TimeZoneCatalog` | `HomeBlaze.Components.Abstractions` | Builds the selectable IANA zone list from the OS zones, dropping zones that have no IANA mapping. |
-| `TimeZoneInterop` (`HomeBlaze.Host`) + `timezone.js` (`HomeBlaze` app `wwwroot`) | `HomeBlaze.Host` | Reads the browser zone (`Intl.DateTimeFormat().resolvedOptions().timeZone`). |
+| `TimeZoneInterop` + `timezone.js` (`HomeBlaze.Host` `wwwroot`) | `HomeBlaze.Host` | Reads the browser zone (`Intl.DateTimeFormat().resolvedOptions().timeZone`). |
 | `BrowserPreferences` | `HomeBlaze.Host` | Scoped store of the preferences a browser remembers, one `homeblaze.<key>` cookie per key. Hands the cookies of the prerender over to the circuit and writes them through `cookies.js`. |
 | `TimeZoneInitializer` | `HomeBlaze.Host` | Resolves the zone on load (see the flow below). Rendered once in `MainLayout`. |
 | `TimeZoneSelector` | `HomeBlaze.Host` | Toolbar control: Automatic plus a searchable zone list, marks the active zone, and persists the choice. |
@@ -63,7 +63,7 @@ Blazor Server prerenders before any JavaScript runs, and the prerender pass and 
 
 1. **Prerender (has `HttpContext`, no JS).** `BrowserPreferences` reads the saved cookie. A pinned zone resolves immediately in `OnInitialized`, so the prerendered HTML already shows correct times. Automatic cannot resolve here, because the browser zone is unknown without JavaScript.
 2. **`PersistentComponentState`.** `BrowserPreferences` hands the cookies of the prerender over to the interactive circuit, where `TimeZoneInitializer` resolves a pinned zone again in `OnInitialized`, before its first render, so a pinned zone never flashes the placeholder.
-3. **After the first interactive render (JS available).** For Automatic, or a first visit with no cookie, JavaScript reports the browser zone; the service resolves it and writes the cookie. This is the only path that briefly shows the placeholder, and only until JavaScript responds.
+3. **After the first interactive render (JS available).** For Automatic, or a first visit with no cookie, JavaScript reports the browser zone; `TimeZoneInitializer` resolves it and stores the preference through `BrowserPreferences`. This is the only path that briefly shows the placeholder, and only until JavaScript responds.
 
 Automatic is intentionally never persisted as a concrete zone: the circuit re-detects the browser zone via JavaScript on each load, so a user who travels follows their current browser zone.
 

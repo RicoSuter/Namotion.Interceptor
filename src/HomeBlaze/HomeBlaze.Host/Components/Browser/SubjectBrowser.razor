@@ -98,9 +98,6 @@
         _ => "subject-pane-rows-automatic"
     };
 
-    /// <summary>Key of the browser preference that stores the row layout.</summary>
-    public const string RowLayoutPreferenceKey = "rowlayout";
-
     [Parameter]
     public string? Path { get; set; }
 
@@ -121,7 +118,7 @@
     protected override void OnInitialized()
     {
         base.OnInitialized();
-        RowLayout.Load(Preferences.Get(RowLayoutPreferenceKey));
+        RowLayout.Load(Preferences.Get(BrowserPreferenceKeys.RowLayout));
         NavigationManager.LocationChanged += OnLocationChanged;
         RowLayout.OnChange += OnRowLayoutChanged;
     }
@@ -131,7 +128,7 @@
     private async Task SetRowLayoutAsync(PropertyRowLayout layout)
     {
         RowLayout.SetLayout(layout);
-        await Preferences.SetAsync(RowLayoutPreferenceKey, RowLayout.StoredValue);
+        await Preferences.SetAsync(BrowserPreferenceKeys.RowLayout, RowLayout.StoredValue);
     }
 
     protected override void OnParametersSet()
