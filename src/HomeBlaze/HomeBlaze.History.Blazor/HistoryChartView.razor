@@ -330,7 +330,7 @@
     }
 
     // The tooltip of MudChart, which opens towards the middle of the bars, so the box of the lines cuts it at neither end.
-    // A bar is found by its label, which the tooltip names anyway, so the decision needs no width in any scale.
+    // A bar is found by its label, which is its own, see BuildBars, so the decision needs no width in any scale.
     private RenderFragment RenderBarTooltip((SvgPath Segment, string Color) context) => builder =>
     {
         var segment = context.Segment;
@@ -800,14 +800,32 @@
             chartSeriesLines[lineIndex] = lineIndex;
         }
 
-        var format = HistoryChartAxis.GetTimeLabelFormat(data.To - data.From, PropertyHistoryChartModel.GetNominalLength(bucket));
-        _barLabels = new string[starts.Count];
+        // A calendar bucket is labeled in the zone it was aligned in, which the viewer's zone can have left meanwhile.
+        var localStarts = new DateTime[starts.Count];
         for (var index = 0; index < starts.Count; index++)
         {
-            // A calendar bucket is labeled in the zone it was aligned in, which the viewer's zone can have left meanwhile.
-            var start = bucket.TimeZone is { } zone ? TimeZoneInfo.ConvertTime(starts[index], zone).DateTime : TimeZone.ToZoned(starts[index]);
-            _barLabels[index] = start.ToString(format, CultureInfo.CurrentCulture);
+            localStarts[index] = bucket.TimeZone is { } zone ? TimeZoneInfo.ConvertTime(starts[index], zone).DateTime : TimeZone.ToZoned(starts[index]);
         }
+
+        // Every bar gets a label of its own, which its tooltip names and finds it by, see RenderBarTooltip, so a format whose
+        // labels repeat, such as the weekday over more than a week, gives way to a longer one.
+        string? format = HistoryChartAxis.GetTimeLabelFormat(data.To - data.From, PropertyHistoryChartModel.GetNominalLength(bucket));
+        var labels = new string[starts.Count];
+        var distinct = new HashSet<string>(StringComparer.Ordinal);
+        do
+        {
+            distinct.Clear();
+            for (var index = 0; index < labels.Length; index++)
+            {
+                labels[index] = localStarts[index].ToString(format, CultureInfo.CurrentCulture);
+                distinct.Add(labels[index]);
+            }
+
+            format = distinct.Count < labels.Length ? HistoryChartAxis.GetLongerTimeLabelFormat(format) : null;
+        }
+        while (format is not null);
+
+        _barLabels = labels;
 
         _palette = palette;
 

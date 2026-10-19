@@ -237,6 +237,33 @@ public class HistoryChartCalendarBucketTests
     }
 
     [Fact]
+    public void WhenAnAutoPeriodResolvedToACalendarPeriod_ThenItsDescriptionNamesThatPeriod()
+    {
+        // Act
+        var description = PropertyHistoryChartModel.DescribePeriod(PropertyHistoryChartModel.Periods[0], Day);
+
+        // Assert
+        Assert.Equal("calendar days", description);
+    }
+
+    [Theory]
+    [InlineData("HH:mm", "MM-dd HH:mm")]
+    [InlineData("ddd HH:mm", "MM-dd HH:mm")]
+    [InlineData("HH:mm:ss", "MM-dd HH:mm:ss")]
+    [InlineData("MM-dd", "yyyy-MM-dd")]
+    [InlineData("MM-dd HH:mm", "yyyy-MM-dd HH:mm")]
+    [InlineData("yyyy-MM", null)]
+    [InlineData("yyyy-MM-dd HH:mm", null)]
+    public void WhenALabelFormatRepeats_ThenTheLongerFormatTellsMoreApart(string format, string? expected)
+    {
+        // Act
+        var longer = HistoryChartAxis.GetLongerTimeLabelFormat(format);
+
+        // Assert
+        Assert.Equal(expected, longer);
+    }
+
+    [Fact]
     public void WhenTheBucketIsCalendar_ThenItDoesNotLengthenTheRefreshWindow()
     {
         // Act

@@ -142,6 +142,20 @@ internal static class HistoryChartAxis
         "ddd HH:mm";
 
     /// <summary>
+    /// Gets the format after <paramref name="format"/> of <see cref="GetTimeLabelFormat"/> that tells more times apart, or
+    /// null when there is none: the date before a time of day, and the year before a date.
+    /// </summary>
+    /// <param name="format">A format of <see cref="GetTimeLabelFormat"/> or of this method.</param>
+    public static string? GetLongerTimeLabelFormat(string format) => format switch
+    {
+        "HH:mm" or "ddd HH:mm" => "MM-dd HH:mm",
+        "HH:mm:ss" => "MM-dd HH:mm:ss",
+        "MM-dd" => "yyyy-MM-dd",
+        "MM-dd HH:mm" => "yyyy-MM-dd HH:mm",
+        _ => null
+    };
+
+    /// <summary>
     /// Gets the time between two time labels: the smallest round step of <see cref="TimeLabelSteps"/> that splits the
     /// range into no more parts than the width holds labels, never shorter than a bucket under half the range. When
     /// that step leaves less than two parts, the largest step that still splits the range in two is taken, so a narrow

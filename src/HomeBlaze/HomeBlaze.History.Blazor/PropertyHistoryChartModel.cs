@@ -396,17 +396,19 @@ public static class PropertyHistoryChartModel
 
     /// <summary>
     /// Returns a short human description of a selected period for a helper line: Auto shows its resolved bucket
-    /// ("about 15s") or "auto" if not yet resolved; a calendar period names its unit ("calendar days"); a fixed period
+    /// ("about 15s") or "auto" if not yet resolved; a calendar period, also one that Auto resolved to, names its unit ("calendar days"); a fixed period
     /// shows "{size} buckets"; None shows "raw samples".
     /// </summary>
     public static string DescribePeriod(ChartPeriod period, HistoryBucket? resolvedBucket)
     {
-        if (period.IsAuto)
+        // An auto period of bars can resolve to a calendar period as well.
+        var calendarUnit = period.CalendarUnit ?? resolvedBucket?.CalendarUnit;
+        if (period.IsAuto && calendarUnit is null)
         {
             return resolvedBucket is { FixedSize: { } bucket } ? $"about {FormatDuration(bucket)}" : "auto";
         }
 
-        if (period.CalendarUnit is { } unit)
+        if (calendarUnit is { } unit)
         {
             return unit switch
             {

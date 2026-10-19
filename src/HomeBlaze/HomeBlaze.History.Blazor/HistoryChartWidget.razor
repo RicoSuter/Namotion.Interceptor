@@ -84,6 +84,10 @@
     private string? _queryError;
     private HistoryBucket? _bucket;
 
+    // Whether the last query, also one still running, was aligned to a calendar, set before it starts. Read by the
+    // handler of a change of the time zone, which can run on another thread.
+    private volatile bool _isCalendarQuery;
+
     // The resolution of the series, kept until the configuration or the paths of the graph change, because the
     // legend renders on every change of a charted value.
     private HistoryChartSeries[]? _resolvedEntries;
@@ -273,7 +277,7 @@
     // known the buckets are aligned in UTC, which the view shows its times in as well.
     private void OnTimeZoneChanged()
     {
-        if (PropertyHistoryChartModel.TryGetPeriod(_resolvedBucket, out var period) && period.CalendarUnit is not null)
+        if (_isCalendarQuery)
         {
             QueueRefresh();
         }
@@ -568,6 +572,7 @@
                 period, range, TimeZone.Zone ?? TimeZoneInfo.Utc, HistoryChartQuery.GetAvailableCoverage(stores, to),
                 HistoryChartQuery.IsBars(requests));
             var from = PropertyHistoryChartModel.GetWindowStart(to, range, bucket);
+            _isCalendarQuery = bucket is { CalendarUnit: not null };
             var result = await HistoryChartQuery.QueryAsync(stores, requests, from, to, bucket, cancellationToken);
             if (cancellationToken.IsCancellationRequested || _isDisposed)
             {
