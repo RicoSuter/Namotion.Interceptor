@@ -363,11 +363,14 @@ internal sealed class StorageReconciler
         }
 
         // On a file system that ignores case, a misnamed file would be read and written here, and a pass ignores it. A
-        // metadata file in another case is that of another subject on a file system that respects case.
+        // metadata file in another case is that of another subject or folder on a file system that respects case, but
+        // only while the index holds what it describes.
         foreach (var candidate in _index.Entries)
         {
-            if (string.Equals(candidate.Path, path, StringComparison.OrdinalIgnoreCase) &&
-                !StorageMetadataPath.IsMetadataFile(candidate.Path))
+            if (candidate.Path != path &&
+                string.Equals(candidate.Path, path, StringComparison.OrdinalIgnoreCase) &&
+                !(StorageMetadataPath.IsMetadataFile(candidate.Path) &&
+                  _index.TryGet(StorageMetadataPath.GetDescribedPath(candidate.Path), out _)))
             {
                 throw new StorageRefusedException($"Rename '{candidate.Path}' to '{StoragePath.GetName(path)}' to make it the metadata file, then try again.");
             }

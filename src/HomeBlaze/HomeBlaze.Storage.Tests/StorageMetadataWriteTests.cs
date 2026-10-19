@@ -177,6 +177,7 @@ public class StorageMetadataWriteTests : StorageTestBase
     [Theory]
     [InlineData("Docs/Motor.Metadata.json", "Docs/Motor.metadata.json")]
     [InlineData("Docs/.Metadata.json", "Docs/.metadata.json")]
+    [InlineData("Docs/motor.metadata.json", "Docs/Motor.metadata.json")]
     public async Task WhenTheMetadataFileIsNamedInAnotherCase_ThenAWriteIsRefusedNamingBothNames(string actualPath, string expectedPath)
     {
         // Arrange
@@ -221,6 +222,29 @@ public class StorageMetadataWriteTests : StorageTestBase
         Assert.Equal("Lower", lowerRead.GetProperty("navTitle").GetString());
         Assert.Equal(new SubjectMetadata { NavigationTitle = "Upper", Icon = "Water" }, ReadMetadataFile("Docs/Motor.metadata.json").SubjectMetadata);
         Assert.Equal(new SubjectMetadata { NavigationTitle = "Lower", Icon = "Air" }, ReadMetadataFile("Docs/motor.metadata.json").SubjectMetadata);
+    }
+
+    [Fact]
+    public async Task WhenTwoFoldersDifferOnlyInCase_ThenEachMetadataFileIsWritten()
+    {
+        // Arrange
+        WriteFile("Docs/a.md");
+        WriteFile("docs/b.md");
+        WriteFile("Docs/.metadata.json", """{ "title": "Upper" }""");
+        WriteFile("docs/.metadata.json", """{ "title": "Lower" }""");
+        var storage = await ConnectAsync();
+        var upper = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
+        var lower = Assert.IsType<VirtualFolder>(storage.Children["docs"]);
+
+        // Act
+        await storage.SetMetadataAsync(upper, Values("""{ "icon": "Water" }"""), CancellationToken.None);
+        await storage.SetMetadataAsync(lower, Values("""{ "icon": "Air" }"""), CancellationToken.None);
+
+        // Assert
+        Assert.Contains("\"Upper\"", ReadText("Docs/.metadata.json"));
+        Assert.Contains("\"Water\"", ReadText("Docs/.metadata.json"));
+        Assert.Contains("\"Lower\"", ReadText("docs/.metadata.json"));
+        Assert.Contains("\"Air\"", ReadText("docs/.metadata.json"));
     }
 
     [Fact]
