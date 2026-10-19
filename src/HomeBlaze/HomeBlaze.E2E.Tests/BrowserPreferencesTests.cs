@@ -142,11 +142,12 @@ public class BrowserPreferencesTests
         await page.WaitForFunctionAsync(SubjectBrowserPage.IsInteractive, null, new() { Timeout = PageLoadTimeout });
         await Assertions.Expect(Drawer(page)).ToHaveClassAsync(ClosedDrawer, new() { Timeout = PageLoadTimeout });
 
-        // Assert
         // A later write through the same store, which reaches the browser after a write of the closed drawer would have.
         await page.Locator("[data-testid='row-layout-menu']").GetByRole(AriaRole.Button).ClickAsync();
         await page.Locator("[data-testid='row-layout-stacked']").ClickAsync();
         await WaitForCookieAsync(page, $"{RowLayoutCookie}=Stacked");
+
+        // Assert
         var cookies = await page.Context.CookiesAsync();
         Assert.DoesNotContain(cookies, cookie => cookie.Name == DrawerCookie);
     }

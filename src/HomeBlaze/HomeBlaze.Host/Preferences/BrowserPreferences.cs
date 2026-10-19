@@ -68,7 +68,7 @@ public sealed class BrowserPreferences : IAsyncDisposable
         }
         catch (Exception exception) when (exception is JSDisconnectedException or OperationCanceledException)
         {
-            // A timed-out call surfaces as OperationCanceledException. Neither is worth an error page: the value already applies to this circuit.
+            // A timed-out call surfaces as OperationCanceledException. Neither that nor a lost circuit is worth an error page: the value already applies to this circuit.
             ForgetFailedImport();
         }
     }

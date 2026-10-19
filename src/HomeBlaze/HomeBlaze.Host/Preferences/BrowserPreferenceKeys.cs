@@ -5,12 +5,12 @@ namespace HomeBlaze.Host.Preferences;
 /// </summary>
 internal static class BrowserPreferenceKeys
 {
-    /// <summary>Whether the navigation drawer is open: "open" or "closed".</summary>
+    /// <summary>Whether the navigation drawer is open.</summary>
     public const string Drawer = "drawer";
 
     /// <summary>The row layout of the property panel.</summary>
     public const string RowLayout = "rowlayout";
 
-    /// <summary>The display time zone: "Automatic" or an IANA id.</summary>
+    /// <summary>The display time zone.</summary>
     public const string TimeZone = "timezone";
 }
