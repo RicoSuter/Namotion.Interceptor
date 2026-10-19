@@ -9,7 +9,7 @@ namespace HomeBlaze.Host.Preferences;
 /// <summary>
 /// Preferences that a browser remembers, one cookie per key. The prerendered page and the interactive circuit read the same values.
 /// </summary>
-/// <remarks>Resolve it during the first render of a circuit, as the main layout does: the values handed over from the prerender are only available then.</remarks>
+/// <remarks>Resolve it during the first render of a circuit: the values handed over from the prerender are available only until that render completes.</remarks>
 public sealed class BrowserPreferences : IAsyncDisposable
 {
     private const string CookiePrefix = "homeblaze.";
@@ -44,11 +44,6 @@ public sealed class BrowserPreferences : IAsyncDisposable
     }
 
     /// <summary>
-    /// Gets the name of the cookie in which a browser stores the preference with the given key.
-    /// </summary>
-    public static string GetCookieName(string key) => CookiePrefix + key;
-
-    /// <summary>
     /// Gets the stored value of a preference, or null when the browser has none.
     /// </summary>
     public string? Get(string key) => _values.GetValueOrDefault(key);
@@ -56,6 +51,7 @@ public sealed class BrowserPreferences : IAsyncDisposable
     /// <summary>
     /// Stores a preference for this circuit and in the browser for a year. A value the browser cannot store still applies to this circuit.
     /// </summary>
+    /// <remarks>Call it only once the circuit is interactive, such as from an event handler or <c>OnAfterRenderAsync</c>: during the prerender no JavaScript runs.</remarks>
     public async ValueTask SetAsync(string key, string value)
     {
         _values[key] = value;
@@ -72,7 +68,7 @@ public sealed class BrowserPreferences : IAsyncDisposable
         }
         catch (Exception exception) when (exception is JSDisconnectedException or OperationCanceledException)
         {
-            // The circuit is gone or the call timed out. Rethrowing would tear down the circuit with an error page for a preference that still applies to this circuit.
+            // A timed-out call surfaces as OperationCanceledException. Neither is worth an error page: the value already applies to this circuit.
             ForgetFailedImport();
         }
     }
@@ -101,6 +97,8 @@ public sealed class BrowserPreferences : IAsyncDisposable
             }
         }
     }
+
+    private static string GetCookieName(string key) => CookiePrefix + key;
 
     private static Dictionary<string, string> ReadCookies(IRequestCookieCollection? cookies)
     {

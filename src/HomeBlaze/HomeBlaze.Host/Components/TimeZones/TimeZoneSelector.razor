@@ -98,7 +98,7 @@
             if (!string.IsNullOrWhiteSpace(browserZone))
             {
                 TimeZone.SetResolved(TimeZonePreference.Automatic, TimeZoneResolver.Resolve(browserZone));
-                await Preferences.SetAsync(TimeZoneInitializer.PreferenceKey, TimeZonePreference.Automatic.ToCookieValue());
+                await Preferences.SetAsync(BrowserPreferenceKeys.TimeZone, TimeZonePreference.Automatic.ToCookieValue());
             }
 
             await CloseMenuAsync();
@@ -115,7 +115,7 @@
         {
             var preference = TimeZonePreference.Specific(id);
             TimeZone.SetResolved(preference, TimeZoneResolver.Resolve(id));
-            await Preferences.SetAsync(TimeZoneInitializer.PreferenceKey, preference.ToCookieValue());
+            await Preferences.SetAsync(BrowserPreferenceKeys.TimeZone, preference.ToCookieValue());
             await CloseMenuAsync();
         }
         catch (Exception exception) when (IsInteropFailure(exception))
@@ -124,10 +124,9 @@
         }
     }
 
-    // The same reasoning as TimeZoneInitializer: a time zone that could not be detected is cosmetic, while an
-    // exception out of a click handler tears the circuit down and replaces the application with an error
-    // page. OperationCanceledException is in the set because that is how the interop call timeout
-    // surfaces; it derives from neither JSException nor JSDisconnectedException.
+    // An exception out of a click handler tears the circuit down and replaces the application with an error page,
+    // which a failed detection or a menu closed on a lost circuit does not justify. OperationCanceledException is in the
+    // set because that is how the interop call timeout surfaces; it derives from neither JSException nor JSDisconnectedException.
     private static bool IsInteropFailure(Exception exception) =>
         exception is JSDisconnectedException or OperationCanceledException or JSException;
 

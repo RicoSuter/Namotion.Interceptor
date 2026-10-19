@@ -231,6 +231,7 @@ Storage.Abs.   Components.Abs.   Abstractions
 - **Operations UI**: Execute `[Operation]` methods with parameter dialogs
 - **Navigation Menu**: Sidebar from subject tree
 - **Layout**: Standard application layout
+- **Browser Preferences**: Settings a browser remembers across reloads (navigation drawer, property row layout, display time zone), one `homeblaze.<key>` cookie each, read during the prerender so the first paint is already right (`BrowserPreferences`)
 
 **Dependencies**: `HomeBlaze.Host.Services`, `HomeBlaze.Storage.Blazor`, `MudBlazor`
 
