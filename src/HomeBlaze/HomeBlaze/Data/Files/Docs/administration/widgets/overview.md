@@ -56,7 +56,7 @@ Every other type that can be configured works as a block as well, see [Widgets](
 
 | Widget | Type name | What it does |
 |--------|-----------|--------------|
-| [HistoryChart](history-chart.md) | `HomeBlaze.History.Blazor.HistoryChart` | The recorded history of numbers as lines and of states as bands |
+| [HistoryChart](history-chart.md) | `HomeBlaze.History.Blazor.HistoryChart` | The recorded history of numbers as lines, of counters as bars per day, week or month, and of states as bands |
 
 ## Related
 
