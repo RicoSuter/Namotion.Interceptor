@@ -79,14 +79,19 @@ else
 }
 
 <style>
-    /* Clips content that needs more room, but leaves 8 pixels for the shadow of a card that fills the cell. A clipping
-       cell is no scroll container, so without min-width: 0 its content would widen its column. */
+    /* Clips content that needs more room. A clipping cell is no scroll container, so without min-width: 0 its content
+       would widen its column. */
     .grid-cell {
         min-width: 0;
         min-height: 100px;
         overflow: clip;
-        overflow-clip-margin: 8px;
         position: relative;
+    }
+
+    /* A card or a tile that fills the cell keeps 8 pixels around it for its shadow, which Safari clips: it has no
+       overflow-clip-margin. The selector is that of a place-filler in SubjectComponent.razor.css. */
+    .grid-cell:has(> .grid-cell-content > .subject-component-wrapper > .place-filler, > .grid-cell-content > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty)) > .place-filler) {
+        overflow-clip-margin: 8px;
     }
 
     /* In edit mode: disable widget interaction */

@@ -24,6 +24,10 @@ public sealed partial class ValueColor
         .Select(color => color.Theme.ToString())
         .ToArray();
 
+    // The theme colors whose palette variable has a text variant, -text, for the text on a fill of it.
+    private static readonly Color[] PaletteThemeColors =
+        [Color.Primary, Color.Secondary, Color.Tertiary, Color.Info, Color.Success, Color.Warning, Color.Error, Color.Dark];
+
     private ValueColor(Color theme)
     {
         Theme = theme;
@@ -72,8 +76,9 @@ public sealed partial class ValueColor
     /// <summary>
     /// Parses the name of a theme color, without regard to case, or a CSS color: <c>#rgb</c>, <c>#rgba</c>,
     /// <c>#rrggbb</c>, <c>#rrggbbaa</c>, <c>rgb()</c> or <c>rgba()</c> with numbers or percentages, or
-    /// <c>var(--mud-palette-name)</c>. Null, empty and white space give <see cref="Default"/>. Anything else,
-    /// a number for a theme color included, is no color.
+    /// <c>var(--mud-palette-name)</c>. The variable of a theme color, such as <c>var(--mud-palette-success)</c>, gives
+    /// that theme color. Null, empty and white space give <see cref="Default"/>. Anything else, a number for a theme
+    /// color and the variables of the primary color that <see cref="Style"/> redefines included, is no color.
     /// </summary>
     public static bool TryParse(string? text, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out ValueColor? color)
     {
@@ -113,12 +118,35 @@ public sealed partial class ValueColor
 
         if (PaletteVariableRegex().IsMatch(css))
         {
-            color = new ValueColor(css, ThemeText);
-            return true;
+            return TryParsePaletteVariable(css, out color);
         }
 
         color = null;
         return false;
+    }
+
+    private static bool TryParsePaletteVariable(string css, out ValueColor? color)
+    {
+        // The regex matched, so the name stands between "--mud-palette-" and the closing parenthesis.
+        var name = css.AsSpan(4, css.Length - 5).Trim(" \t\r\n\f")["--mud-palette-".Length..];
+        foreach (var theme in PaletteThemeColors)
+        {
+            if (name.Equals(ThemeNames[(int)theme], StringComparison.OrdinalIgnoreCase))
+            {
+                color = ThemeColors[(int)theme];
+                return true;
+            }
+        }
+
+        // Style redefines these on the element, so a color of one of them would refer to itself.
+        if (name.StartsWith("primary-", StringComparison.Ordinal))
+        {
+            color = null;
+            return false;
+        }
+
+        color = new ValueColor(css, ThemeText);
+        return true;
     }
 
     /// <summary>Gets the widget argument error of a color that <see cref="TryParse"/> does not take.</summary>

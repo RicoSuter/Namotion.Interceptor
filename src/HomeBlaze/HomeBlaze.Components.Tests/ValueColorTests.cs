@@ -84,6 +84,8 @@ public class ValueColorTests
     [InlineData("var(--my-color)")]
     [InlineData("var(--mud-palette-primary, red)")]
     [InlineData("var(--mud-palette-primary);color:red")]
+    [InlineData("var(--mud-palette-primary-hover)")]
+    [InlineData("var(--mud-palette-primary-text)")]
     [InlineData("url(x)")]
     [InlineData("expression(alert(1))")]
     public void WhenTextIsNoThemeColorAndNoAllowedCssColor_ThenItIsNoColor(string text)
@@ -112,6 +114,21 @@ public class ValueColorTests
         Assert.Equal(
             $"--mud-palette-primary: {text}; --mud-palette-primary-text: {expectedText}; --mud-palette-primary-hover: color-mix(in srgb, {text} 6%, transparent)",
             color!.Style);
+    }
+
+    [Theory]
+    [InlineData("var(--mud-palette-primary)", Color.Primary)]
+    [InlineData("var(--mud-palette-success)", Color.Success)]
+    [InlineData("var( --mud-palette-dark )", Color.Dark)]
+    public void WhenCssColorIsThePaletteVariableOfAThemeColor_ThenItIsThatThemeColorWithoutStyle(string text, Color expected)
+    {
+        // Act
+        var isColor = ValueColor.TryParse(text, out var color);
+
+        // Assert
+        Assert.True(isColor);
+        Assert.Same(ValueColor.FromTheme(expected), color);
+        Assert.Null(color!.Style);
     }
 
     [Fact]

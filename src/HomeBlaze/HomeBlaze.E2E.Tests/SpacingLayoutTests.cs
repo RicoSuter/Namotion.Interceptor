@@ -261,6 +261,32 @@ public class SpacingLayoutTests
         // Assert
         var widths = await cells.EvaluateAllAsync<double[]>("cells => cells.map(cell => cell.getBoundingClientRect().width)");
         Assert.Equal(widths[1], widths[0], Tolerance);
+
+        // The text runs past the right edge of its cell, which clips it at that edge.
+        var overflow = await cells.First.EvaluateAsync<double>(
+            """
+            cell => {
+                const range = document.createRange();
+                range.selectNodeContents(cell.querySelector('.grid-cell-content'));
+                return range.getBoundingClientRect().right - cell.getBoundingClientRect().right;
+            }
+            """);
+        Assert.True(overflow > 8, $"The text reaches only {overflow} pixels past the cell.");
+        await Assertions.Expect(cells.First).ToHaveCSSAsync("overflow", "clip");
+        await Assertions.Expect(cells.First).ToHaveCSSAsync("overflow-clip-margin", "0px");
+    }
+
+    [Fact]
+    public async Task WhenACardFillsAGridCell_ThenOnlyThatCellLeavesRoomForItsShadow()
+    {
+        // Arrange & Act
+        var page = await OpenPageAsync();
+        var cardCell = page.Locator(".grid-cell").Filter(new() { Has = page.GetCard("Cell Card") });
+        var textCell = page.Locator(".grid-cell").Filter(new() { Has = page.GetByText("Text in a cell.", new() { Exact = true }) });
+
+        // Assert
+        await Assertions.Expect(cardCell).ToHaveCSSAsync("overflow-clip-margin", "8px", new() { Timeout = Timeout });
+        await Assertions.Expect(textCell).ToHaveCSSAsync("overflow-clip-margin", "0px");
     }
 
     [Fact]
