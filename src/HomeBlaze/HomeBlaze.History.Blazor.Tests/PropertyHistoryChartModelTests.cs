@@ -574,6 +574,34 @@ public class PropertyHistoryChartModelTests
         Assert.Equal(HistoryBucket.Fixed(TimeSpan.FromMinutes(expectedMinutes)), bucket);
     }
 
+    [Theory]
+    [InlineData(30, HistoryCalendarUnit.Day)]
+    [InlineData(90, HistoryCalendarUnit.Week)]
+    [InlineData(365, HistoryCalendarUnit.Month)]
+    public void WhenResolveBucketAutoForBarsSpansADayOrMore_ThenItIsTheCalendarPeriod(int rangeDays, HistoryCalendarUnit expected)
+    {
+        // Arrange
+        var auto = PropertyHistoryChartModel.Periods[0];
+        var zone = TimeZoneInfo.FindSystemTimeZoneById("Europe/Zurich");
+
+        // Act
+        var bucket = PropertyHistoryChartModel.ResolveBucket(auto, TimeSpan.FromDays(rangeDays), zone, isBars: true);
+
+        // Assert
+        Assert.Equal(HistoryBucket.Calendar(expected, zone), bucket);
+    }
+
+    [Fact]
+    public void WhenResolveBucketAutoForLinesSpansADay_ThenItStaysFixed()
+    {
+        // Act
+        var bucket = PropertyHistoryChartModel.ResolveBucket(
+            PropertyHistoryChartModel.Periods[0], TimeSpan.FromDays(365), TimeZoneInfo.Utc);
+
+        // Assert
+        Assert.Equal(HistoryBucket.Fixed(TimeSpan.FromDays(7)), bucket);
+    }
+
     [Fact]
     public void WhenResolveBucketNone_ThenReturnsNull()
     {

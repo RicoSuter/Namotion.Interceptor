@@ -419,7 +419,8 @@
     // height it gets with its data from its first render on.
     private void PlanLayout()
     {
-        // Bars when every line asks for Delta of a counter in buckets, which every history store offers.
+        // Bars when every line asks for Delta of a counter in buckets, which the history stores of HomeBlaze offer. With a
+        // store that does not, the chart draws lines, and their legend moves once they are drawn.
         var isBars = PropertyHistoryChartModel.TryGetPeriod(_resolvedBucket, out var period) && !period.IsRaw;
         var hasLines = false;
         var bandSeries = new List<int>();

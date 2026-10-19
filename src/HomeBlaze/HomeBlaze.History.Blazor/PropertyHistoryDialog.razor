@@ -218,18 +218,16 @@
 
             var stores = HistoryChartQuery.GetStores(Registry);
             var period = PropertyHistoryChartModel.Periods[_periodIndex];
-            var isBars = _aggregation == HistoryAggregations.Delta && !UseStateTimeline;
+            HistoryChartSeriesRequest[] requests =
+                [new(PropertyPath, DisplayName, PropertyType, UseStateTimeline, _aggregation, Unit: Unit)];
             var bucket = PropertyHistoryChartModel.ResolveBucket(
-                period, to - from, TimeZone.Zone ?? TimeZoneInfo.Utc, HistoryChartQuery.GetAvailableCoverage(stores, to), isBars);
+                period, to - from, TimeZone.Zone ?? TimeZoneInfo.Utc, HistoryChartQuery.GetAvailableCoverage(stores, to),
+                HistoryChartQuery.IsBars(requests));
 
             // A calendar bucket starts a range at the start of a period, so that its first bar is a whole one.
-            if (!_useCustom)
+            if (bucket is { CalendarUnit: not null } calendar)
             {
-                from = PropertyHistoryChartModel.GetWindowStart(to, to - from, bucket);
-            }
-            else if (bucket is { CalendarUnit: not null } calendar)
-            {
-                from = BucketAlignment.Start(from, calendar);
+                from = _useCustom ? BucketAlignment.Start(from, calendar) : PropertyHistoryChartModel.GetWindowStart(to, to - from, calendar);
             }
 
             var range = to - from;
@@ -248,8 +246,7 @@
                 ? "Only Count applies to states."
                 : PropertyHistoryChartModel.DescribeAggregation(_aggregation);
 
-            var request = new HistoryChartSeriesRequest(PropertyPath, DisplayName, PropertyType, UseStateTimeline, _aggregation, Unit: Unit);
-            var result = await HistoryChartQuery.QueryAsync(stores, [request], from, to, bucket, cancellationToken);
+            var result = await HistoryChartQuery.QueryAsync(stores, requests, from, to, bucket, cancellationToken);
 
             // Superseded by a newer load while this query ran; leave the newer result in place.
             if (cancellationToken.IsCancellationRequested)

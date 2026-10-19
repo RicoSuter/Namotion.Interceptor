@@ -129,6 +129,16 @@ function thinBarLabels(lines) {
             label.style.visibility = visibility;
         }
     });
+
+    // The bars end where the lines do, which clip what reaches past them, so the newest label is moved back inside. It is
+    // measured without its earlier move, in the layout pixels of the lines, which a scaled canvas draws larger or smaller.
+    const newest = labels[labels.length - 1];
+    newest.style.transform = '';
+    const box = lines.getBoundingClientRect();
+    const overflow = (newest.getBoundingClientRect().right - box.right) * (lines.offsetWidth / box.width);
+    if (overflow > 0) {
+        newest.style.transform = `translateX(${-Math.ceil(overflow)}px)`;
+    }
 }
 
 // Sets only a changed value, because setting one changes the style attribute that is observed.

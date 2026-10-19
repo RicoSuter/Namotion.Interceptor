@@ -251,8 +251,9 @@ public static class PropertyHistoryChartModel
 
     /// <summary>
     /// Resolves the effective bucket for a selected period: an auto period uses <see cref="AutoBucket"/> over the
-    /// current range (clamped to <paramref name="availableCoverage"/> when supplied), with fewer buckets for bars; a
-    /// calendar period is aligned to local period starts in <paramref name="timeZone"/>; any other period uses its fixed
+    /// current range (clamped to <paramref name="availableCoverage"/> when supplied), with fewer buckets for bars, which
+    /// take the calendar day, week or month in <paramref name="timeZone"/> once a bucket spans a day or more; a calendar
+    /// period is aligned to local period starts in <paramref name="timeZone"/>; any other period uses its fixed
     /// <see cref="ChartPeriod.Bucket"/> (null means a raw query).
     /// </summary>
     public static HistoryBucket? ResolveBucket(
@@ -263,9 +264,20 @@ public static class PropertyHistoryChartModel
             return HistoryBucket.Calendar(unit, timeZone);
         }
 
-        return period.IsAuto
-            ? AutoBucket(range, availableCoverage, isBars ? AutoBarBuckets : AutoLineBuckets)
-            : period.Bucket;
+        if (!period.IsAuto)
+        {
+            return period.Bucket;
+        }
+
+        var size = AutoBucket(range, availableCoverage, isBars ? AutoBarBuckets : AutoLineBuckets);
+
+        // A bar of a day or longer is an amount per day, week or month, which the epoch grid would split at UTC midnight.
+        return !isBars || size < TimeSpan.FromDays(1) ? size :
+            HistoryBucket.Calendar(
+                size >= TimeSpan.FromDays(30) ? HistoryCalendarUnit.Month :
+                size >= TimeSpan.FromDays(7) ? HistoryCalendarUnit.Week :
+                HistoryCalendarUnit.Day,
+                timeZone);
     }
 
     /// <summary>

@@ -33,17 +33,13 @@
                 {
                     @if (_linesWidth > 0)
                     {
-                        @if (ShowAxes && data!.IsBars)
-                        {
-                            <div style="@BarPlotStyle">@_plot</div>
-                        }
-                        else if (ShowAxes)
+                        @if (ShowAxes && !data!.IsBars)
                         {
                             @_plot
                         }
                         else
                         {
-                            <div style="@CompactPlotStyle">@_plot</div>
+                            <div style="@(ShowAxes ? BarPlotStyle : CompactPlotStyle)">@_plot</div>
                         }
                     }
                 }
@@ -162,12 +158,9 @@
     private const int PlotBottomSpace = 30;
     private const int StrokeMargin = 4;
 
-    // About half the width of the tooltip of a bar, from where on it opens to the left.
-    private const int BarTooltipHalfWidth = 80;
-
     // MudChart keeps the same space right of bars as of lines, where only lines need it for their last time label, so the
     // bars are drawn that much wider than their box and end where it does. The box clips the space, which would otherwise
-    // widen the page, so the tooltip of a bar near the end opens to the left, see RenderBarTooltip.
+    // widen the page, so the tooltip of a bar opens towards the middle, see RenderBarTooltip.
     private static readonly string BarPlotStyle =
         $"position:absolute; left:0; top:0; width:calc(100% + {PlotEndSpace}px); height:100%; display:flex;";
 
@@ -207,15 +200,15 @@
     // The line of Data.Lines that each chart series draws, -1 for the series that holds the time axis to the window.
     private int[] _chartSeriesLines = [];
 
-    // Set by a click on a line or a bar, which the click handler of the lines receives right after it, see OnLinesClicked.
+    // See OnPlotSeriesClicked.
     private bool _isSeriesClick;
     private readonly EventCallback<int> _plotSeriesClicked;
     private readonly EventCallback _linesClicked;
     private readonly RenderFragment<(SvgPath Segment, string Color)> _barTooltip;
 
-    // The label of each group of bars, and the unit the bars are drawn in with a space before it, or empty.
+    // The label of each group of bars, and the format of their values with their unit.
     private string[] _barLabels = [];
-    private string _barUnit = string.Empty;
+    private string _barValueFormat = "0.##";
     private double _valueMinimum;
     private double _valueMaximum;
     private bool _isPercent;
@@ -336,17 +329,19 @@
         _barTooltip = RenderBarTooltip;
     }
 
-    // The tooltip of MudChart, which opens to the left of a bar so near the end of the plot that it would reach past it.
+    // The tooltip of MudChart, which opens towards the middle of the bars, so the box of the lines cuts it at neither end.
+    // A bar is found by its label, which the tooltip names anyway, so the decision needs no width in any scale.
     private RenderFragment RenderBarTooltip((SvgPath Segment, string Color) context) => builder =>
     {
         var segment = context.Segment;
         var name = (uint)segment.Index < (uint)(_chartSeries?.Count ?? 0) ? _chartSeries![segment.Index].Name : string.Empty;
+        var isRightHalf = 2 * Array.IndexOf(_barLabels, segment.LabelXValue) >= _barLabels.Length;
         builder.OpenComponent<ChartTooltip>(0);
         builder.AddComponentParameter(1, nameof(ChartTooltip.Title), segment.LabelYValue);
         builder.AddComponentParameter(2, nameof(ChartTooltip.Subtitle), $"{name}, {segment.LabelXValue}");
         builder.AddComponentParameter(3, nameof(ChartTooltip.Color), context.Color);
         builder.AddComponentParameter(4, nameof(ChartTooltip.AnchorPositionX),
-            segment.LabelX > _linesWidth - BarTooltipHalfWidth ? ChartTooltipAnchorPositionX.End : ChartTooltipAnchorPositionX.Center);
+            isRightHalf ? ChartTooltipAnchorPositionX.End : ChartTooltipAnchorPositionX.Start);
         builder.CloseComponent();
     };
 
@@ -767,10 +762,10 @@
             factor = (double)scaledFactor;
         }
 
-        _barUnit = string.IsNullOrEmpty(suffix) ? string.Empty : " " + suffix;
-        var valueFormat = string.IsNullOrEmpty(suffix) ? "0.##" : $"0.## '{suffix}'";
+        _barValueFormat = string.IsNullOrEmpty(suffix) ? "0.##" : $"0.## '{suffix}'";
         var chartSeries = new List<ChartSeries<double>>(data.Lines.Count);
         var palette = new string[data.Lines.Count];
+        var chartSeriesLines = new int[data.Lines.Count];
         for (var lineIndex = 0; lineIndex < data.Lines.Count; lineIndex++)
         {
             var line = data.Lines[lineIndex];
@@ -799,9 +794,10 @@
                 Name = line.Label,
                 Visible = true,
                 Data = values,
-                TooltipYValueFormat = valueFormat
+                TooltipYValueFormat = _barValueFormat
             });
             palette[lineIndex] = line.Color;
+            chartSeriesLines[lineIndex] = lineIndex;
         }
 
         var format = HistoryChartAxis.GetTimeLabelFormat(data.To - data.From, PropertyHistoryChartModel.GetNominalLength(bucket));
@@ -815,12 +811,7 @@
 
         _palette = palette;
 
-        // One chart series per line, in their order.
-        _chartSeriesLines = new int[data.Lines.Count];
-        for (var lineIndex = 0; lineIndex < _chartSeriesLines.Length; lineIndex++)
-        {
-            _chartSeriesLines[lineIndex] = lineIndex;
-        }
+        _chartSeriesLines = chartSeriesLines;
 
         _valueMinimum = minimum * factor;
         _valueMaximum = maximum * factor;
@@ -848,16 +839,14 @@
             : HistoryChartAxis.GetValueAxis(_valueMinimum, _valueMaximum, height);
         if (data.IsBars)
         {
-            var unit = _barUnit;
+            var format = _barValueFormat;
             _chartOptions = new BarChartOptions
             {
                 ChartPalette = _palette,
                 ShowLegend = false,
-                YAxisToStringFunc = ShowAxes ? value => value.ToString("0.##", CultureInfo.CurrentCulture) + unit : EmptyAxisLabel,
+                YAxisToStringFunc = ShowAxes ? value => value.ToString(format, CultureInfo.CurrentCulture) : EmptyAxisLabel,
                 YAxisLines = ShowAxes,
                 ShowToolTips = ShowAxes,
-                TooltipTitleFormat = "{{Y_VALUE}}",
-                TooltipSubtitleFormat = "{{SERIES_NAME}}, {{X_VALUE}}",
                 BarWidthRatio = 0.7,
                 YAxisTicks = valueAxis.Step,
                 MaxNumYAxisTicks = _valueLabelCount,

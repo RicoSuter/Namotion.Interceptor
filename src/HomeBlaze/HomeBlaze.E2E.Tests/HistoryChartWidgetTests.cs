@@ -788,6 +788,32 @@ public class HistoryChartWidgetTests
     }
 
     [Fact]
+    public async Task WhenTheSameBarIsClickedAgainAndThenBesideTheBars_ThenItsDialogOpensAgainAndThenTheOneOfTheFirstSeries()
+    {
+        // Arrange
+        var page = await OpenBarsPageAsync();
+        var chart = GetChart(page, "Fed in");
+        var view = chart.GetByTestId("history-chart-view");
+        await Assertions.Expect(view).ToHaveAttributeAsync("data-plot-ready", "", new() { Timeout = Timeout });
+        var bars = view.Locator(".mud-charts-bar-series path.mud-chart-bar");
+        await Assertions.Expect(bars).ToHaveCountAsync(14, new() { Timeout = Timeout });
+
+        // Act & Assert - MudChart reports a click on a series only when it differs from the last, which the chart rearms.
+        foreach (var _ in Enumerable.Range(0, 2))
+        {
+            await bars.Last.DispatchEventAsync("click");
+            var dialog = GetHistoryDialog(page, "Fed in");
+            await Assertions.Expect(dialog).ToBeVisibleAsync(new() { Timeout = Timeout });
+            await dialog.Locator(".mud-dialog-actions").GetByRole(AriaRole.Button, new() { Name = "Close" }).ClickAsync();
+            await Assertions.Expect(dialog).ToHaveCountAsync(0, new() { Timeout = Timeout });
+        }
+
+        // The top left corner of the plot is beside every bar.
+        await chart.GetByTestId("history-chart-lines").ClickAsync(new() { Position = new() { X = 60, Y = 5 } });
+        await Assertions.Expect(GetHistoryDialog(page, "Taken")).ToBeVisibleAsync(new() { Timeout = Timeout });
+    }
+
+    [Fact]
     public async Task WhenTheLineOfTheSecondSeriesIsClicked_ThenTheHistoryDialogOfThatSeriesOpens()
     {
         // Arrange - the line of a series is drawn in the color of the swatch of its legend entry.
