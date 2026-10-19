@@ -493,12 +493,10 @@
             for (var index = 0; index < series.Count; index++)
             {
                 var entry = series[index];
-                if (GetHistoryPath(entry) is not { } path)
+                if (entry.Property is not { } property || GetHistoryPath(entry) is not { } path)
                 {
                     continue;
                 }
-
-                var property = entry.Property!;
 
                 var isBand = entry.Kind == HistoryChartSeriesKind.Band;
                 if (isBand)

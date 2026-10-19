@@ -310,7 +310,7 @@ public class HistoryChartWidgetTests
     }
 
     // Records the height of the chart with the legend entry in every frame from the parsed prerendered page on, together
-    // with whether its lines were drawn, so the heights before and after the data arrived can be compared.
+    // with whether it was drawn with its data, so the heights before and after the data arrived can be compared.
     private const string HeightRecorderScript =
         """
         label => {
@@ -322,11 +322,16 @@ public class HistoryChartWidgetTests
                             .some(element => element.childElementCount === 0 && element.textContent.trim() === label));
                     if (widget) {
                         const height = Math.round(widget.getBoundingClientRect().height * 10) / 10;
-                        // Drawn once the chart has lines and has fitted itself to its box, see GetLayoutAsync.
-                        const chart = widget.querySelector("[data-testid=history-chart-lines] svg");
+                        // Lines are drawn once they have fitted themselves to their box, see GetLayoutAsync, and bands
+                        // without lines once they and their range are shown.
+                        const lines = widget.querySelector("[data-testid=history-chart-lines]");
+                        const chart = lines?.querySelector("svg");
                         const size = chart?.getBoundingClientRect();
-                        const isDrawn = chart?.querySelector(".mud-charts-timeseries-series path") != null &&
-                            chart.getAttribute("viewBox") === `0 0 ${Math.round(size.width)} ${Math.round(size.height)}`;
+                        const isDrawn = lines
+                            ? chart?.querySelector(".mud-charts-timeseries-series path") != null &&
+                              chart.getAttribute("viewBox") === `0 0 ${Math.round(size.width)} ${Math.round(size.height)}`
+                            : widget.querySelector("[data-testid=history-chart-band]") !== null &&
+                              widget.querySelector("[data-testid=history-chart-range]") !== null;
                         const last = window.historyChartHeights.at(-1);
                         if (!last || last.height !== height || last.isDrawn !== isDrawn) {
                             window.historyChartHeights.push({ height, isDrawn });
@@ -344,6 +349,7 @@ public class HistoryChartWidgetTests
     [InlineData("Chart speed", DesktopWidth)]
     [InlineData("Pair speed", PhoneWidth)]
     [InlineData("Compact speed", PhoneWidth)]
+    [InlineData("Band status", PhoneWidth)]
     public async Task WhenAPageWithAChartLoads_ThenTheChartHasItsFinalHeightBeforeItsDataArrives(string legendLabel, int width)
     {
         // Arrange

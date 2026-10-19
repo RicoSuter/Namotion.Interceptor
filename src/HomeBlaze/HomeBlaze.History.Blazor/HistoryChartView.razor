@@ -10,7 +10,6 @@
 
 @if (Data is not null || Placeholder is not null)
 {
-    @* Without data the view lays out what the placeholder says the data will have, so the page does not move when it arrives. *@
     var data = Data;
     var hasLines = data is null ? Placeholder!.Value.HasLines : data.Lines.Count > 0;
     var bandCount = data is null ? Placeholder!.Value.BandCount : data.Bands.Count;
@@ -23,21 +22,18 @@
                renders only once the box was measured with a size. *@
             <div @ref="_linesBox" data-testid="history-chart-lines" data-axes-labels="@_axesLabels" style="@_linesStyle"
                  title="@LinesTitle" @onclick="LinesClicked">
-                @if (_chartSeries is not null)
+                @if (_chartSeries is not null && _linesWidth > 0)
                 {
-                    @if (_linesWidth > 0)
+                    @if (ShowAxes)
                     {
-                        @if (ShowAxes)
-                        {
-                            @_plot
-                        }
-                        else
-                        {
-                            <div style="@CompactPlotStyle">@_plot</div>
-                        }
+                        @_plot
+                    }
+                    else
+                    {
+                        <div style="@CompactPlotStyle">@_plot</div>
                     }
                 }
-                else if (data is null)
+                else if (data is null || _chartSeries is not null)
                 {
                     <MudSkeleton SkeletonType="SkeletonType.Rectangle" Style="@PlaceholderLinesStyle" data-testid="history-chart-loading" />
                 }
@@ -98,6 +94,11 @@
         @if (ShowRange && _rangeText is not null)
         {
             <MudText Typo="Typo.caption" Class="mud-text-secondary" Style="align-self:stretch;" data-testid="history-chart-range">@_rangeText</MudText>
+        }
+        else if (ShowRange && data is null && !hasLines && bandCount > 0)
+        {
+            @* The range is named once the data says where it starts and ends. *@
+            <MudText Typo="Typo.caption" Style="align-self:stretch; visibility:hidden;">&nbsp;</MudText>
         }
 
         @if (ShowStateTable && data is { Bands.Count: > 0 })
@@ -498,9 +499,10 @@
             _linesHeight = 0;
         }
 
-        // Bands without lines have no time axis above them, so they name their range.
+        // Bands without lines have no time axis above them, so they name their range. Lines without a point keep their
+        // box, which the placeholder reserved, so the range is named only without lines.
         _rangeText = null;
-        if (_chartSeries is null && Data is { Bands.Count: > 0 } data)
+        if (Data is { Lines.Count: 0, Bands.Count: > 0 } data)
         {
             var from = TimeZone.ToZoned(data.From);
             var to = TimeZone.ToZoned(data.To);
