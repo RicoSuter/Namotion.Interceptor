@@ -33,10 +33,9 @@ public interface ITransactionHandler
     /// </summary>
     /// <remarks>
     /// Throwing on the first call aborts the commit without writing anything and leaves the transaction retryable;
-    /// the exception propagates unchanged. Throwing on the second call fails the affected changes (the failed
-    /// changes of a <see cref="SubjectTransactionException"/>, or every passed change for any other exception or when
-    /// none of those failed changes was passed), which is handled like a failed local apply and makes the transaction
-    /// terminal.
+    /// the exception propagates unchanged. Throwing on the second call lands none of the passed changes in either
+    /// failure handling mode: their source writes are reverted, every passed change is reported as failed, and the
+    /// transaction is terminal.
     /// </remarks>
     /// <param name="transaction">The committing transaction.</param>
     /// <param name="changes">
