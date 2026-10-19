@@ -10,3 +10,7 @@ title: History Chart Bars
 :: HomeBlaze.History.Blazor.HistoryChart Range=7d Bucket=day Aggregation=Delta Height=200
 ::: Series Path=barmotor/Energy Label="Daily energy"
 ::
+
+:: HomeBlaze.History.Blazor.HistoryChart Range=7d Bucket=day Aggregation=Delta Height=200
+::: Series Path=barmotor/Energy Label="Fed in" Negate=true
+::

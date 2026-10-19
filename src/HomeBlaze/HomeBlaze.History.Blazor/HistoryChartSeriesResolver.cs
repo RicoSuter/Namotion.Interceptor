@@ -34,6 +34,7 @@ internal enum HistoryChartSeriesKind
 /// <param name="HasHistory">Whether the property is recorded.</param>
 /// <param name="IsCumulative">Whether the property is a counter that only grows.</param>
 /// <param name="Aggregation">The aggregation the series asks for as written, its own or else the one of the chart, or null or empty for the automatic choice.</param>
+/// <param name="IsNegated">Whether a line or bar is drawn with the opposite sign.</param>
 internal sealed record HistoryChartSeriesInfo(
     string Label,
     string? Color,
@@ -42,7 +43,8 @@ internal sealed record HistoryChartSeriesInfo(
     StateUnit Unit,
     bool HasHistory,
     bool IsCumulative,
-    string? Aggregation = null)
+    string? Aggregation = null,
+    bool IsNegated = false)
 {
     /// <summary>Gets what the legend says about a series that has no history to show, or null.</summary>
     public string? Note =>
@@ -53,11 +55,12 @@ internal sealed record HistoryChartSeriesInfo(
 /// <summary>
 /// The arguments of a series of a <see cref="HistoryChart"/> as written.
 /// </summary>
-internal readonly record struct HistoryChartSeriesConfiguration(string? Path, string? Label, string? Color, string? Aggregation)
+internal readonly record struct HistoryChartSeriesConfiguration(
+    string? Path, string? Label, string? Color, string? Aggregation, bool Negate = false)
 {
     /// <summary>Reads the arguments of a series, so a component that calls it in its render renders again when one changes.</summary>
     public static HistoryChartSeriesConfiguration Read(HistoryChartSeries series) =>
-        new(series.Path, series.Label, series.Color, series.Aggregation);
+        new(series.Path, series.Label, series.Color, series.Aggregation, series.Negate);
 }
 
 /// <summary>
@@ -86,7 +89,7 @@ internal static partial class HistoryChartSeriesResolver
         var result = new HistoryChartSeriesInfo[series.Count];
         for (var index = 0; index < result.Length; index++)
         {
-            var (path, label, color, aggregation) = configurations[index];
+            var (path, label, color, aggregation, negate) = configurations[index];
             var property = ResolveProperty(resolver, series[index], path);
             var metadata = property?.GetStateMetadata();
             var kind = property is null
@@ -103,7 +106,8 @@ internal static partial class HistoryChartSeriesResolver
                 metadata?.Unit ?? StateUnit.Default,
                 property?.HasHistory() ?? false,
                 metadata?.IsCumulative ?? false,
-                string.IsNullOrEmpty(aggregation) ? chartAggregation : aggregation);
+                string.IsNullOrEmpty(aggregation) ? chartAggregation : aggregation,
+                negate);
         }
 
         return result;

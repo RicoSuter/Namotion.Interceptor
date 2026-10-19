@@ -170,6 +170,28 @@ public class HistoryChartQueryTests
     }
 
     [Fact]
+    public async Task WhenALineIsNegated_ThenItIsDrawnWithTheOppositeSignAndKeepsItsRecordedPoints()
+    {
+        // Arrange
+        var store = CreateStore().Add("/meter/Exported", At(0), 4_000);
+        HistoryChartSeriesRequest[] requests =
+        [
+            new("/meter/Exported", "Exported", typeof(double), IsBand: false, HistoryAggregations.Delta, IsNegated: true),
+            new("/meter/Exported", "Plain", typeof(double), IsBand: false, HistoryAggregations.Delta)
+        ];
+
+        // Act
+        var result = await HistoryChartQuery.QueryAsync([store], requests, At(0), At(60), TimeSpan.FromHours(1), CancellationToken.None);
+
+        // Assert
+        var negated = result.Data.Lines[0];
+        Assert.True(negated.IsNegated);
+        Assert.Equal(-1, negated.Sign);
+        Assert.Equal(4_000, Assert.Single(Assert.Single(negated.Runs)).Number);
+        Assert.Equal(1, result.Data.Lines[1].Sign);
+    }
+
+    [Fact]
     public async Task WhenOneLineIsNotDelta_ThenTheChartDrawsLines()
     {
         // Arrange

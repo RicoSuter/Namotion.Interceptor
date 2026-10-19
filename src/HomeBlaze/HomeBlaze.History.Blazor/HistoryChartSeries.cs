@@ -45,5 +45,12 @@ public partial class HistoryChartSeries : IConfigurable
     [Configuration]
     public partial string? Aggregation { get; set; }
 
+    /// <summary>
+    /// Whether a line or bar is drawn with the opposite sign, for example to draw the energy fed into the grid below the
+    /// axis. The legend shows the value of the property as it is. A band ignores it.
+    /// </summary>
+    [Configuration]
+    public partial bool Negate { get; set; }
+
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 }

@@ -594,6 +594,8 @@
                         number = HistoryChartAxis.ToPercent(number);
                     }
 
+                    number *= line.Sign;
+
                     anchorValue ??= number;
                     minimum = Math.Min(minimum, number);
                     maximum = Math.Max(maximum, number);
@@ -657,8 +659,9 @@
             {
                 foreach (var point in run)
                 {
-                    minimum = Math.Min(minimum, point.Number!.Value);
-                    maximum = Math.Max(maximum, point.Number!.Value);
+                    var number = point.Number!.Value * line.Sign;
+                    minimum = Math.Min(minimum, number);
+                    maximum = Math.Max(maximum, number);
                 }
             }
         }
@@ -697,7 +700,7 @@
 
                     if (startIndex < starts.Count && starts[startIndex] == point.Timestamp)
                     {
-                        values[startIndex] = point.Number!.Value * factor;
+                        values[startIndex] = point.Number!.Value * line.Sign * factor;
                     }
                 }
             }

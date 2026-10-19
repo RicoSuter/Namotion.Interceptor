@@ -521,7 +521,8 @@
                     property.Type, isBand, entry.IsCumulative, period.IsRaw, storeAggregations, entry.Aggregation);
                 queryNotes[index] = HistoryChartSeriesResolver.GetAggregationNote(entry, period.IsRaw, aggregation);
                 requestSeries.Add(index);
-                requests.Add(new HistoryChartSeriesRequest(path, entry.Label, property.Type, isBand, aggregation, _colors[index], entry.Unit));
+                requests.Add(new HistoryChartSeriesRequest(
+                    path, entry.Label, property.Type, isBand, aggregation, _colors[index], entry.Unit, entry.IsNegated));
             }
 
             var to = TimeProvider.GetUtcNow();

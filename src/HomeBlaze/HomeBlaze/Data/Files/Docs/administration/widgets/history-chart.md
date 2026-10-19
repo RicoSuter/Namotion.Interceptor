@@ -35,6 +35,7 @@ The arguments of a `Series` block:
 | `Label` | Text | From the property, see [Labels](basics.md#labels) | The label in the legend of the lines or above a band |
 | `Color` | Text, a CSS color such as `"#E4572E"`, `teal` or `"rgb(228, 87, 46)"` | The next color of the chart | The color of a line or a bar. A value other than `#` with 3, 4, 6 or 8 hex digits, a word of letters such as a color name, or `rgb()`, `rgba()`, `hsl()` or `hsla()` with plain numbers uses the next color of the chart. A word the browser does not know as a color leaves the line without a color. A band has one color per state and ignores it |
 | `Aggregation` | Like `Aggregation` of the chart | The aggregation of the chart | The aggregation of this line in place of the one of the chart. A band ignores it |
+| `Negate` | Yes or no | `false` | Draws the line or bar with the opposite sign, for example the energy fed into the grid below the axis, under the bars of the energy taken from it. The legend and the history dialog show the property as it is. A band ignores it |
 
 ## Samples
 
@@ -113,6 +114,21 @@ The energy that each motor used per day in the last week, as two bars per day. `
 ::: Series Path=../Fan/Energy Label="Fan"
 ::
 
+Energy in both directions per day, the one direction below the axis with `Negate`. A grid meter has a counter for each direction, `TotalImportedEnergy` and `TotalExportedEnergy`, and both only grow, so each takes `Delta`. Here the pump stands in for the energy taken from the grid and the fan for the energy fed into it:
+
+<!-- sample: live -->
+~~~~markdown
+:: HomeBlaze.History.Blazor.HistoryChart Range=7d Bucket=day Aggregation=Delta Height=200
+::: Series Path=../Pump/Energy Label="Taken"
+::: Series Path=../Fan/Energy Label="Fed in" Negate=true
+::
+~~~~
+
+:: HomeBlaze.History.Blazor.HistoryChart Range=7d Bucket=day Aggregation=Delta Height=200
+::: Series Path=../Pump/Energy Label="Taken"
+::: Series Path=../Fan/Energy Label="Fed in" Negate=true
+::
+
 The energy of the pump per hour of the last day, which fills in sooner on a fresh installation:
 
 <!-- sample: live -->
@@ -160,7 +176,7 @@ Three compact charts in a row: the temperature of each motor and the speed of th
 - **One unit**: All lines share one value axis, so every recorded number series needs the unit of the first one. A series with another unit, for example a temperature next to a speed, shows an error that names both series in place of the chart, see [Value Widget Errors](../page-errors.md#value-widget-errors). Put it in a second chart. A line with the aggregation `Count` counts samples and has no unit, unless the bucket is `Raw`.
 - **Percent**: A percent value is recorded as a fraction from 0 to 1 and drawn times 100, on a value axis from 0 % to 100 % that grows only when a value leaves that range. The history dialog draws it the same way, and its count of samples stays a count.
 - **Small differences**: The value axis steps by at least 1, so lines whose values differ by only a fraction of 1, for example from 0.25 to 0.30, are drawn nearly flat.
-- **Bars**: A line whose aggregation is `Delta` shows the increase of a counter in each bucket, which a chart draws as bars, one group per bucket with one bar per series. The newest bar holds the current period so far and grows with every refresh. A chart draws bars only when all of its lines show `Delta`; with one line of another aggregation, every line is drawn as a line. The value axis of the bars starts at 0 and names the unit of the counter, scaled to the largest bar, for example kWh for a counter in Wh, and the tooltip of a bar names its value, its series and its period. Where the labels of the periods would overlap, only every so many are shown, counted from the newest.
+- **Bars**: A line whose aggregation is `Delta` shows the increase of a counter in each bucket, which a chart draws as bars, one group per bucket with one bar per series. The newest bar holds the current period so far and grows with every refresh. A chart draws bars only when all of its lines show `Delta`; with one line of another aggregation, every line is drawn as a line. The value axis of the bars reaches from 0, down as well for a negated series, and names the unit of the counter, scaled to the largest bar, for example kWh for a counter in Wh, and the tooltip of a bar names its value, its series and its period. Where the labels of the periods would overlap, only every so many are shown, counted from the newest.
 - **Delta**: `Delta` applies only to a counter, a property whose `[State]` attribute has `IsCumulative`, such as the energy of a meter. For any other property it falls back to the automatic aggregation, and the legend says so. A drop of the counter counts as a restart from 0, and a span that no history store recorded is bridged: the increase during it counts in the next bucket with a sample. A bucket without a known reading has no bar.
 - **Calendar buckets**: `day`, `week` and `month` start at midnight in the time zone of the viewer, the one of the browser or the one chosen in the settings, so a day the clocks change is 23 or 25 hours long. With them the range starts at the start of a period, so that the chart shows whole periods up to the current one: `Range=7d Bucket=day` shows today and the six days before it, `Range=30d Bucket=day` 30 days, `Range=90d Bucket=week` 13 weeks and `Range=1y Bucket=month` this month and the 11 before it. A range shorter than the period shows the current period. Until the browser has named its time zone the periods are those of UTC, and the chart queries again once it has.
 - **States as bands**: A boolean, an enum, a text and a number whose state is marked as discrete (`IsDiscrete` of its `[State]` attribute) are a band below the lines, one per series with a header above it: the label and the current value, and the states that the band shows. The header is one line: states that do not fit are cut off at its end, and its tooltip names all of them. Below lines a band starts and ends where the lines do, so a change of state sits under its time. A chart without lines names its range below the bands. A state has the same color in every band of a chart, and "Yes" is always blue. A band is always queried as recorded samples, together with the value held when the range starts, whatever the bucket.

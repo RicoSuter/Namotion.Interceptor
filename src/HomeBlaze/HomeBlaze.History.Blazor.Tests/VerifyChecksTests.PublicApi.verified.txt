@@ -67,8 +67,9 @@ namespace HomeBlaze.History.Blazor
     }
     public sealed class HistoryChartLine : System.IEquatable<HomeBlaze.History.Blazor.HistoryChartLine>
     {
-        public HistoryChartLine(string Label, string Color, System.Collections.Generic.IReadOnlyList<System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Abstractions.HistoryPoint>> Runs, bool IsPercent = false, HomeBlaze.Abstractions.Attributes.StateUnit Unit = 0) { }
+        public HistoryChartLine(string Label, string Color, System.Collections.Generic.IReadOnlyList<System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Abstractions.HistoryPoint>> Runs, bool IsPercent = false, HomeBlaze.Abstractions.Attributes.StateUnit Unit = 0, bool IsNegated = false) { }
         public string Color { get; init; }
+        public bool IsNegated { get; init; }
         public bool IsPercent { get; init; }
         public string Label { get; init; }
         public System.Collections.Generic.IReadOnlyList<System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Abstractions.HistoryPoint>> Runs { get; init; }
@@ -93,6 +94,8 @@ namespace HomeBlaze.History.Blazor
         public string? Color { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public string? Label { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public bool Negate { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         [HomeBlaze.Abstractions.Attributes.SubjectPath(ValueTypes=new System.Type[] {
                 typeof(System.Numerics.INumber<!0>),

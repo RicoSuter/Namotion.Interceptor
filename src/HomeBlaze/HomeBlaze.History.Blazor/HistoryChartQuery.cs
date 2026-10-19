@@ -14,6 +14,7 @@ namespace HomeBlaze.History.Blazor;
 /// <param name="Aggregation">The aggregation of a line query; lines with the same aggregation share one batch. Ignored for a band, which is always queried as raw samples.</param>
 /// <param name="Color">The color of a line as <see cref="HistoryChartSeriesResolver.AssignLineColors"/> returned it, which reaches the chart unchecked, or null for the next of <see cref="HistoryChartPalette.LineColors"/>.</param>
 /// <param name="Unit">The unit of the property. A line in <see cref="StateUnit.Percent"/> is drawn in percent, except a count of samples.</param>
+/// <param name="IsNegated">Whether a line is drawn with the opposite sign. Ignored for a band.</param>
 internal sealed record HistoryChartSeriesRequest(
     string PropertyPath,
     string Label,
@@ -21,7 +22,8 @@ internal sealed record HistoryChartSeriesRequest(
     bool IsBand,
     string Aggregation,
     string? Color = null,
-    StateUnit Unit = StateUnit.Default);
+    StateUnit Unit = StateUnit.Default,
+    bool IsNegated = false);
 
 /// <summary>
 /// The answer to a chart query.
@@ -198,7 +200,7 @@ internal static class HistoryChartQuery
                     result.Points, request.Aggregation, bucket, to, result.CoverageRanges);
                 var runs = isBars ? GetBars(points) : PropertyHistoryChartModel.SplitIntoGapRuns(points, bucket, to);
                 lines.Add(new HistoryChartLine(
-                    request.Label, request.Color ?? HistoryChartPalette.GetLineColor(lines.Count), runs, isPercent, request.Unit));
+                    request.Label, request.Color ?? HistoryChartPalette.GetLineColor(lines.Count), runs, isPercent, request.Unit, request.IsNegated));
             }
         }
 

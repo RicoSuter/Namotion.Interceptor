@@ -698,6 +698,23 @@ public class HistoryChartWidgetTests
     }
 
     [Fact]
+    public async Task WhenABarSeriesIsNegated_ThenItsBarReachesDownFromTheAxis()
+    {
+        // Arrange & Act
+        var page = await OpenBarsPageAsync();
+        var view = GetChart(page, "Fed in").GetByTestId("history-chart-view");
+        await Assertions.Expect(view).ToHaveAttributeAsync("data-plot-ready", "", new() { Timeout = Timeout });
+
+        // Assert - a bar is the path "M x zero L x value", and y grows downwards in an svg.
+        var bars = view.GetByTestId("history-chart-lines").Locator("svg").First.Locator(".mud-charts-bar-series path.mud-chart-bar");
+        await Assertions.Expect(bars).ToHaveCountAsync(7, new() { Timeout = Timeout });
+        var ends = await bars.Last.EvaluateAsync<double[]>(
+            "path => path.getAttribute('d').match(/-?[\\d.]+/g).map(Number)");
+        Assert.True(ends[3] > ends[1], $"The bar of today does not reach down from the axis: {string.Join(", ", ends)}");
+        await Assertions.Expect(view.GetByTestId("history-chart-legend-value")).Not.ToHaveTextAsync(new System.Text.RegularExpressions.Regex("^-"));
+    }
+
+    [Fact]
     public async Task WhenABarChartIsClicked_ThenTheHistoryDialogOpensWithItsDaysAndDeltaAndDrawsBars()
     {
         // Arrange

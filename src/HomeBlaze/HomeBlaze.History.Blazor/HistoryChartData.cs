@@ -50,12 +50,18 @@ public sealed record HistoryChartData(
 /// <param name="Runs">The gap-free runs of points in time order.</param>
 /// <param name="IsPercent">Whether the points are fractions that are drawn in percent, see <see cref="HistoryChartAxis.ToPercent"/>.</param>
 /// <param name="Unit">The unit of the points, which bars name and scale within its family, for example to kWh.</param>
+/// <param name="IsNegated">Whether the points are drawn with the opposite sign, for example below the axis. The points of <paramref name="Runs"/> are as recorded.</param>
 public sealed record HistoryChartLine(
     string Label,
     string Color,
     IReadOnlyList<IReadOnlyList<HistoryPoint>> Runs,
     bool IsPercent = false,
-    StateUnit Unit = StateUnit.Default);
+    StateUnit Unit = StateUnit.Default,
+    bool IsNegated = false)
+{
+    /// <summary>Gets the number the points are multiplied by when they are drawn: -1 when <see cref="IsNegated"/>, else 1.</summary>
+    internal double Sign => IsNegated ? -1 : 1;
+}
 
 /// <summary>A state series: its constant-value runs, the CSS background that draws them and the legend of its states.</summary>
 /// <param name="Label">The name of the series.</param>
