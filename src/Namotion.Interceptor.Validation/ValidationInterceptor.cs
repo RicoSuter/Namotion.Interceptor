@@ -59,6 +59,19 @@ public class ValidationInterceptor : IWriteInterceptor, ITransactionHandler
         }
     }
 
+    /// <summary>
+    /// Returns true when <paramref name="obj"/> is a validation interceptor of the same type. All instances validate
+    /// alike, so a context that reaches several registrations, for example its own and its fallback's, uses one.
+    /// </summary>
+    /// <param name="obj">The object to compare with.</param>
+    public override bool Equals(object? obj)
+    {
+        return obj is not null && obj.GetType() == GetType();
+    }
+
+    /// <inheritdoc />
+    public override int GetHashCode() => GetType().GetHashCode();
+
     private static void ThrowIfInvalid<TProperty>(PropertyReference property, TProperty value, ChangeOrigin origin)
     {
         var errorMessage = Validate(property, value, origin);

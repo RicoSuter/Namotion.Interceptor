@@ -219,6 +219,37 @@ public class TransactionValidationTests
     }
 
     [Fact]
+    public async Task WhenSubjectContextAndFallbackBothRegisterValidation_ThenCommitIsValidatedOnce()
+    {
+        // Arrange
+        var validator = new RecordingValidator(new MotorSpeedValidator());
+        var transactionContext = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithTransactions()
+            .WithPropertyValidation();
+        var subjectContext = InterceptorSubjectContext
+            .Create()
+            .WithPropertyValidation()
+            .WithService<IPropertyValidator>(() => validator);
+        subjectContext.AddFallbackContext(transactionContext);
+        var motor = new Motor(subjectContext);
+        validator.ValidatedProperties.Clear();
+
+        // Act
+        using var transaction = await transactionContext.BeginTransactionAsync(
+            TransactionFailureHandling.Rollback, validationMode: TransactionValidationMode.Deferred);
+        motor.MotorSpeed = 150;
+        motor.MaxAllowedSpeed = 200;
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(150, motor.MotorSpeed);
+        Assert.Equal(200, motor.MaxAllowedSpeed);
+        Assert.Equal([nameof(Motor.MotorSpeed), nameof(Motor.MaxAllowedSpeed)], validator.ValidatedProperties);
+    }
+
+    [Fact]
     public async Task WhenImmediateAndLimitIsLoweredLater_ThenCommitRejectsFinalSet()
     {
         // Arrange
@@ -500,6 +531,20 @@ public class TransactionValidationTests
             }
 
             return [];
+        }
+    }
+
+    /// <summary>
+    /// Records the name of every property it validates and delegates the validation.
+    /// </summary>
+    private sealed class RecordingValidator(IPropertyValidator inner) : IPropertyValidator
+    {
+        public List<string> ValidatedProperties { get; } = [];
+
+        public IEnumerable<ValidationResult> Validate<TProperty>(in PropertyValidationContext<TProperty> context)
+        {
+            ValidatedProperties.Add(context.Property.Name);
+            return inner.Validate(in context);
         }
     }
 

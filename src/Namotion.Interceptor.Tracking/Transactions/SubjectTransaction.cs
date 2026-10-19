@@ -99,6 +99,10 @@ public sealed class SubjectTransaction : IDisposable
     /// it. Reference-type values match by identity, value-type values by equality. A call by one of the transaction's
     /// handlers consumes the mark, so it returns true at most once per applied value.
     /// </summary>
+    /// <remarks>
+    /// Only one handler can consume a mark. When another handler that also intercepts writes checks the same write
+    /// afterwards, this returns false for it, so it must check the write again.
+    /// </remarks>
     /// <typeparam name="TProperty">The type of the written value.</typeparam>
     /// <param name="handler">The handler asking whether it already checked the write.</param>
     /// <param name="property">The property being written.</param>
@@ -195,54 +199,80 @@ public sealed class SubjectTransaction : IDisposable
     /// <summary>
     /// Adds the handlers of <paramref name="subjectHandlers"/> that are in neither the transaction's handlers nor
     /// <paramref name="transactionContextHandlers"/>, so a handler registered on the transaction's context after it
-    /// began stays out. Returns false when the transaction is disposed or committed.
+    /// began stays out. Handlers match by equality. Returns false when the transaction is disposed or committed.
     /// </summary>
     private bool TryInclude(
         ReadOnlySpan<ITransactionHandler> subjectHandlers,
         ReadOnlySpan<ITransactionHandler> transactionContextHandlers)
     {
-        lock (_pendingChangesLock)
+        while (true)
         {
-            // Same checks and order as TryCaptureChange, which this write reaches next.
-            if (Volatile.Read(ref _isDisposed) != 0 || _isCommitted || _pendingChanges is null)
+            // Handler equality can run user code, so the union is built before taking the transaction lock and
+            // published only when no concurrent inclusion replaced the handlers in between.
+            var handlers = Volatile.Read(ref _handlers);
+            var union = CreateUnion(handlers, subjectHandlers, transactionContextHandlers);
+            lock (_pendingChangesLock)
             {
-                return false;
-            }
-
-            ThrowIfCommittingConcurrently();
-            if (_isValidating)
-            {
-                ThrowCaptureDuringCommitValidation();
-            }
-
-            var handlers = _handlers;
-            var additionCount = 0;
-            for (var index = 0; index < subjectHandlers.Length; index++)
-            {
-                if (IsAddition(subjectHandlers, index, handlers, transactionContextHandlers))
+                // Same checks and order as TryCaptureChange, which this write reaches next.
+                if (Volatile.Read(ref _isDisposed) != 0 || _isCommitted || _pendingChanges is null)
                 {
-                    additionCount++;
+                    return false;
                 }
-            }
 
-            if (additionCount > 0)
-            {
-                var union = new ITransactionHandler[handlers.Length + additionCount];
-                handlers.CopyTo(union, 0);
-                var count = handlers.Length;
-                for (var index = 0; index < subjectHandlers.Length; index++)
+                ThrowIfCommittingConcurrently();
+                if (_isValidating)
                 {
-                    if (IsAddition(subjectHandlers, index, handlers, transactionContextHandlers))
+                    ThrowCaptureDuringCommitValidation();
+                }
+
+                if (ReferenceEquals(_handlers, handlers))
+                {
+                    if (union is not null)
                     {
-                        union[count++] = subjectHandlers[index];
+                        Volatile.Write(ref _handlers, union);
                     }
+
+                    return true;
                 }
-
-                Volatile.Write(ref _handlers, union);
             }
-
-            return true;
         }
+    }
+
+    /// <summary>
+    /// Returns <paramref name="handlers"/> followed by the additions of <paramref name="subjectHandlers"/>, or null
+    /// when there are none.
+    /// </summary>
+    private static ITransactionHandler[]? CreateUnion(
+        ITransactionHandler[] handlers,
+        ReadOnlySpan<ITransactionHandler> subjectHandlers,
+        ReadOnlySpan<ITransactionHandler> transactionContextHandlers)
+    {
+        var additionCount = 0;
+        for (var index = 0; index < subjectHandlers.Length; index++)
+        {
+            if (IsAddition(subjectHandlers, index, handlers, transactionContextHandlers))
+            {
+                additionCount++;
+            }
+        }
+
+        if (additionCount == 0)
+        {
+            return null;
+        }
+
+        var union = new ITransactionHandler[handlers.Length + additionCount];
+        handlers.CopyTo(union, 0);
+        var count = handlers.Length;
+        for (var index = 0; index < subjectHandlers.Length; index++)
+        {
+            if (IsAddition(subjectHandlers, index, handlers, transactionContextHandlers))
+            {
+                union[count++] = subjectHandlers[index];
+            }
+        }
+
+        return union;
     }
 
     private static bool IsAddition(
@@ -252,16 +282,16 @@ public sealed class SubjectTransaction : IDisposable
         ReadOnlySpan<ITransactionHandler> transactionContextHandlers)
     {
         var handler = subjectHandlers[index];
-        return !ContainsByReference(handlers, handler) &&
-            !ContainsByReference(transactionContextHandlers, handler) &&
-            !ContainsByReference(subjectHandlers[..index], handler);
+        return !Contains(handlers, handler) &&
+            !Contains(transactionContextHandlers, handler) &&
+            !Contains(subjectHandlers[..index], handler);
     }
 
     private static bool ContainsAll(ReadOnlySpan<ITransactionHandler> handlers, ReadOnlySpan<ITransactionHandler> candidates)
     {
         foreach (var candidate in candidates)
         {
-            if (!ContainsByReference(handlers, candidate))
+            if (!Contains(handlers, candidate))
             {
                 return false;
             }
@@ -270,11 +300,11 @@ public sealed class SubjectTransaction : IDisposable
         return true;
     }
 
-    private static bool ContainsByReference(ReadOnlySpan<ITransactionHandler> handlers, ITransactionHandler handler)
+    private static bool Contains(ReadOnlySpan<ITransactionHandler> handlers, ITransactionHandler handler)
     {
         foreach (var candidate in handlers)
         {
-            if (ReferenceEquals(candidate, handler))
+            if (candidate.Equals(handler))
             {
                 return true;
             }

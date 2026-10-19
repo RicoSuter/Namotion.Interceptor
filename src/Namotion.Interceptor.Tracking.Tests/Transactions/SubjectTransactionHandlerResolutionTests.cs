@@ -72,6 +72,30 @@ public class SubjectTransactionHandlerResolutionTests
     }
 
     [Fact]
+    public async Task WhenEqualHandlersAreRegisteredOnSubjectContextAndTransactionContext_ThenOnlyTheFirstTakesPart()
+    {
+        // Arrange
+        var transactionContextHandler = new TypeEqualHandler();
+        var subjectContextHandler = new TypeEqualHandler();
+        var transactionContext = CreateContext();
+        transactionContext.AddService<ITransactionHandler>(transactionContextHandler);
+        var subjectContext = InterceptorSubjectContext.Create();
+        subjectContext.AddService<ITransactionHandler>(subjectContextHandler);
+        subjectContext.AddFallbackContext(transactionContext);
+        var person = new Person(subjectContext);
+
+        // Act
+        using var transaction = await transactionContext.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "Bob";
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(1, transactionContextHandler.CommittingCalls);
+        Assert.Equal(0, subjectContextHandler.CommittingCalls);
+        Assert.Equal("Bob", person.FirstName);
+    }
+
+    [Fact]
     public async Task WhenHandlerIsIncludedFromSubjectContext_ThenItSeesLaterWritesToOtherSubjects()
     {
         // Arrange
@@ -176,5 +200,23 @@ public class SubjectTransactionHandlerResolutionTests
         Assert.Equal(0, subjectHandler.CommittingCalls);
         Assert.Null(person.FirstName);
         Assert.Equal("Ann", otherPerson.FirstName);
+    }
+
+    private sealed class TypeEqualHandler : ITransactionHandler
+    {
+        public int CommittingCalls { get; private set; }
+
+        public void OnCapturing<TProperty>(SubjectTransaction transaction, PropertyReference property, TProperty newValue, ChangeOrigin origin)
+        {
+        }
+
+        public void OnCommitting(SubjectTransaction transaction, ReadOnlySpan<SubjectPropertyChange> changes)
+        {
+            CommittingCalls++;
+        }
+
+        public override bool Equals(object? obj) => obj is TypeEqualHandler;
+
+        public override int GetHashCode() => typeof(TypeEqualHandler).GetHashCode();
     }
 }
