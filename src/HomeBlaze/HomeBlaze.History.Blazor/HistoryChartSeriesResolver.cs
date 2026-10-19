@@ -68,7 +68,7 @@ internal readonly record struct HistoryChartSeriesConfiguration(
 /// </summary>
 internal static partial class HistoryChartSeriesResolver
 {
-    private static readonly string AggregationChoices = string.Join(", ", PropertyHistoryChartModel.ChartAggregations.SelectMany(aggregation =>
+    private static readonly string AggregationChoices = string.Join(", ", HistoryAggregations.All.SelectMany(aggregation =>
         aggregation == HistoryAggregations.TimeWeightedAverage
             ? new[] { aggregation, PropertyHistoryChartModel.AverageAlias }
             : new[] { aggregation }));
@@ -140,7 +140,8 @@ internal static partial class HistoryChartSeriesResolver
             return $"Unknown bucket '{bucket}': use one of {choices}";
         }
 
-        if (!PropertyHistoryChartModel.FitsMaxPoints(rangeSpan, period))
+        // A calendar bucket is at least 23 hours long, which divides the longest range into far fewer intervals.
+        if (period.Bucket is { } size && !PropertyHistoryChartModel.FitsMaxPoints(rangeSpan, size))
         {
             var smallest = PropertyHistoryChartModel.Periods.First(candidate =>
                 candidate.Bucket is { } candidateSize && PropertyHistoryChartModel.FitsMaxPoints(rangeSpan, candidateSize));

@@ -166,7 +166,7 @@ internal static class HistoryChartQuery
             }
         }
 
-        var isBars = IsBars(requests, bucket);
+        var isBars = bucket is not null && IsBars(requests);
         var palette = new HistoryStatePalette();
         var lines = new List<HistoryChartLine>();
         var bands = new List<HistoryChartBand>();
@@ -208,14 +208,12 @@ internal static class HistoryChartQuery
         return new HistoryChartResult(data, series, isTruncated);
     }
 
-    // A chart draws either bars or lines, so one line of another aggregation draws every line as a line.
-    private static bool IsBars(IReadOnlyList<HistoryChartSeriesRequest> requests, HistoryBucket? bucket)
+    /// <summary>
+    /// Gets whether bucketed requests draw bars: every line asks for <see cref="HistoryAggregations.Delta"/>, and there is
+    /// at least one line. A chart draws either bars or lines, so one line of another aggregation draws every line as a line.
+    /// </summary>
+    public static bool IsBars(IReadOnlyList<HistoryChartSeriesRequest> requests)
     {
-        if (bucket is null)
-        {
-            return false;
-        }
-
         var hasLine = false;
         foreach (var request in requests)
         {

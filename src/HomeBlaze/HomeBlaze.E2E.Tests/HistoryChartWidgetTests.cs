@@ -661,12 +661,15 @@ public class HistoryChartWidgetTests
         await Assertions.Expect(page.GetByTestId("property-history-dialog")).ToHaveCountAsync(0);
     }
 
-    // The bar chart queries once after its first render, so the page is opened only when the store holds a reading of
-    // the counter that has grown, which today's bar shows.
+    // The bar chart queries once after its first render, and the increase of today needs two readings of the counter, so
+    // the page is opened only when the store holds a reading above an earlier one.
     private async Task<IPage> OpenBarsPageAsync()
     {
         var motor = (Motor)((MarkdownFile)_fixture.GetDemoFolder().Children[BarsPageName]).Children[BarMotorName];
-        await WaitUntilRecordedAsync(motor.TryGetRegisteredProperty(nameof(Motor.Energy))!, point => point.Number > 0);
+        var energy = motor.TryGetRegisteredProperty(nameof(Motor.Energy))!;
+        double? first = null;
+        await WaitUntilRecordedAsync(energy, point => (first ??= point.Number) is not null);
+        await WaitUntilRecordedAsync(energy, point => point.Number > first);
         return await OpenAsync(BarsPageName, DesktopWidth);
     }
 
@@ -682,14 +685,23 @@ public class HistoryChartWidgetTests
         var chart = view.GetByTestId("history-chart-lines").Locator("svg").First;
         var bars = chart.Locator(".mud-charts-bar-series path.mud-chart-bar");
         await Assertions.Expect(bars).ToHaveCountAsync(7, new() { Timeout = Timeout });
-        // Until the browser names its time zone the days are those of UTC, and the chart queries again once it does.
-        var browserZone = TimeZoneInfo.FindSystemTimeZoneById(
-            await page.EvaluateAsync<string>("() => Intl.DateTimeFormat().resolvedOptions().timeZone"));
-        var today = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, browserZone).Date;
-        var expected = Enumerable.Range(0, 7)
-            .Select(day => today.AddDays(day - 6).ToString("MM-dd", CultureInfo.InvariantCulture))
-            .ToArray();
-        await Assertions.Expect(chart.Locator(".mud-charts-xaxis text")).ToHaveTextAsync(expected, new() { Timeout = Timeout });
+        // Until the browser names its time zone the days are those of UTC, and the chart queries again once it does. The
+        // days are taken in the browser on every poll, so a test that runs across midnight waits for the next query.
+        await page.WaitForFunctionAsync(
+            """
+            labels => {
+                const texts = [...labels.querySelectorAll('.mud-charts-xaxis text')].map(text => text.textContent.trim());
+                const pad = number => String(number).padStart(2, '0');
+                const days = [...Array(7).keys()].map(day => {
+                    const date = new Date();
+                    date.setDate(date.getDate() + day - 6);
+                    return `${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+                });
+                return texts.join() === days.join();
+            }
+            """,
+            await chart.ElementHandleAsync(),
+            new() { Timeout = Timeout });
 
         // A bar is a vertical path from the axis to its value, and the store recorded the counter today.
         var heights = await bars.EvaluateAllAsync<double[]>("paths => paths.map(path => path.getBBox().height)");
@@ -707,11 +719,53 @@ public class HistoryChartWidgetTests
 
         // Assert - a bar is the path "M x zero L x value", and y grows downwards in an svg.
         var bars = view.GetByTestId("history-chart-lines").Locator("svg").First.Locator(".mud-charts-bar-series path.mud-chart-bar");
-        await Assertions.Expect(bars).ToHaveCountAsync(7, new() { Timeout = Timeout });
+        await Assertions.Expect(bars).ToHaveCountAsync(14, new() { Timeout = Timeout });
         var ends = await bars.Last.EvaluateAsync<double[]>(
             "path => path.getAttribute('d').match(/-?[\\d.]+/g).map(Number)");
         Assert.True(ends[3] > ends[1], $"The bar of today does not reach down from the axis: {string.Join(", ", ends)}");
-        await Assertions.Expect(view.GetByTestId("history-chart-legend-value")).Not.ToHaveTextAsync(new System.Text.RegularExpressions.Regex("^-"));
+        var legendValue = view.GetByTestId("history-chart-legend-entry").Filter(new() { HasText = "Fed in" })
+            .GetByTestId("history-chart-legend-value");
+        await Assertions.Expect(legendValue).Not.ToHaveTextAsync(new System.Text.RegularExpressions.Regex("^-"));
+    }
+
+    [Fact]
+    public async Task WhenTheBarOfTheSecondSeriesIsClicked_ThenTheHistoryDialogOfThatSeriesOpens()
+    {
+        // Arrange - the bars of a chart are its series one after the other, so the last is today's bar of the second.
+        var page = await OpenBarsPageAsync();
+        var view = GetChart(page, "Fed in").GetByTestId("history-chart-view");
+        await Assertions.Expect(view).ToHaveAttributeAsync("data-plot-ready", "", new() { Timeout = Timeout });
+        var bars = view.Locator(".mud-charts-bar-series path.mud-chart-bar");
+        await Assertions.Expect(bars).ToHaveCountAsync(14, new() { Timeout = Timeout });
+
+        // Act - a bar is a stroke, which a click at the center of its box can miss.
+        await bars.Last.DispatchEventAsync("click");
+
+        // Assert
+        await Assertions.Expect(GetHistoryDialog(page, "Fed in")).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(GetHistoryDialog(page, "Taken")).ToHaveCountAsync(0);
+    }
+
+    [Fact]
+    public async Task WhenTheLineOfTheSecondSeriesIsClicked_ThenTheHistoryDialogOfThatSeriesOpens()
+    {
+        // Arrange - the line of a series is drawn in the color of the swatch of its legend entry.
+        var page = await OpenBarsPageAsync();
+        var chart = GetChart(page, "Mean speed");
+        await Assertions.Expect(chart.GetByTestId("history-chart-view")).ToHaveAttributeAsync("data-plot-ready", "", new() { Timeout = Timeout });
+        var color = await chart.GetByTestId("history-chart-legend-entry").Filter(new() { HasText = "Mean speed" })
+            .Locator("span[aria-hidden=true]").EvaluateAsync<string>("swatch => getComputedStyle(swatch).backgroundColor");
+        var lines = chart.Locator("path.mud-chart-line");
+        var index = await lines.EvaluateAllAsync<int>(
+            "(paths, color) => paths.findIndex(path => getComputedStyle(path).stroke === color)", color);
+        Assert.True(index >= 0, $"No line is drawn in {color}");
+
+        // Act - a line is a stroke, which a click at the center of its box misses.
+        await lines.Nth(index).DispatchEventAsync("click");
+
+        // Assert
+        await Assertions.Expect(GetHistoryDialog(page, "Mean speed")).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(GetHistoryDialog(page, "Peak speed")).ToHaveCountAsync(0);
     }
 
     [Fact]

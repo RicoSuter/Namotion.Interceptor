@@ -559,6 +559,21 @@ public class PropertyHistoryChartModelTests
         Assert.Equal(HistoryBucket.Fixed(PropertyHistoryChartModel.AutoBucket(range)), bucket);
     }
 
+    [Theory]
+    [InlineData(24, 30)]
+    [InlineData(1, 2)]
+    public void WhenResolveBucketAutoForBars_ThenItAimsAtFewerBucketsThanForLines(int rangeHours, int expectedMinutes)
+    {
+        // Arrange
+        var auto = PropertyHistoryChartModel.Periods[0];
+
+        // Act
+        var bucket = PropertyHistoryChartModel.ResolveBucket(auto, TimeSpan.FromHours(rangeHours), TimeZoneInfo.Utc, isBars: true);
+
+        // Assert
+        Assert.Equal(HistoryBucket.Fixed(TimeSpan.FromMinutes(expectedMinutes)), bucket);
+    }
+
     [Fact]
     public void WhenResolveBucketNone_ThenReturnsNull()
     {

@@ -97,6 +97,17 @@ public class StateUnitExtensionsTests
     }
 
     [Fact]
+    public void WhenAValueIsTooLargeToConvert_ThenItGetsTheLargestUnitOfItsFamily()
+    {
+        // Act
+        var isScaled = StateUnitExtensions.TryGetScaledUnit(StateUnit.Byte, decimal.MaxValue, out var suffix, out _);
+
+        // Assert
+        Assert.True(isScaled);
+        Assert.Equal("GB", suffix);
+    }
+
+    [Fact]
     public void WhenAUnitHasNoFamily_ThenItIsNotScaled()
     {
         // Act

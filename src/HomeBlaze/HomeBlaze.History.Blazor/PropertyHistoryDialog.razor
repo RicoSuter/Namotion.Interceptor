@@ -197,26 +197,16 @@
             // of that day (start of the next day), giving a half-open [from, to) window that includes the whole
             // selected To day, so a single-day pick (From == To) is a full day rather than an empty range.
             // Presets anchor to "now"; the chart and labels convert to the display time zone for rendering.
-            // A calendar bucket of a preset starts the range at the start of a period, like the history chart does.
             DateTimeOffset from, to;
-            var stores = HistoryChartQuery.GetStores(Registry);
-            var period = PropertyHistoryChartModel.Periods[_periodIndex];
-            var timeZone = TimeZone.Zone ?? TimeZoneInfo.Utc;
-            HistoryBucket? bucket;
             if (_useCustom)
             {
                 (from, to) = PropertyHistoryChartModel.ResolveCustomRange(
                     _customFrom, _customTo, TimeProvider.GetUtcNow(), TimeZone.ToUtc);
-                bucket = to > from
-                    ? PropertyHistoryChartModel.ResolveBucket(period, to - from, timeZone, HistoryChartQuery.GetAvailableCoverage(stores, to))
-                    : null;
             }
             else
             {
                 to = TimeProvider.GetUtcNow();
-                var preset = PropertyHistoryChartModel.RangePresets[_rangeIndex].Range;
-                bucket = PropertyHistoryChartModel.ResolveBucket(period, preset, timeZone, HistoryChartQuery.GetAvailableCoverage(stores, to));
-                from = PropertyHistoryChartModel.GetWindowStart(to, preset, bucket);
+                from = to - PropertyHistoryChartModel.RangePresets[_rangeIndex].Range;
             }
 
             if (to <= from)
@@ -224,6 +214,18 @@
                 _error = "The 'to' time must be after 'from'.";
                 ClearView();
                 return;
+            }
+
+            var stores = HistoryChartQuery.GetStores(Registry);
+            var period = PropertyHistoryChartModel.Periods[_periodIndex];
+            var isBars = _aggregation == HistoryAggregations.Delta && !UseStateTimeline;
+            var bucket = PropertyHistoryChartModel.ResolveBucket(
+                period, to - from, TimeZone.Zone ?? TimeZoneInfo.Utc, HistoryChartQuery.GetAvailableCoverage(stores, to), isBars);
+
+            // A calendar bucket starts a preset range at the start of a period.
+            if (!_useCustom)
+            {
+                from = PropertyHistoryChartModel.GetWindowStart(to, to - from, bucket);
             }
 
             var range = to - from;

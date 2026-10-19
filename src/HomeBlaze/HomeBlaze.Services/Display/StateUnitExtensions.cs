@@ -186,7 +186,11 @@ public static class StateUnitExtensions
         }
 
         var family = UnitFamilies[lookup.FamilyIndex];
-        var baseValue = Math.Abs(magnitude * family[lookup.UnitIndex].Factor);
+        var inputFactor = family[lookup.UnitIndex].Factor;
+
+        // Saturated rather than overflowing, which only picks the largest unit.
+        var absolute = Math.Abs(magnitude);
+        var baseValue = absolute > decimal.MaxValue / inputFactor ? decimal.MaxValue : absolute * inputFactor;
 
         // The largest unit in which the value is at least 1, or else the smallest.
         var bestIndex = 0;
@@ -200,7 +204,7 @@ public static class StateUnitExtensions
         }
 
         suffix = family[bestIndex].Suffix;
-        factor = family[lookup.UnitIndex].Factor / family[bestIndex].Factor;
+        factor = inputFactor / family[bestIndex].Factor;
         return true;
     }
 

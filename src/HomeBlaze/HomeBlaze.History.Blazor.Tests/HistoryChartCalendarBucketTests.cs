@@ -27,8 +27,6 @@ public class HistoryChartCalendarBucketTests
         var bucket = PropertyHistoryChartModel.ResolveBucket(period, TimeSpan.FromDays(30), Zurich);
 
         // Assert
-        Assert.False(period.IsRaw);
-        Assert.False(period.IsAuto);
         Assert.Equal(HistoryBucket.Calendar(unit, Zurich), bucket);
     }
 
@@ -63,65 +61,75 @@ public class HistoryChartCalendarBucketTests
         Assert.Equal(7, PropertyHistoryChartModel.GetBucketStarts(from, to, Day).Count);
     }
 
-    [Fact]
-    public void WhenTheClocksGoBackInTheWindow_ThenThatDayIsOneBucketOf25Hours()
-    {
-        // Arrange - summer time ends on 25 October 2026 at 03:00 local time.
-        var to = Local(2026, 10, 27, 12);
-
-        // Act
-        var from = PropertyHistoryChartModel.GetWindowStart(to, TimeSpan.FromDays(7), Day);
-        var starts = PropertyHistoryChartModel.GetBucketStarts(from, to, Day);
-
-        // Assert
-        Assert.Equal(Local(2026, 10, 21), from);
-        Assert.Equal(new DateTimeOffset(2026, 10, 20, 22, 0, 0, TimeSpan.Zero), from);
-        Assert.Equal(7, starts.Count);
-        var dayOfChange = starts.ToList().IndexOf(Local(2026, 10, 25));
-        Assert.Equal(TimeSpan.FromHours(25), starts[dayOfChange + 1] - starts[dayOfChange]);
-        Assert.All(starts, start => Assert.Equal(TimeSpan.Zero, TimeZoneInfo.ConvertTime(start, Zurich).TimeOfDay));
-    }
-
-    [Fact]
-    public void WhenTheClocksGoForwardInTheWindow_ThenThatDayIsOneBucketOf23Hours()
-    {
-        // Arrange - summer time starts on 29 March 2026 at 02:00 local time.
-        var to = Local(2026, 3, 31, 12);
-
-        // Act
-        var from = PropertyHistoryChartModel.GetWindowStart(to, TimeSpan.FromDays(7), Day);
-        var starts = PropertyHistoryChartModel.GetBucketStarts(from, to, Day);
-
-        // Assert
-        Assert.Equal(Local(2026, 3, 25), from);
-        Assert.Equal(7, starts.Count);
-        var dayOfChange = starts.ToList().IndexOf(Local(2026, 3, 29));
-        Assert.Equal(TimeSpan.FromHours(23), starts[dayOfChange + 1] - starts[dayOfChange]);
-    }
-
-    [Fact]
-    public void WhenTheBucketIsAMonthOverAYear_ThenTheWindowHoldsTwelveMonthsEndingWithThisOne()
+    [Theory]
+    [InlineData(10, 27, 12, 25, 25)] // summer time ends on 25 October 2026 at 03:00
+    [InlineData(10, 27, 23, 25, 25)]
+    [InlineData(10, 26, 0, 25, 25)]
+    [InlineData(3, 31, 12, 29, 23)] // summer time starts on 29 March 2026 at 02:00
+    [InlineData(3, 31, 0, 29, 23)]
+    [InlineData(3, 30, 23, 29, 23)]
+    public void WhenTheClocksChangeInTheWindow_ThenItStillHoldsSevenDaysAndThatDayIsOneBucket(
+        int month, int day, int hour, int dayOfChange, int hoursOfThatDay)
     {
         // Arrange
-        var month = HistoryBucket.Calendar(HistoryCalendarUnit.Month, Zurich);
-        var to = Local(2026, 10, 19, 9);
+        var to = Local(2026, month, day, hour).AddMinutes(30);
 
         // Act
-        var from = PropertyHistoryChartModel.GetWindowStart(to, TimeSpan.FromDays(365), month);
-        var starts = PropertyHistoryChartModel.GetBucketStarts(from, to, month);
+        var from = PropertyHistoryChartModel.GetWindowStart(to, TimeSpan.FromDays(7), Day);
+        var starts = PropertyHistoryChartModel.GetBucketStarts(from, to, Day);
 
         // Assert
-        Assert.Equal(Local(2025, 11, 1), from);
-        Assert.Equal(12, starts.Count);
-        Assert.Equal(Local(2026, 10, 1), starts[^1]);
+        Assert.Equal(7, starts.Count);
+        Assert.Equal(Local(2026, month, day), starts[^1]);
+        Assert.All(starts, start => Assert.Equal(TimeSpan.Zero, TimeZoneInfo.ConvertTime(start, Zurich).TimeOfDay));
+        var change = starts.ToList().IndexOf(Local(2026, month, dayOfChange));
+        Assert.Equal(TimeSpan.FromHours(hoursOfThatDay), starts[change + 1] - starts[change]);
     }
 
-    [Fact]
-    public void WhenTheBucketIsAWeek_ThenTheWindowStartsOnAMonday()
+    [Theory]
+    [InlineData(30, 23, 30)]
+    [InlineData(1, 0, 1)]
+    public void WhenTheRangeIsInDays_ThenTheWindowHoldsThatManyDaysAtAnyTimeOfDay(int rangeDays, int hour, int expectedDays)
+    {
+        // Arrange
+        var to = Local(2026, 11, 10, hour).AddMinutes(30);
+
+        // Act
+        var from = PropertyHistoryChartModel.GetWindowStart(to, TimeSpan.FromDays(rangeDays), Day);
+
+        // Assert
+        Assert.Equal(expectedDays, PropertyHistoryChartModel.GetBucketStarts(from, to, Day).Count);
+    }
+
+    [Theory]
+    [InlineData(2026, 10, 19, 2025, 11)]
+    [InlineData(2028, 2, 29, 2027, 3)]
+    [InlineData(2028, 3, 31, 2027, 4)]
+    public void WhenTheBucketIsAMonthOverAYear_ThenTheWindowHoldsTwelveMonthsEndingWithThisOne(
+        int year, int month, int day, int firstYear, int firstMonth)
+    {
+        // Arrange
+        var bucket = HistoryBucket.Calendar(HistoryCalendarUnit.Month, Zurich);
+        var to = Local(year, month, day, 9);
+
+        // Act
+        var from = PropertyHistoryChartModel.GetWindowStart(to, TimeSpan.FromDays(365), bucket);
+        var starts = PropertyHistoryChartModel.GetBucketStarts(from, to, bucket);
+
+        // Assert
+        Assert.Equal(Local(firstYear, firstMonth, 1), from);
+        Assert.Equal(12, starts.Count);
+        Assert.Equal(Local(year, month, 1), starts[^1]);
+    }
+
+    [Theory]
+    [InlineData(19)] // a Monday
+    [InlineData(18)] // a Sunday
+    public void WhenTheBucketIsAWeek_ThenNinetyDaysAreThirteenWeeksFromAMonday(int day)
     {
         // Arrange
         var week = HistoryBucket.Calendar(HistoryCalendarUnit.Week, Zurich);
-        var to = Local(2026, 10, 19, 9);
+        var to = Local(2026, 10, day, 9);
 
         // Act
         var from = PropertyHistoryChartModel.GetWindowStart(to, TimeSpan.FromDays(90), week);

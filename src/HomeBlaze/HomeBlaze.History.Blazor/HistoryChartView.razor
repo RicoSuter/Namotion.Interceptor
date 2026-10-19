@@ -28,7 +28,7 @@
                renders, and a box that is not displayed, like one in a hidden tab, has no height yet. So the chart
                renders only once the box was measured with a size. *@
             <div @ref="_linesBox" data-testid="history-chart-lines" data-axes-labels="@_axesLabels" style="@_linesStyle"
-                 title="@LinesTitle" @onclick="LinesClicked">
+                 title="@LinesTitle" @onclick="@(LinesClicked.HasDelegate ? _linesClicked : default)">
                 @if (_chartSeries is not null)
                 {
                     @if (_linesWidth > 0)
@@ -191,6 +191,14 @@
     private IChartOptions _chartOptions = new TimeSeriesChartOptions();
     private string[] _palette = [];
 
+    // The line of Data.Lines that each chart series draws, -1 for the series that holds the time axis to the window.
+    private int[] _chartSeriesLines = [];
+
+    // Set by a click on a line or a bar, which the click handler of the lines receives right after it, see OnLinesClicked.
+    private bool _isSeriesClick;
+    private readonly EventCallback<int> _plotSeriesClicked;
+    private readonly EventCallback _linesClicked;
+
     // The label of each group of bars, and the unit the bars are drawn in with a space before it, or empty.
     private string[] _barLabels = [];
     private string _barUnit = string.Empty;
@@ -291,15 +299,52 @@
     [Parameter]
     public bool ShowAxes { get; set; } = true;
 
-    /// <summary>Called when the lines are clicked. With it the lines show a pointer.</summary>
+    /// <summary>
+    /// Called when the lines are clicked beside a line or a bar, and on a line or a bar without <see cref="SeriesClicked"/>.
+    /// With it the lines show a pointer, and only with it <see cref="SeriesClicked"/> is called.
+    /// </summary>
     [Parameter]
     public EventCallback LinesClicked { get; set; }
+
+    /// <summary>Called with the index in <see cref="HistoryChartData.Lines"/> of the line or bar that was clicked.</summary>
+    [Parameter]
+    public EventCallback<int> SeriesClicked { get; set; }
 
     /// <summary>The tooltip of the lines, which says what a click on them does.</summary>
     [Parameter]
     public string? LinesTitle { get; set; }
 
-    public HistoryChartView() => _plot = RenderPlot;
+    public HistoryChartView()
+    {
+        _plot = RenderPlot;
+        _plotSeriesClicked = EventCallback.Factory.Create<int>(this, OnPlotSeriesClicked);
+        _linesClicked = EventCallback.Factory.Create(this, OnLinesClicked);
+    }
+
+    // Blazor hands a click to the handler of the clicked line or bar first and then to the one of the lines around it,
+    // one after the other, so the flag set here tells the second that the click is taken.
+    private Task OnPlotSeriesClicked(int chartSeries)
+    {
+        var line = (uint)chartSeries < (uint)_chartSeriesLines.Length ? _chartSeriesLines[chartSeries] : -1;
+        if (line < 0 || !SeriesClicked.HasDelegate || !LinesClicked.HasDelegate)
+        {
+            return Task.CompletedTask;
+        }
+
+        _isSeriesClick = true;
+        return SeriesClicked.InvokeAsync(line);
+    }
+
+    private Task OnLinesClicked()
+    {
+        if (_isSeriesClick)
+        {
+            _isSeriesClick = false;
+            return Task.CompletedTask;
+        }
+
+        return LinesClicked.InvokeAsync();
+    }
 
     protected override void OnInitialized() => TimeZone.Changed += OnTimeZoneChanged;
 
@@ -310,6 +355,7 @@
         builder.AddComponentParameter(2, nameof(HistoryChartPlot.ChartOptions), _chartOptions);
         // Without axes the bars have no labels, and the options change with the axes, which draws the bars again.
         builder.AddComponentParameter(3, nameof(HistoryChartPlot.ChartLabels), ShowAxes ? _barLabels : []);
+        builder.AddComponentParameter(4, nameof(HistoryChartPlot.SeriesClicked), _plotSeriesClicked);
         builder.CloseComponent();
     }
 
@@ -575,13 +621,15 @@
         }
 
         var chartSeries = new List<ChartSeries<double>>();
+        var chartSeriesLines = new List<int>();
         var palette = new List<string>();
         double? anchorValue = null;
         var minimum = double.PositiveInfinity;
         var maximum = double.NegativeInfinity;
         var isPercent = true;
-        foreach (var line in data.Lines)
+        for (var lineIndex = 0; lineIndex < data.Lines.Count; lineIndex++)
         {
+            var line = data.Lines[lineIndex];
             isPercent &= line.IsPercent || line.Runs.Count == 0;
             foreach (var run in line.Runs)
             {
@@ -609,6 +657,7 @@
                     Data = new ChartData<double>(points),
                     TooltipYValueFormat = "0.###"
                 });
+                chartSeriesLines.Add(lineIndex);
                 palette.Add(line.Color);
             }
         }
@@ -630,8 +679,10 @@
                 ])
             });
             palette.Add("transparent");
+            chartSeriesLines.Add(-1);
 
             _palette = palette.ToArray();
+            _chartSeriesLines = chartSeriesLines.ToArray();
             _valueMinimum = minimum;
             _valueMaximum = maximum;
             _isPercent = isPercent;
@@ -644,13 +695,12 @@
     // height 0, which draws nothing.
     private void BuildBars(HistoryChartData data)
     {
-        if (data.Bucket is not { } bucket || !HasPoint(data))
+        if (data.Bucket is not { } bucket)
         {
             return;
         }
 
-        var starts = PropertyHistoryChartModel.GetBucketStarts(data.From, data.To, bucket);
-
+        var hasPoint = false;
         var minimum = 0.0;
         var maximum = 0.0;
         foreach (var line in data.Lines)
@@ -662,9 +712,17 @@
                     var number = point.Number!.Value * line.Sign;
                     minimum = Math.Min(minimum, number);
                     maximum = Math.Max(maximum, number);
+                    hasPoint = true;
                 }
             }
         }
+
+        if (!hasPoint)
+        {
+            return;
+        }
+
+        var starts = PropertyHistoryChartModel.GetBucketStarts(data.From, data.To, bucket);
 
         // All lines have one unit, see HistoryChartSeriesResolver.FindArgumentError, which is scaled to the largest bar.
         var unit = data.Lines[0].Unit;
@@ -719,10 +777,20 @@
         _barLabels = new string[starts.Count];
         for (var index = 0; index < starts.Count; index++)
         {
-            _barLabels[index] = TimeZone.ToZoned(starts[index]).ToString(format, CultureInfo.CurrentCulture);
+            // A calendar bucket is labeled in the zone it was aligned in, which the viewer's zone can have left meanwhile.
+            var start = bucket.TimeZone is { } zone ? TimeZoneInfo.ConvertTime(starts[index], zone).DateTime : TimeZone.ToZoned(starts[index]);
+            _barLabels[index] = start.ToString(format, CultureInfo.CurrentCulture);
         }
 
         _palette = palette;
+
+        // One chart series per line, in their order.
+        _chartSeriesLines = new int[data.Lines.Count];
+        for (var lineIndex = 0; lineIndex < _chartSeriesLines.Length; lineIndex++)
+        {
+            _chartSeriesLines[lineIndex] = lineIndex;
+        }
+
         _valueMinimum = minimum * factor;
         _valueMaximum = maximum * factor;
         _isPercent = false;
@@ -730,30 +798,11 @@
         BuildOptions();
     }
 
-    private static bool HasPoint(HistoryChartData data)
-    {
-        foreach (var line in data.Lines)
-        {
-            if (line.Runs.Count > 0)
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
     // A new instance, because the chart draws again only for other options.
     private void BuildOptions()
     {
         if (Data is not { } data)
         {
-            return;
-        }
-
-        if (data.IsBars)
-        {
-            BuildBarOptions();
             return;
         }
 
@@ -766,6 +815,26 @@
         var valueAxis = _isPercent
             ? HistoryChartAxis.GetPercentValueAxis(_valueMinimum, _valueMaximum, height)
             : HistoryChartAxis.GetValueAxis(_valueMinimum, _valueMaximum, height);
+        if (data.IsBars)
+        {
+            var unit = _barUnit;
+            _chartOptions = new BarChartOptions
+            {
+                ChartPalette = _palette,
+                ShowLegend = false,
+                YAxisToStringFunc = ShowAxes ? value => value.ToString("0.##", CultureInfo.CurrentCulture) + unit : EmptyAxisLabel,
+                YAxisLines = ShowAxes,
+                ShowToolTips = ShowAxes,
+                TooltipTitleFormat = "{{Y_VALUE}}",
+                TooltipSubtitleFormat = "{{SERIES_NAME}}, {{X_VALUE}}",
+                BarWidthRatio = 0.7,
+                YAxisTicks = valueAxis.Step,
+                MaxNumYAxisTicks = _valueLabelCount,
+                YAxisSuggestedMax = valueAxis.SuggestedMaximum
+            };
+            return;
+        }
+
         var range = data.To - data.From;
         var timeLabelSpacing = HistoryChartAxis.GetTimeLabelSpacing(
             range, data.Bucket is { } bucket ? PropertyHistoryChartModel.GetNominalLength(bucket) : null, width);
@@ -789,32 +858,6 @@
             // The chart doubles the step while it has more labels, which only a range beyond the largest step needs.
             MaxNumYAxisTicks = _valueLabelCount,
             YAxisRequireZeroPoint = valueAxis.IncludesZero,
-            YAxisSuggestedMax = valueAxis.SuggestedMaximum
-        };
-    }
-
-    private void BuildBarOptions()
-    {
-        var height = _linesHeight > 0 ? _linesHeight : MaxHeight ?? 300;
-        var width = _linesWidth > 0 ? _linesWidth : height * 2;
-        _valueLabelCount = HistoryChartAxis.GetValueLabelCount(height);
-        _timeLabelCount = HistoryChartAxis.GetTimeLabelCount(width);
-        _axesLabels = $"{_valueLabelCount}x{_timeLabelCount}";
-        var valueAxis = HistoryChartAxis.GetValueAxis(_valueMinimum, _valueMaximum, height);
-        var unit = _barUnit;
-        _chartOptions = new BarChartOptions
-        {
-            ChartPalette = _palette,
-            ShowLegend = false,
-            // Every bar has its label, which its tooltip shows; the script of the view hides those that would overlap.
-            YAxisToStringFunc = ShowAxes ? value => value.ToString("0.##", CultureInfo.CurrentCulture) + unit : EmptyAxisLabel,
-            YAxisLines = ShowAxes,
-            ShowToolTips = ShowAxes,
-            TooltipTitleFormat = "{{Y_VALUE}}",
-            TooltipSubtitleFormat = "{{SERIES_NAME}}, {{X_VALUE}}",
-            BarWidthRatio = 0.7,
-            YAxisTicks = valueAxis.Step,
-            MaxNumYAxisTicks = _valueLabelCount,
             YAxisSuggestedMax = valueAxis.SuggestedMaximum
         };
     }

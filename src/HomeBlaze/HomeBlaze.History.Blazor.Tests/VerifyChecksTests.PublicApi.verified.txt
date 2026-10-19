@@ -132,6 +132,8 @@ namespace HomeBlaze.History.Blazor
         [Microsoft.AspNetCore.Components.Parameter]
         public HomeBlaze.History.Blazor.HistoryChartPlaceholder? Placeholder { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback<int> SeriesClicked { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
         public bool ShowAxes { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public bool ShowRange { get; set; }
@@ -163,16 +165,14 @@ namespace HomeBlaze.History.Blazor
     {
         public const int MaxPoints = 1000;
         public static readonly System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.PropertyHistoryChartModel.ChartPeriod> Periods;
-        public static System.TimeSpan AutoBucket(System.TimeSpan range, System.TimeSpan? availableCoverage = default) { }
+        public static System.TimeSpan AutoBucket(System.TimeSpan range, System.TimeSpan? availableCoverage = default, int bucketCount = 200) { }
         public static System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.PropertyHistoryChartModel.StateSegment> BuildStateSegments(System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Abstractions.HistoryPoint> points, HomeBlaze.History.Abstractions.HistoryPoint? valueAtStart, System.DateTimeOffset from, System.DateTimeOffset to, System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Abstractions.HistoryCoverage> coverage, System.Func<HomeBlaze.History.Abstractions.HistoryPoint, string?> format) { }
         public static string DescribeAggregation(string aggregation) { }
         public static string DescribePeriod(HomeBlaze.History.Blazor.PropertyHistoryChartModel.ChartPeriod period, HomeBlaze.History.Abstractions.HistoryBucket? resolvedBucket) { }
         public static string? FormatDiscreteValue(HomeBlaze.History.Abstractions.HistoryPoint point, System.Type propertyType) { }
         public static System.Collections.Generic.IReadOnlyList<string> GateAggregations(HomeBlaze.History.Abstractions.ValueColumn column, bool isCumulative, System.Collections.Generic.IReadOnlySet<string> storeUnion, bool isDiscrete = false) { }
-        public static System.Collections.Generic.IReadOnlyList<System.DateTimeOffset> GetBucketStarts(System.DateTimeOffset from, System.DateTimeOffset to, HomeBlaze.History.Abstractions.HistoryBucket bucket) { }
-        public static System.DateTimeOffset GetWindowStart(System.DateTimeOffset to, System.TimeSpan range, HomeBlaze.History.Abstractions.HistoryBucket? bucket) { }
         public static bool IsDiscrete(System.Type propertyType, bool isDiscreteState) { }
-        public static HomeBlaze.History.Abstractions.HistoryBucket? ResolveBucket(HomeBlaze.History.Blazor.PropertyHistoryChartModel.ChartPeriod period, System.TimeSpan range, System.TimeZoneInfo timeZone, System.TimeSpan? availableCoverage = default) { }
+        public static HomeBlaze.History.Abstractions.HistoryBucket? ResolveBucket(HomeBlaze.History.Blazor.PropertyHistoryChartModel.ChartPeriod period, System.TimeSpan range, System.TimeZoneInfo timeZone, System.TimeSpan? availableCoverage = default, bool isBars = false) { }
         [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
                 "From",
                 "To"})]

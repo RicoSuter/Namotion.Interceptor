@@ -43,7 +43,8 @@
                 <HistoryChartView Data="_data" Placeholder="_placeholder" MaxHeight="_resolvedHeight" ShowAxes="!chart.Compact"
                                   LineLegend="_lineLegend" BandHeader="_bandHeader"
                                   LinesClicked="@(linesTarget >= 0 ? _showHistory[linesTarget] : default)"
-                                  LinesTitle="@(linesTarget >= 0 ? _historyTitles[linesTarget] : null)" />
+                                  SeriesClicked="@(linesTarget >= 0 ? _seriesClicked : default)"
+                                  LinesTitle="@(linesTarget >= 0 ? _linesTitle : null)" />
             }
 
             @if (_queryError is not null || _hasStores == false)
@@ -98,16 +99,21 @@
     private string?[] _swatchStyles = [];
     private string? _error;
 
-    // Built with the series, so a render allocates none: the first recorded line, which a click on the lines shows,
-    // and for every series what opens its history and the tooltip that says so.
+    // Built with the series, so a render allocates none: the first recorded line, which a click beside the lines and
+    // bars shows, the tooltip of the lines, and for every series what opens its history and the tooltip that says so.
     private int _firstLine = -1;
+    private string? _linesTitle;
     private EventCallback[] _showHistory = [];
     private string[] _historyTitles = [];
+    private readonly EventCallback<int> _seriesClicked;
 
     // The series the shown data was queried for, and the index in them of the series of each band of the data. Until
     // the first query returns, the series it will query and the bands it will return, see PlanLayout.
     private IReadOnlyList<HistoryChartSeriesInfo>? _dataSeries;
     private int[] _bandSeries = [];
+
+    // The index in the series the shown data was queried for of the series of each line of the data.
+    private int[] _lineSeries = [];
     private bool[] _hasBand = [];
 
     // Per series of the shown data, what the legend says about how its query shows it, see GetQueryNote.
@@ -143,7 +149,14 @@
     {
         _lineLegend = RenderLineLegend;
         _bandHeader = GetBandHeader;
+        _seriesClicked = EventCallback.Factory.Create<int>(this, OnSeriesClicked);
     }
+
+    // A line or bar of data that was queried for other series than the current ones opens nothing.
+    private Task OnSeriesClicked(int line) =>
+        ReferenceEquals(_dataSeries, _series) && (uint)line < (uint)_lineSeries.Length && CanShowHistory(_lineSeries[line])
+            ? ShowHistoryAsync(_series[_lineSeries[line]])
+            : Task.CompletedTask;
 
     // Every series without a band in the shown data: the lines, and a band series that has no band, such as one
     // without history, so its note stays in view.
@@ -379,6 +392,16 @@
             _historyTitles[index] = $"Show history of {entry.Label}";
         }
 
+        var lineCount = 0;
+        foreach (var entry in series)
+        {
+            lineCount += entry is { Kind: HistoryChartSeriesKind.Line, HasHistory: true } ? 1 : 0;
+        }
+
+        _linesTitle = _firstLine < 0 ? null :
+            lineCount > 1 ? $"Show history of the clicked line or bar, else of {series[_firstLine].Label}" :
+            _historyTitles[_firstLine];
+
         _colors = HistoryChartSeriesResolver.AssignLineColors(series);
         _swatchStyles = new string?[_colors.Length];
         for (var index = 0; index < _colors.Length; index++)
@@ -417,13 +440,15 @@
         }
 
         _placeholder = new HistoryChartPlaceholder(hasLines, bandSeries.Count);
-        SetBands(_series, bandSeries.ToArray(), hasBand, new string?[_series.Count]);
+        SetBands(_series, bandSeries.ToArray(), hasBand, new string?[_series.Count], []);
     }
 
-    private void SetBands(IReadOnlyList<HistoryChartSeriesInfo> series, int[] bandSeries, bool[] hasBand, string?[] queryNotes)
+    private void SetBands(
+        IReadOnlyList<HistoryChartSeriesInfo> series, int[] bandSeries, bool[] hasBand, string?[] queryNotes, int[] lineSeries)
     {
         _dataSeries = series;
         _bandSeries = bandSeries;
+        _lineSeries = lineSeries;
         _hasBand = hasBand;
         _queryNotes = queryNotes;
         _bandHeaders = new RenderFragment[bandSeries.Length];
@@ -499,6 +524,7 @@
             var requests = new List<HistoryChartSeriesRequest>(series.Count);
             var requestSeries = new List<int>(series.Count);
             var bandSeries = new List<int>();
+            var lineSeries = new List<int>(series.Count);
             var hasBand = new bool[series.Count];
             var queryNotes = new string?[series.Count];
             for (var index = 0; index < series.Count; index++)
@@ -510,11 +536,15 @@
                 }
 
                 var isBand = entry.Kind == HistoryChartSeriesKind.Band;
+                // The query returns one band per band request and one line per other request, in request order.
                 if (isBand)
                 {
-                    // The query returns one band per band request, in request order.
                     bandSeries.Add(index);
                     hasBand[index] = true;
+                }
+                else
+                {
+                    lineSeries.Add(index);
                 }
 
                 var aggregation = HistoryChartSeriesResolver.ChooseAggregation(
@@ -527,7 +557,8 @@
 
             var to = TimeProvider.GetUtcNow();
             var bucket = PropertyHistoryChartModel.ResolveBucket(
-                period, range, TimeZone.Zone ?? TimeZoneInfo.Utc, HistoryChartQuery.GetAvailableCoverage(stores, to));
+                period, range, TimeZone.Zone ?? TimeZoneInfo.Utc, HistoryChartQuery.GetAvailableCoverage(stores, to),
+                HistoryChartQuery.IsBars(requests));
             var from = PropertyHistoryChartModel.GetWindowStart(to, range, bucket);
             var result = await HistoryChartQuery.QueryAsync(stores, requests, from, to, bucket, cancellationToken);
             if (cancellationToken.IsCancellationRequested || _isDisposed)
@@ -543,7 +574,7 @@
             }
 
             _data = result.Data;
-            SetBands(series, bandSeries.ToArray(), hasBand, queryNotes);
+            SetBands(series, bandSeries.ToArray(), hasBand, queryNotes, lineSeries.ToArray());
             _bucket = bucket;
             _queryError = null;
         }
