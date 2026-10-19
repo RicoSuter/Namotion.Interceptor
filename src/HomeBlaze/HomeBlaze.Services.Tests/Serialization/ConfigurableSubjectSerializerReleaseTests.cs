@@ -1,4 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Moq;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Lifecycle;
@@ -20,16 +22,19 @@ public class ConfigurableSubjectSerializerReleaseTests
         """;
 
     private readonly ConfigurableSubjectSerializer _serializer;
+    private readonly TypeProvider _typeProvider = new();
     private readonly List<IInterceptorSubject> _attached = [];
+    private readonly Mock<ILogger<ConfigurableSubjectSerializer>> _logger = new();
+    private int _attachCount;
 
     public ConfigurableSubjectSerializerReleaseTests()
     {
-        var typeProvider = new TypeProvider();
-        typeProvider.AddTypes(
+        _typeProvider.AddTypes(
         [
             typeof(ParentWithChildSubject),
             typeof(ChildSubject),
-            typeof(SubjectWithValidatedProperty)
+            typeof(SubjectWithValidatedProperty),
+            typeof(SubjectWithUnreadableConfiguration)
         ]);
 
         var context = InterceptorSubjectContext
@@ -38,12 +43,17 @@ public class ConfigurableSubjectSerializerReleaseTests
             .WithDataAnnotationValidation();
 
         var lifecycle = context.TryGetLifecycleInterceptor()!;
-        lifecycle.SubjectAttached += change => _attached.Add(change.Subject);
+        lifecycle.SubjectAttached += change =>
+        {
+            _attached.Add(change.Subject);
+            _attachCount++;
+        };
         lifecycle.SubjectDetaching += change => _attached.Remove(change.Subject);
 
         var services = new ServiceCollection();
         services.AddSingleton<IInterceptorSubjectContext>(context);
-        _serializer = new ConfigurableSubjectSerializer(typeProvider, services.BuildServiceProvider());
+        services.AddSingleton(_logger.Object);
+        _serializer = new ConfigurableSubjectSerializer(_typeProvider, services.BuildServiceProvider());
     }
 
     [Fact]
@@ -154,5 +164,82 @@ public class ConfigurableSubjectSerializerReleaseTests
         // Assert
         Assert.Null(result);
         Assert.False(isCalled);
+    }
+
+    [Fact]
+    public void WhenDefaultConfigurationIsRequested_ThenItHasTheConstructorValuesAndTheSubjectLeavesTheContext()
+    {
+        // Act
+        var defaults = _serializer.GetDefaultConfiguration(typeof(ParentWithChildSubject), ConfigurationNaming.CSharpProperty);
+
+        // Assert
+        Assert.NotNull(defaults);
+        Assert.Equal(typeof(ParentWithChildSubject).FullName, defaults.Value.GetProperty("$type").GetString());
+        Assert.Equal(string.Empty, defaults.Value.GetProperty("Name").GetString());
+        Assert.False(defaults.Value.TryGetProperty("Child", out _));
+        Assert.Equal(1, _attachCount);
+        Assert.Empty(_attached);
+    }
+
+    [Fact]
+    public void WhenDefaultConfigurationIsRequestedTwice_ThenOnlyOneSubjectIsCreated()
+    {
+        // Arrange
+        var first = _serializer.GetDefaultConfiguration(typeof(ChildSubject));
+
+        // Act
+        var second = _serializer.GetDefaultConfiguration(typeof(ChildSubject));
+
+        // Assert
+        Assert.Equal(first!.Value.GetRawText(), second!.Value.GetRawText());
+        Assert.Equal(1, _attachCount);
+    }
+
+    [Fact]
+    public void WhenTypeIsNotKnown_ThenDefaultConfigurationIsNull()
+    {
+        // Act
+        var defaults = _serializer.GetDefaultConfiguration(typeof(PlainSubject));
+
+        // Assert
+        Assert.Null(defaults);
+        Assert.Equal(0, _attachCount);
+    }
+
+    [Fact]
+    public void WhenDefaultConfigurationCannotBeSerialized_ThenItIsNullAndTheFailureIsLoggedOnce()
+    {
+        // Act
+        var first = _serializer.GetDefaultConfiguration(typeof(SubjectWithUnreadableConfiguration));
+        var second = _serializer.GetDefaultConfiguration(typeof(SubjectWithUnreadableConfiguration));
+
+        // Assert
+        Assert.Null(first);
+        Assert.Null(second);
+        Assert.Equal(1, _attachCount);
+        Assert.Empty(_attached);
+        _logger.Verify(
+            logger => logger.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.IsAny<It.IsAnyType>(),
+                It.IsAny<InvalidOperationException>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public void WhenTypeIsAddedAfterItsDefaultConfigurationWasRequested_ThenItsDefaultConfigurationIsRead()
+    {
+        // Arrange
+        var before = _serializer.GetDefaultConfiguration(typeof(SubjectWithList));
+        _typeProvider.AddTypes([typeof(SubjectWithList)]);
+
+        // Act
+        var after = _serializer.GetDefaultConfiguration(typeof(SubjectWithList));
+
+        // Assert
+        Assert.Null(before);
+        Assert.NotNull(after);
     }
 }

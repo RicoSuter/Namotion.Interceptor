@@ -6,38 +6,35 @@
 @inject RootManager RootManager
 @inject SubjectComponentRegistry ComponentRegistry
 @inject ISnackbar Snackbar
-@inject DeveloperModeService DeveloperMode
 
-<TrackingScope Context="Subject?.Context" ShowDebugInfo="DeveloperMode.IsEnabled">
-    @if (Subject != null)
-    {
-        @* A hosted form may change its validity without raising IsValidChanged, so the panel reads it again after
-           interaction. Blazor does not bubble change, so a control that only changes on change is picked up by
-           the next focus change. *@
-        <div @oninput="_refreshIsValid"
-             @onclick="_refreshIsValid"
-             @onkeyup="_refreshIsValid"
-             @onfocusin="_refreshIsValid"
-             @onfocusout="_refreshIsValid">
-            @if (HostedComponentType is { } hostedComponentType)
-            {
-                <SubjectComponent @key="Subject"
-                                  Subject="@Subject"
-                                  Type="hostedComponentType"
-                                  AdditionalParameters="@(IsCreating ? CreatingParameters : EditingParameters)"
-                                  ComponentInstance="_subjectComponent"
-                                  ComponentInstanceChanged="OnSubjectComponentRendered" />
-            }
-            else
-            {
-                <ConfigurationPropertiesEditor @key="Subject"
-                                               @ref="_propertiesEditor"
-                                               Subject="@Subject"
-                                               IsValidChanged="OnPropertiesEditorIsValidChanged" />
-            }
-        </div>
-    }
-</TrackingScope>
+@if (Subject != null)
+{
+    @* A hosted form may change its validity without raising IsValidChanged, so the panel reads it again after
+       interaction. Blazor does not bubble change, so a control that only changes on change is picked up by
+       the next focus change. *@
+    <div @oninput="_refreshIsValid"
+         @onclick="_refreshIsValid"
+         @onkeyup="_refreshIsValid"
+         @onfocusin="_refreshIsValid"
+         @onfocusout="_refreshIsValid">
+        @if (HostedComponentType is { } hostedComponentType)
+        {
+            <SubjectComponent @key="Subject"
+                              Subject="@Subject"
+                              Type="hostedComponentType"
+                              AdditionalParameters="@(IsCreating ? CreatingParameters : EditingParameters)"
+                              ComponentInstance="_subjectComponent"
+                              ComponentInstanceChanged="OnSubjectComponentRendered" />
+        }
+        else
+        {
+            <ConfigurationPropertiesEditor @key="Subject"
+                                           @ref="_propertiesEditor"
+                                           Subject="@Subject"
+                                           IsValidChanged="OnPropertiesEditorIsValidChanged" />
+        }
+    </div>
+}
 
 @code {
     // SubjectComponent builds the parameters of the hosted component again whenever it is given another instance.
@@ -239,8 +236,8 @@
     }
 
     /// <summary>
-    /// Writes the configuration that contains the subject through its configuration writer, see
-    /// <see cref="RootManagerExtensions.GetConfigurationWriter"/>, and applies it. Nothing is written for a subject that is part of no
+    /// Writes and applies the configuration that contains the subject, see
+    /// <see cref="ConfigurationPersistence.PersistOwnerAsync"/>. Nothing is written for a subject that is part of no
     /// configuration, such as a file, which its edit component has saved. Warns when the writer wrote nothing,
     /// in which case the edits are applied but not saved.
     /// </summary>
@@ -251,24 +248,15 @@
 
         try
         {
-            // The first configurable parent would be wrong here: for a file that is its storage, whose
-            // configuration does not contain the file.
-            var isWritten = true;
-            var configurationOwner = subject.TryGetConfigurationOwner();
-            if (configurationOwner is IConfigurable configurable)
+            var result = await ConfigurationPersistence.PersistOwnerAsync(RootManager, subject, cancellationToken);
+            if (result == ConfigurationPersistResult.NotWritten)
             {
-                var configurationWriter = RootManager.GetConfigurationWriter(configurationOwner);
-                isWritten = await configurationWriter.WriteConfigurationAsync(configurationOwner, CancellationToken.None);
-                await configurable.ApplyConfigurationAsync(cancellationToken);
-            }
-
-            if (isWritten)
-            {
-                Snackbar.Add("Configuration saved.", Severity.Info);
+                Snackbar.AddConfigurationNotSavedWarning();
             }
             else
             {
-                Snackbar.AddConfigurationNotSavedWarning();
+                // NoOwner is a subject such as a file, which its edit component has saved.
+                Snackbar.Add("Configuration saved.", Severity.Info);
             }
         }
         catch (Exception ex)

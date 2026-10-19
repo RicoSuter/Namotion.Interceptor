@@ -1,3 +1,4 @@
+using FluentStorage.Blobs;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using Namotion.Interceptor.Attributes;
@@ -44,6 +45,34 @@ public class FluentStorageContainerConfigurationWriterTests : StorageTestBase
         // Assert
         Assert.False(isWritten);
         Assert.Equal(originalContent, await ReadFileAsync());
+    }
+
+    [Fact]
+    public async Task WhenTwoSubjectsOfOneFileAreSavedAtOnce_ThenTheFileHoldsBothChanges()
+    {
+        // Arrange
+        PausableBlobStorage? client = null;
+        var storage = await ConnectAsync(configure: container => container.ClientDecorator = inner => client = new PausableBlobStorage(inner));
+        var first = new ConfigurationWriterTestSubject(Context!);
+        var second = new ConfigurationWriterTestSubject(Context!);
+        var file = new ConfigurationWriterTestSubject(Context!) { Items = [first, second] };
+        await storage.AddSubjectAsync(FilePath, file, CancellationToken.None);
+        first.Name = "first, saved";
+        var firstWriteReached = client!.PauseNext(nameof(IBlobStorage.WriteAsync));
+        var firstSave = storage.WriteConfigurationAsync(first, CancellationToken.None);
+        await firstWriteReached;
+
+        // Act: the second save is asked for while the first one writes.
+        second.Name = "second, saved";
+        var secondSave = storage.WriteConfigurationAsync(second, CancellationToken.None);
+        client.Release();
+        var results = await Task.WhenAll(firstSave, secondSave).WaitAsync(DeadlockTimeout);
+
+        // Assert
+        Assert.Equal([true, true], results);
+        var content = await ReadFileAsync();
+        Assert.Contains("\"name\": \"first, saved\"", content);
+        Assert.Contains("\"name\": \"second, saved\"", content);
     }
 
     private Task<string> ReadFileAsync() => File.ReadAllTextAsync(GetFullPath(FilePath));

@@ -1,0 +1,205 @@
+@attribute [SubjectComponent(SubjectComponentType.Page, typeof(ClaudeCliAgent))]
+@attribute [SubjectComponent(SubjectComponentType.Page, typeof(AnthropicAgent))]
+@implements ISubjectComponent
+@implements IDisposable
+@inject ITimeZoneDisplay TimeZone
+@inject IDialogService DialogService
+
+@if (Agent is { } agent)
+{
+    @* Fills the viewport below the app bar, so the chat input stays in view and the tab content scrolls on its own.
+       The max height caps it to the pane when the page is shown next to its editor. *@
+    <div class="d-flex flex-column gap-2 pt-2 pt-sm-4 pb-2"
+         style="height: calc(100vh - var(--mud-appbar-height)); height: calc(100dvh - var(--mud-appbar-height)); max-height: 100%;">
+        @* The right padding keeps the buttons clear of the page's edit mode menu, which floats over the top right corner. *@
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="pr-12 flex-shrink-0">
+            <MudStack Row="true" Wrap="Wrap.Wrap" AlignItems="AlignItems.Center" Spacing="2" Class="flex-grow-1" Style="min-width: 0;">
+                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Style="min-width: 0;">
+                    <MudIcon Icon="@Icons.Material.Filled.SmartToy" />
+                    <MudText Typo="Typo.h5" Style="overflow-wrap: anywhere;">@agent.Title</MudText>
+                </MudStack>
+                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1" Style="min-width: 0;" data-testid="agent-status">
+                    @if (agent.Status == ServiceStatus.Running)
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="@(agent.IsBusy ? Color.Info : Color.Success)" Class="ma-0">@GetTurnState(agent.StatusMessage)</MudChip>
+                    }
+                    else
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="@GetStatusColor(agent.Status)" Class="ma-0">@agent.Status</MudChip>
+                        @if (agent.StatusMessage is { Length: > 0 } statusMessage)
+                        {
+                            <MudText Typo="Typo.body2" Class="mud-text-secondary" Style="overflow-wrap: anywhere;">@statusMessage</MudText>
+                        }
+                    }
+                </MudStack>
+            </MudStack>
+            @* Both variants render, so neither flashes in after prerendering; CSS shows one per breakpoint. *@
+            <div class="d-flex d-sm-none gap-2">
+                <MudTooltip Text="Run now">
+                    <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Variant="Variant.Outlined" aria-label="Run now"
+                                   OnClick="@agent.RunNow" Disabled="@agent.IsBusy" />
+                </MudTooltip>
+                <MudTooltip Text="New conversation">
+                    <MudIconButton Icon="@Icons.Material.Filled.RestartAlt" Variant="Variant.Outlined" aria-label="New conversation"
+                                   OnClick="NewConversationAsync" Disabled="@agent.IsBusy" />
+                </MudTooltip>
+            </div>
+            <div class="d-none d-sm-flex gap-2 flex-shrink-0">
+                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.PlayArrow"
+                           OnClick="@agent.RunNow" Disabled="@agent.IsBusy">Run now</MudButton>
+                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.RestartAlt"
+                           OnClick="NewConversationAsync" Disabled="@agent.IsBusy">New conversation</MudButton>
+            </div>
+        </MudStack>
+        @* A plain underlined tab bar on the page background, with the content aligned to the title. *@
+        @* The narrow tab padding on phones keeps all four tabs in view without a scrolling tab bar. *@
+        <MudTabs Elevation="0" Border="true" MinimumTabWidth="0px" TabHeaderClass="mud-background" TabButtonsClass="px-2 px-sm-4"
+                 Class="flex-grow-1 overflow-hidden" TabPanelsClass="flex-grow-1 pt-3 overflow-y-auto">
+            <MudTabPanel Text="Chat" PanelClass="mud-height-full"><AgentChatTab Agent="agent" TimeZoneVersion="_timeZoneVersion" /></MudTabPanel>
+            <MudTabPanel Text="Activity"><AgentActivityTab Agent="agent" /></MudTabPanel>
+            <MudTabPanel Text="Memory"><AgentMemoryTab MemoryEditor="_memoryEditor!" /></MudTabPanel>
+            <MudTabPanel Text="Settings"><AgentSettingsTab Agent="agent" /></MudTabPanel>
+        </MudTabs>
+    </div>
+}
+
+@code {
+    private LlmAgentBase? _subscribed;
+    private AgentMemoryEditor? _memoryEditor;
+    private int _isRenderPending;
+    private int _timeZoneVersion;
+
+    // The state the next render shows, read on the agent's threads to skip events that only stream text, which
+    // AgentStreamingBubble renders on its own.
+    private IReadOnlyList<AgentTimelineEntry>? _renderedEntries;
+    private AgentMemorySnapshot? _renderedMemory;
+    private volatile bool _renderedIsBusy;
+    private volatile ServiceStatus _renderedStatus;
+    private string? _renderedStatusMessage;
+
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private LlmAgentBase? Agent => Subject as LlmAgentBase;
+
+    protected override void OnInitialized()
+    {
+        TimeZone.Changed += OnTimeZoneChanged;
+    }
+
+    protected override void OnParametersSet()
+    {
+        if (!ReferenceEquals(_subscribed, Agent))
+        {
+            if (_subscribed is not null)
+            {
+                _subscribed.StateChanged -= OnStateChanged;
+            }
+
+            _subscribed = Agent;
+            _memoryEditor = null;
+            if (_subscribed is { } agent)
+            {
+                _memoryEditor = new AgentMemoryEditor(() => agent.IsStorageLoaded ? agent.Memory : null);
+                CaptureRenderedState(agent);
+                agent.StateChanged += OnStateChanged;
+            }
+        }
+    }
+
+    private void OnStateChanged()
+    {
+        if (_subscribed is { } agent &&
+            (!ReferenceEquals(Volatile.Read(ref _renderedEntries), agent.Timeline.Entries) ||
+             !ReferenceEquals(Volatile.Read(ref _renderedMemory), agent.Memory.GetSnapshot()) ||
+             _renderedIsBusy != agent.IsBusy ||
+             _renderedStatus != agent.Status ||
+             !string.Equals(Volatile.Read(ref _renderedStatusMessage), agent.StatusMessage, StringComparison.Ordinal)))
+        {
+            RequestRender();
+        }
+    }
+
+    private void OnTimeZoneChanged()
+    {
+        _ = InvokeAsync(() =>
+        {
+            // Timeline entries render only when their entry changes, so a new version makes them reformat timestamps.
+            _timeZoneVersion++;
+            StateHasChanged();
+        });
+    }
+
+    private void RequestRender()
+    {
+        // Events arrive faster than the browser can render; coalesce them into one pending render. The state is
+        // captured after the flag is cleared, so a change whose event was skipped while a render was pending is
+        // still part of that render.
+        if (Interlocked.Exchange(ref _isRenderPending, 1) == 0)
+        {
+            _ = InvokeAsync(() =>
+            {
+                Volatile.Write(ref _isRenderPending, 0);
+                if (_subscribed is { } agent)
+                {
+                    CaptureRenderedState(agent);
+                }
+
+                StateHasChanged();
+            });
+        }
+    }
+
+    private void CaptureRenderedState(LlmAgentBase agent)
+    {
+        Volatile.Write(ref _renderedEntries, agent.Timeline.Entries);
+        Volatile.Write(ref _renderedMemory, agent.Memory.GetSnapshot());
+        _renderedIsBusy = agent.IsBusy;
+        _renderedStatus = agent.Status;
+        Volatile.Write(ref _renderedStatusMessage, agent.StatusMessage);
+    }
+
+    private async Task NewConversationAsync()
+    {
+        if (Agent is not { } agent)
+        {
+            return;
+        }
+
+        var confirmed = await DialogService.ShowMessageBoxAsync(
+            "New conversation",
+            "Discard the chat session? Memory and timeline stay.",
+            yesText: "New conversation",
+            cancelText: "Cancel");
+
+        if (confirmed == true)
+        {
+            await agent.NewConversationAsync(CancellationToken.None);
+        }
+    }
+
+    private static string GetTurnState(string? statusMessage) => statusMessage switch
+    {
+        LlmAgentBase.AnsweringStatusMessage => "Answering",
+        LlmAgentBase.BackgroundRunStatusMessage => "Running background",
+        LlmAgentBase.WaitingStatusMessage => "Waiting",
+        _ => "Idle"
+    };
+
+    private static Color GetStatusColor(ServiceStatus status) => status switch
+    {
+        ServiceStatus.Unavailable => Color.Warning,
+        ServiceStatus.Error => Color.Error,
+        _ => Color.Default
+    };
+
+    public void Dispose()
+    {
+        TimeZone.Changed -= OnTimeZoneChanged;
+        if (_subscribed is not null)
+        {
+            _subscribed.StateChanged -= OnStateChanged;
+            _subscribed = null;
+        }
+    }
+}

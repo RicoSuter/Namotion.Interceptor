@@ -13,6 +13,7 @@ namespace HomeBlaze.Components;
 [Description("A titled card that wraps page content")]
 [DisplayName("Card")]
 [SubjectIcon("WebAsset")]
+[PageLayout]
 [InterceptorSubject]
 public partial class Card : IConfigurable, ITitleProvider
 {
@@ -51,6 +52,7 @@ public partial class Card : IConfigurable, ITitleProvider
     /// a route of the application, or a web address. It has no effect on a card without a title.
     /// </summary>
     [Configuration]
+    [LinkAddress]
     public partial string? Href { get; set; }
 
     /// <summary>
@@ -69,7 +71,21 @@ public partial class Card : IConfigurable, ITitleProvider
     /// Address of a picture shown between the header and the body. Written like <see cref="Href"/>.
     /// </summary>
     [Configuration]
+    [MediaAddress]
     public partial string? Image { get; set; }
+
+    /// <summary>
+    /// Height of the whole card in pixels, above 0; 0 or less is a widget argument error. Without it the card is as high as
+    /// its content. Wins over <see cref="AspectRatio"/>.
+    /// </summary>
+    [Configuration]
+    public partial int? Height { get; set; }
+
+    /// <summary>
+    /// Width and height in the form <c>W:H</c>, for example <c>4:3</c>, so that the height of the card follows its width.
+    /// </summary>
+    [Configuration]
+    public partial string? AspectRatio { get; set; }
 
     /// <summary>
     /// The body of the card.

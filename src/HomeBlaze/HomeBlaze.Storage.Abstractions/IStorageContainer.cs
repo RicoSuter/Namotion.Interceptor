@@ -53,6 +53,15 @@ public interface IStorageContainer
     Task WriteBlobAsync(string path, Stream content, CancellationToken cancellationToken);
 
     /// <summary>
+    /// Writes content to a blob at the specified path, atomically as
+    /// <see cref="WriteBlobAsync(string, Stream, CancellationToken)"/> does.
+    /// </summary>
+    /// <param name="path">The relative path to the blob.</param>
+    /// <param name="content">The content to write. The caller may change it once the returned task has completed.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task WriteBlobAsync(string path, ReadOnlyMemory<byte> content, CancellationToken cancellationToken);
+
+    /// <summary>
     /// Deletes a blob from storage.
     /// </summary>
     /// <param name="path">The relative path to the blob.</param>

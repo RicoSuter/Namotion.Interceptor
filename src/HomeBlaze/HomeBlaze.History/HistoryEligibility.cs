@@ -21,8 +21,9 @@ public static class HistoryEligibility
     /// </summary>
     public static bool HasHistory(this RegisteredSubjectProperty property)
     {
-        if (property.TryGetAttribute(KnownAttributes.State) is null) return false; // not [State]
+        // The type checks first: the attribute lookup walks the properties of the subject.
         if (property.CanContainSubjects) return false;                             // structural (v1.1)
-        return HistoryColumns.IsRecordable(property.Type);
+        if (!HistoryColumns.IsRecordable(property.Type)) return false;
+        return property.TryGetAttribute(KnownAttributes.State) is not null;       // [State]
     }
 }

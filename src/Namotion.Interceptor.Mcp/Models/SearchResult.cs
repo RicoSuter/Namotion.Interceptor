@@ -12,4 +12,11 @@ public class SearchResult
 
     [JsonPropertyName("truncated")]
     public bool Truncated { get; init; }
+
+    /// <summary>
+    /// Problems with the request that did not prevent an answer, such as a property name no subject in scope has.
+    /// </summary>
+    [JsonPropertyName("warnings")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? Warnings { get; init; }
 }

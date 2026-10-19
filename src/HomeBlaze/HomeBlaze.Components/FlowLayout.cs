@@ -13,6 +13,7 @@ namespace HomeBlaze.Components;
 [Description("Lays items out in columns that wrap by screen width")]
 [DisplayName("Flow layout")]
 [SubjectIcon("ViewColumn")]
+[PageLayout]
 [InterceptorSubject]
 public partial class FlowLayout : IConfigurable, ITitleProvider
 {

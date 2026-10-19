@@ -3,6 +3,7 @@ using System.Runtime;
 using System.Runtime.InteropServices;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Abstractions.Common;
 using Namotion.Interceptor.Attributes;
 using DiagnosticsProcess = System.Diagnostics.Process;
 
@@ -15,7 +16,7 @@ namespace HomeBlaze.Services.Diagnostics;
 [Description("Reports CPU, memory and garbage collection values of the current process")]
 [SubjectIcon("Memory")]
 [InterceptorSubject]
-public partial class HostProcess : ITitleProvider, IIconProvider
+public partial class HostProcess : ITitleProvider, IIconProvider, IUptimeState
 {
     private readonly Action _collectGarbage;
     private readonly Action _collected;

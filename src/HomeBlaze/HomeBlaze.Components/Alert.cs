@@ -13,6 +13,7 @@ namespace HomeBlaze.Components;
 [Description("A highlighted box for a note or a warning")]
 [DisplayName("Alert")]
 [SubjectIcon("Info")]
+[PageLayout]
 [InterceptorSubject]
 public partial class Alert : IConfigurable, ITitleProvider
 {

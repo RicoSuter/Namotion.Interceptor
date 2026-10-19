@@ -2,7 +2,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using HomeBlaze.E2E.Tests.Infrastructure;
 using Microsoft.Playwright;
-using Namotion.Interceptor.Testing;
+using static HomeBlaze.E2E.Tests.Infrastructure.PageGeometry;
 
 namespace HomeBlaze.E2E.Tests;
 
@@ -27,7 +27,7 @@ public class CanvasLayoutTests
     // The page that tests overwrite. Each of them writes its own content before it opens the page.
     private const string ScratchPage = "Scratch.md";
 
-    private static readonly Regex FirstNodePositionPattern = new("\"X\": (-?\\d+),\\s*\"Y\": (-?\\d+),");
+    private static readonly Regex FirstNodePositionPattern = new("^::: Node X=(-?\\d+) Y=(-?\\d+) ", RegexOptions.Multiline);
 
     private readonly PlaywrightFixture _fixture;
 
@@ -239,9 +239,8 @@ public class CanvasLayoutTests
         // Act: a click on the title, which would follow its link while the page is viewed.
         await page.Mouse.ClickAsync((float)(titleBox.Left + 5), (float)(titleBox.Top + titleBox.Height / 2));
 
-        // Assert: the click is the click on a node, which offers to add a node at that place. Closing the dialog is the round trip
-        // after which the page would have navigated.
-        await page.GetByTestId("cancel-button").ClickAsync();
+        // Assert: the click selects the widget of the node. Its actions are the round trip after which the page would have navigated.
+        await Assertions.Expect(page.GetWidgetActionBar()).ToBeVisibleAsync(new() { Timeout = Timeout });
         Assert.Equal(urlBefore, page.Url);
     }
 
@@ -409,6 +408,9 @@ public class CanvasLayoutTests
         var page = await OpenCanvasPageAsync(editMode: "Split");
         var node = GetNodes(page).First;
 
+        // A click on the node selects the widget in it, which shows the buttons of the nodes.
+        await node.SelectWidgetAsync();
+
         // Act
         await node.GetByTitle("Edit Node").ClickAsync();
 
@@ -426,7 +428,7 @@ public class CanvasLayoutTests
         // Arrange: the inline mode keeps the widget of the page, so that this is the diagram that was read-only.
         var page = await OpenCanvasPageAsync();
         await MarkCanvasAsync(page);
-        await SelectModeAsync(page, "Inline");
+        await page.SelectEditModeAsync("Inline");
         await Assertions.Expect(page.Locator(".canvas-layout-container.editing")).ToBeVisibleAsync(new() { Timeout = Timeout });
         Assert.True(await IsCanvasMarkedAsync(page), "The canvas was built again, so the test would not show that the diagram of the viewed page is changed");
 
@@ -452,7 +454,7 @@ public class CanvasLayoutTests
         // Arrange: the inline mode keeps the widget of the page, so that this is the diagram that could be edited.
         var page = await OpenCanvasPageAsync(withTextBelow: true, editMode: "Inline");
         await MarkCanvasAsync(page);
-        await SelectModeAsync(page, "View");
+        await page.SelectEditModeAsync("View");
         await Assertions.Expect(page.Locator(".canvas-layout-container:not(.editing)")).ToBeVisibleAsync(new() { Timeout = Timeout });
         Assert.True(await IsCanvasMarkedAsync(page), "The canvas was built again, so the test would not show that the diagram that was edited is read-only");
 
@@ -513,33 +515,24 @@ public class CanvasLayoutTests
         });
         await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/{ScratchPage}");
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+        await page.WaitUntilInteractiveAsync(Timeout);
 
         if (editMode is not null)
         {
-            await Assertions.Expect(page.GetByTestId("edit-mode-menu")).ToBeVisibleAsync(new() { Timeout = Timeout });
-            await SelectModeAsync(page, editMode);
+            await page.SelectEditModeAsync(editMode, Timeout);
             await Assertions.Expect(page.Locator(".canvas-layout-container.editing")).ToBeVisibleAsync(new() { Timeout = Timeout });
         }
 
-        // The library draws the border of a node and the area that a link starts from only after it has measured the node.
-        var nodeCount = withControlsWidget ? 1 : 2;
-        await Assertions.Expect(GetCanvas(page).Locator("svg rect")).ToHaveCountAsync(2 * nodeCount, new() { Timeout = Timeout });
-        await GetNodes(page).First.ScrollIntoViewIfNeededAsync();
+        await GetCanvas(page).WaitForCanvasNodesAsync(withControlsWidget ? 1 : 2, Timeout);
         await Assertions.Expect(GetNodes(page).First).ToBeVisibleAsync();
         return page;
-    }
-
-    private static async Task SelectModeAsync(IPage page, string mode)
-    {
-        await page.GetByTestId("edit-mode-menu").ClickAsync();
-        await page.Locator(".mud-popover-open").GetByText(mode, new() { Exact = true }).ClickAsync();
     }
 
     // Opens the menu of the edit modes and closes it with the mode that is already selected. Each step is a round
     // trip with a visible result, and the second one comes after every event that the mouse caused before.
     private static async Task WaitForServerAsync(IPage page, string currentMode = "View")
     {
-        await SelectModeAsync(page, currentMode);
+        await page.SelectEditModeAsync(currentMode);
         await Assertions.Expect(page.Locator(".mud-popover-open")).ToHaveCountAsync(0, new() { Timeout = Timeout });
     }
 
@@ -619,51 +612,21 @@ public class CanvasLayoutTests
     // one that the write has when it is done. It is the final one only after the events of the drag have arrived.
     private async Task WaitForPositionToBeWrittenAsync(double[] position)
     {
-        var path = _fixture.GetDemoPagePath(ScratchPage);
-
-        await AsyncTestHelpers.WaitUntilAsync(
-            () =>
+        await _fixture.WaitForDemoPageTextAsync(
+            ScratchPage,
+            text =>
             {
-                var match = FirstNodePositionPattern.Match(_fixture.ReadFileAsync(path).GetAwaiter().GetResult());
+                var match = FirstNodePositionPattern.Match(text);
                 return match.Success
                     && double.Parse(match.Groups[1].Value) == position[0]
                     && double.Parse(match.Groups[2].Value) == position[1];
             },
-            message: $"The page was not written with the new position {position[0]}, {position[1]} of the node");
+            $"The page was not written with the new position {position[0]}, {position[1]} of the node");
     }
 
     private static ILocator GetCanvas(IPage page) => page.Locator(".canvas-layout-container");
 
     private static ILocator GetNodes(IPage page) => GetCanvas(page).Locator(".canvas-node");
-
-    private static async Task DragAsync(IPage page, double fromX, double fromY, double toX, double toY)
-    {
-        await page.Mouse.MoveAsync((float)fromX, (float)fromY);
-        await page.Mouse.DownAsync();
-        await page.Mouse.MoveAsync((float)toX, (float)toY, new() { Steps = 10 });
-        await page.Mouse.UpAsync();
-    }
-
-    private sealed record Box(double Left, double Top, double Width, double Height)
-    {
-        public double Right => Left + Width;
-
-        public double Bottom => Top + Height;
-    }
-
-    // Left, top, width and height come from one call, so that a layout that is still moving cannot give values of different moments.
-    private static async Task<Box> GetBoxAsync(ILocator locator)
-    {
-        var values = await locator.EvaluateAsync<double[]>(
-            """
-            element => {
-                const rectangle = element.getBoundingClientRect();
-                return [rectangle.left, rectangle.top, rectangle.width, rectangle.height];
-            }
-            """);
-
-        return new Box(values[0], values[1], values[2], values[3]);
-    }
 
     // Relative to the canvas, so that a page that scrolls does not count as a move.
     private static async Task<Box> GetBoxInCanvasAsync(ILocator locator)
@@ -705,27 +668,29 @@ public class CanvasLayoutTests
         var builder = new StringBuilder();
         builder.Append("---\ntitle: Scratch\n---\n\n# Scratch\n\n");
         builder.Append($":: HomeBlaze.Components.CanvasLayout#canvas MinHeight={CanvasHeight}\n");
-        builder.Append("```json\n");
-        builder.Append("{\n  \"Nodes\": [\n");
         if (withControlsWidget)
         {
             // One node with a widget that has a slider, a text field, a button and an area that scrolls.
-            builder.Append("    { \"X\": 40, \"Y\": 10, \"Width\": 420, \"Height\": 380, \"Child\": { \"$type\": \"HomeBlaze.E2E.Tests.Models.ControlsTestSubject\" } }\n");
+            builder.Append("::: Node X=40 Y=10 Width=420 Height=380\n");
+            builder.Append(":::: HomeBlaze.E2E.Tests.Models.ControlsTestSubject\n");
         }
         else if (withOperableWidgets)
         {
             // A card whose title is a link, and an icon indicator whose path does not exist, so that its tooltip is the path.
-            builder.Append("    { \"X\": 40, \"Y\": 40, \"Width\": 300, \"Height\": 200, \"Child\": { \"$type\": \"HomeBlaze.Components.Card\", \"Title\": \"Linked Card\", \"Href\": \"/pages/Demo/Blocks.md\" } },\n");
-            builder.Append("    { \"X\": 420, \"Y\": 40, \"Width\": 300, \"Height\": 200, \"Child\": { \"$type\": \"HomeBlaze.Components.Indicator\", \"Path\": \"../Motor/Missing\", \"Kind\": \"Icon\" } }\n");
+            builder.Append("::: Node X=40 Y=40 Width=300 Height=200\n");
+            builder.Append(":::: HomeBlaze.Components.Card Title=\"Linked Card\" Href=/pages/Demo/Blocks.md\n");
+            builder.Append("::: Node X=420 Y=40 Width=300 Height=200\n");
+            builder.Append(":::: HomeBlaze.Components.Indicator Path=../Motor/Missing Kind=Icon\n");
         }
         else
         {
-            builder.Append("    { \"X\": 40, \"Y\": 40, \"Width\": 300, \"Height\": 200, \"Child\": { \"$type\": \"HomeBlaze.Components.Widget\", \"Path\": \"../Motor\" } },\n");
-            builder.Append("    { \"X\": 420, \"Y\": 40, \"Width\": 300, \"Height\": 200, \"Child\": { \"$type\": \"HomeBlaze.Components.Widget\", \"Path\": \"../Motor\" } }\n");
+            builder.Append("::: Node X=40 Y=40 Width=300 Height=200\n");
+            builder.Append(":::: HomeBlaze.Components.Widget Path=../Motor\n");
+            builder.Append("::: Node X=420 Y=40 Width=300 Height=200\n");
+            builder.Append(":::: HomeBlaze.Components.Widget Path=../Motor\n");
         }
 
-        builder.Append("  ]\n}\n");
-        builder.Append("```\n::\n\n");
+        builder.Append("::\n\n");
 
         if (withTextBelow)
         {

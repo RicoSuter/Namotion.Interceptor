@@ -7,6 +7,7 @@ using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Pages;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Registry.Abstractions;
 
 namespace HomeBlaze.Storage.Internal;
 
@@ -15,8 +16,8 @@ namespace HomeBlaze.Storage.Internal;
 /// </summary>
 public sealed partial class MarkdownContentParser
 {
-    private const string HtmlKeyPrefix = "Html_";
-    private const string ExpressionKeyPrefix = "Expression_";
+    internal const string HtmlKeyPrefix = "Html_";
+    internal const string ExpressionKeyPrefix = "Expression_";
 
     private readonly ConfigurableSubjectSerializer _serializer;
     private readonly SubjectPathResolver _pathResolver;
@@ -178,13 +179,27 @@ public sealed partial class MarkdownContentParser
         _logger = logger;
     }
 
+    /// <summary>Logs why a change of a subject was not written to the text of its page.</summary>
+    internal void LogRefusedWrite(string path, string reason) =>
+        _logger?.LogWarning("A change was not written to the page {Path}: {Reason}", path, reason);
+
+    /// <summary>Logs that the page could not be read again after a refused write.</summary>
+    internal void LogFailedReload(string path, Exception exception) =>
+        _logger?.LogWarning(exception, "Failed to reload the page {Path} after a refused write", path);
+
     /// <summary>
-    /// Renders markdown content by replacing {{ path }} expressions with their resolved values in the format
-    /// each one asks for. An expression with an unknown format stays as written.
-    /// Everything else stays as written, including the lines of the blocks and the front matter. An expression inside markdown code is kept as written.
+    /// Renders markdown content by replacing each {{ path }} expression that
+    /// <see cref="MarkdownSegmentBuilder.FindExpressions"/> finds with its resolved value in the format it asks for: also
+    /// one in the front matter, on the head line of a block or in an invalid block, which the page itself does not
+    /// evaluate. An expression with an unknown format, and one inside markdown code, is kept as written, and everything
+    /// else stays as written. Only a displayable property is shown (<see cref="SubjectRegistryExtensions.IsDisplayable"/>).
     /// Uses the same resolution semantics as <see cref="RenderExpression"/> (in the scope of the markdown file).
     /// </summary>
-    public string? RenderContent(string? content, MarkdownFile parent)
+    /// <param name="content">The markdown content.</param>
+    /// <param name="parent">The markdown file the expressions are relative to.</param>
+    /// <param name="includeSourcePaths">When true, each resolved value is followed by the absolute canonical path of
+    /// its property in parentheses. An expression that does not resolve to a property renders as without it.</param>
+    public string? RenderContent(string? content, MarkdownFile parent, bool includeSourcePaths = false)
     {
         if (string.IsNullOrEmpty(content))
             return content;
@@ -203,9 +218,7 @@ public sealed partial class MarkdownContentParser
             {
                 try
                 {
-                    // The reader of the text is not a viewer with a time zone, so dates are in that of the server.
-                    var property = _pathResolver.ResolveScopedProperty(expression.Path, PathStyle.Canonical, parent);
-                    rendered.Append(RenderExpression.GetText(property, expression.Format, timeZone: null));
+                    rendered.Append(RenderExpressionValue(expression, parent, includeSourcePaths));
                 }
                 catch
                 {
@@ -219,6 +232,25 @@ public sealed partial class MarkdownContentParser
         return rendered is null
             ? content
             : rendered.Append(content, copiedLength, content.Length - copiedLength).ToString();
+    }
+
+    private string? RenderExpressionValue(MarkdownExpression expression, MarkdownFile parent, bool includeSourcePaths)
+    {
+        // The reader of the text is not a viewer with a time zone, so dates are in that of the server.
+        var property = _pathResolver.ResolveScopedDisplayableProperty(expression.Path, PathStyle.Canonical, parent);
+        var valueText = RenderExpression.GetText(property, expression.Format, timeZone: null);
+        if (!includeSourcePaths || property is null || GetAbsolutePath(property) is not { } sourcePath)
+        {
+            return valueText;
+        }
+
+        return $"{valueText} ({sourcePath})";
+    }
+
+    private string? GetAbsolutePath(RegisteredSubjectProperty property)
+    {
+        var subjectPath = _pathResolver.GetPath(property.Subject, PathStyle.Canonical);
+        return subjectPath is null ? null : $"{subjectPath.TrimEnd('/')}/{property.Name}";
     }
 
     /// <summary>
@@ -240,7 +272,7 @@ public sealed partial class MarkdownContentParser
         var pageName = EscapeFileNameForLink(Path.GetFileName(parent.FullPath));
         var segments = MarkdownSegmentBuilder.Build(page, url => RewriteLink(url, basePath, pageName));
 
-        var state = new ParseState(parent, page.AllBlocks);
+        var state = new ParseState(parent, page);
         try
         {
             var children = await BuildChildrenAsync(segments, existingChildren, state, cancellationToken);
@@ -284,6 +316,7 @@ public sealed partial class MarkdownContentParser
                     var (key, subject, error) = await CreateWidgetAsync(block, children, existingChildren, index, state, cancellationToken);
                     if (subject is null)
                     {
+                        state.AddErrorBox();
                         AddHtml(children, existingChildren, index, error!.Render());
                     }
                     else
@@ -334,7 +367,7 @@ public sealed partial class MarkdownContentParser
                 $"'{head.Name}' is not a slot at this position. A slot block must be directly inside the widget that declares it."));
         }
 
-        var type = _typeProvider.Types.FirstOrDefault(candidate => candidate.FullName == head.Name);
+        var type = FindType(head.Name);
         if (type is null)
         {
             return (null, null, new BlockError(
@@ -356,7 +389,7 @@ public sealed partial class MarkdownContentParser
         }
 
         // An id can equal the positional key of another block, for example #Card_3.
-        var key = head.Id ?? $"{type.Name}_{index}";
+        var key = MarkdownSubjectKeys.GetContentKey(head.Id, type, index);
         if (children.ContainsKey(key))
         {
             return (null, null, new BlockError(block.Line, FormatUsedTwice(key)));
@@ -367,6 +400,22 @@ public sealed partial class MarkdownContentParser
             type, $"The type '{head.Name}'", segment, existing, state, cancellationToken);
 
         return (subject is null ? null : key, subject, error);
+    }
+
+    /// <summary>Gets the type that a widget block names with its full name, or null when there is none.</summary>
+    internal Type? FindType(string fullName) => _typeProvider.Types.FirstOrDefault(candidate => candidate.FullName == fullName);
+
+    /// <summary>Gets whether the path resolves to a subject from <paramref name="from"/> the way a page resolves it.</summary>
+    internal bool ResolvesToSubject(string path, IInterceptorSubject from)
+    {
+        try
+        {
+            return _pathResolver.ResolveScopedSubject(path, PathStyle.Canonical, from) is not null;
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            return false;
+        }
     }
 
     private static string FormatUsedTwice(string name) => $"The name '{name}' is used twice on this page.";
@@ -385,8 +434,14 @@ public sealed partial class MarkdownContentParser
         CancellationToken cancellationToken)
     {
         var block = segment.Block;
+        if (existing is not null && existing.GetType() == type && TryKeepUnchangedBlock(existing, block, state))
+        {
+            return (existing, null);
+        }
+
         var registrationCount = state.RegistrationCount;
         var createdCount = state.CreatedCount;
+        var errorBoxCount = state.ErrorBoxCount;
 
         BlockError? error;
         try
@@ -404,7 +459,7 @@ public sealed partial class MarkdownContentParser
                 return (null, new BlockError(block.Line, configurationError!));
             }
 
-            if (!TryArrangeContent(type, slots, segment, state, out var content, out var contentError))
+            if (!TryArrangeContent(type, slots, segment, state.OwnsName, out var content, out var contentError))
             {
                 return (null, contentError);
             }
@@ -425,6 +480,11 @@ public sealed partial class MarkdownContentParser
                 if (error is null)
                 {
                     state.Register(block, block.Head!.Id, subject);
+                    if (state.ErrorBoxCount == errorBoxCount)
+                    {
+                        RememberAppliedBlock(subject, block, state, registrationCount);
+                    }
+
                     return (subject, null);
                 }
             }
@@ -515,17 +575,22 @@ public sealed partial class MarkdownContentParser
 
     private sealed class ParseState
     {
-        private readonly List<(int BlockIndex, string? Id)> _registrations = [];
+        private readonly List<(int BlockIndex, string? Id, IInterceptorSubject Subject)> _registrations = [];
         private readonly List<IInterceptorSubject> _created = [];
         private readonly Dictionary<string, int> _nameOwners = new();
+        private readonly string _source;
+        private bool? _hasLoneCarriageReturn;
+        private List<int>? _lineStarts;
 
-        public ParseState(MarkdownFile page, IReadOnlyList<MarkdownBlock> blocksInDocumentOrder)
+        public ParseState(MarkdownFile page, MarkdownPage parsedPage)
         {
             Page = page;
+            Blocks = parsedPage.AllBlocks;
+            _source = parsedPage.Source;
 
             // Decided before anything is built: slot blocks are built before the loose content around them, and
             // the blocks inside a block that ends as an error box are not built at all.
-            foreach (var block in blocksInDocumentOrder)
+            foreach (var block in parsedPage.AllBlocks)
             {
                 if (block.Head?.Id is { } id)
                 {
@@ -535,6 +600,12 @@ public sealed partial class MarkdownContentParser
         }
 
         public MarkdownFile Page { get; }
+
+        /// <summary>The widget, slot and invalid blocks of the page, by <see cref="MarkdownBlock.Index"/>.</summary>
+        public IReadOnlyList<MarkdownBlock> Blocks { get; }
+
+        /// <summary>How many blocks this parse has shown as an error box so far.</summary>
+        public int ErrorBoxCount { get; private set; }
 
         public Dictionary<int, IInterceptorSubject> BlockSubjects { get; } = new();
 
@@ -550,6 +621,51 @@ public sealed partial class MarkdownContentParser
         /// it is detached only when it is released.
         /// </summary>
         public void AddCreated(IInterceptorSubject subject) => _created.Add(subject);
+
+        public void AddErrorBox() => ErrorBoxCount++;
+
+        /// <summary>The text of the page that this parse reads.</summary>
+        public string Source => _source;
+
+        /// <summary>
+        /// Gets where the lines of the block are in <see cref="Source"/>, from its head line to its last line. False
+        /// on a page with a lone carriage return, whose line numbers are not the ones counted here.
+        /// </summary>
+        public bool TryGetBlockSpan(MarkdownBlock block, out int start, out int length)
+        {
+            _hasLoneCarriageReturn ??= MarkdownBlockWriter.HasLoneCarriageReturn(_source);
+            if (_hasLoneCarriageReturn.Value)
+            {
+                start = 0;
+                length = 0;
+                return false;
+            }
+
+            if (_lineStarts is null)
+            {
+                _lineStarts = [0];
+                for (var lineFeed = _source.IndexOf('\n'); lineFeed >= 0; lineFeed = _source.IndexOf('\n', lineFeed + 1))
+                {
+                    _lineStarts.Add(lineFeed + 1);
+                }
+            }
+
+            start = GetLineStart(block.Line);
+            length = GetLineStart(block.EndLine + 1) - start;
+            return true;
+        }
+
+        /// <summary>Gets the subjects registered after <see cref="RegistrationCount"/> had the given value, with their block index.</summary>
+        public IEnumerable<(int BlockIndex, IInterceptorSubject Subject)> GetRegistrationsSince(int registrationCount)
+        {
+            for (var index = registrationCount; index < _registrations.Count; index++)
+            {
+                yield return (_registrations[index].BlockIndex, _registrations[index].Subject);
+            }
+        }
+
+        // The offset of the first character of the 1-based line, or the length of the text for a line after the last one.
+        private int GetLineStart(int line) => line - 1 < _lineStarts!.Count ? _lineStarts[line - 1] : _source.Length;
 
         /// <summary>
         /// Removes and returns the subjects created after <see cref="CreatedCount"/> had the given value,
@@ -582,7 +698,7 @@ public sealed partial class MarkdownContentParser
                 NamedSubjects[id] = subject;
             }
 
-            _registrations.Add((block.Index, id));
+            _registrations.Add((block.Index, id, subject));
         }
 
         /// <summary>
@@ -593,7 +709,7 @@ public sealed partial class MarkdownContentParser
         {
             for (var index = _registrations.Count - 1; index >= registrationCount; index--)
             {
-                var (blockIndex, id) = _registrations[index];
+                var (blockIndex, id, _) = _registrations[index];
                 BlockSubjects.Remove(blockIndex);
                 if (id is not null)
                 {

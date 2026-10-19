@@ -16,6 +16,7 @@ public interface IVolumeController
     /// <param name="volume">Volume level (0..1).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     [Operation]
+    [Category("Volume")]
     Task SetVolumeAsync(
         [OperationParameter(Unit = StateUnit.Percent)] decimal volume,
         CancellationToken cancellationToken);
@@ -24,11 +25,13 @@ public interface IVolumeController
     /// Mutes the audio.
     /// </summary>
     [Operation]
+    [Category("Volume")]
     Task MuteAsync(CancellationToken cancellationToken);
 
     /// <summary>
     /// Unmutes the audio.
     /// </summary>
     [Operation]
+    [Category("Volume")]
     Task UnmuteAsync(CancellationToken cancellationToken);
 }

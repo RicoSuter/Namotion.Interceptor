@@ -33,7 +33,8 @@ internal class ListTypesTool
                       "Call this first, then pass the returned type names to search's types parameter (full names with namespace preferred). " +
                       "Filter with kind ('interfaces'/'concrete').",
         InputSchema = Schema,
-        Handler = HandleListTypesAsync
+        Handler = HandleListTypesAsync,
+        Annotations = McpToolAnnotations.ReadOnly
     };
 
     private Task<object?> HandleListTypesAsync(JsonElement input, CancellationToken cancellationToken)

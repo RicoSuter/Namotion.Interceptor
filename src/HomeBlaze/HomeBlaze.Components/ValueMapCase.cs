@@ -9,6 +9,7 @@ namespace HomeBlaze.Components;
 /// One case of a <see cref="ValueMap"/>: what a value with this text gets.
 /// </summary>
 [ExcludeFromCreation]
+[PageLayout]
 [InterceptorSubject]
 public partial class ValueMapCase : IConfigurable
 {

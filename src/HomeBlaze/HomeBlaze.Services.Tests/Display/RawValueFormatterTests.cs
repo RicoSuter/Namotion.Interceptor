@@ -1,4 +1,5 @@
 using System.Globalization;
+using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Services.Display;
 using Xunit;
 
@@ -97,4 +98,39 @@ public class RawValueFormatterTests
         Assert.Equal("Heating", RawValueFormatter.Format(Mode.Heating));
         Assert.Equal("text", RawValueFormatter.Format("text"));
     }
+
+    [Fact]
+    public void WhenAValueHoldsASecretConfigurationValue_ThenTextIsEmpty()
+    {
+        // Arrange
+        var credentials = new Credentials("admin", "s3cr3t");
+        var connection = new Connection("host", credentials);
+
+        // Act
+        var credentialsText = RawValueFormatter.Format(credentials);
+        var connectionText = RawValueFormatter.Format(connection);
+
+        // Assert
+        Assert.Equal(string.Empty, credentialsText);
+        Assert.Equal(string.Empty, connectionText);
+    }
+
+    [Fact]
+    public void WhenAValueHoldsNoSecret_ThenTextIsItsText()
+    {
+        // Arrange
+        var endpoint = new Endpoint("host", 80);
+
+        // Act
+        var text = RawValueFormatter.Format(endpoint);
+
+        // Assert
+        Assert.Equal(endpoint.ToString(), text);
+    }
+
+    private sealed record Credentials(string User, [property: Configuration(IsSecret = true)] string Password);
+
+    private sealed record Connection(string Host, Credentials Credentials);
+
+    private sealed record Endpoint(string Host, int Port);
 }

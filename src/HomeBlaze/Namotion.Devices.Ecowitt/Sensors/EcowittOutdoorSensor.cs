@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Common;
@@ -32,24 +33,31 @@ public partial class EcowittOutdoorSensor :
     public partial decimal? FeelsLikeTemperature { get; internal set; }
 
     [State(Unit = StateUnit.MeterPerSecond)]
+    [Category("Wind")]
     public partial decimal? WindSpeed { get; internal set; }
 
     [State(Unit = StateUnit.MeterPerSecond)]
+    [Category("Wind")]
     public partial decimal? WindGust { get; internal set; }
 
     [State(Unit = StateUnit.MeterPerSecond)]
+    [Category("Wind")]
     public partial decimal? MaxDailyGust { get; internal set; }
 
     [State(Unit = StateUnit.Degree)]
+    [Category("Wind")]
     public partial decimal? WindDirection { get; internal set; }
 
     [State(Unit = StateUnit.Lux)]
+    [Category("Sun")]
     public partial decimal? Illuminance { get; internal set; }
 
     [State(Unit = StateUnit.UvIndex)]
+    [Category("Sun")]
     public partial decimal? UvIndex { get; internal set; }
 
     [State]
+    [Category("Sun")]
     public partial decimal? SolarRadiation { get; internal set; }
 
     [State]

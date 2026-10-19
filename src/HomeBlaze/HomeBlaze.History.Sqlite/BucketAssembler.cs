@@ -12,6 +12,7 @@ namespace HomeBlaze.History.Sqlite;
 /// partitions (Count sum, Sum sum, Min/Max min/max, SampleAverage=Sum/Count, StandardDeviation from Count+Sum+SumOfSquares);
 /// First picks the smallest <c>FirstTicks</c>, Last the largest <c>LastTicks</c>; TWA carries the covered
 /// integral (<c>WeightedSum</c> over <c>TotalDuration</c>), which the reader computes and the assembler divides.
+/// For Delta, <c>Sum</c> holds the bucket's increase, written by the ordered Delta scan.
 /// </summary>
 internal readonly record struct BucketPartial(
     long BucketStartTicks,
@@ -87,7 +88,7 @@ internal static class BucketAssembler
     /// <summary>
     /// Assembles the bucket grid. <paramref name="windows"/> is the store's coverage clipped to
     /// [first bucket start, To), and <paramref name="lastSeed"/> the value held entering the first
-    /// bucket, for <c>Last</c> only.
+    /// bucket, for <c>Last</c> and <c>Delta</c> only.
     /// </summary>
     public static HistorySeries Assemble(
         HistoryQuery query,
@@ -98,20 +99,26 @@ internal static class BucketAssembler
         var bucket = query.Bucket!.Value;
         var aggregation = query.Aggregation;
 
-        // Only Last threads a held value (Number and Json) here; the reader integrates the
-        // TimeWeightedAverage carry itself.
+        // Only Last threads a held value (Number and Json) here, and Delta whether a reading is held; the reader
+        // integrates the TimeWeightedAverage carry and sums the Delta steps itself.
         var isLast = aggregation == HistoryAggregations.Last;
         var carriedNumber = lastSeed?.Number;
         var carriedJson = lastSeed?.Json;
+        var isDelta = aggregation == HistoryAggregations.Delta;
+        var hasDeltaCarry = lastSeed?.Number is not null;
 
-        var alignedFrom = BucketAlignment.BucketStart(query.From, bucket);
+        var alignedFrom = BucketAlignment.Start(query.From, bucket);
         var firstBucketStart = BucketAlignment.FirstBucketStart(
             query.From, query.To, bucket, query.MaxPoints);
         var bucketStartTimestamp = firstBucketStart;
         var allPoints = new List<HistoryPoint>();
         while (bucketStartTimestamp < query.To)
         {
-            var bucketEndTimestamp = bucketStartTimestamp + bucket;
+            var bucketEndTimestamp = BucketAlignment.Next(bucketStartTimestamp, bucket);
+            if (bucketEndTimestamp <= bucketStartTimestamp)
+            {
+                throw new InvalidOperationException($"The {bucket} bucket starting at {bucketStartTimestamp:O} does not advance.");
+            }
 
             // Measured over [bucket start, min(bucket end, To)) within coverage (partial buckets: history.md).
             var clippedEnd = bucketEndTimestamp < query.To ? bucketEndTimestamp : query.To;
@@ -133,11 +140,26 @@ internal static class BucketAssembler
             }
 
             var hasPartial = partials.TryGetValue(EpochTicks.ToEpochTicks(bucketStartTimestamp), out var partial);
-            var isPartial = covered < clippedEnd - bucketStartTimestamp;
-            var point = isPartial && aggregation is (HistoryAggregations.Count or HistoryAggregations.Sum)
-                ? new HistoryPoint(bucketStartTimestamp, null, null)
-                : AggregateBucket(aggregation, bucketStartTimestamp, hasPartial ? partial : null,
+            HistoryPoint point;
+            if (isDelta)
+            {
+                // A bucket with samples has its increase; one without has 0 when a reading is held, else nothing.
+                if (hasPartial && partial.Sum is { } increase)
+                {
+                    point = new HistoryPoint(bucketStartTimestamp, increase, null);
+                    hasDeltaCarry = true;
+                }
+                else
+                {
+                    point = new HistoryPoint(bucketStartTimestamp, hasDeltaCarry ? 0 : null, null);
+                }
+            }
+            else
+            {
+                point = AggregateBucket(aggregation, bucketStartTimestamp, hasPartial ? partial : null,
                     ref carriedNumber, ref carriedJson);
+            }
+
             allPoints.Add(point);
 
             if (isLast && !HoldsValueAtEnd(windows, bucketStartTimestamp, clippedEnd, partial.LastTicks))

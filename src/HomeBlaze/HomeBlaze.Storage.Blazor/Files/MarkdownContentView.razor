@@ -5,7 +5,6 @@
 @using HomeBlaze.Components.Abstractions.TimeZones
 @using HomeBlaze.Storage.Internal
 @using Namotion.Interceptor
-@implements IDisposable
 @inject ITimeZoneDisplay TimeZone
 
 @foreach (var segment in GetRenderSegments())
@@ -28,23 +27,10 @@
     [Parameter]
     public IDictionary<string, IInterceptorSubject>? Children { get; set; }
 
-    protected override void OnInitialized()
-    {
-        TimeZone.Changed += OnTimeZoneChanged;
-    }
-
-    // A date in an expression is written in the time zone of the viewer, so a change of it changes the page.
-    private void OnTimeZoneChanged() => InvokeAsync(StateHasChanged);
-
-    public void Dispose()
-    {
-        TimeZone.Changed -= OnTimeZoneChanged;
-    }
-
     private record RenderSegment(string? Html, IInterceptorSubject? Widget);
 
-    // Runs on every render and keeps nothing: the values of expressions are read here so that the
-    // surrounding tracking scope records them, and a reload replaces the dictionary and its subjects.
+    // Runs on every render and keeps nothing: the values of expressions are read here so that the render
+    // records them, and a reload replaces the dictionary and its subjects.
     private List<RenderSegment> GetRenderSegments()
     {
         var result = new List<RenderSegment>();

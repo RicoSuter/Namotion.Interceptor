@@ -31,10 +31,15 @@ public class PlaywrightFixture : IAsyncLifetime
     /// </summary>
     public IServiceProvider ServerServices => _factory?.ServerServices ?? throw new InvalidOperationException("Server not started");
 
+    /// <summary>
+    /// The warnings and errors that the server under test logs.
+    /// </summary>
+    public ServerLogRecorder ServerLog => _factory?.ServerLog ?? throw new InvalidOperationException("Server not started");
+
     public async Task InitializeAsync()
     {
-        // Start the test server with Kestrel. It learns the test subject and its widget before it loads anything.
-        _factory = new WebTestingHostFactory<App>([typeof(ControlsTestSubject), typeof(ControlsTestWidget)]);
+        // Start the test server with Kestrel. It learns the test subjects and the widget before it loads anything.
+        _factory = new WebTestingHostFactory<App>([typeof(ControlsTestSubject), typeof(ControlsTestWidget), typeof(HistoryValuesSubject), typeof(LiveValuesSubject), typeof(LiveGridSubject), typeof(LiveGridWidget)]);
         // Force server to start by accessing ServerAddress which calls EnsureServer
         var address = _factory.ServerAddress;
         Console.WriteLine($"Test server started at: {address}");
@@ -104,15 +109,8 @@ public class PlaywrightFixture : IAsyncLifetime
     public async Task<(string Name, PlainConfigurableSubject Subject)> AddPlainSubjectToRootAsync(string? name = null, string label = "Original label")
     {
         name ??= CreatePlainSubjectName();
-        var root = GetRoot();
-
-        // A pass of the storage that finds a change sets the children of the root anew from its files, which drops
-        // this subject. A pass now takes in what earlier tests left changed on disk, so that the pass they asked
-        // for, which runs seconds later, finds nothing.
-        await root.ReconcileAsync();
-
         var subject = CreatePlainSubject(label);
-        root.Children = new Dictionary<string, IInterceptorSubject>(root.Children) { [name] = subject };
+        await AttachSubjectToRootAsync(name, subject);
         return (name, subject);
     }
 
@@ -120,6 +118,40 @@ public class PlaywrightFixture : IAsyncLifetime
     /// Creates a name that no subject under the root has, for a test that opens a page before the subject exists.
     /// </summary>
     public static string CreatePlainSubjectName() => $"Plain{Guid.NewGuid():N}";
+
+    /// <summary>
+    /// Creates a subject through dependency injection and puts it under the root with a new name.
+    /// </summary>
+    public async Task<(string Name, T Subject)> AddSubjectToRootAsync<T>() where T : IInterceptorSubject
+    {
+        var name = $"{typeof(T).Name}{Guid.NewGuid():N}";
+        var subject = ServerServices.GetRequiredService<SubjectFactory>().CreateSubject<T>();
+        await AttachSubjectToRootAsync(name, subject);
+        return (name, subject);
+    }
+
+    /// <summary>
+    /// Puts a subject under the root with the given name, after reconciling the storage so that an earlier test's
+    /// change left on disk does not drop it again later.
+    /// </summary>
+    private async Task AttachSubjectToRootAsync(string name, IInterceptorSubject subject)
+    {
+        await ReconcileStorageAsync();
+
+        var root = GetRoot();
+        root.Children = new Dictionary<string, IInterceptorSubject>(root.Children) { [name] = subject };
+    }
+
+    /// <summary>
+    /// Runs a pass of the storage now. Call it before a test sets the children of a folder or of the root itself.
+    /// </summary>
+    public async Task ReconcileStorageAsync()
+    {
+        // A pass of the storage that finds a change sets the children of a folder anew from its files, which drops what
+        // a test put there. A pass now takes in what earlier tests left changed on disk, so that the pass they asked for,
+        // which runs seconds later, finds nothing.
+        await GetRoot().ReconcileAsync();
+    }
 
     /// <summary>
     /// Puts a new subject in the place of a subject of <see cref="AddPlainSubjectToRootAsync"/> in one write, like a
@@ -136,9 +168,10 @@ public class PlaywrightFixture : IAsyncLifetime
     }
 
     /// <summary>
-    /// Takes a subject of <see cref="AddPlainSubjectToRootAsync"/> out of the graph again.
+    /// Takes a subject of <see cref="AddSubjectToRootAsync{T}"/> or <see cref="AddPlainSubjectToRootAsync"/> out of the
+    /// graph again.
     /// </summary>
-    public void RemovePlainSubjectFromRoot(string name, PlainConfigurableSubject subject)
+    public void RemoveSubjectFromRoot(string name, IInterceptorSubject subject)
     {
         var root = GetRoot();
         var children = new Dictionary<string, IInterceptorSubject>(root.Children);
@@ -192,6 +225,46 @@ public class PlaywrightFixture : IAsyncLifetime
             () => content = File.ReadAllText(path),
             $"The file {path} could not be read");
         return content;
+    }
+
+    /// <summary>
+    /// Reads a page of the demo folder, given by its file name, until its text with line feeds only is the expected
+    /// one, and returns that text. A write that the page refuses leaves the text as it was.
+    /// </summary>
+    public async Task<string> WaitForDemoPageTextAsync(string name, Func<string, bool> isExpected, string message)
+    {
+        var path = GetDemoPagePath(name);
+        var text = string.Empty;
+
+        await AsyncTestHelpers.WaitUntilAsync(
+            () =>
+            {
+                if (!TryReadFile(path, out var written))
+                {
+                    return false;
+                }
+
+                text = written.Replace("\r\n", "\n");
+                return isExpected(text);
+            },
+            message: message);
+
+        return text;
+    }
+
+    // The server holds the file open while it reads it again after a write, and the poll tries a failed read again.
+    private static bool TryReadFile(string path, out string text)
+    {
+        try
+        {
+            text = File.ReadAllText(path);
+            return true;
+        }
+        catch (IOException)
+        {
+            text = string.Empty;
+            return false;
+        }
     }
 
     // The server reads a file again after every write and keeps it open while it parses the page, which can still be

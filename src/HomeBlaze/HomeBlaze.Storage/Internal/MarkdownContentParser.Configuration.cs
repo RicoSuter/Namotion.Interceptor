@@ -26,10 +26,17 @@ public sealed partial class MarkdownContentParser
     private static readonly ConcurrentDictionary<Type, IReadOnlyDictionary<string, Type>> ConfigurationPropertyCache = new();
 
     // A JsonObject with a duplicate key parses and then throws on the first write, so the duplicate is rejected while parsing.
-    private static readonly JsonDocumentOptions StrictJsonOptions = new() { AllowDuplicateProperties = false };
+    internal static readonly JsonDocumentOptions StrictJsonOptions = new() { AllowDuplicateProperties = false };
 
     // The top-level keys of the configuration last applied to a subject. See CanUpdateInPlace.
     private readonly ConditionalWeakTable<IInterceptorSubject, string[]> _appliedConfigurationKeys = new();
+
+    // The configuration text last applied to a subject. See CreateOrUpdateAsync.
+    private readonly ConditionalWeakTable<IInterceptorSubject, string> _appliedConfigurationJson = new();
+
+    // The text of the block last applied to a subject in full, with the subjects of the blocks inside it. See
+    // TryKeepUnchangedBlock.
+    private readonly ConditionalWeakTable<IInterceptorSubject, AppliedBlock> _appliedBlocks = new();
 
     /// <summary>
     /// Creates the subject of a block from its configuration, or updates <paramref name="existing"/> in place.
@@ -51,6 +58,13 @@ public sealed partial class MarkdownContentParser
         IInterceptorSubject? subject;
         if (CanUpdateInPlace(existing, type, configuration.Keys))
         {
+            // A block whose configuration did not change keeps the values of its subject. They can hold a change
+            // that is about to be saved, which the reload inside the save of another block must not reset.
+            if (_appliedConfigurationJson.TryGetValue(existing, out var appliedJson) && appliedJson == configuration.Json)
+            {
+                return (existing, null);
+            }
+
             // Without the execution flow, as for the creation below: it can attach nested subjects.
             using (ExecutionContext.SuppressFlow())
             {
@@ -87,6 +101,7 @@ public sealed partial class MarkdownContentParser
         if (subject is not null)
         {
             _appliedConfigurationKeys.AddOrUpdate(subject, configuration.Keys);
+            _appliedConfigurationJson.AddOrUpdate(subject, configuration.Json);
         }
 
         return (subject, null);
@@ -111,6 +126,82 @@ public sealed partial class MarkdownContentParser
         }
 
         _appliedConfigurationKeys.AddOrUpdate(subject, keys.ToArray());
+    }
+
+    /// <summary>
+    /// Makes the next parse apply the configuration of the block of the subject also when its text did not change.
+    /// </summary>
+    internal void ForgetAppliedConfiguration(IInterceptorSubject subject)
+    {
+        _appliedConfigurationJson.Remove(subject);
+        _appliedBlocks.Remove(subject);
+    }
+
+    /// <summary>
+    /// Makes the next parse apply the block of the subject in full also when its text is the one last applied, because
+    /// a write-back changed that text in the file.
+    /// </summary>
+    internal void ForgetAppliedBlock(IInterceptorSubject subject) => _appliedBlocks.Remove(subject);
+
+    /// <summary>
+    /// Keeps the subject of a block whose text did not change since it was last applied in full, with its values,
+    /// its slot values and the subjects of the blocks inside it, and registers them for the blocks of this parse.
+    /// </summary>
+    /// <remarks>
+    /// The values in memory can hold a change that is about to be saved, such as a value added to a slot, which
+    /// the reload inside the save of another block must not reset. A slot value without a block stays one, so
+    /// the save of its owner inserts its block.
+    /// </remarks>
+    private bool TryKeepUnchangedBlock(IInterceptorSubject existing, MarkdownBlock block, ParseState state)
+    {
+        if (!_appliedBlocks.TryGetValue(existing, out var applied) ||
+            !state.TryGetBlockSpan(block, out var start, out var length) ||
+            !state.Source.AsSpan(start, length).SequenceEqual(applied.Text))
+        {
+            return false;
+        }
+
+        // The text inside the block is the same, so its blocks follow it at the same distance. Their names can
+        // have been taken by a block before them since then, which makes them error boxes.
+        foreach (var (offset, _) in applied.InnerSubjects)
+        {
+            var index = block.Index + offset;
+            if (index >= state.Blocks.Count || !state.OwnsName(state.Blocks[index]))
+            {
+                return false;
+            }
+        }
+
+        foreach (var (offset, subject) in applied.InnerSubjects)
+        {
+            var innerBlock = state.Blocks[block.Index + offset];
+            state.Register(innerBlock, innerBlock.Head!.Id, subject);
+        }
+
+        state.Register(block, block.Head!.Id, existing);
+        return true;
+    }
+
+    // Only a block without an error box inside is remembered: an error can come from outside the block, such as a
+    // name that another block took, and must go away when that changes.
+    private void RememberAppliedBlock(IInterceptorSubject subject, MarkdownBlock block, ParseState state, int registrationCount)
+    {
+        if (!state.TryGetBlockSpan(block, out var start, out var length))
+        {
+            _appliedBlocks.Remove(subject);
+            return;
+        }
+
+        var innerSubjects = new List<(int Offset, IInterceptorSubject Subject)>();
+        foreach (var (blockIndex, innerSubject) in state.GetRegistrationsSince(registrationCount))
+        {
+            if (blockIndex != block.Index)
+            {
+                innerSubjects.Add((blockIndex - block.Index, innerSubject));
+            }
+        }
+
+        _appliedBlocks.AddOrUpdate(subject, new AppliedBlock(state.Source, start, length, innerSubjects.ToArray()));
     }
 
     // Updating in place only sets the keys that are present. A key that was removed from the page
@@ -200,12 +291,31 @@ public sealed partial class MarkdownContentParser
             return null;
         }
 
-        foreach (var (key, _) in configuration)
+        List<string>? emptySlotLists = null;
+        foreach (var (key, value) in configuration)
         {
-            if (key != TypeDiscriminator && !properties.ContainsKey(key))
+            if (key == TypeDiscriminator || properties.ContainsKey(key))
             {
-                error = FormatUnknownProperty(type, key, properties);
-                return null;
+                continue;
+            }
+
+            // Earlier versions wrote an empty list for the slot of a layout into every page they saved. It holds
+            // nothing, and the next save of the block leaves it out.
+            if (value is JsonArray { Count: 0 } && SlotMap.For(type).FindByPropertyName(key) is { IsList: true })
+            {
+                (emptySlotLists ??= []).Add(key);
+                continue;
+            }
+
+            error = FormatUnknownProperty(type, key, properties);
+            return null;
+        }
+
+        if (emptySlotLists is not null)
+        {
+            foreach (var key in emptySlotLists)
+            {
+                configuration.Remove(key);
             }
         }
 
@@ -214,6 +324,18 @@ public sealed partial class MarkdownContentParser
 
     private static string FormatUnknownProperty(Type type, string key, IReadOnlyDictionary<string, Type> properties)
     {
+        if (SlotMap.For(type).FindByPropertyNameIgnoringCase(key) is { } slot)
+        {
+            if (slot.IsDefault)
+            {
+                return $"'{slot.PropertyName}' is the content of the block on a page, so it cannot be set as configuration.";
+            }
+
+            return slot.IsList
+                ? $"'{slot.PropertyName}' is written as blocks on a page: one '{slot.Name}' block per value inside this block."
+                : $"'{slot.PropertyName}' is written as a block on a page: a '{slot.Name}' block inside this block.";
+        }
+
         if (properties.Count == 0)
         {
             return $"{type.Name} has no configuration properties, so '{key}' cannot be set.";
@@ -284,11 +406,17 @@ public sealed partial class MarkdownContentParser
         return $"The value of '{property.PropertyName}' in the json block cannot be read{place}: {reason}";
     }
 
+    // A slot is filled by the content of the block, also when the same property is configuration in a file.
     private static IReadOnlyDictionary<string, Type> GetConfigurationProperties(Type type) =>
-        ConfigurationPropertyCache.GetOrAdd(type, static key => key
-            .GetProperties(BindingFlags.Public | BindingFlags.Instance)
-            .Where(property => property.GetCustomAttribute<ConfigurationAttribute>(true) is not null)
-            .ToDictionary(property => property.Name, property => property.PropertyType));
+        ConfigurationPropertyCache.GetOrAdd(type, static key =>
+        {
+            var slots = SlotMap.For(key);
+            return key
+                .GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                .Where(property => property.GetCustomAttribute<ConfigurationAttribute>(true) is not null &&
+                                   slots.FindByPropertyName(property.Name) is null)
+                .ToDictionary(property => property.Name, property => property.PropertyType);
+        });
 
     // The literal an argument stands for: a bare literal for a bool or numeric property, a JSON string for every
     // other type. Null when the text is no such literal.
@@ -316,6 +444,15 @@ public sealed partial class MarkdownContentParser
         {
             return null;
         }
+    }
+
+    /// <summary>
+    /// Where the text of a block is in the text of the page it was parsed from, which all blocks of that parse share
+    /// instead of a copy each, and the subjects of the blocks inside it by their distance from the block.
+    /// </summary>
+    private sealed record AppliedBlock(string Source, int Start, int Length, (int Offset, IInterceptorSubject Subject)[] InnerSubjects)
+    {
+        public ReadOnlySpan<char> Text => Source.AsSpan(Start, Length);
     }
 
     /// <summary>The merged configuration of one block and its top-level keys without the type discriminator.</summary>

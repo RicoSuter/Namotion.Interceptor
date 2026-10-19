@@ -172,14 +172,14 @@ public class MarkdownShortFormTests
         // Assert
         Assert.True(isHeadLineWritten);
         Assert.Equal(
-            content.Replace($"{headLine} Count=1", $"{headLine} Count=9 Enabled=false Interval=00:00:00"),
+            content.Replace($"{headLine} Count=1", $"{headLine} Count=9"),
             afterHeadLine);
 
         Assert.True(isJsonBlockWritten);
         Assert.Equal(
             content.Replace(
                 $"{headLine} Count=1",
-                $"{headLine} Count=9 Enabled=false Interval=00:00:00\n```json\n{{\n  \"Tags\": [\n    \"a\"\n  ]\n}}\n```"),
+                $"{headLine} Count=9\n```json\n{{\n  \"Tags\": [\n    \"a\"\n  ]\n}}\n```"),
             afterJsonBlock);
 
         Assert.Empty(PageErrorBoxes.FindSortedByLine(page));

@@ -1,5 +1,6 @@
 ﻿using System.Collections;
 using System.Collections.Immutable;
+using System.Reflection;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Tracking;
@@ -17,6 +18,9 @@ public class RegisteredSubjectProperty
     private ImmutableArray<SubjectPropertyChild> _childrenCache;
 
     private readonly PropertyAttributeAttribute? _attributeMetadata;
+
+    // 0: not computed yet, 1: no public setter, 2: public setter. Computed on first read because it reflects over the setter.
+    private byte _hasPublicSetter;
 
     internal RegisteredSubjectProperty[]? AttributesCache = null; // TODO: Dangerous cache, needs review
 
@@ -147,9 +151,32 @@ public class RegisteredSubjectProperty
     public bool HasGetter => Reference.Metadata.GetValue is not null;
 
     /// <summary>
-    /// Gets a value indicating whether the property has a setter.
+    /// Gets a value indicating whether the property has a setter of any accessibility, see <see cref="HasPublicSetter"/>;
+    /// a generated init-only property has no setter.
     /// </summary>
     public bool HasSetter => Reference.Metadata.SetValue is not null;
+
+    /// <summary>
+    /// Gets a value indicating whether the property has a setter that is public. An init-only setter does not count as public.
+    /// A setter that an override inherits has the accessibility of the property it overrides. An explicit or default
+    /// interface implementation has the accessibility of the implemented interface member. A dynamic property without
+    /// <see cref="SubjectPropertyMetadata.PropertyInfo"/> counts as public when it has a setter.
+    /// </summary>
+    // TODO: Read the accessibility from the generated metadata instead of the PropertyInfo (see #732)
+    public bool HasPublicSetter
+    {
+        get
+        {
+            var hasPublicSetter = _hasPublicSetter;
+            if (hasPublicSetter == 0)
+            {
+                hasPublicSetter = HasSetter && IsSetterPublic(Reference.Metadata.PropertyInfo) ? (byte)2 : (byte)1;
+                _hasPublicSetter = hasPublicSetter;
+            }
+
+            return hasPublicSetter == 2;
+        }
+    }
 
     /// <summary>
     /// Gets the current value of the property.
@@ -424,6 +451,39 @@ public class RegisteredSubjectProperty
             // Release references so subjects can be GC'd on idle threads
             collectionPositions.Clear();
         }
+    }
+
+    private static bool IsSetterPublic(PropertyInfo? propertyInfo)
+    {
+        if (propertyInfo is null)
+        {
+            return true;
+        }
+
+        // An override that declares only the getter has no SetMethod of its own; the root declaration holds the setter.
+        var setter = propertyInfo.SetMethod;
+        if (setter is null && propertyInfo.GetMethod?.GetBaseDefinition().DeclaringType is { } rootType)
+        {
+            setter = rootType
+                .GetProperty(propertyInfo.Name, BindingFlags.DeclaredOnly | BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?
+                .SetMethod;
+        }
+
+        return setter is { IsPublic: true } && !IsInitOnly(setter);
+    }
+
+    private static bool IsInitOnly(MethodInfo setter)
+    {
+        // Matched by name: an assembly built for an older framework declares its own IsExternalInit.
+        foreach (var modifier in setter.ReturnParameter.GetRequiredCustomModifiers())
+        {
+            if (modifier.FullName == "System.Runtime.CompilerServices.IsExternalInit")
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>

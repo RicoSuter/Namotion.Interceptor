@@ -2,23 +2,51 @@ using System.Text.Json;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Services;
-using Microsoft.Extensions.Logging;
-using Namotion.Interceptor;
 using Namotion.Interceptor.Mcp;
 using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Mcp.Models;
 using Namotion.Interceptor.Mcp.Tools;
-using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Registry.Paths;
 
 namespace HomeBlaze.AI.Mcp;
 
 /// <summary>
-/// Provides the list_methods and invoke_method tools for HomeBlaze subjects.
+/// Provides the list_methods, invoke_query and invoke_operation tools for HomeBlaze subjects. invoke_operation is
+/// only offered when the configuration is not read-only.
 /// </summary>
 public class HomeBlazeMcpToolProvider : IMcpToolProvider
 {
+    /// <summary>The name of the tool that calls query methods.</summary>
+    public const string InvokeQueryToolName = "invoke_query";
+
+    /// <summary>The name of the tool that calls operation methods.</summary>
+    public const string InvokeOperationToolName = "invoke_operation";
+
+    private const string ListMethodsToolName = "list_methods";
+
+    private const string PathArgument = "path";
+
+    private const string ListMethodsDescriptionPrefix =
+        "List the methods of a subject, with each parameter's type, format and unit. Every method is either a query " +
+        $"(reads, no side effects; call it with {InvokeQueryToolName}) or an operation (changes devices or sends something";
+
+    private const string ListMethodsDescription =
+        ListMethodsDescriptionPrefix + $"; call it with {InvokeOperationToolName}). The kind field of each method says which. " +
+        "Operations with requiresConfirmation set need a person's confirmation and cannot be called through MCP.";
+
+    private const string ReadOnlyListMethodsDescription =
+        ListMethodsDescriptionPrefix + "). The kind field of each method says which; operations are listed for information " +
+        "but cannot be called on this server.";
+
+    private const string InvokeQueryDescription =
+        "Call a query method of a subject: it reads and has no side effects, for example ReadEvaluatedContent on a " +
+        "Markdown page or document (*.md) to read it, with includeSourcePaths=true to see where each value comes from. " +
+        $"Find methods and their kind with {ListMethodsToolName}.";
+
+    private const string InvokeOperationDescription =
+        "Call an operation method of a subject: it can change devices or send something, for example SendNotification. " +
+        $"Operations that require confirmation by a person cannot be called. Find methods and their kind with {ListMethodsToolName}. " +
+        HomeBlazeMcpInstructions.ChangeCaution;
+
     private static readonly JsonElement ListMethodsSchema = JsonSerializer.SerializeToElement(new
     {
         type = "object",
@@ -33,56 +61,64 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
         {
             path = new { type = "string", description = "Subject path" },
             method = new { type = "string", description = "Method name" },
-            parameters = new { type = "object", description = "Arguments by parameter name, in the type, format and unit list_methods gives (optional)" }
+            parameters = new { type = "object", description = $"Arguments by parameter name, in the type, format and unit {ListMethodsToolName} gives (optional)" }
         },
         required = new[] { "path", "method" }
     });
 
-    private readonly Func<IInterceptorSubject> _rootSubjectProvider;
-    private readonly PathProviderBase _pathProvider;
-    private readonly IServiceProvider _serviceProvider;
-    private readonly ILogger<HomeBlazeMcpToolProvider> _logger;
-    private readonly bool _isReadOnly;
+    // Operations also reach systems outside the graph, such as notification services and media URLs.
+    private static readonly McpToolAnnotations InvokeOperationAnnotations = McpToolAnnotations.Destructive with { OpenWorldHint = true };
 
-    public HomeBlazeMcpToolProvider(
-        Func<IInterceptorSubject> rootSubjectProvider,
-        PathProviderBase pathProvider,
-        IServiceProvider serviceProvider,
-        ILogger<HomeBlazeMcpToolProvider> logger,
-        bool isReadOnly)
+    private readonly bool _isReadOnly;
+    private readonly McpMethodInvoker _invoker;
+
+    /// <param name="invoker">Resolves the subjects and invokes their methods.</param>
+    /// <param name="isReadOnly">Whether invoke_operation is left out.</param>
+    internal HomeBlazeMcpToolProvider(McpMethodInvoker invoker, bool isReadOnly)
     {
-        _rootSubjectProvider = rootSubjectProvider;
-        _pathProvider = pathProvider;
-        _serviceProvider = serviceProvider;
-        _logger = logger;
         _isReadOnly = isReadOnly;
+        _invoker = invoker;
     }
 
     public IEnumerable<McpToolInfo> GetTools()
     {
         yield return new McpToolInfo
         {
-            Name = "list_methods",
-            Description = "List operations and queries available on a subject at the given path, with each parameter's type, format and unit.",
+            Name = ListMethodsToolName,
+            Description = _isReadOnly ? ReadOnlyListMethodsDescription : ListMethodsDescription,
             InputSchema = ListMethodsSchema,
-            Handler = HandleListMethodsAsync
+            Handler = HandleListMethodsAsync,
+            Annotations = McpToolAnnotations.ReadOnly
         };
 
         yield return new McpToolInfo
         {
-            Name = "invoke_method",
-            Description = "Execute a method on a subject. When server is read-only, only query methods are allowed.",
+            Name = InvokeQueryToolName,
+            Description = InvokeQueryDescription,
             InputSchema = InvokeMethodSchema,
-            Handler = HandleInvokeMethodAsync
+            Handler = (input, cancellationToken) => HandleInvokeAsync(input, MethodKind.Query, cancellationToken),
+            Annotations = McpToolAnnotations.ReadOnly
         };
+
+        if (!_isReadOnly)
+        {
+            yield return new McpToolInfo
+            {
+                Name = InvokeOperationToolName,
+                Description = InvokeOperationDescription,
+                InputSchema = InvokeMethodSchema,
+                Handler = (input, cancellationToken) => HandleInvokeAsync(input, MethodKind.Operation, cancellationToken),
+                Annotations = InvokeOperationAnnotations
+            };
+        }
     }
 
     private Task<object?> HandleListMethodsAsync(JsonElement input, CancellationToken cancellationToken)
     {
-        var subject = ResolveSubject(input.GetProperty("path").GetString()!);
+        var subject = _invoker.TryResolveSubject(input, PathArgument, out _, out var error);
         if (subject is null)
         {
-            return Task.FromResult<object?>(new { error = "Subject not found." });
+            return Task.FromResult(error);
         }
 
         var methods = subject.GetAllMethods().Select(method => new
@@ -92,6 +128,7 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
             title = method.Title,
             description = method.Description,
             returnType = JsonSchemaTypeMapper.ToJsonSchemaType(method.ResultType),
+            requiresConfirmation = method.RequiresConfirmation,
             parameters = method.Parameters
                 .Where(parameter => parameter.RequiresInput)
                 .Select(parameter => McpMethodParameter.Create(
@@ -102,104 +139,17 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
         return Task.FromResult<object?>(new { methods });
     }
 
-    private async Task<object?> HandleInvokeMethodAsync(JsonElement input, CancellationToken cancellationToken)
+    private Task<object?> HandleInvokeAsync(JsonElement input, MethodKind allowedKind, CancellationToken cancellationToken)
     {
-        var subject = ResolveSubject(input.GetProperty("path").GetString()!);
+        var subject = _invoker.TryResolveSubject(input, PathArgument, out _, out var error);
         if (subject is null)
         {
-            return new { error = "Subject not found." };
+            return Task.FromResult(error);
         }
 
-        var methodName = input.GetProperty("method").GetString()!;
-        var methodProperty = subject.TryGetProperty(methodName);
-        if (methodProperty?.GetValue() is not MethodMetadata method)
-        {
-            return new { error = $"Method not found: {methodName}" };
-        }
-
-        if (_isReadOnly && method.Kind != MethodKind.Query)
-        {
-            return new { error = "Operations are not allowed in read-only mode." };
-        }
-
-        var inputParameters = method.Parameters.Where(parameter => parameter.RequiresInput).ToArray();
-        var (arguments, argumentError) = ReadArguments(input, inputParameters);
-        if (argumentError is not null)
-        {
-            return new { error = argumentError };
-        }
-
-        try
-        {
-            var result = await method.InvokeAsync(arguments, _serviceProvider, cancellationToken);
-            return result is not null ? new { success = true, result } : new { success = true };
-        }
-        catch (ArgumentException exception)
-        {
-            // Argument validation messages are written for the caller, for example listing the known values.
-            _logger.LogWarning(exception, "Method '{MethodName}' rejected an argument.", methodName);
-            return new { error = exception.Message };
-        }
-        catch (Exception exception)
-        {
-            _logger.LogError(exception, "Failed to invoke method '{MethodName}' on subject.", methodName);
-            return new { error = "Method invocation failed. Check server logs for details." };
-        }
+        var arguments = input.TryGetProperty("parameters", out var argumentsElement) ? argumentsElement : default;
+        return _invoker.InvokeAsync(subject, input.GetProperty("method").GetString()!, allowedKind, arguments, cancellationToken);
     }
-
-    private static (object?[]? Arguments, string? Error) ReadArguments(JsonElement input, MethodParameter[] inputParameters)
-    {
-        JsonElement? argumentsObject = null;
-        if (input.TryGetProperty("parameters", out var argumentsElement) && argumentsElement.ValueKind != JsonValueKind.Null)
-        {
-            if (argumentsElement.ValueKind != JsonValueKind.Object)
-            {
-                return (null, $"'parameters' must be an object. {DescribeExpectedParameters(inputParameters)}");
-            }
-
-            foreach (var argument in argumentsElement.EnumerateObject())
-            {
-                if (!inputParameters.Any(parameter => parameter.Name == argument.Name))
-                {
-                    return (null, $"Unknown parameter '{argument.Name}'. {DescribeExpectedParameters(inputParameters)}");
-                }
-            }
-
-            argumentsObject = argumentsElement;
-        }
-
-        var arguments = new object?[inputParameters.Length];
-        for (var i = 0; i < inputParameters.Length; i++)
-        {
-            var parameter = inputParameters[i];
-            if (argumentsObject is not { } providedArguments || !providedArguments.TryGetProperty(parameter.Name, out var argumentValue))
-            {
-                // A missing non-nullable argument would otherwise reach the method as default, for example a volume of 0.
-                if (!parameter.IsNullable)
-                {
-                    return (null, $"Missing parameter '{parameter.Name}'. {DescribeExpectedParameters(inputParameters)}");
-                }
-
-                continue;
-            }
-
-            try
-            {
-                arguments[i] = McpValueConverter.Deserialize(argumentValue, parameter.Type);
-            }
-            catch (JsonException exception)
-            {
-                return (null, $"Invalid value for parameter '{parameter.Name}': {exception.Message}");
-            }
-        }
-
-        return (arguments, null);
-    }
-
-    private static string DescribeExpectedParameters(MethodParameter[] inputParameters) =>
-        inputParameters.Length == 0
-            ? "The method takes no parameters."
-            : $"Expected parameters: {string.Join(", ", inputParameters.Select(parameter => parameter.Name))}.";
 
     private static string? GetUnitDescription(StateUnit? unit) => unit switch
     {
@@ -207,22 +157,4 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
         StateUnit.Percent => "fraction where 1 = 100% (0.2 = 20%)",
         _ => $"unit: {unit}"
     };
-
-    private RegisteredSubject? ResolveSubject(string path)
-    {
-        var rootRegistered = _rootSubjectProvider().TryGetRegisteredSubject();
-        if (rootRegistered is null)
-        {
-            return null;
-        }
-
-        var isRootPath = string.IsNullOrEmpty(path) || path == "/";
-
-        if (isRootPath)
-        {
-            return rootRegistered;
-        }
-
-        return _pathProvider.TryGetSubjectFromPath(rootRegistered, path);
-    }
 }

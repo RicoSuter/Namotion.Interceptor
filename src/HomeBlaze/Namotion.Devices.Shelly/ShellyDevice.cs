@@ -27,8 +27,10 @@ public partial class ShellyDevice : BackgroundService,
     ILastUpdatedProvider,
     IConnectionState,
     INetworkAdapter,
+    INetworkHost,
     ISoftwareState,
-    IDeviceInfo
+    IDeviceInfo,
+    IUptimeState
 {
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<ShellyDevice> _logger;
@@ -36,13 +38,11 @@ public partial class ShellyDevice : BackgroundService,
     private readonly Lock _updateLock = new();
     private readonly ShellyVirtualEnergyCounters _virtualEnergyCounters = new();
 
-    private ShellyDeviceInfo? _deviceInfo;
     private string? _ethernetIpAddress;
     private string? _wifiIpAddress;
     private int? _wifiSignalStrength;
     private string? _stateHostAddress;
     private bool _isVirtualEnergyCounterReadFailing;
-    private string? _availableSoftwareUpdate;
     
     [Configuration]
     public partial string Name { get; set; }
@@ -61,6 +61,9 @@ public partial class ShellyDevice : BackgroundService,
 
     [State(IsDiscrete = true)]
     public partial bool IsConnected { get; internal set; }
+
+    // Tracked, so that the derived properties that read it change when it is fetched or reset.
+    internal partial ShellyDeviceInfo? DeviceInfo { get; set; }
 
     [State(IsDiscrete = true)]
     public partial ServiceStatus Status { get; internal set; }
@@ -87,19 +90,19 @@ public partial class ShellyDevice : BackgroundService,
     public partial ShellyEnergyMeter? EnergyMeter { get; internal set; }
 
     [State(Position = 402)]
+    [Category("Device")]
     public partial TimeSpan? Uptime { get; internal set; }
     
     [Derived]
     [State]
-    public string? SoftwareVersion => _deviceInfo?.Version;
+    public string? SoftwareVersion => DeviceInfo?.Version;
+
+    [State]
+    public partial string? AvailableSoftwareUpdate { get; internal set; }
 
     [Derived]
     [State]
-    public string? AvailableSoftwareUpdate => _availableSoftwareUpdate;
-
-    [Derived]
-    [State]
-    public string? MacAddress => _deviceInfo?.Mac;
+    public string? MacAddress => DeviceInfo?.Mac;
 
     [State]
     public partial string? IpAddress { get; internal set; }
@@ -115,7 +118,7 @@ public partial class ShellyDevice : BackgroundService,
     
     [Derived]
     public string? Title => !string.IsNullOrEmpty(Name) ? Name :
-        _deviceInfo?.Name ?? _deviceInfo?.Application ?? HostAddress;
+        DeviceInfo?.Name ?? DeviceInfo?.Application ?? HostAddress;
 
     [Derived]
     public string IconName => IsConnected ? "Hub" : "HubOutlined";
@@ -125,7 +128,7 @@ public partial class ShellyDevice : BackgroundService,
     
     [Derived]
     [State(Position = 400)]
-    public string? DeviceName => _deviceInfo?.Name;
+    public string? DeviceName => DeviceInfo?.Name;
 
     // IDeviceInfo
 
@@ -135,23 +138,24 @@ public partial class ShellyDevice : BackgroundService,
 
     [Derived]
     [State]
-    public string? Model => _deviceInfo?.Model;
+    public string? Model => DeviceInfo?.Model;
 
     [Derived]
     [State]
-    public string? ProductCode => _deviceInfo?.Application;
+    public string? ProductCode => DeviceInfo?.Application;
 
     [Derived]
     [State]
-    public string? SerialNumber => _deviceInfo?.Mac;
+    public string? SerialNumber => DeviceInfo?.Mac;
 
     [Derived]
     [State]
-    public string? HardwareRevision => _deviceInfo?.Generation?.ToString();
+    public string? HardwareRevision => DeviceInfo?.Generation?.ToString();
 
     [Derived]
     [State(Position = 401)]
-    public int? Generation => _deviceInfo?.Generation;
+    [Category("Device")]
+    public int? Generation => DeviceInfo?.Generation;
 
     public ShellyDevice(IHttpClientFactory httpClientFactory, ILogger<ShellyDevice> logger)
     {
@@ -223,7 +227,7 @@ public partial class ShellyDevice : BackgroundService,
                 await FetchDeviceInfoAsync(client, stoppingToken);
 
                 // Gen1 devices do not report "gen".
-                if (_deviceInfo?.Generation is null or < 2)
+                if (DeviceInfo?.Generation is null or < 2)
                 {
                     Status = ServiceStatus.Error;
                     StatusMessage = "Only Gen2+ Shelly devices are supported";
@@ -334,7 +338,7 @@ public partial class ShellyDevice : BackgroundService,
     {
         using var response = await client.GetAsync($"http://{HostAddress}/shelly", cancellationToken);
         response.EnsureSuccessStatusCode();
-        _deviceInfo = await response.Content.ReadFromJsonAsync<ShellyDeviceInfo>(cancellationToken);
+        DeviceInfo = await response.Content.ReadFromJsonAsync<ShellyDeviceInfo>(cancellationToken);
     }
 
     private async Task PollStatusAsync(HttpClient client, CancellationToken cancellationToken)
@@ -743,7 +747,7 @@ public partial class ShellyDevice : BackgroundService,
 
         // Partial updates omit available_updates; a full status always contains it, possibly empty.
         if (sysStatus.AvailableUpdates != null)
-            _availableSoftwareUpdate = sysStatus.AvailableUpdates.Stable?.Version;
+            AvailableSoftwareUpdate = sysStatus.AvailableUpdates.Stable?.Version;
     }
 
     /// <summary>
@@ -753,7 +757,7 @@ public partial class ShellyDevice : BackgroundService,
     {
         lock (_updateLock)
         {
-            _deviceInfo = null;
+            DeviceInfo = null;
             ResetState();
         }
     }

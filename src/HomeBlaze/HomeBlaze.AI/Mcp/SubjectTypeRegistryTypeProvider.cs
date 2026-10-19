@@ -8,7 +8,7 @@ namespace HomeBlaze.AI.Mcp;
 /// <summary>
 /// Returns concrete subject types from HomeBlaze's SubjectTypeRegistry.
 /// </summary>
-public class SubjectTypeRegistryTypeProvider : IMcpTypeProvider
+internal class SubjectTypeRegistryTypeProvider : IMcpTypeProvider
 {
     private readonly SubjectTypeRegistry _typeRegistry;
 

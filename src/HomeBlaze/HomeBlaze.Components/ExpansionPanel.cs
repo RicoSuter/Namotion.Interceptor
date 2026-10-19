@@ -9,6 +9,7 @@ namespace HomeBlaze.Components;
 /// One panel of <see cref="ExpansionPanels"/>.
 /// </summary>
 [ExcludeFromCreation]
+[PageLayout]
 [InterceptorSubject]
 public partial class ExpansionPanel : IConfigurable
 {

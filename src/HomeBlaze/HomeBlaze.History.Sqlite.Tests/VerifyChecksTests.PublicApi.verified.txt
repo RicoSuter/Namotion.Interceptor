@@ -26,6 +26,8 @@ namespace HomeBlaze.History.Sqlite
         public System.Collections.Generic.IReadOnlySet<string> SupportedAggregations { get; }
         public void Dispose() { }
         public System.Threading.Tasks.Task FlushAsync(System.Threading.CancellationToken cancellationToken) { }
+        public HomeBlaze.History.Abstractions.HistoryPoint? GetLastNumericSampleBefore(string propertyPath, System.DateTimeOffset before) { }
+        public System.Threading.Tasks.ValueTask<HomeBlaze.History.Abstractions.HistoryPoint?> GetLastNumericSampleBeforeAsync(string propertyPath, System.DateTimeOffset before, System.Threading.CancellationToken cancellationToken) { }
         public HomeBlaze.History.Abstractions.HistoryPoint? GetSampleAtOrBefore(string propertyPath, System.DateTimeOffset asOf) { }
         public System.Threading.Tasks.ValueTask<HomeBlaze.History.Abstractions.HistoryPoint?> GetSampleAtOrBeforeAsync(string propertyPath, System.DateTimeOffset asOf, System.Threading.CancellationToken cancellationToken) { }
         public HomeBlaze.History.Abstractions.HistorySeries Query(HomeBlaze.History.Abstractions.HistoryQuery query) { }
@@ -49,12 +51,14 @@ namespace HomeBlaze.History.Sqlite
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public string DatabasePath { get; set; }
         [HomeBlaze.Abstractions.Attributes.State]
+        [System.ComponentModel.Category("Statistics")]
         public long DropCount { get; set; }
         [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Byte)]
         public long EstimatedStorageSize { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public int FlushIntervalSeconds { get; set; }
         [HomeBlaze.Abstractions.Attributes.State]
+        [System.ComponentModel.Category("Statistics")]
         public double IncomingChangesPerSecond { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public bool IsEnabled { get; set; }
@@ -67,6 +71,7 @@ namespace HomeBlaze.History.Sqlite
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public int MaxJsonSize { get; set; }
         [HomeBlaze.Abstractions.Attributes.State]
+        [System.ComponentModel.Category("Statistics")]
         public long OversizeCount { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public HomeBlaze.History.Sqlite.PartitionInterval PartitionInterval { get; set; }
@@ -75,8 +80,10 @@ namespace HomeBlaze.History.Sqlite
         [HomeBlaze.Abstractions.Attributes.State]
         public int QueueDepth { get; set; }
         [HomeBlaze.Abstractions.Attributes.State]
+        [System.ComponentModel.Category("Statistics")]
         public double RecordedChangesPerSecond { get; set; }
         [HomeBlaze.Abstractions.Attributes.State]
+        [System.ComponentModel.Category("Statistics")]
         public long RecordedCount { get; set; }
         [HomeBlaze.Abstractions.Attributes.State]
         public string Status { get; set; }
@@ -87,6 +94,7 @@ namespace HomeBlaze.History.Sqlite
         public System.Threading.Tasks.Task ApplyConfigurationAsync(System.Threading.CancellationToken cancellationToken) { }
         protected override System.Threading.Tasks.Task ExecuteAsync(System.Threading.CancellationToken stoppingToken) { }
         protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        public System.Threading.Tasks.ValueTask<HomeBlaze.History.Abstractions.HistoryPoint?> GetLastNumericSampleBeforeAsync(string propertyPath, System.DateTimeOffset before, System.Threading.CancellationToken cancellationToken) { }
         protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
         public System.Threading.Tasks.ValueTask<HomeBlaze.History.Abstractions.HistoryPoint?> GetSampleAtOrBeforeAsync(string propertyPath, System.DateTimeOffset asOf, System.Threading.CancellationToken cancellationToken) { }
         public void HandleLifecycleChange(Namotion.Interceptor.Tracking.Lifecycle.SubjectLifecycleChange change) { }

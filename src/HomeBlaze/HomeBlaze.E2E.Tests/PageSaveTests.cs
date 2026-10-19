@@ -16,6 +16,7 @@ public class PageSaveTests
 {
     private const string EditablePageName = "Editable.md";
     private const string PagePath = "Demo/" + EditablePageName;
+    private const string CardsPageName = "Cards.md";
 
     // Far enough in the past that any write of the file moves it, whatever the resolution of the file system.
     private static readonly DateTime UntouchedTime = new(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
@@ -45,11 +46,9 @@ public class PageSaveTests
             var page = await _fixture.CreatePageAsync();
             await page.GotoAsync($"{_fixture.ServerAddress}pages/{PagePath}");
             await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+            await page.WaitUntilInteractiveAsync();
 
-            var editMenu = page.Locator("[data-testid='edit-mode-menu']");
-            await Assertions.Expect(editMenu).ToBeVisibleAsync(new() { Timeout = 30000 });
-            await editMenu.ClickAsync();
-            await page.GetByText("Source").ClickAsync();
+            await page.SelectEditModeAsync("Source");
 
             var editorContent = page.Locator(".monaco-editor .view-lines");
             await Assertions.Expect(editorContent).ToBeVisibleAsync(new() { Timeout = 30000 });
@@ -94,15 +93,12 @@ public class PageSaveTests
             var page = await _fixture.CreatePageAsync();
             await page.GotoAsync($"{_fixture.ServerAddress}pages/{PagePath}");
             await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+            await page.WaitUntilInteractiveAsync();
 
-            var editMenu = page.Locator("[data-testid='edit-mode-menu']");
-            await Assertions.Expect(editMenu).ToBeVisibleAsync(new() { Timeout = 30000 });
-            await editMenu.ClickAsync();
-            await page.GetByText("Inline").ClickAsync();
+            await page.SelectEditModeAsync("Inline");
 
-            var editButton = page.Locator("[data-testid='edit-subject-button']");
-            await Assertions.Expect(editButton).ToBeVisibleAsync(new() { Timeout = 30000 });
-            await editButton.ClickAsync();
+            var actionBar = await page.Locator(".subject-component-wrapper.selectable").First.SelectWidgetAsync();
+            await actionBar.GetByTestId("edit-subject-button").ClickAsync();
 
             var dialog = page.Locator(".mud-dialog");
             var nameField = dialog.GetByLabel("Name");
@@ -124,6 +120,42 @@ public class PageSaveTests
         finally
         {
             await RestoreAsync(rootManager, originalContent, originalConfigurationTime);
+        }
+    }
+
+    [Fact]
+    public async Task WhenCardIsSavedInlineWithoutChanges_ThenItsPageIsNotChanged()
+    {
+        // Arrange
+        var rootManager = _fixture.ServerServices.GetRequiredService<RootManager>();
+        var pageFilePath = Path.Combine(rootManager.DataDirectory, "TestData", "Demo", CardsPageName);
+        var originalContent = await _fixture.ReadFileAsync(pageFilePath);
+
+        try
+        {
+            var page = await _fixture.CreatePageAsync();
+            await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/{CardsPageName}");
+            await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+            await page.WaitUntilInteractiveAsync();
+
+            await page.SelectEditModeAsync("Inline");
+
+            var actionBar = await page.GetByText("Sentence Card", new() { Exact = true }).SelectWidgetAsync();
+            await actionBar.GetByTestId("edit-subject-button").ClickAsync();
+
+            var dialog = page.Locator(".mud-dialog");
+            await Assertions.Expect(dialog.GetByText("HomeBlaze.Components.Card")).ToBeVisibleAsync(new() { Timeout = 30000 });
+
+            // Act
+            await dialog.GetByRole(AriaRole.Button, new() { Name = "Save" }).ClickAsync();
+
+            // Assert: the notification is the last step of the save, so everything it writes is written by now.
+            await Assertions.Expect(page.GetByText("Configuration saved.")).ToBeVisibleAsync(new() { Timeout = 30000 });
+            Assert.Equal(originalContent, await _fixture.ReadFileAsync(pageFilePath));
+        }
+        finally
+        {
+            await _fixture.WriteDemoPageAsync(CardsPageName, originalContent);
         }
     }
 

@@ -17,6 +17,7 @@ public interface IColorController
     /// <param name="color">Color as hex string (e.g., "#FF0000").</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     [Operation]
+    [Category("Light")]
     Task SetColorAsync(
         [OperationParameter(Unit = StateUnit.HexColor)] string color,
         CancellationToken cancellationToken);

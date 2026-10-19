@@ -85,3 +85,8 @@ export function scrollToPane(container, index, smooth) {
         container.scrollTo({ left, behavior: 'smooth' });
     });
 }
+
+// A cookie and not local storage, so that the server already renders the page with the layout. Kept for a year.
+export function saveRowLayout(cookieName, value) {
+    document.cookie = `${cookieName}=${encodeURIComponent(value)}; path=/; max-age=31536000; samesite=lax`;
+}

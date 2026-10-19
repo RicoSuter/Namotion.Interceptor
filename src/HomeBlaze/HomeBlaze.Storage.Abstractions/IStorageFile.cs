@@ -48,7 +48,8 @@ public interface IStorageFile
     /// <para>
     /// A storage can call this on the worker that changes its hierarchy, which waits for the returned task.
     /// The implementation must not call an operation that changes that storage
-    /// (<see cref="IStorageContainer.WriteBlobAsync"/>, <see cref="IStorageContainer.DeleteBlobAsync"/>,
+    /// (<see cref="IStorageContainer.WriteBlobAsync(string, Stream, CancellationToken)"/>,
+    /// <see cref="IStorageContainer.WriteBlobAsync(string, ReadOnlyMemory{byte}, CancellationToken)"/>, <see cref="IStorageContainer.DeleteBlobAsync"/>,
     /// <see cref="IStorageContainer.AddSubjectAsync"/>, <see cref="IStorageContainer.DeleteSubjectAsync"/>,
     /// saving configuration): the storage refuses such a call, also from a task or a timer that the
     /// implementation starts and does not await. A refused call does not throw where it is made. It returns

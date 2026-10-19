@@ -93,7 +93,7 @@ public class NavigationTests
     public async Task WhenPageIsAddedToExpandedFolder_ThenNavMenuShowsIt()
     {
         // Arrange
-        var (services, root, folder) = GetDemoFolder();
+        var (services, root, folder) = await GetDemoFolderAsync();
         var originalChildren = folder.Children;
         var navigation = await OpenWithDemoFolderExpandedAsync();
 
@@ -119,7 +119,7 @@ public class NavigationTests
     public async Task WhenPageIsRemovedFromExpandedFolder_ThenNavMenuDropsIt()
     {
         // Arrange
-        var (services, root, folder) = GetDemoFolder();
+        var (services, root, folder) = await GetDemoFolderAsync();
         var originalChildren = folder.Children;
 
         try
@@ -149,7 +149,7 @@ public class NavigationTests
     public async Task WhenFolderAppearsBeforeExpandedFolder_ThenExpandedStateStaysWithItsFolder()
     {
         // Arrange
-        var (services, root, _) = GetDemoFolder();
+        var (services, root, _) = await GetDemoFolderAsync();
         var originalRootChildren = root.Children;
         var navigation = await OpenWithDemoFolderExpandedAsync();
 
@@ -175,8 +175,10 @@ public class NavigationTests
         }
     }
 
-    private (IServiceProvider Services, FluentStorageContainer Root, VirtualFolder Folder) GetDemoFolder()
+    private async Task<(IServiceProvider Services, FluentStorageContainer Root, VirtualFolder Folder)> GetDemoFolderAsync()
     {
+        await _fixture.ReconcileStorageAsync();
+
         var services = _fixture.ServerServices;
         var root = (FluentStorageContainer)services.GetRequiredService<RootManager>().Root!;
         return (services, root, (VirtualFolder)root.Children["Demo"]);
@@ -187,6 +189,7 @@ public class NavigationTests
         var page = await _fixture.CreatePageAsync();
         await page.GotoAsync(_fixture.ServerAddress);
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+        await page.WaitUntilInteractiveAsync();
 
         var navigation = page.Locator(".mud-navmenu");
         var folderHeader = navigation.GetByRole(AriaRole.Button, new() { Name = "Demo" });

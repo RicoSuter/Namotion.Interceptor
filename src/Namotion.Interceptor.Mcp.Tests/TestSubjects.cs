@@ -45,3 +45,23 @@ public partial class TestSchedule
     public partial DayOfWeek Day { get; set; }
     public partial DayOfWeek? OptionalDay { get; set; }
 }
+
+[InterceptorSubject]
+public partial class TestNumbers
+{
+    public partial int IntValue { get; set; }
+    public partial long LongValue { get; set; }
+    public partial float FloatValue { get; set; }
+    public partial double DoubleValue { get; set; }
+}
+
+[InterceptorSubject]
+public partial class TestDeviceGroup
+{
+    public partial Dictionary<string, TestDevice> Devices { get; set; }
+
+    public TestDeviceGroup()
+    {
+        Devices = new Dictionary<string, TestDevice>();
+    }
+}

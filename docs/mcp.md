@@ -61,6 +61,7 @@ Key conventions:
 - **Collapsed collection:** `Name/ (Nx ItemType)` or `Name/ (N children)`
 - **Collapsed child subject:** `Name/ (ItemType)` for a single subject property beyond the depth limit (omitted when the property is null)
 - **Footer:** `[N subjects]` or `[N subjects, truncated]`
+- **Warning:** `# warning: <text>` before the footer, see [Unknown property names](#unknown-property-names)
 - Special values: `null` for null, `""` for empty strings, `...` for truncated strings (>100 chars)
 - Collection values (arrays, lists, dictionaries of plain values) render as compact JSON, such as `[{"Title":"Radio","IsContainer":false}]`. Whole items are shown up to about 500 characters and the rest as `... +N more`; `get_property` returns the full value. Byte arrays render as their length, such as `<16 bytes>`.
 
@@ -146,6 +147,7 @@ Browse the subject tree starting at a path. Use `text` format (default) for over
 | `includeAttributes` | false | Include registry attributes on properties |
 | `includeMethods` | false | Include `$methods` in subject nodes |
 | `includeInterfaces` | false | Include `$interfaces` in subject nodes |
+| `properties` | (all) | Return only these properties, e.g. `["IsConnected", "BatteryLevel"]`; implies `includeProperties` |
 | `excludeTypes` | (none) | Exclude subjects matching these type/interface names |
 | `maxSubjects` | server limit | Maximum subjects to return |
 
@@ -190,6 +192,8 @@ Search across all subjects. Use `text` format (default) for overview, `json` for
 | `query` | (none) | Filter by path and enrichment values (e.g. `$title`, `$icon`); does not match types, interfaces, or property names |
 | `types` | all | Filter subjects by type/interface full names |
 | `path` | (none) | Scope search to a subtree path prefix |
+| `where` | (none) | Filter by property values, see [Filtering by value](#filtering-by-value) |
+| `properties` | (all) | Return only these properties, e.g. `["IsConnected", "BatteryLevel"]`; implies `includeProperties` |
 | `includeProperties` | false | Include property values |
 | `includeAttributes` | false | Include registry attributes on properties |
 | `includeMethods` | false | Include `$methods` in subject nodes |
@@ -197,13 +201,50 @@ Search across all subjects. Use `text` format (default) for overview, `json` for
 | `excludeTypes` | (none) | Exclude subjects matching these type/interface names |
 | `maxSubjects` | server limit | Maximum subjects to return |
 
+#### Filtering by value
+
+`where` takes one C#-style expression over the subject's properties:
+
+```text
+IsConnected == false || BatteryLevel < 0.2 && Status != "Running"
+```
+
+- Comparisons: `==`, `!=`, `<`, `<=`, `>`, `>=` between a property name and a number, `true`, `false`, `null` or a string in double or single quotes. A bare word on the right, as in `Status != Running`, is read as a string.
+- Combine comparisons with `&&` (or `and`) and `||` (or `or`); `&&` binds tighter, and parentheses group.
+- Numbers compare numerically whatever their CLR type. Enums compare by name and strings case-insensitively for `==` and `!=`; strings order by ordinal. `DateTime` and `DateTimeOffset` values compare against an ISO 8601 string, a string without an offset read as UTC.
+- A subject without the property, with a null value compared to a non-null literal, with a NaN value, or with a value of an incompatible type does not match, for every operator including `!=`. `== null` and `!= null` test whether the value is null; the other operators never match `null`. Properties holding subjects and attributes never match.
+- Only properties the path provider exposes can be filtered on.
+- An expression may be at most 1000 characters long and nest parentheses at most 32 levels deep.
+- An invalid expression returns an error naming the zero-based position, for example `where: use '==' for equality at position 12`.
+
+`browse` has no `where`; to filter a subtree, use `search` with `path` and `where`. Combine `where` with `properties` to return only the values the question needs.
+
+#### Unknown property names
+
+A name in `where` or `properties` that no subject has is not an error, because subjects of different types have different properties. So that an empty answer is not mistaken for a negative one, `search` and `browse` add a warning for each name that no subject in scope has as a property the path provider exposes and that holds no subjects. For `search` the scope is every subject that passes `types`, `excludeTypes`, `path` and `query`, before `where` is applied; for `browse` it is every subject in the returned tree. A truncated result has no warnings, because it did not look at every subject.
+
+In JSON, the warnings are a `warnings` array of strings, omitted when there are none:
+
+```json
+{
+  "results": {},
+  "subjectCount": 0,
+  "truncated": false,
+  "warnings": ["No subject in scope has a property named 'IsOnline'."]
+}
+```
+
+In text, each warning is a `# warning: ` line before the footer, or after the "no subjects found" message of an empty search.
+
 ### `get_property`
 
 Read a property value by path. Returns the value, JSON schema type, and optional writeability flag.
 
 ### `set_property`
 
-Write a property value by path. Blocked when `IsReadOnly` is true. The value is converted by `McpValueConverter`, which a custom tool can use for its own arguments: `TimeSpan`, `TimeOnly`, `DateOnly`, `DateTime`, `DateTimeOffset`, `Guid`, `Uri` and enums from their string form, enums by name (ignoring case) or by a defined number, and other values also from a string holding their JSON, such as `"0.5"`. A value that cannot be converted returns an error and leaves the property unchanged.
+Write a property value by path. Blocked when `IsReadOnly` is true. The value is converted by `McpValueConverter`, which a custom tool can use for its own arguments: `TimeSpan`, `TimeOnly`, `DateOnly`, `DateTime`, `DateTimeOffset`, `Guid`, `Uri` and enums from their string form, enums by name (ignoring case) or by a defined number, and other values also from a string holding their JSON, such as `"0.5"`. An object binds its members in any case, rejects a member its type does not have, requires each constructor parameter without a default value, and reads an enum member, or an enum element of a collection, only by name. A value that cannot be converted returns an error and leaves the property unchanged.
+
+An application can refuse writes to some properties with `PropertyWriteFilter` on the configuration: it receives the property and returns null to allow the write or the reason it is refused, for example to keep a client from changing properties that hold settings. `set_property` then returns the error `Property is not writable: <path>. <reason>` and writes nothing. A refused property is not reported as writable by `get_property`, `browse` and `search`. The filter may be called concurrently.
 
 ### `list_types`
 
@@ -214,7 +255,7 @@ List available types from registered type providers. Interface types include pro
 | `kind` | `all` | Filter by kind: `interfaces`, `concrete`, or `all` |
 | `type` | (none) | Search type names (case-insensitive contains match) |
 
-Method parameters are listed as `McpMethodParameter` objects: `name` and JSON Schema `type`, plus the `format` of a string value: the standard JSON Schema name where one matches (`date-time`, `date`, `uuid`, `uri`), otherwise a short label: `hh:mm:ss` for `TimeSpan` (accepted as `[-][d.]hh:mm:ss[.fffffff]`) `HH:mm:ss` for `TimeOnly` (accepted as `HH:mm:ss[.fffffff]`) and `base64` for a byte array. `TimeSpan` is not `duration`, which means ISO 8601 (`PT1M30S`) and is not read by System.Text.Json. A parameter also has `enum` with the allowed names of an enum, `nullable`, and an optional `description`. `list_types` leaves `description` empty. A custom tool that lists methods can build the same shape with `McpMethodParameter.Create` and put a host-specific hint, such as a unit, into `description`.
+Method parameters are listed as `McpMethodParameter` objects: `name` and JSON Schema `type`, plus the `format` of a string value: the standard JSON Schema name where one matches (`date-time`, `date`, `uuid`, `uri`), otherwise a short label: `hh:mm:ss` for `TimeSpan` (accepted as `[-][d.]hh:mm:ss[.fffffff]`) `HH:mm:ss` for `TimeOnly` (accepted as `HH:mm:ss[.fffffff]`) and `base64` for a byte array. `TimeSpan` is not `duration`, which means ISO 8601 (`PT1M30S`) and is not read by System.Text.Json. A parameter also has `enum` with the allowed names of an enum, `nullable`, and an optional `description`. An object parameter also has `schema`, the JSON Schema of its members as `McpValueConverter` binds them: camelCase names, the `required` members (the C# `required` modifier, `[JsonRequired]` or a constructor parameter without a default value), enum names, and the `[Description]` text of each member. `list_types` leaves `description` empty. A custom tool that lists methods can build the same shape with `McpMethodParameter.Create` and put a host-specific hint, such as a unit, into `description`.
 
 ## Configuration
 
@@ -233,12 +274,20 @@ var config = new McpServerConfiguration
     // Optional: additional tools
     ToolProviders = { new MyToolProvider() },
 
+    // Optional: text appended to a tool's description, keyed by tool name
+    ToolDescriptionAdditions = { ["browse"] = "Subjects of type Document hold the manuals." },
+
+    // Optional: refuse writes to some properties; return null to allow, else the reason for the client
+    PropertyWriteFilter = property => property.Name == "Password" ? "Passwords cannot be changed." : null,
+
     // Safety limits
     MaxDepth = 10,
     MaxSubjectsPerResponse = 500,
     IsReadOnly = true
 };
 ```
+
+`ToolDescriptionAdditions` describes conventions of the application to the client without replacing the generic description of a tool, for example which subjects hold its documentation. Each text is appended after a space; names of tools that are not offered are ignored.
 
 ### Access Control
 
@@ -300,13 +349,56 @@ public class MyToolProvider : IMcpToolProvider
             Name = "my_tool",
             Description = "My custom tool",
             InputSchema = JsonSerializer.SerializeToElement(new { type = "object" }),
-            Handler = async (input, ct) => new { result = "hello" }
+            Handler = async (input, ct) => new { result = "hello" },
+            Annotations = McpToolAnnotations.ReadOnly
         };
     }
 }
 ```
 
 Tools are transport-agnostic `McpToolInfo` instances registered via `WithSubjectRegistryTools`.
+
+`Annotations` carries the MCP tool annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) that clients may use to decide which calls need the user's approval. They are hints, not enforcement. `McpToolAnnotations.ReadOnly` marks a tool that only reads and `McpToolAnnotations.Destructive` one that can change state; both set `openWorldHint` to false. The core tools carry these: `set_property` is destructive, the other core tools are read-only.
+
+## Using the Tools In-Process
+
+The tools do not depend on the MCP transport, so an application can hand them to its own AI agent directly or serve a selection of them on another route.
+
+```csharp
+// The core tools and those of the tool providers, with ToolDescriptionAdditions applied
+var tools = new McpToolFactory(() => rootSubject, configuration).CreateTools();
+
+// Function calling with Microsoft.Extensions.AI
+var options = new ChatOptions { Tools = [.. tools.Select(tool => tool.ToAIFunction())] };
+var client = new FunctionInvokingChatClient(innerChatClient);
+var response = await client.GetResponseAsync(messages, options, cancellationToken);
+```
+
+`ToAIFunction()` wraps a tool as an `AIFunction` with the tool's name, description and input schema; invoking it calls the tool's handler with the arguments as a JSON object.
+
+`McpToolDispatcher` serves any list of tools through the MCP list and call requests, which `WithSubjectRegistryTools` uses as well. It lets a custom route offer a different tool list, for example only the tools one client may use, set in a stateless transport's `ConfigureSessionOptions` on `options.Handlers`:
+
+```csharp
+var handlers = options.Handlers;
+handlers.ListToolsHandler = (_, _) => ValueTask.FromResult(McpToolDispatcher.ListTools(tools));
+handlers.CallToolHandler = (request, cancellationToken) =>
+    McpToolDispatcher.CallToolAsync(tools, request.Params, logger, cancellationToken);
+```
+
+`ListTools` maps the annotations of each tool. `CallToolAsync` returns a string result as text and any other result as indented JSON that keeps non-ASCII characters and `<>&'` unescaped, and turns an unknown tool or a throwing handler into an error result. A call whose cancellation token is cancelled throws `OperationCanceledException` instead.
+
+To change one member of a tool, for example to wrap its handler with a budget or logging, copy it with the copy constructor, which keeps all other members including the annotations:
+
+```csharp
+var counted = new McpToolInfo(tool)
+{
+    Handler = async (input, cancellationToken) =>
+    {
+        Interlocked.Increment(ref callCount);
+        return await tool.Handler(input, cancellationToken);
+    }
+};
+```
 
 ## Connecting Claude Desktop (Local Development)
 

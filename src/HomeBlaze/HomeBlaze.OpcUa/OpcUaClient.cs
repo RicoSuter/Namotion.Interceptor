@@ -99,36 +99,42 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
     /// Average incoming changes per second (server to client). Null when not running.
     /// </summary>
     [State]
+    [Category("Statistics")]
     public partial double? IncomingChangesPerSecond { get; set; }
 
     /// <summary>
     /// Average outgoing changes per second (client to server). Null when not running.
     /// </summary>
     [State]
+    [Category("Statistics")]
     public partial double? OutgoingChangesPerSecond { get; set; }
 
     /// <summary>
     /// Number of monitored items in the client. Null when not running.
     /// </summary>
     [State]
+    [Category("Statistics")]
     public partial double? MonitoredItemCount { get; set; }
 
     /// <summary>
     /// Number of items using polling fallback. Null when not running.
     /// </summary>
     [State]
+    [Category("Statistics")]
     public partial int? PollingItemCount { get; set; }
 
     /// <summary>
     /// Number of writes queued for retry during disconnection. Null when not running.
     /// </summary>
     [State]
+    [Category("Statistics")]
     public partial int? PendingWriteCount { get; set; }
 
     /// <summary>
     /// Total number of reconnections since start. Null when not running.
     /// </summary>
     [State(IsCumulative = true)]
+    [Category("Statistics")]
     public partial long? TotalReconnections { get; set; }
 
     /// <summary>

@@ -32,7 +32,8 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
         HistoryAggregations.Maximum,
         HistoryAggregations.Sum,
         HistoryAggregations.Count,
-        HistoryAggregations.StandardDeviation
+        HistoryAggregations.StandardDeviation,
+        HistoryAggregations.Delta
     };
 
     private readonly int _priority;
@@ -481,8 +482,8 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
         // through the engine's OpenPartition/OpenMoves delegates, which re-enter this lock).
         lock (_connectionLock)
         {
-            // The bucket reader's TWA carry-seed look-back reads directly through the same context; it runs
-            // while this lock is already held, matching the original inline GetSampleAtOrBefore look-back.
+            // The bucket reader's look-backs (the TWA carry seed and the Delta reading) read directly through the
+            // same context; they run while this lock is already held, matching the original inline look-back.
             var result = query.Bucket is null
                 ? SqliteHistoryReader.QueryRaw(_readContext, query, cancellationToken)
                 : SqliteBucketReader.QueryBucketed(
@@ -506,6 +507,23 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
         lock (_connectionLock)
         {
             return GetSampleAtOrBeforeCore(propertyPath, asOf, coverageRanges);
+        }
+    }
+
+    public ValueTask<HistoryPoint?> GetLastNumericSampleBeforeAsync(
+        string propertyPath, DateTimeOffset before, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return new ValueTask<HistoryPoint?>(GetLastNumericSampleBefore(propertyPath, before));
+    }
+
+    /// <inheritdoc cref="IHistoryStore.GetLastNumericSampleBeforeAsync"/>
+    public HistoryPoint? GetLastNumericSampleBefore(string propertyPath, DateTimeOffset before)
+    {
+        // Serialize connection use under the re-entrant _connectionLock (see Query for the rationale).
+        lock (_connectionLock)
+        {
+            return SqliteHistoryReader.GetLastNumericSampleBefore(_readContext, propertyPath, before);
         }
     }
 

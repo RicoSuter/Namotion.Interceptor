@@ -8,7 +8,7 @@ namespace HomeBlaze.AI.Mcp;
 /// <summary>
 /// Returns interfaces marked with <see cref="SubjectAbstractionAttribute"/>.
 /// </summary>
-public class SubjectAbstractionTypeProvider : IMcpTypeProvider
+internal class SubjectAbstractionTypeProvider : IMcpTypeProvider
 {
     private readonly IEnumerable<Assembly>? _assemblies;
 

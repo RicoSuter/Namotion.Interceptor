@@ -17,5 +17,6 @@ public interface ILightbulb : ISwitchDevice
     /// The light output in lumens, or null if unknown.
     /// </summary>
     [State(Unit = StateUnit.Lumen)]
+    [Category("Light")]
     decimal? Lumen { get; }
 }

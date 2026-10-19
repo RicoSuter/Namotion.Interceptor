@@ -1,0 +1,231 @@
+@using Microsoft.JSInterop
+@implements IAsyncDisposable
+@inject IJSRuntime JavaScript
+
+<div class="d-flex flex-column mud-height-full">
+    @* The script keeps this scrolled to the newest entry while the reader is at the bottom, and shows it once it is
+       scrolled there. *@
+    <div class="flex-grow-1 overflow-y-auto" style="@(_isTimelineHidden ? "visibility: hidden;" : null)" data-testid="agent-timeline" @ref="_timeline">
+        <div>
+            <AgentTimelineList Agent="Agent" TimeZoneVersion="TimeZoneVersion" />
+        </div>
+    </div>
+
+    <MudStack Row="true" AlignItems="AlignItems.Start" Spacing="2" Class="flex-shrink-0 pt-2">
+        <div class="flex-grow-1" data-testid="agent-chat-input" @ref="_inputContainer">
+            <MudTextField T="string" @bind-Value="_message" Immediate="true" Lines="1" Sizing="InputSizing.Auto" MaxLines="6"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="Ask the agent"
+                          HelperText="@(_sendsOnEnter ? "Enter sends, Shift+Enter adds a line" : null)" FullWidth="true"
+                          Error="@(_sendError is not null)" ErrorText="@_sendError" />
+        </div>
+        <MudIconButton Icon="@Icons.Material.Filled.Send" Variant="Variant.Filled" Color="Color.Primary" aria-label="Send" Class="mt-1"
+                       OnClick="SendAsync" Disabled="@(_isSending || string.IsNullOrWhiteSpace(_message))" data-testid="agent-chat-send" />
+    </MudStack>
+</div>
+
+@code {
+    private string _message = string.Empty;
+    private bool _isSending;
+    private string? _sendError;
+    private ElementReference _inputContainer;
+    private ElementReference _timeline;
+    private DotNetObjectReference<AgentChatTab>? _dotNetReference;
+    private IJSObjectReference? _module;
+    private IJSObjectReference? _enterListener;
+    private IJSObjectReference? _bottomFollower;
+    private bool _sendsOnEnter;
+    private bool _isTimelineHidden = true;
+    private bool _isDisposed;
+
+    [Parameter, EditorRequired]
+    public LlmAgentBase Agent { get; set; } = null!;
+
+    [Parameter]
+    public int TimeZoneVersion { get; set; }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        // DisposeAsync can run while an interop call is pending, so each result is checked against _isDisposed and
+        // released here when it arrives after disposal.
+        try
+        {
+            var module = await JavaScript.InvokeAsync<IJSObjectReference>("import", "./_content/HomeBlaze.AI.Blazor/AgentChatTab.razor.js");
+            if (_isDisposed)
+            {
+                await DisposeReferenceAsync(module);
+                return;
+            }
+
+            _module = module;
+            var bottomFollower = await module.InvokeAsync<IJSObjectReference?>("attachStickToBottom", _timeline);
+            if (_isDisposed)
+            {
+                await DisposeListenerAsync(bottomFollower);
+                return;
+            }
+
+            _bottomFollower = bottomFollower;
+            _dotNetReference = DotNetObjectReference.Create(this);
+            var listener = await module.InvokeAsync<IJSObjectReference?>("attachEnterToSend", _inputContainer, _dotNetReference);
+            if (_isDisposed)
+            {
+                await DisposeListenerAsync(listener);
+                return;
+            }
+
+            _enterListener = listener;
+            if (listener is not null && await listener.InvokeAsync<bool>("sendsOnEnter") && !_isDisposed)
+            {
+                _sendsOnEnter = true;
+                StateHasChanged();
+            }
+        }
+        catch (Exception exception) when (IsInteropFailure(exception))
+        {
+            // The circuit is gone or the script failed to load; the Send button still works.
+        }
+        finally
+        {
+            // The script shows the timeline itself; this keeps the render in line and shows it when the script failed.
+            if (!_isDisposed && _isTimelineHidden)
+            {
+                _isTimelineHidden = false;
+                StateHasChanged();
+            }
+        }
+    }
+
+    /// <summary>Shows or hides the keyboard hint when the device's primary pointer changes.</summary>
+    [JSInvokable]
+    public void SetSendsOnEnter(bool sendsOnEnter)
+    {
+        if (!_isDisposed && _sendsOnEnter != sendsOnEnter)
+        {
+            _sendsOnEnter = sendsOnEnter;
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>Sends the message typed into the chat input when Enter is pressed.</summary>
+    [JSInvokable]
+    public async Task SendFromKeyboardAsync(string text)
+    {
+        if (_isSending)
+        {
+            return;
+        }
+
+        // The keydown can overtake the input binding's last update, so the text comes from the textarea itself.
+        _message = text;
+        await SendAsync();
+    }
+
+    private async Task SendAsync()
+    {
+        var text = _message.Trim();
+        if (_isSending || text.Length == 0)
+        {
+            return;
+        }
+
+        _message = string.Empty;
+        _sendError = null;
+        _isSending = true;
+        StateHasChanged();
+        _ = PinToBottomAsync();
+        try
+        {
+            // Failures are recorded in the timeline; a message to an agent that is not running is rejected.
+            await Agent.SendMessageAsync(text, CancellationToken.None);
+        }
+        catch (InvalidOperationException exception)
+        {
+            _message = text;
+            _sendError = exception.Message;
+        }
+        finally
+        {
+            _isSending = false;
+            StateHasChanged();
+        }
+    }
+
+    // The reader's own message always scrolls the timeline to the bottom, and the reply follows from there.
+    private async Task PinToBottomAsync()
+    {
+        if (_bottomFollower is not { } bottomFollower)
+        {
+            return;
+        }
+
+        try
+        {
+            await bottomFollower.InvokeVoidAsync("pin");
+        }
+        catch (Exception exception) when (IsInteropFailure(exception) || exception is ObjectDisposedException)
+        {
+            // The page is going away; sending does not depend on scrolling.
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _isDisposed = true;
+        var enterListener = _enterListener;
+        var bottomFollower = _bottomFollower;
+        var module = _module;
+        _enterListener = null;
+        _bottomFollower = null;
+        _module = null;
+
+        // Each release swallows its own interop failure, so a failing one does not skip the next.
+        await DisposeListenerAsync(enterListener);
+        await DisposeListenerAsync(bottomFollower);
+        await DisposeReferenceAsync(module);
+        _dotNetReference?.Dispose();
+    }
+
+    private static async Task DisposeListenerAsync(IJSObjectReference? listener)
+    {
+        if (listener is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await listener.InvokeVoidAsync("dispose");
+        }
+        catch (Exception exception) when (IsInteropFailure(exception))
+        {
+            // The circuit is gone, and the browser dropped the listener with the page.
+        }
+
+        await DisposeReferenceAsync(listener);
+    }
+
+    private static async Task DisposeReferenceAsync(IJSObjectReference? reference)
+    {
+        if (reference is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await reference.DisposeAsync();
+        }
+        catch (Exception exception) when (IsInteropFailure(exception))
+        {
+            // The circuit is gone, and the browser released the reference with the page.
+        }
+    }
+
+    private static bool IsInteropFailure(Exception exception) =>
+        exception is JSDisconnectedException or JSException or OperationCanceledException;
+}

@@ -1,13 +1,17 @@
+using System.Collections.Concurrent;
 using System.Reflection;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Services.Serialization;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Hosting;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.Services;
@@ -33,6 +37,8 @@ public class ConfigurableSubjectSerializer
     private readonly IServiceProvider _serviceProvider;
     private readonly JsonSerializerOptions _jsonPropertyOptions;
     private readonly JsonSerializerOptions _cSharpPropertyOptions;
+    // Never cleared: holds its Type keys, and with them their assemblies, as long as the serializer lives, like TypeProvider.
+    private readonly ConcurrentDictionary<(Type Type, ConfigurationNaming Naming), JsonElement?> _defaultConfigurations = new();
 
     public ConfigurableSubjectSerializer(TypeProvider typeProvider, IServiceProvider serviceProvider)
     {
@@ -56,6 +62,13 @@ public class ConfigurableSubjectSerializer
     private JsonSerializerOptions GetOptions(ConfigurationNaming naming) =>
         naming == ConfigurationNaming.JsonProperty ? _jsonPropertyOptions : _cSharpPropertyOptions;
 
+    private static IConfigurable GetConfigurable(IInterceptorSubject subject)
+    {
+        return subject as IConfigurable ?? throw new ArgumentException(
+            $"Subject must implement IConfigurable. Type: {subject.GetType().FullName}",
+            nameof(subject));
+    }
+
     // The configuration properties of the subject itself are matched by this name and not by the options.
     private static string GetJsonName(string propertyName, ConfigurationNaming naming) =>
         naming == ConfigurationNaming.JsonProperty ? JsonNamingPolicy.CamelCase.ConvertName(propertyName) : propertyName;
@@ -65,14 +78,126 @@ public class ConfigurableSubjectSerializer
     /// </summary>
     public string Serialize(IInterceptorSubject subject, ConfigurationNaming naming = ConfigurationNaming.JsonProperty)
     {
-        if (subject is not IConfigurable configurableSubject)
+        return JsonSerializer.Serialize(GetConfigurable(subject), typeof(IConfigurable), GetOptions(naming));
+    }
+
+    /// <summary>
+    /// Serializes like <see cref="Serialize(IInterceptorSubject, ConfigurationNaming)"/>, without the configuration
+    /// properties of the subject itself for which <paramref name="isExcluded"/> returns true.
+    /// </summary>
+    /// <param name="subject">The subject to serialize. It must be registered.</param>
+    /// <param name="isExcluded">Receives a registered property of the subject and returns true to leave it out.</param>
+    /// <param name="naming">The naming of the JSON.</param>
+    /// <exception cref="InvalidOperationException">The subject is not registered.</exception>
+    /// <remarks>
+    /// The value of an excluded property is not read. A subject that is nested in another property is written
+    /// in full, also when it has a property that would be excluded.
+    /// </remarks>
+    public string Serialize(
+        IInterceptorSubject subject,
+        Func<RegisteredSubjectProperty, bool> isExcluded,
+        ConfigurationNaming naming = ConfigurationNaming.JsonProperty)
+    {
+        _ = GetConfigurable(subject);
+
+        var options = GetOptions(naming);
+        var type = subject.GetType();
+        var registeredSubject = subject.TryGetRegisteredSubject() ?? throw new InvalidOperationException(
+            $"Subject must be registered to exclude its properties. Type: {type.FullName}");
+        var result = new JsonObject { [TypeDiscriminatorPropertyName] = type.FullName };
+
+        // The properties, their names and their filter are those of the serializer, so that the result
+        // equals Serialize apart from what is excluded.
+        foreach (var property in options.GetTypeInfo(type).Properties)
         {
-            throw new ArgumentException(
-                $"Subject must implement IConfigurable. Type: {subject.GetType().FullName}",
-                nameof(subject));
+            // The resolver creates every property from a member of the type and adds none of its own. A property
+            // without a registered counterpart is skipped, as the filter of the serializer skips it.
+            var declaredName = ((MemberInfo)property.AttributeProvider!).Name;
+            if (property.Get is not { } getValue ||
+                registeredSubject.TryGetProperty(declaredName) is not { } registeredProperty ||
+                isExcluded(registeredProperty))
+            {
+                continue;
+            }
+
+            var value = getValue(subject);
+            if (property.ShouldSerialize is { } shouldSerialize && !shouldSerialize(subject, value))
+            {
+                continue;
+            }
+
+            result[property.Name] = JsonSerializer.SerializeToNode(value, property.PropertyType, options);
         }
 
-        return JsonSerializer.Serialize(configurableSubject, typeof(IConfigurable), GetOptions(naming));
+        return result.ToJsonString(options);
+    }
+
+    /// <summary>
+    /// Gets the configuration of a new subject of <paramref name="type"/> as
+    /// <see cref="Serialize(IInterceptorSubject, ConfigurationNaming)"/> writes it: the values that
+    /// <see cref="Deserialize(string, ConfigurationNaming)"/> gives a property that the JSON does not have.
+    /// Null when <see cref="Deserialize(string, ConfigurationNaming)"/> does not create the type, or when creating or
+    /// serializing the subject throws, which is logged.
+    /// </summary>
+    /// <remarks>
+    /// Creates a subject of the type and releases it before a hosted service of it starts. Calls that race on the
+    /// first request for a type can each create one. The result is cached, except null for a type that is not known
+    /// yet, because a plugin can add it later.
+    /// </remarks>
+    public JsonElement? GetDefaultConfiguration(Type type, ConfigurationNaming naming = ConfigurationNaming.JsonProperty)
+    {
+        var key = (type, naming);
+        if (_defaultConfigurations.TryGetValue(key, out var cached))
+        {
+            return cached;
+        }
+
+        var defaults = CreateDefaultConfiguration(type, naming, out var isKnownType);
+        return isKnownType ? _defaultConfigurations.GetOrAdd(key, defaults) : null;
+    }
+
+    private JsonElement? CreateDefaultConfiguration(Type type, ConfigurationNaming naming, out bool isKnownType)
+    {
+        isKnownType = _typeProvider.Types.Contains(type);
+        if (!isKnownType)
+        {
+            return null;
+        }
+
+        // Work that a lifecycle handler starts for the subject does not carry the flow of the caller, and
+        // the subject is released before the deferral ends, so its hosted services never start.
+        using var suppressedFlow = ExecutionContext.IsFlowSuppressed() ? (AsyncFlowControl?)null : ExecutionContext.SuppressFlow();
+        using var startup = _serviceProvider.GetService<IInterceptorSubjectContext>()?.DeferHostedServiceStarts();
+
+        IInterceptorSubject? subject = null;
+        try
+        {
+            var json = new JsonObject { [TypeDiscriminatorPropertyName] = type.FullName }.ToJsonString();
+            Deserialize(json, created => subject = created, naming);
+
+            // Another type of the same name would give the wrong values.
+            if (subject is null || subject.GetType() != type)
+            {
+                return null;
+            }
+
+            using var document = JsonDocument.Parse(Serialize(subject, naming));
+            return document.RootElement.Clone();
+        }
+        catch (Exception exception)
+        {
+            // Cached as null, so it is logged once and the configuration is written in full.
+            _serviceProvider.GetService<ILogger<ConfigurableSubjectSerializer>>()?.LogWarning(
+                exception, "The default configuration of {Type} could not be read, so all its values are written.", type.FullName);
+            return null;
+        }
+        finally
+        {
+            if (subject is not null)
+            {
+                Release(subject);
+            }
+        }
     }
 
     /// <summary>

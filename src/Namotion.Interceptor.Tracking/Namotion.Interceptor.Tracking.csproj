@@ -2,6 +2,7 @@
 
     <ItemGroup>
         <InternalsVisibleTo Include="Namotion.Interceptor.Tracking.Tests" />
+        <InternalsVisibleTo Include="Namotion.Interceptor.Blazor.Tests" />
         <InternalsVisibleTo Include="Namotion.Interceptor.Connectors.Tests" />
         <InternalsVisibleTo Include="Namotion.Interceptor.WebSocket.Tests" />
     </ItemGroup>

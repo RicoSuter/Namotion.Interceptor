@@ -7,7 +7,8 @@
                            Label="@Label"
                            Placeholder="@Placeholder"
                            IsPropertyVisible="IsPropertyVisible"
-                           CanSelectProperty="CanSelectProperty" />
+                           CanSelectProperty="CanSelectProperty"
+                           CanSelectSubject="CanSelectSubject" />
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="Cancel">Cancel</MudButton>
@@ -38,6 +39,9 @@
 
     [Parameter]
     public Func<RegisteredSubjectProperty, bool>? CanSelectProperty { get; set; }
+
+    [Parameter]
+    public Func<IInterceptorSubject, bool>? CanSelectSubject { get; set; }
 
     private string? _selectedPath;
 

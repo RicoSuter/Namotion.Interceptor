@@ -18,6 +18,8 @@ internal static class McpTextFormatter
         "# path [Type] $key=value | prop: value | type | @attr: value | Collection/ (Nx Type)\n" +
         "# Use get_property for exact values or browse with format=json for structured data.";
 
+    private const string WarningPrefix = "# warning: ";
+
     private const int MaxStringValueLength = 100;
 
     private const int MaxCollectionValueLength = 500;
@@ -35,6 +37,7 @@ internal static class McpTextFormatter
         sb.AppendLine(Legend);
         sb.AppendLine();
         FormatSubjectNode(sb, result.Result, indent: 0);
+        AppendWarnings(sb, result.Warnings);
         AppendFooter(sb, result.SubjectCount, result.Truncated);
         return sb.ToString();
     }
@@ -43,7 +46,19 @@ internal static class McpTextFormatter
     {
         if (result.SubjectCount == 0)
         {
-            return "No subjects found matching the search criteria.";
+            const string noResults = "No subjects found matching the search criteria.";
+            if (result.Warnings is not { Count: > 0 } warnings)
+            {
+                return noResults;
+            }
+
+            var warningText = new StringBuilder(noResults);
+            foreach (var warning in warnings)
+            {
+                warningText.AppendLine().Append(WarningPrefix).Append(warning);
+            }
+
+            return warningText.ToString();
         }
 
         var sb = new StringBuilder();
@@ -62,6 +77,7 @@ internal static class McpTextFormatter
             first = false;
         }
 
+        AppendWarnings(sb, result.Warnings);
         AppendFooter(sb, result.SubjectCount, result.Truncated);
         return sb.ToString();
     }
@@ -336,6 +352,19 @@ internal static class McpTextFormatter
         }
 
         return JsonSerializer.Serialize(value);
+    }
+
+    private static void AppendWarnings(StringBuilder sb, IReadOnlyList<string>? warnings)
+    {
+        if (warnings is null)
+        {
+            return;
+        }
+
+        foreach (var warning in warnings)
+        {
+            sb.Append(WarningPrefix).AppendLine(warning);
+        }
     }
 
     private static void AppendFooter(StringBuilder sb, int subjectCount, bool truncated)

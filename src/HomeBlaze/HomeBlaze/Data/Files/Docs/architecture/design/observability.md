@@ -91,6 +91,8 @@ AI agents can monitor both levels using the standard MCP tools; no separate moni
 
 Host and process values already exist as the `Host system` subject (CPU, memory, uptime, container limits, allocation rate, GC pause time); see [Monitoring](../../administration/monitoring.md#host-system). The planned instance health values (node role, property count, changes per second, last heartbeat) are separate from it.
 
+Build, environment and update values exist as the `Installation` subject; see [Version and Updates](../../administration/updates.md). CI stamps the tag, branch, commit date, build time and run URL into every assembly as `Namotion.Build.*` assembly metadata, next to the commit that SourceLink adds to the informational version. The NuGet libraries get only the tag and the commit date, so a rebuild of the same tag produces the same metadata.
+
 ## Key Decisions
 
 | Decision | Choice | Rationale |
