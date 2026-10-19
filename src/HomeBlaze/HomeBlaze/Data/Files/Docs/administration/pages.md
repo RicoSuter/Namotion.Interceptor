@@ -36,8 +36,6 @@ When you add a `.md` file to your data folder:
 4. Expressions become live values, and blocks become widgets with the subjects behind them
 5. The page renders with live data updates
 
-The eye button in the top right corner of a page opens the page menu. Its first entry tells about the page: its title, its path and the time of its last change, in the time zone of the browser. Below it are the edit modes: "View" shows the page, "Split" shows the page next to its text, "Source" shows only the text and "Inline" edits the widgets on the page. The page shows nothing else in that corner, so the button covers no more of a dashboard than its own size.
-
 ---
 
 ## Frontmatter
@@ -951,7 +949,7 @@ What the editor writes:
 
 Editing a subject elsewhere in the UI, for example through "Edit" in the bar of its selected widget in the Inline or Split mode of the page, writes its block in the same way.
 
-While the page is in edit mode, which is with "Split" or "Inline" in the page menu at the top right of the page, a `GridLayout` shows a plus in every free place, and once the grid itself is selected, a click on it adds a cell there. A `CanvasLayout` adds a node with a click on a free place of the canvas, a click on a node selects the widget in it, or the canvas when the node has no widget, and a node can be moved with the mouse. Each cell and each node has buttons to edit and remove it, which show while its layout or a widget in the layout is selected, so a click on a cell without a widget selects the grid and shows the buttons of all its cells. Each of these writes the `Cell` and `Node` blocks of the page and saves the page:
+While the page is in edit mode, which is with "Split" or "Inline" in the menu at the top right of the page, a `GridLayout` shows a plus in every free place, and once the grid itself is selected, a click on it adds a cell there. A `CanvasLayout` adds a node with a click on a free place of the canvas, a click on a node selects the widget in it, or the canvas when the node has no widget, and a node can be moved with the mouse. Each cell and each node has buttons to edit and remove it, which show while its layout or a widget in the layout is selected, so a click on a cell without a widget selects the grid and shows the buttons of all its cells. Each of these writes the `Cell` and `Node` blocks of the page and saves the page:
 
 - **Add**: The click opens the dialog "Create subject". The new cell or node is a `Cell` or `Node` block after the last one of its layout, with the widget that you chose as a block inside it. It is written like the block before it: with as many colons, and with a closing line only when that block has one. In a layout without a cell or a node, the new block has one colon more than the layout. It then gets a closing line when every widget block and slot block of the page has one, and none otherwise.
 - **Edit and move**: Editing a cell or a node, or moving a node, writes the head line of its block again, by the rules of the editor above. A node that had only `X` and `Y` gets `Width` and `Height` only when they differ from their defaults. The content of the block stays as it is.
