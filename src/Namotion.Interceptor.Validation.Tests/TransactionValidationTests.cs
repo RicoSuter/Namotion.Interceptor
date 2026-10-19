@@ -295,6 +295,33 @@ public class TransactionValidationTests
     }
 
     [Fact]
+    public async Task WhenApplyOfLimitFailsInBestEffort_ThenSpeedCheckedAgainstItIsValidatedAndRejected()
+    {
+        // Arrange
+        var context = CreateContext();
+        var motor = new Motor(context);
+        using var transaction = await context.BeginTransactionAsync(
+            TransactionFailureHandling.BestEffort, validationMode: TransactionValidationMode.Deferred);
+        motor.MaxAllowedSpeed = 200;
+        motor.MotorSpeed = 150;
+        motor.ThrowOnLimitWrite = true;
+
+        // Act
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Assert
+        Assert.Empty(exception.AppliedChanges);
+        Assert.Equal(
+            [nameof(Motor.MaxAllowedSpeed), nameof(Motor.MotorSpeed)],
+            exception.FailedChanges.Select(change => change.Property.Name));
+        Assert.IsType<InvalidOperationException>(exception.Errors[0]);
+        Assert.IsType<ValidationException>(exception.Errors[1]);
+        Assert.Equal(100, motor.MaxAllowedSpeed);
+        Assert.Equal(0, motor.MotorSpeed);
+    }
+
+    [Fact]
     public async Task WhenChangeHandlerWritesDuringApply_ThenThatWriteIsValidated()
     {
         // Arrange

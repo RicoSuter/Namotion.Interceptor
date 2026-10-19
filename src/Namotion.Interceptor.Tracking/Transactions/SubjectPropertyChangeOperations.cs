@@ -13,7 +13,8 @@ internal static class SubjectPropertyChangeOperations
     /// properties). Inspect Failed.Count == 0 to detect full success. The Successful list is returned empty
     /// only on the no-exclude full-success path, where the caller already holds the input span and does not
     /// need the applied set; with exclusions, or on any failure, Successful is populated. When
-    /// <paramref name="markingTransaction"/> is set, each applied write carries the commit write mark of that transaction.
+    /// <paramref name="markingTransaction"/> is set, each applied write up to the first failed one carries the commit
+    /// write mark of that transaction.
     /// </summary>
     internal static (IReadOnlyList<SubjectPropertyChange> Successful, IReadOnlyList<SubjectPropertyChange> Failed, IReadOnlyList<Exception> Errors)
         ApplyLocalChanges(ReadOnlySpan<SubjectPropertyChange> changes, IReadOnlyList<SubjectPropertyChange>? exclude, SubjectTransaction? markingTransaction = null)
@@ -68,6 +69,10 @@ internal static class SubjectPropertyChangeOperations
                 {
                     (errors ??= []).Add(error);
                 }
+
+                // The handlers checked the changes as a set, which no longer lands as checked, so the remaining
+                // applies are not marked and handlers check them against the model.
+                markingTransaction = null;
             }
         }
 

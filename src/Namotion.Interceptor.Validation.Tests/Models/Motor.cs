@@ -21,6 +21,9 @@ public partial class Motor
     /// <summary>Adds one to every MotorSpeed write, so a commit applies a different value than it captured.</summary>
     public bool IncrementSpeedOnWrite { get; set; }
 
+    /// <summary>Throws from every MaxAllowedSpeed write, so a commit fails to apply it.</summary>
+    public bool ThrowOnLimitWrite { get; set; }
+
     /// <summary>MotorSpeed written from the MaxAllowedSpeed change hook, like a change handler would.</summary>
     public int? SpeedToWriteOnLimitChange { get; set; }
 
@@ -29,6 +32,14 @@ public partial class Motor
         if (IncrementSpeedOnWrite)
         {
             newValue++;
+        }
+    }
+
+    partial void OnMaxAllowedSpeedChanging(ref int newValue, ref bool cancel)
+    {
+        if (ThrowOnLimitWrite)
+        {
+            throw new InvalidOperationException("MaxAllowedSpeed write failed.");
         }
     }
 
