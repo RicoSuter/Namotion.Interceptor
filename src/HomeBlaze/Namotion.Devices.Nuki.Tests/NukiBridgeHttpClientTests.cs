@@ -19,7 +19,7 @@ public class NukiBridgeHttpClientTests
         var connections = 0;
         var serverTask = Task.Run(async () =>
         {
-            while (!serverCancellation.IsCancellationRequested)
+            while (true)
             {
                 var socket = await listener.AcceptTcpClientAsync(serverCancellation.Token);
                 Interlocked.Increment(ref connections);
@@ -27,19 +27,24 @@ public class NukiBridgeHttpClientTests
             }
         });
 
-        using var httpClient = NukiBridgeHttpClient.Create();
-        var client = new NukiBridgeClient(
-            httpClient, "127.0.0.1:" + ((IPEndPoint)listener.LocalEndpoint).Port, "123456", NukiTokenMode.Plain);
+        try
+        {
+            using var httpClient = NukiBridgeHttpClient.Create();
+            var client = new NukiBridgeClient(
+                httpClient, "127.0.0.1:" + ((IPEndPoint)listener.LocalEndpoint).Port, "123456", NukiTokenMode.Plain);
 
-        // Act
-        await client.GetListAsync(CancellationToken.None);
-        await client.GetListAsync(CancellationToken.None);
+            // Act
+            await client.GetListAsync(CancellationToken.None);
+            await client.GetListAsync(CancellationToken.None);
 
-        // Assert
-        Assert.Equal(2, Volatile.Read(ref connections));
-
-        await serverCancellation.CancelAsync();
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => serverTask);
+            // Assert
+            Assert.Equal(2, Volatile.Read(ref connections));
+        }
+        finally
+        {
+            await serverCancellation.CancelAsync();
+            await serverTask.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing | ConfigureAwaitOptions.ContinueOnCapturedContext);
+        }
     }
 
     // Answers every request on the connection with a keep-alive response until the connection is closed.

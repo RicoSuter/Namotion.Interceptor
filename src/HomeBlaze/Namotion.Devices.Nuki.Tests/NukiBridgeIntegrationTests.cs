@@ -19,7 +19,7 @@ public class NukiBridgeIntegrationTests
         using var httpClient = NukiBridgeHttpClient.Create();
 
         // Act
-        var detection = await NukiBridgeDiscovery.DetectTokenModeAsync(httpClient, hostAddress, token, CancellationToken.None);
+        var detection = await NukiBridgeDiscovery.DetectTokenModeAsync(hostAddress, token, CancellationToken.None);
         var client = new NukiBridgeClient(httpClient, hostAddress, token, detection.Mode);
         var info = await client.GetInfoAsync(CancellationToken.None);
         var devices = await client.GetListAsync(CancellationToken.None);
