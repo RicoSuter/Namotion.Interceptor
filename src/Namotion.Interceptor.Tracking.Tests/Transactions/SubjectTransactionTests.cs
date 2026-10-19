@@ -767,11 +767,9 @@ public class SubjectTransactionTests
     }
 
     [Fact]
-    public async Task WhenPropertyIsWrittenBackToLandedValueThenAgain_ThenPendingChangeIsRecreatedCleanly()
+    public async Task WhenPropertyIsRewrittenAfterWriteBack_ThenItKeepsItsOldValueAndPosition()
     {
-        // Arrange: the LastName write in between lands between the cancelled and re-created FirstName entries
-        // only if the first FirstName entry was actually removed rather than merely overwritten in place, so
-        // the resulting [LastName, FirstName] order pins the removal rather than just the old/new values.
+        // Arrange
         var context = InterceptorSubjectContext.Create()
             .WithFullPropertyTracking()
             .WithTransactions();
@@ -786,13 +784,43 @@ public class SubjectTransactionTests
 
         // Assert
         var pending = transaction.GetPendingChanges();
-        Assert.Equal([nameof(Person.LastName), nameof(Person.FirstName)], pending.Select(c => c.Property.Name));
+        Assert.Equal([nameof(Person.FirstName), nameof(Person.LastName)], pending.Select(c => c.Property.Name));
 
         var firstNameChange = pending.Single(c => c.Property.Name == nameof(Person.FirstName));
         Assert.Equal("Ann", firstNameChange.GetOldValue<string?>());
         Assert.Equal("Carl", firstNameChange.GetNewValue<string?>());
 
         await transaction.CommitAsync(CancellationToken.None);
+        Assert.Equal("Carl", person.FirstName);
+        Assert.Equal("Smith", person.LastName);
+    }
+
+    [Fact]
+    public async Task WhenPropertyIsRewrittenAfterWriteBackAndChangedOutside_ThenCommitDetectsConflict()
+    {
+        // Arrange
+        var context = CreateTransactionContext();
+        var person = new Person(context) { FirstName = "Original" };
+
+        using var transaction = await context.BeginTransactionAsync(
+            TransactionFailureHandling.BestEffort,
+            TransactionLocking.Optimistic,
+            conflictBehavior: TransactionConflictBehavior.FailOnConflict);
+
+        person.FirstName = "First";
+        person.FirstName = "Original";
+        await RunWithoutAsyncLocalFlowAsync(() => person.FirstName = "External");
+        person.FirstName = "Second";
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<SubjectTransactionConflictException>(
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        Assert.Equal(nameof(Person.FirstName), Assert.Single(exception.ConflictingProperties).Name);
+
+        string? landedValue = null;
+        await RunWithoutAsyncLocalFlowAsync(() => landedValue = person.FirstName);
+        Assert.Equal("External", landedValue);
     }
 
 }

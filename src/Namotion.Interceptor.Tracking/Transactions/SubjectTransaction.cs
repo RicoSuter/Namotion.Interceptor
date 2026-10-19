@@ -41,6 +41,12 @@ public sealed class SubjectTransaction : IDisposable
     private OrderedDictionary<PropertyReference, SubjectPropertyChange>? _pendingChanges = PendingChangesPool.Rent();
     private readonly Lock _pendingChangesLock = new();
 
+    // Pending entries cancelled by a write back to the landed value. They stay in _pendingChanges so a later
+    // write revives them with their original old value and position, which keeps conflict detection intact;
+    // every reader must treat them as absent. Always a subset of the _pendingChanges keys. Allocated on the
+    // first cancel; accessed only under _pendingChangesLock.
+    private HashSet<PropertyReference>? _cancelledChanges;
+
     private volatile bool _isCommitting;
     private volatile bool _isCommitted;
     private int _commitStarted;
@@ -104,8 +110,40 @@ public sealed class SubjectTransaction : IDisposable
     {
         lock (_pendingChangesLock)
         {
-            return _pendingChanges?.Values.ToList() ?? [];
+            var pendingChanges = _pendingChanges;
+            if (pendingChanges is null)
+            {
+                return [];
+            }
+
+            var result = new List<SubjectPropertyChange>(GetLiveChangeCount());
+            foreach (var change in pendingChanges.Values)
+            {
+                if (!IsCancelled(change.Property))
+                {
+                    result.Add(change);
+                }
+            }
+
+            return result;
         }
+    }
+
+    /// <summary>
+    /// Gets the number of pending changes that are not cancelled. Must be called under <see cref="_pendingChangesLock"/>.
+    /// </summary>
+    private int GetLiveChangeCount()
+    {
+        return (_pendingChanges?.Count ?? 0) - (_cancelledChanges?.Count ?? 0);
+    }
+
+    /// <summary>
+    /// Returns true when the pending change for <paramref name="property"/> is cancelled. Must be called under
+    /// <see cref="_pendingChangesLock"/>.
+    /// </summary>
+    private bool IsCancelled(PropertyReference property)
+    {
+        return _cancelledChanges is not null && _cancelledChanges.Contains(property);
     }
 
     /// <summary>
@@ -124,7 +162,7 @@ public sealed class SubjectTransaction : IDisposable
 
             ThrowIfCommittingConcurrently();
 
-            if (_pendingChanges.TryGetValue(property, out var change))
+            if (_pendingChanges.TryGetValue(property, out var change) && !IsCancelled(property))
             {
                 value = change.GetNewValue<TProperty>();
                 return true;
@@ -149,7 +187,8 @@ public sealed class SubjectTransaction : IDisposable
     /// <param name="newValue">The value being written.</param>
     /// <param name="restoresLandedValue">
     /// True when the new value equals the landed value; an existing pending change for the property is
-    /// then cancelled instead of updated.
+    /// then cancelled instead of updated. A later write revives a cancelled change with its original old
+    /// value and position.
     /// </param>
     /// <exception cref="InvalidOperationException">Thrown if a concurrent commit is in progress (TOCTOU race).</exception>
     internal bool TryCaptureChange<TProperty>(
@@ -173,12 +212,18 @@ public sealed class SubjectTransaction : IDisposable
             var pendingChanges = _pendingChanges;
             var isFirstWrite = !pendingChanges.TryGetValue(property, out var existingChange);
 
-            // A write back to the landed value cancels an existing pending change, so the outcome matches
-            // never having written the property: no no-op change reaches sources, batch limits or conflicts.
-            if (!isFirstWrite && restoresLandedValue)
+            if (!isFirstWrite)
             {
-                pendingChanges.Remove(property);
-                return true;
+                // A write back to the landed value cancels the pending change, so no no-op change reaches
+                // sources, batch limits or conflicts. Removing the entry instead would lose the original old
+                // value, and a later write would silently overwrite a concurrent change landed in between.
+                if (restoresLandedValue)
+                {
+                    (_cancelledChanges ??= new HashSet<PropertyReference>(PropertyReference.Comparer)).Add(property);
+                    return true;
+                }
+
+                _cancelledChanges?.Remove(property);
             }
 
             pendingChanges[property] = SubjectPropertyChange.Create(
@@ -206,7 +251,7 @@ public sealed class SubjectTransaction : IDisposable
 
         lock (transaction._pendingChangesLock)
         {
-            return transaction._pendingChanges?.ContainsKey(property) == true;
+            return transaction._pendingChanges?.ContainsKey(property) == true && !transaction.IsCancelled(property);
         }
     }
 
@@ -359,7 +404,7 @@ public sealed class SubjectTransaction : IDisposable
 
         lock (_pendingChangesLock)
         {
-            if (_pendingChanges is null || _pendingChanges.Count == 0)
+            if (GetLiveChangeCount() == 0)
             {
                 _isCommitted = true;
                 return default;
@@ -679,6 +724,7 @@ public sealed class SubjectTransaction : IDisposable
         lock (_pendingChangesLock)
         {
             _pendingChanges?.Clear();
+            _cancelledChanges = null;
             _isCommitted = true;
         }
     }
@@ -703,6 +749,7 @@ public sealed class SubjectTransaction : IDisposable
             {
                 pendingChangesToReturn = _pendingChanges;
                 _pendingChanges = null;
+                _cancelledChanges = null;
             }
         }
 
@@ -771,7 +818,7 @@ public sealed class SubjectTransaction : IDisposable
         {
             // Rent before setting _isCommitting so an allocation failure leaves the transaction reusable.
             var pendingChanges = _pendingChanges;
-            var changeCount = pendingChanges?.Count ?? 0;
+            var changeCount = GetLiveChangeCount();
             var rentedArray = ArrayPool<SubjectPropertyChange>.Shared.Rent(changeCount);
 
             // Set this while holding the lock so no write can be captured between snapshot and commit.
@@ -782,7 +829,10 @@ public sealed class SubjectTransaction : IDisposable
             {
                 foreach (var change in pendingChanges.Values)
                 {
-                    rentedArray[index++] = change;
+                    if (!IsCancelled(change.Property))
+                    {
+                        rentedArray[index++] = change;
+                    }
                 }
             }
 
@@ -862,6 +912,7 @@ public sealed class SubjectTransaction : IDisposable
             lock (_pendingChangesLock)
             {
                 _pendingChanges?.Clear();
+                _cancelledChanges = null;
                 committing = _isCommitting;
                 if (committing)
                 {

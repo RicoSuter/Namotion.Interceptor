@@ -424,4 +424,38 @@ public class SubjectTransactionWriterTests
         Assert.Equal("John", person.FirstName);
     }
 
+    [Fact]
+    public async Task WhenAllPendingChangesAreWrittenBack_ThenCommitCallsNoWriterAndPublishesNothing()
+    {
+        // Arrange
+        var changes = new List<SubjectPropertyChange>();
+        var writer = new NonMarkingTransactionWriter();
+        var context = CreateTransactionContext();
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(changes.Add);
+        context.AddService<ITransactionWriter>(writer);
+
+        var person = new Person(context) { FirstName = "Ann", LastName = "Smith" };
+        changes.Clear();
+
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "Bob";
+        person.LastName = "Jones";
+        person.FirstName = "Ann";
+        person.LastName = "Smith";
+
+        // Act
+        var pendingBeforeCommit = transaction.GetPendingChanges();
+        var firstNameInsideTransaction = person.FirstName;
+        var lastNameInsideTransaction = person.LastName;
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Empty(pendingBeforeCommit);
+        Assert.Equal("Ann", firstNameInsideTransaction);
+        Assert.Equal("Smith", lastNameInsideTransaction);
+        Assert.Equal(0, writer.WriteCalls);
+        Assert.Empty(changes);
+        Assert.Equal("Ann", person.FirstName);
+        Assert.Equal("Smith", person.LastName);
+    }
 }
