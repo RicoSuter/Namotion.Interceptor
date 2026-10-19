@@ -39,6 +39,7 @@ internal sealed class TestRenderer : Renderer
 
     private volatile bool _holdAcknowledgements;
     private int _unacknowledgedBatchCount;
+    private int _acknowledgedBatchCount;
     private int _deferredRenderRequests;
     private int _batchCount;
 
@@ -92,6 +93,9 @@ internal sealed class TestRenderer : Renderer
 
     /// <summary>Gets the number of batches the client has not acknowledged yet.</summary>
     public int UnacknowledgedBatchCount => Volatile.Read(ref _unacknowledgedBatchCount);
+
+    /// <summary>Gets the number of batches the client has acknowledged so far.</summary>
+    public int AcknowledgedBatchCount => Volatile.Read(ref _acknowledgedBatchCount);
 
     public async Task<TComponent> RenderAsync<TComponent>(Dictionary<string, object?> parameters)
         where TComponent : IComponent, new()
@@ -188,6 +192,7 @@ internal sealed class TestRenderer : Renderer
         {
             var batch = _unacknowledgedBatches.Dequeue();
             Interlocked.Decrement(ref _unacknowledgedBatchCount);
+            Interlocked.Increment(ref _acknowledgedBatchCount);
             batch.TrySetResult();
             if (batch == lastBatch)
             {
