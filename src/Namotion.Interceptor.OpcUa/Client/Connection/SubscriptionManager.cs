@@ -44,11 +44,10 @@ internal class SubscriptionManager : IAsyncDisposable
     private readonly Func<Subscription, CancellationToken, Task> _applyChangesAsync;
 
     private readonly ConcurrentDictionary<uint, MonitoredItemState> _monitoredItems = new();
-    // Keyed by object, not by the server-assigned id: a reconnect to a new session clones every
-    // subscription, and a restarted server numbers a recreated one from 1 again, possibly under the same id.
+    // Keyed by object, not by the server-assigned id: a subscription recreated after a failed transfer
+    // is a new object numbering from 1 again, possibly under the same id, while a transferred one keeps
+    // its object and its numbering.
     private readonly ConditionalWeakTable<Subscription, SubscriptionApplyState> _applyStates = new();
-    private readonly ConditionalWeakTable<Subscription, SubscriptionApplyState>.CreateValueCallback _createApplyState;
-    private int _lastApplyEpoch;
     private readonly ConcurrentDictionary<Subscription, byte> _subscriptions = new();
     private readonly ConcurrentDictionary<uint, int> _healAttempts = new();
     private readonly Lock _trackingMutationLock = new();
@@ -117,7 +116,6 @@ internal class SubscriptionManager : IAsyncDisposable
         _logger = logger;
         _applyChangesAsync = applyChangesAsync ??
             (static (subscription, cancellationToken) => subscription.ApplyChangesAsync(cancellationToken));
-        _createApplyState = _ => new SubscriptionApplyState((uint)Interlocked.Increment(ref _lastApplyEpoch));
     }
 
     public async Task CreateBatchedSubscriptionsAsync(
@@ -237,20 +235,19 @@ internal class SubscriptionManager : IAsyncDisposable
         {
             _source.IncomingThroughput.Add(changes.Count);
 
-            var applyState = _applyStates.GetValue(subscription, _createApplyState);
+            var applyState = _applyStates.GetValue(subscription, static _ => new SubscriptionApplyState());
 
             // Pool item returned inside callback. Safe because ApplyUpdate never throws:
             // It wraps callback execution in try-catch and only throws on catastrophic failures (lock/memory corruption).
             var state = (manager: this, source: _source, applyState, sequenceNumber: notification.SequenceNumber, receivedTimestamp, changes, logger: _logger);
             _propertyWriter.Write(state, static s =>
             {
-                // The ranking and the apply share one lock: the SDK hands a subscription's messages to
-                // concurrent workers, so a message that passed the check could otherwise still apply
-                // after a newer one. Taken inside the writer's lock during replay, so nothing may take
-                // the writer's lock while holding this one.
+                // The ranking and the apply share one lock because the SDK briefly runs two workers for
+                // one subscription when it restarts its worker. Taken inside the writer's lock during
+                // replay, so nothing may take the writer's lock while holding this one.
                 lock (s.applyState.Lock)
                 {
-                    var stamp = s.applyState.Stamp(s.sequenceNumber);
+                    var stamp = s.applyState.GetStamp(s.sequenceNumber);
                     for (var i = 0; i < s.changes.Count; i++)
                     {
                         var change = s.changes[i];
@@ -260,18 +257,27 @@ internal class SubscriptionManager : IAsyncDisposable
                             var lastApplied = Interlocked.Read(ref monitoredItem.LastAppliedStamp);
                             if (SubscriptionApplyState.IsOlder(stamp, lastApplied))
                             {
-                                s.logger.LogDebug(
-                                    "Skipped a stale value for property {PropertyName}: notification message {SequenceNumber} is older than the applied message {LastAppliedSequenceNumber}.",
-                                    monitoredItem.Property.Name, s.sequenceNumber, SubscriptionApplyState.GetSequenceNumber(lastApplied));
+                                if (s.logger.IsEnabled(LogLevel.Debug))
+                                {
+                                    s.logger.LogDebug(
+                                        "Skipped a stale value for property {PropertyName}: notification message {SequenceNumber} is older than the applied message {LastAppliedSequenceNumber}.",
+                                        monitoredItem.Property.Name, s.sequenceNumber, SubscriptionApplyState.GetSequenceNumber(lastApplied));
+                                }
+
                                 continue;
                             }
-
-                            Interlocked.Exchange(ref monitoredItem.LastAppliedStamp, stamp);
                         }
 
                         try
                         {
                             monitoredItem.Property.SetValueFromSource(s.source, change.Timestamp, s.receivedTimestamp, change.Value);
+
+                            // Only once the value landed: a rejected value must not outrank a late message
+                            // that is still newer than the shown value.
+                            if (stamp != 0)
+                            {
+                                Interlocked.Exchange(ref monitoredItem.LastAppliedStamp, stamp);
+                            }
                         }
                         catch (Exception e)
                         {
@@ -693,31 +699,39 @@ internal class SubscriptionManager : IAsyncDisposable
         }
     }
 
-    private readonly record struct NotificationUpdate(
-        MonitoredItemState MonitoredItem, object? Value, DateTimeOffset Timestamp);
+    private readonly struct NotificationUpdate(MonitoredItemState monitoredItem, object? value, DateTimeOffset timestamp)
+    {
+        public readonly MonitoredItemState MonitoredItem = monitoredItem;
+        public readonly object? Value = value;
+        public readonly DateTimeOffset Timestamp = timestamp;
+    }
 
     private sealed class MonitoredItemState(RegisteredSubjectProperty property)
     {
         public RegisteredSubjectProperty Property { get; } = property;
 
         /// <summary>
-        /// The <see cref="SubscriptionApplyState.Stamp"/> of the last message applied to this item, 0 before
-        /// the first. Written under the applying subscription's lock; read and written atomically because a
-        /// replaced subscription's late callback can write it under a different lock.
+        /// The stamp of the last message applied to this item, 0 before the first. Read and written with
+        /// <see cref="Interlocked"/>.
         /// </summary>
+        // Interlocked rather than the subscription's lock alone: a replaced subscription's late callback
+        // writes it under its own lock.
         public ulong LastAppliedStamp;
     }
 
     /// <summary>
-    /// Ranks the notification messages of one subscription object. A stamp packs the object's epoch into the
-    /// high bits and the message's sequence number, extended past the 32-bit wrap, into the low bits.
+    /// Ranks the notification messages of one subscription object. A stamp packs a 24-bit epoch that
+    /// identifies the object into the high bits and the message's sequence number, extended past the
+    /// 32-bit wrap, into the low 40 bits, which last 2^40 messages per subscription object.
     /// </summary>
-    private sealed class SubscriptionApplyState(uint epoch)
+    private sealed class SubscriptionApplyState
     {
         private const int SequenceBits = 40;
         private const ulong SequenceMask = (1UL << SequenceBits) - 1;
 
-        private readonly ulong _epoch = (ulong)(epoch & 0xFF_FFFF) << SequenceBits;
+        private static int _lastEpoch;
+
+        private readonly ulong _epoch = ((ulong)(uint)Interlocked.Increment(ref _lastEpoch) & 0xFF_FFFF) << SequenceBits;
         private ulong _highestSequenceNumber;
 
         public Lock Lock { get; } = new();
@@ -732,19 +746,18 @@ internal class SubscriptionManager : IAsyncDisposable
         public static uint GetSequenceNumber(ulong stamp) => (uint)(stamp & SequenceMask);
 
         /// <summary>
-        /// Returns the stamp for a message, or 0 for an unnumbered one. The sequence number is extended
-        /// relative to the highest one seen, so it keeps increasing across the 32-bit wrap and an item that
-        /// stays unchanged for more than half the 32-bit range is not ranked against a wrapped number.
-        /// Must be called under <see cref="Lock"/>.
+        /// Returns the stamp for a message, or 0 for an unnumbered one. Must be called under <see cref="Lock"/>.
         /// </summary>
-        public ulong Stamp(uint sequenceNumber)
+        public ulong GetStamp(uint sequenceNumber)
         {
             if (sequenceNumber == 0)
             {
                 return 0;
             }
 
-            // Starts one wrap in, so a message older than the first one seen still maps above 0.
+            // Extended relative to the highest number seen rather than per item, so an item that stays
+            // unchanged for more than half the 32-bit range is not ranked against a wrapped number. Starts
+            // one wrap in, so a message older than the first one seen still maps above 0.
             var extended = _highestSequenceNumber == 0
                 ? (1UL << 32) + sequenceNumber
                 : (ulong)((long)_highestSequenceNumber + (int)(sequenceNumber - (uint)_highestSequenceNumber));

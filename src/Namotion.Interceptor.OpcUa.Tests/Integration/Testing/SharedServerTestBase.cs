@@ -36,14 +36,14 @@ public abstract class SharedServerTestBase<TClient> : IAsyncLifetime,
 
     public async Task DisposeAsync()
     {
-        WriteServerLog();
-
         // Client is disposed by SharedOpcUaClientFixture at class level
         // Only dispose if Client is a different type (e.g., DynamicSubject client)
         if (Client is IAsyncDisposable asyncDisposable && Client is not OpcUaTestClient<SharedTestModel>)
         {
             await asyncDisposable.DisposeAsync();
         }
+
+        WriteServerLog();
     }
 
     private void WriteServerLog()

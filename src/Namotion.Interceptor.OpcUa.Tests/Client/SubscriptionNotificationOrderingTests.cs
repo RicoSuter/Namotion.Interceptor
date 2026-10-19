@@ -29,6 +29,23 @@ public class SubscriptionNotificationOrderingTests
     }
 
     [Fact]
+    public async Task WhenOutOfOrderMessagesAreBufferedDuringTheInitialLoad_ThenTheNewerValueIsKept()
+    {
+        // Arrange
+        await using var harness = await Harness.CreateAsync(loadInitialState: false);
+        var name = harness.Track(nameof(TestRoot.Name));
+        harness.Notify(sequenceNumber: 5, (name, "Newer"));
+        harness.Notify(sequenceNumber: 4, (name, "Older"));
+
+        // Act
+        await harness.LoadInitialStateAsync();
+
+        // Assert
+        Assert.Empty(harness.Errors);
+        Assert.Equal("Newer", harness.Root.Name);
+    }
+
+    [Fact]
     public async Task WhenAMessageCarriesAnItemTwice_ThenTheLastValueIsKept()
     {
         // Arrange
@@ -131,6 +148,25 @@ public class SubscriptionNotificationOrderingTests
     }
 
     [Fact]
+    public async Task WhenTheNewestValueFailsToApply_ThenAnOlderMessageThatIsNewerThanTheShownValueIsApplied()
+    {
+        // Arrange
+        var configuration = CreateConfiguration();
+        configuration.ValueConverter = new RejectingConverter("Unassignable");
+        await using var harness = await Harness.CreateAsync(configuration: configuration);
+        var name = harness.Track(nameof(TestRoot.Name));
+        harness.Notify(sequenceNumber: 5, (name, "Old"));
+
+        // Act
+        harness.Notify(sequenceNumber: 10, (name, "Unassignable"));
+        harness.Notify(sequenceNumber: 9, (name, "Fresher"));
+
+        // Assert
+        Assert.Single(harness.Errors);
+        Assert.Equal("Fresher", harness.Root.Name);
+    }
+
+    [Fact]
     public async Task WhenAMessageCarriesNoSequenceNumber_ThenItIsApplied()
     {
         // Arrange
@@ -162,19 +198,31 @@ public class SubscriptionNotificationOrderingTests
         Assert.Equal(messageCount.ToString(), harness.Root.Name);
     }
 
+    /// <summary>
+    /// Converts <paramref name="unassignableValue"/> to a number, which the string property's setter rejects.
+    /// </summary>
+    private sealed class RejectingConverter(string unassignableValue) : OpcUaValueConverter
+    {
+        public override object? ConvertToPropertyValue(object? nodeValue, RegisteredSubjectProperty property) =>
+            Equals(nodeValue, unassignableValue) ? 0 : base.ConvertToPropertyValue(nodeValue, property);
+    }
+
     private sealed class Harness : IAsyncDisposable
     {
         private readonly OpcUaSubjectClientSource _source;
         private readonly SubscriptionManager _manager;
+        private readonly SubjectPropertyWriter _propertyWriter;
         private readonly List<Subscription> _replacedSubscriptions = [];
         private Subscription _subscription;
 
         private Harness(
             OpcUaSubjectClientSource source,
+            SubjectPropertyWriter propertyWriter,
             SubscriptionManager manager,
             List<Exception> errors)
         {
             _source = source;
+            _propertyWriter = propertyWriter;
             _manager = manager;
             Errors = errors;
             _subscription = new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions());
@@ -184,18 +232,29 @@ public class SubscriptionNotificationOrderingTests
 
         public List<Exception> Errors { get; }
 
-        public static async Task<Harness> CreateAsync()
+        /// <param name="loadInitialState">
+        /// <c>false</c> leaves the writer buffering notifications until <see cref="LoadInitialStateAsync"/>.
+        /// </param>
+        /// <param name="configuration">The client configuration, or <c>null</c> for the default one.</param>
+        public static async Task<Harness> CreateAsync(
+            bool loadInitialState = true, OpcUaClientConfiguration? configuration = null)
         {
-            var configuration = CreateConfiguration();
+            configuration ??= CreateConfiguration();
             var source = CreateClientSource(configuration: configuration);
             var propertyWriter = new SubjectPropertyWriter(source, NullLogger.Instance);
-            await propertyWriter.LoadInitialStateAndResumeAsync(CancellationToken.None);
+            if (loadInitialState)
+            {
+                await propertyWriter.LoadInitialStateAndResumeAsync(CancellationToken.None);
+            }
+
             var errors = new List<Exception>();
             var manager = new SubscriptionManager(
                 source, propertyWriter, pollingManager: null, readAfterWriteManager: null,
                 configuration, error => { lock (errors) { errors.Add(error); } }, NullLogger.Instance);
-            return new Harness(source, manager, errors);
+            return new Harness(source, propertyWriter, manager, errors);
         }
+
+        public Task LoadInitialStateAsync() => _propertyWriter.LoadInitialStateAndResumeAsync(CancellationToken.None);
 
         public uint Track(string propertyName)
         {
