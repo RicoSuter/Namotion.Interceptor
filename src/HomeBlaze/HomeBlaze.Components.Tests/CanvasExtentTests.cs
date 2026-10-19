@@ -44,20 +44,29 @@ public class CanvasExtentTests
     }
 
     [Theory]
-    [InlineData(CanvasScale.FitWidth, false, 1000, 500, 0.5)]
-    [InlineData(CanvasScale.FitWidth, false, 1000, 1500, 1.5)]
-    [InlineData(CanvasScale.FitWidth, true, 1000, 500, 1)]
-    [InlineData(CanvasScale.None, false, 1000, 500, 1)]
-    [InlineData(CanvasScale.FitWidth, false, 0, 500, 1)]
-    [InlineData(CanvasScale.FitWidth, false, 1000, 0, 1)]
-    public void WhenFactorIsComputed_ThenOnlyAViewedFitWidthCanvasWithAWidthIsScaled(
-        CanvasScale scale, bool isEditing, int designWidth, double availableWidth, double expected)
+    [InlineData(CanvasScale.FitWidth, false, 1000, true)]
+    [InlineData(CanvasScale.FitWidth, true, 1000, false)]
+    [InlineData(CanvasScale.None, false, 1000, false)]
+    [InlineData(CanvasScale.FitWidth, false, 0, false)]
+    public void WhenCanvasIsChecked_ThenOnlyAViewedFitWidthCanvasWithAWidthIsScaled(
+        CanvasScale scale, bool isEditing, int designWidth, bool expected)
     {
         // Act
-        var factor = CanvasExtent.GetFactor(scale, isEditing, designWidth, availableWidth, null);
+        var isScaled = CanvasExtent.IsScaled(scale, isEditing, designWidth);
 
         // Assert
-        Assert.Equal(expected, factor, 6);
+        Assert.Equal(expected, isScaled);
+    }
+
+    [Fact]
+    public void WhenCanvasHasNoMinWidth_ThenItIsDrawnAtTheWidthOfItsFrame()
+    {
+        // Act
+        var factor = CanvasExtent.GetFactor(1104, null);
+
+        // Assert
+        Assert.Equal("100cqw", CanvasExtent.GetDrawnWidth(null));
+        Assert.Equal("tan(atan2(100cqw, 1104px))", factor);
     }
 
     [Theory]
@@ -69,16 +78,14 @@ public class CanvasExtentTests
         Assert.Equal($"MinWidth must be above 0: {value}", CanvasExtent.Validate(null, value));
     }
 
-    [Theory]
-    [InlineData(375, 750, 0.75)] // narrower than the least width: drawn at it, and the frame scrolls
-    [InlineData(1500, 750, 1.5)] // wider: fits the width
-    [InlineData(0, 750, 1)] // the available width is not known yet
-    public void WhenCanvasHasAMinWidth_ThenItIsDrawnAtLeastThatWide(double availableWidth, int minWidth, double expected)
+    [Fact]
+    public void WhenCanvasHasAMinWidth_ThenItIsDrawnAtLeastThatWide()
     {
         // Act
-        var factor = CanvasExtent.GetFactor(CanvasScale.FitWidth, false, 1000, availableWidth, minWidth);
+        var factor = CanvasExtent.GetFactor(1000, 750);
 
         // Assert
-        Assert.Equal(expected, factor, 6);
+        Assert.Equal("max(100cqw, 750px)", CanvasExtent.GetDrawnWidth(750));
+        Assert.Equal("tan(atan2(max(100cqw, 750px), 1000px))", factor);
     }
 }
