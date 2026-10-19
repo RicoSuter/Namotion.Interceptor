@@ -1,6 +1,5 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
-using MudBlazor;
 using Namotion.Interceptor.Attributes;
 
 namespace HomeBlaze.Components;
@@ -13,6 +12,8 @@ namespace HomeBlaze.Components;
 [InterceptorSubject]
 public partial class ValueMapCase : IConfigurable
 {
+    private ParsedColor? _parsedColor;
+
     /// <summary>
     /// The value this case is for, as its raw text, for example "True" or the name of an enum value.
     /// </summary>
@@ -26,10 +27,11 @@ public partial class ValueMapCase : IConfigurable
     public partial string? Text { get; set; }
 
     /// <summary>
-    /// The colour of the value.
+    /// The color of the value: the name of a theme color, such as "Success", or a CSS color, such as "#ffffff80".
+    /// See <see cref="ValueColor.TryParse"/> for what is taken.
     /// </summary>
     [Configuration]
-    public partial Color Color { get; set; }
+    public partial string? Color { get; set; }
 
     /// <summary>
     /// Name of the icon shown for the value, for example "Lightbulb".
@@ -37,5 +39,31 @@ public partial class ValueMapCase : IConfigurable
     [Configuration]
     public partial string? Icon { get; set; }
 
+    /// <summary>
+    /// Gets the parsed <see cref="Color"/>, or <see cref="ValueColor.Default"/> when it is no color, which
+    /// <see cref="ValueReader.ResolveMap"/> reports. The result is kept until the text changes, so that a render parses
+    /// nothing and gets the same instance.
+    /// </summary>
+    public ValueColor GetColor() => GetParsedColor().Color ?? ValueColor.Default;
+
+    /// <summary>Gets whether <see cref="Color"/> is a theme color, a CSS color that <see cref="ValueColor.TryParse"/> takes, or not set.</summary>
+    internal bool IsColorValid() => GetParsedColor().Color is not null;
+
+    private ParsedColor GetParsedColor()
+    {
+        var text = Color;
+        var parsed = _parsedColor;
+        if (parsed is null || !string.Equals(parsed.Text, text, StringComparison.Ordinal))
+        {
+            // Replaced as a whole, so that a render on another thread sees the text and its color together.
+            parsed = new ParsedColor(text, ValueColor.TryParse(text, out var color) ? color : null);
+            _parsedColor = parsed;
+        }
+
+        return parsed;
+    }
+
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+    private sealed record ParsedColor(string? Text, ValueColor? Color);
 }
