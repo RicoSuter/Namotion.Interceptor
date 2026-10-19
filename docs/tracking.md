@@ -562,6 +562,15 @@ var accessedProperties = scope.GetPropertiesAndDispose();
 
 This is primarily used internally by the derived property change detection system but can also be used for custom scenarios.
 
+For synchronous code on one thread, `ReadPropertyRecorder.RecordOnCurrentThread(target)` sends the reads of the current thread to an `IReadPropertyRecorderTarget` instead. Its `OnRead` is called on the reading thread before the value of each intercepted property is read. The method returns a `ref struct` scope that restores the previous target of the thread when disposed, so targets nest, and it must be disposed on the thread that started it. While a target is set, reads on that thread go only to it and are not recorded by the async scopes of `ReadPropertyRecorder.Start`.
+
+```csharp
+using (ReadPropertyRecorder.RecordOnCurrentThread(target))
+{
+    var fullName = person.FullName; // target.OnRead is called for FirstName and LastName
+}
+```
+
 ## Change Origin and Timestamps
 
 **Change Sources**: Use the `SetValueFromSource()` extension method to apply a value coming from an external source:

@@ -12,6 +12,7 @@ namespace HomeBlaze.Components;
 [Description("Text, colour and icon per value, for value widgets")]
 [DisplayName("Value map")]
 [SubjectIcon("Rule")]
+[PageLayout]
 [InterceptorSubject]
 public partial class ValueMap : IConfigurable, ITitleProvider
 {

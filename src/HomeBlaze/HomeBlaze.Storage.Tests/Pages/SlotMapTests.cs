@@ -49,7 +49,7 @@ public class SlotMapTests
 
         // Assert
         Assert.Null(map.Error);
-        var slot = Assert.Single(map.Named.Values);
+        var slot = Assert.Single(map.Slots);
         Assert.Equal("Content", slot.Name);
         Assert.Same(slot, map.Default);
     }
@@ -62,7 +62,20 @@ public class SlotMapTests
 
         // Assert
         Assert.Null(map.Error);
-        Assert.Equal(["_Item_2"], map.Named.Keys);
+        Assert.Equal(new[] { "_Item_2" }, map.Named.Keys);
+    }
+
+    [Fact]
+    public void WhenTypeDeclaresManySlots_ThenSlotsAreInDeclarationOrder()
+    {
+        // Act
+        var map = SlotMap.For(typeof(ManySlots));
+
+        // Assert
+        Assert.Null(map.Error);
+        Assert.Equal(
+            ["Zulu", "Echo", "Kilo", "Alfa", "Mike", "Golf", "Papa", "Lima"],
+            map.Slots.Select(slot => slot.Name));
     }
 
     [Theory]

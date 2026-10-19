@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Media;
@@ -70,23 +71,28 @@ public partial class SonosGroup :
     /// <inheritdoc cref="SonosPlayer.Source"/>
     [Derived]
     [State(Position = 11)]
+    [Category("Source")]
     public SonosSource? Source => Coordinator.Source;
 
     [Derived]
     [State(Position = 12)]
+    [Category("Playback")]
     public bool? Shuffle => Coordinator.Shuffle;
 
     [Derived]
     [State(Position = 13)]
+    [Category("Playback")]
     public SonosRepeatMode? Repeat => Coordinator.Repeat;
 
     [Derived]
     [State(Position = 14)]
+    [Category("Playback")]
     public TimeSpan? SleepTimerRemaining => Coordinator.SleepTimerRemaining;
 
     /// <inheritdoc cref="SonosPlayer.SourceTitle"/>
     [Derived]
     [State(Position = 15)]
+    [Category("Source")]
     public string? SourceTitle => Coordinator.SourceTitle;
 
     [Derived]
@@ -145,6 +151,7 @@ public partial class SonosGroup :
     public bool TogglePlayback_IsEnabled => CanControl;
 
     [Operation(Title = "Play or Pause", Position = 6, Description = "Pauses the group when it plays, otherwise starts playback.")]
+    [Category("Playback")]
     public Task TogglePlaybackAsync(CancellationToken cancellationToken) =>
         Coordinator.TogglePlaybackAsync(cancellationToken);
 
@@ -172,6 +179,7 @@ public partial class SonosGroup :
     public bool ChangeVolume_IsEnabled => CanControl;
 
     [Operation(Title = "Change Volume", Position = 11, Description = "Changes the group volume by a relative amount.")]
+    [Category("Volume")]
     public Task ChangeVolumeAsync([OperationParameter(Unit = StateUnit.Percent)] decimal delta, CancellationToken cancellationToken)
     {
         SonosValues.ThrowIfFractionOutOfRange(delta, -1m);
@@ -199,6 +207,7 @@ public partial class SonosGroup :
     public bool PlayFavorite_IsEnabled => CanControl;
 
     [Operation(Title = "Play Favorite", Position = 20, Description = "Plays the Sonos favorite with the given title on the group.")]
+    [Category("Source")]
     public Task PlayFavoriteAsync(string title, CancellationToken cancellationToken) =>
         Coordinator.PlayFavoriteAsync(title, cancellationToken);
 
@@ -208,6 +217,7 @@ public partial class SonosGroup :
 
     /// <inheritdoc cref="SonosPlayer.PlayUriAsync"/>
     [Operation(Title = "Play URI", Position = 21, Description = "Plays a URI once as a normal track on the group, which ends and can be sought.")]
+    [Category("Source")]
     public Task PlayUriAsync(string uri, CancellationToken cancellationToken) =>
         Coordinator.PlayUriAsync(uri, cancellationToken);
 
@@ -217,6 +227,7 @@ public partial class SonosGroup :
 
     /// <inheritdoc cref="SonosPlayer.PlayStreamAsync"/>
     [Operation(Title = "Play Stream", Position = 22, Description = "Plays an http(s) or x-rincon-mp3radio stream on the group as radio, which Sonos reconnects when it ends.")]
+    [Category("Source")]
     public Task PlayStreamAsync(string uri, string? title, CancellationToken cancellationToken) =>
         Coordinator.PlayStreamAsync(uri, title, cancellationToken);
 
@@ -225,6 +236,7 @@ public partial class SonosGroup :
     public bool SetShuffle_IsEnabled => CanControl;
 
     [Operation(Title = "Set Shuffle", Position = 30, Description = "Turns shuffle on or off for the group.")]
+    [Category("Playback")]
     public Task SetShuffleAsync(bool shuffle, CancellationToken cancellationToken) =>
         Coordinator.SetShuffleAsync(shuffle, cancellationToken);
 
@@ -233,6 +245,7 @@ public partial class SonosGroup :
     public bool SetRepeat_IsEnabled => CanControl;
 
     [Operation(Title = "Set Repeat", Position = 31, Description = "Sets the repeat mode of the group.")]
+    [Category("Playback")]
     public Task SetRepeatAsync(SonosRepeatMode repeat, CancellationToken cancellationToken) =>
         Coordinator.SetRepeatAsync(repeat, cancellationToken);
 
@@ -242,6 +255,7 @@ public partial class SonosGroup :
 
     /// <inheritdoc cref="SonosPlayer.SetSleepTimerAsync"/>
     [Operation(Title = "Set Sleep Timer", Position = 32, Description = "Sets the sleep timer of the group, at most 23:59:59; zero cancels it.")]
+    [Category("Playback")]
     public Task SetSleepTimerAsync(TimeSpan duration, CancellationToken cancellationToken) =>
         Coordinator.SetSleepTimerAsync(duration, cancellationToken);
 

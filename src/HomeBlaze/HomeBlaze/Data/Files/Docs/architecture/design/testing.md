@@ -135,7 +135,7 @@ In addition to functional correctness, the system tester should validate perform
 | Welcome snapshot | Generate a complete SubjectUpdate for the full graph, measure serialization time and payload size |
 | WebSocket sync under load | Satellite generates changes at target rate, measure sync latency and reconnect recovery time |
 | Multi-connector independence | Attach multiple connectors under load, verify a slow connector does not block others |
-| Registry and path resolution | Measure `GetAllProperties()`, MCP `query`, and path segment lookup at each scale tier |
+| Registry and path resolution | Measure `GetAllProperties()`, MCP `search` and `browse`, and path segment lookup at each scale tier |
 
 Concrete performance targets should be established after initial baseline measurements — the goal of the first round is to understand where the actual limits are, not to hit predetermined numbers. See [Scalability](scalability.md) for known bottlenecks to validate.
 

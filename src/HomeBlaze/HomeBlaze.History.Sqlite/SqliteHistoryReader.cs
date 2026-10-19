@@ -74,13 +74,15 @@ internal readonly struct SqliteReadContext(
             .OrderBy(entry => entry.Range.Start)
             .Select(entry => (entry.Key, entry.Range.Start, entry.Range.End));
 
-    // Existing partition files at or before asOf, newest first (look-back across files stops at the first hit).
-    public IEnumerable<string> PartitionKeysAtOrBefore(DateTimeOffset asOf) =>
+    // Existing partition files starting at or before asOf with each file's inferred end in epoch ticks, latest
+    // end first. Files overlap in time after the interval was made coarser, so a later start does not mean newer
+    // rows: a look-back keeps the newest row found and stops at the first file ending at or before it.
+    public IEnumerable<(string Key, long EndTicks)> PartitionsAtOrBeforeByEndDescending(DateTimeOffset asOf) =>
         EnumeratePartitionFileKeys()
             .Select(key => (Key: key, Range: SqlitePartition.InferredRange(key)))
             .Where(entry => entry.Range.Start <= asOf)
-            .OrderByDescending(entry => entry.Range.Start)
-            .Select(entry => entry.Key);
+            .OrderByDescending(entry => entry.Range.End)
+            .Select(entry => (entry.Key, EpochTicks.ToEpochTicks(entry.Range.End)));
 }
 
 /// <summary>
@@ -187,6 +189,27 @@ internal static class SqliteHistoryReader
         return null;
     }
 
+    public static HistoryPoint? GetLastNumericSampleBefore(SqliteReadContext context, string propertyPath, DateTimeOffset before)
+    {
+        // Newest leg first, like GetSampleAtOrBefore; each leg only answers inside its own validity.
+        foreach (var leg in ResolveChain(context, propertyPath))
+        {
+            if (leg.ValidFrom >= before)
+            {
+                continue;
+            }
+
+            var ceiling = before < leg.ValidTo ? before : leg.ValidTo;
+            var found = GetLegNumericSampleBefore(context, leg.Path, ceiling, ResolveIsUlong(context, leg.Path));
+            if (found is { } point && point.Timestamp >= leg.ValidFrom)
+            {
+                return point;
+            }
+        }
+
+        return null;
+    }
+
     // The stored column kind and ulong flag for a (possibly moved) property: the first path along its chain
     // that the paths table knows. The SQLite equivalent of InMemoryHistoryStore.ResolveBuffer (which returns the
     // first buffer in the chain), used for the numeric-on-json-non-ulong guard and ulong-overflow folding.
@@ -235,10 +258,15 @@ internal static class SqliteHistoryReader
     private static RawRow? GetLegSampleAtOrBefore(SqliteReadContext context, string path, DateTimeOffset asOf)
     {
         var asOfTicks = EpochTicks.ToEpochTicks(asOf);
-
-        // Search the partition holding asOf, then earlier partitions, newest match wins.
-        foreach (var key in context.PartitionKeysAtOrBefore(asOf))
+        RawRow? newest = null;
+        var newestTicks = long.MinValue;
+        foreach (var (key, endTicks) in context.PartitionsAtOrBeforeByEndDescending(asOf))
         {
+            if (endTicks <= newestTicks)
+            {
+                break; // this file and every later one only hold rows before the newest found
+            }
+
             if (!context.PartitionFileExists(key))
             {
                 continue;
@@ -258,13 +286,68 @@ internal static class SqliteHistoryReader
             command.Parameters.AddWithValue("@asOf", asOfTicks);
 
             using var reader = command.ExecuteReader();
-            if (reader.Read())
+            if (reader.Read() && reader.GetInt64(0) > newestTicks)
             {
-                return ReadRawRow(reader);
+                newest = ReadRawRow(reader);
+                newestTicks = newest.Value.Ticks;
             }
         }
 
-        return null;
+        return newest;
+    }
+
+    // The largest finite double: comparing ABS(v) against it rejects NULL, NaN and the infinities in one predicate.
+    private const string MaximumFiniteSql = "1.7976931348623157e308";
+
+    private const string LastNumericBeforeSql =
+        "SELECT ts, " + SqliteValueRouting.NumericValueSql + " AS v FROM history " +
+        "WHERE path_id = @path_id AND ts < @before AND ABS(" + SqliteValueRouting.NumericValueSql + ") <= " + MaximumFiniteSql +
+        " ORDER BY ts DESC LIMIT 1;";
+
+    private const string UlongLastNumericBeforeSql =
+        "SELECT ts, " + SqliteValueRouting.UlongNumericValueSql + " AS v FROM history " +
+        "WHERE path_id = @path_id AND ts < @before AND ABS(" + SqliteValueRouting.UlongNumericValueSql + ") <= " + MaximumFiniteSql +
+        " ORDER BY ts DESC LIMIT 1;";
+
+    // Newest row with a finite numeric value strictly before the given instant for a single path across its partitions.
+    private static HistoryPoint? GetLegNumericSampleBefore(SqliteReadContext context, string path, DateTimeOffset before, bool isUlong)
+    {
+        var sql = isUlong ? UlongLastNumericBeforeSql : LastNumericBeforeSql;
+        var beforeTicks = EpochTicks.ToEpochTicks(before);
+        HistoryPoint? newest = null;
+        var newestTicks = long.MinValue;
+        foreach (var (key, endTicks) in context.PartitionsAtOrBeforeByEndDescending(before))
+        {
+            if (endTicks <= newestTicks)
+            {
+                break; // this file and every later one only hold rows before the newest found
+            }
+
+            if (!context.PartitionFileExists(key))
+            {
+                continue;
+            }
+
+            var connection = context.OpenPartition(key);
+            if (connection is null || ResolvePathId(connection, path) is not { } pathId)
+            {
+                continue; // unreadable partition, or one that never saw the path
+            }
+
+            using var command = connection.CreateCommand();
+            command.CommandText = sql;
+            command.Parameters.AddWithValue("@path_id", pathId);
+            command.Parameters.AddWithValue("@before", beforeTicks);
+
+            using var reader = command.ExecuteReader();
+            if (reader.Read() && reader.GetInt64(0) > newestTicks)
+            {
+                newestTicks = reader.GetInt64(0);
+                newest = new HistoryPoint(EpochTicks.FromEpochTicks(newestTicks), reader.GetDouble(1), null);
+            }
+        }
+
+        return newest;
     }
 
     // The id a partition interns a path to, or null when that partition never held the path.
@@ -279,17 +362,35 @@ internal static class SqliteHistoryReader
         return command.ExecuteScalar() is long id ? id : null;
     }
 
+    private const string ColumnMetaSql =
+        "SELECT p.value_column, p.is_ulong, " +
+        "(SELECT h.ts FROM history h WHERE h.path_id = p.id ORDER BY h.ts DESC LIMIT 1) " +
+        "FROM paths p WHERE p.path = @path;";
+
     // The stored column kind and ulong flag for a single path, read from the paths table (written at
     // flush time). Returns null when the path has never been written.
     //
-    // Newest partition first, and stops at the first hit. Directory enumeration order is not specified,
-    // so scanning in that order let an arbitrary partition answer: after a property's type changed, the
-    // reader could pick up the superseded column kind and route a numeric read at the wrong column.
-    // Newest-first also means the common case opens one partition instead of every one of them.
+    // Each file stores the kind of its newest row for the path (see SqliteHistoryWriter.InternPath), so
+    // the file holding the path's newest row answers. Walked like the look-backs, latest end first: once a
+    // file holds a row, the walk stops at the first file ending at or before it, so a single-interval store
+    // reads one file. A file that knows the path but holds no row for it only answers when no file holds a
+    // row, and then the first one walked wins.
     private static ColumnMeta? ResolveColumnMetaForPath(SqliteReadContext context, string propertyPath)
     {
-        foreach (var key in context.EnumeratePartitionFileKeys().OrderByDescending(key => key, StringComparer.Ordinal))
+        ColumnMeta? newest = null;
+        var newestTicks = long.MinValue;
+        foreach (var (key, endTicks) in context.PartitionsAtOrBeforeByEndDescending(DateTimeOffset.MaxValue))
         {
+            if (endTicks <= newestTicks)
+            {
+                break; // this file and every later one only hold rows before the newest found
+            }
+
+            if (!context.PartitionFileExists(key))
+            {
+                continue;
+            }
+
             var connection = context.OpenPartition(key);
             if (connection is null)
             {
@@ -297,16 +398,27 @@ internal static class SqliteHistoryReader
             }
 
             using var command = connection.CreateCommand();
-            command.CommandText = "SELECT value_column, is_ulong FROM paths WHERE path = @path;";
+            command.CommandText = ColumnMetaSql;
             command.Parameters.AddWithValue("@path", propertyPath);
             using var reader = command.ExecuteReader();
-            if (reader.Read())
+            if (!reader.Read())
             {
-                return new ColumnMeta((ValueColumn)reader.GetInt64(0), reader.GetInt64(1) != 0);
+                continue; // a partition that never saw the path
+            }
+
+            var meta = new ColumnMeta((ValueColumn)reader.GetInt64(0), reader.GetInt64(1) != 0);
+            if (reader.IsDBNull(2))
+            {
+                newest ??= meta;
+            }
+            else if (reader.GetInt64(2) > newestTicks)
+            {
+                newest = meta;
+                newestTicks = reader.GetInt64(2);
             }
         }
 
-        return null;
+        return newest;
     }
 
     private static bool ResolveIsUlong(SqliteReadContext context, string propertyPath) =>

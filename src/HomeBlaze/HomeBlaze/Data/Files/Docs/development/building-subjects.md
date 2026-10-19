@@ -152,7 +152,7 @@ public enum StateUnit
 }
 ```
 
-Values are auto-scaled for display within unit families (e.g., 1500 W displays as "1.5 kW", 0.5 A displays as "500 mA"). A `Percent` value, state or operation parameter, is a fraction from 0 to 1: it displays as 0 to 100 %, the operation dialog takes 0 to 100 and divides by 100, and MCP `invoke_method` passes the fraction unchanged.
+Values are auto-scaled for display within unit families (e.g., 1500 W displays as "1.5 kW", 0.5 A displays as "500 mA"). A `Percent` value, state or operation parameter, is a fraction from 0 to 1: it displays as 0 to 100 %, the operation dialog takes 0 to 100 and divides by 100, and the MCP tools `invoke_query` and `invoke_operation` pass the fraction unchanged.
 
 ### Naming Cumulative Properties
 
@@ -190,8 +190,8 @@ Properties without any `Position` (from class or interface) sort **last** in the
 
 HomeBlaze abstraction interfaces use reserved position ranges to ensure consistent default ordering when a device implements multiple interfaces:
 
-| Range | Category | Examples |
-|-------|----------|---------|
+| Range | Kind of property | Examples |
+|-------|------------------|---------|
 | 0–99 | Device-specific primary (custom per class) | Pin number, enabled state |
 | 100–199 | Primary device function | Switch on/off, brightness, cover position |
 | 200–299 | Sensor measurements | Temperature, humidity, presence |
@@ -261,6 +261,15 @@ public partial GpioPin[] Pins { get; set; }
 - Deterministic (same device always produces the same key)
 
 Good key sources: API resource IDs (GUIDs), hardware serial numbers, MAC addresses. Bad key sources: user-assignable names, discovery order, timestamps.
+
+### Shared Child Subjects
+
+A subject may be held by several collections, for example a light in a bridge's `Lights` and in a room's `Lights`, or a network client in a router's `Clients` and in an access point's `Clients`. Rules:
+
+- **The owning collection adds the subject first and sits at the shallowest level, because the canonical path is the shallowest, then earliest attached.** It creates the subject and adds it to its own collection before any other collection refers to it. A subject with several parents has one path per parent; paths are ordered by depth, with attach order deciding between equally deep ones, and history records values under the first. The other collections only refer to it and are replaced when their members change.
+- **The subject stays attached until the last collection drops it,** not the first: a subject with several parents detaches only once every collection holding it has dropped it. When the owner drops it, drop it from every other collection in the same update, or it stays attached, referenced by them but orphaned from its owner.
+- **Relative paths from a shared subject do not resolve.** A `../` path starting at a subject with several parents resolves to nothing, because its parent is ambiguous.
+- **Do not reference a parent through an intercepted property.** An intercepted (partial) property holding a subject reference attaches the referenced subject under the referencing one; only such a property attaches anything. The parent would become a child of its own child, and the two keep each other attached. Keep a back-reference to an owner in a field.
 
 ## Display Interfaces
 
@@ -342,6 +351,8 @@ A type belongs to exactly one group, the one that its `[Category]` names. The si
 
 When none of them fits, name a new group in `[Category]`. Using the name is all it takes to create the group, and group names are compared ignoring case. A type in such a group that sets no `[SubjectIcon]` gets a generic icon.
 
+On a property or a method, `[Category]` names a [category](#categories) of the property panel instead.
+
 ### Name of a New Subject
 
 Where the new subject needs a name, the dialog asks for it on the configure page and suggests the class name, with a number appended when it is already used (`Motor`, `Motor2`). A name that already exists in the same place is rejected, and the messages name the field by its label ("This file name is already used").
@@ -414,7 +425,7 @@ public partial class Motor
         TargetSpeed = Math.Clamp(speed, 0, 3000);
     }
 
-    [Operation(Title = "Emergency Stop", RequiresConfirmation = true, Position = 2)]
+    [Operation(Title = "Emergency Stop", Position = 2)]
     public void EmergencyStop()
     {
         TargetSpeed = 0;
@@ -427,13 +438,21 @@ public partial class Motor
         return new MotorDiagnostics { Status = Status, Speed = TargetSpeed };
     }
 
-    [Operation(Title = "Run Test", Position = 4)]
-    public async Task RunTestAsync(int speed, int durationSeconds)
+    [Operation(Title = "Run Test", RequiresConfirmation = true, Position = 4)]
+    public async Task RunTestAsync(int speed, int durationSeconds, CancellationToken cancellationToken)
     {
+        ArgumentOutOfRangeException.ThrowIfNegative(durationSeconds);
+
         var previousSpeed = TargetSpeed;
         TargetSpeed = speed;
-        await Task.Delay(TimeSpan.FromSeconds(durationSeconds));
-        TargetSpeed = previousSpeed;
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(durationSeconds), cancellationToken);
+        }
+        finally
+        {
+            TargetSpeed = previousSpeed; // also when the run is canceled
+        }
     }
 }
 ```
@@ -449,18 +468,21 @@ public partial class Motor
 | `RequiresConfirmation` | Show confirmation dialog before executing | `true` |
 
 **Key points:**
-- Operations appear in the subject's property panel under "Operations"
+- Operations appear as buttons in the subject's property panel, grouped by [category](#categories)
 - Parameters with supported types (primitives, enums, nullable variants) show input dialogs
 - Async methods are supported and show a progress indicator
 - Methods returning values display the result in a dialog
 - Errors are caught and shown in an error dialog
-- Operations with `RequiresConfirmation = true` show a confirmation dialog first
+- Operations with `RequiresConfirmation = true` show a confirmation dialog first and cannot be called through MCP, see [AI Agents](../administration/ai-agents.md#tools-and-permissions). Use it for operations a person must decide on, such as unlocking, rebooting or installing code
+- Confirmation is inherited: an implementation of an interface operation or an override of a base class operation that requires confirmation requires it too, also with its own `[Operation]`, and a `[Query]` in its place becomes an operation that requires confirmation
+- Do not require confirmation for safety actions such as an emergency stop; agents must be able to call them
 
 **Supported parameter types:**
 - `string`, `int`, `long`, `double`, `float`, `decimal`, `bool`
 - `DateTime`, `DateTimeOffset`, `Guid`, `TimeSpan`
 - Nullable versions of the above (`int?`, `bool?`, etc.)
 - Enums and nullable enums
+- Objects such as records: a form per member, or a JSON field when a member is not a supported type or the parameter is nullable
 
 **Parameter units:**
 
@@ -512,7 +534,26 @@ public partial class Server
 - The property attribute name (e.g., `"Start"`) must match the method name without the `Async` suffix
 - The `IsEnabled` property should be `[Derived]` so it automatically updates when dependencies change
 - When `IsEnabled` is `false`, the button is disabled in the UI
-- This uses the `TrackingScope` for automatic re-rendering when the derived property changes
+- The attribute name is `IsEnabled`, without the `HB:` prefix of the HomeBlaze metadata: it describes the operation itself, so an external source can provide it and a connector that exports attributes shows it under this name
+- The button renders again by itself when the derived property changes, because its render read it
+
+## Categories
+
+`[Category("...")]` from `System.ComponentModel` on a `[State]` property or on an `[Operation]` or `[Query]` method puts it under a heading of that name in the property panel, below the members without a category.
+
+```csharp
+[State("Speed", Position = 3)]
+[Category("Speed")]
+public partial int CurrentSpeed { get; set; }
+
+[Operation(Title = "Set Speed", Position = 1)]
+[Category("Speed")]
+public void SetTargetSpeed(int speed) { /* ... */ }
+```
+
+- Categories are ordered by the lowest `Position` of their state properties. Categories with only methods come last, and names break ties.
+- A `[Category]` on an interface member applies to the class member that implements it. One on the class member wins, and `[Category("")]` there removes the category. The shared interfaces in `HomeBlaze.Abstractions` carry "Device", "Network", "Light", "Playback", "Volume", "Track", "Lock" and "Door" this way.
+- Names are case-sensitive. .NET shows "Default" as "Misc", "Config" as "Configurations", "DragDrop" as "Drag Drop" and "WindowStyle" as "Window Style".
 
 ## Background Services
 
@@ -564,15 +605,19 @@ public partial class Motor
     [State("Target")]
     public partial int TargetSpeed { get; set; }
 
-    [PropertyAttribute(nameof(TargetSpeed), "Minimum")]
+    [PropertyAttribute(nameof(TargetSpeed), KnownAttributes.Minimum)]
     public partial int TargetSpeed_Minimum { get; set; }
 
-    [PropertyAttribute(nameof(TargetSpeed), "Maximum")]
+    [PropertyAttribute(nameof(TargetSpeed), KnownAttributes.Maximum)]
     public partial int TargetSpeed_Maximum { get; set; }
 }
 ```
 
-This associates `TargetSpeed_Minimum` and `TargetSpeed_Maximum` as metadata for `TargetSpeed`, enabling UI features like range sliders.
+This associates `TargetSpeed_Minimum` and `TargetSpeed_Maximum` as metadata for `TargetSpeed`.
+
+### Range Attributes
+
+`KnownAttributes.Minimum` and `KnownAttributes.Maximum` give a number property its range, declared as above. A widget that shows or sets a number within a range reads them when the page sets no range of its own, and only when their value is a number; [Ranges](../administration/widgets/basics.md#ranges) has the order in which the widget looks for each end, including the range 0 to 1 of a property with `StateUnit.Percent`. Like `KnownAttributes.IsEnabled` and unlike `State` and `Configuration`, they have no `HB:` prefix: they describe the value and not how HomeBlaze shows it, so they read naturally where a connector exports the property, and an external source can provide them under the same name.
 
 ## Complete Example: Motor
 
@@ -600,12 +645,13 @@ public partial class Motor : BackgroundService, IConfigurable, ITitleProvider, I
 
     [Configuration]
     [State("Target", Position = 2)]
+    [Category("Speed")]
     public partial int TargetSpeed { get; set; }
 
-    [PropertyAttribute(nameof(TargetSpeed), "Minimum")]
+    [PropertyAttribute(nameof(TargetSpeed), KnownAttributes.Minimum)]
     public partial int TargetSpeed_Minimum { get; set; }
 
-    [PropertyAttribute(nameof(TargetSpeed), "Maximum")]
+    [PropertyAttribute(nameof(TargetSpeed), KnownAttributes.Maximum)]
     public partial int TargetSpeed_Maximum { get; set; }
 
     [Configuration]
@@ -614,6 +660,7 @@ public partial class Motor : BackgroundService, IConfigurable, ITitleProvider, I
     // Live state (not persisted)
 
     [State("Speed", Position = 3)]
+    [Category("Speed")]
     public partial int CurrentSpeed { get; set; }
 
     [State(Unit = StateUnit.DegreeCelsius, Position = 4)]
@@ -626,10 +673,12 @@ public partial class Motor : BackgroundService, IConfigurable, ITitleProvider, I
 
     [Derived]
     [State("Delta", Position = 5)]
+    [Category("Speed")]
     public int SpeedDelta => TargetSpeed - CurrentSpeed;
 
     [Derived]
     [State("At Target", Position = 6)]
+    [Category("Speed")]
     public bool IsAtTargetSpeed => Math.Abs(SpeedDelta) < 50;
 
     // Display interfaces
@@ -728,7 +777,7 @@ The subject project should only depend on `Namotion.Interceptor` and optionally 
 ```
 
 **Why separate?**
-- Subjects can be used in headless scenarios (APIs, console apps, background services)
+- Subject libraries must work in a plain .NET host without HomeBlaze, registered through their `Add...` service collection extension, for headless scenarios (APIs, console apps, background services)
 - No dependency on Blazor, MudBlazor, or any UI framework
 - Easier testing without UI dependencies
 - Cleaner dependency graph
@@ -788,10 +837,14 @@ Only `[Configuration]` properties are persisted. The `$type` field enables polym
 | `[Configuration]` | User-editable settings | Yes | No (unless also `[State]`) |
 | `[Configuration(IsSecret = true)]` | Sensitive settings (API keys, passwords) | Yes | Never (masked in editor) |
 | `[State]` | Live values for display | No | Yes |
-| `[Configuration] + [State]` | Editable and displayed | Yes | Yes |
+| `[Configuration] + [State]` | Editable and displayed, but not writable through MCP's `set_property`, see [AI Agents](../administration/ai-agents.md#tools-and-permissions); expose a write through an operation instead | Yes | Yes |
+| `[Configuration] + [SubjectPath]` | Path with a picker, see [Path Properties](#path-properties) | Yes | No (unless also `[State]`) |
+| `[State] + [SubjectPath(type)]` | Link to the subject at a canonical path, see [Path Properties](#path-properties) | No | Yes (as the subject) |
 | `[Derived]` | Computed from other properties | No | Only if also `[State]` |
 | `[Operation]` | Executable actions from UI | No | Yes (as buttons) |
+| `[Category]` on a property or method | Heading in the property panel, see [Categories](#categories) | No | Yes |
 | `[Slot]` | Content that a markdown page fills in | No | Rendered by the widget |
+| `[Configuration] + [Slot]` | A slot on a page that a configuration file can also hold, see [Content Slots](#content-slots) | Yes, as configuration in a `*.json` file, never on a page | Rendered by the widget |
 | `[DisplayName]`, `[Description]`, `[Category]`, `[SubjectIcon]` | Describe the type in the create dialog | No | In the create dialog |
 | `[ExcludeFromCreation]`, `[SingleInstance]` | Hide the type from the create dialog | No | No |
 
@@ -818,7 +871,7 @@ Core platform interfaces and attributes:
 
 | Area | Contents |
 |------|----------|
-| Attributes | `[Configuration]`, `[State]`, `[Operation]`, `[Query]`, `[Slot]`, `[SubjectIcon]`, `[ExcludeFromCreation]`, `[SingleInstance]`, `StateUnit` |
+| Attributes | `[Configuration]`, `[State]`, `[Operation]`, `[Query]`, `[Slot]`, `[SubjectPath]`, `[SubjectIcon]`, `[ExcludeFromCreation]`, `[SingleInstance]`, `StateUnit` |
 | Display | `ITitleProvider`, `IIconProvider` |
 | Lifecycle | `IConfigurable`, `IMonitoredService`, `IServerSubject` |
 | Messaging | `IEvent`, `ICommand`, `IMessageBus`, `INotificationPublisher` |
@@ -918,9 +971,51 @@ private IInterceptorSubject? ResolveSubject()
 
 `ResolveScopedSubject` and `ResolveScopedValue` are extension methods in `HomeBlaze.Services`. When the subject is on a markdown page, a relative path starts at the page and its first segment can be the name of a block on that page, as [Paths](../administration/paths.md) describes for page authors. When the subject is not on a page, they resolve relative to the subject, like `ResolveSubject` and `ResolveValue` with the subject as the third argument.
 
+### Path Properties
+
+`[SubjectPath]` on a `string` `[Configuration]` property makes the generated properties editor show a [`SubjectPathField`](#subjectpathfield-component), so that the path can be picked as well as typed. Without a type the path leads to a property, and with a type to a subject of that type, which can be an interface:
+
+```csharp
+[Configuration]
+[SubjectPath]
+public partial string? Path { get; set; }
+
+[Configuration]
+[SubjectPath(typeof(ValueMap))]
+public partial string? Map { get; set; }
+```
+
+Without a type, `Kind` says what the path leads to, with the flags of `SubjectPathKind` that combine with OR: `Property`, the default, for a property that holds a value, `Attribute` for an attribute of a property or of an operation, such as `Minimum`, and `Operation` for an `[Operation]` or `[Query]` method. The picker lists an attribute below its property and never offers the metadata of `KnownAttributes.State` and `KnownAttributes.Configuration`. An attribute is a property of the subject, so its path is the name under which the subject registers it, for example `/Demo/Conveyor/TargetSpeed_Minimum`, or `Speed@Minimum` for an attribute added at runtime.
+
+`ValueTypes` names the types that the value of a property or an attribute may have, and null, the default, accepts any type. A nullable type counts as its underlying type. A type matches when it is assignable to one of them or, for an open generic type, when it implements or derives from a closed form of it. `typeof(Enum)` matches only enum types, not a property declared as `System.Enum`. `typeof(INumber<>)` matches the numbers that the number widgets read: the built-in integral types, `float`, `double` and `decimal`, so neither `char` nor types such as `Half` or `Int128`. `ValueTypes` does not restrict an operation. `IsWritable = true` keeps only properties and attributes with a public setter and never matches an operation. `Kind`, `ValueTypes` and `IsWritable` are ignored for a path to a subject, so do not set them together with a type:
+
+```csharp
+[Configuration]
+[SubjectPath(ValueTypes = [typeof(INumber<>)], IsWritable = true)]
+public partial string? Path { get; set; }
+
+[Configuration]
+[SubjectPath(Kind = SubjectPathKind.Operation)]
+public partial string? Operation { get; set; }
+
+[Configuration]
+[SubjectPath(Kind = SubjectPathKind.Property | SubjectPathKind.Operation, ValueTypes = [typeof(bool), typeof(Enum)])]
+public partial string? Target { get; set; }
+```
+
+The attribute only changes the editor: the subject still resolves the path itself. The picker returns absolute paths, so a relative path has to be typed.
+
+On a `[State]` property with a type, the property panel shows the subject at the path with a button that opens it. Use it to point at a subject elsewhere in the tree without attaching it, see [Shared Child Subjects](#shared-child-subjects):
+
+```csharp
+[State("Device")]
+[SubjectPath(typeof(IInterceptorSubject))]
+public partial string? DevicePath { get; internal set; }
+```
+
 ### SubjectPathField Component
 
-For subject path configuration properties, use the `SubjectPathField` component in edit forms. It provides a text input with a browse button that opens a tree picker dialog:
+In an Edit component of your own, use the `SubjectPathField` component for a path. It provides a text input with a browse button that opens a tree picker dialog:
 
 ```razor
 @using HomeBlaze.Components.Inputs
@@ -936,7 +1031,7 @@ For subject path configuration properties, use the `SubjectPathField` component 
 - Text input for direct path entry
 - Search icon button opens tree picker dialog
 - Tree shows all subjects with lazy loading
-- State properties and child properties are displayed
+- State properties and child properties are displayed, and operations when `CanSelectProperty` accepts them
 - Disabled properties shown grayed but still selectable
 - Preview shows resolved value
 
@@ -947,9 +1042,13 @@ For subject path configuration properties, use the `SubjectPathField` component 
 | `Value` | `string?` | `null` | The path value (two-way bindable) |
 | `Label` | `string` | `"Path"` | Input label |
 | `Placeholder` | `string` | `"Enter path or click to browse"` | Placeholder text |
-| `Variant` | `Variant` | `Variant.Outlined` | MudBlazor input variant |
+| `Variant` | `Variant` | `Variant.Text` | MudBlazor input variant |
+| `Required` | `bool` | `false` | Whether a `MudForm` reports the empty field as invalid |
 | `LocalSubjects` | `IDictionary<string, IInterceptorSubject>?` | `null` | Additional local subjects to show in picker |
 | `Class` | `string?` | `null` | CSS class for styling |
+| `IsPropertyVisible` | `Func<RegisteredSubjectProperty, bool>?` | `null` | Which properties the picker shows |
+| `CanSelectProperty` | `Func<RegisteredSubjectProperty, bool>?` | `null` | Which properties can be picked. An operation is listed only when this accepts it. Typed text is not checked |
+| `CanSelectSubject` | `Func<IInterceptorSubject, bool>?` | `null` | Which subjects can be picked. Typed text is not checked |
 
 ---
 
@@ -973,6 +1072,45 @@ This hides the subject from:
 - MCP `browse` and `search` tool results
 
 Use this for internal subjects that are part of a parent subject's implementation but have no meaning to end users or AI agents (e.g., parsed HTML segments, render expressions).
+
+### Page Layout Types
+
+A type whose blocks only lay out a page, such as a card or a tab layout, is marked with `[PageLayout]`. Its blocks act on nothing and hold no secret, so an AI agent with the permission to edit page layout may add, change, remove and move them, see [AI Agents](../administration/ai-agents.md#editing-page-layout). The attributes of its properties decide what such a block may hold:
+
+- A `[SubjectPath]` with a subject type must lead to an existing subject.
+- A `[LinkAddress]` may only hold a relative address or one with http, https or mailto.
+- A block that sets a `[MediaAddress]`, such as the picture of a card, is no layout block.
+
+```csharp
+[PageLayout]
+[InterceptorSubject]
+public partial class Widget : ITitleProvider, IConfigurable
+{
+    [Configuration]
+    [SubjectPath(typeof(IInterceptorSubject))]
+    public partial string Path { get; set; }
+}
+```
+
+Mark only types whose configuration is plain values and that do nothing but show content.
+
+### Properties Shown on Pages
+
+A `{{ path }}` expression on a page and a [value widget](../administration/widgets/basics.md#value-widgets) show the value of a property they reach only when the property is displayable: a partial (intercepted) property, a `[Derived]` property or a property with `[State]`, on the class or through an interface. An expression shows nothing and a value widget shows a dash for:
+
+- A plain property, a public property without `[State]` that is no partial or `[Derived]` property. It is registered too but is no tracked value of the subject and can hold internal data, such as the text an agent is still writing. Mark a computed value that pages should show with `[Derived]`.
+- A default property of an interface without `[State]`, such as `bool? IsDoorClosed => DoorState switch { ... }`, unless it is marked with `[Derived]`. It is no partial property of the class, so it counts as a plain property otherwise.
+- A secret configuration property (`[Configuration(IsSecret = true)]`).
+- A property marked with `[ExcludeFromExpressions]`, for a value that can hold secrets in another form, such as the raw source of a file.
+
+A displayable property whose value type holds a secret configuration member, such as a record with a property marked `[Configuration(IsSecret = true)]`, renders as empty text, since the text of a record shows its members.
+
+Every other configuration value of any subject is shown by design, also to an AI agent that reads a page with `ReadEvaluatedContent`, while the MCP tools themselves expose only state. Mark a value that must not appear on a page as secret.
+
+```csharp
+[ExcludeFromExpressions]
+public partial string? Content { get; private set; }
+```
 
 ---
 
@@ -1018,6 +1156,7 @@ Widgets are compact visual representations shown in dashboards and markdown page
     {
         <!-- Inline editing when page is in edit mode -->
         <MudSlider T="int"
+                   Class="edit-mode-interactive"
                    Value="@MotorSubject.TargetSpeed"
                    ValueChanged="@OnSpeedChanged"
                    Min="0" Max="3000" />
@@ -1060,17 +1199,18 @@ public bool IsEditing { get; set; }
 
 ### Auto Edit Button
 
-When a widget has a corresponding Edit component, the host automatically renders an edit button overlay when `IsEditing` is true:
+In the Inline and Split modes of a page, a click on a widget selects it, and the host shows a bar with its actions above the top right corner of the widget. Every widget block of a page that shows something can be selected. A block that shows nothing, such as a `ValueMap`, is hidden while the page is edited inline and is edited in the [page editor](../administration/pages.md#editing-in-the-page-editor). When the widget has an Edit component or configuration properties, the bar has an edit button. A widget without either, such as a `ValueList`, gets only the outline, and the bar when it has a parent to select:
 
-- The button appears in the top-right corner of the widget
-- Clicking opens the `SubjectEditDialog` with the Edit component
+- Clicking it opens the `SubjectEditDialog` with the Edit component, or with the generated properties editor without one
+- A widget inside another one has an arrow up button that selects the widget around it, and Escape or a click on the page clears the selection
+- The content of a widget takes no mouse input while the page is edited, so that a click selects the widget instead of operating it. A part that is meant to be used while the page is edited takes it back with the class `edit-mode-interactive`, as the slider above does, or with `edit-mode-selected-interactive` once its widget is selected
 - No boilerplate needed in widget components
 
 ### Content Slots
 
 A widget type can take content from the markdown page it is used on: text, expressions and other widgets. The type declares where the content goes with `[Slot]` on properties, and the page fills these properties from the content of the block. The attribute is in `HomeBlaze.Abstractions.Attributes`.
 
-[Markdown Pages](../administration/pages.md) is the guide for the page side: the colon lines that open and end a block, the arguments and what a page author sees when something is wrong. [Page Widgets](../administration/page-widgets.md) is the reference of the widgets that ship, and [Page Errors](../administration/page-errors.md) lists the messages. This section is the side of the widget author. Its samples of page source use the names of that guide: a block starts with a head line of colons and a name, a block whose name has no dot is a slot block, and a closing line is written only where the next head line does not end the block.
+[Markdown Pages](../administration/pages.md) is the guide for the page side: the colon lines that open and end a block, the arguments and what a page author sees when something is wrong. [Widgets](../administration/widgets/overview.md) is the reference of the widgets that ship, and [Page Errors](../administration/page-errors.md) lists the messages. This section is the side of the widget author. Its samples of page source use the names of that guide: a block starts with a head line of colons and a name, a block whose name has no dot is a slot block, and a closing line is written only where the next head line does not end the block.
 
 #### Declaring Slots
 
@@ -1204,6 +1344,8 @@ What a page author cannot do with each kind:
 - **Typed slots are configured like widget blocks**: A block for a slot with a class of your own takes the `[Configuration]` properties of that class as arguments and in a `json` block, with the same checks as a widget block.
 - **One block for a single value**: A second block for a slot that is no array is an error on the page.
 
+**An editor for a list of typed values.** To add or remove a value, the editor of a widget replaces the array with a new one and saves the owner, as the editors of `GridLayout` and `CanvasLayout` do with `RootManager.WriteConfigurationOrWarnAsync`. To change a value, it saves that value, which writes the head line and the `json` block of its block. A new value is written as a block after the last block of the slot, as [Editing in the Page Editor](../administration/pages.md#editing-in-the-page-editor) describes for cells and nodes. The order of the values is never written, because the text decides it: a save with the values in another order than their blocks is refused, and so is a save with one value twice.
+
 #### Rules for a Slot Property
 
 A slot property must meet these rules. A declaration that breaks one cannot be used: every block of that type then shows an error box with the message of the table, with the short type name and a colon before it, like "Gauge: the slot 'Content' needs a setter." No instance is created.
@@ -1226,7 +1368,7 @@ More that a declaration should follow:
 - **Name**: The slot name defaults to the property name and is case-sensitive. For an array, set the singular explicitly, like `[Slot("Item")]` on `Items`.
 - **Arrays**: Initialize an array property with an empty array in the constructor. All values of one slot have the same type. Mixed types in one list slot are not supported.
 - **The class of a typed slot**: It must implement `IConfigurable` and be known to HomeBlaze like every subject type. Otherwise the page shows "The type 'MyCompany.Widgets.Sidebar' of the slot 'Sidebar' could not be created. It must be a registered configurable subject type." Give it a default slot of its own when its blocks should take content. Put `[ExcludeFromCreation]` on it, because it only exists inside its widget and the create dialog would offer it on its own otherwise, see [Hiding a Type](#hiding-a-type).
-- **Not configuration**: A slot property is not configuration and is not saved. The content lives in the text of the page. Do not put `[Configuration]` on it.
+- **Not configuration on a page**: A slot property is not configuration on a page. Its values live in the text of the page as blocks, and an argument or a name in the `json` block that sets it is an error on the page that says how the slot is filled. Only an empty list of a slot that takes several blocks is ignored in the `json` block, because earlier versions wrote one for every layout. Put `[Configuration]` on it as well only when the same property must also be read and written in a configuration file, as `GridLayout.Cells` does.
 
 #### Rendering Slots
 
@@ -1292,7 +1434,7 @@ A widget component renders a slot with `SubjectComponent` and does not need to k
     var tabs = Layout?.Tabs ?? [];
 }
 
-<MudTabs KeepPanelsAlive="true">
+<MudTabs>
     @foreach (var tab in tabs)
     {
         <MudTabPanel Text="@tab.Title">
@@ -1312,8 +1454,8 @@ A widget component renders a slot with `SubjectComponent` and does not need to k
 Rules for rendering:
 
 - **`null` renders nothing**: `SubjectComponent` with a slot that is `null` renders nothing. Test for `null` only when the widget shows something around the slot, like the divider of the card. A slot block without content gives a value that is not `null` and renders nothing.
-- **Read in the render, keep nothing**: Read slot properties inside the render and do not keep their values in fields. The page renders again when a property changes that was read while it rendered, and a change of the page text assigns new values and new arrays.
-- **Content that renders later is not tracked**: Content inside a child component that renders on its own later is not tracked that way, for example a tab panel that is only created when it is first opened. `TabLayout` keeps all its panels alive for this reason.
+- **Read in the render, keep nothing**: Read slot properties inside the render and do not keep their values in fields. Each component renders again when a property changes that its own render read, wherever and whenever it renders, and a change of the page text assigns new values and new arrays.
+- **Not in lifecycle methods**: A value read in `OnInitialized`, `OnParametersSet`, after an `await` or in an event handler is not tracked, because a change renders the component again without running these methods. Read values that the markup shows in the render.
 - **Identity of typed values**: A typed value whose block has a `#name` stays the same instance when the page text changes, so a component can compare instances to keep its state. `TabLayoutWidget.razor` keeps the selected tab this way and compares it with the tabs of the current render only.
 
 #### A Subject on a Page: Identity and Lifecycle
@@ -1326,7 +1468,7 @@ What a widget author must know about the life of a subject that a page creates. 
 - **Kept across reloads**: The page is read again with every change of its text. While the block stays, the page keeps the instance and updates it in place: it sets every `[Configuration]` property that the block names again, also when the value did not change, calls `ApplyConfigurationAsync`, and assigns the slots again. Expect all of this to run often.
 - **A new instance**: The page creates a new instance when the name, the position or the type of the block changes, when an argument is removed from the block, and when the block around it gets a new instance. The section "What an Edit of the Page Keeps" of [Markdown Pages](../administration/pages.md#what-an-edit-of-the-page-keeps) has the rules as a page author sees them.
 - **Slot values**: A content slot keeps its value while its block stays, and a list slot gets a new array on every reload. A slot whose block was removed is set to `null`, or to an empty array.
-- **Subjects in the configuration**: A subject that is a value of a `[Configuration]` property, like the child of a grid cell, is created again on every reload, because the configuration is applied again.
+- **Subjects in the configuration**: A subject that the `json` block holds as a value of a `[Configuration]` property is created again on every reload, because the configuration is applied again. A property that is a slot as well, like the `Child` of a grid cell, is filled from the content of its block and follows the rule for slot values.
 - **Release after an error**: The subject of a block that ends as an error box is released again. This also holds for the typed slot values and nested subjects that were created for it. A hosted subject can therefore get `StopAsync` without a preceding `StartAsync`.
 - **Failures are shown**: An exception from the constructor, from a property setter or from `ApplyConfigurationAsync` does not take the page down. The block shows an error box with the message of the exception, and the log has the stack trace.
 - **Never wait for the own page**: A subject must not wait for a write or a reload of its own page from its constructor, from a property setter or from `ApplyConfigurationAsync`. The reloads of one page run one after the other, so such a wait would never end.
@@ -1716,4 +1858,4 @@ Page components provide full-page views:
 | Compact/card format | Yes | No | No |
 | Full configuration | No | Yes | No |
 | Uses IsEditing | Yes (optional) | No | Yes (provides) |
-| Auto edit button | Yes (if Edit exists) | N/A | No |
+| Auto edit button | Yes (if Edit component or configuration properties) | N/A | No |

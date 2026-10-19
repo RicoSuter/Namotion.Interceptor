@@ -20,13 +20,9 @@ public class DocumentationLinksTests
     private const string PagesFolder = "src/HomeBlaze/HomeBlaze/Data/Files";
     private const string PageExtension = ".md";
 
-    // Broken before this test existed and not fixed yet: the two plan pages are not in the repository.
-    // A link that is fixed must be taken off this list, which the second test checks.
-    private static readonly (string Page, string Url)[] KnownBrokenLinks =
-    [
-        (PagesFolder + "/Docs/plans/ai-agents.md", "mcp-extensions.md"),
-        (PagesFolder + "/Docs/plans/ai-agents.md", "../../../../../docs/plans/mcp-server.md")
-    ];
+    // Links that are broken and not fixed yet, as (page, url). A link that is fixed must be taken off this list,
+    // which the second test checks.
+    private static readonly (string Page, string Url)[] KnownBrokenLinks = [];
 
     private static readonly ConcurrentDictionary<string, HashSet<string>> HeadingIds = new();
 

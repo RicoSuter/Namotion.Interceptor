@@ -18,6 +18,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="..\HomeBlaze.AI.Tests\ExecutableScripts.cs" Link="ExecutableScripts.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\HomeBlaze\HomeBlaze.csproj" />
     <ProjectReference Include="..\..\Namotion.Interceptor.Testing\Namotion.Interceptor.Testing.csproj" />
     <ProjectReference Include="..\..\Namotion.Interceptor.Generator\Namotion.Interceptor.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />

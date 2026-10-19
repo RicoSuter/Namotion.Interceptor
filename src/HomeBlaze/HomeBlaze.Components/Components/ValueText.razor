@@ -1,8 +1,10 @@
 @* The value of a value widget: its text in the colour of its case, a dash when it is missing, or the error of its map. *@
+@* A widget reads all its values in one render, so an equal reading does not render the text again. *@
+@inherits Namotion.Interceptor.Blazor.TrackedComponentBase
 
 @if (Reading.MapError is not null)
 {
-    <MudAlert Severity="Severity.Error" Dense="true" data-testid="value-map-error">@Reading.MapError</MudAlert>
+    <WidgetArgumentError Message="@Reading.MapError" />
 }
 else if (Reading.IsMissing)
 {

@@ -1,0 +1,94 @@
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(FritzBoxWlan))]
+@implements ISubjectComponent
+
+<MudPaper Class="pa-4">
+    <MudStack Spacing="2">
+        <MudStack Row="true" AlignItems="AlignItems.Center">
+            <MudIcon Icon="@Icons.Material.Filled.Wifi" Class="mr-2" />
+            <MudText Typo="Typo.h6">@(Wlan?.Title ?? "WLAN")</MudText>
+            <MudSpacer />
+            @if (Wlan is FritzBoxGuestWlan guest)
+            {
+                <MudSwitch @key="_switchKey"
+                           T="bool"
+                           Value="@(guest.IsOn == true)"
+                           ValueChanged="isOn => SetGuestWlanAsync(guest, isOn)"
+                           Disabled="_isSwitching"
+                           Color="Color.Primary"
+                           aria-label="@($"Turn {guest.Title ?? "the guest WLAN"} on or off")" />
+            }
+            else
+            {
+                <MudChip T="string"
+                         Size="Size.Small"
+                         Color="@(Wlan?.IsOn == true ? Color.Success : Color.Default)"
+                         Variant="Variant.Filled">
+                    @(Wlan?.IsOn switch { true => "On", false => "Off", null => "Unknown" })
+                </MudChip>
+            }
+        </MudStack>
+
+        <MudDivider />
+
+        <MudText Typo="Typo.body2">
+            @(Wlan?.Band ?? string.Empty) @(Wlan?.Channel != null ? $"channel {Wlan.Channel}" : string.Empty)
+        </MudText>
+        <MudText Typo="Typo.body2">Clients: @(Wlan?.ClientCount?.ToString() ?? "—")</MudText>
+
+        @if (_errorMessage != null)
+        {
+            <MudAlert Severity="Severity.Error">@_errorMessage</MudAlert>
+        }
+    </MudStack>
+</MudPaper>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private FritzBoxWlan? Wlan => Subject as FritzBoxWlan;
+
+    private bool _isSwitching;
+    private string? _errorMessage;
+
+    // MudSwitch caches the last Value it was given and skips re-reading it when a render passes the same value
+    // again, so after a failed toggle it keeps showing the optimistic (wrong) position even though Value reverted
+    // to the real one. Changing @key forces a fresh switch instance that reads Value from scratch.
+    private int _switchKey;
+
+    private async Task SetGuestWlanAsync(FritzBoxGuestWlan guest, bool isOn)
+    {
+        if (_isSwitching)
+        {
+            return;
+        }
+
+        _isSwitching = true;
+        _errorMessage = null;
+        try
+        {
+            if (isOn)
+            {
+                await guest.TurnOnAsync(CancellationToken.None);
+            }
+            else
+            {
+                await guest.TurnOffAsync(CancellationToken.None);
+            }
+        }
+        catch (Exception exception)
+        {
+            // Catches every failure: an uncaught exception from a UI event handler ends the Blazor circuit.
+            _errorMessage = exception.Message;
+        }
+        finally
+        {
+            if (guest.IsOn != isOn)
+            {
+                _switchKey++;
+            }
+
+            _isSwitching = false;
+        }
+    }
+}

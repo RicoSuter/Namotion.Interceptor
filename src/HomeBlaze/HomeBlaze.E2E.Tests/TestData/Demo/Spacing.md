@@ -1,0 +1,158 @@
+---
+title: Spacing Demo
+---
+
+# Spacing Demo
+
+:: HomeBlaze.Samples.Motor#spacingmotor Name="Spacing Motor" TargetSpeed=1000 SimulationInterval=00:00:01
+::
+
+Text before the gauge card.
+
+:: HomeBlaze.Components.Card#gaugecard Title="Gauge Card"
+::: HomeBlaze.Components.FlowLayout MinWidth=120
+:::: Item
+::::: HomeBlaze.Components.Gauge Path=spacingmotor/CurrentSpeed Minimum=0 Maximum=3000 Label="First"
+:::: Item
+::::: HomeBlaze.Components.Gauge Path=spacingmotor/CurrentSpeed Minimum=0 Maximum=3000 Label="Second"
+::
+
+Text before the top flow.
+
+:: HomeBlaze.Components.FlowLayout#topflow MinWidth=300
+::: Item
+:::: HomeBlaze.Components.Card Title="Short Card"
+One line.
+::: Item
+:::: HomeBlaze.Components.Card Title="Tall Card"
+::::: HomeBlaze.Components.ValueList
+:::::: Value Path=spacingmotor/CurrentSpeed
+:::::: Value Path=spacingmotor/TargetSpeed
+:::::: Value Path=spacingmotor/Temperature
+::::: Footer
+:::::: HomeBlaze.Components.OperationButton Path=spacingmotor/EmergencyStop Color=Error Variant=Outlined
+::: Item
+:::: HomeBlaze.Components.Card Title="Third Card"
+Third.
+::: Item
+:::: HomeBlaze.Components.Card Title="Fourth Card"
+Fourth.
+::
+
+Text after the top flow.
+
+:: HomeBlaze.Components.Card Title="Mixed Card"
+A paragraph first.
+
+::: HomeBlaze.Components.FlowLayout MinWidth=160
+:::: Item
+::::: HomeBlaze.Components.ValueTile Path=spacingmotor/CurrentSpeed Label="Speed"
+:::: Item
+::::: HomeBlaze.Components.ValueTile Path=spacingmotor/TargetSpeed Label="Target"
+:::
+
+A paragraph last.
+::
+
+:: HomeBlaze.Components.Card Title="List Card"
+::: HomeBlaze.Components.ValueList
+:::: Value Path=spacingmotor/Temperature Label="Temperature"
+::::: HomeBlaze.Components.Progress Path=spacingmotor/Temperature Minimum=20 Maximum=100
+:::: Value Path=spacingmotor/TargetSpeed Label="At target"
+::::: HomeBlaze.Components.Indicator Path=spacingmotor/IsAtTargetSpeed Kind=Icon Icon=Speed
+::
+
+:: HomeBlaze.Components.Card Title="Heading Card"
+A paragraph above the heading.
+
+#### Heading in a card
+
+A paragraph below the heading.
+::
+
+Text before the map.
+
+:: HomeBlaze.Components.ValueMap#spacingmap
+::: Case Value=Running Text="Running" Color=Success
+::
+
+Text after the map.
+
+:: HomeBlaze.Components.Card Title="Footer Card"
+Body of the footer card.
+::: Footer
+:::: HomeBlaze.Components.OperationButton Path=spacingmotor/EmergencyStop Color=Error Variant=Outlined
+:::: HomeBlaze.Components.Control Path=spacingmotor/GetDiagnostics
+::
+
+:: HomeBlaze.Components.Card Title="Controls Card"
+::: HomeBlaze.Components.Switch Path=spacingmotor/IsPowered Label="Power" On=spacingmotor/PowerOn Off=spacingmotor/PowerOff
+::: HomeBlaze.Components.Select Path=spacingmotor/Mode Label="Mode"
+::: HomeBlaze.Components.Slider Path=spacingmotor/Load Label="Load"
+::
+
+:: HomeBlaze.Components.TabLayout#spacingtabs
+::: Tab Title="Hidden First"
+:::: HomeBlaze.Components.Responsive To=Xs
+::::: HomeBlaze.Components.Card Title="Phone Card"
+Only on a phone.
+:::: HomeBlaze.Components.Responsive From=Sm
+::::: HomeBlaze.Components.Card Title="Wide Card"
+Not on a phone.
+:::: HomeBlaze.Components.Alert
+The last block of the tab.
+::
+
+:: HomeBlaze.Components.ExpansionPanels#spacingpanels
+::: Panel Title="Open Panel" Expanded=true
+:::: HomeBlaze.Components.Card Title="Panel Card"
+In a panel.
+::
+
+Text after the panels.
+
+:: HomeBlaze.Components.GridLayout#spacinggrid Rows=1 Columns=3
+::: Cell Row=0 Column=0
+Text in a cell.
+::: Cell Row=0 Column=1
+:::: HomeBlaze.Components.Card Title="Cell Card"
+In a cell.
+::: Cell Row=0 Column=2
+:::: HomeBlaze.Components.ValueTile Path=spacingmotor/CurrentSpeed Label="Cell Speed"
+::
+
+:: HomeBlaze.Components.CanvasLayout#spacingcanvas MinHeight=200
+::: Node X=20 Y=20 Width=300 Height=120
+Text in a node.
+::
+
+Text before the code table.
+
+| Widget | Type name | What it does |
+|--------|-----------|--------------|
+| ExpansionPanels | `HomeBlaze.Components.ExpansionPanels` | Page content in panels that open and close |
+| HistoryChart | `HomeBlaze.History.Blazor.HistoryChart` | The recorded history of numbers as lines and of states as bands |
+
+Text after the code table, with code that is wider than a phone: `Href="../Docs/administration/widgets/expansion-panels.md#behavior-and-limits"`.
+
+| Argument | Kind of value | Default | Meaning |
+|----------|---------------|---------|---------|
+| `Subtitle` | Text | None | A smaller line below the title |
+| `IconColor` | Color | `Default` | The color of the icon |
+| `AspectRatio` | Text | None | The width and the height of the card in the form `W:H` |
+
+| Name | Word |
+|------|------|
+| Unbreakable | Averyveryverylongwordwithoutanyplacetobreakthatisfarwiderthanthescreenofaphone |
+
+:: HomeBlaze.Components.Card Title="Table Card"
+| Name | Value |
+|------|-------|
+| First | One |
+
+A paragraph between two tables.
+
+| Name | Value |
+|------|-------|
+| Second | Two |
+::

@@ -87,6 +87,28 @@ public class MethodMetadataTests
     }
 
     [Fact]
+    public async Task WhenATrulyAsyncMethodReturnsAValue_ThenTheResultIsUnwrapped()
+    {
+        // Arrange
+        static async Task<string> ReturnAfterAwaitAsync()
+        {
+            await Task.Yield();
+            return "async-result";
+        }
+
+        var metadata = new MethodMetadata(_ => ReturnAfterAwaitAsync())
+        {
+            ResultType = typeof(string),
+        };
+
+        // Act
+        var result = await metadata.InvokeAsync(null, null, CancellationToken.None);
+
+        // Assert
+        Assert.Equal("async-result", result);
+    }
+
+    [Fact]
     public async Task InvokeAsync_WithFuncConstructor_AwaitsPlainTask()
     {
         // Arrange

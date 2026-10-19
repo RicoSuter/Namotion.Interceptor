@@ -27,12 +27,10 @@ public class MarkdownEditorTests
         // Navigate to Inline.md (has the :: HomeBlaze.Samples.Motor#mymotor block)
         await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/Inline.md");
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+        await page.WaitUntilInteractiveAsync();
 
         // Open Split mode via dropdown menu
-        var editMenu = page.Locator("[data-testid='edit-mode-menu']");
-        await Assertions.Expect(editMenu).ToBeVisibleAsync(new() { Timeout = 30000 });
-        await editMenu.ClickAsync();
-        await page.GetByText("Split").ClickAsync();
+        await page.SelectEditModeAsync("Split");
 
         // Wait for Monaco editor to appear
         var monacoEditor = page.Locator(".monaco-editor");
@@ -62,12 +60,10 @@ public class MarkdownEditorTests
         // Navigate to Inline.md (has {{ mymotor/Temperature }})
         await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/Inline.md");
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+        await page.WaitUntilInteractiveAsync();
 
         // Open Split mode via dropdown menu
-        var editMenu = page.Locator("[data-testid='edit-mode-menu']");
-        await Assertions.Expect(editMenu).ToBeVisibleAsync(new() { Timeout = 30000 });
-        await editMenu.ClickAsync();
-        await page.GetByText("Split").ClickAsync();
+        await page.SelectEditModeAsync("Split");
 
         // Wait for Monaco editor
         var monacoEditor = page.Locator(".monaco-editor");
@@ -92,7 +88,7 @@ public class MarkdownEditorTests
     }
 
     [Fact]
-    public async Task WhenInlineModeIsEnabled_ThenWidgetEditButtonsAreVisible()
+    public async Task WhenAWidgetIsSelectedInInlineMode_ThenItsEditButtonIsVisible()
     {
         // Arrange
         var page = await _fixture.CreatePageAsync();
@@ -100,18 +96,46 @@ public class MarkdownEditorTests
         // Navigate to Inline.md (has a motor widget)
         await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/Inline.md");
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+        await page.WaitUntilInteractiveAsync();
 
         // Act
         // Open Inline mode via dropdown menu (enables IsEditing on widgets)
-        var editMenu = page.Locator("[data-testid='edit-mode-menu']");
-        await Assertions.Expect(editMenu).ToBeVisibleAsync(new() { Timeout = 30000 });
-        await editMenu.ClickAsync();
-        await page.GetByText("Inline").ClickAsync();
+        await page.SelectEditModeAsync("Inline");
+        var actionBar = await page.Locator(".subject-component-wrapper.selectable").First.SelectWidgetAsync();
 
         // Assert
-        // After enabling edit mode, edit buttons on widgets should be visible
-        var editButtonAfter = page.Locator("[data-testid='edit-subject-button']").First;
-        await Assertions.Expect(editButtonAfter).ToBeVisibleAsync(new() { Timeout = 10000 });
+        await Assertions.Expect(actionBar.GetByTestId("edit-subject-button")).ToBeVisibleAsync(new() { Timeout = 10000 });
+    }
+
+    [Fact]
+    public async Task WhenInlineModeIsEnabled_ThenAWidgetWithoutItsOwnEditComponentOpensTheGeneratedEditor()
+    {
+        // Arrange
+        var page = await _fixture.CreatePageAsync();
+        await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/Values.md");
+        await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+        await page.WaitUntilInteractiveAsync();
+
+        // A top-level indicator, not one in a card header, whose wrapper would also hold the card's button.
+        var indicatorWrapper = page.Locator(".subject-component-wrapper:has(> .mud-chip-container > [data-testid=indicator])").First;
+        await Assertions.Expect(indicatorWrapper).ToBeVisibleAsync(new() { Timeout = 30000 });
+
+        // Act
+        await page.SelectEditModeAsync("Inline");
+
+        var actionBar = await indicatorWrapper.SelectWidgetAsync();
+        await actionBar.GetByTestId("edit-subject-button").ClickAsync();
+
+        // Assert
+        var dialog = page.GetByRole(AriaRole.Dialog);
+        var pathInput = dialog.GetByLabel("Path", new() { Exact = true });
+        await Assertions.Expect(pathInput).ToHaveValueAsync("valuemotor/Status", new() { Timeout = 10000 });
+        await Assertions.Expect(pathInput).ToHaveAttributeAsync("data-testid", "subject-path-field");
+
+        // The picker button is the adornment that shares the input's container.
+        await pathInput.Locator("xpath=..").Locator(".mud-input-adornment button").ClickAsync();
+        var pickerDialog = page.GetByTestId("subject-path-picker-dialog");
+        await Assertions.Expect(pickerDialog).ToBeVisibleAsync(new() { Timeout = 10000 });
     }
 
     [Fact]
@@ -123,13 +147,11 @@ public class MarkdownEditorTests
         // Navigate to Inline.md
         await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/Inline.md");
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+        await page.WaitUntilInteractiveAsync();
 
         // Act
         // Open Split mode via dropdown menu
-        var editMenu = page.Locator("[data-testid='edit-mode-menu']");
-        await Assertions.Expect(editMenu).ToBeVisibleAsync(new() { Timeout = 30000 });
-        await editMenu.ClickAsync();
-        await page.GetByText("Split").ClickAsync();
+        await page.SelectEditModeAsync("Split");
 
         // Wait for Monaco editor
         var monacoEditor = page.Locator(".monaco-editor");

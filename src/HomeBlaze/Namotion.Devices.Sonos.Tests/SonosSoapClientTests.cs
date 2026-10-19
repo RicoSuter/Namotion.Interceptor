@@ -228,6 +228,30 @@ public class SonosSoapClientTests
     }
 
     [Fact]
+    public async Task WhenAFaultCarriesSeveralErrorCodeElements_ThenTheFirstOneIsUsed()
+    {
+        // Arrange: a second errorCode must not stall the reader once the first one has already been parsed.
+        await using var speaker = Answer(
+            HttpStatusCode.InternalServerError,
+            AnswerStart +
+            "<s:Fault><faultcode>s:Client</faultcode><faultstring>UPnPError</faultstring>" +
+            "<detail><UPnPError xmlns=\"urn:schemas-upnp-org:control-1-0\">" +
+            "<errorCode>401</errorCode><errorCode>402</errorCode>" +
+            "</UPnPError></detail></s:Fault>" +
+            EnvelopeEnd);
+        using var httpClient = new HttpClient();
+        var client = new SonosSoapClient(httpClient, speaker.BaseUri);
+
+        // Act
+        var exception = await Assert.ThrowsAsync<SonosFaultException>(
+                () => client.InvokeAsync(SonosService.AvTransport, "Next", [("InstanceID", "0")], CancellationToken.None))
+            .WaitAsync(TimeSpan.FromSeconds(10));
+
+        // Assert
+        Assert.Equal(401, exception.UpnpErrorCode);
+    }
+
+    [Fact]
     public async Task WhenAFaultCarriesNoErrorCode_ThenTheExceptionHoldsTheFaultText()
     {
         // Arrange

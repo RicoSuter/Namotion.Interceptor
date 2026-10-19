@@ -70,7 +70,13 @@ public class MethodMetadata
     public int Position { get; init; }
 
     /// <summary>
-    /// Whether the UI should show a confirmation dialog before invoking this method.
+    /// The category the UI groups the method under, or null when it has none.
+    /// </summary>
+    public string? Category { get; init; }
+
+    /// <summary>
+    /// Whether the UI should show a confirmation dialog before invoking this method; see
+    /// <see cref="Attributes.OperationAttribute.RequiresConfirmation"/>.
     /// </summary>
     public bool RequiresConfirmation { get; init; }
 
@@ -103,19 +109,15 @@ public class MethodMetadata
         if (result is Task task)
         {
             await task.ConfigureAwait(false);
-            if (ResultType != null)
-            {
-                var taskType = task.GetType();
-                if (taskType.IsGenericType && taskType.GetGenericTypeDefinition() == typeof(Task<>))
-                {
-                    return taskType.GetProperty("Result")?.GetValue(task);
-                }
-            }
-            return null;
+            return ResultType != null ? GetTaskResult(task) : null;
         }
 
         return result;
     }
+
+    // An async method returns a subclass of Task<T> (its state machine box); GetProperty finds the inherited Result.
+    private static object? GetTaskResult(Task task) =>
+        task.GetType().GetProperty("Result")?.GetValue(task);
 
     private object?[] ResolveParameters(
         object?[]? userParameters,

@@ -437,7 +437,7 @@ public class MarkdownWidgetBlockTests
         Assert.Equal(
             content.Replace(
                 $":: {LeafType}#second Count=2",
-                $":: {LeafType}#second Name=\"New Name\" Count=9 Enabled=false Interval=00:00:00"),
+                $":: {LeafType}#second Name=\"New Name\" Count=9"),
             written);
     }
 
@@ -461,8 +461,8 @@ public class MarkdownWidgetBlockTests
         Assert.True(firstHandled);
         Assert.True(secondHandled);
         var expected =
-            $"intro\n\n:: {LeafType}#first Count=5 Enabled=false Interval=00:00:00\n::\n\n" +
-            $":: {LeafType}#second Count=7 Enabled=false Interval=00:00:00\n::\n\noutro\n";
+            $"intro\n\n:: {LeafType}#first Count=5\n::\n\n" +
+            $":: {LeafType}#second Count=7\n::\n\noutro\n";
         Assert.Equal(expected, await fixture.ReadAsync("page.md"));
         Assert.Equal(expected, page.Content);
     }

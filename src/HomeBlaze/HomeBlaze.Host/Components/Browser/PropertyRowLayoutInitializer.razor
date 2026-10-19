@@ -1,0 +1,34 @@
+@using Microsoft.AspNetCore.Http
+
+@implements IDisposable
+
+@inject PropertyRowLayoutService RowLayout
+@inject IHttpContextAccessor HttpContextAccessor
+@inject PersistentComponentState ApplicationState
+
+@code {
+    /// <summary>Cookie in which a browser remembers its row layout.</summary>
+    public const string CookieName = "homeblaze.rowlayout";
+
+    private const string StateKey = "property-row-layout";
+
+    private PersistingComponentStateSubscription _persistingSubscription;
+
+    protected override void OnInitialized()
+    {
+        _persistingSubscription = ApplicationState.RegisterOnPersisting(PersistLayout);
+
+        // Only the prerender has the request with the cookie, so it hands the layout over to the circuit.
+        RowLayout.Load(ApplicationState.TryTakeFromJson<string>(StateKey, out var persisted)
+            ? persisted
+            : HttpContextAccessor.HttpContext?.Request.Cookies[CookieName]);
+    }
+
+    private Task PersistLayout()
+    {
+        ApplicationState.PersistAsJson(StateKey, RowLayout.StoredValue);
+        return Task.CompletedTask;
+    }
+
+    public void Dispose() => _persistingSubscription.Dispose();
+}

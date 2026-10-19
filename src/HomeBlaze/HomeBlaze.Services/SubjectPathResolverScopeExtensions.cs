@@ -85,12 +85,28 @@ public static class SubjectPathResolverScopeExtensions
     }
 
     /// <summary>
-    /// Resolves the value of the property that <see cref="ResolveScopedProperty"/> finds for the path.
+    /// Resolves a property for showing its value, for example in a page expression or a value widget: the same as
+    /// <see cref="ResolveScopedProperty"/>, except that a property that is not
+    /// <see cref="SubjectRegistryExtensions.IsDisplayable"/>, such as a secret configuration property, resolves to null,
+    /// as if it did not exist.
+    /// </summary>
+    public static RegisteredSubjectProperty? ResolveScopedDisplayableProperty(
+        this SubjectPathResolver resolver,
+        string path,
+        PathStyle style,
+        IInterceptorSubject from)
+    {
+        return resolver.ResolveScopedProperty(path, style, from).AsDisplayable();
+    }
+
+    /// <summary>
+    /// Resolves the value for display of the property that <see cref="ResolveScopedDisplayableProperty"/> finds for the
+    /// path, so the value of a property that is not displayable is never returned.
     /// </summary>
     public static object? ResolveScopedValue(
         this SubjectPathResolver resolver,
         string path,
         PathStyle style,
         IInterceptorSubject from) =>
-        resolver.ResolveScopedProperty(path, style, from)?.GetValue();
+        resolver.ResolveScopedDisplayableProperty(path, style, from)?.GetValue();
 }

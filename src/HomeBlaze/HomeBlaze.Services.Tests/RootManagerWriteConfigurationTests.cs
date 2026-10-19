@@ -3,11 +3,14 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Interceptors;
 
 namespace HomeBlaze.Services.Tests;
 
 public class RootManagerWriteConfigurationTests : IDisposable
 {
+    private static readonly TimeSpan DeadlockTimeout = TimeSpan.FromSeconds(30);
+
     private readonly string _configurationFilePath =
         Path.Combine(Path.GetTempPath(), $"homeblaze-root-{Guid.NewGuid():N}.json");
 
@@ -62,6 +65,63 @@ public class RootManagerWriteConfigurationTests : IDisposable
         // Assert
         Assert.False(isWritten);
         Assert.False(File.Exists(_configurationFilePath));
+    }
+
+    [Fact]
+    public async Task WhenRootIsWrittenTwiceAtOnce_ThenTheFileHoldsTheLaterChange()
+    {
+        // Arrange
+        var child = new ChildSubject(_context) { ChildConfig = "first" };
+        _rootManager.Root = new ParentWithChildSubject(_context) { Child = child };
+        using var blockingRead = new BlockingReadAfterValue(child, nameof(ChildSubject.ChildConfig));
+        _context.AddService<IReadInterceptor>(blockingRead);
+        blockingRead.Arm();
+
+        // Act: the first write stops after it has read the old value, and the second starts with the new one then.
+        var firstWrite = Task.Run(() => _rootManager.WriteConfigurationAsync(child, CancellationToken.None));
+        await blockingRead.Reached.WaitAsync(DeadlockTimeout);
+        child.ChildConfig = "second";
+        var secondWrite = _rootManager.WriteConfigurationAsync(child, CancellationToken.None);
+        blockingRead.Release();
+        var results = await Task.WhenAll(firstWrite, secondWrite).WaitAsync(DeadlockTimeout);
+
+        // Assert
+        Assert.Equal([true, true], results);
+        Assert.Contains("\"childConfig\": \"second\"", await File.ReadAllTextAsync(_configurationFilePath));
+    }
+
+    /// <summary>Blocks the thread of the next read of one property of one subject, after the value was read, until it is released.</summary>
+    private sealed class BlockingReadAfterValue(IInterceptorSubject subject, string propertyName) : IReadInterceptor, IDisposable
+    {
+        private readonly ManualResetEventSlim _released = new();
+        private readonly TaskCompletionSource _reached = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _isArmed;
+
+        public Task Reached => _reached.Task;
+
+        public void Arm() => Volatile.Write(ref _isArmed, 1);
+
+        public void Release() => _released.Set();
+
+        public TProperty ReadProperty<TProperty>(ref PropertyReadContext<TProperty> context, ReadInterceptionDelegate<TProperty> next)
+        {
+            var value = next(ref context);
+            if (ReferenceEquals(context.Property.Subject, subject) &&
+                context.Property.Name == propertyName &&
+                Interlocked.Exchange(ref _isArmed, 0) == 1)
+            {
+                _reached.TrySetResult();
+                _released.Wait(DeadlockTimeout);
+            }
+
+            return value;
+        }
+
+        public void Dispose()
+        {
+            _released.Set();
+            _released.Dispose();
+        }
     }
 
     public void Dispose()

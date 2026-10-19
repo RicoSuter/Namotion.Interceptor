@@ -29,13 +29,14 @@ public partial class MyStromSwitch : BackgroundService,
     IPowerRelay,
     IPowerMeter,
     ITemperatureSensor,
-    INetworkAdapter
+    INetworkAdapter,
+    INetworkHost,
+    IUptimeState
 {
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<MyStromSwitch> _logger;
     private readonly SemaphoreSlim _configChangedSignal = new(0, 1);
 
-    private MyStromSwitchInformation? _information;
 
     [Configuration]
     public partial string Name { get; set; }
@@ -58,6 +59,9 @@ public partial class MyStromSwitch : BackgroundService,
     [State(IsDiscrete = true)]
     public partial ServiceStatus Status { get; internal set; }
 
+    // Tracked, so that the derived properties that read it change when it is fetched or reset.
+    internal partial MyStromSwitchInformation? Information { get; set; }
+
     [State]
     public partial string? StatusMessage { get; internal set; }
 
@@ -79,7 +83,7 @@ public partial class MyStromSwitch : BackgroundService,
     [State(Unit = StateUnit.DegreeCelsius)]
     public partial decimal? Temperature { get; internal set; }
 
-    [State(Position = 400)]
+    [Category("Device")]
     public partial TimeSpan? Uptime { get; internal set; }
 
     [Derived]
@@ -98,27 +102,29 @@ public partial class MyStromSwitch : BackgroundService,
 
     [Derived]
     [State]
-    public string? MacAddress => _information?.Mac;
+    public string? MacAddress => Information?.Mac;
 
     [Derived]
     [State]
-    public string? IpAddress => _information?.Ip;
+    public string? IpAddress => Information?.Ip;
 
     [Derived]
     [State]
-    public string? SubnetMask => _information?.Mask;
+    public string? SubnetMask => Information?.Mask;
 
     [Derived]
     [State]
-    public string? Gateway => _information?.Gateway;
+    public string? Gateway => Information?.Gateway;
 
     [Derived]
     [State(Position = 401)]
-    public string? DeviceType => _information?.Type;
+    [Category("Device")]
+    public string? DeviceType => Information?.Type;
 
     [Derived]
     [State(Position = 402)]
-    public string? FirmwareVersion => _information?.Version;
+    [Category("Device")]
+    public string? FirmwareVersion => Information?.Version;
 
     public bool? IsWireless => true;
     public int? SignalStrength => null;
@@ -255,7 +261,7 @@ public partial class MyStromSwitch : BackgroundService,
                 var signaled = await _configChangedSignal.WaitAsync(PollingInterval, stoppingToken);
                 if (signaled)
                 {
-                    _information = null;
+                    Information = null;
                     return; // Exit polling loop to reinitialize
                 }
             }
@@ -271,7 +277,7 @@ public partial class MyStromSwitch : BackgroundService,
         var response = await client.GetAsync($"http://{HostAddress}/info", cancellationToken);
         response.EnsureSuccessStatusCode();
 
-        _information = await response.Content.ReadFromJsonAsync<MyStromSwitchInformation>(cancellationToken);
+        Information = await response.Content.ReadFromJsonAsync<MyStromSwitchInformation>(cancellationToken);
     }
 
     private async Task RefreshReportAsync(HttpClient client, CancellationToken cancellationToken)

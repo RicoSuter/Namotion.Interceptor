@@ -89,7 +89,7 @@ When an operation is executed from the UI:
 ```
 User clicks "Emergency Stop" button
   -> SubjectPropertyPanel reads [Operation] metadata from registry (MethodMetadata)
-  -> If RequiresConfirmation: shows confirmation dialog
+  -> OperationInvoker shows the parameter dialog, or the confirmation dialog if RequiresConfirmation
   -> MethodMetadata.InvokeAsync(parameters)
      -> Parameter conversion (string inputs -> typed values)
      -> Method invoked via delegate

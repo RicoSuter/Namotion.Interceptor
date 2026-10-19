@@ -15,7 +15,7 @@ namespace HomeBlaze.Services;
 /// Supports canonical notation (/Items[0]/Name) and route notation (/Items/0/Name).
 /// Implements lifecycle handling to invalidate caches when subjects are attached/detached.
 /// </summary>
-public class SubjectPathResolver : ILifecycleHandler, ISubjectPathResolver
+public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler, ISubjectPathResolver
 {
     private readonly Func<IInterceptorSubject?> _getRoot;
 
@@ -25,19 +25,15 @@ public class SubjectPathResolver : ILifecycleHandler, ISubjectPathResolver
     // (path, style) → Subject resolve cache (absolute paths only)
     private readonly ConcurrentDictionary<(string Path, PathStyle Style), IInterceptorSubject?> _resolveCache = new();
 
-    /// <summary>
-    /// Raised when a subject was attached to or detached from the graph: a path may lead to another subject than
-    /// before or to none, and a subject may have other paths. Whoever shows something that was resolved from a path
-    /// resolves it again.
-    /// </summary>
-    /// <remarks>
-    /// Raised once per attached or detached reference, so in bursts, on the thread that changes the graph and inside
-    /// the lock of the lifecycle interceptor that serializes all changes of the graph. A handler must return at once
-    /// and must not throw: it must not block, wait for another thread, change the graph or render. It notes the change
-    /// and does its work on another thread. Blazor's <c>InvokeAsync</c> does not qualify, because it runs the callback
-    /// inline when the dispatcher is idle.
-    /// </remarks>
-    public event Action? PathsChanged;
+    // In a context of its own, so that a change of the version tells only the components that read it and not the
+    // observers of the graph's changes, such as connectors and the history.
+    // Without derived property detection: a derived property that resolves a path would otherwise be computed again
+    // for every attached subject and property. Components read the version in their render instead.
+    private readonly SubjectPathsVersion _pathsVersion = new(InterceptorSubjectContext.Create()
+        .WithEqualityCheck()
+        .WithPropertyChangeSubscriptions()
+        .WithReadPropertyRecorder());
+    private long _pathsVersionValue;
 
     /// <param name="getRoot">
     /// Resolves the current graph root. A delegate rather than the RootManager itself, because
@@ -65,6 +61,10 @@ public class SubjectPathResolver : ILifecycleHandler, ISubjectPathResolver
         IInterceptorSubject? relativeTo = null)
     {
         var root = _getRoot();
+
+        // An absolute path is cached, the root is not a property and a parent is found in the registry, so a resolution
+        // may read no property of the graph: this read is what a caller that tracks its reads depends on.
+        _ = _pathsVersion.Value;
 
         if (string.IsNullOrEmpty(path))
             return relativeTo ?? root;
@@ -145,6 +145,7 @@ public class SubjectPathResolver : ILifecycleHandler, ISubjectPathResolver
         IInterceptorSubject subject,
         PathStyle style)
     {
+        _ = _pathsVersion.Value;
         var canonicalPaths = _canonicalPathsCache.GetOrAdd(subject, ComputeCanonicalPaths);
 
         if (style == PathStyle.Canonical)
@@ -174,13 +175,36 @@ public class SubjectPathResolver : ILifecycleHandler, ISubjectPathResolver
     }
 
     /// <summary>
-    /// Invalidates caches when subject graph changes and raises <see cref="PathsChanged"/>.
+    /// Invalidates caches when subject graph changes and changes <see cref="PathsVersion"/>.
     /// </summary>
     public void HandleLifecycleChange(SubjectLifecycleChange change)
     {
         ClearCaches();
-        PathsChanged?.Invoke();
+        IncrementPathsVersion();
     }
+
+    // A property added to a subject at run time changes what a path to a property resolves to. Every other property is
+    // attached with its subject, which increments the version already.
+    void IPropertyLifecycleHandler.AttachProperty(SubjectPropertyLifecycleChange change)
+    {
+        if (change.Property.Metadata.IsDynamic)
+        {
+            IncrementPathsVersion();
+        }
+    }
+
+    // A detached property is followed by the change of its subject, which increments the version after it.
+    void IPropertyLifecycleHandler.DetachProperty(SubjectPropertyLifecycleChange change)
+    {
+    }
+
+    private void IncrementPathsVersion() => _pathsVersion.Value = Interlocked.Increment(ref _pathsVersionValue);
+
+    /// <summary>
+    /// Gets a number that changes whenever the paths of subjects may have changed. Reading it in a render makes the
+    /// component render again when the paths change, also when it keeps what it resolved instead of resolving again.
+    /// </summary>
+    public long PathsVersion => _pathsVersion.Value;
 
     private void ClearCaches()
     {

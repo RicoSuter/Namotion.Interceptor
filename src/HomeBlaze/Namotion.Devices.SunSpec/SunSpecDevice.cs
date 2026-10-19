@@ -32,6 +32,7 @@ public partial class SunSpecDevice :
     IModbusDiscovery,
     IConfigurable,
     IConnectionState,
+    INetworkHost,
     IMonitoredService,
     ITitleProvider,
     IIconProvider,

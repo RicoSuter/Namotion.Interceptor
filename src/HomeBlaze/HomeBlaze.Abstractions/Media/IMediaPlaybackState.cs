@@ -15,6 +15,7 @@ public interface IMediaPlaybackState
     /// The playback state, or <c>null</c> while it is unknown, such as before the first read or while the device is offline.
     /// </summary>
     [State(Position = 139)]
+    [Category("Playback")]
     MediaPlaybackState? PlaybackState { get; }
 
     /// <summary>
@@ -23,6 +24,7 @@ public interface IMediaPlaybackState
     /// </summary>
     [Derived]
     [State(Position = 140)]
+    [Category("Playback")]
     bool? IsPlaying => PlaybackState switch
     {
         null => null,

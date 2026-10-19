@@ -1,0 +1,88 @@
+@implements IDisposable
+
+@{
+    UpdateHtml();
+}
+@* Laid out like the final reply, with the progress overlaid on the bottom padding, so the reply replaces it
+   without a jump. *@
+<div class="py-2 my-2 relative" style="max-width: min(100%, 56rem);" data-testid="agent-streaming">
+    <AgentMarkdown>
+        @foreach (var segmentHtml in _stableSegments)
+        {
+            @segmentHtml
+        }
+        @_tailHtml
+    </AgentMarkdown>
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" Rounded="true" Size="Size.Small" Style="position: absolute; left: 0; right: 0; bottom: 0;" />
+</div>
+
+@code {
+    private LlmAgentBase? _subscribed;
+    private int _isRenderPending;
+    private readonly List<MarkupString> _stableSegments = [];
+    private string _stableText = string.Empty;
+    private MarkupString _tailHtml;
+
+    [Parameter, EditorRequired]
+    public LlmAgentBase Agent { get; set; } = null!;
+
+    protected override void OnParametersSet()
+    {
+        if (!ReferenceEquals(_subscribed, Agent))
+        {
+            if (_subscribed is not null)
+            {
+                _subscribed.StateChanged -= OnStateChanged;
+            }
+
+            _subscribed = Agent;
+            _subscribed.StateChanged += OnStateChanged;
+        }
+    }
+
+    private void OnStateChanged()
+    {
+        // Text deltas arrive faster than the browser can render; coalesce them into one pending render.
+        if (Interlocked.Exchange(ref _isRenderPending, 1) == 0)
+        {
+            _ = InvokeAsync(() =>
+            {
+                Volatile.Write(ref _isRenderPending, 0);
+                StateHasChanged();
+            });
+        }
+    }
+
+    // Completed blocks are converted once, as one segment per boundary move, so a render sends only the newest
+    // segment and the block being written; unchanged segments keep their markup and are not sent again.
+    private void UpdateHtml()
+    {
+        var text = Agent.StreamingText;
+        if (!text.StartsWith(_stableText, StringComparison.Ordinal))
+        {
+            // A new turn started streaming while this bubble stayed on the page.
+            _stableSegments.Clear();
+            _stableText = string.Empty;
+        }
+
+        // The previous boundary is a line start outside a fenced block, so the scan can resume there.
+        var previousLength = _stableText.Length;
+        var stableLength = previousLength + AgentStreamingMarkdown.FindStableLength(text.AsSpan(previousLength));
+        if (stableLength > previousLength)
+        {
+            _stableSegments.Add(new MarkupString(AgentMarkdownRenderer.ToHtml(text[previousLength..stableLength])));
+            _stableText = text[..stableLength];
+        }
+
+        _tailHtml = stableLength < text.Length ? new MarkupString(AgentMarkdownRenderer.ToHtml(text[stableLength..])) : default;
+    }
+
+    public void Dispose()
+    {
+        if (_subscribed is not null)
+        {
+            _subscribed.StateChanged -= OnStateChanged;
+            _subscribed = null;
+        }
+    }
+}

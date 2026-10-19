@@ -1801,6 +1801,24 @@ public class StorageReconcilerTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenBytesAreWrittenAsBlob_ThenTheFileHasExactlyTheseBytesAndItsSubjectTakesThem()
+    {
+        // Arrange
+        WriteFile("Notes.md", "first");
+        var storage = await ConnectAsync();
+        var file = (MarkdownFile)storage.Children["Notes.md"];
+        var buffer = Encoding.UTF8.GetBytes("[second version]");
+
+        // Act
+        await storage.WriteBlobAsync("Notes.md", buffer.AsMemory(1, buffer.Length - 2), CancellationToken.None);
+        var contentAfterWrite = file.Content;
+
+        // Assert
+        Assert.Equal("second version", File.ReadAllText(GetFullPath("Notes.md")));
+        Assert.Equal("second version", contentAfterWrite);
+    }
+
+    [Fact]
     public async Task WhenConfigurationFileIsWrittenAsBlob_ThenItsSubjectTakesTheContentAndNamedPassDoesNotReloadIt()
     {
         // Arrange

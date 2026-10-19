@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Devices.Energy;
 using HomeBlaze.Abstractions.Media;
@@ -147,18 +148,22 @@ public partial class SonosPlayer : SonosDevice,
     /// </summary>
     [Derived]
     [State(Position = 11)]
+    [Category("Source")]
     public SonosSource? Source => GetCoordinator().ReportedSource;
 
     [Derived]
     [State(Position = 12)]
+    [Category("Playback")]
     public bool? Shuffle => GetCoordinator().ReportedShuffle;
 
     [Derived]
     [State(Position = 13)]
+    [Category("Playback")]
     public SonosRepeatMode? Repeat => GetCoordinator().ReportedRepeat;
 
     [Derived]
     [State(Position = 14)]
+    [Category("Playback")]
     public TimeSpan? SleepTimerRemaining => GetCoordinator().ReportedSleepTimerRemaining;
 
     /// <summary>
@@ -166,15 +171,19 @@ public partial class SonosPlayer : SonosDevice,
     /// </summary>
     [Derived]
     [State(Position = 15)]
+    [Category("Source")]
     public string? SourceTitle => GetCoordinator().ReportedSourceTitle;
 
-    [State(Position = 20)]
+    [State(Position = 400)]
+    [Category("Sound")]
     public partial int? Bass { get; internal set; }
 
-    [State(Position = 21)]
+    [State(Position = 401)]
+    [Category("Sound")]
     public partial int? Treble { get; internal set; }
 
-    [State(Position = 22)]
+    [State(Position = 402)]
+    [Category("Sound")]
     public partial bool? Loudness { get; internal set; }
 
     /// <summary>
@@ -184,11 +193,13 @@ public partial class SonosPlayer : SonosDevice,
     [State(Position = 23)]
     public partial SonosHomeTheater? HomeTheater { get; internal set; }
 
-    [State(Position = 30)]
+    [State(Position = 410)]
+    [Category("Group")]
     public partial string? GroupCoordinatorUuid { get; internal set; }
 
     [Derived]
-    [State(Position = 31)]
+    [State(Position = 411)]
+    [Category("Group")]
     public bool IsGroupCoordinator => GroupCoordinatorUuid is null || GroupCoordinatorUuid == Uuid;
 
     /// <summary>
@@ -198,10 +209,12 @@ public partial class SonosPlayer : SonosDevice,
 
     [Derived]
     [State(Position = 32)]
+    [Category("Source")]
     public bool IsHomeTheater => HomeTheater is not null;
 
     [Derived]
     [State(Position = 33)]
+    [Category("Source")]
     public bool HasLineIn => ServiceIds.Contains("AudioIn");
 
     public partial decimal? BatteryLevel { get; internal set; }

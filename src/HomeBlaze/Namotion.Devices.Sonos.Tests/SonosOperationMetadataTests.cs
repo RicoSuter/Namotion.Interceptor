@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Reflection;
 using System.Text.RegularExpressions;
 using HomeBlaze.Abstractions;
@@ -128,6 +129,71 @@ public class SonosOperationMetadataTests
         Assert.Equal([10, 10], positions);
     }
 
+    [Theory]
+    [InlineData(nameof(IVolumeState.Volume), "Volume")]
+    [InlineData(nameof(IMediaPlaybackState.IsPlaying), "Playback")]
+    [InlineData(nameof(IMediaTrackState.CurrentTrackTitle), "Track")]
+    public void WhenAMediaInterfacePropertyIsRegistered_ThenItHasTheCategoryOfTheInterface(string propertyName, string expectedCategory)
+    {
+        // Arrange
+        var system = TestFixtures.CreateGroupedSystem();
+        IInterceptorSubject[] subjects = [system.Players[TestFixtures.OfficeUuid], system.Groups[TestFixtures.OfficeUuid]];
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        foreach (var subject in subjects)
+        {
+            subject.Context.AddFallbackContext(context);
+        }
+
+        // Act
+        var categories = subjects.Select(subject => subject
+            .TryGetRegisteredProperty(propertyName)!
+            .ReflectionAttributes
+            .OfType<CategoryAttribute>()
+            .Single()
+            .Category).ToArray();
+
+        // Assert
+        Assert.Equal([expectedCategory, expectedCategory], categories);
+    }
+
+    [Theory]
+    [InlineData(typeof(SonosPlayer))]
+    [InlineData(typeof(SonosGroup))]
+    public void WhenAPlayerOrGroupOperationIsListed_ThenItHasACategory(Type type)
+    {
+        // Act
+        var uncategorized = GetOperationCategories(type)
+            .Where(operation => string.IsNullOrWhiteSpace(operation.Value))
+            .Select(operation => operation.Key);
+
+        // Assert
+        Assert.Empty(uncategorized);
+    }
+
+    [Fact]
+    public void WhenAnOperationIsOnTheGroup_ThenThePlayerHasItWithTheSameCategory()
+    {
+        // Arrange
+        var playerCategories = GetOperationCategories(typeof(SonosPlayer));
+
+        // Act
+        var differences = new List<string>();
+        foreach (var (operation, groupCategory) in GetOperationCategories(typeof(SonosGroup)))
+        {
+            if (!playerCategories.TryGetValue(operation, out var playerCategory))
+            {
+                differences.Add($"{operation} is an operation of the group but not of the player");
+            }
+            else if (playerCategory != groupCategory)
+            {
+                differences.Add($"{operation} has the category '{playerCategory}' on the player and '{groupCategory}' on the group");
+            }
+        }
+
+        // Assert
+        Assert.Empty(differences);
+    }
+
     [Fact]
     public void WhenDeviceBaseTypeIsInspected_ThenItIsAbstract()
     {
@@ -136,6 +202,25 @@ public class SonosOperationMetadataTests
 
         // Assert
         Assert.True(isAbstract);
+    }
+
+    private static Dictionary<string, string?> GetOperationCategories(Type type) =>
+        type.GetMethods(BindingFlags.Public | BindingFlags.Instance)
+            .Where(method => method.GetCustomAttribute<OperationAttribute>() is not null)
+            .ToDictionary(method => method.Name, method => GetCategory(type, method));
+
+    // The category on the class method, otherwise the one on the interface method it implements.
+    private static string? GetCategory(Type type, MethodInfo method)
+    {
+        if (method.GetCustomAttribute<CategoryAttribute>() is { } attribute)
+        {
+            return attribute.Category;
+        }
+
+        var parameterTypes = method.GetParameters().Select(parameter => parameter.ParameterType).ToArray();
+        return type.GetInterfaces()
+            .Select(implemented => implemented.GetMethod(method.Name, parameterTypes)?.GetCustomAttribute<CategoryAttribute>()?.Category)
+            .FirstOrDefault(category => category is not null);
     }
 
     private static MethodInfo GetMethod(string operation)

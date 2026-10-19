@@ -1,0 +1,661 @@
+@using HomeBlaze.History.Abstractions
+@using HomeBlaze.Components.Abstractions.TimeZones
+@using MudBlazor.Services
+@using Microsoft.JSInterop
+@using Microsoft.AspNetCore.Components.Rendering
+@inject ITimeZoneDisplay TimeZone
+@inject IResizeObserverFactory ResizeObserverFactory
+@inject IJSRuntime JsRuntime
+@implements IAsyncDisposable
+
+@if (Data is { } data)
+{
+    <div data-testid="history-chart-view" style="@_rootStyle">
+        @if (data.IsEmpty)
+        {
+            <MudText Typo="Typo.body2" Class="mud-text-secondary" data-testid="history-chart-empty">No data in this range.</MudText>
+        }
+        else if (_chartSeries is not null)
+        {
+            @* MudChart fills the box only when it has a height or is a flex box with a max-height: otherwise it draws
+               in a box of its own 350 px high, which is clipped or letterboxed. It decides this once, when it first
+               renders, and a box that is not displayed, like one in a hidden tab, has no height yet. So the chart
+               renders only once the box was measured with a size. *@
+            <div @ref="_linesBox" data-testid="history-chart-lines" data-axes-labels="@_axesLabels" style="@_linesStyle"
+                 title="@LinesTitle" @onclick="LinesClicked">
+                @if (_linesWidth > 0)
+                {
+                    @if (ShowAxes)
+                    {
+                        @_plot
+                    }
+                    else
+                    {
+                        <div style="@CompactPlotStyle">@_plot</div>
+                    }
+                }
+            </div>
+        }
+
+        @LineLegend
+
+        @for (var index = 0; index < data.Bands.Count; index++)
+        {
+            var band = data.Bands[index];
+            var swatchStyles = _bandSwatchStyles[index];
+
+            @* With lines, the band spans the plot area of the lines, so a change of state sits under its time. *@
+            <div data-testid="history-chart-band-group" style="@(_chartSeries is not null ? PlotAlignedBandGroupStyle : BandGroupStyle)">
+                <div data-testid="history-chart-band-header"
+                     style="display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; column-gap:16px; row-gap:4px;">
+                    <div style="display:flex; align-items:center; gap:6px; min-width:0;">
+                        @if (BandHeader is not null)
+                        {
+                            @BandHeader(index)
+                        }
+                    </div>
+                    <div data-testid="history-chart-band-legend" style="display:flex; flex-wrap:wrap; column-gap:12px; row-gap:2px;">
+                        @for (var entryIndex = 0; entryIndex < band.Legend.Count; entryIndex++)
+                        {
+                            var entry = band.Legend[entryIndex];
+                            <div style="display:flex; align-items:center; gap:6px;">
+                                <span aria-hidden="true" style="@swatchStyles[entryIndex]"></span>
+                                <MudText Typo="Typo.caption">@entry.Label</MudText>
+                            </div>
+                        }
+                    </div>
+                </div>
+
+                @* The band is decorative: the legend names its states, and the state table lists every run. *@
+                <div aria-hidden="true" data-testid="history-chart-band" style="@_bandStyles[index]"></div>
+            </div>
+        }
+
+        @if (ShowRange && _rangeText is not null)
+        {
+            <MudText Typo="Typo.caption" Class="mud-text-secondary" Style="align-self:stretch;" data-testid="history-chart-range">@_rangeText</MudText>
+        }
+
+        @if (ShowStateTable && data.Bands.Count > 0)
+        {
+            var showSeries = data.Bands.Count > 1;
+            <MudSimpleTable Dense="true" Style="width:100%; flex:1 1 auto; min-height:0; overflow:auto;">
+                <thead>
+                    <tr>
+                        @if (showSeries)
+                        {
+                            <th>Series</th>
+                        }
+                        <th>Time</th><th>Value</th><th>Duration</th>
+                    </tr>
+                </thead>
+                <tbody>
+                @for (var index = 0; index < _stateRows.Length; index++)
+                {
+                    var row = _stateRows[index];
+                    <tr>
+                        @if (showSeries)
+                        {
+                            <td>@row.Band</td>
+                        }
+                        <td>@TimeZone.ToZoned(row.Segment.Start).ToString("g")</td>
+                        <td>@HistoryChartPalette.DescribeSegment(row.Segment)</td>
+                        <td>@PropertyHistoryChartModel.FormatDuration(row.Segment.Duration)</td>
+                    </tr>
+                }
+                </tbody>
+            </MudSimpleTable>
+        }
+    </div>
+}
+
+@code {
+    private const string ModulePath = "./_content/HomeBlaze.History.Blazor/HistoryChartView.razor.js";
+    private const string BandGroupStyle = "align-self:stretch; display:flex; flex-direction:column; gap:4px;";
+
+    // The margins are set by the script of this view from the plot area MudChart drew.
+    private const string PlotAlignedBandGroupStyle = BandGroupStyle +
+        " margin-left:var(--history-chart-plot-left, 0px); margin-right:var(--history-chart-plot-right, 0px);";
+
+    // The fixed space MudChart 9.11 keeps around the plot while its labels are empty, which the E2E test of the edges of
+    // a compact chart guards. Without axes the chart is drawn that much larger than its box, which clips it, so the plot
+    // fills the width and keeps the lines a few pixels inside the box at the top and bottom so their strokes are not cut.
+    private const int PlotStartSpace = 30;
+    private const int PlotEndSpace = 30;
+    private const int PlotTopSpace = 25;
+    private const int PlotBottomSpace = 30;
+    private const int StrokeMargin = 4;
+
+    private static readonly string CompactPlotStyle =
+        $"position:absolute; left:-{PlotStartSpace}px; top:-{PlotTopSpace - StrokeMargin}px; " +
+        $"width:calc(100% + {PlotStartSpace + PlotEndSpace}px); " +
+        $"height:calc(100% + {PlotTopSpace + PlotBottomSpace - 2 * StrokeMargin}px); display:flex;";
+
+    private static readonly Func<double, string> EmptyAxisLabel = static _ => string.Empty;
+
+    private HistoryChartData? _builtData;
+    private int? _renderedMaxHeight;
+    private string? _renderedStyle;
+    private int _renderedBandHeight;
+    private bool _renderedShowRange;
+    private bool _renderedShowStateTable;
+    private bool _renderedShowAxes = true;
+    private bool _renderedIsClickable;
+    private string? _renderedLinesTitle;
+    private EventCallback _renderedLinesClicked;
+    private bool _hasStyles;
+    private bool _shouldRender = true;
+    private volatile bool _isDisposed;
+    private List<ChartSeries<double>>? _chartSeries;
+    private TimeSeriesChartOptions _chartOptions = new();
+    private string[] _palette = [];
+    private double _valueMinimum;
+    private double _valueMaximum;
+    private bool _isPercent;
+
+    // The measured size of the lines, zero until the box of the lines is measured, and the label counts the axes are spaced for.
+    private double _linesWidth;
+    private double _linesHeight;
+    private int _valueLabelCount;
+    private int _timeLabelCount;
+    private ElementReference _linesBox;
+    private ElementReference? _observedLines;
+    private IResizeObserver? _resizeObserver;
+    private (string Band, PropertyHistoryChartModel.StateSegment Segment)[] _stateRows = [];
+
+    // Built when the data or a parameter changes rather than on every render, since the view renders on every change
+    // of a value its legends show, and a band style holds the whole gradient of its band.
+    private string _rootStyle = string.Empty;
+    private string _linesStyle = string.Empty;
+    private string _axesLabels = string.Empty;
+    private string[] _bandStyles = [];
+    private string[][] _bandSwatchStyles = [];
+    private string? _rangeText;
+
+    // HistoryChartPlot is internal, which markup cannot name.
+    private readonly RenderFragment _plot;
+
+    private Task<IJSObjectReference>? _module;
+    private IJSObjectReference? _plotAlignment;
+    private ElementReference? _alignedLines;
+
+    // Incremented by every alignment, so one that a later one superseded while its script ran disposes its handle.
+    private int _alignmentGeneration;
+
+    /// <summary>
+    /// The data to draw. The view draws again only when it gets another instance, so its parent may render
+    /// often without redrawing the chart.
+    /// </summary>
+    [Parameter, EditorRequired]
+    public HistoryChartData? Data { get; set; }
+
+    /// <summary>
+    /// The highest the lines may be, in pixels. With it the lines fill the width and are half as high as wide, up
+    /// to this height. Without it they fill the width and the height of the view.
+    /// </summary>
+    [Parameter]
+    public int? MaxHeight { get; set; }
+
+    /// <summary>Extra CSS appended to the style of the root element.</summary>
+    [Parameter]
+    public string? Style { get; set; }
+
+    /// <summary>The height of a band in pixels.</summary>
+    [Parameter]
+    public int BandHeight { get; set; } = 24;
+
+    /// <summary>
+    /// The legend of the lines, rendered right below them. The view renders every time its parent does while it has
+    /// this or <see cref="BandHeader"/>, so the content may show values that change; the lines are drawn again only for
+    /// other data. The CSS property <c>--history-chart-plot-right</c> holds the measured distance of the right end of the
+    /// plot from the right edge of the view while the view has bands, and <c>--history-chart-plot-end</c> the space MudChart
+    /// keeps there, so the legend can end where the plot does.
+    /// </summary>
+    [Parameter]
+    public RenderFragment? LineLegend { get; set; }
+
+    /// <summary>
+    /// The start of the header of the band at the index: the header shows it left of the states of the band, right above
+    /// the band. Without it the header shows only the states.
+    /// </summary>
+    [Parameter]
+    public RenderFragment<int>? BandHeader { get; set; }
+
+    /// <summary>Whether bands without lines name their range below them, as they have no time axis.</summary>
+    [Parameter]
+    public bool ShowRange { get; set; } = true;
+
+    /// <summary>Whether the runs of the bands are listed in a table below the legend, newest first.</summary>
+    [Parameter]
+    public bool ShowStateTable { get; set; }
+
+    /// <summary>
+    /// Whether the lines have labels on their value and time axes, grid lines and tooltips. Without them the lines fill
+    /// the width of the view.
+    /// </summary>
+    [Parameter]
+    public bool ShowAxes { get; set; } = true;
+
+    /// <summary>Called when the lines are clicked. With it the lines show a pointer.</summary>
+    [Parameter]
+    public EventCallback LinesClicked { get; set; }
+
+    /// <summary>The tooltip of the lines, which says what a click on them does.</summary>
+    [Parameter]
+    public string? LinesTitle { get; set; }
+
+    public HistoryChartView() => _plot = RenderPlot;
+
+    protected override void OnInitialized() => TimeZone.Changed += OnTimeZoneChanged;
+
+    private void RenderPlot(RenderTreeBuilder builder)
+    {
+        builder.OpenComponent<HistoryChartPlot>(0);
+        builder.AddComponentParameter(1, nameof(HistoryChartPlot.ChartSeries), _chartSeries);
+        builder.AddComponentParameter(2, nameof(HistoryChartPlot.ChartOptions), _chartOptions);
+        builder.CloseComponent();
+    }
+
+    protected override void OnParametersSet()
+    {
+        var dataChanged = !ReferenceEquals(Data, _builtData);
+        var stateTableChanged = ShowStateTable != _renderedShowStateTable;
+        if (dataChanged)
+        {
+            Build();
+        }
+        else
+        {
+            if (stateTableChanged)
+            {
+                BuildStateRows();
+            }
+
+            if (BandHeight != _renderedBandHeight)
+            {
+                BuildBandStyles();
+            }
+        }
+
+        var axesChanged = ShowAxes != _renderedShowAxes;
+        if (axesChanged && !dataChanged)
+        {
+            BuildOptions();
+        }
+
+        var isClickable = LinesClicked.HasDelegate;
+        var stylesChanged = !_hasStyles ||
+            dataChanged ||
+            axesChanged ||
+            isClickable != _renderedIsClickable ||
+            Style != _renderedStyle ||
+            MaxHeight != _renderedMaxHeight;
+        if (stylesChanged)
+        {
+            BuildStyles(isClickable);
+        }
+
+        _shouldRender = stylesChanged ||
+            LinesTitle != _renderedLinesTitle ||
+            LineLegend is not null ||
+            BandHeader is not null ||
+            stateTableChanged ||
+            BandHeight != _renderedBandHeight ||
+            ShowRange != _renderedShowRange ||
+            // Last, because EventCallback compares only boxed; a view with a legend has already decided to render.
+            !LinesClicked.Equals(_renderedLinesClicked);
+
+        _renderedMaxHeight = MaxHeight;
+        _renderedStyle = Style;
+        _renderedBandHeight = BandHeight;
+        _renderedShowRange = ShowRange;
+        _renderedShowStateTable = ShowStateTable;
+        _renderedShowAxes = ShowAxes;
+        _renderedIsClickable = isClickable;
+        _renderedLinesTitle = LinesTitle;
+        _renderedLinesClicked = LinesClicked;
+    }
+
+    private void BuildStyles(bool isClickable)
+    {
+        _hasStyles = true;
+        var plotEnd = _chartSeries is null || !ShowAxes ? 0 : PlotEndSpace;
+        _rootStyle = $"width:100%; display:flex; flex-direction:column; align-items:center; gap:8px; --history-chart-plot-end:{plotEnd}px; {Style}";
+
+        var size = MaxHeight is { } maxHeight
+            ? $"max-height:{maxHeight}px; min-height:0; aspect-ratio:2 / 1;"
+            : "height:100%; min-height:0;";
+        var frame = ShowAxes ? string.Empty : " position:relative; overflow:clip;";
+        var cursor = isClickable ? " cursor:pointer;" : string.Empty;
+        _linesStyle = $"display:flex; width:100%; {size}{frame}{cursor}";
+    }
+
+    protected override bool ShouldRender() => _shouldRender;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        _shouldRender = false;
+
+        // The lines are drawn in a new element whenever they reappear, so the observed element follows the rendered one.
+        ElementReference? lines = Data is { IsEmpty: false } && _chartSeries is not null ? _linesBox : null;
+        if (lines?.Id != _observedLines?.Id && !_isDisposed)
+        {
+            _resizeObserver ??= CreateResizeObserver();
+            if (_observedLines is { } observed)
+            {
+                await _resizeObserver.Unobserve(observed);
+            }
+
+            _observedLines = lines;
+            if (lines is { } element && await _resizeObserver.Observe(element) is { } size)
+            {
+                OnLinesResized(size.Width, size.Height);
+            }
+        }
+
+        // Only bands below lines follow the plot area.
+        ElementReference? alignedLines = Data is { Bands.Count: > 0 } ? lines : null;
+        if (alignedLines?.Id != _alignedLines?.Id && !_isDisposed)
+        {
+            _alignedLines = alignedLines;
+            await AlignBandsAsync(alignedLines);
+        }
+    }
+
+    // Follows the plot area of the lines in the margins of the bands, see HistoryChartView.razor.js.
+    private async Task AlignBandsAsync(ElementReference? lines)
+    {
+        var generation = ++_alignmentGeneration;
+        try
+        {
+            var previous = _plotAlignment;
+            _plotAlignment = null;
+            await DisposeAlignmentAsync(previous);
+            if (lines is not { } element || _isDisposed)
+            {
+                return;
+            }
+
+            // One import for every call, which DisposeAsync disposes once it has completed.
+            _module ??= JsRuntime.InvokeAsync<IJSObjectReference>("import", ModulePath).AsTask();
+            var module = await _module;
+            if (_isDisposed)
+            {
+                // Disposed while the import ran, so DisposeAsync may have found it incomplete.
+                await module.DisposeAsync();
+                return;
+            }
+
+            var alignment = await module.InvokeAsync<IJSObjectReference>("alignBands", element);
+
+            // The view can be disposed or show other lines while the script ran.
+            if (_isDisposed || generation != _alignmentGeneration)
+            {
+                await DisposeAlignmentAsync(alignment);
+                return;
+            }
+
+            _plotAlignment = alignment;
+        }
+        catch (Exception exception) when (exception is JSDisconnectedException or JSException or TaskCanceledException)
+        {
+            // The alignment is only visual: without it the bands span the full width, which must not end the circuit.
+        }
+    }
+
+    private static async ValueTask DisposeAlignmentAsync(IJSObjectReference? alignment)
+    {
+        if (alignment is not null)
+        {
+            await alignment.InvokeVoidAsync("dispose");
+            await alignment.DisposeAsync();
+        }
+    }
+
+    private IResizeObserver CreateResizeObserver()
+    {
+        var observer = ResizeObserverFactory.Create();
+        observer.OnResized += changes =>
+        {
+            foreach (var size in changes.Values)
+            {
+                InvokeAsync(() => OnLinesResized(size.Width, size.Height));
+            }
+        };
+
+        return observer;
+    }
+
+    // The label counts decide the whole spacing of both axes, so after the first size the options are built and drawn only when one changes.
+    private void OnLinesResized(double width, double height)
+    {
+        if (_isDisposed || _chartSeries is null || width <= 0 || height <= 0)
+        {
+            return;
+        }
+
+        var isFirstSize = _linesWidth <= 0;
+        _linesWidth = width;
+        _linesHeight = height;
+        if (isFirstSize ||
+            HistoryChartAxis.GetValueLabelCount(height) != _valueLabelCount ||
+            HistoryChartAxis.GetTimeLabelCount(width) != _timeLabelCount)
+        {
+            BuildOptions();
+            _shouldRender = true;
+            StateHasChanged();
+        }
+    }
+
+    private void Build()
+    {
+        BuildChart();
+        BuildBandStyles();
+        if (_chartSeries is null)
+        {
+            // Without lines their box is removed, so a box that comes back is measured before the chart renders in it.
+            _linesWidth = 0;
+            _linesHeight = 0;
+        }
+
+        // Bands without lines have no time axis above them, so they name their range.
+        _rangeText = null;
+        if (_chartSeries is null && Data is { Bands.Count: > 0 } data)
+        {
+            var from = TimeZone.ToZoned(data.From);
+            var to = TimeZone.ToZoned(data.To);
+            _rangeText = from.Date == to.Date ? $"{from:g} to {to:t}" : $"{from:g} to {to:g}";
+        }
+    }
+
+    private void BuildBandStyles()
+    {
+        var bands = Data?.Bands ?? [];
+        _bandStyles = new string[bands.Count];
+        _bandSwatchStyles = new string[bands.Count][];
+        for (var index = 0; index < bands.Count; index++)
+        {
+            var band = bands[index];
+            _bandStyles[index] = $"flex:0 0 {BandHeight}px; border-radius:4px; background:{band.Background};";
+            var swatchStyles = new string[band.Legend.Count];
+            for (var entryIndex = 0; entryIndex < swatchStyles.Length; entryIndex++)
+            {
+                swatchStyles[entryIndex] = $"width:12px; height:12px; border-radius:2px; background:{band.Legend[entryIndex].Fill};";
+            }
+
+            _bandSwatchStyles[index] = swatchStyles;
+        }
+    }
+
+    private void BuildChart()
+    {
+        _builtData = Data;
+        _chartSeries = null;
+        BuildStateRows();
+        if (Data is not { } data)
+        {
+            return;
+        }
+
+        var chartSeries = new List<ChartSeries<double>>();
+        var palette = new List<string>();
+        double? anchorValue = null;
+        var minimum = double.PositiveInfinity;
+        var maximum = double.NegativeInfinity;
+        var isPercent = true;
+        foreach (var line in data.Lines)
+        {
+            isPercent &= line.IsPercent || line.Runs.Count == 0;
+            foreach (var run in line.Runs)
+            {
+                var points = new List<(DateTime, double)>(run.Count);
+                for (var index = 0; index < run.Count; index++)
+                {
+                    var number = run[index].Number!.Value;
+                    if (line.IsPercent)
+                    {
+                        number = HistoryChartAxis.ToPercent(number);
+                    }
+
+                    anchorValue ??= number;
+                    minimum = Math.Min(minimum, number);
+                    maximum = Math.Max(maximum, number);
+                    points.Add((TimeZone.ToZoned(run[index].Timestamp), number));
+                }
+
+                chartSeries.Add(new ChartSeries<double>
+                {
+                    Name = line.Label,
+                    Visible = true,
+                    Data = new ChartData<double>(points),
+                    TooltipYValueFormat = "0.###"
+                });
+                palette.Add(line.Color);
+            }
+        }
+
+        if (anchorValue is { } value)
+        {
+            // The time axis is derived from the series extent, so fifteen minutes of data in a six hour
+            // range would otherwise stretch across the full width and read as six hours of recording.
+            // An invisible series pinned to the window ends holds the axis to the range that was asked
+            // for. Its value is taken from the data so it cannot widen the value axis.
+            chartSeries.Add(new ChartSeries<double>
+            {
+                Name = string.Empty,
+                Visible = true,
+                Data = new ChartData<double>(
+                [
+                    (TimeZone.ToZoned(data.From), value),
+                    (TimeZone.ToZoned(data.To), value)
+                ])
+            });
+            palette.Add("transparent");
+
+            _palette = palette.ToArray();
+            _valueMinimum = minimum;
+            _valueMaximum = maximum;
+            _isPercent = isPercent;
+            _chartSeries = chartSeries;
+            BuildOptions();
+        }
+    }
+
+    // A new instance, because the chart draws again only for other options.
+    private void BuildOptions()
+    {
+        if (Data is not { } data)
+        {
+            return;
+        }
+
+        // Until the lines are measured, the axes are spaced for the size they take on a wide screen.
+        var height = _linesHeight > 0 ? _linesHeight : MaxHeight ?? 300;
+        var width = _linesWidth > 0 ? _linesWidth : height * 2;
+        _valueLabelCount = HistoryChartAxis.GetValueLabelCount(height);
+        _timeLabelCount = HistoryChartAxis.GetTimeLabelCount(width);
+        _axesLabels = $"{_valueLabelCount}x{_timeLabelCount}";
+        var valueAxis = _isPercent
+            ? HistoryChartAxis.GetPercentValueAxis(_valueMinimum, _valueMaximum, height)
+            : HistoryChartAxis.GetValueAxis(_valueMinimum, _valueMaximum, height);
+        var range = data.To - data.From;
+        var timeLabelSpacing = HistoryChartAxis.GetTimeLabelSpacing(range, data.Bucket, width);
+        _chartOptions = new TimeSeriesChartOptions
+        {
+            ChartPalette = _palette,
+            LineDisplayType = LineDisplayType.Line,
+            // The series are named outside the chart: the dialog by its title, the widget by its own legend.
+            ShowLegend = false,
+            // Empty labels, which MudChart measures as no space, so the space around the plot stays the same.
+            TimeLabelFormat = ShowAxes ? HistoryChartAxis.GetTimeLabelFormat(range, timeLabelSpacing) : "''",
+            YAxisToStringFunc = ShowAxes ? null : EmptyAxisLabel,
+            // Without labels the grid lines would reach from edge to edge and run into those of a chart next to it, and
+            // the box would cut a tooltip at its edges.
+            YAxisLines = ShowAxes,
+            ShowToolTips = ShowAxes,
+            TimeLabelSpacing = timeLabelSpacing,
+            // The labels fall on round times rather than on the start of the range.
+            TimeLabelSpacingRounding = true,
+            YAxisTicks = valueAxis.Step,
+            // The chart doubles the step while it has more labels, which only a range beyond the largest step needs.
+            MaxNumYAxisTicks = _valueLabelCount,
+            YAxisRequireZeroPoint = valueAxis.IncludesZero,
+            YAxisSuggestedMax = valueAxis.SuggestedMaximum
+        };
+    }
+
+    private void BuildStateRows()
+    {
+        _stateRows = ShowStateTable && Data is { Bands.Count: > 0 } data
+            ? data.Bands
+                .SelectMany(band => band.Segments.Select(segment => (Band: band.Label, Segment: segment)))
+                .OrderByDescending(row => row.Segment.Start)
+                .ToArray()
+            : [];
+    }
+
+    // The chart holds zoned times, so another time zone needs another build even without new data.
+    private void OnTimeZoneChanged()
+    {
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        InvokeAsync(() =>
+        {
+            // Dispose runs on the dispatcher too, so this check cannot race it.
+            if (_isDisposed)
+            {
+                return;
+            }
+
+            Build();
+            _shouldRender = true;
+            StateHasChanged();
+        });
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _isDisposed = true;
+        TimeZone.Changed -= OnTimeZoneChanged;
+        if (_resizeObserver is not null)
+        {
+            await _resizeObserver.DisposeAsync();
+        }
+
+        try
+        {
+            await DisposeAlignmentAsync(_plotAlignment);
+            if (_module is { IsCompletedSuccessfully: true })
+            {
+                await _module.Result.DisposeAsync();
+            }
+        }
+        catch (Exception exception) when (exception is JSDisconnectedException or JSException or TaskCanceledException)
+        {
+            // The circuit is gone, or the script already went with the page.
+        }
+    }
+}

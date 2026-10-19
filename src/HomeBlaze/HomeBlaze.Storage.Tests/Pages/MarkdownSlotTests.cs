@@ -519,7 +519,7 @@ public class MarkdownSlotTests
         Assert.Same(page, writer);
         Assert.True(handled);
         Assert.Equal(
-            content.Replace("#leaf Count=1", "#leaf Count=5 Enabled=false Interval=00:00:00"),
+            content.Replace("#leaf Count=1", "#leaf Count=5"),
             await fixture.ReadAsync("page.md"));
     }
 

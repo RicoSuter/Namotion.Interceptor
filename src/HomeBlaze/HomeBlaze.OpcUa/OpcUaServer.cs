@@ -105,18 +105,21 @@ public partial class OpcUaServer : BackgroundService, IConfigurable, ITitleProvi
     /// Average incoming changes per second (client writes to server). Null when not running.
     /// </summary>
     [State]
+    [Category("Statistics")]
     public partial double? IncomingChangesPerSecond { get; set; }
 
     /// <summary>
     /// Average outgoing changes per second (subject changes pushed to OPC UA nodes). Null when not running.
     /// </summary>
     [State]
+    [Category("Statistics")]
     public partial double? OutgoingChangesPerSecond { get; set; }
 
     /// <summary>
     /// Number of active OPC UA client sessions. Null when not running.
     /// </summary>
     [State]
+    [Category("Statistics")]
     public partial int? ActiveSessionCount { get; set; }
 
     // Operations

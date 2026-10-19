@@ -43,10 +43,11 @@ internal static class SqliteHistoryWriter
         // newer one. Taking the kind from the last arrival then stored the superseded one, and a ulong
         // whose value had overflowed into value_json read back as JSON text instead of a number. Ordering
         // by timestamp makes the stored kind independent of the order the samples turned up in.
+        // A tie goes to the later arrival, because that write replaces the earlier row at the same instant.
         var newestByPath = new Dictionary<string, PendingSample>(StringComparer.Ordinal);
         foreach (var sample in samples)
         {
-            if (!newestByPath.TryGetValue(sample.Path, out var newest) || sample.Timestamp > newest.Timestamp)
+            if (!newestByPath.TryGetValue(sample.Path, out var newest) || sample.Timestamp >= newest.Timestamp)
             {
                 newestByPath[sample.Path] = sample;
             }
@@ -72,11 +73,13 @@ internal static class SqliteHistoryWriter
     }
 
     // The id this partition interns a path to, registering it on first sight and refreshing its stored
-    // column kind when the property's type has changed.
+    // column kind when the property's type has changed. The stored kind is the kind of the file's newest
+    // row for the path, which is what the reader routes on, so a batch only rewrites it when its newest
+    // sample is at or after that row: a late sample of a superseded type must not revert it.
     //
     // Read before write: after the first flush the path is already known with an unchanged kind, and
     // an unconditional upsert would dirty a page for every path on every flush purely to rewrite what
-    // was already there.
+    // was already there. The newest-row seek likewise only runs when the kind differs.
     private static long InternPath(
         SqliteConnection connection, SqliteTransaction transaction, PendingSample sample)
     {
@@ -101,7 +104,7 @@ internal static class SqliteHistoryWriter
 
         if (existingId is { } id)
         {
-            if (!storedKindIsCurrent)
+            if (!storedKindIsCurrent && IsAtOrAfterNewestRow(connection, transaction, id, sample.Timestamp))
             {
                 using var update = connection.CreateCommand();
                 update.Transaction = transaction;
@@ -129,6 +132,19 @@ internal static class SqliteHistoryWriter
         assigned.Transaction = transaction;
         assigned.CommandText = "SELECT last_insert_rowid();";
         return (long)assigned.ExecuteScalar()!;
+    }
+
+    // Whether timestamp is at or after the newest row this partition holds for the path id (true when
+    // it holds none). Runs before the batch's inserts, so it only sees rows from earlier flushes.
+    private static bool IsAtOrAfterNewestRow(
+        SqliteConnection connection, SqliteTransaction transaction, long pathId, DateTimeOffset timestamp)
+    {
+        using var newest = connection.CreateCommand();
+        newest.Transaction = transaction;
+        newest.CommandText = "SELECT ts FROM history WHERE path_id = @path_id ORDER BY ts DESC LIMIT 1;";
+        newest.Parameters.AddWithValue("@path_id", pathId);
+        return newest.ExecuteScalar() is not long newestTicks ||
+            EpochTicks.ToEpochTicks(timestamp) >= newestTicks;
     }
 
     // Persists queued moves into the metadata database in a single transaction. OR IGNORE because a

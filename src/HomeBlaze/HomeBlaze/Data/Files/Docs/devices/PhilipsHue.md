@@ -18,6 +18,8 @@ The Philips Hue integration connects to a Hue Bridge on the local network and ex
 | `PollingInterval` | TimeSpan | 60s | Interval of the device set reconciliation poll |
 | `RetryInterval` | TimeSpan | 30s | Retry interval on connection failure |
 
+Both intervals accept 5 seconds to 1 hour; a value outside that range is clamped, and zero or less uses the default.
+
 ### JSON Configuration
 
 ```json

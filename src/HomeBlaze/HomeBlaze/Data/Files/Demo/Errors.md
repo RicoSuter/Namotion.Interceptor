@@ -292,19 +292,19 @@ A block is allowed directly on the page, directly inside another widget block an
 
 ## A json block with broken JSON
 
-The list of cells is opened and never closed. The message ends with what the reader of the JSON found and where. The `json` block must hold one valid JSON object.
+A list is opened and never closed. The message ends with what the reader of the JSON found and where. The `json` block must hold one valid JSON object.
 
 ~~~~markdown
 :: HomeBlaze.Components.GridLayout#brokengrid Rows=1 Columns=2
 ```json
-{ "Cells": [ }
+{ "Rows": [ }
 ```
 ::
 ~~~~
 
 :: HomeBlaze.Components.GridLayout#brokengrid Rows=1 Columns=2
 ```json
-{ "Cells": [ }
+{ "Rows": [ }
 ```
 ::
 

@@ -1,0 +1,5 @@
+/* MudChart draws its value labels once left of the chart before it has measured them, and only then makes room for
+   them, so they are not cut while they are there. */
+[data-testid="history-chart-lines"] ::deep svg {
+    overflow: visible;
+}

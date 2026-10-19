@@ -1,0 +1,7 @@
+{"type":"system","subtype":"init","cwd":"/tmp/agent","session_id":"d57c5029-b6b6-4e1a-8767-6df4d71bb4ba","tools":[],"mcp_servers":[],"model":"claude-haiku-4-5-20251001"}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":""}},"session_id":"d57c5029-b6b6-4e1a-8767-6df4d71bb4ba"}
+{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Hello"}},"session_id":"d57c5029-b6b6-4e1a-8767-6df4d71bb4ba"}
+{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" world"}},"session_id":"d57c5029-b6b6-4e1a-8767-6df4d71bb4ba"}
+{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","resetsAt":1791663000,"rateLimitType":"five_hour","unifiedWindows":{"five_hour":{"utilization":0.18,"resetsAt":1791663000},"seven_day":{"utilization":0.73,"resetsAt":1791748800}}}}
+{"type":"system","subtype":"post_turn_summary","status_category":"completed"}
+{"type":"result","subtype":"success","is_error":false,"duration_ms":1200,"num_turns":1,"result":"Hello world","session_id":"d57c5029-b6b6-4e1a-8767-6df4d71bb4ba","total_cost_usd":0.00056,"usage":{"input_tokens":382,"cache_creation_input_tokens":10,"cache_read_input_tokens":20,"output_tokens":85}}

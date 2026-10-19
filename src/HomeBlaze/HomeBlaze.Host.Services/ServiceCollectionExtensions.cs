@@ -1,3 +1,4 @@
+using HomeBlaze.Host.Services.Display;
 using HomeBlaze.Host.Services.Navigation;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Components;
@@ -23,6 +24,7 @@ public static class ServiceCollectionExtensions
         // UI-specific services
         services.AddSingleton<SubjectComponentRegistry>();
         services.AddSingleton<NavigationItemResolver>();
+        services.AddScoped<PropertyRowLayoutService>();
 
         return services;
     }

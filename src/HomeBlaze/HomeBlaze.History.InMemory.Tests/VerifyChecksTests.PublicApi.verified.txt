@@ -16,6 +16,8 @@ namespace HomeBlaze.History.InMemory
         public long RetainedSampleCount { get; }
         public System.Collections.Generic.IReadOnlySet<string> SupportedAggregations { get; }
         public int TrackedPropertyCount { get; }
+        public HomeBlaze.History.Abstractions.HistoryPoint? GetLastNumericSampleBefore(string propertyPath, System.DateTimeOffset before) { }
+        public System.Threading.Tasks.ValueTask<HomeBlaze.History.Abstractions.HistoryPoint?> GetLastNumericSampleBeforeAsync(string propertyPath, System.DateTimeOffset before, System.Threading.CancellationToken cancellationToken) { }
         public HomeBlaze.History.Abstractions.HistoryPoint? GetSampleAtOrBefore(string propertyPath, System.DateTimeOffset asOf) { }
         public System.Threading.Tasks.ValueTask<HomeBlaze.History.Abstractions.HistoryPoint?> GetSampleAtOrBeforeAsync(string propertyPath, System.DateTimeOffset asOf, System.Threading.CancellationToken cancellationToken) { }
         public HomeBlaze.History.Abstractions.HistorySeries Query(HomeBlaze.History.Abstractions.HistoryQuery query) { }
@@ -39,8 +41,10 @@ namespace HomeBlaze.History.InMemory
         [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Byte)]
         public long EstimatedMemorySize { get; set; }
         [HomeBlaze.Abstractions.Attributes.State]
+        [System.ComponentModel.Category("Statistics")]
         public long EvictedCount { get; set; }
         [HomeBlaze.Abstractions.Attributes.State]
+        [System.ComponentModel.Category("Statistics")]
         public double IncomingChangesPerSecond { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public bool IsEnabled { get; set; }
@@ -51,12 +55,15 @@ namespace HomeBlaze.History.InMemory
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public int MaxPointsPerProperty { get; set; }
         [HomeBlaze.Abstractions.Attributes.State]
+        [System.ComponentModel.Category("Statistics")]
         public long OversizeCount { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public int Priority { get; set; }
         [HomeBlaze.Abstractions.Attributes.State]
+        [System.ComponentModel.Category("Statistics")]
         public double RecordedChangesPerSecond { get; set; }
         [HomeBlaze.Abstractions.Attributes.State]
+        [System.ComponentModel.Category("Statistics")]
         public long RecordedCount { get; set; }
         [HomeBlaze.Abstractions.Attributes.State]
         public long RetainedSampleCount { get; set; }
@@ -71,6 +78,7 @@ namespace HomeBlaze.History.InMemory
         public System.Threading.Tasks.Task ApplyConfigurationAsync(System.Threading.CancellationToken cancellationToken) { }
         protected override System.Threading.Tasks.Task ExecuteAsync(System.Threading.CancellationToken stoppingToken) { }
         protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        public System.Threading.Tasks.ValueTask<HomeBlaze.History.Abstractions.HistoryPoint?> GetLastNumericSampleBeforeAsync(string propertyPath, System.DateTimeOffset before, System.Threading.CancellationToken cancellationToken) { }
         protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
         public System.Threading.Tasks.ValueTask<HomeBlaze.History.Abstractions.HistoryPoint?> GetSampleAtOrBeforeAsync(string propertyPath, System.DateTimeOffset asOf, System.Threading.CancellationToken cancellationToken) { }
         public void HandleLifecycleChange(Namotion.Interceptor.Tracking.Lifecycle.SubjectLifecycleChange change) { }
