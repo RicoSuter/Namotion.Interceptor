@@ -6,6 +6,7 @@
 
 @inject ITimeZoneDisplay TimeZone
 @inject TimeZoneInterop Interop
+@inject BrowserPreferences Preferences
 @inject ILogger<TimeZoneSelector> Logger
 
 <MudMenu @ref="_menu" Icon="@Icons.Material.Filled.Schedule" Color="Color.Inherit"
@@ -97,7 +98,7 @@
             if (!string.IsNullOrWhiteSpace(browserZone))
             {
                 TimeZone.SetResolved(TimeZonePreference.Automatic, TimeZoneResolver.Resolve(browserZone));
-                await Interop.SetPreferenceCookieAsync(TimeZonePreference.Automatic.ToCookieValue());
+                await Preferences.SetAsync(TimeZoneInitializer.PreferenceKey, TimeZonePreference.Automatic.ToCookieValue());
             }
 
             await CloseMenuAsync();
@@ -113,10 +114,10 @@
         try
         {
             // Applied before it is persisted, so a failed cookie write still leaves the picked zone in
-            // effect for this session rather than discarding the choice entirely.
+            // effect for this circuit rather than discarding the choice entirely.
             var preference = TimeZonePreference.Specific(id);
             TimeZone.SetResolved(preference, TimeZoneResolver.Resolve(id));
-            await Interop.SetPreferenceCookieAsync(preference.ToCookieValue());
+            await Preferences.SetAsync(TimeZoneInitializer.PreferenceKey, preference.ToCookieValue());
             await CloseMenuAsync();
         }
         catch (Exception exception) when (IsInteropFailure(exception))
@@ -136,7 +137,7 @@
     {
         if (exception is JSException)
         {
-            Logger.LogWarning(exception, "Could not persist the selected time zone.");
+            Logger.LogWarning(exception, "Could not apply the selected time zone.");
         }
     }
 
