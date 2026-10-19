@@ -185,6 +185,45 @@ public class SubjectTransactionHandlerTests
         Assert.Equal("Bob", person.FirstName);
     }
 
+    [Theory]
+    [InlineData(false, 1)]
+    [InlineData(true, 2)]
+    public async Task WhenCheckedChangeCarriesTimestamps_ThenChangeContextDuringCheckCarriesNone(bool withWriter, int expectedChecks)
+    {
+        // Arrange
+        var changedTimestamp = new DateTimeOffset(2024, 1, 2, 3, 4, 5, TimeSpan.Zero);
+        var receivedTimestamp = changedTimestamp.AddSeconds(1);
+        var context = CreateContext(out var handler, withWriter ? new CountingTransactionWriter() : null);
+        var person = new Person(context);
+        var changeContextsSeen = new List<SubjectChangeContext>();
+        var changesSeen = new List<SubjectPropertyChange>();
+        handler.OnCommittingAction = (_, changes) =>
+        {
+            changeContextsSeen.Add(SubjectChangeContext.Current);
+            changesSeen.Add(Assert.Single(changes));
+        };
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        new PropertyReference(person, nameof(Person.FirstName))
+            .SetValueFromSource(new object(), changedTimestamp, receivedTimestamp, "Bob");
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(expectedChecks, changeContextsSeen.Count);
+        Assert.All(changesSeen, change =>
+        {
+            Assert.Equal(changedTimestamp, change.ChangedTimestamp);
+            Assert.Equal(receivedTimestamp, change.ReceivedTimestamp);
+        });
+        Assert.All(changeContextsSeen, changeContext =>
+        {
+            Assert.Equal(default, changeContext);
+            Assert.Null(changeContext.ReceivedTimestamp);
+        });
+        Assert.Equal("Bob", person.FirstName);
+    }
+
     [Fact]
     public async Task WhenOnCommittingThrows_ThenNothingIsAppliedAndRetryCommits()
     {

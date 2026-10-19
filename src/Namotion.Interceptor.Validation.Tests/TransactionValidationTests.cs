@@ -515,6 +515,119 @@ public class TransactionValidationTests
         Assert.Equal("errors", exception.ParamName);
     }
 
+    [Theory]
+    [InlineData(TransactionValidationMode.Immediate, true, new[] { typeof(int), typeof(object), typeof(object) })]
+    [InlineData(TransactionValidationMode.Deferred, true, new[] { typeof(object), typeof(object) })]
+    [InlineData(TransactionValidationMode.Immediate, false, new[] { typeof(int), typeof(object) })]
+    [InlineData(TransactionValidationMode.Deferred, false, new[] { typeof(object) })]
+    public async Task WhenValidValueIsCommitted_ThenValidatorIsCalledOncePerCaptureAndCheck(
+        TransactionValidationMode validationMode, bool withWriter, Type[] expectedTypeArguments)
+    {
+        // Arrange
+        var validator = new CallRecordingValidator();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithTransactions()
+            .WithPropertyValidation()
+            .WithService<IPropertyValidator>(() => validator);
+        if (withWriter)
+        {
+            context.AddService<ITransactionWriter>(new TestTransactionWriter());
+        }
+
+        var motor = new Motor(context);
+        validator.Calls.Clear();
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(
+            TransactionFailureHandling.Rollback, validationMode: validationMode);
+        motor.MotorSpeed = 50;
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(expectedTypeArguments, validator.Calls.Select(call => call.TypeArgument));
+        Assert.All(validator.Calls, call =>
+        {
+            Assert.Equal(nameof(Motor.MotorSpeed), call.Property);
+            Assert.Equal(50, call.Value);
+        });
+        Assert.Equal(50, motor.MotorSpeed);
+    }
+
+    [Theory]
+    [InlineData(TransactionFailureHandling.BestEffort)]
+    [InlineData(TransactionFailureHandling.Rollback)]
+    public async Task WhenDerivedPropertyBecomesInvalid_ThenBothChecksPassAndApplyFailsAfterSourceWrite(
+        TransactionFailureHandling failureHandling)
+    {
+        // Arrange
+        var log = new List<string>();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithTransactions()
+            .WithPropertyValidation()
+            .WithService<IPropertyValidator>(() => new PowerLimitValidator(log));
+        var writer = new TestTransactionWriter(updateDuringWrite: () => log.Add("source write"));
+        context.AddService<ITransactionWriter>(writer);
+        var motor = new PoweredMotor(context);
+        _ = motor.Power;
+        log.Clear();
+        using var transaction = await context.BeginTransactionAsync(failureHandling);
+        motor.MotorSpeed = 200;
+
+        // Act
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Assert
+        Assert.Equal(
+            [
+                nameof(PoweredMotor.MotorSpeed), // capture
+                nameof(PoweredMotor.MotorSpeed), // commit check
+                "source write",
+                nameof(PoweredMotor.MotorSpeed), // pre-apply check
+                nameof(PoweredMotor.Power) // recalculation while the commit applies MotorSpeed
+            ],
+            log);
+        Assert.Equal(1, writer.WriteCount);
+        Assert.Equal(nameof(PoweredMotor.MotorSpeed), Assert.Single(exception.FailedChanges).Property.Name);
+        Assert.Contains("Power 2000 exceeds", Assert.IsType<ValidationException>(Assert.Single(exception.Errors)).Message);
+    }
+
+    [Fact]
+    public async Task WhenSubjectCreatedWithoutContextIsAttachedInTransaction_ThenItsValuesAreNotValidated()
+    {
+        // Arrange
+        var validator = new RecordingValidator(new MotorSpeedValidator());
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithTransactions()
+            .WithPropertyValidation()
+            .WithService<IPropertyValidator>(() => validator);
+        var holder = new MotorHolder(context);
+        var motor = new Motor { MotorSpeed = 500 };
+        validator.ValidatedProperties.Clear();
+
+        // Act
+        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback))
+        {
+            holder.Motor = motor;
+            await transaction.CommitAsync(CancellationToken.None);
+        }
+
+        // Assert
+        Assert.Same(motor, holder.Motor);
+        Assert.Equal(500, motor.MotorSpeed);
+        // Only the captured reference write is validated, at capture and in the commit check.
+        Assert.Equal([nameof(MotorHolder.Motor), nameof(MotorHolder.Motor)], validator.ValidatedProperties);
+
+        // The attached motor now uses the context, so a later write is validated.
+        Assert.Throws<ValidationException>(() => motor.MotorSpeed = 600);
+    }
+
     private static async Task<SubjectTransaction> BeginInOwnFlowAsync(IInterceptorSubjectContext context)
     {
         // An async method does not leak the transaction it begins into the caller's flow.
@@ -553,6 +666,37 @@ public class TransactionValidationTests
         {
             ValidatedProperties.Add(context.Property.Name);
             return inner.Validate(in context);
+        }
+    }
+
+    /// <summary>
+    /// Records the property, type argument and value of every call and accepts every value.
+    /// </summary>
+    private sealed class CallRecordingValidator : IPropertyValidator
+    {
+        public List<(string Property, Type TypeArgument, object? Value)> Calls { get; } = [];
+
+        public IEnumerable<ValidationResult> Validate<TProperty>(in PropertyValidationContext<TProperty> context)
+        {
+            Calls.Add((context.Property.Name, typeof(TProperty), context.Value));
+            return [];
+        }
+    }
+
+    /// <summary>
+    /// Logs the name of every property it validates and rejects a Power above 1000.
+    /// </summary>
+    private sealed class PowerLimitValidator(List<string> log) : IPropertyValidator
+    {
+        public IEnumerable<ValidationResult> Validate<TProperty>(in PropertyValidationContext<TProperty> context)
+        {
+            log.Add(context.Property.Name);
+            if (context.Property.Name == nameof(PoweredMotor.Power) && context.Value is int power && power > 1000)
+            {
+                return [new ValidationResult($"Power {power} exceeds 1000.")];
+            }
+
+            return [];
         }
     }
 
