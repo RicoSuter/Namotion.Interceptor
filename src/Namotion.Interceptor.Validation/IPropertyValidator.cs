@@ -16,8 +16,8 @@ public interface IPropertyValidator
     /// <returns>The validation results, empty if valid.</returns>
     /// <remarks>
     /// <typeparamref name="TProperty"/> is <c>object</c> when a transaction commit checks its final set, and for
-    /// other non-generic write paths. Test the value (<c>context.Value is int speed</c>) instead of
-    /// <c>typeof(TProperty)</c>.
+    /// writes through <c>SetPropertyValueWithInterception</c>, which include derived property recalculations. Test
+    /// the value (<c>context.Value is int speed</c>) instead of <c>typeof(TProperty)</c>.
     /// </remarks>
     IEnumerable<ValidationResult> Validate<TProperty>(in PropertyValidationContext<TProperty> context);
 }

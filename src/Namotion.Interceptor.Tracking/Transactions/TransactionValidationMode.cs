@@ -1,8 +1,8 @@
 namespace Namotion.Interceptor.Tracking.Transactions;
 
 /// <summary>
-/// Specifies when transaction handlers validate the values written in a transaction. The modes are compared in
-/// the validation documentation (docs/validation.md).
+/// Specifies when transaction handlers validate the values written in a transaction. The transaction does not
+/// interpret the mode; handlers read it from <see cref="SubjectTransaction.ValidationMode"/>.
 /// </summary>
 public enum TransactionValidationMode
 {

@@ -21,6 +21,9 @@ public sealed class SubjectTransaction : IDisposable
     [ThreadStatic]
     private static SubjectTransaction? _commitScopeTransaction;
 
+    private static readonly ObjectPool<OrderedDictionary<PropertyReference, SubjectPropertyChange>> PendingChangesPool
+        = new(() => new OrderedDictionary<PropertyReference, SubjectPropertyChange>(PropertyReference.Comparer));
+
     /// <summary>
     /// Gets a value indicating whether any transaction is currently active across all contexts.
     /// This is a fast-path check using a volatile read; it may briefly return true after
@@ -42,9 +45,6 @@ public sealed class SubjectTransaction : IDisposable
     /// Preserves insertion order so that commit replays changes in the order they were written.
     /// Access must be synchronized via <see cref="_pendingChangesLock"/>.
     /// </summary>
-    private static readonly ObjectPool<OrderedDictionary<PropertyReference, SubjectPropertyChange>> PendingChangesPool
-        = new(() => new OrderedDictionary<PropertyReference, SubjectPropertyChange>(PropertyReference.Comparer));
-
     private OrderedDictionary<PropertyReference, SubjectPropertyChange>? _pendingChanges = PendingChangesPool.Rent();
     private readonly Lock _pendingChangesLock = new();
 
@@ -494,13 +494,33 @@ public sealed class SubjectTransaction : IDisposable
     /// The behavior on partial failure depends on the <see cref="_failureHandling"/> specified at transaction creation.
     /// </summary>
     /// <remarks>
+    /// The commit runs these stages in order:
+    /// <list type="number">
+    /// <item><description>
+    /// Commit check: the transaction's <see cref="ITransactionHandler"/>s check the final set.
+    /// </description></item>
+    /// <item><description>
+    /// Conflict detection: with <see cref="TransactionConflictBehavior.FailOnConflict"/>, the captured old values are
+    /// compared with the current values, which catches changes from other transactions and external sources since
+    /// the transaction started.
+    /// </description></item>
+    /// <item><description>
+    /// Source writes, when an <see cref="ITransactionWriter"/> is registered.
+    /// </description></item>
+    /// <item><description>
+    /// Pre-apply check, when an <see cref="ITransactionWriter"/> is registered: the handlers check the changes that
+    /// will be applied again.
+    /// </description></item>
+    /// <item><description>
+    /// Apply: the changes are applied to the local model in insertion order.
+    /// </description></item>
+    /// </list>
     /// For Optimistic locking, the lock is acquired at the start of commit and released after completion.
-    /// Conflict detection compares captured OldValue with current value at commit time.
-    /// This catches changes from other transactions and external sources that occurred
-    /// after the transaction started.
     /// </remarks>
     /// <param name="cancellationToken">The cancellation token.</param>
-    /// <exception cref="ObjectDisposedException">Thrown when the transaction has been disposed.</exception>
+    /// <exception cref="ObjectDisposedException">
+    /// Thrown when the transaction has been disposed, or was disposed while the commit check ran.
+    /// </exception>
     /// <exception cref="InvalidOperationException">
     /// Thrown when commit is called from a different async flow than the one the transaction is active in,
     /// when the transaction was already committed, or when another commit is already in progress.
@@ -509,6 +529,10 @@ public sealed class SubjectTransaction : IDisposable
     /// Thrown when one or more changes failed to commit. A registered <see cref="ITransactionWriter"/>
     /// that throws instead of reporting failures makes the transaction terminal (it must be disposed,
     /// not retried) and may leave its sources un-reverted.
+    /// </exception>
+    /// <exception cref="Exception">
+    /// Any exception a transaction handler throws in the commit check propagates unchanged. Nothing was written, and
+    /// the transaction stays retryable with its pending changes.
     /// </exception>
     public ValueTask CommitAsync(CancellationToken cancellationToken)
     {

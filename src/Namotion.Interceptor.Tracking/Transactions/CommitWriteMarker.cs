@@ -2,14 +2,15 @@ using System.Runtime.CompilerServices;
 
 namespace Namotion.Interceptor.Tracking.Transactions;
 
+// Thread-static: the local apply and the rollback are synchronous, so the mark is set and consumed within one call
+// frame, never across an await. Same-property re-entry before the consumer runs (an OnChanging hook or an earlier
+// interceptor) takes the mark instead, the same limitation as PendingOrigin.
+
 /// <summary>
 /// Marks the write a commit is applying, or a rollback is restoring, so a transaction handler that checked the
 /// final set can recognize it. The first call for the marked property by one of the transaction's handlers
-/// consumes the mark, so nested writes (change handlers, derived recalculations) are not covered. Same-property
-/// re-entry before the consumer runs (an OnChanging hook or an earlier interceptor) takes the mark instead, the
-/// same limitation as PendingOrigin. The mark of a transaction disposed mid-commit never matches. Thread-static by
-/// design: the local apply and the rollback are synchronous, so the mark is set and consumed within one call frame,
-/// never across an await.
+/// consumes the mark, so nested writes (change handlers, derived recalculations) are not covered. The mark of a
+/// transaction disposed mid-commit never matches.
 /// </summary>
 internal static class CommitWriteMarker
 {

@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.ComponentModel.DataAnnotations;
 using System.Text;
 using Namotion.Interceptor.Attributes;
@@ -44,9 +45,23 @@ public class ValidationInterceptor : IWriteInterceptor, ITransactionHandler
     {
         List<SubjectPropertyChange>? failedChanges = null;
         List<Exception>? errors = null;
+        IInterceptorSubjectContext? validatorsContext = null;
+        var validators = ImmutableArray<IPropertyValidator>.Empty;
         foreach (var change in changes)
         {
-            var errorMessage = Validate(change.Property, change.GetNewValue<object?>(), change.Origin);
+            var subjectContext = change.Property.Subject.Context;
+            if (!ReferenceEquals(subjectContext, validatorsContext))
+            {
+                validatorsContext = subjectContext;
+                validators = subjectContext.GetServices<IPropertyValidator>();
+            }
+
+            if (validators.IsDefaultOrEmpty)
+            {
+                continue;
+            }
+
+            var errorMessage = Validate(validators, change.Property, change.GetNewValue<object?>(), change.Origin);
             if (errorMessage is not null)
             {
                 (failedChanges ??= []).Add(change);
@@ -75,16 +90,19 @@ public class ValidationInterceptor : IWriteInterceptor, ITransactionHandler
 
     private static void ThrowIfInvalid<TProperty>(PropertyReference property, TProperty value, ChangeOrigin origin)
     {
-        var errorMessage = Validate(property, value, origin);
+        var errorMessage = Validate(property.Subject.Context.GetServices<IPropertyValidator>(), property, value, origin);
         if (errorMessage is not null)
         {
             throw new ValidationException(errorMessage);
         }
     }
 
-    private static string? Validate<TProperty>(PropertyReference property, TProperty value, ChangeOrigin origin)
+    private static string? Validate<TProperty>(
+        ImmutableArray<IPropertyValidator> validators,
+        PropertyReference property,
+        TProperty value,
+        ChangeOrigin origin)
     {
-        var validators = property.Subject.Context.GetServices<IPropertyValidator>();
         var validationContext = new PropertyValidationContext<TProperty>(property, value, origin);
 
         StringBuilder? message = null;
