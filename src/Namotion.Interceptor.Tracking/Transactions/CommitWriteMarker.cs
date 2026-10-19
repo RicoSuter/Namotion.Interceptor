@@ -7,8 +7,9 @@ namespace Namotion.Interceptor.Tracking.Transactions;
 /// final set can recognize it. The first check for the marked property by one of the transaction's handlers
 /// consumes the mark, so nested writes (change handlers, derived recalculations) are not covered. Same-property
 /// re-entry before the consumer runs (an OnChanging hook or an earlier interceptor) takes the mark instead, the
-/// same limitation as PendingOrigin. Thread-static by design: the local apply and the rollback are synchronous,
-/// so the mark is set and consumed within one call frame, never across an await.
+/// same limitation as PendingOrigin. The mark of a transaction disposed mid-commit never matches. Thread-static by
+/// design: the local apply and the rollback are synchronous, so the mark is set and consumed within one call frame,
+/// never across an await.
 /// </summary>
 internal static class CommitWriteMarker
 {
@@ -38,7 +39,8 @@ internal static class CommitWriteMarker
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static bool TryConsume<TProperty>(ITransactionHandler handler, PropertyReference property, TProperty value)
     {
-        // A dispose mid-commit from another flow can clear this gate while a mark is set; the write is then validated.
+        // A dispose mid-commit from another flow can clear this gate while a mark is set; the slow path rejects the
+        // mark of a disposed transaction too, so the write is validated either way.
         return SubjectTransaction.HasActiveTransaction && TryConsumeMarked(handler, property, value);
     }
 
@@ -46,7 +48,10 @@ internal static class CommitWriteMarker
     private static bool TryConsumeMarked<TProperty>(ITransactionHandler handler, PropertyReference property, TProperty value)
     {
         var frame = _frame;
-        if (!frame.HasValue || !frame.Target.Equals(property) || !frame.Transaction!.Handlers.Contains(handler))
+        if (!frame.HasValue ||
+            !frame.Target.Equals(property) ||
+            frame.Transaction!.IsDisposed ||
+            !frame.Transaction.Handlers.Contains(handler))
         {
             return false;
         }

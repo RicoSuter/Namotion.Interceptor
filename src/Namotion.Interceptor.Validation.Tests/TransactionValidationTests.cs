@@ -410,6 +410,38 @@ public class TransactionValidationTests
     }
 
     [Fact]
+    public async Task WhenDisposedFromAnotherFlowWhileLimitIsLowered_ThenInvalidSpeedDoesNotLand()
+    {
+        // Arrange
+        var context = CreateContext();
+        var motor = new Motor(context) { MaxAllowedSpeed = 200 };
+        SubjectTransaction? transaction = null;
+        var writer = new TestTransactionWriter(updateDuringWrite: () =>
+        {
+            motor.MaxAllowedSpeed = 100;
+            transaction!.Dispose();
+        });
+        context.AddService<ITransactionWriter>(writer);
+
+        // Keeps a transaction active in the process after the dispose, so the result does not depend on other tests.
+        using var unrelatedTransaction = await BeginInOwnFlowAsync(CreateContext());
+
+        // Act
+        using (transaction = await context.BeginTransactionAsync(
+            TransactionFailureHandling.BestEffort, validationMode: TransactionValidationMode.Deferred))
+        {
+            motor.MotorSpeed = 150;
+            await Assert.ThrowsAsync<SubjectTransactionException>(
+                () => transaction.CommitAsync(CancellationToken.None).AsTask());
+        }
+
+        // Assert
+        Assert.Equal(0, motor.MotorSpeed);
+        Assert.Equal(100, motor.MaxAllowedSpeed);
+        Assert.Equal(nameof(Motor.MotorSpeed), Assert.Single(writer.Reverted).Property.Name);
+    }
+
+    [Fact]
     public async Task WhenWriterConfirmsAcceptedChanges_ThenSecondCheckSeesCapturedOrigin()
     {
         // Arrange
@@ -442,6 +474,12 @@ public class TransactionValidationTests
         // Act & Assert
         Assert.Throws<ValidationException>(() => motor.MotorSpeed = 150);
         Assert.Equal(0, motor.MotorSpeed);
+    }
+
+    private static async Task<SubjectTransaction> BeginInOwnFlowAsync(IInterceptorSubjectContext context)
+    {
+        // An async method does not leak the transaction it begins into the caller's flow.
+        return await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
     }
 
     /// <summary>
