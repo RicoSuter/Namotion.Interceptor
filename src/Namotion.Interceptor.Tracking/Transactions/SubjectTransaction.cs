@@ -355,7 +355,8 @@ public sealed class SubjectTransaction : IDisposable
 
     /// <summary>
     /// Reads a pending value for the handlers that run right before the local apply, while the transaction is
-    /// committing. Returns false when the property is not part of the transaction or its source write failed.
+    /// committing. Returns false when the property is not part of the transaction, its change was cancelled, or its
+    /// source write failed.
     /// </summary>
     internal bool TryGetCommitValidationValue<TProperty>(PropertyReference property, out TProperty value)
     {
@@ -363,7 +364,7 @@ public sealed class SubjectTransaction : IDisposable
         {
             lock (_pendingChangesLock)
             {
-                if (_pendingChanges is not null && _pendingChanges.TryGetValue(property, out var change))
+                if (_pendingChanges is not null && _pendingChanges.TryGetValue(property, out var change) && !IsCancelled(property))
                 {
                     value = change.GetNewValue<TProperty>();
                     return true;
@@ -1244,8 +1245,8 @@ public sealed class SubjectTransaction : IDisposable
     }
 
     /// <summary>
-    /// Copies the pending changes whose property is not in <paramref name="failedSource"/> into a rented array, in
-    /// insertion order. The caller returns the array to <see cref="ArrayPool{T}.Shared"/>.
+    /// Copies the pending changes that are not cancelled and whose property is not in <paramref name="failedSource"/>
+    /// into a rented array, in insertion order. The caller returns the array to <see cref="ArrayPool{T}.Shared"/>.
     /// </summary>
     private (SubjectPropertyChange[] RentedArray, int Count) RentLandingPendingChanges(
         IReadOnlyList<SubjectPropertyChange> failedSource)
@@ -1263,13 +1264,14 @@ public sealed class SubjectTransaction : IDisposable
         lock (_pendingChangesLock)
         {
             var pendingChanges = _pendingChanges;
-            var rentedArray = ArrayPool<SubjectPropertyChange>.Shared.Rent(pendingChanges?.Count ?? 0);
+            var rentedArray = ArrayPool<SubjectPropertyChange>.Shared.Rent(GetLiveChangeCount());
             var count = 0;
             if (pendingChanges is not null)
             {
                 foreach (var change in pendingChanges.Values)
                 {
-                    if (failedProperties is null || !failedProperties.Contains(change.Property))
+                    if (!IsCancelled(change.Property) &&
+                        (failedProperties is null || !failedProperties.Contains(change.Property)))
                     {
                         rentedArray[count++] = change;
                     }

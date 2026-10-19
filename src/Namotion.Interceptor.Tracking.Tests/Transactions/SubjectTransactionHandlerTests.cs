@@ -1101,6 +1101,74 @@ public class SubjectTransactionHandlerTests
         Assert.Equal(ChangeOriginKind.Confirmed, Assert.Single(writer.Reverted).Origin.Kind);
     }
 
+    [Fact]
+    public async Task WhenChangeIsCancelledByWriteBack_ThenOnCommittingDoesNotReceiveIt()
+    {
+        // Arrange
+        var changesSeen = new List<SubjectPropertyChange[]>();
+        var firstNamesSeen = new List<string?>();
+        var context = CreateContext();
+        var person = new Person(context) { FirstName = "Ann", LastName = "Lee" };
+        context.AddService<ITransactionHandler>(new RecordingHandler
+        {
+            OnCommittingAction = (_, changes) =>
+            {
+                changesSeen.Add(changes);
+                firstNamesSeen.Add(person.FirstName);
+            }
+        });
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "Bob";
+        person.FirstName = "Ann";
+        person.LastName = "Kim";
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        var change = Assert.Single(Assert.Single(changesSeen));
+        Assert.Equal(nameof(Person.LastName), change.Property.Name);
+        Assert.Equal("Kim", change.GetNewValue<string>());
+        Assert.Equal(["Ann"], firstNamesSeen);
+        Assert.Equal("Ann", person.FirstName);
+        Assert.Equal("Kim", person.LastName);
+    }
+
+    [Fact]
+    public async Task WhenChangeIsCancelledByWriteBackWithWriter_ThenSecondCheckDoesNotReceiveItAndReadsLandedValue()
+    {
+        // Arrange
+        var changesSeen = new List<SubjectPropertyChange[]>();
+        var firstNamesSeen = new List<string?>();
+        var writer = new CountingTransactionWriter();
+        var context = CreateContext();
+        context.AddService<ITransactionWriter>(writer);
+        var person = new Person(context) { FirstName = "Ann", LastName = "Lee" };
+        context.AddService<ITransactionHandler>(new RecordingHandler
+        {
+            OnCommittingAction = (_, changes) =>
+            {
+                changesSeen.Add(changes);
+                firstNamesSeen.Add(person.FirstName);
+            }
+        });
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "Bob";
+        person.FirstName = "Ann";
+        person.LastName = "Kim";
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(2, changesSeen.Count);
+        Assert.All(changesSeen, changes => Assert.Equal(nameof(Person.LastName), Assert.Single(changes).Property.Name));
+        Assert.Equal(["Ann", "Ann"], firstNamesSeen);
+        Assert.Equal(1, writer.WriteCalls);
+        Assert.Equal("Ann", person.FirstName);
+        Assert.Equal("Kim", person.LastName);
+    }
+
     private static async Task<SubjectTransaction> BeginInOwnFlowAsync(IInterceptorSubjectContext context)
     {
         // An async method does not leak the transaction it begins into the caller's flow.
