@@ -309,32 +309,43 @@ public class HistoryChartWidgetTests
         Assert.InRange(layout.ValueLabels.Length, 2, 4);
     }
 
-    // Records the height of the chart with the legend entry in every frame from the parsed prerendered page on, together
-    // with whether it was drawn with its data, so the heights before and after the data arrived can be compared.
+    // Records in every frame from the parsed prerendered page on the height of the chart with the legend entry, whether it
+    // is drawn with its data, and where its visible plot, value labels and band are, so the chart before and after the data
+    // arrived can be compared.
     private const string HeightRecorderScript =
         """
         label => {
-            window.historyChartHeights = [];
+            window.historyChartFrames = [];
+            const isVisible = element => element != null && getComputedStyle(element).visibility === "visible";
             const record = () => {
                 if (document.readyState !== "loading") {
                     const widget = [...document.querySelectorAll("[data-testid=history-chart]")].find(candidate =>
                         [...candidate.querySelectorAll("[data-testid=history-chart-legend-entry] *")]
                             .some(element => element.childElementCount === 0 && element.textContent.trim() === label));
                     if (widget) {
-                        const height = Math.round(widget.getBoundingClientRect().height * 10) / 10;
-                        // Lines are drawn once they have fitted themselves to their box, see GetLayoutAsync, and bands
-                        // without lines once they and their range are shown.
+                        const origin = widget.getBoundingClientRect();
+                        const height = Math.round(origin.height * 10) / 10;
+
+                        // Lines are drawn once their chart is shown, and bands without lines once they and their range are.
                         const lines = widget.querySelector("[data-testid=history-chart-lines]");
                         const chart = lines?.querySelector("svg");
-                        const size = chart?.getBoundingClientRect();
+                        const band = widget.querySelector("[data-testid=history-chart-band]");
                         const isDrawn = lines
-                            ? chart?.querySelector(".mud-charts-timeseries-series path") != null &&
-                              chart.getAttribute("viewBox") === `0 0 ${Math.round(size.width)} ${Math.round(size.height)}`
-                            : widget.querySelector("[data-testid=history-chart-band]") !== null &&
-                              widget.querySelector("[data-testid=history-chart-range]") !== null;
-                        const last = window.historyChartHeights.at(-1);
-                        if (!last || last.height !== height || last.isDrawn !== isDrawn) {
-                            window.historyChartHeights.push({ height, isDrawn });
+                            ? isVisible(chart) && chart.querySelector(".mud-charts-timeseries-series path") != null
+                            : band !== null && widget.querySelector("[data-testid=history-chart-range]") !== null;
+
+                        // A horizontal grid line spans the plot area. A label left of the chart is one MudChart has not placed yet.
+                        const left = element => element ? Math.round(element.getBoundingClientRect().left - origin.left) : "none";
+                        const gridLine = isVisible(chart)
+                            ? [...chart.querySelectorAll(".mud-charts-grid path")].find(path => path.getBoundingClientRect().height < 1)
+                            : null;
+                        const labelsOutside = isVisible(chart) && [...chart.querySelectorAll(".mud-charts-yaxis text")]
+                            .some(text => text.textContent.trim() !== "" && text.getBoundingClientRect().left < chart.getBoundingClientRect().left - 1);
+                        const layout = `plot ${left(gridLine)}, band ${isVisible(band) ? left(band) : "none"}${labelsOutside ? ", labels outside" : ""}`;
+
+                        const last = window.historyChartFrames.at(-1);
+                        if (!last || last.height !== height || last.isDrawn !== isDrawn || last.layout !== layout) {
+                            window.historyChartFrames.push({ height, isDrawn, layout });
                         }
                     }
                 }
@@ -350,7 +361,7 @@ public class HistoryChartWidgetTests
     [InlineData("Pair speed", PhoneWidth)]
     [InlineData("Compact speed", PhoneWidth)]
     [InlineData("Band status", PhoneWidth)]
-    public async Task WhenAPageWithAChartLoads_ThenTheChartHasItsFinalHeightBeforeItsDataArrives(string legendLabel, int width)
+    public async Task WhenAPageWithAChartLoads_ThenTheChartHasItsFinalHeightBeforeItsDataArrivesAndShowsItsPlotOnlyWhereItStays(string legendLabel, int width)
     {
         // Arrange
         var motor = (Motor)((MarkdownFile)_fixture.GetDemoFolder().Children[PageName]).Children[MotorName];
@@ -361,20 +372,26 @@ public class HistoryChartWidgetTests
 
         // Act
         await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/{PageName}");
-        await page.WaitForFunctionAsync("() => window.historyChartHeights?.at(-1)?.isDrawn === true", null, new() { Timeout = Timeout });
+        await page.WaitForFunctionAsync("() => window.historyChartFrames?.at(-1)?.isDrawn === true", null, new() { Timeout = Timeout });
 
         // Assert
-        var heights = (await page.EvaluateAsync<JsonElement>("() => window.historyChartHeights"))
+        var frames = (await page.EvaluateAsync<JsonElement>("() => window.historyChartFrames"))
             .EnumerateArray()
-            .Select(recorded => new RecordedHeight(recorded.GetProperty("height").GetDouble(), recorded.GetProperty("isDrawn").GetBoolean()))
+            .Select(frame => new RecordedFrame(
+                frame.GetProperty("height").GetDouble(), frame.GetProperty("isDrawn").GetBoolean(), frame.GetProperty("layout").GetString()!))
             .ToArray();
-        var finalHeight = heights[^1].Height;
-        Assert.False(heights[0].IsDrawn, "The first recorded height is already that of the drawn chart");
-        Assert.All(heights, recorded => Assert.True(Math.Abs(recorded.Height - finalHeight) <= 1,
-            $"The chart was {string.Join(", ", heights.Select(height => $"{height.Height} px ({(height.IsDrawn ? "drawn" : "loading")})"))} high"));
+        var final = frames[^1];
+        var description = string.Join(", ", frames.Select(frame => $"{frame.Height} px ({(frame.IsDrawn ? "drawn" : "loading")}, {frame.Layout})"));
+        Assert.False(frames[0].IsDrawn, $"The first recorded frame already shows the drawn chart: {description}");
+        Assert.All(frames, frame => Assert.True(Math.Abs(frame.Height - final.Height) <= 1, $"The chart was {description} high"));
+        Assert.All(frames.Where(frame => frame.Layout != HiddenLayout), frame => Assert.Equal(final.Layout, frame.Layout));
+        Assert.DoesNotContain("labels outside", final.Layout);
     }
 
-    private sealed record RecordedHeight(double Height, bool IsDrawn);
+    // The layout of a frame that shows neither the plot nor the band.
+    private const string HiddenLayout = "plot none, band none";
+
+    private sealed record RecordedFrame(double Height, bool IsDrawn, string Layout);
 
     [Theory]
     [InlineData(PhoneWidth)]

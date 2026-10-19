@@ -13,7 +13,11 @@
     var data = Data;
     var hasLines = data is null ? Placeholder!.Value.HasLines : data.Lines.Count > 0;
     var bandCount = data is null ? Placeholder!.Value.BandCount : data.Bands.Count;
-    <div data-testid="history-chart-view" style="@_rootStyle" aria-busy="@(data is null ? "true" : null)">
+
+    @* The style of this view hides the chart and the bands while a plot is pending or drawn but not yet marked ready by
+       its script, see HistoryChartView.razor.js. *@
+    var plot = !hasLines ? null : data is null ? "pending" : _chartSeries is not null ? "drawn" : null;
+    <div data-testid="history-chart-view" data-plot="@plot" style="@_rootStyle" aria-busy="@(data is null ? "true" : null)">
         @if (hasLines)
         {
             @* MudChart fills the box only when it has a height or is a flex box with a max-height: otherwise it draws
@@ -22,22 +26,21 @@
                renders only once the box was measured with a size. *@
             <div @ref="_linesBox" data-testid="history-chart-lines" data-axes-labels="@_axesLabels" style="@_linesStyle"
                  title="@LinesTitle" @onclick="LinesClicked">
-                @if (_chartSeries is not null && _linesWidth > 0)
+                @if (_chartSeries is not null)
                 {
-                    @if (ShowAxes)
+                    @if (_linesWidth > 0)
                     {
-                        @_plot
-                    }
-                    else
-                    {
-                        <div style="@CompactPlotStyle">@_plot</div>
+                        @if (ShowAxes)
+                        {
+                            @_plot
+                        }
+                        else
+                        {
+                            <div style="@CompactPlotStyle">@_plot</div>
+                        }
                     }
                 }
-                else if (data is null || _chartSeries is not null)
-                {
-                    <MudSkeleton SkeletonType="SkeletonType.Rectangle" Style="@PlaceholderLinesStyle" data-testid="history-chart-loading" />
-                }
-                else
+                else if (data is not null)
                 {
                     <MudText Typo="Typo.body2" Class="mud-text-secondary" Style="margin:auto;" data-testid="history-chart-empty">No data in this range.</MudText>
                 }
@@ -54,15 +57,16 @@
         {
             @* With lines, the band spans the plot area of the lines, so a change of state sits under its time. *@
             <div data-testid="history-chart-band-group" style="@(_chartSeries is not null ? PlotAlignedBandGroupStyle : BandGroupStyle)">
-                <div data-testid="history-chart-band-header"
-                     style="display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; column-gap:16px; row-gap:4px;">
-                    <div style="display:flex; align-items:center; gap:6px; min-width:0;">
+                @* One line, whatever the states of the data, so the chart keeps the height it had while loading. The
+                   states that do not fit are cut off, and the tooltip of the legend names all of them. *@
+                <div data-testid="history-chart-band-header" style="@BandHeaderStyle">
+                    <div style="@BandHeaderStartStyle">
                         @if (BandHeader is not null)
                         {
                             @BandHeader(index)
                         }
                     </div>
-                    <div data-testid="history-chart-band-legend" style="display:flex; flex-wrap:wrap; column-gap:12px; row-gap:2px;">
+                    <div data-testid="history-chart-band-legend" style="@BandLegendStyle" title="@(data is null ? null : _bandLegendTitles[index])">
                         @if (data is not null)
                         {
                             var band = data.Bands[index];
@@ -70,7 +74,7 @@
                             @for (var entryIndex = 0; entryIndex < band.Legend.Count; entryIndex++)
                             {
                                 var entry = band.Legend[entryIndex];
-                                <div style="display:flex; align-items:center; gap:6px;">
+                                <div style="@BandLegendEntryStyle">
                                     <span aria-hidden="true" style="@swatchStyles[entryIndex]"></span>
                                     <MudText Typo="Typo.caption">@entry.Label</MudText>
                                 </div>
@@ -81,7 +85,7 @@
 
                 @if (data is null)
                 {
-                    <MudSkeleton SkeletonType="SkeletonType.Rectangle" Style="@_placeholderBandStyle" data-testid="history-chart-band-loading" />
+                    <div aria-hidden="true" style="@_placeholderBandStyle"></div>
                 }
                 else
                 {
@@ -156,8 +160,11 @@
         $"width:calc(100% + {PlotStartSpace + PlotEndSpace}px); " +
         $"height:calc(100% + {PlotTopSpace + PlotBottomSpace - 2 * StrokeMargin}px); display:flex;";
 
-    // A skeleton is a block of its own height, which a flex box only stretches to the box with an automatic height.
-    private const string PlaceholderLinesStyle = "flex:1 1 auto; height:auto; border-radius:4px;";
+    private const string BandHeaderStyle = "display:flex; align-items:center; column-gap:16px; white-space:nowrap;";
+    private const string BandHeaderStartStyle = "display:flex; align-items:center; gap:6px; min-width:0; overflow:hidden;";
+    private const string BandLegendStyle =
+        "display:flex; column-gap:12px; min-width:0; margin-left:auto; overflow:hidden;";
+    private const string BandLegendEntryStyle = "display:flex; flex:0 0 auto; align-items:center; gap:6px;";
 
     private static readonly Func<double, string> EmptyAxisLabel = static _ => string.Empty;
 
@@ -199,6 +206,7 @@
     private string _axesLabels = string.Empty;
     private string[] _bandStyles = [];
     private string _placeholderBandStyle = string.Empty;
+    private string[] _bandLegendTitles = [];
     private string[][] _bandSwatchStyles = [];
     private string? _rangeText;
 
@@ -208,6 +216,7 @@
     private Task<IJSObjectReference>? _module;
     private IJSObjectReference? _plotAlignment;
     private ElementReference? _alignedLines;
+    private bool _alignsBands;
 
     // Incremented by every alignment, so one that a later one superseded while its script ran disposes its handle.
     private int _alignmentGeneration;
@@ -394,17 +403,19 @@
             }
         }
 
-        // Only bands below lines follow the plot area.
-        ElementReference? alignedLines = Data is { Bands.Count: > 0 } ? lines : null;
-        if (alignedLines?.Id != _alignedLines?.Id && !_isDisposed)
+        // Every drawn plot is followed, so the view shows it once it is placed. Only bands below lines follow the plot area.
+        var alignsBands = Data is { Bands.Count: > 0 };
+        if ((lines?.Id != _alignedLines?.Id || alignsBands != _alignsBands) && !_isDisposed)
         {
-            _alignedLines = alignedLines;
-            await AlignBandsAsync(alignedLines);
+            _alignedLines = lines;
+            _alignsBands = alignsBands;
+            await FollowPlotAsync(lines, alignsBands);
         }
     }
 
-    // Follows the plot area of the lines in the margins of the bands, see HistoryChartView.razor.js.
-    private async Task AlignBandsAsync(ElementReference? lines)
+    // Marks the view ready once the plot is placed and follows the plot area in the margins of the bands, see
+    // HistoryChartView.razor.js.
+    private async Task FollowPlotAsync(ElementReference? lines, bool alignsBands)
     {
         var generation = ++_alignmentGeneration;
         try
@@ -427,7 +438,7 @@
                 return;
             }
 
-            var alignment = await module.InvokeAsync<IJSObjectReference>("alignBands", element);
+            var alignment = await module.InvokeAsync<IJSObjectReference>("followPlot", element, alignsBands);
 
             // The view can be disposed or show other lines while the script ran.
             if (_isDisposed || generation != _alignmentGeneration)
@@ -440,7 +451,8 @@
         }
         catch (Exception exception) when (exception is JSDisconnectedException or JSException or TaskCanceledException)
         {
-            // The alignment is only visual: without it the bands span the full width, which must not end the circuit.
+            // The alignment is only visual, which must not end the circuit: without it the bands span the full width, and the
+            // style of the view shows the chart and the bands after a few seconds.
         }
     }
 
@@ -513,8 +525,9 @@
     private void BuildBandStyles()
     {
         var bands = Data?.Bands ?? [];
-        _placeholderBandStyle = $"flex:0 0 {BandHeight}px; border-radius:4px;";
+        _placeholderBandStyle = $"flex:0 0 {BandHeight}px;";
         _bandStyles = new string[bands.Count];
+        _bandLegendTitles = new string[bands.Count];
         _bandSwatchStyles = new string[bands.Count][];
         for (var index = 0; index < bands.Count; index++)
         {
@@ -527,6 +540,7 @@
             }
 
             _bandSwatchStyles[index] = swatchStyles;
+            _bandLegendTitles[index] = string.Join(", ", band.Legend.Select(entry => entry.Label));
         }
     }
 
