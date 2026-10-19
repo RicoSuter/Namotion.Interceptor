@@ -15,7 +15,6 @@ internal static class CommitWriteMarker
 {
     internal struct Frame
     {
-        public bool HasValue;
         public PropertyReference Target;
         public object? Value;
         public SubjectTransaction? Transaction;
@@ -28,7 +27,6 @@ internal static class CommitWriteMarker
         var scope = new Scope(_frame);
         _frame = new Frame
         {
-            HasValue = true,
             Target = target,
             Value = value,
             Transaction = transaction
@@ -48,9 +46,9 @@ internal static class CommitWriteMarker
     private static bool TryConsumeMarked<TProperty>(ITransactionHandler handler, PropertyReference property, TProperty value)
     {
         var frame = _frame;
-        if (!frame.HasValue ||
+        if (frame.Transaction is null ||
             !frame.Target.Equals(property) ||
-            frame.Transaction!.IsDisposed ||
+            frame.Transaction.IsDisposed ||
             !frame.Transaction.Handlers.Contains(handler))
         {
             return false;

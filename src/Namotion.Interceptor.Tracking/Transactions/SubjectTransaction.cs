@@ -34,14 +34,8 @@ public sealed class SubjectTransaction : IDisposable
     private readonly TimeSpan _commitTimeout;
     private readonly IDisposable? _lockReleaser; // null for Optimistic until commit
 
-    // Replaced under _pendingChangesLock only while no commit runs, so the handlers that checked a commit are exactly
-    // the ones its applies are marked for. Never mutated in place: it starts as the context's cached service array.
-    private ITransactionHandler[] _handlers;
-
-    // Caches only (a stale read just takes the slow path): the last subject context and handler array included.
-    // Written after _handlers with release semantics, so a reader that skips on a hit also sees the included handlers.
-    private IInterceptorSubjectContext? _lastIncludedContext;
-    private ITransactionHandler[] _lastIncludedHandlers;
+    // A mutable struct: never copy it or make this field readonly (see TransactionHandlerSet).
+    private TransactionHandlerSet _handlerSet;
 
     /// <summary>
     /// Last write wins if the same property is written multiple times.
@@ -157,10 +151,10 @@ public sealed class SubjectTransaction : IDisposable
     /// Gets the transaction handlers resolved from the context when the transaction began, followed by those added from
     /// the contexts of subjects when they are written.
     /// </summary>
-    internal ImmutableArray<ITransactionHandler> Handlers => ImmutableCollectionsMarshal.AsImmutableArray(Volatile.Read(ref _handlers));
+    internal ImmutableArray<ITransactionHandler> Handlers => ImmutableCollectionsMarshal.AsImmutableArray(_handlerSet.Handlers);
 
     // Applies carry the commit write mark only when handlers checked the final set.
-    private SubjectTransaction? MarkingTransaction => _handlers.Length == 0 ? null : this;
+    private SubjectTransaction? MarkingTransaction => _handlerSet.Handlers.Length == 0 ? null : this;
 
     /// <summary>
     /// Adds the transaction handlers of <paramref name="subjectContext"/> that are not registered on the transaction's
@@ -171,137 +165,7 @@ public sealed class SubjectTransaction : IDisposable
     /// </exception>
     internal void IncludeHandlersOf(IInterceptorSubjectContext subjectContext)
     {
-        if (ReferenceEquals(subjectContext, Context) || ReferenceEquals(subjectContext, Volatile.Read(ref _lastIncludedContext)))
-        {
-            return;
-        }
-
-        var subjectHandlers = ImmutableCollectionsMarshal.AsArray(subjectContext.GetServices<ITransactionHandler>()) ?? [];
-        if (!ReferenceEquals(subjectHandlers, Volatile.Read(ref _lastIncludedHandlers)))
-        {
-            if (!ContainsAll(Volatile.Read(ref _handlers), subjectHandlers) &&
-                !TryInclude(subjectHandlers, Context.GetServices<ITransactionHandler>().AsSpan()))
-            {
-                return;
-            }
-
-            Volatile.Write(ref _lastIncludedHandlers, subjectHandlers);
-        }
-
-        Volatile.Write(ref _lastIncludedContext, subjectContext);
-    }
-
-    /// <summary>
-    /// Adds the handlers of <paramref name="subjectHandlers"/> that are in neither the transaction's handlers nor
-    /// <paramref name="transactionContextHandlers"/>, so a handler registered on the transaction's context after it
-    /// began stays out. Handlers match by equality. Returns false when the transaction is disposed or committed.
-    /// </summary>
-    private bool TryInclude(
-        ReadOnlySpan<ITransactionHandler> subjectHandlers,
-        ReadOnlySpan<ITransactionHandler> transactionContextHandlers)
-    {
-        while (true)
-        {
-            // Handler equality can run user code, so the union is built before taking the transaction lock and
-            // published only when no concurrent inclusion replaced the handlers in between.
-            var handlers = Volatile.Read(ref _handlers);
-            var union = CreateUnion(handlers, subjectHandlers, transactionContextHandlers);
-            lock (_pendingChangesLock)
-            {
-                // Same checks and order as TryCaptureChange, which this write reaches next.
-                if (Volatile.Read(ref _isDisposed) != 0 || _isCommitted || _pendingChanges is null)
-                {
-                    return false;
-                }
-
-                ThrowIfCommittingConcurrently();
-
-                if (ReferenceEquals(_handlers, handlers))
-                {
-                    if (union is not null)
-                    {
-                        Volatile.Write(ref _handlers, union);
-                    }
-
-                    return true;
-                }
-            }
-        }
-    }
-
-    /// <summary>
-    /// Returns <paramref name="handlers"/> followed by the additions of <paramref name="subjectHandlers"/>, or null
-    /// when there are none.
-    /// </summary>
-    private static ITransactionHandler[]? CreateUnion(
-        ITransactionHandler[] handlers,
-        ReadOnlySpan<ITransactionHandler> subjectHandlers,
-        ReadOnlySpan<ITransactionHandler> transactionContextHandlers)
-    {
-        var additionCount = 0;
-        for (var index = 0; index < subjectHandlers.Length; index++)
-        {
-            if (IsAddition(subjectHandlers, index, handlers, transactionContextHandlers))
-            {
-                additionCount++;
-            }
-        }
-
-        if (additionCount == 0)
-        {
-            return null;
-        }
-
-        var union = new ITransactionHandler[handlers.Length + additionCount];
-        handlers.CopyTo(union, 0);
-        var count = handlers.Length;
-        for (var index = 0; index < subjectHandlers.Length; index++)
-        {
-            if (IsAddition(subjectHandlers, index, handlers, transactionContextHandlers))
-            {
-                union[count++] = subjectHandlers[index];
-            }
-        }
-
-        return union;
-    }
-
-    private static bool IsAddition(
-        ReadOnlySpan<ITransactionHandler> subjectHandlers,
-        int index,
-        ReadOnlySpan<ITransactionHandler> handlers,
-        ReadOnlySpan<ITransactionHandler> transactionContextHandlers)
-    {
-        var handler = subjectHandlers[index];
-        return !Contains(handlers, handler) &&
-            !Contains(transactionContextHandlers, handler) &&
-            !Contains(subjectHandlers[..index], handler);
-    }
-
-    private static bool ContainsAll(ReadOnlySpan<ITransactionHandler> handlers, ReadOnlySpan<ITransactionHandler> candidates)
-    {
-        foreach (var candidate in candidates)
-        {
-            if (!Contains(handlers, candidate))
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    private static bool Contains(ReadOnlySpan<ITransactionHandler> handlers, ITransactionHandler handler)
-    {
-        foreach (var candidate in handlers)
-        {
-            if (candidate.Equals(handler))
-            {
-                return true;
-            }
-        }
-
-        return false;
+        _handlerSet.Include(subjectContext, this, _pendingChangesLock);
     }
 
     /// <summary>
@@ -355,13 +219,11 @@ public sealed class SubjectTransaction : IDisposable
     {
         lock (_pendingChangesLock)
         {
-            if (Volatile.Read(ref _isDisposed) != 0 || _isCommitted || _pendingChanges is null)
+            if (!CanCaptureUnderLock())
             {
                 value = default!;
                 return false;
             }
-
-            ThrowIfCommittingConcurrently();
 
             if (_pendingChanges.TryGetValue(property, out var change) && !IsCancelled(property))
             {
@@ -427,12 +289,10 @@ public sealed class SubjectTransaction : IDisposable
     {
         lock (_pendingChangesLock)
         {
-            if (Volatile.Read(ref _isDisposed) != 0 || _isCommitted || _pendingChanges is null)
+            if (!CanCaptureUnderLock())
             {
                 return false;
             }
-
-            ThrowIfCommittingConcurrently();
 
             var pendingChanges = _pendingChanges;
             var isFirstWrite = !pendingChanges.TryGetValue(property, out var existingChange);
@@ -489,18 +349,24 @@ public sealed class SubjectTransaction : IDisposable
     {
         lock (_pendingChangesLock)
         {
-            if (Volatile.Read(ref _isDisposed) != 0 || _isCommitted || _pendingChanges is null)
-            {
-                return true;
-            }
-
-            ThrowIfCommittingConcurrently();
-            return false;
+            return !CanCaptureUnderLock();
         }
     }
 
-    private void ThrowIfCommittingConcurrently()
+    /// <summary>
+    /// Returns false when the transaction no longer captures (disposed or committed), and throws while a commit is in
+    /// progress. Must be called under <see cref="_pendingChangesLock"/>.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">Thrown while a commit is in progress.</exception>
+    [System.Diagnostics.CodeAnalysis.MemberNotNullWhen(true, nameof(_pendingChanges))]
+    internal bool CanCaptureUnderLock()
     {
+        Debug.Assert(_pendingChangesLock.IsHeldByCurrentThread, "Must be called under the pending changes lock.");
+        if (Volatile.Read(ref _isDisposed) != 0 || _isCommitted || _pendingChanges is null)
+        {
+            return false;
+        }
+
         if (_isCommitting)
         {
             throw new InvalidOperationException(
@@ -509,6 +375,8 @@ public sealed class SubjectTransaction : IDisposable
                 "payload from the supplied changes instead of reading or writing subject properties. " +
                 "This is also reported when the transaction is used from another thread.");
         }
+
+        return true;
     }
 
     internal static void ThrowWriteDuringCommitCheck()
@@ -559,8 +427,7 @@ public sealed class SubjectTransaction : IDisposable
         ValidationMode = validationMode;
         _commitTimeout = commitTimeout;
         _lockReleaser = lockReleaser;
-        _handlers = ImmutableCollectionsMarshal.AsArray(context.GetServices<ITransactionHandler>()) ?? [];
-        _lastIncludedHandlers = _handlers;
+        _handlerSet = new TransactionHandlerSet(context);
 
         Interlocked.Increment(ref _activeTransactionCount);
     }
@@ -1131,7 +998,7 @@ public sealed class SubjectTransaction : IDisposable
     /// <exception cref="ObjectDisposedException">Thrown when the transaction was disposed while the handlers ran.</exception>
     private void RunCommitCheck(ReadOnlySpan<SubjectPropertyChange> changes)
     {
-        if (_handlers.Length == 0)
+        if (_handlerSet.Handlers.Length == 0)
         {
             return;
         }
@@ -1155,7 +1022,7 @@ public sealed class SubjectTransaction : IDisposable
         {
             using (EnterCommitCheck())
             {
-                foreach (var handler in _handlers)
+                foreach (var handler in _handlerSet.Handlers)
                 {
                     handler.OnCommitting(this, changes);
                 }
@@ -1177,7 +1044,7 @@ public sealed class SubjectTransaction : IDisposable
         IReadOnlyList<SubjectPropertyChange> failedSource)
     {
         // A transaction disposed from another flow mid-commit has dropped the pending values the reads need.
-        if (_handlers.Length == 0 || Volatile.Read(ref _isDisposed) != 0)
+        if (_handlerSet.Handlers.Length == 0 || IsDisposed)
         {
             return null;
         }
@@ -1201,7 +1068,7 @@ public sealed class SubjectTransaction : IDisposable
             }
             catch (Exception exception)
             {
-                return GetRejectionErrors(exception, SubjectPropertyChangeOperations.ExcludeByProperty(changes, failedSource, []));
+                return PreApplyCheckRejection.GetErrors(exception, SubjectPropertyChangeOperations.ExcludeByProperty(changes, failedSource, []));
             }
         }
         finally
@@ -1237,62 +1104,6 @@ public sealed class SubjectTransaction : IDisposable
 
             return (rentedArray, count);
         }
-    }
-
-    /// <summary>
-    /// Returns the errors of a handler exception that rejected <paramref name="checkedChanges"/>. A
-    /// <see cref="SubjectTransactionException"/> whose failed changes include a checked change contributes its
-    /// errors; any other exception is the error itself.
-    /// </summary>
-    private static IReadOnlyList<Exception> GetRejectionErrors(
-        Exception exception,
-        IReadOnlyList<SubjectPropertyChange> checkedChanges)
-    {
-        if (exception is SubjectTransactionException { FailedChanges.Count: > 0 } transactionException &&
-            SubjectPropertyChangeOperations.IntersectByProperty(transactionException.FailedChanges, checkedChanges).Count > 0)
-        {
-            return GetCheckedChangeErrors(transactionException, checkedChanges);
-        }
-
-        return [exception];
-    }
-
-    /// <summary>
-    /// Returns the errors of a rejection. When the failed changes and errors align one to one, only the errors of
-    /// the failed changes that were checked are kept; otherwise all errors, or the exception itself when it has none.
-    /// </summary>
-    private static IReadOnlyList<Exception> GetCheckedChangeErrors(
-        SubjectTransactionException exception,
-        IReadOnlyList<SubjectPropertyChange> checkedChanges)
-    {
-        var failedChanges = exception.FailedChanges;
-        var errors = exception.Errors;
-        if (errors.Count == 0)
-        {
-            return [exception];
-        }
-
-        if (errors.Count != failedChanges.Count)
-        {
-            return errors;
-        }
-
-        var checkedProperties = new HashSet<PropertyReference>(checkedChanges.Count, PropertyReference.Comparer);
-        foreach (var change in checkedChanges)
-        {
-            checkedProperties.Add(change.Property);
-        }
-
-        var alignedErrors = new List<Exception>(errors.Count);
-        for (var index = 0; index < failedChanges.Count; index++)
-        {
-            if (checkedProperties.Contains(failedChanges[index].Property))
-            {
-                alignedErrors.Add(errors[index]);
-            }
-        }
-
-        return alignedErrors;
     }
 
     private void ThrowIfConflictsDetected(ReadOnlySpan<SubjectPropertyChange> changes)
