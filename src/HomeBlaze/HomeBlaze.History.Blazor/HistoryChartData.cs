@@ -64,3 +64,8 @@ public sealed record HistoryChartBand(
 /// <param name="Label">The text of the state.</param>
 /// <param name="Fill">The CSS fill of the state, a color or a gradient.</param>
 public readonly record struct HistoryChartLegendEntry(string Label, string Fill);
+
+/// <summary>What a history chart view reserves room for until it has data, see <see cref="HistoryChartView.Placeholder"/>.</summary>
+/// <param name="HasLines">Whether the data will have lines.</param>
+/// <param name="BandCount">The number of bands the data will have.</param>
+public readonly record struct HistoryChartPlaceholder(bool HasLines, int BandCount);

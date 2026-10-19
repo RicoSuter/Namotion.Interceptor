@@ -309,6 +309,99 @@ public class HistoryChartWidgetTests
         Assert.InRange(layout.ValueLabels.Length, 2, 4);
     }
 
+    // Records in every frame from the parsed prerendered page on the height of the chart with the legend entry, whether it
+    // is drawn with its data, and where its visible chart, plot, value labels and band are, so the chart before and after
+    // the data arrived can be compared.
+    private const string FrameRecorderScript =
+        """
+        label => {
+            window.historyChartFrames = [];
+            const isVisible = element => element != null && getComputedStyle(element).visibility === "visible";
+            const record = () => {
+                if (document.readyState !== "loading") {
+                    const widget = [...document.querySelectorAll("[data-testid=history-chart]")].find(candidate =>
+                        [...candidate.querySelectorAll("[data-testid=history-chart-legend-entry] *")]
+                            .some(element => element.childElementCount === 0 && element.textContent.trim() === label));
+                    if (widget) {
+                        const origin = widget.getBoundingClientRect();
+                        const height = Math.round(origin.height * 10) / 10;
+
+                        // Lines are drawn once their chart is shown, and bands without lines once they and their range are.
+                        const lines = widget.querySelector("[data-testid=history-chart-lines]");
+                        const chart = lines?.querySelector("svg");
+                        const band = widget.querySelector("[data-testid=history-chart-band]");
+                        const isDrawn = lines
+                            ? isVisible(chart) && chart.querySelector(".mud-charts-timeseries-series path") != null
+                            : band !== null && widget.querySelector("[data-testid=history-chart-range]") !== null;
+
+                        // A horizontal grid line spans the plot area. A label left of the chart is one MudChart has not placed yet.
+                        const left = element => element ? Math.round(element.getBoundingClientRect().left - origin.left) : "none";
+                        const gridLine = isVisible(chart)
+                            ? [...chart.querySelectorAll(".mud-charts-grid path")].find(path => path.getBoundingClientRect().height < 1)
+                            : null;
+                        const labelsOutside = isVisible(chart) && [...chart.querySelectorAll(".mud-charts-yaxis text")]
+                            .some(text => text.textContent.trim() !== "" && text.getBoundingClientRect().left < chart.getBoundingClientRect().left - 1);
+                        const layout = `chart ${isVisible(chart) ? left(chart) : "none"}, plot ${left(gridLine)}, ` +
+                            `band ${isVisible(band) ? left(band) : "none"}${labelsOutside ? ", labels outside" : ""}`;
+
+                        // Set by the script of the view once MudChart has placed the chart, rather than by the fallback of its style.
+                        const isReady = widget.querySelector("[data-testid=history-chart-view]")?.hasAttribute("data-plot-ready") === true;
+
+                        const last = window.historyChartFrames.at(-1);
+                        if (!last || last.height !== height || last.isDrawn !== isDrawn || last.layout !== layout || last.isReady !== isReady) {
+                            window.historyChartFrames.push({ height, isDrawn, layout, isReady, hasLines: lines !== null });
+                        }
+                    }
+                }
+
+                requestAnimationFrame(record);
+            };
+            requestAnimationFrame(record);
+        }
+        """;
+
+    [Theory]
+    [InlineData("Chart speed", DesktopWidth)]
+    [InlineData("Pair speed", PhoneWidth)]
+    [InlineData("Compact speed", PhoneWidth)]
+    [InlineData("Band status", PhoneWidth)]
+    public async Task WhenAPageWithAChartLoads_ThenNothingInItMovesWhileItsDataArrives(string legendLabel, int width)
+    {
+        // Arrange
+        var motor = (Motor)((MarkdownFile)_fixture.GetDemoFolder().Children[PageName]).Children[MotorName];
+        await WaitUntilRecordedAsync(motor.TryGetRegisteredProperty(nameof(Motor.CurrentSpeed))!, point => point.Number is not null);
+        var page = await _fixture.CreatePageAsync();
+        await page.SetViewportSizeAsync(width, 900);
+        await page.AddInitScriptAsync($"({FrameRecorderScript})({JsonSerializer.Serialize(legendLabel)})");
+
+        // Act
+        await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/{PageName}");
+        await page.WaitForFunctionAsync("() => window.historyChartFrames?.at(-1)?.isDrawn === true", null, new() { Timeout = Timeout });
+
+        // Assert
+        var frames = (await page.EvaluateAsync<JsonElement>("() => window.historyChartFrames"))
+            .EnumerateArray()
+            .Select(frame => new RecordedFrame(
+                frame.GetProperty("height").GetDouble(),
+                frame.GetProperty("isDrawn").GetBoolean(),
+                frame.GetProperty("layout").GetString()!,
+                frame.GetProperty("isReady").GetBoolean(),
+                frame.GetProperty("hasLines").GetBoolean()))
+            .ToArray();
+        var final = frames[^1];
+        var description = string.Join(", ", frames.Select(frame => $"{frame.Height} px ({(frame.IsDrawn ? "drawn" : "loading")}, {frame.Layout})"));
+        Assert.False(frames[0].IsDrawn, $"The first recorded frame already shows the drawn chart: {description}");
+        Assert.All(frames, frame => Assert.True(Math.Abs(frame.Height - final.Height) <= 1, $"The chart was {description} high"));
+        Assert.All(frames.Where(frame => frame.Layout != HiddenLayout), frame => Assert.Equal(final.Layout, frame.Layout));
+        Assert.DoesNotContain("labels outside", final.Layout);
+        Assert.True(!final.HasLines || final.IsReady, $"The chart was not marked ready by its script: {description}");
+    }
+
+    // The layout of a frame that shows neither the plot nor the band.
+    private const string HiddenLayout = "chart none, plot none, band none";
+
+    private sealed record RecordedFrame(double Height, bool IsDrawn, string Layout, bool IsReady, bool HasLines);
+
     [Theory]
     [InlineData(PhoneWidth)]
     [InlineData(DesktopWidth)]
@@ -477,6 +570,9 @@ public class HistoryChartWidgetTests
         var dialog = GetHistoryDialog(page, "Chart speed");
         await Assertions.Expect(dialog.GetByTestId("property-history-dialog")).ToBeVisibleAsync(new() { Timeout = Timeout });
         await Assertions.Expect(dialog.GetByTestId("history-chart-view")).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // The chart of the dialog is shown once the script of its view has seen it placed, not by the fallback of its style.
+        await Assertions.Expect(dialog.GetByTestId("history-chart-view")).ToHaveAttributeAsync("data-plot-ready", "", new() { Timeout = Timeout });
     }
 
     [Fact]
