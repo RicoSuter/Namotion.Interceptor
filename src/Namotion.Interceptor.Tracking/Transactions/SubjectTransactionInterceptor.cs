@@ -72,15 +72,9 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
         ReadInterceptionDelegate<TProperty> next,
         out TProperty value)
     {
-        if (transaction.IsCommitModelAccessAuthorized)
+        if (transaction.IsInCommitScope)
         {
-            value = next(ref context);
-            return true;
-        }
-
-        if (transaction.IsCheckReadAuthorized)
-        {
-            value = transaction.TryGetCheckedValue<TProperty>(context.Property, out var checkedValue)
+            value = transaction.IsCheckingCommit && transaction.TryGetCheckedValue<TProperty>(context.Property, out var checkedValue)
                 ? checkedValue
                 : next(ref context);
             return true;
@@ -164,14 +158,14 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static bool ShouldWriteThroughWhileCommitting(SubjectTransaction transaction)
     {
-        if (transaction.IsCommitModelAccessAuthorized)
+        if (transaction.IsInCommitScope)
         {
-            return true;
-        }
+            if (transaction.IsCheckingCommit)
+            {
+                SubjectTransaction.ThrowWriteDuringCommitCheck();
+            }
 
-        if (transaction.IsCheckReadAuthorized)
-        {
-            SubjectTransaction.ThrowWriteDuringCommitCheck();
+            return true;
         }
 
         return transaction.IsInactiveUnderLockOrThrowIfCommitting();

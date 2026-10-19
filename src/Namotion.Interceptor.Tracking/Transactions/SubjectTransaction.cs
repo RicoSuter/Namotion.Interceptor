@@ -19,10 +19,7 @@ public sealed class SubjectTransaction : IDisposable
     private static int _activeTransactionCount;
 
     [ThreadStatic]
-    private static SubjectTransaction? _commitModelAccessTransaction;
-
-    [ThreadStatic]
-    private static SubjectTransaction? _checkingTransaction;
+    private static SubjectTransaction? _commitScopeTransaction;
 
     /// <summary>
     /// Gets a value indicating whether any transaction is currently active across all contexts.
@@ -71,6 +68,10 @@ public sealed class SubjectTransaction : IDisposable
     // Handoff from Dispose to EndCommit: when Dispose runs mid-commit, EndCommit releases the exclusive lock
     // once the commit finishes. Accessed only under _pendingChangesLock (no volatile needed; never read lock-free).
     private bool _disposeRequestedDuringCommit;
+
+    // Written only by the committing thread as it enters and leaves a commit scope, and read only after
+    // IsInCommitScope matched on that same thread, so it needs no synchronization.
+    private bool _isCheckingCommit;
 
     // The changes whose source write failed, set only during the pre-apply check. Read only by the committing thread
     // inside its check scope, so it needs no lock.
@@ -136,14 +137,16 @@ public sealed class SubjectTransaction : IDisposable
     internal bool IsDisposed => Volatile.Read(ref _isDisposed) != 0;
 
     /// <summary>
-    /// Gets a value indicating whether this thread is synchronously replaying this transaction's model work.
+    /// Gets a value indicating whether this thread runs this transaction's synchronous commit work: a handler check,
+    /// conflict detection, or the local apply and its rollback.
     /// </summary>
-    internal bool IsCommitModelAccessAuthorized => ReferenceEquals(_commitModelAccessTransaction, this);
+    internal bool IsInCommitScope => ReferenceEquals(_commitScopeTransaction, this);
 
     /// <summary>
-    /// Gets a value indicating whether this thread runs this transaction's commit check or pre-apply check.
+    /// Gets a value indicating whether the commit scope runs a handler check, where reads return the checked values
+    /// and writes throw. Only meaningful when <see cref="IsInCommitScope"/> is true.
     /// </summary>
-    internal bool IsCheckReadAuthorized => ReferenceEquals(_checkingTransaction, this);
+    internal bool IsCheckingCommit => _isCheckingCommit;
 
     /// <summary>
     /// Gets the interceptor this transaction is bound to (for cross-context validation).
@@ -1340,49 +1343,36 @@ public sealed class SubjectTransaction : IDisposable
             : new CancellationTokenSource(_commitTimeout);
     }
 
-    private CommitModelAccessScope EnterCommitModelAccess() => new(this);
+    private CommitScope EnterCommitModelAccess() => new(this, isCheck: false);
+
+    private CommitScope EnterCommitCheck() => new(this, isCheck: true);
 
     /// <summary>
-    /// Grants model access only to synchronous commit-owned work on this thread. The previous identity is
-    /// restored for nested/reentrant use. Callers must dispose the scope before awaiting external code.
+    /// Authorizes synchronous commit-owned work of the transaction on this thread: a handler check when
+    /// <c>isCheck</c> is true, model access otherwise. The previous identity is restored on disposal, so a scope of
+    /// another transaction can nest. Callers must dispose the scope before awaiting external code.
     /// </summary>
-    private readonly struct CommitModelAccessScope : IDisposable
+    private readonly struct CommitScope : IDisposable
     {
+        private readonly SubjectTransaction _transaction;
         private readonly SubjectTransaction? _previousTransaction;
 
         [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S3010", Justification = "This scope deliberately installs the current thread's commit identity and restores the previous identity on disposal, including nested scopes.")]
-        public CommitModelAccessScope(SubjectTransaction transaction)
+        public CommitScope(SubjectTransaction transaction, bool isCheck)
         {
-            _previousTransaction = _commitModelAccessTransaction;
-            _commitModelAccessTransaction = transaction;
+            // Dispose resets the check flag instead of restoring it, which holds only while the scopes of one
+            // transaction run one after another.
+            Debug.Assert(!ReferenceEquals(_commitScopeTransaction, transaction), "Commit scopes of one transaction must not nest.");
+            _transaction = transaction;
+            _previousTransaction = _commitScopeTransaction;
+            transaction._isCheckingCommit = isCheck;
+            _commitScopeTransaction = transaction;
         }
 
         public void Dispose()
         {
-            _commitModelAccessTransaction = _previousTransaction;
-        }
-    }
-
-    private CommitCheckScope EnterCommitCheck() => new(this);
-
-    /// <summary>
-    /// Lets this thread read the transaction's pending values while it runs the commit check or the pre-apply check.
-    /// The previous identity is restored on disposal. Callers must dispose the scope before awaiting.
-    /// </summary>
-    private readonly struct CommitCheckScope : IDisposable
-    {
-        private readonly SubjectTransaction? _previousTransaction;
-
-        [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S3010", Justification = "This scope deliberately installs the current thread's commit check identity and restores the previous identity on disposal, including nested scopes.")]
-        public CommitCheckScope(SubjectTransaction transaction)
-        {
-            _previousTransaction = _checkingTransaction;
-            _checkingTransaction = transaction;
-        }
-
-        public void Dispose()
-        {
-            _checkingTransaction = _previousTransaction;
+            _commitScopeTransaction = _previousTransaction;
+            _transaction._isCheckingCommit = false;
         }
     }
 
