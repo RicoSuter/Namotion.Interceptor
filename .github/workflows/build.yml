@@ -429,7 +429,6 @@ jobs:
     # Forks cannot push to this package.
     if: github.repository_owner == 'RicoSuter' && (github.event_name == 'release' || (github.event_name == 'push' && github.ref == 'refs/heads/master'))
     # Serializes publishing per ref, so the edge commit the Compute tags step reads cannot change before this run pushes.
-    # A queued run cancels the one already pending, so a burst of merges can skip a commit until the next push.
     concurrency:
       group: container-publish-${{ github.ref }}
       cancel-in-progress: false
@@ -438,9 +437,6 @@ jobs:
     permissions:
       contents: read
       packages: write
-    env:
-      # Overrides the local image name of the project file.
-      CONTAINER_REPOSITORY: ricosuter/homeblaze
     steps:
       - uses: actions/checkout@v7
 
@@ -488,7 +484,7 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "Could not read the master head" }
             $moveEdge = $masterHead -like "$($env:GITHUB_SHA)*"
             if (-not $moveEdge) {
-              $edgeCommit = (skopeo inspect --no-tags "docker://ghcr.io/$($env:CONTAINER_REPOSITORY):edge" | ConvertFrom-Json).Labels.'org.opencontainers.image.revision'
+              $edgeCommit = (skopeo --command-timeout 1m inspect --no-tags docker://ghcr.io/ricosuter/homeblaze:edge | ConvertFrom-Json).Labels.'org.opencontainers.image.revision'
               $comparison = if ($edgeCommit) { gh api "repos/$($env:GITHUB_REPOSITORY)/compare/$edgeCommit...$($env:GITHUB_SHA)" --jq .status }
               $moveEdge = $comparison -in "ahead", "identical"
               Write-Host "Not the master head; edge commit '$edgeCommit', this commit compared with it: '$comparison'"
@@ -520,7 +516,7 @@ jobs:
           ContainerImageTags: ${{ steps.tags.outputs.TAGS }}
         run: |
           dotnet publish src/HomeBlaze/HomeBlaze/HomeBlaze.csproj -c Release /t:PublishContainer `
-            -p:ContainerRegistry=ghcr.io -p:ContainerRepository=$env:CONTAINER_REPOSITORY `
+            -p:ContainerRegistry=ghcr.io -p:ContainerRepository=ricosuter/homeblaze `
             -p:InformationalVersion=${{ steps.tags.outputs.INFORMATIONAL_VERSION }} `
             -p:LibraryPackageVersion=${{ steps.tags.outputs.LIBRARY_VERSION }} `
             -p:BuildTag=${{ steps.tags.outputs.BUILD_TAG }} `

@@ -88,12 +88,12 @@
     </ItemGroup>
 
     <!-- The multi-platform publish hands labels to each platform build as Key:Value and the SDK keeps only the text
-         up to the next colon, so timestamps and URLs arrive cut off. Only the first colon separates the key. -->
+         up to the next colon, so timestamps and URLs arrive cut off. Remove once CI builds with an SDK that has dotnet/sdk#55414. -->
     <Target Name="RestoreContainerLabelValues" AfterTargets="_ParseItemsForPublishingSingleContainer">
         <ItemGroup>
             <ContainerLabel Remove="@(ContainerLabel)" />
             <ContainerLabel Include="$([System.String]::Copy('%(_ParsedContainerLabel.Identity)').Split(':')[0])"
-                            Value="$([System.Text.RegularExpressions.Regex]::Replace('%(_ParsedContainerLabel.Identity)', '^[^:]*:', ''))" />
+                            Value="$([System.String]::Copy('%(_ParsedContainerLabel.Identity)').Split(':', 2)[1])" />
         </ItemGroup>
     </Target>
 
