@@ -132,8 +132,9 @@ else
     }
 
     /* What the page menu tells about the page, above the edit modes. It looks like text and not like an action, and a
-       long path breaks, so that the menu stays in the window. */
+       long path breaks, so that the menu stays in the window. Its icon stands next to the title, the first line. */
     .mud-menu-item.page-info {
+        align-items: flex-start;
         cursor: default;
         max-width: 20rem;
         overflow-wrap: anywhere;
