@@ -216,11 +216,6 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
         TProperty newValue,
         ChangeOrigin origin)
     {
-        if (transaction.IsValidating)
-        {
-            SubjectTransaction.ThrowCaptureDuringCommitValidation();
-        }
-
         foreach (var handler in handlers)
         {
             handler.OnCapturing(transaction, property, newValue, origin);

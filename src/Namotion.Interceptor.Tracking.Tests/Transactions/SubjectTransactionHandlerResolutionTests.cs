@@ -195,7 +195,7 @@ public class SubjectTransactionHandlerResolutionTests
 
         // Assert
         var exception = Assert.IsType<InvalidOperationException>(concurrentWriteException);
-        Assert.Contains("while transaction handlers check the commit", exception.Message);
+        Assert.Contains("commit is in progress", exception.Message);
         Assert.Empty(subjectHandler.Captured);
         Assert.Equal(0, subjectHandler.CommittingCalls);
         Assert.Null(person.FirstName);

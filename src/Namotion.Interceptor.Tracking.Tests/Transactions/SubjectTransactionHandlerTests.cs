@@ -263,10 +263,83 @@ public class SubjectTransactionHandlerTests
         await transaction.CommitAsync(CancellationToken.None);
 
         // Assert
-        Assert.IsType<InvalidOperationException>(writeError);
+        var exception = Assert.IsType<InvalidOperationException>(writeError);
+        Assert.Contains("Transaction handlers must not write properties", exception.Message);
         Assert.DoesNotContain(handler.Captured, captured => captured.Property.Name == nameof(Person.LastName));
         Assert.Equal("Bob", person.FirstName);
         Assert.Null(person.LastName);
+    }
+
+    [Fact]
+    public async Task WhenHandlerWritesSettableDerivedPropertyDuringOnCommitting_ThenWriteThrows()
+    {
+        // Arrange
+        var handler = new RecordingHandler();
+        var context = CreateContext();
+        context.AddService<ITransactionHandler>(handler);
+        var subject = new TransactionCascadeSubject(context);
+        Exception? writeError = null;
+        handler.OnCommittingAction = (_, _) => writeError = Record.Exception(() => subject.DerivedWithSetter = "derived");
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        subject.Plain = "plain";
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        var exception = Assert.IsType<InvalidOperationException>(writeError);
+        Assert.Contains("Transaction handlers must not write properties", exception.Message);
+        Assert.Null(subject.DerivedWithSetter);
+        Assert.Equal("plain", subject.Plain);
+    }
+
+    [Fact]
+    public async Task WhenHandlerWritesLandedValueOfPendingPropertyDuringOnCommitting_ThenWriteIsDropped()
+    {
+        // Arrange
+        var handler = new RecordingHandler();
+        var context = CreateContext();
+        context.AddService<ITransactionHandler>(handler);
+        var person = new Person(context) { FirstName = "Ann" };
+        Exception? writeError = null;
+        handler.OnCommittingAction = (_, _) => writeError = Record.Exception(() => person.FirstName = "Ann");
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "Bob";
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Null(writeError);
+        Assert.Equal("Bob", person.FirstName);
+    }
+
+    [Fact]
+    public async Task WhenAnotherThreadReadsDuringOnCommitting_ThenReadThrows()
+    {
+        // Arrange
+        var handler = new RecordingHandler();
+        var context = CreateContext();
+        context.AddService<ITransactionHandler>(handler);
+        var person = new Person(context) { FirstName = "Ann" };
+        Exception? concurrentReadException = null;
+        handler.OnCommittingAction = (_, _) =>
+        {
+            // A started thread inherits the execution context, so it carries the transaction.
+            var thread = new Thread(() => concurrentReadException = Record.Exception(() => _ = person.FirstName));
+            thread.Start();
+            thread.Join();
+        };
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "Bob";
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        var exception = Assert.IsType<InvalidOperationException>(concurrentReadException);
+        Assert.Contains("commit is in progress", exception.Message);
+        Assert.Equal("Bob", person.FirstName);
     }
 
     [Fact]

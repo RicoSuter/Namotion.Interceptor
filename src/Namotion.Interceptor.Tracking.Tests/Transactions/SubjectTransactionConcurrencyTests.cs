@@ -351,7 +351,7 @@ public class SubjectTransactionConcurrencyTests
     {
         // Arrange: an optimistic commit parks acquiring the per-context transaction lock. A dispose on
         // another flow then releases the pending-changes buffer while the commit is still parked, so the
-        // commit resumes with a null buffer. The null tolerance in StartCommitAndSnapshotChanges and
+        // commit resumes with a null buffer. The null tolerance in SnapshotChanges and
         // FinishCommit is what keeps that from being a NullReferenceException; it is load-bearing, not
         // defensive.
         var context = CreateTransactionContext();

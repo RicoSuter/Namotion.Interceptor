@@ -72,10 +72,6 @@ public sealed class SubjectTransaction : IDisposable
     // once the commit finishes. Accessed only under _pendingChangesLock (no volatile needed; never read lock-free).
     private bool _disposeRequestedDuringCommit;
 
-    // Set while commit handlers check the snapshot, before _isCommitting: captures throw so the checked snapshot is
-    // the one that commits. Written only under _pendingChangesLock.
-    private bool _isValidating;
-
     // The changes whose source write failed, set only while the handlers check the set right before the local apply.
     // Read only by the committing thread inside its commit validation scope, so it needs no lock.
     private IReadOnlyList<SubjectPropertyChange>? _commitValidationExcludedChanges;
@@ -130,12 +126,6 @@ public sealed class SubjectTransaction : IDisposable
     internal bool IsCommitting => _isCommitting;
 
     /// <summary>
-    /// Gets a value indicating whether commit handlers are checking the snapshot.
-    /// </summary>
-    // Lock-free early check; the authoritative check stays in TryCaptureChange under the lock.
-    internal bool IsValidating => Volatile.Read(ref _isValidating);
-
-    /// <summary>
     /// Gets a value indicating whether the transaction has reached a terminal committed state.
     /// </summary>
     internal bool IsCommitted => _isCommitted;
@@ -174,7 +164,7 @@ public sealed class SubjectTransaction : IDisposable
     /// context, when a subject of it is written and the transaction is about to capture the write.
     /// </summary>
     /// <exception cref="InvalidOperationException">
-    /// Thrown while a commit is in progress or commit handlers are checking the snapshot, like the capture would.
+    /// Thrown while a commit is in progress, like the capture would.
     /// </exception>
     internal void IncludeHandlersOf(IInterceptorSubjectContext subjectContext)
     {
@@ -222,10 +212,6 @@ public sealed class SubjectTransaction : IDisposable
                 }
 
                 ThrowIfCommittingConcurrently();
-                if (_isValidating)
-                {
-                    ThrowCaptureDuringCommitValidation();
-                }
 
                 if (ReferenceEquals(_handlers, handlers))
                 {
@@ -445,7 +431,7 @@ public sealed class SubjectTransaction : IDisposable
     /// value and position.
     /// </param>
     /// <exception cref="InvalidOperationException">
-    /// Thrown if a concurrent commit is in progress (TOCTOU race) or commit handlers are checking the snapshot.
+    /// Thrown if a concurrent commit is in progress (TOCTOU race).
     /// </exception>
     internal bool TryCaptureChange<TProperty>(
         PropertyReference property,
@@ -464,10 +450,6 @@ public sealed class SubjectTransaction : IDisposable
             }
 
             ThrowIfCommittingConcurrently();
-            if (_isValidating)
-            {
-                ThrowCaptureDuringCommitValidation();
-            }
 
             var pendingChanges = _pendingChanges;
             var isFirstWrite = !pendingChanges.TryGetValue(property, out var existingChange);
@@ -747,8 +729,9 @@ public sealed class SubjectTransaction : IDisposable
         SubjectPropertyChange[]? rentedArray = null;
         try
         {
-            var (rented, changes) = StartCommitAndSnapshotChanges();
+            var (rented, changes) = SnapshotChanges();
             rentedArray = rented;
+            RunCommitCheck(changes.Span);
 
             SubjectTransactionException? failure = null;
             using (EnterCommitModelAccess())
@@ -794,8 +777,9 @@ public sealed class SubjectTransaction : IDisposable
         try
         {
             commitLock = await AcquireOptimisticLockIfNeededAsync(cancellationToken).ConfigureAwait(false);
-            var (rented, changes) = StartCommitAndSnapshotChanges();
+            var (rented, changes) = SnapshotChanges();
             rentedArray = rented;
+            RunCommitCheck(changes.Span);
 
             using (EnterCommitModelAccess())
             {
@@ -1127,45 +1111,7 @@ public sealed class SubjectTransaction : IDisposable
         return await Interceptor.AcquireTransactionLockAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private (SubjectPropertyChange[] RentedArray, Memory<SubjectPropertyChange> Changes) StartCommitAndSnapshotChanges()
-    {
-        var (rentedArray, changes, handlers) = SnapshotChanges();
-        if (handlers.Length == 0)
-        {
-            return (rentedArray, changes);
-        }
-
-        try
-        {
-            InvokeCommitHandlers(handlers, changes.Span);
-
-            lock (_pendingChangesLock)
-            {
-                _isValidating = false;
-                if (Volatile.Read(ref _isDisposed) != 0)
-                {
-                    throw new ObjectDisposedException(nameof(SubjectTransaction));
-                }
-
-                _isCommitting = true;
-            }
-
-            return (rentedArray, changes);
-        }
-        catch
-        {
-            lock (_pendingChangesLock)
-            {
-                _isValidating = false;
-            }
-
-            // The caller has not received the array yet, so EndCommit cannot return it.
-            ArrayPool<SubjectPropertyChange>.Shared.Return(rentedArray, clearArray: true);
-            throw;
-        }
-    }
-
-    private (SubjectPropertyChange[] RentedArray, Memory<SubjectPropertyChange> Changes, ITransactionHandler[] Handlers) SnapshotChanges()
+    private (SubjectPropertyChange[] RentedArray, Memory<SubjectPropertyChange> Changes) SnapshotChanges()
     {
         lock (_pendingChangesLock)
         {
@@ -1174,17 +1120,9 @@ public sealed class SubjectTransaction : IDisposable
             var changeCount = GetLiveChangeCount();
             var rentedArray = ArrayPool<SubjectPropertyChange>.Shared.Rent(changeCount);
 
-            // Read the handlers and set the state while holding the lock so no write can be captured, and no
-            // handler included, between the snapshot and the commit.
-            var handlers = _handlers;
-            if (handlers.Length == 0)
-            {
-                _isCommitting = true;
-            }
-            else
-            {
-                _isValidating = true;
-            }
+            // Set while holding the lock so no write can be captured, and no handler included, between the snapshot
+            // and the end of the commit.
+            _isCommitting = true;
 
             var index = 0;
             if (pendingChanges is not null)
@@ -1200,15 +1138,50 @@ public sealed class SubjectTransaction : IDisposable
 
             Debug.Assert(index == changeCount, "Cancelled changes must be a subset of the pending changes.");
 
-            return (rentedArray, rentedArray.AsMemory(0, changeCount), handlers);
+            return (rentedArray, rentedArray.AsMemory(0, changeCount));
         }
     }
 
-    private void InvokeCommitHandlers(ITransactionHandler[] handlers, ReadOnlySpan<SubjectPropertyChange> changes)
+    /// <summary>
+    /// Calls the handlers with the snapshot before anything is written. A handler exception propagates unchanged; the
+    /// caller's <see cref="EndCommit"/> then keeps the pending changes for a retry.
+    /// </summary>
+    /// <exception cref="ObjectDisposedException">Thrown when the transaction was disposed while the handlers ran.</exception>
+    private void RunCommitCheck(ReadOnlySpan<SubjectPropertyChange> changes)
     {
-        foreach (var handler in handlers)
+        if (_handlers.Length == 0)
         {
-            handler.OnCommitting(this, changes);
+            return;
+        }
+
+        RunCommitHandlers(changes, excludedChanges: null);
+
+        if (IsDisposed)
+        {
+            throw new ObjectDisposedException(nameof(SubjectTransaction));
+        }
+    }
+
+    /// <summary>
+    /// Calls the handlers on this thread with reads returning the pending values, except those of
+    /// <paramref name="excludedChanges"/>, and writes throwing.
+    /// </summary>
+    private void RunCommitHandlers(ReadOnlySpan<SubjectPropertyChange> changes, IReadOnlyList<SubjectPropertyChange>? excludedChanges)
+    {
+        _commitValidationExcludedChanges = excludedChanges;
+        try
+        {
+            using (EnterCommitValidationAccess())
+            {
+                foreach (var handler in _handlers)
+                {
+                    handler.OnCommitting(this, changes);
+                }
+            }
+        }
+        finally
+        {
+            _commitValidationExcludedChanges = null;
         }
     }
 
@@ -1238,23 +1211,16 @@ public sealed class SubjectTransaction : IDisposable
                 return null;
             }
 
-            _commitValidationExcludedChanges = failedSource.Count == 0 ? null : failedSource;
             try
             {
-                using (EnterCommitValidationAccess())
-                {
-                    InvokeCommitHandlers(_handlers, new ReadOnlySpan<SubjectPropertyChange>(rentedArray, 0, checkedCount));
-                }
-
+                RunCommitHandlers(
+                    new ReadOnlySpan<SubjectPropertyChange>(rentedArray, 0, checkedCount),
+                    failedSource.Count == 0 ? null : failedSource);
                 return null;
             }
             catch (Exception exception)
             {
                 return GetRejectionErrors(exception, SubjectPropertyChangeOperations.ExcludeByProperty(changes, failedSource, []));
-            }
-            finally
-            {
-                _commitValidationExcludedChanges = null;
             }
         }
         finally
@@ -1453,9 +1419,7 @@ public sealed class SubjectTransaction : IDisposable
             {
                 _pendingChanges?.Clear();
                 _cancelledChanges = null;
-                // A disposal during the handler phase also defers to EndCommit, so the exclusive lock is not released
-                // while handlers of this commit still run.
-                committing = _isCommitting || _isValidating;
+                committing = _isCommitting;
                 if (committing)
                 {
                     _disposeRequestedDuringCommit = true;
