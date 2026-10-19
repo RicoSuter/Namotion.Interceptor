@@ -113,8 +113,6 @@
     {
         try
         {
-            // Applied before it is persisted, so a failed cookie write still leaves the picked zone in
-            // effect for this circuit rather than discarding the choice entirely.
             var preference = TimeZonePreference.Specific(id);
             TimeZone.SetResolved(preference, TimeZoneResolver.Resolve(id));
             await Preferences.SetAsync(TimeZoneInitializer.PreferenceKey, preference.ToCookieValue());
@@ -126,7 +124,7 @@
         }
     }
 
-    // The same reasoning as TimeZoneInitializer: a time zone that did not persist is cosmetic, while an
+    // The same reasoning as TimeZoneInitializer: a time zone that could not be detected is cosmetic, while an
     // exception out of a click handler tears the circuit down and replaces the application with an error
     // page. OperationCanceledException is in the set because that is how the interop call timeout
     // surfaces; it derives from neither JSException nor JSDisconnectedException.
@@ -137,7 +135,7 @@
     {
         if (exception is JSException)
         {
-            Logger.LogWarning(exception, "Could not apply the selected time zone.");
+            Logger.LogWarning(exception, "Could not detect the browser time zone.");
         }
     }
 
