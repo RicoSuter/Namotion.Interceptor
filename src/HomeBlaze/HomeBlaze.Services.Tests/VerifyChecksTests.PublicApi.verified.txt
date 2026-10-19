@@ -52,6 +52,18 @@ namespace HomeBlaze.Services
         public static string GetPluginConfigurationPath(Microsoft.Extensions.Configuration.IConfiguration configuration) { }
         public static string GetRootConfigurationPath(Microsoft.Extensions.Configuration.IConfiguration? configuration) { }
     }
+    public static class MetadataDictionaryExtensions
+    {
+        public static TEnum? GetEnum<TEnum>(this System.Collections.Generic.IReadOnlyDictionary<string, System.Text.Json.JsonElement>? metadata, string key)
+            where TEnum :  struct, System.Enum { }
+        public static string? GetString(this System.Collections.Generic.IReadOnlyDictionary<string, System.Text.Json.JsonElement>? metadata, string key) { }
+        public static System.Collections.Immutable.ImmutableArray<string> GetStringArray(this System.Collections.Generic.IReadOnlyDictionary<string, System.Text.Json.JsonElement>? metadata, string key) { }
+    }
+    public static class MetadataPaths
+    {
+        public static Namotion.Interceptor.Registry.Paths.PathProviderBase PathProvider { get; }
+        public static Namotion.Interceptor.IInterceptorSubject? TryResolveSubject(Namotion.Interceptor.IInterceptorSubject origin, string path) { }
+    }
     public sealed class ObjectParameterMember : System.IEquatable<HomeBlaze.Services.ObjectParameterMember>
     {
         public ObjectParameterMember(string Name, System.Type Type, bool IsRequired) { }
