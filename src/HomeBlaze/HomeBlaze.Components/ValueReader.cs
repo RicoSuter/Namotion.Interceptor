@@ -2,7 +2,6 @@ using HomeBlaze.Abstractions;
 using HomeBlaze.Components.Abstractions.TimeZones;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Display;
-using MudBlazor;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -81,7 +80,7 @@ public static class ValueReader
         var value = property?.GetValue();
         if (property is null || value is null)
         {
-            return new ValueReading(property, null, MissingText, Color.Default, null, mapError);
+            return new ValueReading(property, null, MissingText, ValueColor.Default, null, mapError);
         }
 
         var matched = valueMap?.FindCase(RawValueFormatter.Format(value));
@@ -89,7 +88,7 @@ public static class ValueReader
             property,
             value,
             GetText(property, value, matched, timeZone),
-            matched?.Color ?? Color.Default,
+            matched?.GetColor() ?? ValueColor.Default,
             string.IsNullOrEmpty(matched?.Icon) ? null : matched.Icon,
             mapError);
     }
@@ -122,13 +121,13 @@ public static class ValueReader
     }
 
     /// <summary>
-    /// Gets the colour of an indicator: that of the matched case, and without a map the primary colour for true.
+    /// Gets the color of an indicator: that of the matched case, and without a map the primary color for true.
     /// </summary>
-    public static Color GetIndicatorColor(ValueReading reading, string? map)
+    public static ValueColor GetIndicatorColor(ValueReading reading, string? map)
     {
         if (string.IsNullOrEmpty(map) && reading.Value is true)
         {
-            return Color.Primary;
+            return MudBlazor.Color.Primary;
         }
 
         return reading.Color;
@@ -154,7 +153,8 @@ public static class ValueReader
     /// <param name="resolver">The resolver of the map.</param>
     /// <param name="widget">The subject the map is relative to, usually the widget itself.</param>
     /// <param name="map">The name or path of the map as written.</param>
-    /// <param name="error">The widget argument error when the map leads nowhere or to no <see cref="ValueMap"/>, otherwise null.</param>
+    /// <param name="error">The widget argument error when the map leads nowhere or to no <see cref="ValueMap"/>, or
+    /// when the <see cref="ValueMapCase.Color"/> of one of its cases is no color, otherwise null.</param>
     public static ValueMap? ResolveMap(SubjectPathResolver resolver, IInterceptorSubject widget, string? map, out string? error)
     {
         error = null;
@@ -165,6 +165,15 @@ public static class ValueReader
 
         if (ResolveSubject(resolver, widget, map) is ValueMap valueMap)
         {
+            foreach (var valueCase in valueMap.Cases)
+            {
+                if (valueCase.GetColor() is null)
+                {
+                    error = ValueColor.GetError(valueCase.Color);
+                    return null;
+                }
+            }
+
             return valueMap;
         }
 

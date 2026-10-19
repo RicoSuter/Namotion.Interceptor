@@ -9,7 +9,7 @@ namespace HomeBlaze.Components.Controls;
 /// <see cref="Operation"/> names the operation a click invokes; when a click does nothing, they are the text of the
 /// state alone and null.
 /// </summary>
-internal readonly record struct DoorLockAppearance(string DoorIcon, string BadgeIcon, Color Fill, string Subtitle, string Description, string? Operation);
+internal readonly record struct DoorLockAppearance(string DoorIcon, string BadgeIcon, ValueColor Fill, string Subtitle, string Description, string? Operation);
 
 /// <summary>
 /// Gets what a door lock tile shows for the state of the lock and of its door.
@@ -50,7 +50,7 @@ internal static class DoorLockDisplay
             return new DoorLockAppearance(
                 doorIcon,
                 MudBlazorIconResolver.ResolveOrNull(matched.Icon) ?? badgeIcon,
-                matched.Color,
+                matched.GetColor() ?? ValueColor.Default,
                 text,
                 operation is null ? text : string.Concat(text, clickText),
                 operation);

@@ -3,7 +3,7 @@ using MudBlazor;
 namespace HomeBlaze.Components.Controls;
 
 /// <summary>
-/// Gets the inline style of a tile: its fill and its text color from a theme color and a variant.
+/// Gets the inline style of a tile: its fill and its text color from a theme color or a CSS color and a variant.
 /// </summary>
 internal static class TileStyle
 {
@@ -15,9 +15,25 @@ internal static class TileStyle
     /// <summary>
     /// Gets the style of a tile. A color without a palette fill (Default, Inherit, Transparent, Surface) draws the tile
     /// on the surface, as does a color or a variant that is not defined (a configuration can give any integer). A
-    /// disabled tile keeps its style and is dimmed by its class instead.
+    /// disabled tile keeps its style and is dimmed by its class instead. A CSS color fills the tile like a theme color,
+    /// with black or white text, see <see cref="ValueColor.FillStyle"/>.
     /// </summary>
-    public static string GetStyle(Color color, Variant variant)
+    public static string GetStyle(ValueColor color, Variant variant)
+    {
+        if (color.Css is not null)
+        {
+            return variant switch
+            {
+                Variant.Outlined => color.TileOutlinedStyle!,
+                Variant.Text => color.TileTextStyle!,
+                _ => color.TileFilledStyle!
+            };
+        }
+
+        return GetStyle(color.Theme, variant);
+    }
+
+    private static string GetStyle(Color color, Variant variant)
     {
         // The unsigned comparison also rejects a negative value.
         return (uint)color < (uint)Styles.GetLength(0) && (uint)variant < (uint)Styles.GetLength(1)

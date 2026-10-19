@@ -50,9 +50,9 @@ public class DoorLockDisplayTests
     {
         Cases =
         [
-            new ValueMapCase { Value = "Locked", Text = "Secured", Color = Color.Tertiary, Icon = "Key" },
-            new ValueMapCase { Value = "unlocked", Text = "Not secured", Color = Color.Warning },
-            new ValueMapCase { Value = "Locking", Color = Color.Info, Icon = "Sync" },
+            new ValueMapCase { Value = "Locked", Text = "Secured", Color = "Tertiary", Icon = "Key" },
+            new ValueMapCase { Value = "unlocked", Text = "Not secured", Color = "Warning" },
+            new ValueMapCase { Value = "Locking", Color = "Info", Icon = "Sync" },
             new ValueMapCase { Value = "Unlatched", Text = "Latch pulled" }
         ]
     };

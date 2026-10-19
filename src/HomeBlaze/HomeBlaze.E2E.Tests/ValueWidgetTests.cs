@@ -359,6 +359,65 @@ public class ValueWidgetTests
         }
     }
 
+    private static string CreateCssColorPage(string subjectName, string quietColor) =>
+        ":: HomeBlaze.Components.ValueMap#motion\n" +
+        "::: Case Value=moving Color=\"#ffffff\"\n" +
+        $"::: Case Value=quiet Color=\"{quietColor}\"\n" +
+        "::\n\n" +
+        $":: HomeBlaze.Components.Indicator Path=\"/{subjectName}/Label\" Map=motion Kind=Icon\n::\n\n" +
+        $":: HomeBlaze.Components.ValueTile Path=\"/{subjectName}/Label\" Map=motion Kind=Tile\n::\n";
+
+    [Fact]
+    public async Task WhenCaseOfAMapHasACssColor_ThenTheIconIndicatorHasItAndTheTileIsFilledWithIt()
+    {
+        // Arrange
+        var (name, subject) = await _fixture.AddPlainSubjectToRootAsync(label: "moving");
+        try
+        {
+            var page = await OpenQuietPageAsync(CreateCssColorPage(name, "#ffffff80"));
+            var icon = GetFirstIconIndicator(page);
+            var tile = page.GetByTestId("value-tile");
+            var white = await page.ResolveColorAsync("#ffffff");
+            var halfWhite = await page.ResolveColorAsync("#ffffff80");
+            await Assertions.Expect(icon).ToHaveCSSAsync("color", white, new() { Timeout = Timeout });
+            await Assertions.Expect(tile).ToHaveCSSAsync("background-color", white);
+            await Assertions.Expect(tile).ToHaveCSSAsync("color", await page.ResolveColorAsync("rgba(0, 0, 0, 0.87)"));
+
+            // Act
+            subject.Label = "quiet";
+
+            // Assert
+            await Assertions.Expect(icon).ToHaveCSSAsync("color", halfWhite, new() { Timeout = Timeout });
+            await Assertions.Expect(tile).ToHaveCSSAsync("background-color", halfWhite);
+        }
+        finally
+        {
+            _fixture.RemoveSubjectFromRoot(name, subject);
+        }
+    }
+
+    [Fact]
+    public async Task WhenCaseOfAMapHasNoColor_ThenTheWidgetsOfTheMapShowTheErrorInTheirPlace()
+    {
+        // Arrange
+        var (name, subject) = await _fixture.AddPlainSubjectToRootAsync(label: "moving");
+        try
+        {
+            // Act
+            var page = await OpenQuietPageAsync(CreateCssColorPage(name, "white;background:red"));
+
+            // Assert
+            var errors = page.GetByTestId("widget-argument-error");
+            await Assertions.Expect(errors).ToHaveCountAsync(2, new() { Timeout = Timeout });
+            await Assertions.Expect(errors.First).ToContainTextAsync("Unknown color 'white;background:red'");
+            await Assertions.Expect(page.GetByTestId("indicator")).ToHaveCountAsync(0);
+        }
+        finally
+        {
+            _fixture.RemoveSubjectFromRoot(name, subject);
+        }
+    }
+
     [Fact]
     public async Task WhenSubjectOfAnAbsolutePathIsRemoved_ThenTheTileShowsADashWithoutAReload()
     {

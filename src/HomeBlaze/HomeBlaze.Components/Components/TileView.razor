@@ -76,7 +76,8 @@
     /// <summary>The icon as resolved by <see cref="MudBlazorIconResolver"/>, or null for none.</summary>
     [Parameter] public string? Icon { get; set; }
 
-    [Parameter] public Color Color { get; set; }
+    /// <summary>The fill, a theme color or a CSS color, see <see cref="TileStyle"/>.</summary>
+    [Parameter] public ValueColor Color { get; set; } = ValueColor.Default;
 
     [Parameter] public Variant Variant { get; set; } = Variant.Filled;
 

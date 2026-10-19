@@ -40,7 +40,7 @@
 {
     // The case itself decides the fill: a case without a color is drawn on the surface, while a value without a case
     // is filled with the primary color when true.
-    var fill = matched?.Color ?? (shown is true ? Color.Primary : Color.Default);
+    ValueColor fill = matched is not null ? matched.GetColor() ?? ValueColor.Default : shown is true ? Color.Primary : Color.Default;
     var subtitle = !string.IsNullOrEmpty(Subtitle)
         ? Subtitle
         : ValueMap is not null && property is not null && shown is not null ? ValueReader.GetText(property, shown, matched, TimeZone) : null;
@@ -62,8 +62,9 @@
 }
 else
 {
-    // A matched case without a color of its own leaves the toggle switch in the primary color.
-    var color = matched?.Color is { } caseColor && caseColor != Color.Default ? caseColor : Color.Primary;
+    // A matched case without a theme color of its own leaves the toggle switch in the primary color, as does a CSS color,
+    // which MudSwitch cannot take.
+    var color = matched?.GetColor() is { Css: null, IsDefault: false } caseColor ? caseColor.Theme : Color.Primary;
     <div class="switch-widget" data-testid="switch">
         <MudSwitch T="bool"
                    @key="_resetKey"
