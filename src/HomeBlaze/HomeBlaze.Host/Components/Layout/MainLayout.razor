@@ -1,5 +1,4 @@
 ﻿@using HomeBlaze.Components.Abstractions.Pages
-@using HomeBlaze.Host.Components.Browser
 @using HomeBlaze.Host.Components.TimeZones
 
 @inherits LayoutComponentBase
@@ -8,6 +7,7 @@
 @inject RootManager RootManager
 @inject NavigationItemResolver NavigationResolver
 @inject NavigationManager NavigationManager
+@inject BrowserPreferences Preferences
 
 @implements IDisposable
 
@@ -23,10 +23,9 @@
     <CascadingValue Value="@_isDarkMode" Name="IsDarkMode">
         <MudLayout>
             <TimeZoneInitializer />
-            <PropertyRowLayoutInitializer />
             <MudAppBar Elevation="1">
                 <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start"
-                               OnClick="@(_ => DrawerToggle())"/>
+                               OnClick="@DrawerToggleAsync" title="Toggle navigation"/>
                 @foreach (var item in GetAppBarItems(AppBarAlignment.Left))
                 {
                     <MudIconButton Icon="@SubjectIconExtensions.ResolveMudBlazorIcon(item.Icon)"
@@ -84,11 +83,16 @@
 </div>
 
 @code {
+    /// <summary>Key of the browser preference that stores whether the navigation drawer is open.</summary>
+    public const string DrawerPreferenceKey = "drawer";
+
     private const string DarkModeClass = "homeblaze-dark-mode";
+    private const string DrawerOpen = "open";
+    private const string DrawerClosed = "closed";
 
     private readonly CancellationTokenSource _disposalTokenSource = new();
 
-    private bool _drawerOpen = true;
+    private bool _drawerOpen;
     private bool _isDarkMode = true;
     private MudTheme? _theme;
     private bool _isRootLoaded;
@@ -101,6 +105,7 @@
         NavigationManager.LocationChanged += OnLocationChanged;
 
         _isRootLoaded = RootManager.RootLoaded.IsCompletedSuccessfully;
+        _drawerOpen = Preferences.Get(DrawerPreferenceKey) != DrawerClosed;
 
         _theme = new()
         {
@@ -137,9 +142,11 @@
         StateHasChanged();
     }
 
-    private void DrawerToggle()
+    // Only this button stores the state: on a narrow view the drawer also closes itself, which is not a choice to remember.
+    private async Task DrawerToggleAsync()
     {
         _drawerOpen = !_drawerOpen;
+        await Preferences.SetAsync(DrawerPreferenceKey, _drawerOpen ? DrawerOpen : DrawerClosed);
     }
 
     private void DarkModeToggle()

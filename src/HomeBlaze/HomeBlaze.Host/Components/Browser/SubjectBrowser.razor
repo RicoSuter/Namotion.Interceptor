@@ -7,6 +7,7 @@
 @inject IJSRuntime JsRuntime
 @inject IDialogService DialogService
 @inject PropertyRowLayoutService RowLayout
+@inject BrowserPreferences Preferences
 
 @implements IDisposable
 @implements IAsyncDisposable
@@ -97,6 +98,9 @@
         _ => "subject-pane-rows-automatic"
     };
 
+    /// <summary>Key of the browser preference that stores the row layout.</summary>
+    public const string RowLayoutPreferenceKey = "rowlayout";
+
     [Parameter]
     public string? Path { get; set; }
 
@@ -117,6 +121,7 @@
     protected override void OnInitialized()
     {
         base.OnInitialized();
+        RowLayout.Load(Preferences.Get(RowLayoutPreferenceKey));
         NavigationManager.LocationChanged += OnLocationChanged;
         RowLayout.OnChange += OnRowLayoutChanged;
     }
@@ -126,19 +131,7 @@
     private async Task SetRowLayoutAsync(PropertyRowLayout layout)
     {
         RowLayout.SetLayout(layout);
-        if (_jsModule is null)
-        {
-            return;
-        }
-
-        try
-        {
-            await _jsModule.InvokeVoidAsync("saveRowLayout", PropertyRowLayoutInitializer.CookieName, RowLayout.StoredValue);
-        }
-        catch (Exception exception) when (exception is JSDisconnectedException or OperationCanceledException or JSException)
-        {
-            // A layout that cannot be remembered still applies to this visit.
-        }
+        await Preferences.SetAsync(RowLayoutPreferenceKey, RowLayout.StoredValue);
     }
 
     protected override void OnParametersSet()

@@ -3,13 +3,10 @@ using Microsoft.JSInterop;
 namespace HomeBlaze.Host.TimeZones;
 
 /// <summary>
-/// Thin wrapper over the timezone JS module: detects the browser zone and writes the preference cookie.
+/// Thin wrapper over the timezone JS module: detects the browser zone.
 /// </summary>
 public sealed class TimeZoneInterop : IAsyncDisposable
 {
-    /// <summary>Cookie that stores the display timezone preference ("Automatic" or an IANA id).</summary>
-    public const string CookieName = "homeblaze.timezone";
-
     private readonly IJSRuntime _jsRuntime;
     private IJSObjectReference? _module;
 
@@ -23,13 +20,6 @@ public sealed class TimeZoneInterop : IAsyncDisposable
     {
         var module = await GetModuleAsync();
         return await module.InvokeAsync<string?>("getBrowserTimeZone");
-    }
-
-    /// <summary>Persists the preference for one year via a SameSite=Lax cookie.</summary>
-    public async ValueTask SetPreferenceCookieAsync(string cookieValue)
-    {
-        var module = await GetModuleAsync();
-        await module.InvokeVoidAsync("setCookie", CookieName, cookieValue, 365);
     }
 
     public async ValueTask DisposeAsync()
