@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Diagnostics;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Performance;
 
@@ -143,7 +144,7 @@ public sealed class SubjectTransaction : IDisposable
     /// </summary>
     private bool IsCancelled(PropertyReference property)
     {
-        return _cancelledChanges is not null && _cancelledChanges.Contains(property);
+        return _cancelledChanges is { Count: > 0 } cancelledChanges && cancelledChanges.Contains(property);
     }
 
     /// <summary>
@@ -835,6 +836,8 @@ public sealed class SubjectTransaction : IDisposable
                     }
                 }
             }
+
+            Debug.Assert(index == changeCount, "Cancelled changes must be a subset of the pending changes.");
 
             return (rentedArray, rentedArray.AsMemory(0, changeCount));
         }
