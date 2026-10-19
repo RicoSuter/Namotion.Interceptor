@@ -35,20 +35,18 @@
             {
                 <MudAlert Severity="Severity.Warning" Dense="true" data-testid="history-chart-query-error">@_queryError</MudAlert>
             }
-            else if (_hasStores is null)
+            else if (_hasStores != false)
             {
-                <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
-            }
-            else if (_hasStores == true && _data is not null)
-            {
-                @* The view shows the legend of the lines below them and each band series in the header of its band. *@
+                @* The view shows the legend of the lines below them and each band series in the header of its band. Until
+                   the data arrives it reserves the room of the lines and bands the query will return, also while prerendering. *@
                 var linesTarget = CanShowHistory(_firstLine) ? _firstLine : -1;
-                <HistoryChartView Data="_data" MaxHeight="_resolvedHeight" ShowAxes="!chart.Compact" LineLegend="_lineLegend" BandHeader="_bandHeader"
+                <HistoryChartView Data="_data" Placeholder="_placeholder" MaxHeight="_resolvedHeight" ShowAxes="!chart.Compact"
+                                  LineLegend="_lineLegend" BandHeader="_bandHeader"
                                   LinesClicked="@(linesTarget >= 0 ? _showHistory[linesTarget] : default)"
                                   LinesTitle="@(linesTarget >= 0 ? _historyTitles[linesTarget] : null)" />
             }
 
-            @if (_queryError is not null || _hasStores != true || _data is null)
+            @if (_queryError is not null || _hasStores == false)
             {
                 <div data-testid="history-chart-legend" style="@OwnLegendStyle">
                     @for (var index = 0; index < _series.Count; index++)
@@ -106,7 +104,8 @@
     private EventCallback[] _showHistory = [];
     private string[] _historyTitles = [];
 
-    // The series the shown data was queried for, and the index in them of the series of each band of the data.
+    // The series the shown data was queried for, and the index in them of the series of each band of the data. Until
+    // the first query returns, the series it will query and the bands it will return, see PlanLayout.
     private IReadOnlyList<HistoryChartSeriesInfo>? _dataSeries;
     private int[] _bandSeries = [];
     private bool[] _hasBand = [];
@@ -116,6 +115,9 @@
 
     // One fragment per band of the shown data, built with it, so a render allocates none.
     private RenderFragment[] _bandHeaders = [];
+
+    // What the view reserves room for until the first query returns.
+    private HistoryChartPlaceholder _placeholder;
 
     private readonly RenderFragment _lineLegend;
     private readonly RenderFragment<int> _bandHeader;
@@ -339,12 +341,21 @@
         _resolvedRefreshInterval = refreshInterval;
         _resolvedPathsVersion = pathsVersion;
         _error = error;
-        if (!seriesChanged)
+
+        // Unchanged series keep their instance, so the bands of the shown data still match them, see _dataSeries.
+        if (seriesChanged)
         {
-            // The same instance, so the bands of the shown data still match their series, see _dataSeries.
-            return;
+            SetSeries(series);
         }
 
+        if (_data is null)
+        {
+            PlanLayout();
+        }
+    }
+
+    private void SetSeries(IReadOnlyList<HistoryChartSeriesInfo> series)
+    {
         _series = series;
         _refresh?.SetSeries(series);
         _firstLine = HistoryChartSeriesResolver.FindFirstRecordedLine(series);
@@ -367,6 +378,54 @@
             }
         }
     }
+
+    // The lines and bands the first query returns follow from the series alone, see RefreshAsync, so the chart has the
+    // height it gets with its data from its first render on.
+    private void PlanLayout()
+    {
+        var hasLines = false;
+        var bandSeries = new List<int>();
+        var hasBand = new bool[_series.Count];
+        for (var index = 0; index < _series.Count; index++)
+        {
+            var entry = _series[index];
+            if (GetHistoryPath(entry) is null)
+            {
+                continue;
+            }
+
+            if (entry.Kind == HistoryChartSeriesKind.Band)
+            {
+                bandSeries.Add(index);
+                hasBand[index] = true;
+            }
+            else
+            {
+                hasLines = true;
+            }
+        }
+
+        _placeholder = new HistoryChartPlaceholder(hasLines, bandSeries.Count);
+        SetBands(_series, bandSeries.ToArray(), hasBand, new string?[_series.Count]);
+    }
+
+    private void SetBands(IReadOnlyList<HistoryChartSeriesInfo> series, int[] bandSeries, bool[] hasBand, string?[] queryNotes)
+    {
+        _dataSeries = series;
+        _bandSeries = bandSeries;
+        _hasBand = hasBand;
+        _queryNotes = queryNotes;
+        _bandHeaders = new RenderFragment[bandSeries.Length];
+        for (var band = 0; band < _bandHeaders.Length; band++)
+        {
+            var captured = band;
+            _bandHeaders[band] = builder => RenderBandHeader(builder, captured);
+        }
+    }
+
+    // The path a query reads the history of the series from, or null when it is not queried.
+    private string? GetHistoryPath(HistoryChartSeriesInfo entry) =>
+        entry.Property is { } property && entry.HasHistory ? property.GetHistoryPath(PathResolver) : null;
 
     // Runs on a timer thread under the lock of the throttle (see the remarks of HistoryRefreshThrottle).
     private void OnRefreshDue() => QueueRefresh();
@@ -434,10 +493,12 @@
             for (var index = 0; index < series.Count; index++)
             {
                 var entry = series[index];
-                if (entry.Property is not { } property || !entry.HasHistory || property.GetHistoryPath(PathResolver) is not { } path)
+                if (GetHistoryPath(entry) is not { } path)
                 {
                     continue;
                 }
+
+                var property = entry.Property!;
 
                 var isBand = entry.Kind == HistoryChartSeriesKind.Band;
                 if (isBand)
@@ -471,17 +532,7 @@
             }
 
             _data = result.Data;
-            _dataSeries = series;
-            _bandSeries = bandSeries.ToArray();
-            _hasBand = hasBand;
-            _queryNotes = queryNotes;
-            _bandHeaders = new RenderFragment[_bandSeries.Length];
-            for (var band = 0; band < _bandHeaders.Length; band++)
-            {
-                var captured = band;
-                _bandHeaders[band] = builder => RenderBandHeader(builder, captured);
-            }
-
+            SetBands(series, bandSeries.ToArray(), hasBand, queryNotes);
             _bucket = bucket;
             _queryError = null;
         }

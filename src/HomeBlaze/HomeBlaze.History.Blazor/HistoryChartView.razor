@@ -8,14 +8,14 @@
 @inject IJSRuntime JsRuntime
 @implements IAsyncDisposable
 
-@if (Data is { } data)
+@if (Data is not null || Placeholder is not null)
 {
-    <div data-testid="history-chart-view" style="@_rootStyle">
-        @if (data.IsEmpty)
-        {
-            <MudText Typo="Typo.body2" Class="mud-text-secondary" data-testid="history-chart-empty">No data in this range.</MudText>
-        }
-        else if (_chartSeries is not null)
+    @* Without data the view lays out what the placeholder says the data will have, so the page does not move when it arrives. *@
+    var data = Data;
+    var hasLines = data is null ? Placeholder!.Value.HasLines : data.Lines.Count > 0;
+    var bandCount = data is null ? Placeholder!.Value.BandCount : data.Bands.Count;
+    <div data-testid="history-chart-view" style="@_rootStyle" aria-busy="@(data is null ? "true" : null)">
+        @if (hasLines)
         {
             @* MudChart fills the box only when it has a height or is a flex box with a max-height: otherwise it draws
                in a box of its own 350 px high, which is clipped or letterboxed. It decides this once, when it first
@@ -23,27 +23,39 @@
                renders only once the box was measured with a size. *@
             <div @ref="_linesBox" data-testid="history-chart-lines" data-axes-labels="@_axesLabels" style="@_linesStyle"
                  title="@LinesTitle" @onclick="LinesClicked">
-                @if (_linesWidth > 0)
+                @if (_chartSeries is not null)
                 {
-                    @if (ShowAxes)
+                    @if (_linesWidth > 0)
                     {
-                        @_plot
-                    }
-                    else
-                    {
-                        <div style="@CompactPlotStyle">@_plot</div>
+                        @if (ShowAxes)
+                        {
+                            @_plot
+                        }
+                        else
+                        {
+                            <div style="@CompactPlotStyle">@_plot</div>
+                        }
                     }
                 }
+                else if (data is null)
+                {
+                    <MudSkeleton SkeletonType="SkeletonType.Rectangle" Style="@PlaceholderLinesStyle" data-testid="history-chart-loading" />
+                }
+                else
+                {
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary" Style="margin:auto;" data-testid="history-chart-empty">No data in this range.</MudText>
+                }
             </div>
+        }
+        else if (bandCount == 0)
+        {
+            <MudText Typo="Typo.body2" Class="mud-text-secondary" data-testid="history-chart-empty">No data in this range.</MudText>
         }
 
         @LineLegend
 
-        @for (var index = 0; index < data.Bands.Count; index++)
+        @for (var index = 0; index < bandCount; index++)
         {
-            var band = data.Bands[index];
-            var swatchStyles = _bandSwatchStyles[index];
-
             @* With lines, the band spans the plot area of the lines, so a change of state sits under its time. *@
             <div data-testid="history-chart-band-group" style="@(_chartSeries is not null ? PlotAlignedBandGroupStyle : BandGroupStyle)">
                 <div data-testid="history-chart-band-header"
@@ -55,19 +67,31 @@
                         }
                     </div>
                     <div data-testid="history-chart-band-legend" style="display:flex; flex-wrap:wrap; column-gap:12px; row-gap:2px;">
-                        @for (var entryIndex = 0; entryIndex < band.Legend.Count; entryIndex++)
+                        @if (data is not null)
                         {
-                            var entry = band.Legend[entryIndex];
-                            <div style="display:flex; align-items:center; gap:6px;">
-                                <span aria-hidden="true" style="@swatchStyles[entryIndex]"></span>
-                                <MudText Typo="Typo.caption">@entry.Label</MudText>
-                            </div>
+                            var band = data.Bands[index];
+                            var swatchStyles = _bandSwatchStyles[index];
+                            @for (var entryIndex = 0; entryIndex < band.Legend.Count; entryIndex++)
+                            {
+                                var entry = band.Legend[entryIndex];
+                                <div style="display:flex; align-items:center; gap:6px;">
+                                    <span aria-hidden="true" style="@swatchStyles[entryIndex]"></span>
+                                    <MudText Typo="Typo.caption">@entry.Label</MudText>
+                                </div>
+                            }
                         }
                     </div>
                 </div>
 
-                @* The band is decorative: the legend names its states, and the state table lists every run. *@
-                <div aria-hidden="true" data-testid="history-chart-band" style="@_bandStyles[index]"></div>
+                @if (data is null)
+                {
+                    <MudSkeleton SkeletonType="SkeletonType.Rectangle" Style="@_placeholderBandStyle" data-testid="history-chart-band-loading" />
+                }
+                else
+                {
+                    @* The band is decorative: the legend names its states, and the state table lists every run. *@
+                    <div aria-hidden="true" data-testid="history-chart-band" style="@_bandStyles[index]"></div>
+                }
             </div>
         }
 
@@ -76,7 +100,7 @@
             <MudText Typo="Typo.caption" Class="mud-text-secondary" Style="align-self:stretch;" data-testid="history-chart-range">@_rangeText</MudText>
         }
 
-        @if (ShowStateTable && data.Bands.Count > 0)
+        @if (ShowStateTable && data is { Bands.Count: > 0 })
         {
             var showSeries = data.Bands.Count > 1;
             <MudSimpleTable Dense="true" Style="width:100%; flex:1 1 auto; min-height:0; overflow:auto;">
@@ -131,10 +155,14 @@
         $"width:calc(100% + {PlotStartSpace + PlotEndSpace}px); " +
         $"height:calc(100% + {PlotTopSpace + PlotBottomSpace - 2 * StrokeMargin}px); display:flex;";
 
+    // A skeleton is a block of its own height, which a flex box only stretches to the box with an automatic height.
+    private const string PlaceholderLinesStyle = "flex:1 1 auto; height:auto; border-radius:4px;";
+
     private static readonly Func<double, string> EmptyAxisLabel = static _ => string.Empty;
 
     private HistoryChartData? _builtData;
     private int? _renderedMaxHeight;
+    private HistoryChartPlaceholder? _renderedPlaceholder;
     private string? _renderedStyle;
     private int _renderedBandHeight;
     private bool _renderedShowRange;
@@ -169,6 +197,7 @@
     private string _linesStyle = string.Empty;
     private string _axesLabels = string.Empty;
     private string[] _bandStyles = [];
+    private string _placeholderBandStyle = string.Empty;
     private string[][] _bandSwatchStyles = [];
     private string? _rangeText;
 
@@ -188,6 +217,13 @@
     /// </summary>
     [Parameter, EditorRequired]
     public HistoryChartData? Data { get; set; }
+
+    /// <summary>
+    /// What the view reserves room for while <see cref="Data"/> is null: the lines at their size, <see cref="LineLegend"/>
+    /// and every band with its header, each showing that it loads. Without it the view renders nothing until it has data.
+    /// </summary>
+    [Parameter]
+    public HistoryChartPlaceholder? Placeholder { get; set; }
 
     /// <summary>
     /// The highest the lines may be, in pixels. With it the lines fill the width and are half as high as wide, up
@@ -289,7 +325,8 @@
             axesChanged ||
             isClickable != _renderedIsClickable ||
             Style != _renderedStyle ||
-            MaxHeight != _renderedMaxHeight;
+            MaxHeight != _renderedMaxHeight ||
+            (Data is null && Placeholder != _renderedPlaceholder);
         if (stylesChanged)
         {
             BuildStyles(isClickable);
@@ -306,6 +343,7 @@
             !LinesClicked.Equals(_renderedLinesClicked);
 
         _renderedMaxHeight = MaxHeight;
+        _renderedPlaceholder = Placeholder;
         _renderedStyle = Style;
         _renderedBandHeight = BandHeight;
         _renderedShowRange = ShowRange;
@@ -319,7 +357,9 @@
     private void BuildStyles(bool isClickable)
     {
         _hasStyles = true;
-        var plotEnd = _chartSeries is null || !ShowAxes ? 0 : PlotEndSpace;
+        // A placeholder of lines keeps the space the plot will keep, so the legend does not move either.
+        var hasPlot = _chartSeries is not null || (Data is null && Placeholder is { HasLines: true });
+        var plotEnd = !hasPlot || !ShowAxes ? 0 : PlotEndSpace;
         _rootStyle = $"width:100%; display:flex; flex-direction:column; align-items:center; gap:8px; --history-chart-plot-end:{plotEnd}px; {Style}";
 
         var size = MaxHeight is { } maxHeight
@@ -471,6 +511,7 @@
     private void BuildBandStyles()
     {
         var bands = Data?.Bands ?? [];
+        _placeholderBandStyle = $"flex:0 0 {BandHeight}px; border-radius:4px;";
         _bandStyles = new string[bands.Count];
         _bandSwatchStyles = new string[bands.Count][];
         for (var index = 0; index < bands.Count; index++)

@@ -309,6 +309,67 @@ public class HistoryChartWidgetTests
         Assert.InRange(layout.ValueLabels.Length, 2, 4);
     }
 
+    // Records the height of the chart with the legend entry in every frame from the parsed prerendered page on, together
+    // with whether its lines were drawn, so the heights before and after the data arrived can be compared.
+    private const string HeightRecorderScript =
+        """
+        label => {
+            window.historyChartHeights = [];
+            const record = () => {
+                if (document.readyState !== "loading") {
+                    const widget = [...document.querySelectorAll("[data-testid=history-chart]")].find(candidate =>
+                        [...candidate.querySelectorAll("[data-testid=history-chart-legend-entry] *")]
+                            .some(element => element.childElementCount === 0 && element.textContent.trim() === label));
+                    if (widget) {
+                        const height = Math.round(widget.getBoundingClientRect().height * 10) / 10;
+                        // Drawn once the chart has lines and has fitted itself to its box, see GetLayoutAsync.
+                        const chart = widget.querySelector("[data-testid=history-chart-lines] svg");
+                        const size = chart?.getBoundingClientRect();
+                        const isDrawn = chart?.querySelector(".mud-charts-timeseries-series path") != null &&
+                            chart.getAttribute("viewBox") === `0 0 ${Math.round(size.width)} ${Math.round(size.height)}`;
+                        const last = window.historyChartHeights.at(-1);
+                        if (!last || last.height !== height || last.isDrawn !== isDrawn) {
+                            window.historyChartHeights.push({ height, isDrawn });
+                        }
+                    }
+                }
+
+                requestAnimationFrame(record);
+            };
+            requestAnimationFrame(record);
+        }
+        """;
+
+    [Theory]
+    [InlineData("Chart speed", DesktopWidth)]
+    [InlineData("Pair speed", PhoneWidth)]
+    [InlineData("Compact speed", PhoneWidth)]
+    public async Task WhenAPageWithAChartLoads_ThenTheChartHasItsFinalHeightBeforeItsDataArrives(string legendLabel, int width)
+    {
+        // Arrange
+        var motor = (Motor)((MarkdownFile)_fixture.GetDemoFolder().Children[PageName]).Children[MotorName];
+        await WaitUntilRecordedAsync(motor.TryGetRegisteredProperty(nameof(Motor.CurrentSpeed))!, point => point.Number is not null);
+        var page = await _fixture.CreatePageAsync();
+        await page.SetViewportSizeAsync(width, 900);
+        await page.AddInitScriptAsync($"({HeightRecorderScript})({JsonSerializer.Serialize(legendLabel)})");
+
+        // Act
+        await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/{PageName}");
+        await page.WaitForFunctionAsync("() => window.historyChartHeights?.at(-1)?.isDrawn === true", null, new() { Timeout = Timeout });
+
+        // Assert
+        var heights = (await page.EvaluateAsync<JsonElement>("() => window.historyChartHeights"))
+            .EnumerateArray()
+            .Select(recorded => new RecordedHeight(recorded.GetProperty("height").GetDouble(), recorded.GetProperty("isDrawn").GetBoolean()))
+            .ToArray();
+        var finalHeight = heights[^1].Height;
+        Assert.False(heights[0].IsDrawn, "The first recorded height is already that of the drawn chart");
+        Assert.All(heights, recorded => Assert.True(Math.Abs(recorded.Height - finalHeight) <= 1,
+            $"The chart was {string.Join(", ", heights.Select(height => $"{height.Height} px ({(height.IsDrawn ? "drawn" : "loading")})"))} high"));
+    }
+
+    private sealed record RecordedHeight(double Height, bool IsDrawn);
+
     [Theory]
     [InlineData(PhoneWidth)]
     [InlineData(DesktopWidth)]
