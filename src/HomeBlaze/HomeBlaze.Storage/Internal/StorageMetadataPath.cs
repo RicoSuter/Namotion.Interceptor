@@ -25,12 +25,6 @@ internal static class StorageMetadataPath
     public static string GetFolderFilePath(string folder)
         => folder.Length == 0 ? FolderFileName : $"{folder}/{FolderFileName}";
 
-    /// <summary>The folder or JSON file that the metadata file at the path describes.</summary>
-    public static string GetDescribedPath(string metadataPath)
-        => StoragePath.GetName(metadataPath) == FolderFileName
-            ? StoragePath.GetParent(metadataPath)
-            : string.Concat(metadataPath.AsSpan(0, metadataPath.Length - Suffix.Length), FileExtensions.Json);
-
     /// <summary>The metadata file of the subject of a JSON file, for example Devices/Motor.metadata.json for Devices/Motor.json.</summary>
     public static string GetSubjectFilePath(string subjectPath)
         => string.Concat(subjectPath.AsSpan(0, subjectPath.Length - FileExtensions.Json.Length), Suffix);

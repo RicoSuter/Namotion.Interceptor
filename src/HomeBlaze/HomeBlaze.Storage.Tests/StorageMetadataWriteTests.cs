@@ -225,6 +225,32 @@ public class StorageMetadataWriteTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenTwoSubjectsDifferOnlyInExtensionCase_ThenEachMetadataFileIsReadAndWritten()
+    {
+        // Arrange
+        WriteFile("Docs/Motor.JSON", SerializeMotor("Motor 1"));
+        WriteFile("Docs/motor.JSON", SerializeMotor("Motor 2"));
+        WriteFile("Docs/Motor.metadata.json", """{ "navTitle": "Upper" }""");
+        WriteFile("Docs/motor.metadata.json", """{ "navTitle": "Lower" }""");
+        var storage = await ConnectAsync();
+        var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
+        var upper = docs.Children["Motor"];
+        var lower = docs.Children["motor"];
+
+        // Act
+        var upperRead = await storage.GetMetadataAsync(upper, CancellationToken.None);
+        var lowerRead = await storage.GetMetadataAsync(lower, CancellationToken.None);
+        await storage.SetMetadataAsync(upper, Values("""{ "icon": "Water" }"""), CancellationToken.None);
+        await storage.SetMetadataAsync(lower, Values("""{ "icon": "Air" }"""), CancellationToken.None);
+
+        // Assert
+        Assert.Equal("Upper", upperRead.GetProperty("navTitle").GetString());
+        Assert.Equal("Lower", lowerRead.GetProperty("navTitle").GetString());
+        Assert.Equal(new SubjectMetadata { NavigationTitle = "Upper", Icon = "Water" }, ReadMetadataFile("Docs/Motor.metadata.json").SubjectMetadata);
+        Assert.Equal(new SubjectMetadata { NavigationTitle = "Lower", Icon = "Air" }, ReadMetadataFile("Docs/motor.metadata.json").SubjectMetadata);
+    }
+
+    [Fact]
     public async Task WhenTwoFoldersDifferOnlyInCase_ThenEachMetadataFileIsWritten()
     {
         // Arrange

@@ -364,13 +364,14 @@ internal sealed class StorageReconciler
 
         // On a file system that ignores case, a misnamed file would be read and written here, and a pass ignores it. A
         // metadata file in another case is that of another subject or folder on a file system that respects case, but
-        // only while the index holds what it describes.
+        // only while the index holds what it describes, in exact case: deriving the described path from the metadata
+        // file's own name would rebuild it with a lower case extension, which misses a subject whose own extension
+        // is not lower case even though it is still JSON (see StoragePath.IsJson).
         foreach (var candidate in _index.Entries)
         {
             if (candidate.Path != path &&
                 string.Equals(candidate.Path, path, StringComparison.OrdinalIgnoreCase) &&
-                !(StorageMetadataPath.IsMetadataFile(candidate.Path) &&
-                  _index.TryGet(StorageMetadataPath.GetDescribedPath(candidate.Path), out _)))
+                !(StorageMetadataPath.IsMetadataFile(candidate.Path) && DescribesEntryInStorage(candidate.Path)))
             {
                 throw new StorageRefusedException($"Rename '{candidate.Path}' to '{StoragePath.GetName(path)}' to make it the metadata file, then try again.");
             }
@@ -400,6 +401,22 @@ internal sealed class StorageReconciler
 
     private static StorageRefusedException CreateUnreadableException(string path)
         => new($"The metadata file '{path}' could not be read. Fix or delete it, then try again.");
+
+    // Whether a subject or folder of the index has the path as its metadata file, in exact case. Used only for a
+    // candidate that already differs from the path asked for only in case, which is rare.
+    private bool DescribesEntryInStorage(string metadataPath)
+    {
+        foreach (var entry in _index.Entries)
+        {
+            if ((entry.HasSidecar && StorageMetadataPath.GetSubjectFilePath(entry.Path) == metadataPath) ||
+                (entry.IsFolder && StorageMetadataPath.GetFolderFilePath(entry.Path) == metadataPath))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     /// <summary>
     /// Checks whether a folder of the index is gone from a storage on disk, where asking about a path in a folder
