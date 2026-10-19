@@ -425,7 +425,7 @@ jobs:
     timeout-minutes: 30
     # Forks cannot push to this package.
     if: github.repository_owner == 'RicoSuter' && (github.event_name == 'release' || (github.event_name == 'push' && github.ref == 'refs/heads/master'))
-    # Serializes publishing per ref; the Compute tags step decides whether the moving edge and latest tags may move.
+    # Serializes publishing per ref, so the edge commit the Compute tags step reads cannot change before this run pushes.
     concurrency:
       group: container-publish-${{ github.ref }}
       cancel-in-progress: false
@@ -434,6 +434,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+    env:
+      CONTAINER_REPOSITORY: ricosuter/homeblaze
     steps:
       - uses: actions/checkout@v7
 
@@ -456,7 +458,29 @@ jobs:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
           RELEASE_PRERELEASE: ${{ github.event.release.prerelease }}
         run: |
-          # Moving tags only follow the newest master commit or release, so re-running an older run cannot move them back.
+          # Returns the commit the published edge image was built from, or $null when there is none or it has no revision label.
+          function Get-EdgeCommit {
+            try {
+              $token = (Invoke-RestMethod "https://ghcr.io/token?scope=repository:$($env:CONTAINER_REPOSITORY):pull").token
+              $headers = @{
+                Authorization = "Bearer $token"
+                Accept = "application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json"
+              }
+              $registry = "https://ghcr.io/v2/$($env:CONTAINER_REPOSITORY)"
+              $manifest = Invoke-RestMethod "$registry/manifests/edge" -Headers $headers
+              # Every platform image of the index is built from the same commit.
+              if ($manifest.manifests) {
+                $manifest = Invoke-RestMethod "$registry/manifests/$($manifest.manifests[0].digest)" -Headers $headers
+              }
+              $config = Invoke-RestMethod "$registry/blobs/$($manifest.config.digest)" -Headers $headers
+              return $config.config.Labels.'org.opencontainers.image.revision'
+            } catch {
+              Write-Host "Could not read the edge image: $_"
+              return $null
+            }
+          }
+
+          # Moving tags never move back to an older commit or release, so re-running an older run is safe.
           if ($env:GITHUB_EVENT_NAME -eq "release") {
             $version = $env:RELEASE_TAG -replace '^v', ''
             $tags = $version
@@ -476,9 +500,30 @@ jobs:
           } else {
             $short = $env:GITHUB_SHA.Substring(0, 7)
             $tags = "sha-$short"
-            $masterHead = git ls-remote origin refs/heads/master
-            if ($LASTEXITCODE -ne 0) { throw "Could not read the master head" }
-            if ($masterHead -and $masterHead.Split("`t")[0] -eq $env:GITHUB_SHA) {
+            # Edge follows every newer green commit, so a failed run of a later commit does not hold it back.
+            $moveEdge = $null
+            $edgeCommit = Get-EdgeCommit
+            if ($edgeCommit) {
+              Write-Host "Edge points to $edgeCommit"
+              # The checkout is shallow; the ancestor check needs the history back to the edge commit.
+              git fetch --no-tags --quiet --unshallow origin $env:GITHUB_SHA
+              if ($LASTEXITCODE -ne 0) { throw "Could not fetch the history of $env:GITHUB_SHA" }
+              # Edge can be newer than this commit, for example when an older run is re-run; a failed fetch leaves it unknown below.
+              git fetch --no-tags --quiet origin $edgeCommit
+              git merge-base --is-ancestor $edgeCommit $env:GITHUB_SHA
+              switch ($LASTEXITCODE) {
+                0 { $moveEdge = $true; Write-Host "Moving edge: $env:GITHUB_SHA contains the edge commit" }
+                1 { $moveEdge = $false; Write-Host "Keeping edge: $env:GITHUB_SHA does not contain the edge commit" }
+                default { Write-Host "Edge commit $edgeCommit is not in the history" }
+              }
+            }
+            if ($null -eq $moveEdge) {
+              $masterHead = git ls-remote origin refs/heads/master
+              if ($LASTEXITCODE -ne 0) { throw "Could not read the master head" }
+              $moveEdge = $masterHead -and $masterHead.Split("`t")[0] -eq $env:GITHUB_SHA
+              Write-Host "Edge commit unknown, falling back to the master head check: $(if ($moveEdge) { 'moving' } else { 'keeping' }) edge"
+            }
+            if ($moveEdge) {
               $tags = "edge;$tags"
             }
             # The SDK appends +<commit> itself.
@@ -502,12 +547,14 @@ jobs:
       # Tags go through an environment variable because MSBuild splits semicolons on the command line.
       # Version is not overridden: HomeBlaze pins it to 1.0.0 because plugins bind by assembly version.
       # LibraryPackageVersion only sets the library versions in deps.json.
+      # PublishRepositoryUrl makes the SDK add the org.opencontainers.image.revision label, which Compute tags reads from edge.
       - name: Publish multi-arch image
         env:
           ContainerImageTags: ${{ steps.tags.outputs.TAGS }}
         run: |
           dotnet publish src/HomeBlaze/HomeBlaze/HomeBlaze.csproj -c Release /t:PublishContainer `
-            -p:ContainerRegistry=ghcr.io -p:ContainerRepository=ricosuter/homeblaze `
+            -p:ContainerRegistry=ghcr.io -p:ContainerRepository=$env:CONTAINER_REPOSITORY `
+            -p:PublishRepositoryUrl=true `
             -p:InformationalVersion=${{ steps.tags.outputs.INFORMATIONAL_VERSION }} `
             -p:LibraryPackageVersion=${{ steps.tags.outputs.LIBRARY_VERSION }} `
             -p:BuildTag=${{ steps.tags.outputs.BUILD_TAG }} `
