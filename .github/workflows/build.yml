@@ -458,28 +458,6 @@ jobs:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
           RELEASE_PRERELEASE: ${{ github.event.release.prerelease }}
         run: |
-          # Returns the commit the published edge image was built from, or $null when there is none or it has no revision label.
-          function Get-EdgeCommit {
-            try {
-              $token = (Invoke-RestMethod "https://ghcr.io/token?scope=repository:$($env:CONTAINER_REPOSITORY):pull").token
-              $headers = @{
-                Authorization = "Bearer $token"
-                Accept = "application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json"
-              }
-              $registry = "https://ghcr.io/v2/$($env:CONTAINER_REPOSITORY)"
-              $manifest = Invoke-RestMethod "$registry/manifests/edge" -Headers $headers
-              # Every platform image of the index is built from the same commit.
-              if ($manifest.manifests) {
-                $manifest = Invoke-RestMethod "$registry/manifests/$($manifest.manifests[0].digest)" -Headers $headers
-              }
-              $config = Invoke-RestMethod "$registry/blobs/$($manifest.config.digest)" -Headers $headers
-              return $config.config.Labels.'org.opencontainers.image.revision'
-            } catch {
-              Write-Host "Could not read the edge image: $_"
-              return $null
-            }
-          }
-
           # Moving tags never move back to an older commit or release, so re-running an older run is safe.
           if ($env:GITHUB_EVENT_NAME -eq "release") {
             $version = $env:RELEASE_TAG -replace '^v', ''
@@ -501,30 +479,21 @@ jobs:
             $short = $env:GITHUB_SHA.Substring(0, 7)
             $tags = "sha-$short"
             # Edge follows every newer green commit, so a failed run of a later commit does not hold it back.
-            $moveEdge = $null
-            $edgeCommit = Get-EdgeCommit
+            $edgeCommit = (skopeo inspect --no-tags "docker://ghcr.io/$($env:CONTAINER_REPOSITORY):edge" | ConvertFrom-Json).Labels.'org.opencontainers.image.revision'
             if ($edgeCommit) {
-              Write-Host "Edge points to $edgeCommit"
-              # The checkout is shallow; the ancestor check needs the history back to the edge commit.
-              git fetch --no-tags --quiet --unshallow origin $env:GITHUB_SHA
-              if ($LASTEXITCODE -ne 0) { throw "Could not fetch the history of $env:GITHUB_SHA" }
-              # Edge can be newer than this commit, for example when an older run is re-run; a failed fetch leaves it unknown below.
-              git fetch --no-tags --quiet origin $edgeCommit
-              git merge-base --is-ancestor $edgeCommit $env:GITHUB_SHA
-              switch ($LASTEXITCODE) {
-                0 { $moveEdge = $true; Write-Host "Moving edge: $env:GITHUB_SHA contains the edge commit" }
-                1 { $moveEdge = $false; Write-Host "Keeping edge: $env:GITHUB_SHA does not contain the edge commit" }
-                default { Write-Host "Edge commit $edgeCommit is not in the history" }
-              }
+              $comparison = gh api "repos/$($env:GITHUB_REPOSITORY)/compare/$edgeCommit...$($env:GITHUB_SHA)" --jq .status
+              if ($LASTEXITCODE -ne 0) { $comparison = "unknown" }
             }
-            if ($null -eq $moveEdge) {
+            Write-Host "Edge commit: '$edgeCommit', this commit compared with it: '$comparison'"
+            if ($comparison -in "ahead", "identical") {
+              $tags = "edge;$tags"
+            } elseif ($comparison -notin "behind", "diverged") {
+              # Without a known edge commit, only the master head moves edge.
               $masterHead = git ls-remote origin refs/heads/master
               if ($LASTEXITCODE -ne 0) { throw "Could not read the master head" }
-              $moveEdge = $masterHead -and $masterHead.Split("`t")[0] -eq $env:GITHUB_SHA
-              Write-Host "Edge commit unknown, falling back to the master head check: $(if ($moveEdge) { 'moving' } else { 'keeping' }) edge"
-            }
-            if ($moveEdge) {
-              $tags = "edge;$tags"
+              if ($masterHead -and $masterHead.Split("`t")[0] -eq $env:GITHUB_SHA) {
+                $tags = "edge;$tags"
+              }
             }
             # The SDK appends +<commit> itself.
             $informationalVersion = "edge"
