@@ -47,7 +47,7 @@ public class PageMenuTests
         var info = page.GetByTestId("page-info");
         await Assertions.Expect(info).ToBeVisibleAsync(new() { Timeout = Timeout });
         await Assertions.Expect(info).ToContainTextAsync("Spacing Demo");
-        await Assertions.Expect(page.GetByTestId("page-path")).ToHaveTextAsync("Demo/Spacing.md");
+        await Assertions.Expect(page.GetByTestId("page-path")).ToHaveTextAsync("/Demo/Spacing.md");
         await Assertions.Expect(page.GetByTestId("page-last-modified")).ToHaveTextAsync(new Regex(@"^Modified \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$"));
     }
 
@@ -67,18 +67,33 @@ public class PageMenuTests
     }
 
     [Fact]
-    public async Task WhenThePageMenuIsOpenedWithTheKeyboard_ThenTheInfoHasTheFocusAndEscapeGivesItBackToTheButton()
+    public async Task WhenThePageMenuIsOpenedWithTheKeyboard_ThenTheInfoHasTheFocus()
+    {
+        // Arrange
+        var page = await OpenPageAsync();
+        await page.GetByRole(AriaRole.Button, new() { Name = "Page info and edit mode" }).FocusAsync();
+
+        // Act
+        await page.Keyboard.PressAsync("Enter");
+
+        // Assert
+        await Assertions.Expect(page.GetByTestId("page-info")).ToBeFocusedAsync(new() { Timeout = Timeout });
+    }
+
+    [Fact]
+    public async Task WhenThePageMenuIsClosedWithEscape_ThenItsButtonHasTheFocusAgain()
     {
         // Arrange
         var page = await OpenPageAsync();
         var button = page.GetByRole(AriaRole.Button, new() { Name = "Page info and edit mode" });
         await button.FocusAsync();
-
-        // Act & Assert
         await page.Keyboard.PressAsync("Enter");
         await Assertions.Expect(page.GetByTestId("page-info")).ToBeFocusedAsync(new() { Timeout = Timeout });
 
+        // Act
         await page.Keyboard.PressAsync("Escape");
+
+        // Assert
         await Assertions.Expect(page.GetByTestId("page-info")).ToBeHiddenAsync(new() { Timeout = Timeout });
         await Assertions.Expect(button).ToBeFocusedAsync(new() { Timeout = Timeout });
     }

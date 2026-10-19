@@ -149,6 +149,10 @@ else
         background-color: transparent;
     }
 
+    .mud-menu-item.page-info.mud-ripple::after {
+        display: none;
+    }
+
     .page-info-title {
         display: block;
         font-weight: 500;
@@ -293,18 +297,13 @@ else
         var subject = PathResolver.ResolveSubject(path, PathStyle.Route);
         if (subject != null)
         {
-            if (subject is ITitleProvider titleProvider)
-            {
-                _title = titleProvider.Title ?? subject.GetType().Name;
-            }
-            else
-            {
-                _title = subject.GetType().Name;
-            }
-
+            _title = GetTitle(subject);
             _subject = subject;
         }
     }
+
+    private static string GetTitle(IInterceptorSubject subject)
+        => (subject as ITitleProvider)?.Title ?? subject.GetType().Name;
 
     private bool CanEdit()
     {
@@ -409,8 +408,8 @@ else
             @* An item of the menu, so that the keyboard and a screen reader reach it. It does nothing and keeps the menu open
                when it is clicked. *@
             <MudMenuItem Class="page-info" Icon="@Icons.Material.Outlined.Info" AutoClose="false" data-testid="page-info">
-                <span class="page-info-title">@((_subject as ITitleProvider)?.Title ?? _title)</span>
-                <span class="page-info-detail" data-testid="page-path">@Path</span>
+                <span class="page-info-title">@(_subject is { } subject ? GetTitle(subject) : _title)</span>
+                <span class="page-info-detail" data-testid="page-path">@((_subject is { } pathSubject ? PathResolver.GetPath(pathSubject, PathStyle.Canonical) : null) ?? Path)</span>
                 @if (_subject is IStorageFile file)
                 {
                     <span class="page-info-detail" data-testid="page-last-modified">Modified @TimeZone.ToZoned(new DateTimeOffset(file.LastModified, TimeSpan.Zero)).ToString("yyyy-MM-dd HH:mm:ss")</span>
