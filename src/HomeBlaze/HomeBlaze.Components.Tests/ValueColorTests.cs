@@ -52,6 +52,7 @@ public class ValueColorTests
     [InlineData("rgb(255 255 255)")]
     [InlineData("rgb(255 255 255 / 50%)")]
     [InlineData("var(--mud-palette-text-secondary)")]
+    [InlineData("var(--mud-palette-primary-darken)")]
     public void WhenTextIsACssColor_ThenItIsKeptAsWrittenAndRedefinesThePrimaryColor(string text)
     {
         // Act
@@ -86,6 +87,7 @@ public class ValueColorTests
     [InlineData("var(--mud-palette-primary);color:red")]
     [InlineData("var(--mud-palette-primary-hover)")]
     [InlineData("var(--mud-palette-primary-text)")]
+    [InlineData("var(--mud-palette-success-rgb)")]
     [InlineData("url(x)")]
     [InlineData("expression(alert(1))")]
     public void WhenTextIsNoThemeColorAndNoAllowedCssColor_ThenItIsNoColor(string text)

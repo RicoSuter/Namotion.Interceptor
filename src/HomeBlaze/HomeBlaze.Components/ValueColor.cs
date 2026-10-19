@@ -78,7 +78,8 @@ public sealed partial class ValueColor
     /// <c>#rrggbb</c>, <c>#rrggbbaa</c>, <c>rgb()</c> or <c>rgba()</c> with numbers or percentages, or
     /// <c>var(--mud-palette-name)</c>. The variable of a theme color, such as <c>var(--mud-palette-success)</c>, gives
     /// that theme color. Null, empty and white space give <see cref="Default"/>. Anything else, a number for a theme
-    /// color and the variables of the primary color that <see cref="Style"/> redefines included, is no color.
+    /// color, the primary text and hover variables that <see cref="Style"/> redefines and the <c>-rgb</c> variables
+    /// included, is no color.
     /// </summary>
     public static bool TryParse(string? text, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out ValueColor? color)
     {
@@ -118,14 +119,15 @@ public sealed partial class ValueColor
 
         if (PaletteVariableRegex().IsMatch(css))
         {
-            return TryParsePaletteVariable(css, out color);
+            color = FromPaletteVariable(css);
+            return true;
         }
 
         color = null;
         return false;
     }
 
-    private static bool TryParsePaletteVariable(string css, out ValueColor? color)
+    private static ValueColor FromPaletteVariable(string css)
     {
         // The regex matched, so the name stands between "--mud-palette-" and the closing parenthesis.
         var name = css.AsSpan(4, css.Length - 5).Trim(" \t\r\n\f")["--mud-palette-".Length..];
@@ -133,20 +135,11 @@ public sealed partial class ValueColor
         {
             if (name.Equals(ThemeNames[(int)theme], StringComparison.OrdinalIgnoreCase))
             {
-                color = ThemeColors[(int)theme];
-                return true;
+                return ThemeColors[(int)theme];
             }
         }
 
-        // Style redefines these on the element, so a color of one of them would refer to itself.
-        if (name.StartsWith("primary-", StringComparison.Ordinal))
-        {
-            color = null;
-            return false;
-        }
-
-        color = new ValueColor(css, ThemeText);
-        return true;
+        return new ValueColor(css, ThemeText);
     }
 
     /// <summary>Gets the widget argument error of a color that <see cref="TryParse"/> does not take.</summary>
@@ -214,6 +207,8 @@ public sealed partial class ValueColor
         RegexOptions.CultureInvariant)]
     private static partial Regex RgbColorRegex();
 
-    [GeneratedRegex("^var\\(" + Space + "*--mud-palette-[a-z0-9]+(?:-[a-z0-9]+)*" + Space + "*\\)$", RegexOptions.CultureInvariant)]
+    // Style redefines the primary text and hover variables on the element, so a color of one of them would be the
+    // redefined text color or refer to itself. An -rgb variable holds the channels without rgb() around them.
+    [GeneratedRegex("^var\\(" + Space + "*--mud-palette-(?!(?:primary-text|primary-hover|[a-z0-9-]*-rgb)" + Space + "*\\))[a-z0-9]+(?:-[a-z0-9]+)*" + Space + "*\\)$", RegexOptions.CultureInvariant)]
     private static partial Regex PaletteVariableRegex();
 }

@@ -463,8 +463,7 @@ jobs:
           # Moving tags never move back to an older commit or release, so re-running an older run is safe.
           if ($env:GITHUB_EVENT_NAME -eq "release") {
             $version = $env:RELEASE_TAG -replace '^v', ''
-            $tags = $version
-            $imageTag = $version
+            $tags = $imageTag = $version
             # Pre-releases must not move latest or the minor tag.
             if ($env:RELEASE_PRERELEASE -ne "true") {
               $latestReleaseTag = gh release view --repo $env:GITHUB_REPOSITORY --json tagName -q .tagName
@@ -480,8 +479,7 @@ jobs:
             $branch = ""
           } else {
             $short = $env:GITHUB_SHA.Substring(0, 7)
-            $tags = "sha-$short"
-            $imageTag = $tags
+            $tags = $imageTag = "sha-$short"
             # Edge follows every newer green commit, so a failed run of a later commit does not hold it back.
             $masterHead = git ls-remote origin refs/heads/master
             if ($LASTEXITCODE -ne 0) { throw "Could not read the master head" }
@@ -495,7 +493,7 @@ jobs:
               $comparison = if ($edgeCommit -match '^[0-9a-f]{40}$') { gh api "repos/$($env:GITHUB_REPOSITORY)/compare/$edgeCommit...$($env:GITHUB_SHA)" --jq .status }
               $moveEdge = $comparison -in "ahead", "identical"
               # Behind is an older run of a commit that edge has passed already.
-              if ($comparison -notin "ahead", "identical", "behind") {
+              if (-not $moveEdge -and $comparison -ne "behind") {
                 Write-Host "::warning::Edge stays: no comparison of the edge commit '$edgeCommit' with this commit, got '$comparison'"
               }
             }
@@ -548,8 +546,9 @@ jobs:
             exit 0
           }
           foreach ($arch in "amd64", "arm64") {
-            $image = skopeo --command-timeout 1m inspect --no-tags --override-os linux --override-arch $arch "docker://ghcr.io/ricosuter/homeblaze:$($env:IMAGE_TAG)" | ConvertFrom-Json
-            $revision = $image.Labels.'org.opencontainers.image.revision'
+            $image = skopeo --command-timeout 1m inspect --retry-times 3 --no-tags --override-os linux --override-arch $arch "docker://ghcr.io/ricosuter/homeblaze:$($env:IMAGE_TAG)"
+            if ($LASTEXITCODE -ne 0) { throw "Could not inspect the published $arch image" }
+            $revision = ($image | ConvertFrom-Json).Labels.'org.opencontainers.image.revision'
             if ($revision -ne $env:GITHUB_SHA) { throw "The $arch image has the revision label '$revision' instead of $($env:GITHUB_SHA)" }
           }
 

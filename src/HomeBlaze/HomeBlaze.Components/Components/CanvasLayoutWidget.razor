@@ -147,11 +147,6 @@ else
         position: relative;
     }
 
-    /* A card or a tile that fills the node keeps 8 pixels around it for its shadow, as in GridLayoutWidget.razor. */
-    .canvas-node:has(> .canvas-node-content > .subject-component-wrapper > .place-filler, > .canvas-node-content > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty)) > .place-filler) {
-        overflow-clip-margin: 8px;
-    }
-
     /* In edit mode: disable widget interaction, show drag cursor */
     .canvas-node.editing {
         cursor: move;
