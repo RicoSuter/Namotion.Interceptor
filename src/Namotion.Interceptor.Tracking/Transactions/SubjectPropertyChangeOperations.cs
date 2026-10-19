@@ -245,6 +245,37 @@ internal static class SubjectPropertyChangeOperations
         return result ?? (IReadOnlyList<SubjectPropertyChange>)[];
     }
 
+    /// <summary>
+    /// Returns the changes in <paramref name="changes"/> whose property is not in <paramref name="reported"/>
+    /// (matched by <see cref="SubjectPropertyChange.Property"/>), so a change is reported once.
+    /// </summary>
+    internal static IReadOnlyList<SubjectPropertyChange> ExceptReported(
+        IReadOnlyList<SubjectPropertyChange> changes,
+        IReadOnlyList<SubjectPropertyChange> reported)
+    {
+        if (changes.Count == 0 || reported.Count == 0)
+        {
+            return changes;
+        }
+
+        var reportedProperties = new HashSet<PropertyReference>(reported.Count, PropertyReference.Comparer);
+        foreach (var change in reported)
+        {
+            reportedProperties.Add(change.Property);
+        }
+
+        List<SubjectPropertyChange>? result = null;
+        foreach (var change in changes)
+        {
+            if (!reportedProperties.Contains(change.Property))
+            {
+                (result ??= []).Add(change);
+            }
+        }
+
+        return result ?? (IReadOnlyList<SubjectPropertyChange>)[];
+    }
+
     internal static IReadOnlyList<T> Concat<T>(params ReadOnlySpan<IReadOnlyList<T>> lists)
     {
         var total = 0;

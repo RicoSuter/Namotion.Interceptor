@@ -289,9 +289,11 @@ public class SubjectTransactionWriterTests
     }
 
     [Theory]
-    [InlineData(TransactionFailureHandling.BestEffort)]
-    [InlineData(TransactionFailureHandling.Rollback)]
-    public async Task WhenCommitTimesOutWhileRevertingAfterLocalApply_ThenCommitFailsTerminally(TransactionFailureHandling failureHandling)
+    [InlineData(TransactionFailureHandling.BestEffort, new[] { nameof(Person.LastName) })]
+    [InlineData(TransactionFailureHandling.Rollback, new[] { nameof(Person.LastName), nameof(Person.FirstName) })]
+    public async Task WhenCommitTimesOutWhileRevertingAfterLocalApply_ThenCommitFailsTerminally(
+        TransactionFailureHandling failureHandling,
+        string[] expectedFailedProperties)
     {
         // Arrange
         var handler = new RecordingHandler();
@@ -313,10 +315,49 @@ public class SubjectTransactionWriterTests
             async () => await transaction.CommitAsync(CancellationToken.None));
 
         // Assert
-        Assert.Contains(exception.Errors, error => error is OperationCanceledException);
-        Assert.Contains(exception.FailedChanges, change => change.Property.Name == nameof(Person.LastName));
+        Assert.Equal(expectedFailedProperties, exception.FailedChanges.Select(change => change.Property.Name));
+        Assert.Equal(2, exception.Errors.Count);
+        Assert.Equal("apply failed", exception.Errors[0].Message);
+        Assert.IsAssignableFrom<OperationCanceledException>(exception.Errors[1]);
         Assert.Equal("Lee", person.LastName);
         Assert.Contains("already been committed", retryException.Message);
+    }
+
+    [Fact]
+    public async Task WhenCommitTimesOutWhileRevertingRejectedSetInBestEffort_ThenModelIsUntouchedAndRetryCommits()
+    {
+        // Arrange
+        var committingCalls = 0;
+        var handler = new RecordingHandler
+        {
+            OnCommittingAction = (_, _) =>
+            {
+                if (++committingCalls == 2)
+                {
+                    throw new InvalidOperationException("rejected");
+                }
+            }
+        };
+        var context = CreateTransactionContext();
+        context.AddService<ITransactionHandler>(handler);
+        context.AddService<ITransactionWriter>(new RevertUntilCancelledTransactionWriter());
+        var person = new Person(context) { FirstName = "Ann" };
+        var flowWithoutTransaction = ExecutionContext.Capture()!;
+        using var transaction = await context.BeginTransactionAsync(
+            TransactionFailureHandling.BestEffort, commitTimeout: TimeSpan.FromMilliseconds(50));
+        person.FirstName = "Bob";
+
+        // Act
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+        string? landedFirstName = null;
+        ExecutionContext.Run(flowWithoutTransaction, _ => landedFirstName = person.FirstName, null);
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal("Ann", landedFirstName);
+        Assert.Equal(4, committingCalls);
+        Assert.Equal("Bob", person.FirstName);
     }
 
     /// <summary>

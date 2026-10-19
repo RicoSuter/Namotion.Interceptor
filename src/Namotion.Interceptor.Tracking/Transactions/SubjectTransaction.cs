@@ -101,7 +101,9 @@ public sealed class SubjectTransaction : IDisposable
     /// </summary>
     /// <remarks>
     /// Only one handler can consume a mark. When another handler that also intercepts writes checks the same write
-    /// afterwards, this returns false for it, so it must check the write again.
+    /// afterwards, this returns false for it, so it must check the write again. It also returns false for the applies
+    /// after the first failed apply of a commit, and for every apply after the transaction was disposed during the
+    /// commit.
     /// </remarks>
     /// <typeparam name="TProperty">The type of the written value.</typeparam>
     /// <param name="handler">The handler asking whether it already checked the write.</param>
@@ -925,9 +927,11 @@ public sealed class SubjectTransaction : IDisposable
                 // is empty on this branch) and anything already reported as an apply/revert failure.
                 var rolledBackLocals = SubjectPropertyChangeOperations.ExcludeByProperty(
                     changes.Span, written, SubjectPropertyChangeOperations.Concat(applyFailed, revertFailed));
+                var sourceRevertFailed = SubjectPropertyChangeOperations.ExceptReported(
+                    sourceRevert.Failed, SubjectPropertyChangeOperations.Concat(applyFailed, revertFailed));
                 return CreateFailureException(
                     [],
-                    SubjectPropertyChangeOperations.Concat(failedSource, applyFailed, rolledBackLocals, revertFailed, sourceRevert.Failed),
+                    SubjectPropertyChangeOperations.Concat(failedSource, applyFailed, rolledBackLocals, revertFailed, sourceRevertFailed),
                     SubjectPropertyChangeOperations.Concat(sourceErrors, applyErrors, revertErrors, sourceRevert.Errors));
             }
 
@@ -937,7 +941,8 @@ public sealed class SubjectTransaction : IDisposable
             var bestEffortRevert = await RevertSourceWritesSafelyAsync(writer, toRevert, revertState, afterLocalApply: true, cancellationToken).ConfigureAwait(false);
             return CreateFailureException(
                 applied,
-                SubjectPropertyChangeOperations.Concat(failedSource, applyFailed, bestEffortRevert.Failed),
+                SubjectPropertyChangeOperations.Concat(
+                    failedSource, applyFailed, SubjectPropertyChangeOperations.ExceptReported(bestEffortRevert.Failed, applyFailed)),
                 SubjectPropertyChangeOperations.Concat(sourceErrors, applyErrors, bestEffortRevert.Errors));
         }
 
