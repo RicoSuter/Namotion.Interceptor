@@ -2,6 +2,7 @@ using System.Reactive.Concurrency;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Tests.Models;
 using Namotion.Interceptor.Tracking.Transactions;
+using static Namotion.Interceptor.Tracking.Tests.Transactions.TransactionTestContext;
 
 namespace Namotion.Interceptor.Tracking.Tests.Transactions;
 
@@ -10,21 +11,13 @@ namespace Namotion.Interceptor.Tracking.Tests.Transactions;
 /// </summary>
 public class SubjectTransactionHandlerPreApplyCheckTests
 {
-    private static IInterceptorSubjectContext CreateContext()
-    {
-        return InterceptorSubjectContext.Create()
-            .WithFullPropertyTracking()
-            .WithTransactions();
-    }
-
-    [Fact]
-    public async Task WhenWriterIsRegistered_ThenOnCommittingRunsAgainBeforeLocalApplyWithPendingValues()
+    [Theory]
+    [InlineData(false, 1)]
+    [InlineData(true, 2)]
+    public async Task WhenCommitting_ThenOnCommittingRunsOncePerCheckWithPendingValues(bool withWriter, int expectedChecks)
     {
         // Arrange
-        var handler = new RecordingHandler();
-        var context = CreateContext();
-        context.AddService<ITransactionHandler>(handler);
-        context.AddService<ITransactionWriter>(new CountingTransactionWriter());
+        var context = CreateContext(out var handler, withWriter ? new CountingTransactionWriter() : null);
         var person = new Person(context) { FirstName = "Ann" };
         var seen = new List<string?>();
         handler.OnCommittingAction = (_, _) => seen.Add(person.FirstName);
@@ -35,27 +28,8 @@ public class SubjectTransactionHandlerPreApplyCheckTests
         await transaction.CommitAsync(CancellationToken.None);
 
         // Assert
-        Assert.Equal(2, handler.CommittingCalls);
-        Assert.Equal(["Bob", "Bob"], seen);
-        Assert.Equal("Bob", person.FirstName);
-    }
-
-    [Fact]
-    public async Task WhenNoWriterIsRegistered_ThenOnCommittingRunsOnce()
-    {
-        // Arrange
-        var handler = new RecordingHandler();
-        var context = CreateContext();
-        context.AddService<ITransactionHandler>(handler);
-        var person = new Person(context) { FirstName = "Ann" };
-
-        // Act
-        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-        person.FirstName = "Bob";
-        await transaction.CommitAsync(CancellationToken.None);
-
-        // Assert
-        Assert.Equal(1, handler.CommittingCalls);
+        Assert.Equal(expectedChecks, handler.CommittingCalls);
+        Assert.Equal(Enumerable.Repeat<string?>("Bob", expectedChecks), seen);
         Assert.Equal("Bob", person.FirstName);
     }
 
@@ -63,11 +37,8 @@ public class SubjectTransactionHandlerPreApplyCheckTests
     public async Task WhenPropertyChangesOutsideTransactionDuringSourceWrite_ThenPreApplyCheckSeesLandedValue()
     {
         // Arrange
-        var handler = new RecordingHandler();
         var writer = new CountingTransactionWriter();
-        var context = CreateContext();
-        context.AddService<ITransactionHandler>(handler);
-        context.AddService<ITransactionWriter>(writer);
+        var context = CreateContext(out var handler, writer);
         var person = new Person(context) { FirstName = "Ann", LastName = "Lee" };
         var lastNamesSeen = new List<string?>();
         handler.OnCommittingAction = (_, _) => lastNamesSeen.Add(person.LastName);
@@ -90,11 +61,8 @@ public class SubjectTransactionHandlerPreApplyCheckTests
     {
         // Arrange
         var calls = 0;
-        var handler = new RecordingHandler();
         var writer = new CountingTransactionWriter();
-        var context = CreateContext();
-        context.AddService<ITransactionHandler>(handler);
-        context.AddService<ITransactionWriter>(writer);
+        var context = CreateContext(out var handler, writer);
         var person = new Person(context) { FirstName = "Ann" };
         handler.OnCommittingAction = (_, _) =>
         {
@@ -125,22 +93,17 @@ public class SubjectTransactionHandlerPreApplyCheckTests
     {
         // Arrange
         var calls = 0;
-        var handler = new RecordingHandler
+        var writer = new CountingTransactionWriter();
+        var context = CreateContext(out var handler, writer);
+        handler.OnCommittingAction = (_, changes) =>
         {
-            OnCommittingAction = (_, changes) =>
+            if (++calls == 2)
             {
-                if (++calls == 2)
-                {
-                    var lastName = changes.Single(change => change.Property.Name == nameof(Person.LastName));
-                    throw new SubjectTransactionException(
-                        "invalid", [], [lastName], [new InvalidOperationException("invalid last name")]);
-                }
+                var lastName = changes.Single(change => change.Property.Name == nameof(Person.LastName));
+                throw new SubjectTransactionException(
+                    "invalid", [], [lastName], [new InvalidOperationException("invalid last name")]);
             }
         };
-        var writer = new CountingTransactionWriter();
-        var context = CreateContext();
-        context.AddService<ITransactionHandler>(handler);
-        context.AddService<ITransactionWriter>(writer);
         var person = new Person(context) { FirstName = "Ann", LastName = "Lee" };
 
         // Act
@@ -171,23 +134,18 @@ public class SubjectTransactionHandlerPreApplyCheckTests
     {
         // Arrange
         var calls = 0;
-        var handler = new RecordingHandler
+        var writer = new CountingTransactionWriter();
+        var context = CreateContext(out var handler, writer);
+        handler.OnCommittingAction = (_, changes) =>
         {
-            OnCommittingAction = (_, changes) =>
+            if (++calls == 2)
             {
-                if (++calls == 2)
-                {
-                    var firstName = changes.Single(change => change.Property.Name == nameof(Person.FirstName));
-                    throw new SubjectTransactionException(
-                        "invalid", [], [firstName], [new InvalidOperationException("invalid first name")]);
-                }
+                var firstName = changes.Single(change => change.Property.Name == nameof(Person.FirstName));
+                throw new SubjectTransactionException(
+                    "invalid", [], [firstName], [new InvalidOperationException("invalid first name")]);
             }
         };
         var probe = new CommitWriteProbe(handler);
-        var writer = new CountingTransactionWriter();
-        var context = CreateContext();
-        context.AddService<ITransactionHandler>(handler);
-        context.AddService<ITransactionWriter>(writer);
         context.AddService(probe);
         var person = new Person(context) { FirstName = "Ann", LastName = "Lee" };
         probe.Writes.Clear();
@@ -216,21 +174,16 @@ public class SubjectTransactionHandlerPreApplyCheckTests
         // Arrange
         var person = default(Person)!;
         var calls = new List<(string[] Changes, string? FirstName, string? LastName)>();
-        var handler = new RecordingHandler
+        var writer = new CountingTransactionWriter { FailedPropertyNames = { nameof(Person.LastName) } };
+        var context = CreateContext(out var handler, writer);
+        handler.OnCommittingAction = (_, changes) =>
         {
-            OnCommittingAction = (_, changes) =>
+            calls.Add((changes.Select(change => change.Property.Name).ToArray(), person.FirstName, person.LastName));
+            if (person.FirstName == person.LastName)
             {
-                calls.Add((changes.Select(change => change.Property.Name).ToArray(), person.FirstName, person.LastName));
-                if (person.FirstName == person.LastName)
-                {
-                    throw new InvalidOperationException("first and last name must differ");
-                }
+                throw new InvalidOperationException("first and last name must differ");
             }
         };
-        var writer = new CountingTransactionWriter { FailedPropertyNames = { nameof(Person.LastName) } };
-        var context = CreateContext();
-        context.AddService<ITransactionHandler>(handler);
-        context.AddService<ITransactionWriter>(writer);
         person = new Person(context) { FirstName = "Ann", LastName = "Lee" };
 
         // Act
@@ -259,28 +212,23 @@ public class SubjectTransactionHandlerPreApplyCheckTests
         // Arrange
         var calls = 0;
         var person = default(Person)!;
-        var handler = new RecordingHandler
+        var writer = new CountingTransactionWriter();
+        var context = CreateContext(out var handler, writer);
+        handler.OnCommittingAction = (_, _) =>
         {
-            OnCommittingAction = (_, _) =>
+            if (++calls == 2)
             {
-                if (++calls == 2)
-                {
-                    var uncheckedChange = SubjectPropertyChange.Create(
-                        new PropertyReference(person, nameof(Person.LastName)),
-                        ChangeOrigin.Local,
-                        DateTimeOffset.UtcNow,
-                        null,
-                        "Lee",
-                        "Kim");
-                    throw new SubjectTransactionException(
-                        "invalid", [], [uncheckedChange], [new InvalidOperationException("invalid last name")]);
-                }
+                var uncheckedChange = SubjectPropertyChange.Create(
+                    new PropertyReference(person, nameof(Person.LastName)),
+                    ChangeOrigin.Local,
+                    DateTimeOffset.UtcNow,
+                    null,
+                    "Lee",
+                    "Kim");
+                throw new SubjectTransactionException(
+                    "invalid", [], [uncheckedChange], [new InvalidOperationException("invalid last name")]);
             }
         };
-        var writer = new CountingTransactionWriter();
-        var context = CreateContext();
-        context.AddService<ITransactionHandler>(handler);
-        context.AddService<ITransactionWriter>(writer);
         person = new Person(context) { FirstName = "Ann", LastName = "Lee" };
 
         // Act
@@ -300,11 +248,8 @@ public class SubjectTransactionHandlerPreApplyCheckTests
     public async Task WhenEverySourceWriteFails_ThenOnCommittingIsNotCalledAgainAndNothingIsApplied()
     {
         // Arrange
-        var handler = new RecordingHandler();
         var writer = new CountingTransactionWriter { FailedPropertyNames = { nameof(Person.FirstName) } };
-        var context = CreateContext();
-        context.AddService<ITransactionHandler>(handler);
-        context.AddService<ITransactionWriter>(writer);
+        var context = CreateContext(out var handler, writer);
         var person = new Person(context) { FirstName = "Ann" };
 
         // Act
@@ -325,11 +270,8 @@ public class SubjectTransactionHandlerPreApplyCheckTests
     public async Task WhenDisposedFromAnotherFlowDuringSourceWrite_ThenPreApplyCheckIsSkippedAndSnapshotIsApplied()
     {
         // Arrange
-        var handler = new RecordingHandler();
         var writer = new CountingTransactionWriter();
-        var context = CreateContext();
-        context.AddService<ITransactionHandler>(handler);
-        context.AddService<ITransactionWriter>(writer);
+        var context = CreateContext(out var handler, writer);
         var person = new Person(context) { FirstName = "Ann" };
         var flowWithoutTransaction = ExecutionContext.Capture()!;
 
@@ -349,11 +291,8 @@ public class SubjectTransactionHandlerPreApplyCheckTests
     {
         // Arrange
         var calls = 0;
-        var handler = new RecordingHandler();
         var writer = new CountingTransactionWriter();
-        var context = CreateContext();
-        context.AddService<ITransactionHandler>(handler);
-        context.AddService<ITransactionWriter>(writer);
+        var context = CreateContext(out var handler, writer);
         var person = new Person(context) { FirstName = "Ann" };
         var flowWithoutTransaction = ExecutionContext.Capture()!;
         handler.OnCommittingAction = (committingTransaction, _) =>
@@ -382,22 +321,17 @@ public class SubjectTransactionHandlerPreApplyCheckTests
     {
         // Arrange
         var calls = 0;
-        var handler = new RecordingHandler
+        var writer = new CountingTransactionWriter { UnwrittenPropertyNames = { nameof(Person.LastName) } };
+        var context = CreateContext(out var handler, writer);
+        handler.OnCommittingAction = (_, changes) =>
         {
-            OnCommittingAction = (_, changes) =>
+            if (++calls == 2)
             {
-                if (++calls == 2)
-                {
-                    var firstName = changes.Single(change => change.Property.Name == nameof(Person.FirstName));
-                    throw new SubjectTransactionException(
-                        "invalid", [], [firstName], [new InvalidOperationException("invalid first name")]);
-                }
+                var firstName = changes.Single(change => change.Property.Name == nameof(Person.FirstName));
+                throw new SubjectTransactionException(
+                    "invalid", [], [firstName], [new InvalidOperationException("invalid first name")]);
             }
         };
-        var writer = new CountingTransactionWriter { UnwrittenPropertyNames = { nameof(Person.LastName) } };
-        var context = CreateContext();
-        context.AddService<ITransactionHandler>(handler);
-        context.AddService<ITransactionWriter>(writer);
         var person = new Person(context) { FirstName = "Ann", LastName = "Lee" };
 
         // Act
@@ -422,20 +356,15 @@ public class SubjectTransactionHandlerPreApplyCheckTests
     {
         // Arrange
         var calls = 0;
-        var handler = new RecordingHandler
+        var writer = new CountingTransactionWriter();
+        var context = CreateContext(out var handler, writer);
+        handler.OnCommittingAction = (_, _) =>
         {
-            OnCommittingAction = (_, _) =>
+            if (++calls == 2)
             {
-                if (++calls == 2)
-                {
-                    throw new OperationCanceledException();
-                }
+                throw new OperationCanceledException();
             }
         };
-        var writer = new CountingTransactionWriter();
-        var context = CreateContext();
-        context.AddService<ITransactionHandler>(handler);
-        context.AddService<ITransactionWriter>(writer);
         var person = new Person(context) { FirstName = "Ann" };
 
         // Act
@@ -458,28 +387,23 @@ public class SubjectTransactionHandlerPreApplyCheckTests
         var calls = 0;
         var person = default(Person)!;
         var checkedError = new InvalidOperationException("invalid first name");
-        var handler = new RecordingHandler
+        var context = CreateContext(out var handler, new CountingTransactionWriter());
+        handler.OnCommittingAction = (_, changes) =>
         {
-            OnCommittingAction = (_, changes) =>
+            if (++calls == 2)
             {
-                if (++calls == 2)
-                {
-                    var firstName = changes.Single(change => change.Property.Name == nameof(Person.FirstName));
-                    var uncheckedChange = SubjectPropertyChange.Create(
-                        new PropertyReference(person, nameof(Person.LastName)),
-                        ChangeOrigin.Local,
-                        DateTimeOffset.UtcNow,
-                        null,
-                        "Lee",
-                        "Kim");
-                    throw new SubjectTransactionException(
-                        "invalid", [], [firstName, uncheckedChange], [checkedError, new InvalidOperationException("invalid last name")]);
-                }
+                var firstName = changes.Single(change => change.Property.Name == nameof(Person.FirstName));
+                var uncheckedChange = SubjectPropertyChange.Create(
+                    new PropertyReference(person, nameof(Person.LastName)),
+                    ChangeOrigin.Local,
+                    DateTimeOffset.UtcNow,
+                    null,
+                    "Lee",
+                    "Kim");
+                throw new SubjectTransactionException(
+                    "invalid", [], [firstName, uncheckedChange], [checkedError, new InvalidOperationException("invalid last name")]);
             }
         };
-        var context = CreateContext();
-        context.AddService<ITransactionHandler>(handler);
-        context.AddService<ITransactionWriter>(new CountingTransactionWriter());
         person = new Person(context) { FirstName = "Ann", LastName = "Lee" };
 
         // Act
@@ -498,13 +422,8 @@ public class SubjectTransactionHandlerPreApplyCheckTests
         // Arrange
         var source = new object();
         var originsSeen = new List<ChangeOriginKind[]>();
-        var handler = new RecordingHandler
-        {
-            OnCommittingAction = (_, changes) => originsSeen.Add(changes.Select(change => change.Origin.Kind).ToArray())
-        };
-        var context = CreateContext();
-        context.AddService<ITransactionHandler>(handler);
-        context.AddService<ITransactionWriter>(new CountingTransactionWriter { ConfirmingSource = source });
+        var context = CreateContext(out var handler, new CountingTransactionWriter { ConfirmingSource = source });
+        handler.OnCommittingAction = (_, changes) => originsSeen.Add(changes.Select(change => change.Origin.Kind).ToArray());
         var notifications = new List<SubjectPropertyChange>();
         context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(notifications.Add);
         var person = new Person(context) { FirstName = "Ann" };
@@ -529,20 +448,15 @@ public class SubjectTransactionHandlerPreApplyCheckTests
         // Arrange
         var source = new object();
         var calls = 0;
-        var handler = new RecordingHandler
+        var writer = new CountingTransactionWriter { ConfirmingSource = source };
+        var context = CreateContext(out var handler, writer);
+        handler.OnCommittingAction = (_, _) =>
         {
-            OnCommittingAction = (_, _) =>
+            if (++calls == 2)
             {
-                if (++calls == 2)
-                {
-                    throw new InvalidOperationException("rejected");
-                }
+                throw new InvalidOperationException("rejected");
             }
         };
-        var writer = new CountingTransactionWriter { ConfirmingSource = source };
-        var context = CreateContext();
-        context.AddService<ITransactionHandler>(handler);
-        context.AddService<ITransactionWriter>(writer);
         var person = new Person(context) { FirstName = "Ann" };
 
         // Act
@@ -558,57 +472,22 @@ public class SubjectTransactionHandlerPreApplyCheckTests
         Assert.Equal(ChangeOriginKind.Confirmed, Assert.Single(writer.Reverted).Origin.Kind);
     }
 
-    [Fact]
-    public async Task WhenChangeIsCancelledByWriteBack_ThenOnCommittingDoesNotReceiveIt()
-    {
-        // Arrange
-        var changesSeen = new List<SubjectPropertyChange[]>();
-        var firstNamesSeen = new List<string?>();
-        var context = CreateContext();
-        var person = new Person(context) { FirstName = "Ann", LastName = "Lee" };
-        context.AddService<ITransactionHandler>(new RecordingHandler
-        {
-            OnCommittingAction = (_, changes) =>
-            {
-                changesSeen.Add(changes);
-                firstNamesSeen.Add(person.FirstName);
-            }
-        });
-
-        // Act
-        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-        person.FirstName = "Bob";
-        person.FirstName = "Ann";
-        person.LastName = "Kim";
-        await transaction.CommitAsync(CancellationToken.None);
-
-        // Assert
-        var change = Assert.Single(Assert.Single(changesSeen));
-        Assert.Equal(nameof(Person.LastName), change.Property.Name);
-        Assert.Equal("Kim", change.GetNewValue<string>());
-        Assert.Equal(["Ann"], firstNamesSeen);
-        Assert.Equal("Ann", person.FirstName);
-        Assert.Equal("Kim", person.LastName);
-    }
-
-    [Fact]
-    public async Task WhenChangeIsCancelledByWriteBackWithWriter_ThenPreApplyCheckDoesNotReceiveItAndReadsLandedValue()
+    [Theory]
+    [InlineData(false, 1)]
+    [InlineData(true, 2)]
+    public async Task WhenChangeIsCancelledByWriteBack_ThenNoCheckReceivesItAndEachReadsLandedValue(bool withWriter, int expectedChecks)
     {
         // Arrange
         var changesSeen = new List<SubjectPropertyChange[]>();
         var firstNamesSeen = new List<string?>();
         var writer = new CountingTransactionWriter();
-        var context = CreateContext();
-        context.AddService<ITransactionWriter>(writer);
+        var context = CreateContext(out var handler, withWriter ? writer : null);
         var person = new Person(context) { FirstName = "Ann", LastName = "Lee" };
-        context.AddService<ITransactionHandler>(new RecordingHandler
+        handler.OnCommittingAction = (_, changes) =>
         {
-            OnCommittingAction = (_, changes) =>
-            {
-                changesSeen.Add(changes);
-                firstNamesSeen.Add(person.FirstName);
-            }
-        });
+            changesSeen.Add(changes);
+            firstNamesSeen.Add(person.FirstName);
+        };
 
         // Act
         using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
@@ -618,10 +497,15 @@ public class SubjectTransactionHandlerPreApplyCheckTests
         await transaction.CommitAsync(CancellationToken.None);
 
         // Assert
-        Assert.Equal(2, changesSeen.Count);
-        Assert.All(changesSeen, changes => Assert.Equal(nameof(Person.LastName), Assert.Single(changes).Property.Name));
-        Assert.Equal(["Ann", "Ann"], firstNamesSeen);
-        Assert.Equal(1, writer.WriteCalls);
+        Assert.Equal(expectedChecks, changesSeen.Count);
+        Assert.All(changesSeen, changes =>
+        {
+            var change = Assert.Single(changes);
+            Assert.Equal(nameof(Person.LastName), change.Property.Name);
+            Assert.Equal("Kim", change.GetNewValue<string>());
+        });
+        Assert.Equal(Enumerable.Repeat<string?>("Ann", expectedChecks), firstNamesSeen);
+        Assert.Equal(withWriter ? 1 : 0, writer.WriteCalls);
         Assert.Equal("Ann", person.FirstName);
         Assert.Equal("Kim", person.LastName);
     }

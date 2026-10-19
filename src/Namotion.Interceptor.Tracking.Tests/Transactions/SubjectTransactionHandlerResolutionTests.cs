@@ -1,6 +1,7 @@
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Tests.Models;
 using Namotion.Interceptor.Tracking.Transactions;
+using static Namotion.Interceptor.Tracking.Tests.Transactions.TransactionTestContext;
 
 namespace Namotion.Interceptor.Tracking.Tests.Transactions;
 
@@ -9,13 +10,6 @@ namespace Namotion.Interceptor.Tracking.Tests.Transactions;
 /// </summary>
 public class SubjectTransactionHandlerResolutionTests
 {
-    private static IInterceptorSubjectContext CreateContext()
-    {
-        return InterceptorSubjectContext.Create()
-            .WithFullPropertyTracking()
-            .WithTransactions();
-    }
-
     [Fact]
     public async Task WhenHandlerIsRegisteredOnlyOnSubjectContextReachingTransactionsThroughFallback_ThenItTakesPart()
     {
@@ -52,9 +46,7 @@ public class SubjectTransactionHandlerResolutionTests
     public async Task WhenHandlerIsRegisteredOnSubjectContextAndTransactionContext_ThenItIsCalledOncePerEvent()
     {
         // Arrange
-        var handler = new RecordingHandler();
-        var transactionContext = CreateContext();
-        transactionContext.AddService<ITransactionHandler>(handler);
+        var transactionContext = CreateContext(out var handler);
         var subjectContext = InterceptorSubjectContext.Create();
         subjectContext.AddService<ITransactionHandler>(handler);
         subjectContext.AddFallbackContext(transactionContext);
@@ -127,19 +119,15 @@ public class SubjectTransactionHandlerResolutionTests
     {
         // Arrange
         var rejectCommit = true;
-        var rejectingHandler = new RecordingHandler
+        var transactionContext = CreateContext(out var rejectingHandler);
+        rejectingHandler.OnCommittingAction = (_, _) =>
         {
-            OnCommittingAction = (_, _) =>
+            if (rejectCommit)
             {
-                if (rejectCommit)
-                {
-                    throw new InvalidOperationException("rejected");
-                }
+                throw new InvalidOperationException("rejected");
             }
         };
         var includedHandler = new RecordingHandler();
-        var transactionContext = CreateContext();
-        transactionContext.AddService<ITransactionHandler>(rejectingHandler);
         var subjectContext = InterceptorSubjectContext.Create();
         subjectContext.AddService<ITransactionHandler>(includedHandler);
         subjectContext.AddFallbackContext(transactionContext);
@@ -169,10 +157,8 @@ public class SubjectTransactionHandlerResolutionTests
     public async Task WhenAnotherThreadWritesSubjectWithOwnHandlerDuringOnCommitting_ThenWriteThrowsAndHandlerDoesNotTakePart()
     {
         // Arrange
-        var checkingHandler = new RecordingHandler();
+        var transactionContext = CreateContext(out var checkingHandler);
         var subjectHandler = new RecordingHandler();
-        var transactionContext = CreateContext();
-        transactionContext.AddService<ITransactionHandler>(checkingHandler);
         var subjectContext = InterceptorSubjectContext.Create();
         subjectContext.AddService<ITransactionHandler>(subjectHandler);
         subjectContext.AddFallbackContext(transactionContext);

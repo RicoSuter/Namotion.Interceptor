@@ -1,4 +1,3 @@
-using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Tests.Models;
 using Namotion.Interceptor.Tracking.Transactions;
 
@@ -8,11 +7,7 @@ public class CommitWriteMarkerTests
 {
     private static (IInterceptorSubjectContext Context, ITransactionHandler Handler, Person Person) CreateContext()
     {
-        var handler = new NoOpHandler();
-        var context = InterceptorSubjectContext.Create()
-            .WithFullPropertyTracking()
-            .WithTransactions();
-        context.AddService<ITransactionHandler>(handler);
+        var context = TransactionTestContext.CreateContext(out var handler);
         return (context, handler, new Person(context));
     }
 
@@ -114,7 +109,7 @@ public class CommitWriteMarkerTests
         using (CommitWriteMarker.Set(transaction, property, "Bob"))
         {
             // Act
-            var foreignMatches = CommitWriteMarker.TryConsume(new NoOpHandler(), property, "Bob");
+            var foreignMatches = CommitWriteMarker.TryConsume(new RecordingHandler(), property, "Bob");
             var handlerMatches = CommitWriteMarker.TryConsume(handler, property, "Bob");
 
             // Assert
@@ -238,16 +233,5 @@ public class CommitWriteMarkerTests
         public override bool Equals(object? obj) => obj is AlwaysEqual;
 
         public override int GetHashCode() => 0;
-    }
-
-    private sealed class NoOpHandler : ITransactionHandler
-    {
-        public void OnCapturing<TProperty>(SubjectTransaction transaction, PropertyReference property, TProperty newValue, ChangeOrigin origin)
-        {
-        }
-
-        public void OnCommitting(SubjectTransaction transaction, ReadOnlySpan<SubjectPropertyChange> changes)
-        {
-        }
     }
 }

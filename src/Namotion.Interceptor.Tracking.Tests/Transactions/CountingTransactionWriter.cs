@@ -11,6 +11,9 @@ internal sealed class CountingTransactionWriter : ITransactionWriter
 {
     public int WriteCalls { get; private set; }
 
+    /// <summary>Gets the property names of every change passed to the writer, in call order.</summary>
+    public List<string> ReceivedPropertyNames { get; } = [];
+
     public Action? DuringWrite { get; set; }
 
     public HashSet<string> FailedPropertyNames { get; } = [];
@@ -27,6 +30,11 @@ internal sealed class CountingTransactionWriter : ITransactionWriter
         CancellationToken cancellationToken)
     {
         WriteCalls++;
+        foreach (var change in changes.Span)
+        {
+            ReceivedPropertyNames.Add(change.Property.Name);
+        }
+
         DuringWrite?.Invoke();
         if (ConfirmingSource is not null)
         {

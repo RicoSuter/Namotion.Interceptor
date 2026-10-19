@@ -2,18 +2,12 @@ using System.Reactive.Concurrency;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Tests.Models;
 using Namotion.Interceptor.Tracking.Transactions;
+using static Namotion.Interceptor.Tracking.Tests.Transactions.TransactionTestContext;
 
 namespace Namotion.Interceptor.Tracking.Tests.Transactions;
 
 public class SubjectTransactionHandlerTests
 {
-    private static IInterceptorSubjectContext CreateContext()
-    {
-        return InterceptorSubjectContext.Create()
-            .WithFullPropertyTracking()
-            .WithTransactions();
-    }
-
     [Fact]
     public async Task WhenNoValidationModeIsPassed_ThenTransactionUsesImmediate()
     {
@@ -46,9 +40,7 @@ public class SubjectTransactionHandlerTests
     public async Task WhenWriteIsCaptured_ThenOnCapturingReceivesValueAndAttemptedOrigin()
     {
         // Arrange
-        var handler = new RecordingHandler();
-        var context = CreateContext();
-        context.AddService<ITransactionHandler>(handler);
+        var context = CreateContext(out var handler);
         var person = new Person(context);
 
         // Act
@@ -66,12 +58,8 @@ public class SubjectTransactionHandlerTests
     public async Task WhenOnCapturingThrows_ThenWriteIsNotCaptured()
     {
         // Arrange
-        var handler = new RecordingHandler
-        {
-            RejectCapture = (_, value) => Equals(value, "Bad") ? new InvalidOperationException("bad value") : null
-        };
-        var context = CreateContext();
-        context.AddService<ITransactionHandler>(handler);
+        var context = CreateContext(out var handler);
+        handler.RejectCapture = (_, value) => Equals(value, "Bad") ? new InvalidOperationException("bad value") : null;
         var person = new Person(context);
         using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
 
@@ -82,12 +70,10 @@ public class SubjectTransactionHandlerTests
     }
 
     [Fact]
-    public async Task WhenWriteIsOutsideTransaction_ThenOnCapturingIsNotCalled()
+    public void WhenWriteIsOutsideTransaction_ThenOnCapturingIsNotCalled()
     {
         // Arrange
-        var handler = new RecordingHandler();
-        var context = CreateContext();
-        context.AddService<ITransactionHandler>(handler);
+        var context = CreateContext(out var handler);
         var person = new Person(context);
 
         // Act
@@ -101,9 +87,7 @@ public class SubjectTransactionHandlerTests
     public async Task WhenWriteComesFromSource_ThenOnCapturingReceivesSourceOrigin()
     {
         // Arrange
-        var handler = new RecordingHandler();
-        var context = CreateContext();
-        context.AddService<ITransactionHandler>(handler);
+        var context = CreateContext(out var handler);
         var person = new Person(context);
         var source = new object();
 
@@ -169,9 +153,7 @@ public class SubjectTransactionHandlerTests
     public async Task WhenCommitting_ThenOnCommittingSeesPendingValuesBeforeAnythingIsApplied()
     {
         // Arrange
-        var handler = new RecordingHandler();
-        var context = CreateContext();
-        context.AddService<ITransactionHandler>(handler);
+        var context = CreateContext(out var handler);
         var notifications = new List<SubjectPropertyChange>();
         context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(notifications.Add);
         var person = new Person(context) { FirstName = "Ann" };
@@ -208,18 +190,14 @@ public class SubjectTransactionHandlerTests
     {
         // Arrange
         var reject = true;
-        var handler = new RecordingHandler
+        var context = CreateContext(out var handler);
+        handler.OnCommittingAction = (_, _) =>
         {
-            OnCommittingAction = (_, _) =>
+            if (reject)
             {
-                if (reject)
-                {
-                    throw new InvalidOperationException("rejected");
-                }
+                throw new InvalidOperationException("rejected");
             }
         };
-        var context = CreateContext();
-        context.AddService<ITransactionHandler>(handler);
         var notifications = new List<SubjectPropertyChange>();
         context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(notifications.Add);
         var person = new Person(context) { FirstName = "Ann" };
@@ -250,9 +228,7 @@ public class SubjectTransactionHandlerTests
     public async Task WhenHandlerWritesDuringOnCommitting_ThenWriteThrowsAndIsNotCaptured()
     {
         // Arrange
-        var handler = new RecordingHandler();
-        var context = CreateContext();
-        context.AddService<ITransactionHandler>(handler);
+        var context = CreateContext(out var handler);
         var person = new Person(context);
         Exception? writeError = null;
         handler.OnCommittingAction = (_, _) => writeError = Record.Exception(() => person.LastName = "Smith");
@@ -274,9 +250,7 @@ public class SubjectTransactionHandlerTests
     public async Task WhenHandlerWritesSettableDerivedPropertyDuringOnCommitting_ThenWriteThrows()
     {
         // Arrange
-        var handler = new RecordingHandler();
-        var context = CreateContext();
-        context.AddService<ITransactionHandler>(handler);
+        var context = CreateContext(out var handler);
         var subject = new TransactionCascadeSubject(context);
         Exception? writeError = null;
         handler.OnCommittingAction = (_, _) => writeError = Record.Exception(() => subject.DerivedWithSetter = "derived");
@@ -297,9 +271,7 @@ public class SubjectTransactionHandlerTests
     public async Task WhenHandlerWritesLandedValueOfPendingPropertyDuringOnCommitting_ThenWriteIsDropped()
     {
         // Arrange
-        var handler = new RecordingHandler();
-        var context = CreateContext();
-        context.AddService<ITransactionHandler>(handler);
+        var context = CreateContext(out var handler);
         var person = new Person(context) { FirstName = "Ann" };
         Exception? writeError = null;
         handler.OnCommittingAction = (_, _) => writeError = Record.Exception(() => person.FirstName = "Ann");
@@ -318,9 +290,7 @@ public class SubjectTransactionHandlerTests
     public async Task WhenAnotherThreadReadsDuringOnCommitting_ThenReadThrows()
     {
         // Arrange
-        var handler = new RecordingHandler();
-        var context = CreateContext();
-        context.AddService<ITransactionHandler>(handler);
+        var context = CreateContext(out var handler);
         var person = new Person(context) { FirstName = "Ann" };
         Exception? concurrentReadException = null;
         handler.OnCommittingAction = (_, _) =>
@@ -346,22 +316,18 @@ public class SubjectTransactionHandlerTests
     public async Task WhenDisposedDuringOnCommitting_ThenLockIsReleasedOnlyAfterCommitEnds()
     {
         // Arrange
-        var context = CreateContext();
+        var context = CreateContext(out var handler);
         var person = new Person(context) { FirstName = "Ann" };
         Task<SubjectTransaction>? competingBegin = null;
         var competingBeginCompletedDuringCommit = true;
-        var handler = new RecordingHandler
+        handler.OnCommittingAction = (committingTransaction, _) =>
         {
-            OnCommittingAction = (transaction, _) =>
-            {
-                transaction.Dispose();
+            committingTransaction.Dispose();
 
-                // Started inline so that it completes synchronously if disposal released the exclusive lock.
-                competingBegin = BeginInOwnFlowAsync(context);
-                competingBeginCompletedDuringCommit = competingBegin.IsCompleted;
-            }
+            // Started inline so that it completes synchronously if disposal released the exclusive lock.
+            competingBegin = BeginInOwnFlowAsync(context);
+            competingBeginCompletedDuringCommit = competingBegin.IsCompleted;
         };
-        context.AddService<ITransactionHandler>(handler);
         var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
         person.FirstName = "Bob";
 
@@ -394,11 +360,9 @@ public class SubjectTransactionHandlerTests
     public async Task WhenOnCommittingThrows_ThenWriterIsNotCalled()
     {
         // Arrange
-        var handler = new RecordingHandler { OnCommittingAction = (_, _) => throw new InvalidOperationException("rejected") };
         var writer = new CountingTransactionWriter();
-        var context = CreateContext();
-        context.AddService<ITransactionHandler>(handler);
-        context.AddService<ITransactionWriter>(writer);
+        var context = CreateContext(out var handler, writer);
+        handler.OnCommittingAction = (_, _) => throw new InvalidOperationException("rejected");
         var person = new Person(context);
         using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
         person.FirstName = "Bob";
@@ -454,18 +418,14 @@ public class SubjectTransactionHandlerTests
     {
         // Arrange
         var reject = true;
-        var handler = new RecordingHandler
+        var context = CreateContext(out var handler);
+        handler.OnCommittingAction = (_, _) =>
         {
-            OnCommittingAction = (_, _) =>
+            if (reject)
             {
-                if (reject)
-                {
-                    throw new InvalidOperationException("rejected");
-                }
+                throw new InvalidOperationException("rejected");
             }
         };
-        var context = CreateContext();
-        context.AddService<ITransactionHandler>(handler);
         var person = new Person(context) { FirstName = "Ann" };
         var flowWithoutTransaction = ExecutionContext.Capture()!;
         using var transaction = await context.BeginTransactionAsync(
@@ -484,14 +444,15 @@ public class SubjectTransactionHandlerTests
         Assert.Equal("Lee", person.LastName);
     }
 
-    [Fact]
-    public async Task WhenCommitAppliesCheckedValue_ThenCommitWriteIsConsumedOnce()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenCommitAppliesCheckedValue_ThenCommitWriteIsConsumedOnce(bool withWriter)
     {
         // Arrange
-        var handler = new RecordingHandler();
+        var writer = new CountingTransactionWriter();
+        var context = CreateContext(out var handler, withWriter ? writer : null);
         var probe = new CommitWriteProbe(handler);
-        var context = CreateContext();
-        context.AddService<ITransactionHandler>(handler);
         context.AddService(probe);
         var person = new Person(context) { FirstName = "Ann" };
         probe.Writes.Clear();
@@ -509,17 +470,16 @@ public class SubjectTransactionHandlerTests
         Assert.All(
             probe.Writes.Where(write => write.Property != nameof(Person.FirstName)),
             derivedWrite => Assert.False(derivedWrite.Consumed));
+        Assert.Equal(withWriter ? 1 : 0, writer.WriteCalls);
     }
 
     [Fact]
     public async Task WhenHandlerDidNotCheckTheCommit_ThenCommitWriteIsNotConsumed()
     {
         // Arrange
-        var handler = new RecordingHandler();
+        var context = CreateContext(out _);
         var otherHandler = new RecordingHandler();
         var probe = new CommitWriteProbe(otherHandler);
-        var context = CreateContext();
-        context.AddService<ITransactionHandler>(handler);
         context.AddService(probe);
         var person = new Person(context);
         probe.Writes.Clear();
@@ -553,14 +513,15 @@ public class SubjectTransactionHandlerTests
         Assert.False(Assert.Single(probe.Writes, write => write.Property == nameof(Person.FirstName)).Consumed);
     }
 
-    [Fact]
-    public async Task WhenRollbackRestoresValue_ThenRestoreIsConsumedAsCommitWrite()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenRollbackRestoresValue_ThenRestoreIsConsumedAsCommitWrite(bool withWriter)
     {
         // Arrange
-        var handler = new RecordingHandler();
+        var writer = new CountingTransactionWriter();
+        var context = CreateContext(out var handler, withWriter ? writer : null);
         var probe = new CommitWriteProbe(handler) { ThrowOnConsumedProperty = nameof(Person.LastName) };
-        var context = CreateContext();
-        context.AddService<ITransactionHandler>(handler);
         context.AddService(probe);
         var person = new Person(context) { FirstName = "Ann", LastName = "Lee" };
         probe.Writes.Clear();
@@ -575,72 +536,16 @@ public class SubjectTransactionHandlerTests
         Assert.Equal("Ann", person.FirstName);
         var restore = Assert.Single(probe.Writes, write => write.Property == nameof(Person.FirstName) && Equals(write.Value, "Ann"));
         Assert.True(restore.Consumed);
-    }
-
-    [Fact]
-    public async Task WhenWriterCommitAppliesCheckedValue_ThenCommitWriteIsConsumedOnce()
-    {
-        // Arrange
-        var handler = new RecordingHandler();
-        var probe = new CommitWriteProbe(handler);
-        var context = CreateContext();
-        context.AddService<ITransactionHandler>(handler);
-        var writer = new CountingTransactionWriter();
-        context.AddService<ITransactionWriter>(writer);
-        context.AddService(probe);
-        var person = new Person(context) { FirstName = "Ann" };
-        probe.Writes.Clear();
-
-        // Act
-        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-        person.FirstName = "Bob";
-        await transaction.CommitAsync(CancellationToken.None);
-
-        // Assert
-        var applied = Assert.Single(probe.Writes, write => write.Property == nameof(Person.FirstName));
-        Assert.Equal("Bob", applied.Value);
-        Assert.True(applied.Consumed);
-        Assert.False(applied.ConsumedAgain);
-        Assert.Equal(1, writer.WriteCalls);
-    }
-
-    [Fact]
-    public async Task WhenWriterCommitRollsBack_ThenRestoreIsConsumedAsCommitWrite()
-    {
-        // Arrange
-        var handler = new RecordingHandler();
-        var probe = new CommitWriteProbe(handler) { ThrowOnConsumedProperty = nameof(Person.LastName) };
-        var context = CreateContext();
-        context.AddService<ITransactionHandler>(handler);
-        var writer = new CountingTransactionWriter();
-        context.AddService<ITransactionWriter>(writer);
-        context.AddService(probe);
-        var person = new Person(context) { FirstName = "Ann", LastName = "Lee" };
-        probe.Writes.Clear();
-
-        // Act
-        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback);
-        person.FirstName = "Bob";
-        person.LastName = "Kim";
-        await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None).AsTask());
-
-        // Assert
-        Assert.Equal("Ann", person.FirstName);
-        var restore = Assert.Single(probe.Writes, write => write.Property == nameof(Person.FirstName) && Equals(write.Value, "Ann"));
-        Assert.True(restore.Consumed);
-        Assert.Equal(1, writer.WriteCalls);
+        Assert.Equal(withWriter ? 1 : 0, writer.WriteCalls);
     }
 
     [Fact]
     public async Task WhenDisposedFromAnotherFlowDuringSourceWrite_ThenApplyIsNotConsumedAsCommitWrite()
     {
         // Arrange
-        var handler = new RecordingHandler();
-        var probe = new CommitWriteProbe(handler);
         var writer = new CountingTransactionWriter();
-        var context = CreateContext();
-        context.AddService<ITransactionHandler>(handler);
-        context.AddService<ITransactionWriter>(writer);
+        var context = CreateContext(out var handler, writer);
+        var probe = new CommitWriteProbe(handler);
         context.AddService(probe);
         var person = new Person(context) { FirstName = "Ann" };
         probe.Writes.Clear();
