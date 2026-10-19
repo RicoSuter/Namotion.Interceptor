@@ -398,9 +398,10 @@ public static class PropertyHistoryChartModel
         {
             return unit switch
             {
+                HistoryCalendarUnit.Day => "calendar days",
                 HistoryCalendarUnit.Week => "weeks from Monday",
                 HistoryCalendarUnit.Month => "calendar months",
-                _ => "calendar days"
+                _ => "calendar years"
             };
         }
 

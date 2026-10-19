@@ -222,10 +222,14 @@
             var bucket = PropertyHistoryChartModel.ResolveBucket(
                 period, to - from, TimeZone.Zone ?? TimeZoneInfo.Utc, HistoryChartQuery.GetAvailableCoverage(stores, to), isBars);
 
-            // A calendar bucket starts a preset range at the start of a period.
+            // A calendar bucket starts a range at the start of a period, so that its first bar is a whole one.
             if (!_useCustom)
             {
                 from = PropertyHistoryChartModel.GetWindowStart(to, to - from, bucket);
+            }
+            else if (bucket is { CalendarUnit: not null } calendar)
+            {
+                from = BucketAlignment.Start(from, calendar);
             }
 
             var range = to - from;

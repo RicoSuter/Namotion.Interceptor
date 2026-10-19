@@ -152,11 +152,13 @@
         _seriesClicked = EventCallback.Factory.Create<int>(this, OnSeriesClicked);
     }
 
-    // A line or bar of data that was queried for other series than the current ones opens nothing.
-    private Task OnSeriesClicked(int line) =>
-        ReferenceEquals(_dataSeries, _series) && (uint)line < (uint)_lineSeries.Length && CanShowHistory(_lineSeries[line])
-            ? ShowHistoryAsync(_series[_lineSeries[line]])
-            : Task.CompletedTask;
+    // A line or bar of data that was queried for other series than the current ones opens the first line, as a click
+    // beside the lines does, since the view took the click.
+    private Task OnSeriesClicked(int line)
+    {
+        var index = ReferenceEquals(_dataSeries, _series) && (uint)line < (uint)_lineSeries.Length ? _lineSeries[line] : _firstLine;
+        return CanShowHistory(index) ? ShowHistoryAsync(_series[index]) : Task.CompletedTask;
+    }
 
     // Every series without a band in the shown data: the lines, and a band series that has no band, such as one
     // without history, so its note stays in view.

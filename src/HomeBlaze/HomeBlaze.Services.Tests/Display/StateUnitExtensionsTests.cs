@@ -100,7 +100,7 @@ public class StateUnitExtensionsTests
     public void WhenAValueIsTooLargeToConvert_ThenItGetsTheLargestUnitOfItsFamily()
     {
         // Act
-        var isScaled = StateUnitExtensions.TryGetScaledUnit(StateUnit.Byte, decimal.MaxValue, out var suffix, out _);
+        var isScaled = StateUnitExtensions.TryGetScaledUnit(StateUnit.Kilobyte, decimal.MaxValue, out var suffix, out _);
 
         // Assert
         Assert.True(isScaled);
