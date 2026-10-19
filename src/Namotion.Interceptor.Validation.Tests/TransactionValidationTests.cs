@@ -336,7 +336,7 @@ public class TransactionValidationTests
         // Arrange
         var context = CreateContext();
         var motor = new Motor(context) { MaxAllowedSpeed = 200 };
-        var writer = new TestTransactionWriter(motorToLimitDuringWrite: motor);
+        var writer = new TestTransactionWriter(updateDuringWrite: () => motor.MaxAllowedSpeed = 100);
         context.AddService<ITransactionWriter>(writer);
         using var transaction = await context.BeginTransactionAsync(
             TransactionFailureHandling.Rollback, validationMode: TransactionValidationMode.Deferred);
@@ -354,12 +354,41 @@ public class TransactionValidationTests
     }
 
     [Fact]
+    public async Task WhenSecondCheckRejectsLimitInBestEffort_ThenSpeedCheckedAgainstItDoesNotLandEither()
+    {
+        // Arrange
+        var context = CreateContext();
+        context.AddService<IPropertyValidator>(new SpeedCapValidator());
+        var motor = new Motor(context);
+        var writer = new TestTransactionWriter(updateDuringWrite: () => motor.SpeedCap = 180);
+        context.AddService<ITransactionWriter>(writer);
+        using var transaction = await context.BeginTransactionAsync(
+            TransactionFailureHandling.BestEffort, validationMode: TransactionValidationMode.Deferred);
+        motor.MaxAllowedSpeed = 200;
+        motor.MotorSpeed = 150;
+
+        // Act
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Assert
+        Assert.Empty(exception.AppliedChanges);
+        Assert.Equal(
+            [nameof(Motor.MaxAllowedSpeed), nameof(Motor.MotorSpeed)],
+            exception.FailedChanges.Select(change => change.Property.Name));
+        Assert.Contains("exceeds SpeedCap", Assert.IsType<ValidationException>(Assert.Single(exception.Errors)).Message);
+        Assert.Equal(100, motor.MaxAllowedSpeed);
+        Assert.Equal(0, motor.MotorSpeed);
+        Assert.Equal(2, writer.Reverted.Count);
+    }
+
+    [Fact]
     public async Task WhenWriterConfirmsAcceptedChanges_ThenSecondCheckSeesCapturedOrigin()
     {
         // Arrange
         var context = CreateContext(validateLocalWritesOnly: true);
         var motor = new Motor(context) { MaxAllowedSpeed = 200 };
-        var writer = new TestTransactionWriter(motorToLimitDuringWrite: motor, confirmAcceptedChanges: true);
+        var writer = new TestTransactionWriter(updateDuringWrite: () => motor.MaxAllowedSpeed = 100, confirmAcceptedChanges: true);
         context.AddService<ITransactionWriter>(writer);
         using var transaction = await context.BeginTransactionAsync(
             TransactionFailureHandling.Rollback, validationMode: TransactionValidationMode.Deferred);
@@ -410,12 +439,32 @@ public class TransactionValidationTests
     }
 
     /// <summary>
-    /// Accepts every change and records its calls. Optionally lowers MaxAllowedSpeed to 100 from a flow without the
-    /// transaction while the source write is in flight, like an inbound source update, and marks the accepted
-    /// snapshot slots as confirmed in place, like a source connector does.
+    /// Rejects a MaxAllowedSpeed above SpeedCap. Reads SpeedCap through the getter, so inside a transaction it sees the
+    /// transaction's value.
+    /// </summary>
+    private sealed class SpeedCapValidator : IPropertyValidator
+    {
+        public IEnumerable<ValidationResult> Validate<TProperty>(in PropertyValidationContext<TProperty> context)
+        {
+            if (context.Property.Name == nameof(Motor.MaxAllowedSpeed) &&
+                context.Value is int limit &&
+                context.Property.Subject is Motor motor &&
+                limit > motor.SpeedCap)
+            {
+                return [new ValidationResult($"MaxAllowedSpeed {limit} exceeds SpeedCap {motor.SpeedCap}.")];
+            }
+
+            return [];
+        }
+    }
+
+    /// <summary>
+    /// Accepts every change and records its calls. Optionally runs an update from a flow without the transaction while
+    /// the source write is in flight, like an inbound source update, and marks the accepted snapshot slots as
+    /// confirmed in place, like a source connector does.
     /// </summary>
     private sealed class TestTransactionWriter(
-        Motor? motorToLimitDuringWrite = null,
+        Action? updateDuringWrite = null,
         bool confirmAcceptedChanges = false) : ITransactionWriter
     {
         public int WriteCount { get; private set; }
@@ -428,13 +477,13 @@ public class TransactionValidationTests
             CancellationToken cancellationToken)
         {
             WriteCount++;
-            if (motorToLimitDuringWrite is { } motor)
+            if (updateDuringWrite is { } update)
             {
                 Task task;
                 var flowControl = ExecutionContext.SuppressFlow();
                 try
                 {
-                    task = Task.Run(() => motor.MaxAllowedSpeed = 100, cancellationToken);
+                    task = Task.Run(update, cancellationToken);
                 }
                 finally
                 {

@@ -828,22 +828,35 @@ public sealed class SubjectTransaction : IDisposable
 
         // Source failures leave local changes uncommitted, and written source changes must be reverted.
         // Errors without failed changes from custom writers must still be reported.
-        if (_failureHandling == TransactionFailureHandling.Rollback && (failedSource.Count > 0 || sourceErrors.Count > 0))
+        var rollBackSourceFailure = _failureHandling == TransactionFailureHandling.Rollback &&
+            (failedSource.Count > 0 || sourceErrors.Count > 0);
+
+        // What the handlers read can change while the sources are written (inbound updates, raw writes), so the
+        // final set is checked again right before it lands. Its reads return the pending values of every checked
+        // change, so a rejection invalidates the whole checked set in both failure handling modes.
+        var rejectionErrors = rollBackSourceFailure ? null : CheckBeforeLocalApply(changes.Span, failedSource);
+        if (rollBackSourceFailure || rejectionErrors is not null)
         {
             var revert = await RevertSourceWritesSafelyAsync(writer, written, revertState, cancellationToken).ConfigureAwait(false);
-            var notApplied = SubjectPropertyChangeOperations.ExcludeByProperty(changes.Span, failedSource, written);
+
+            // A rejection fails every checked change, which includes every written one. After a source failure, the
+            // written changes that were reverted cleanly are not reported.
+            var notApplied = rejectionErrors is null
+                ? SubjectPropertyChangeOperations.Concat(
+                    SubjectPropertyChangeOperations.ExcludeByProperty(changes.Span, failedSource, written), revert.Failed)
+                : SubjectPropertyChangeOperations.ExcludeByProperty(changes.Span, failedSource, []);
             return CreateFailureException(
                 [],
-                SubjectPropertyChangeOperations.Concat(failedSource, notApplied, revert.Failed),
-                SubjectPropertyChangeOperations.Concat(sourceErrors, revert.Errors));
+                SubjectPropertyChangeOperations.Concat(failedSource, notApplied),
+                SubjectPropertyChangeOperations.Concat(sourceErrors, rejectionErrors ?? [], revert.Errors));
         }
 
         return await ApplyAfterSourceWritesAsync(writer, changes, writeResult, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
-    /// Checks the final set again and applies it locally after the source writes, reverting sources where the
-    /// failure handling requires it. Returns null on full success.
+    /// Applies the checked set locally after the source writes, reverting sources where the failure handling requires
+    /// it. Returns null on full success.
     /// </summary>
     private async ValueTask<SubjectTransactionException?> ApplyAfterSourceWritesAsync(
         ITransactionWriter writer,
@@ -853,30 +866,8 @@ public sealed class SubjectTransaction : IDisposable
     {
         var (written, failedSource, sourceErrors, revertState) = writeResult;
 
-        // What the handlers read can change while the sources are written (inbound updates, raw writes), so the
-        // final set is checked again right before it lands.
-        var (invalid, invalidErrors) = CheckBeforeLocalApply(changes.Span, failedSource);
-        IReadOnlyList<SubjectPropertyChange> invalidWritten = [];
-        if (invalid.Count > 0)
-        {
-            if (_failureHandling == TransactionFailureHandling.Rollback)
-            {
-                var revert = await RevertSourceWritesSafelyAsync(writer, written, revertState, cancellationToken).ConfigureAwait(false);
-                var notApplied = SubjectPropertyChangeOperations.ExcludeByProperty(changes.Span, invalid, written);
-                return CreateFailureException(
-                    [],
-                    SubjectPropertyChangeOperations.Concat(invalid, notApplied, revert.Failed),
-                    SubjectPropertyChangeOperations.Concat(invalidErrors, revert.Errors));
-            }
-
-            // BestEffort: skip the invalid changes like failed source writes, and revert the sources that accepted them.
-            invalidWritten = SubjectPropertyChangeOperations.IntersectByProperty(invalid, written);
-            failedSource = SubjectPropertyChangeOperations.Concat(failedSource, invalid);
-            sourceErrors = SubjectPropertyChangeOperations.Concat(sourceErrors, invalidErrors);
-        }
-
-        // Apply the whole snapshot except the source-write failures and the changes the handlers rejected in a single
-        // pass. With neither, this is the entire snapshot, and ApplyLocalChanges returns an empty Successful set.
+        // Apply the whole snapshot except the source-write failures in a single pass. Without any, this is the entire
+        // snapshot, and ApplyLocalChanges returns an empty Successful set.
         var exclude = failedSource.Count == 0 ? null : failedSource;
         IReadOnlyList<SubjectPropertyChange> applied;
         IReadOnlyList<SubjectPropertyChange> applyFailed;
@@ -910,23 +901,14 @@ public sealed class SubjectTransaction : IDisposable
                     SubjectPropertyChangeOperations.Concat(sourceErrors, applyErrors, revertErrors, sourceRevert.Errors));
             }
 
-            // BestEffort: keep source == model for failed-apply and rejected properties by reverting only the
-            // source writes whose property failed to apply (matched by Property equality) or was rejected.
-            var toRevert = SubjectPropertyChangeOperations.Concat(SubjectPropertyChangeOperations.IntersectByProperty(applyFailed, written), invalidWritten);
+            // BestEffort: keep source == model for failed-apply properties by reverting only the source writes whose
+            // property failed to apply (matched by Property equality).
+            var toRevert = SubjectPropertyChangeOperations.IntersectByProperty(applyFailed, written);
             var bestEffortRevert = await RevertSourceWritesSafelyAsync(writer, toRevert, revertState, cancellationToken).ConfigureAwait(false);
             return CreateFailureException(
                 applied,
                 SubjectPropertyChangeOperations.Concat(failedSource, applyFailed, bestEffortRevert.Failed),
                 SubjectPropertyChangeOperations.Concat(sourceErrors, applyErrors, bestEffortRevert.Errors));
-        }
-
-        if (invalidWritten.Count > 0)
-        {
-            var invalidRevert = await RevertSourceWritesSafelyAsync(writer, invalidWritten, revertState, cancellationToken).ConfigureAwait(false);
-            return CreateFailureException(
-                applied,
-                SubjectPropertyChangeOperations.Concat(failedSource, invalidRevert.Failed),
-                SubjectPropertyChangeOperations.Concat(sourceErrors, invalidRevert.Errors));
         }
 
         return CreateFailureAfterSuccessfulLocalApply(changes, exclude, applied, failedSource, sourceErrors);
@@ -1194,18 +1176,17 @@ public sealed class SubjectTransaction : IDisposable
 
     /// <summary>
     /// Calls the handlers again right before the local apply with the changes that will be applied, with reads
-    /// returning the transaction's values for them. Returns the snapshot slots of the changes they rejected: the
-    /// failed changes of a <see cref="SubjectTransactionException"/> that match checked changes, or every checked
-    /// change otherwise.
+    /// returning the transaction's values for them. Returns null when they accept the set, or the errors of their
+    /// rejection otherwise.
     /// </summary>
-    private (IReadOnlyList<SubjectPropertyChange> Invalid, IReadOnlyList<Exception> Errors) CheckBeforeLocalApply(
+    private IReadOnlyList<Exception>? CheckBeforeLocalApply(
         ReadOnlySpan<SubjectPropertyChange> changes,
         IReadOnlyList<SubjectPropertyChange> failedSource)
     {
         // A transaction disposed from another flow mid-commit has dropped the pending values the reads need.
         if (_handlers.Length == 0 || Volatile.Read(ref _isDisposed) != 0)
         {
-            return ([], []);
+            return null;
         }
 
         // The writer marks accepted snapshot slots as Confirmed, but handlers must see the captured origin, which the
@@ -1216,7 +1197,7 @@ public sealed class SubjectTransaction : IDisposable
         {
             if (checkedCount == 0)
             {
-                return ([], []);
+                return null;
             }
 
             _commitValidationExcludedChanges = failedSource.Count == 0 ? null : failedSource;
@@ -1227,11 +1208,11 @@ public sealed class SubjectTransaction : IDisposable
                     InvokeCommitHandlers(_handlers, new ReadOnlySpan<SubjectPropertyChange>(rentedArray, 0, checkedCount));
                 }
 
-                return ([], []);
+                return null;
             }
             catch (Exception exception)
             {
-                return GetRejectedChanges(exception, SubjectPropertyChangeOperations.ExcludeByProperty(changes, failedSource, []));
+                return GetRejectionErrors(exception, SubjectPropertyChangeOperations.ExcludeByProperty(changes, failedSource, []));
             }
             finally
             {
@@ -1283,31 +1264,28 @@ public sealed class SubjectTransaction : IDisposable
     }
 
     /// <summary>
-    /// Returns the snapshot slots in <paramref name="checkedChanges"/> that a handler exception rejects, matched by
-    /// property. A <see cref="SubjectTransactionException"/> rejects its failed changes; when none of them was
-    /// checked, the rejection fails closed like any other exception and rejects every checked change.
+    /// Returns the errors of a handler exception that rejected <paramref name="checkedChanges"/>. A
+    /// <see cref="SubjectTransactionException"/> whose failed changes include a checked change contributes its
+    /// errors; any other exception is the error itself.
     /// </summary>
-    private static (IReadOnlyList<SubjectPropertyChange> Invalid, IReadOnlyList<Exception> Errors) GetRejectedChanges(
+    private static IReadOnlyList<Exception> GetRejectionErrors(
         Exception exception,
         IReadOnlyList<SubjectPropertyChange> checkedChanges)
     {
-        if (exception is SubjectTransactionException { FailedChanges.Count: > 0 } transactionException)
+        if (exception is SubjectTransactionException { FailedChanges.Count: > 0 } transactionException &&
+            SubjectPropertyChangeOperations.IntersectByProperty(transactionException.FailedChanges, checkedChanges).Count > 0)
         {
-            var rejected = SubjectPropertyChangeOperations.IntersectByProperty(transactionException.FailedChanges, checkedChanges);
-            if (rejected.Count > 0)
-            {
-                return (rejected, GetRejectionErrors(transactionException, checkedChanges));
-            }
+            return GetCheckedChangeErrors(transactionException, checkedChanges);
         }
 
-        return (checkedChanges, [exception]);
+        return [exception];
     }
 
     /// <summary>
     /// Returns the errors of a rejection. When the failed changes and errors align one to one, only the errors of
     /// the failed changes that were checked are kept; otherwise all errors, or the exception itself when it has none.
     /// </summary>
-    private static IReadOnlyList<Exception> GetRejectionErrors(
+    private static IReadOnlyList<Exception> GetCheckedChangeErrors(
         SubjectTransactionException exception,
         IReadOnlyList<SubjectPropertyChange> checkedChanges)
     {

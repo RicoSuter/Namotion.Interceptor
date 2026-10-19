@@ -7,8 +7,12 @@ public partial class Motor
 {
     public Motor()
     {
+        SpeedCap = int.MaxValue;
         MaxAllowedSpeed = 100;
     }
+
+    /// <summary>The highest MaxAllowedSpeed, for validators that check the limit itself.</summary>
+    public partial int SpeedCap { get; set; }
 
     public partial int MaxAllowedSpeed { get; set; }
 

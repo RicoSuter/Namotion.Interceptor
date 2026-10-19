@@ -664,7 +664,7 @@ public class SubjectTransactionHandlerTests
     [Theory]
     [InlineData(TransactionFailureHandling.BestEffort)]
     [InlineData(TransactionFailureHandling.Rollback)]
-    public async Task WhenSecondCheckRejectsChange_ThenFailureHandlingAppliesAndTransactionIsTerminal(TransactionFailureHandling failureHandling)
+    public async Task WhenSecondCheckRejectsChange_ThenNoCheckedChangeLandsAndTransactionIsTerminal(TransactionFailureHandling failureHandling)
     {
         // Arrange
         var calls = 0;
@@ -693,18 +693,16 @@ public class SubjectTransactionHandlerTests
         var exception = await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None).AsTask());
 
         // Assert
-        Assert.Contains(exception.FailedChanges, change => change.Property.Name == nameof(Person.LastName));
+        Assert.Equal("Ann", person.FirstName);
         Assert.Equal("Lee", person.LastName);
-        if (failureHandling == TransactionFailureHandling.Rollback)
-        {
-            Assert.Equal("Ann", person.FirstName);
-            Assert.Equal(2, writer.Reverted.Count);
-        }
-        else
-        {
-            Assert.Equal("Bob", person.FirstName);
-            Assert.Equal(nameof(Person.LastName), Assert.Single(writer.Reverted).Property.Name);
-        }
+        Assert.Empty(exception.AppliedChanges);
+        Assert.Equal(
+            [nameof(Person.FirstName), nameof(Person.LastName)],
+            exception.FailedChanges.Select(change => change.Property.Name));
+        Assert.Equal("invalid last name", Assert.Single(exception.Errors).Message);
+        Assert.Equal(
+            [nameof(Person.FirstName), nameof(Person.LastName)],
+            writer.Reverted.Select(change => change.Property.Name));
 
         var retryException = await Assert.ThrowsAsync<InvalidOperationException>(
             async () => await transaction.CommitAsync(CancellationToken.None));
@@ -712,7 +710,7 @@ public class SubjectTransactionHandlerTests
     }
 
     [Fact]
-    public async Task WhenSecondCheckRejectsChangeAndAnotherApplyFails_ThenEachWrittenSourceIsRevertedOnce()
+    public async Task WhenSecondCheckRejectsChangeInBestEffort_ThenNoApplyRunsAndEachWrittenSourceIsRevertedOnce()
     {
         // Arrange
         var calls = 0;
@@ -728,13 +726,14 @@ public class SubjectTransactionHandlerTests
                 }
             }
         };
-        var probe = new CommitWriteProbe(handler) { ThrowOnConsumedProperty = nameof(Person.LastName) };
+        var probe = new CommitWriteProbe(handler);
         var writer = new CountingTransactionWriter();
         var context = CreateContext();
         context.AddService<ITransactionHandler>(handler);
         context.AddService<ITransactionWriter>(writer);
         context.AddService(probe);
         var person = new Person(context) { FirstName = "Ann", LastName = "Lee" };
+        probe.Writes.Clear();
 
         // Act
         using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
@@ -745,6 +744,7 @@ public class SubjectTransactionHandlerTests
         // Assert
         Assert.Equal("Ann", person.FirstName);
         Assert.Equal("Lee", person.LastName);
+        Assert.Empty(probe.Writes);
         Assert.Equal(
             [nameof(Person.FirstName), nameof(Person.LastName)],
             exception.FailedChanges.Select(change => change.Property.Name).Order());
