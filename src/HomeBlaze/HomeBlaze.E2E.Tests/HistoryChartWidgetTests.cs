@@ -334,7 +334,7 @@ public class HistoryChartWidgetTests
                         const chart = lines?.querySelector("svg");
                         const band = widget.querySelector("[data-testid=history-chart-band]");
                         const isDrawn = lines
-                            ? isVisible(chart) && chart.querySelector(".mud-charts-timeseries-series path") != null
+                            ? isVisible(chart) && chart.querySelector(".mud-charts-timeseries-series path, .mud-charts-bar-series path") != null
                             : band !== null && widget.querySelector("[data-testid=history-chart-range]") !== null;
 
                         // A horizontal grid line spans the plot area. A label left of the chart is one MudChart has not placed yet.
@@ -349,10 +349,13 @@ public class HistoryChartWidgetTests
 
                         // Set by the script of the view once MudChart has placed the chart, rather than by the fallback of its style.
                         const isReady = widget.querySelector("[data-testid=history-chart-view]")?.hasAttribute("data-plot-ready") === true;
+                        const legend = widget.querySelector("[data-testid=history-chart-legend]");
+                        const legendEnd = legend ? Math.round(legend.getBoundingClientRect().right - origin.left) : -1;
 
                         const last = window.historyChartFrames.at(-1);
-                        if (!last || last.height !== height || last.isDrawn !== isDrawn || last.layout !== layout || last.isReady !== isReady) {
-                            window.historyChartFrames.push({ height, isDrawn, layout, isReady, hasLines: lines !== null });
+                        if (!last || last.height !== height || last.isDrawn !== isDrawn || last.layout !== layout || last.isReady !== isReady ||
+                            last.legendEnd !== legendEnd) {
+                            window.historyChartFrames.push({ height, isDrawn, layout, isReady, hasLines: lines !== null, legendEnd });
                         }
                     }
                 }
@@ -364,21 +367,23 @@ public class HistoryChartWidgetTests
         """;
 
     [Theory]
-    [InlineData("Chart speed", DesktopWidth)]
-    [InlineData("Pair speed", PhoneWidth)]
-    [InlineData("Compact speed", PhoneWidth)]
-    [InlineData("Band status", PhoneWidth)]
-    public async Task WhenAPageWithAChartLoads_ThenNothingInItMovesWhileItsDataArrives(string legendLabel, int width)
+    [InlineData("Chart speed", DesktopWidth, PageName, MotorName)]
+    [InlineData("Pair speed", PhoneWidth, PageName, MotorName)]
+    [InlineData("Compact speed", PhoneWidth, PageName, MotorName)]
+    [InlineData("Band status", PhoneWidth, PageName, MotorName)]
+    [InlineData(BarsLabel, PhoneWidth, BarsPageName, BarMotorName)]
+    public async Task WhenAPageWithAChartLoads_ThenNothingInItMovesWhileItsDataArrives(
+        string legendLabel, int width, string pageName, string motorName)
     {
         // Arrange
-        var motor = (Motor)((MarkdownFile)_fixture.GetDemoFolder().Children[PageName]).Children[MotorName];
+        var motor = (Motor)((MarkdownFile)_fixture.GetDemoFolder().Children[pageName]).Children[motorName];
         await WaitUntilRecordedAsync(motor.TryGetRegisteredProperty(nameof(Motor.CurrentSpeed))!, point => point.Number is not null);
         var page = await _fixture.CreatePageAsync();
         await page.SetViewportSizeAsync(width, 900);
         await page.AddInitScriptAsync($"({FrameRecorderScript})({JsonSerializer.Serialize(legendLabel)})");
 
         // Act
-        await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/{PageName}");
+        await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/{pageName}");
         await page.WaitForFunctionAsync("() => window.historyChartFrames?.at(-1)?.isDrawn === true", null, new() { Timeout = Timeout });
 
         // Assert
@@ -389,13 +394,16 @@ public class HistoryChartWidgetTests
                 frame.GetProperty("isDrawn").GetBoolean(),
                 frame.GetProperty("layout").GetString()!,
                 frame.GetProperty("isReady").GetBoolean(),
-                frame.GetProperty("hasLines").GetBoolean()))
+                frame.GetProperty("hasLines").GetBoolean(),
+                frame.GetProperty("legendEnd").GetDouble()))
             .ToArray();
         var final = frames[^1];
-        var description = string.Join(", ", frames.Select(frame => $"{frame.Height} px ({(frame.IsDrawn ? "drawn" : "loading")}, {frame.Layout})"));
+        var description = string.Join(", ", frames.Select(frame =>
+            $"{frame.Height} px ({(frame.IsDrawn ? "drawn" : "loading")}, {frame.Layout}, legend to {frame.LegendEnd})"));
         Assert.False(frames[0].IsDrawn, $"The first recorded frame already shows the drawn chart: {description}");
         Assert.All(frames, frame => Assert.True(Math.Abs(frame.Height - final.Height) <= 1, $"The chart was {description} high"));
         Assert.All(frames.Where(frame => frame.Layout != HiddenLayout), frame => Assert.Equal(final.Layout, frame.Layout));
+        Assert.All(frames, frame => Assert.True(frame.LegendEnd == final.LegendEnd, $"The legend moved: {description}"));
         Assert.DoesNotContain("labels outside", final.Layout);
         Assert.True(!final.HasLines || final.IsReady, $"The chart was not marked ready by its script: {description}");
     }
@@ -403,7 +411,7 @@ public class HistoryChartWidgetTests
     // The layout of a frame that shows neither the plot nor the band.
     private const string HiddenLayout = "chart none, plot none, band none";
 
-    private sealed record RecordedFrame(double Height, bool IsDrawn, string Layout, bool IsReady, bool HasLines);
+    private sealed record RecordedFrame(double Height, bool IsDrawn, string Layout, bool IsReady, bool HasLines, double LegendEnd);
 
     [Theory]
     [InlineData(PhoneWidth)]
@@ -726,6 +734,39 @@ public class HistoryChartWidgetTests
         var legendValue = view.GetByTestId("history-chart-legend-entry").Filter(new() { HasText = "Fed in" })
             .GetByTestId("history-chart-legend-value");
         await Assertions.Expect(legendValue).Not.ToHaveTextAsync(new System.Text.RegularExpressions.Regex("^-"));
+    }
+
+    [Theory]
+    [InlineData(PhoneWidth)]
+    [InlineData(DesktopWidth)]
+    public async Task WhenABarChartIsDrawn_ThenItsBarsAndLegendEndAtTheEdgeOfItsBoxAndThePageDoesNotScrollSideways(int width)
+    {
+        // Arrange
+        var page = await OpenBarsPageAsync();
+        await page.SetViewportSizeAsync(width, 900);
+        var view = GetChart(page, BarsLabel).GetByTestId("history-chart-view");
+        await Assertions.Expect(view).ToHaveAttributeAsync("data-plot-ready", "", new() { Timeout = Timeout });
+
+        // Act - the right edges of the box, of the grid lines and of the legend, once the chart is drawn at its size.
+        var edges = await (await page.WaitForFunctionAsync(
+            """
+            view => {
+                const box = view.querySelector('[data-testid=history-chart-lines]').getBoundingClientRect();
+                const grid = [...view.querySelectorAll('.mud-charts-grid path')]
+                    .map(path => path.getBoundingClientRect())
+                    .find(line => line.height < 1 && line.width > 0);
+                const legend = view.querySelector('[data-testid=history-chart-legend]').getBoundingClientRect();
+                const page = document.documentElement;
+                return grid && Math.abs(grid.right - box.right) < 2 &&
+                    [box.right, grid.right, legend.right, page.scrollWidth, page.clientWidth];
+            }
+            """,
+            await view.ElementHandleAsync(),
+            new() { Timeout = Timeout })).JsonValueAsync<double[]>();
+
+        // Assert
+        Assert.InRange(edges[2], edges[0] - 1, edges[0] + 1);
+        Assert.Equal(edges[4], edges[3]);
     }
 
     [Fact]

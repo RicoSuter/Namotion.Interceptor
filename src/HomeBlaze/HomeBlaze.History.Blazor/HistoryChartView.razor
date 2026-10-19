@@ -33,7 +33,11 @@
                 {
                     @if (_linesWidth > 0)
                     {
-                        @if (ShowAxes)
+                        @if (ShowAxes && data!.IsBars)
+                        {
+                            <div style="@BarPlotStyle">@_plot</div>
+                        }
+                        else if (ShowAxes)
                         {
                             @_plot
                         }
@@ -158,6 +162,15 @@
     private const int PlotBottomSpace = 30;
     private const int StrokeMargin = 4;
 
+    // About half the width of the tooltip of a bar, from where on it opens to the left.
+    private const int BarTooltipHalfWidth = 80;
+
+    // MudChart keeps the same space right of bars as of lines, where only lines need it for their last time label, so the
+    // bars are drawn that much wider than their box and end where it does. The box clips the space, which would otherwise
+    // widen the page, so the tooltip of a bar near the end opens to the left, see RenderBarTooltip.
+    private static readonly string BarPlotStyle =
+        $"position:absolute; left:0; top:0; width:calc(100% + {PlotEndSpace}px); height:100%; display:flex;";
+
     private static readonly string CompactPlotStyle =
         $"position:absolute; left:-{PlotStartSpace}px; top:-{PlotTopSpace - StrokeMargin}px; " +
         $"width:calc(100% + {PlotStartSpace + PlotEndSpace}px); " +
@@ -198,6 +211,7 @@
     private bool _isSeriesClick;
     private readonly EventCallback<int> _plotSeriesClicked;
     private readonly EventCallback _linesClicked;
+    private readonly RenderFragment<(SvgPath Segment, string Color)> _barTooltip;
 
     // The label of each group of bars, and the unit the bars are drawn in with a space before it, or empty.
     private string[] _barLabels = [];
@@ -319,7 +333,22 @@
         _plot = RenderPlot;
         _plotSeriesClicked = EventCallback.Factory.Create<int>(this, OnPlotSeriesClicked);
         _linesClicked = EventCallback.Factory.Create(this, OnLinesClicked);
+        _barTooltip = RenderBarTooltip;
     }
+
+    // The tooltip of MudChart, which opens to the left of a bar so near the end of the plot that it would reach past it.
+    private RenderFragment RenderBarTooltip((SvgPath Segment, string Color) context) => builder =>
+    {
+        var segment = context.Segment;
+        var name = (uint)segment.Index < (uint)(_chartSeries?.Count ?? 0) ? _chartSeries![segment.Index].Name : string.Empty;
+        builder.OpenComponent<ChartTooltip>(0);
+        builder.AddComponentParameter(1, nameof(ChartTooltip.Title), segment.LabelYValue);
+        builder.AddComponentParameter(2, nameof(ChartTooltip.Subtitle), $"{name}, {segment.LabelXValue}");
+        builder.AddComponentParameter(3, nameof(ChartTooltip.Color), context.Color);
+        builder.AddComponentParameter(4, nameof(ChartTooltip.AnchorPositionX),
+            segment.LabelX > _linesWidth - BarTooltipHalfWidth ? ChartTooltipAnchorPositionX.End : ChartTooltipAnchorPositionX.Center);
+        builder.CloseComponent();
+    };
 
     // Blazor hands a click to the handler of the clicked line or bar first and then to the one of the lines around it,
     // one after the other, so the flag set here tells the second that the click is taken.
@@ -356,6 +385,7 @@
         // Without axes the bars have no labels, and the options change with the axes, which draws the bars again.
         builder.AddComponentParameter(3, nameof(HistoryChartPlot.ChartLabels), ShowAxes ? _barLabels : []);
         builder.AddComponentParameter(4, nameof(HistoryChartPlot.SeriesClicked), _plotSeriesClicked);
+        builder.AddComponentParameter(5, nameof(HistoryChartPlot.TooltipTemplate), Data is { IsBars: true } ? _barTooltip : null);
         builder.CloseComponent();
     }
 
@@ -426,13 +456,14 @@
         _hasStyles = true;
         // Follows the box of the lines rather than the drawn plot, so the legend stays where it was while the lines load.
         var hasLines = Data is null ? Placeholder is { HasLines: true } : Data.Lines.Count > 0;
-        var plotEnd = !hasLines || !ShowAxes ? 0 : PlotEndSpace;
+        var isBars = Data is null ? Placeholder is { IsBars: true } : Data.IsBars;
+        var plotEnd = !hasLines || !ShowAxes || isBars ? 0 : PlotEndSpace;
         _rootStyle = $"width:100%; display:flex; flex-direction:column; align-items:center; gap:8px; --history-chart-plot-end:{plotEnd}px; {Style}";
 
         var size = MaxHeight is { } maxHeight
             ? $"max-height:{maxHeight}px; min-height:0; aspect-ratio:2 / 1;"
             : "height:100%; min-height:0;";
-        var frame = ShowAxes ? string.Empty : " position:relative; overflow:clip;";
+        var frame = !ShowAxes ? " position:relative; overflow:clip;" : isBars ? " position:relative; overflow-x:clip;" : string.Empty;
         var cursor = isClickable ? " cursor:pointer;" : string.Empty;
         _linesStyle = $"display:flex; width:100%; {size}{frame}{cursor}";
     }

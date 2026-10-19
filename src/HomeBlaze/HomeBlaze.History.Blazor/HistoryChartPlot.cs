@@ -42,6 +42,10 @@ internal sealed class HistoryChartPlot : ComponentBase
     [Parameter]
     public string[] ChartLabels { get; set; } = [];
 
+    /// <summary>The tooltip of a hovered bar or point, set together with <see cref="ChartOptions"/>, or null for the one of MudChart.</summary>
+    [Parameter]
+    public RenderFragment<(SvgPath Segment, string Color)>? TooltipTemplate { get; set; }
+
     /// <summary>
     /// Called with the index in <see cref="ChartSeries"/> of the series whose line or bar was clicked, before the click
     /// reaches the elements around the chart.
@@ -78,6 +82,7 @@ internal sealed class HistoryChartPlot : ComponentBase
         builder.AddComponentParameter(7, nameof(MudChart<double>.ChartLabels), ChartLabels);
         builder.AddComponentParameter(8, nameof(MudChart<double>.SelectedIndex), _selectedIndex);
         builder.AddComponentParameter(9, nameof(MudChart<double>.SelectedIndexChanged), _selectedIndexChanged);
+        builder.AddComponentParameter(10, nameof(MudChart<double>.TooltipTemplate), TooltipTemplate);
         builder.CloseComponent();
     }
 }

@@ -77,9 +77,10 @@ namespace HomeBlaze.History.Blazor
     }
     public readonly struct HistoryChartPlaceholder : System.IEquatable<HomeBlaze.History.Blazor.HistoryChartPlaceholder>
     {
-        public HistoryChartPlaceholder(bool HasLines, int BandCount) { }
+        public HistoryChartPlaceholder(bool HasLines, int BandCount, bool IsBars = false) { }
         public int BandCount { get; init; }
         public bool HasLines { get; init; }
+        public bool IsBars { get; init; }
     }
     [HomeBlaze.Abstractions.Attributes.ExcludeFromCreation]
     [HomeBlaze.Abstractions.Attributes.PageLayout]

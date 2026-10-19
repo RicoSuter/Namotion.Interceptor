@@ -419,6 +419,8 @@
     // height it gets with its data from its first render on.
     private void PlanLayout()
     {
+        // Bars when every line asks for Delta of a counter in buckets, which every history store offers.
+        var isBars = PropertyHistoryChartModel.TryGetPeriod(_resolvedBucket, out var period) && !period.IsRaw;
         var hasLines = false;
         var bandSeries = new List<int>();
         var hasBand = new bool[_series.Count];
@@ -438,10 +440,13 @@
             else
             {
                 hasLines = true;
+                isBars &= entry.IsCumulative &&
+                    PropertyHistoryChartModel.TryGetAggregation(entry.Aggregation, out var aggregation) &&
+                    aggregation == HistoryAggregations.Delta;
             }
         }
 
-        _placeholder = new HistoryChartPlaceholder(hasLines, bandSeries.Count);
+        _placeholder = new HistoryChartPlaceholder(hasLines, bandSeries.Count, hasLines && isBars);
         SetBands(_series, bandSeries.ToArray(), hasBand, new string?[_series.Count], []);
     }
 
