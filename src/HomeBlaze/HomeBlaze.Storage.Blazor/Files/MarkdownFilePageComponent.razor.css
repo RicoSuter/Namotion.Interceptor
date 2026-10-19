@@ -2,11 +2,11 @@
    margin of its own. See "Spacing" in the widget basics. The rules are not nested, because CSS isolation does not
    rewrite nested rules correctly. */
 
-/* The title makes room for the time of the last change and the button of the edit modes, which stand in its corner. The
-   width follows the page head in the view modes, see GetPageHeadStyle in Pages.razor of the app, and changes with it. In
-   the split mode they stand above the editor instead, see Pages.razor.css of the app. */
+/* The title makes room for the button of the page menu, which stands in its corner. The width follows the page head in
+   the view modes, see GetPageHeadStyle in Pages.razor of the app, and changes with it. In the split mode the button
+   stands above the editor instead, see Pages.razor.css of the app. */
 .markdown-content > ::deep h1:first-of-type {
-    padding-right: 11rem;
+    padding-right: 3rem;
 }
 
 /* The blocks of a page are 1rem apart, from each other and from the text around them. */
