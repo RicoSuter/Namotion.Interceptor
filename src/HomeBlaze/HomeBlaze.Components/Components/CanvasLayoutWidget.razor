@@ -87,10 +87,10 @@
 }
 else if (scale == CanvasScale.FitWidth)
 {
-    @* The frame is the width the canvas fits. While viewed it cuts off the space that the scaled canvas no longer takes
-       and scrolls a canvas held at its MinWidth, while edited it scrolls a canvas that is wider than the page. A canvas
-       that does not fit the width needs none and stays a direct child of its widget, where the styles and the tests of
-       the layouts expect it. *@
+    @* The frame is the width the canvas fits. While viewed it scrolls a canvas held at its MinWidth, and the sizer in it
+       cuts off the space that the scaled canvas no longer takes. While edited it scrolls a canvas that is wider than the
+       page. A canvas that does not fit the width needs none and stays a direct child of its widget, where the styles and
+       the tests of the layouts expect it. *@
     <div class="canvas-scale-frame" style="@frameStyle" data-testid="canvas-scale-frame">
         @* Always rendered, also unstyled while edited, so that entering edit mode keeps the diagram. *@
         <div style="@sizerStyle">
