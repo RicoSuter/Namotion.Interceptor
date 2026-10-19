@@ -40,10 +40,16 @@ public partial class ValueMapCase : IConfigurable
     public partial string? Icon { get; set; }
 
     /// <summary>
-    /// Gets the parsed <see cref="Color"/>, or null when it is no color. The result is kept until the text changes,
-    /// so that a render parses nothing and gets the same instance.
+    /// Gets the parsed <see cref="Color"/>, or <see cref="ValueColor.Default"/> when it is no color, which
+    /// <see cref="ValueReader.ResolveMap"/> reports. The result is kept until the text changes, so that a render parses
+    /// nothing and gets the same instance.
     /// </summary>
-    public ValueColor? GetColor()
+    public ValueColor GetColor() => GetParsedColor().Color ?? ValueColor.Default;
+
+    /// <summary>Gets whether <see cref="Color"/> is a theme color, a CSS color that <see cref="ValueColor.TryParse"/> takes, or not set.</summary>
+    internal bool IsColorValid() => GetParsedColor().Color is not null;
+
+    private ParsedColor GetParsedColor()
     {
         var text = Color;
         var parsed = _parsedColor;
@@ -54,7 +60,7 @@ public partial class ValueMapCase : IConfigurable
             _parsedColor = parsed;
         }
 
-        return parsed.Color;
+        return parsed;
     }
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;

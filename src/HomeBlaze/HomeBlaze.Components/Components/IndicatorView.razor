@@ -1,5 +1,4 @@
-@* The indicator of a value: a chip with icon and text, an icon alone, or the error of its map in its place. A theme color
-   fills the chip or colors the icon through the class of MudBlazor, a CSS color through the inline style. *@
+@* The indicator of a value: a chip with icon and text, an icon alone, or the error of its map in its place. *@
 
 @{
     var color = ValueReader.GetIndicatorColor(Reading, Map);
@@ -14,18 +13,18 @@ else if (Kind == IndicatorKind.Icon)
 {
     var text = Reading.IsMissing ? Path : Reading.Text;
     <MudTooltip Text="@text">
-        <MudIcon Icon="@(icon ?? Icons.Material.Filled.Circle)" Color="@color.Theme" Style="@color.TextStyle" Class="ma-1" role="img" aria-label="@text" data-testid="indicator" />
+        <MudIcon Icon="@(icon ?? Icons.Material.Filled.Circle)" Color="@color.Theme" Style="@color.Style" Class="ma-1" role="img" aria-label="@text" data-testid="indicator" />
     </MudTooltip>
 }
 else if (Reading.IsMissing)
 {
     <MudTooltip Text="@Path">
-        <MudChip T="string" Icon="@icon" Color="@color.Theme" Style="@color.FillStyle" Size="Size.Small" data-testid="indicator">@Reading.Text</MudChip>
+        <MudChip T="string" Icon="@icon" Color="@color.Theme" Style="@color.Style" Size="Size.Small" data-testid="indicator">@Reading.Text</MudChip>
     </MudTooltip>
 }
 else
 {
-    <MudChip T="string" Icon="@icon" Color="@color.Theme" Style="@color.FillStyle" Size="Size.Small" data-testid="indicator">@Reading.Text</MudChip>
+    <MudChip T="string" Icon="@icon" Color="@color.Theme" Style="@color.Style" Size="Size.Small" data-testid="indicator">@Reading.Text</MudChip>
 }
 
 @code {

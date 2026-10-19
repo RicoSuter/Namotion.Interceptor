@@ -167,7 +167,7 @@ public static class ValueReader
         {
             foreach (var valueCase in valueMap.Cases)
             {
-                if (valueCase.GetColor() is null)
+                if (!valueCase.IsColorValid())
                 {
                     error = ValueColor.GetError(valueCase.Color);
                     return null;

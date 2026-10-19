@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using HomeBlaze.E2E.Tests.Infrastructure;
+using HomeBlaze.E2E.Tests.Models;
 using Microsoft.Playwright;
 
 namespace HomeBlaze.E2E.Tests;
@@ -389,6 +390,38 @@ public class ValueWidgetTests
             // Assert
             await Assertions.Expect(icon).ToHaveCSSAsync("color", halfWhite, new() { Timeout = Timeout });
             await Assertions.Expect(tile).ToHaveCSSAsync("background-color", halfWhite);
+        }
+        finally
+        {
+            _fixture.RemoveSubjectFromRoot(name, subject);
+        }
+    }
+
+    [Fact]
+    public async Task WhenCaseOfAMapHasACssColor_ThenTheChipTheGaugeAndTheToggleSwitchTakeIt()
+    {
+        // Arrange
+        var (name, subject) = await _fixture.AddSubjectToRootAsync<LiveValuesSubject>();
+        subject.IsOn = true;
+        subject.Level = 50;
+        try
+        {
+            // Act
+            var page = await OpenQuietPageAsync(
+                ":: HomeBlaze.Components.ValueMap#on\n::: Case Value=True Color=\"#ff0000\"\n::\n\n" +
+                ":: HomeBlaze.Components.ValueMap#level\n::: Case Value=50 Color=\"rgb(0 0 255)\"\n::\n\n" +
+                $":: HomeBlaze.Components.Indicator Path=\"/{name}/IsOn\" Map=on\n::\n\n" +
+                $":: HomeBlaze.Components.Switch Path=\"/{name}/IsOn\" Map=on\n::\n\n" +
+                $":: HomeBlaze.Components.Gauge Path=\"/{name}/Level\" Map=level Minimum=0 Maximum=100\n::\n");
+
+            // Assert: the chip is filled with the color and has dark text on it, the thumb of the switch that is on and
+            // the ring of the gauge have the color.
+            var red = await page.ResolveColorAsync("#ff0000");
+            var chip = page.GetByTestId("indicator");
+            await Assertions.Expect(chip).ToHaveCSSAsync("background-color", red, new() { Timeout = Timeout });
+            await Assertions.Expect(chip).ToHaveCSSAsync("color", await page.ResolveColorAsync("rgba(0, 0, 0, 0.87)"));
+            await Assertions.Expect(page.GetByTestId("switch").Locator(".mud-switch-base")).ToHaveCSSAsync("color", red);
+            await Assertions.Expect(page.GetByTestId("gauge").Locator(".gauge-value")).ToHaveCSSAsync("color", await page.ResolveColorAsync("rgb(0 0 255)"));
         }
         finally
         {

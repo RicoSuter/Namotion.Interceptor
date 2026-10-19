@@ -5,8 +5,9 @@ using MudBlazor;
 namespace HomeBlaze.Components;
 
 /// <summary>
-/// The color of a value: a theme color, or a CSS color that a widget applies as an inline style. Equal colors from the
-/// same case of a map are the same instance.
+/// The color of a value: a theme color, or a CSS color. A widget passes <see cref="Theme"/> to MudBlazor and
+/// <see cref="Style"/> as the inline style of the same element. Equal colors from the same case of a map are the same
+/// instance.
 /// </summary>
 public sealed partial class ValueColor
 {
@@ -28,21 +29,20 @@ public sealed partial class ValueColor
         Theme = theme;
     }
 
-    private ValueColor(string css, string fillText)
+    private ValueColor(string css, string contrastText)
     {
-        Theme = Color.Default;
+        // The primary color of MudBlazor, overridden on the element, so that every MudBlazor component colors and fills
+        // with the CSS color through its own primary classes. The hover color is the 6 percent of the theme.
+        Theme = Color.Primary;
         Css = css;
-        TextStyle = $"color: {css}";
-        FillStyle = $"background-color: {css}; color: {fillText}";
-        TileFilledStyle = $"background: {css}; color: {fillText}";
-        TileOutlinedStyle = $"background: var(--mud-palette-surface); color: {css}; box-shadow: inset 0 0 0 2px {css}";
-        TileTextStyle = $"background: var(--mud-palette-surface); color: {css}";
+        ContrastText = contrastText;
+        Style = $"--mud-palette-primary: {css}; --mud-palette-primary-text: {contrastText}; --mud-palette-primary-hover: color-mix(in srgb, {css} 6%, transparent)";
     }
 
     /// <summary>The theme color <see cref="Color.Default"/>.</summary>
-    public static ValueColor Default { get; } = FromTheme(Color.Default);
+    public static ValueColor Default { get; } = ThemeColors[(int)Color.Default];
 
-    /// <summary>The theme color, <see cref="Color.Default"/> for a CSS color.</summary>
+    /// <summary>The theme color to pass to MudBlazor. For a CSS color it is <see cref="Color.Primary"/>, which <see cref="Style"/> redefines.</summary>
     public Color Theme { get; }
 
     /// <summary>The CSS color as written, or null for a theme color.</summary>
@@ -51,24 +51,21 @@ public sealed partial class ValueColor
     /// <summary>Whether this is the theme color <see cref="Color.Default"/>.</summary>
     public bool IsDefault => Css is null && Theme == Color.Default;
 
-    /// <summary>The inline style that gives text or an icon the CSS color, or null for a theme color.</summary>
-    public string? TextStyle { get; }
-
     /// <summary>
-    /// The inline style that fills a chip with the CSS color, with black or white text, whichever contrasts more, or
-    /// the text color of the theme for a <c>var()</c>, or null for a theme color.
+    /// The inline style that redefines the primary color of MudBlazor as the CSS color, and the text on it as black or
+    /// white, whichever contrasts more, or the text color of the theme for a <c>var()</c>. Null for a theme color.
     /// </summary>
-    public string? FillStyle { get; }
+    public string? Style { get; }
 
-    internal string? TileFilledStyle { get; }
+    /// <summary>The text color on a fill of the CSS color, or null for a theme color.</summary>
+    internal string? ContrastText { get; }
 
-    internal string? TileOutlinedStyle { get; }
+    /// <summary>The tile styles of the CSS color by variant, built by <see cref="Controls.TileStyle"/> on first use.</summary>
+    internal string[]? TileStyles { get; set; }
 
-    internal string? TileTextStyle { get; }
-
-    /// <summary>Gets the color of a theme color.</summary>
-    public static ValueColor FromTheme(Color color) =>
-        (uint)color < (uint)ThemeColors.Length && ThemeColors[(int)color].Theme == color ? ThemeColors[(int)color] : new ValueColor(color);
+    /// <summary>Gets the color of a theme color. A value that <see cref="Color"/> does not define is <see cref="Default"/>.</summary>
+    internal static ValueColor FromTheme(Color color) =>
+        (uint)color < (uint)ThemeColors.Length ? ThemeColors[(int)color] : Default;
 
     public static implicit operator ValueColor(Color color) => FromTheme(color);
 
@@ -125,7 +122,7 @@ public sealed partial class ValueColor
     }
 
     /// <summary>Gets the widget argument error of a color that <see cref="TryParse"/> does not take.</summary>
-    public static string GetError(string? text) =>
+    internal static string GetError(string? text) =>
         $"Unknown color '{text}': use a theme color like Success or a CSS color like #ffffff80";
 
     public override string ToString() => Css ?? Theme.ToString();
@@ -172,13 +169,23 @@ public sealed partial class ValueColor
     [GeneratedRegex("^#([0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$", RegexOptions.CultureInvariant)]
     private static partial Regex HexColorRegex();
 
-    // The comma syntax, and the space syntax with a slash before the alpha. Only digits, dots, percent signs, commas,
-    // slashes and spaces stand between the parentheses, so the text cannot end the declaration of the style.
+    // CSS white space only, and numbers without signs or exponents, as CSS takes them.
+    private const string Space = "[ \\t\\r\\n\\f]";
+    private const string Number = "[0-9]+(?:\\.[0-9]+)?";
+    private const string Alpha = "(?:[0-9]+(?:\\.[0-9]+)?|\\.[0-9]+)%?";
+
+    // The comma syntax, with all channels numbers or all percentages, and the space syntax with a slash before the alpha,
+    // which may mix them. Only digits, dots, percent signs, commas, slashes and white space stand between the parentheses,
+    // so the text cannot end the declaration of the style.
     [GeneratedRegex(
-        @"^rgba?\(\s*(?<red>[0-9]+(?:\.[0-9]+)?%?)(?:\s*,\s*(?<green>[0-9]+(?:\.[0-9]+)?%?)\s*,\s*(?<blue>[0-9]+(?:\.[0-9]+)?%?)(?:\s*,\s*(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)%?)?|\s+(?<green>[0-9]+(?:\.[0-9]+)?%?)\s+(?<blue>[0-9]+(?:\.[0-9]+)?%?)(?:\s*/\s*(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)%?)?)\s*\)$",
+        "^rgba?\\(" + Space + "*(?:" +
+        "(?<red>" + Number + ")" + Space + "*," + Space + "*(?<green>" + Number + ")" + Space + "*," + Space + "*(?<blue>" + Number + ")(?:" + Space + "*," + Space + "*" + Alpha + ")?" +
+        "|(?<red>" + Number + "%)" + Space + "*," + Space + "*(?<green>" + Number + "%)" + Space + "*," + Space + "*(?<blue>" + Number + "%)(?:" + Space + "*," + Space + "*" + Alpha + ")?" +
+        "|(?<red>" + Number + "%?)" + Space + "+(?<green>" + Number + "%?)" + Space + "+(?<blue>" + Number + "%?)(?:" + Space + "*/" + Space + "*" + Alpha + ")?" +
+        ")" + Space + "*\\)$",
         RegexOptions.CultureInvariant)]
     private static partial Regex RgbColorRegex();
 
-    [GeneratedRegex(@"^var\(\s*--mud-palette-[a-z0-9]+(?:-[a-z0-9]+)*\s*\)$", RegexOptions.CultureInvariant)]
+    [GeneratedRegex("^var\\(" + Space + "*--mud-palette-[a-z0-9]+(?:-[a-z0-9]+)*" + Space + "*\\)$", RegexOptions.CultureInvariant)]
     private static partial Regex PaletteVariableRegex();
 }

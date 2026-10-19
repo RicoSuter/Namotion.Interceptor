@@ -151,9 +151,9 @@ public class ValueReaderTests
 
         // Assert
         Assert.Null(reading.MapError);
-        Assert.Equal(Color.Default, reading.Color.Theme);
+        Assert.Equal(Color.Primary, reading.Color.Theme);
         Assert.Equal("#ffffff80", reading.Color.Css);
-        Assert.Equal("color: #ffffff80", reading.Color.TextStyle);
+        Assert.StartsWith("--mud-palette-primary: #ffffff80; ", reading.Color.Style);
         Assert.Same(reading.Color, ValueReader.Read(resolver, page, "meter/IsOn", "css", null).Color);
     }
 

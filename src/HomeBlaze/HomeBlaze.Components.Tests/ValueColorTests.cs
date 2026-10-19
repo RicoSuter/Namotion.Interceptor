@@ -23,8 +23,7 @@ public class ValueColorTests
         Assert.Same(ValueColor.FromTheme(expected), color);
         Assert.Equal(expected, color!.Theme);
         Assert.Null(color.Css);
-        Assert.Null(color.TextStyle);
-        Assert.Null(color.FillStyle);
+        Assert.Null(color.Style);
     }
 
     [Theory]
@@ -53,7 +52,7 @@ public class ValueColorTests
     [InlineData("rgb(255 255 255)")]
     [InlineData("rgb(255 255 255 / 50%)")]
     [InlineData("var(--mud-palette-text-secondary)")]
-    public void WhenTextIsACssColor_ThenItIsKeptAsWrittenAndIsNoThemeColor(string text)
+    public void WhenTextIsACssColor_ThenItIsKeptAsWrittenAndRedefinesThePrimaryColor(string text)
     {
         // Act
         var isColor = ValueColor.TryParse(" " + text + " ", out var color);
@@ -61,9 +60,9 @@ public class ValueColorTests
         // Assert
         Assert.True(isColor);
         Assert.Equal(text, color!.Css);
-        Assert.Equal(Color.Default, color.Theme);
+        Assert.Equal(Color.Primary, color.Theme);
         Assert.False(color.IsDefault);
-        Assert.Equal($"color: {text}", color.TextStyle);
+        Assert.StartsWith($"--mud-palette-primary: {text}; ", color.Style);
     }
 
     [Theory]
@@ -78,6 +77,8 @@ public class ValueColorTests
     [InlineData("rgb(255, 255)")]
     [InlineData("rgb(255, 255 255)")]
     [InlineData("rgb(255,255,255);background:url(x)")]
+    [InlineData("rgb(100%, 0, 0)")]
+    [InlineData("rgb(255,\u00a0255, 255)")]
     [InlineData("rgb(٣, 0, 0)")]
     [InlineData("hsl(0, 0%, 100%)")]
     [InlineData("var(--my-color)")]
@@ -102,23 +103,25 @@ public class ValueColorTests
     [InlineData("#000080", LightText)]
     [InlineData("rgba(0, 0, 0, 0.5)", LightText)]
     [InlineData("rgb(0%, 0%, 50%)", LightText)]
-    public void WhenCssColorFillsAChip_ThenTheTextIsBlackOrWhiteWhicheverContrastsMore(string text, string expectedText)
+    public void WhenCssColorIsParsed_ThenTheTextOnItIsBlackOrWhiteWhicheverContrastsMore(string text, string expectedText)
     {
         // Act
         ValueColor.TryParse(text, out var color);
 
         // Assert
-        Assert.Equal($"background-color: {text}; color: {expectedText}", color!.FillStyle);
+        Assert.Equal(
+            $"--mud-palette-primary: {text}; --mud-palette-primary-text: {expectedText}; --mud-palette-primary-hover: color-mix(in srgb, {text} 6%, transparent)",
+            color!.Style);
     }
 
     [Fact]
-    public void WhenCssColorIsAPaletteVariable_ThenAFillHasTheTextColorOfTheTheme()
+    public void WhenCssColorIsAPaletteVariable_ThenTheTextOnItHasTheTextColorOfTheTheme()
     {
         // Act
         ValueColor.TryParse("var(--mud-palette-gray-light)", out var color);
 
         // Assert
-        Assert.Equal("background-color: var(--mud-palette-gray-light); color: var(--mud-palette-text-primary)", color!.FillStyle);
+        Assert.Contains("--mud-palette-primary-text: var(--mud-palette-text-primary);", color!.Style);
     }
 
     [Fact]
@@ -144,14 +147,26 @@ public class ValueColorTests
         var second = mapCase.GetColor();
         mapCase.Color = "Purple";
         var invalid = mapCase.GetColor();
+        var isInvalidValid = mapCase.IsColorValid();
         mapCase.Color = "Success";
         var theme = mapCase.GetColor();
 
         // Assert
         Assert.Same(first, second);
         Assert.Equal("#ffffff80", first!.Css);
-        Assert.Null(invalid);
+        Assert.Same(ValueColor.Default, invalid);
+        Assert.False(isInvalidValid);
         Assert.Same(ValueColor.FromTheme(Color.Success), theme);
+    }
+
+    [Fact]
+    public void WhenThemeColorIsNotDefinedByTheEnum_ThenItIsTheDefaultColor()
+    {
+        // Act
+        ValueColor color = (Color)99;
+
+        // Assert
+        Assert.Same(ValueColor.Default, color);
     }
 
     [Fact]

@@ -50,7 +50,7 @@ internal static class DoorLockDisplay
             return new DoorLockAppearance(
                 doorIcon,
                 MudBlazorIconResolver.ResolveOrNull(matched.Icon) ?? badgeIcon,
-                matched.GetColor() ?? ValueColor.Default,
+                matched.GetColor(),
                 text,
                 operation is null ? text : string.Concat(text, clickText),
                 operation);

@@ -101,7 +101,7 @@ Rules of a tile:
 - **Invokes an operation**: With `On` and `Off`, turning the switch on invokes `On` and turning it off invokes `Off`, and the switch does not write the property. The switch shows the state it goes to until the operation ends, and then shows the property again. A device that reports its new state later moves the switch when it does.
 - **Enabled state**: With `On` and `Off`, the switch is disabled while the operation that a toggle would invoke is not enabled, for example `PowerOn` while the motor is powered, and while that operation does not exist.
 - **Confirmation**: An operation that asks for confirmation shows its dialog first. Cancel leaves the switch in its state.
-- **Toggle switch with a map**: A `Switch` with `Map` and without `Kind=Tile` takes the color of the matched case as its color, and `Primary` when no case matches or the case has a CSS color. Subtitle, icon and badge are for tiles.
+- **Toggle switch with a map**: A `Switch` with `Map` and without `Kind=Tile` takes the color of the matched case as its color, a theme color or a CSS color, and `Primary` when no case matches. Subtitle, icon and badge are for tiles.
 - **Operations without input**: `On` and `Off` are operations whose parameters need no input. One of them alone shows `Set both On and Off, or neither`, and an operation that needs input shows `On needs an operation without input` with its path, in place of the switch, see [Value Widget Errors](../page-errors.md#value-widget-errors).
 
 ## Related

@@ -16,29 +16,25 @@ internal static class TileStyle
     /// Gets the style of a tile. A color without a palette fill (Default, Inherit, Transparent, Surface) draws the tile
     /// on the surface, as does a color or a variant that is not defined (a configuration can give any integer). A
     /// disabled tile keeps its style and is dimmed by its class instead. A CSS color fills the tile like a theme color,
-    /// with black or white text, see <see cref="ValueColor.FillStyle"/>.
+    /// with the text color of <see cref="ValueColor.ContrastText"/>.
     /// </summary>
     public static string GetStyle(ValueColor color, Variant variant)
     {
-        if (color.Css is not null)
+        // The unsigned comparison also rejects a negative value.
+        if ((uint)variant >= (uint)Styles.GetLength(1))
         {
-            return variant switch
-            {
-                Variant.Outlined => color.TileOutlinedStyle!,
-                Variant.Text => color.TileTextStyle!,
-                _ => color.TileFilledStyle!
-            };
+            return Surface;
         }
 
-        return GetStyle(color.Theme, variant);
-    }
+        if (color.Css is { } css)
+        {
+            // Built once per CSS color and kept on it. A tile does not take the palette override of ValueColor.Style,
+            // because its badge would inherit it.
+            var cssStyles = color.TileStyles ??= BuildStyles(css, color.ContrastText!);
+            return cssStyles[(int)variant];
+        }
 
-    private static string GetStyle(Color color, Variant variant)
-    {
-        // The unsigned comparison also rejects a negative value.
-        return (uint)color < (uint)Styles.GetLength(0) && (uint)variant < (uint)Styles.GetLength(1)
-            ? Styles[(int)color, (int)variant] ?? Surface
-            : Surface;
+        return (uint)color.Theme < (uint)Styles.GetLength(0) ? Styles[(int)color.Theme, (int)variant] : Surface;
     }
 
     private static string[,] BuildStyles()
@@ -51,17 +47,32 @@ internal static class TileStyle
             var name = GetPaletteName(color);
             foreach (var variant in variants)
             {
-                styles[(int)color, (int)variant] = name is null ? Surface : variant switch
-                {
-                    Variant.Outlined => $"background: var(--mud-palette-surface); color: var(--mud-palette-{name}); box-shadow: inset 0 0 0 2px var(--mud-palette-{name})",
-                    Variant.Text => $"background: var(--mud-palette-surface); color: var(--mud-palette-{name})",
-                    _ => $"background: var(--mud-palette-{name}); color: var(--mud-palette-{name}-text)"
-                };
+                styles[(int)color, (int)variant] = name is null
+                    ? Surface
+                    : BuildStyle($"var(--mud-palette-{name})", $"var(--mud-palette-{name}-text)", variant);
             }
         }
 
         return styles;
     }
+
+    private static string[] BuildStyles(string fill, string fillText)
+    {
+        var styles = new string[Styles.GetLength(1)];
+        for (var variant = 0; variant < styles.Length; variant++)
+        {
+            styles[variant] = BuildStyle(fill, fillText, (Variant)variant);
+        }
+
+        return styles;
+    }
+
+    private static string BuildStyle(string fill, string fillText, Variant variant) => variant switch
+    {
+        Variant.Outlined => $"background: var(--mud-palette-surface); color: {fill}; box-shadow: inset 0 0 0 2px {fill}",
+        Variant.Text => $"background: var(--mud-palette-surface); color: {fill}",
+        _ => $"background: {fill}; color: {fillText}"
+    };
 
     private static string? GetPaletteName(Color color) => color switch
     {

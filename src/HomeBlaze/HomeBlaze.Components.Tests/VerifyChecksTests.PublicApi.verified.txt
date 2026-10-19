@@ -759,14 +759,11 @@ namespace HomeBlaze.Components
     public sealed class ValueColor
     {
         public string? Css { get; }
-        public string? FillStyle { get; }
         public bool IsDefault { get; }
-        public string? TextStyle { get; }
+        public string? Style { get; }
         public MudBlazor.Color Theme { get; }
         public static HomeBlaze.Components.ValueColor Default { get; }
         public override string ToString() { }
-        public static HomeBlaze.Components.ValueColor FromTheme(MudBlazor.Color color) { }
-        public static string GetError(string? text) { }
         public static bool TryParse(string? text, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out HomeBlaze.Components.ValueColor? color) { }
         public static HomeBlaze.Components.ValueColor op_Implicit(MudBlazor.Color color) { }
     }
@@ -833,7 +830,7 @@ namespace HomeBlaze.Components
         public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
         public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
         public System.Threading.Tasks.Task ApplyConfigurationAsync(System.Threading.CancellationToken cancellationToken = default) { }
-        public HomeBlaze.Components.ValueColor? GetColor() { }
+        public HomeBlaze.Components.ValueColor GetColor() { }
         protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
         protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
         protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }

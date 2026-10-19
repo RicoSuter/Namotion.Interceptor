@@ -114,7 +114,7 @@ A color is one of `Default`, `Primary`, `Secondary`, `Tertiary`, `Info`, `Succes
 The `Color` of a case of a [map](value-map.md) also takes a CSS color, for a color that the theme does not have, such as white or half transparent white on a filled tile. It takes these forms and no others, so that a page cannot slip other styles in with a color:
 
 - `#rgb`, `#rgba`, `#rrggbb` and `#rrggbbaa`, such as `#ffffff` and `#ffffff80` for white at 50 percent.
-- `rgb()` and `rgba()` with numbers from 0 to 255 or percentages, separated by commas or by spaces with the alpha after a slash, such as `rgba(255, 255, 255, 0.5)` and `rgb(255 255 255 / 50%)`.
+- `rgb()` and `rgba()` with numbers from 0 to 255 or percentages, separated by commas, all numbers or all percentages, or by spaces with the alpha after a slash, such as `rgba(255, 255, 255, 0.5)` and `rgb(255 255 255 / 50%)`.
 - A color of the theme by its variable, such as `var(--mud-palette-text-secondary)`. The name after `--mud-palette-` has lowercase letters, digits and hyphens.
 
 Write a CSS color in double quotes, like `Color="#ffffff80"`. A CSS color does not follow the theme: white stays white in the light theme, where it does not stand out from the surface. Color names such as `white`, `hsl()` and anything else that is neither a theme color nor one of these forms show an error in place of the widgets that use the map, see [ValueMap](value-map.md). Where a CSS color colors the text and where it fills is described there too.
