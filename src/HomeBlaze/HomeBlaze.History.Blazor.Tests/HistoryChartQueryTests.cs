@@ -136,6 +136,85 @@ public class HistoryChartQueryTests
         Assert.False(result.IsTruncated);
     }
 
+    [Fact]
+    public async Task WhenEveryLineIsDelta_ThenTheChartIsBarsAndEachLineHasOneRunOfItsBuckets()
+    {
+        // Arrange - the store answers with what a bucketed query of the days returns, a gap on the second day.
+        var zone = TimeZoneInfo.FindSystemTimeZoneById("Europe/Zurich");
+        var bucket = HistoryBucket.Calendar(HistoryCalendarUnit.Day, zone);
+        var day = BucketAlignment.LocalTimeToInstant(new DateTime(2026, 6, 1), zone);
+        var store = new TestHistoryStore(new HistoryCoverage(day, day.AddDays(3)))
+            .Add("/meter/Imported", day, 12_000)
+            .Add("/meter/Imported", day.AddDays(1), null)
+            .Add("/meter/Imported", day.AddDays(2), 9_500)
+            .Add("/meter/Exported", day.AddDays(2), 4_000);
+        HistoryChartSeriesRequest[] requests =
+        [
+            new("/meter/Imported", "Imported", typeof(double), IsBand: false, HistoryAggregations.Delta, Unit: StateUnit.WattHour),
+            new("/meter/Exported", "Exported", typeof(double), IsBand: false, HistoryAggregations.Delta, Unit: StateUnit.WattHour)
+        ];
+
+        // Act
+        var result = await HistoryChartQuery.QueryAsync([store], requests, day, day.AddDays(3), bucket, CancellationToken.None);
+
+        // Assert
+        Assert.True(result.Data.IsBars);
+        Assert.Equal(bucket, result.Data.Bucket);
+        Assert.All(store.ReceivedQueries, query => Assert.Equal(bucket, query.Bucket));
+        var imported = result.Data.Lines[0];
+        Assert.Equal(StateUnit.WattHour, imported.Unit);
+        Assert.Equal([day, day.AddDays(2)], Assert.Single(imported.Runs).Select(point => point.Timestamp));
+
+        // A single bucket is not widened, which would draw a second bar.
+        Assert.Equal(day.AddDays(2), Assert.Single(Assert.Single(result.Data.Lines[1].Runs)).Timestamp);
+    }
+
+    [Fact]
+    public async Task WhenOneLineIsNotDelta_ThenTheChartDrawsLines()
+    {
+        // Arrange
+        var store = CreateStore().Add("/meter/Imported", At(0), 1).Add("/meter/Imported", At(60), 2);
+        HistoryChartSeriesRequest[] requests =
+        [
+            new("/meter/Imported", "Increase", typeof(double), IsBand: false, HistoryAggregations.Delta),
+            new("/meter/Imported", "Reading", typeof(double), IsBand: false, HistoryAggregations.Maximum)
+        ];
+
+        // Act
+        var result = await HistoryChartQuery.QueryAsync([store], requests, At(0), At(120), TimeSpan.FromHours(1), CancellationToken.None);
+
+        // Assert
+        Assert.False(result.Data.IsBars);
+    }
+
+    [Fact]
+    public async Task WhenDeltaIsQueriedRaw_ThenTheChartDrawsLines()
+    {
+        // Arrange
+        var store = CreateStore().Add("/meter/Imported", At(0), 1);
+        var request = new HistoryChartSeriesRequest("/meter/Imported", "Imported", typeof(double), IsBand: false, HistoryAggregations.Delta);
+
+        // Act
+        var result = await HistoryChartQuery.QueryAsync([store], [request], At(0), At(60), bucket: null, CancellationToken.None);
+
+        // Assert
+        Assert.False(result.Data.IsBars);
+    }
+
+    [Fact]
+    public async Task WhenAChartHasOnlyBands_ThenItHasNoBars()
+    {
+        // Arrange
+        var store = CreateStore().Add("/pump/IsOn", At(0), 1);
+        var request = new HistoryChartSeriesRequest("/pump/IsOn", "On", typeof(bool), IsBand: true, HistoryAggregations.Delta);
+
+        // Act
+        var result = await HistoryChartQuery.QueryAsync([store], [request], At(0), At(60), TimeSpan.FromHours(1), CancellationToken.None);
+
+        // Assert
+        Assert.False(result.Data.IsBars);
+    }
+
     [Theory]
     [InlineData(HistoryAggregations.TimeWeightedAverage)]
     [InlineData(HistoryAggregations.SampleAverage)]

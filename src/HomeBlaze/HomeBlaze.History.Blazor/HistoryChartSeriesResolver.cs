@@ -136,7 +136,7 @@ internal static partial class HistoryChartSeriesResolver
             return $"Unknown bucket '{bucket}': use one of {choices}";
         }
 
-        if (period.Bucket is { } size && !PropertyHistoryChartModel.FitsMaxPoints(rangeSpan, size))
+        if (!PropertyHistoryChartModel.FitsMaxPoints(rangeSpan, period))
         {
             var smallest = PropertyHistoryChartModel.Periods.First(candidate =>
                 candidate.Bucket is { } candidateSize && PropertyHistoryChartModel.FitsMaxPoints(rangeSpan, candidateSize));

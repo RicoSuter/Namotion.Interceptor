@@ -35,6 +35,9 @@ public class HistoryChartWidgetTests
     private const string MotorName = "chartmotor";
     private const string ValuesPageName = "HistoryChartValues.md";
     private const string ValuesSubjectName = "HistoryValues";
+    private const string BarsPageName = "HistoryChartBars.md";
+    private const string BarMotorName = "barmotor";
+    private const string BarsLabel = "Daily energy";
     private const int DefaultHeight = 300;
     private const int PhoneWidth = 400;
     private const int DesktopWidth = 1400;
@@ -264,7 +267,7 @@ public class HistoryChartWidgetTests
         // Assert
         await Assertions.Expect(error).ToHaveCountAsync(1, new() { Timeout = Timeout });
         await Assertions.Expect(error).ToHaveTextAsync(
-            "Unknown aggregation 'Median': use one of TimeWeightedAverage, Average, SampleAverage, Minimum, Maximum, Sum, StandardDeviation, Last, First, Count");
+            "Unknown aggregation 'Median': use one of TimeWeightedAverage, Average, SampleAverage, Minimum, Maximum, Sum, StandardDeviation, Last, First, Count, Delta");
     }
 
     [Fact]
@@ -656,6 +659,67 @@ public class HistoryChartWidgetTests
         // Assert
         await Assertions.Expect(page.Locator(".subject-component-wrapper.selected").GetByTestId("history-chart")).ToHaveCountAsync(1);
         await Assertions.Expect(page.GetByTestId("property-history-dialog")).ToHaveCountAsync(0);
+    }
+
+    // The bar chart queries once after its first render, so the page is opened only when the store holds a reading of
+    // the counter that has grown, which today's bar shows.
+    private async Task<IPage> OpenBarsPageAsync()
+    {
+        var motor = (Motor)((MarkdownFile)_fixture.GetDemoFolder().Children[BarsPageName]).Children[BarMotorName];
+        await WaitUntilRecordedAsync(motor.TryGetRegisteredProperty(nameof(Motor.Energy))!, point => point.Number > 0);
+        return await OpenAsync(BarsPageName, DesktopWidth);
+    }
+
+    [Fact]
+    public async Task WhenAChartShowsTheDeltaOfACounterPerDay_ThenItDrawsOneBarPerDayEndingToday()
+    {
+        // Arrange & Act
+        var page = await OpenBarsPageAsync();
+        var view = GetChart(page, BarsLabel).GetByTestId("history-chart-view");
+        await Assertions.Expect(view).ToHaveAttributeAsync("data-plot-ready", "", new() { Timeout = Timeout });
+
+        // Assert - one group per day of the range, each with one bar, labeled in the time zone of the browser.
+        var chart = view.GetByTestId("history-chart-lines").Locator("svg").First;
+        var bars = chart.Locator(".mud-charts-bar-series path.mud-chart-bar");
+        await Assertions.Expect(bars).ToHaveCountAsync(7, new() { Timeout = Timeout });
+        // Until the browser names its time zone the days are those of UTC, and the chart queries again once it does.
+        var browserZone = TimeZoneInfo.FindSystemTimeZoneById(
+            await page.EvaluateAsync<string>("() => Intl.DateTimeFormat().resolvedOptions().timeZone"));
+        var today = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, browserZone).Date;
+        var expected = Enumerable.Range(0, 7)
+            .Select(day => today.AddDays(day - 6).ToString("MM-dd", CultureInfo.InvariantCulture))
+            .ToArray();
+        await Assertions.Expect(chart.Locator(".mud-charts-xaxis text")).ToHaveTextAsync(expected, new() { Timeout = Timeout });
+
+        // A bar is a vertical path from the axis to its value, and the store recorded the counter today.
+        var heights = await bars.EvaluateAllAsync<double[]>("paths => paths.map(path => path.getBBox().height)");
+        Assert.True(heights[^1] > 0, $"The bar of today has no height: {string.Join(", ", heights)}");
+        await Assertions.Expect(view.GetByTestId("history-chart-legend-note")).ToHaveCountAsync(0);
+    }
+
+    [Fact]
+    public async Task WhenABarChartIsClicked_ThenTheHistoryDialogOpensWithItsDaysAndDeltaAndDrawsBars()
+    {
+        // Arrange
+        var page = await OpenBarsPageAsync();
+        var lines = GetChart(page, BarsLabel).GetByTestId("history-chart-lines");
+        await Assertions.Expect(lines).ToHaveAttributeAsync("title", $"Show history of {BarsLabel}", new() { Timeout = Timeout });
+
+        // Act
+        await lines.ClickAsync();
+
+        // Assert
+        var dialog = GetHistoryDialog(page, BarsLabel);
+        await Assertions.Expect(dialog.GetByTestId("history-chart-view")).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await page.WaitForFunctionAsync(
+            "() => [...document.querySelectorAll('.mud-dialog')].every(dialog => dialog.getAnimations().every(animation => animation.playState === 'finished'))",
+            null,
+            new() { Timeout = Timeout });
+        await Assertions.Expect(dialog.GetByRole(AriaRole.Combobox, new() { Name = "Range" })).ToHaveTextAsync("Last 7 days");
+        await Assertions.Expect(dialog.GetByRole(AriaRole.Combobox, new() { Name = "Period" })).ToHaveTextAsync("Day");
+        await Assertions.Expect(dialog.GetByRole(AriaRole.Combobox, new() { Name = "Aggregation" })).ToHaveTextAsync("Delta");
+        await Assertions.Expect(dialog.Locator(".mud-charts-bar-series path.mud-chart-bar"))
+            .ToHaveCountAsync(7, new() { Timeout = Timeout });
     }
 
     [Fact]

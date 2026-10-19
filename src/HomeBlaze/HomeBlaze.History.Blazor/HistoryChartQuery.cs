@@ -84,7 +84,8 @@ internal static class HistoryChartQuery
     /// <summary>
     /// Queries every requested series over [<paramref name="from"/>, <paramref name="to"/>) and builds lines
     /// and bands from the results. Lines are queried in <paramref name="bucket"/>, one batch per aggregation;
-    /// bands are always queried as raw samples with the value held entering the window.
+    /// bands are always queried as raw samples with the value held entering the window. The lines are bars when
+    /// each of them is bucketed with <see cref="HistoryAggregations.Delta"/>, see <see cref="HistoryChartData.IsBars"/>.
     /// </summary>
     /// <param name="stores">The history stores to merge.</param>
     /// <param name="requests">The series in legend order.</param>
@@ -100,7 +101,7 @@ internal static class HistoryChartQuery
         IReadOnlyList<HistoryChartSeriesRequest> requests,
         DateTimeOffset from,
         DateTimeOffset to,
-        TimeSpan? bucket,
+        HistoryBucket? bucket,
         CancellationToken cancellationToken)
     {
         var batches = new List<(List<int> Indexes, Task<IReadOnlyList<HistorySeries>> Query)>();
@@ -163,6 +164,7 @@ internal static class HistoryChartQuery
             }
         }
 
+        var isBars = IsBars(requests, bucket);
         var palette = new HistoryStatePalette();
         var lines = new List<HistoryChartLine>();
         var bands = new List<HistoryChartBand>();
@@ -194,14 +196,54 @@ internal static class HistoryChartQuery
                     (bucket is null || request.Aggregation != HistoryAggregations.Count);
                 var points = PropertyHistoryChartModel.HidePartialTotals(
                     result.Points, request.Aggregation, bucket, to, result.CoverageRanges);
-                var runs = PropertyHistoryChartModel.SplitIntoGapRuns(points, bucket, to);
+                var runs = isBars ? GetBars(points) : PropertyHistoryChartModel.SplitIntoGapRuns(points, bucket, to);
                 lines.Add(new HistoryChartLine(
-                    request.Label, request.Color ?? HistoryChartPalette.GetLineColor(lines.Count), runs, isPercent));
+                    request.Label, request.Color ?? HistoryChartPalette.GetLineColor(lines.Count), runs, isPercent, request.Unit));
             }
         }
 
-        var data = new HistoryChartData(from, to, bucket, lines, bands);
+        var data = new HistoryChartData(from, to, bucket, lines, bands, isBars);
         return new HistoryChartResult(data, series, isTruncated);
+    }
+
+    // A chart draws either bars or lines, so one line of another aggregation draws every line as a line.
+    private static bool IsBars(IReadOnlyList<HistoryChartSeriesRequest> requests, HistoryBucket? bucket)
+    {
+        if (bucket is null)
+        {
+            return false;
+        }
+
+        var hasLine = false;
+        foreach (var request in requests)
+        {
+            if (!request.IsBand)
+            {
+                if (request.Aggregation != HistoryAggregations.Delta)
+                {
+                    return false;
+                }
+
+                hasLine = true;
+            }
+        }
+
+        return hasLine;
+    }
+
+    // The buckets with a value as one run, without the widening of a single point, which would draw another bar.
+    private static IReadOnlyList<IReadOnlyList<HistoryPoint>> GetBars(IReadOnlyList<HistoryPoint> points)
+    {
+        var bars = new List<HistoryPoint>(points.Count);
+        foreach (var point in points)
+        {
+            if (point.Number is not null)
+            {
+                bars.Add(point);
+            }
+        }
+
+        return bars.Count > 0 ? [bars] : [];
     }
 
     /// <summary>

@@ -1,3 +1,4 @@
+using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.History.Abstractions;
 
 namespace HomeBlaze.History.Blazor;
@@ -11,12 +12,14 @@ namespace HomeBlaze.History.Blazor;
 /// <param name="Bucket">The bucket of the query, or null for raw samples.</param>
 /// <param name="Lines">The number series in legend order.</param>
 /// <param name="Bands">The state series in legend order.</param>
+/// <param name="IsBars">Whether the lines are drawn as bars, one group per bucket from <paramref name="From"/> to <paramref name="To"/>, because every line shows the increase of a counter per bucket (<see cref="HistoryAggregations.Delta"/>). Each line then has one run of the buckets that have a value, and needs a <paramref name="Bucket"/>.</param>
 public sealed record HistoryChartData(
     DateTimeOffset From,
     DateTimeOffset To,
-    TimeSpan? Bucket,
+    HistoryBucket? Bucket,
     IReadOnlyList<HistoryChartLine> Lines,
-    IReadOnlyList<HistoryChartBand> Bands)
+    IReadOnlyList<HistoryChartBand> Bands,
+    bool IsBars = false)
 {
     /// <summary>Gets whether there is nothing to draw: no band and no line with a point.</summary>
     public bool IsEmpty
@@ -46,8 +49,13 @@ public sealed record HistoryChartData(
 /// <param name="Color">The CSS color of the line, which the chart draws without a check: pass only a plain color such as "#E4572E", never a value from an untrusted source.</param>
 /// <param name="Runs">The gap-free runs of points in time order.</param>
 /// <param name="IsPercent">Whether the points are fractions that are drawn in percent, see <see cref="HistoryChartAxis.ToPercent"/>.</param>
+/// <param name="Unit">The unit of the points, which bars name and scale within its family, for example to kWh.</param>
 public sealed record HistoryChartLine(
-    string Label, string Color, IReadOnlyList<IReadOnlyList<HistoryPoint>> Runs, bool IsPercent = false);
+    string Label,
+    string Color,
+    IReadOnlyList<IReadOnlyList<HistoryPoint>> Runs,
+    bool IsPercent = false,
+    StateUnit Unit = StateUnit.Default);
 
 /// <summary>A state series: its constant-value runs, the CSS background that draws them and the legend of its states.</summary>
 /// <param name="Label">The name of the series.</param>

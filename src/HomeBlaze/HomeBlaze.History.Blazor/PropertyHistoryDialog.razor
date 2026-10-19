@@ -197,16 +197,26 @@
             // of that day (start of the next day), giving a half-open [from, to) window that includes the whole
             // selected To day, so a single-day pick (From == To) is a full day rather than an empty range.
             // Presets anchor to "now"; the chart and labels convert to the display time zone for rendering.
+            // A calendar bucket of a preset starts the range at the start of a period, like the history chart does.
             DateTimeOffset from, to;
+            var stores = HistoryChartQuery.GetStores(Registry);
+            var period = PropertyHistoryChartModel.Periods[_periodIndex];
+            var timeZone = TimeZone.Zone ?? TimeZoneInfo.Utc;
+            HistoryBucket? bucket;
             if (_useCustom)
             {
                 (from, to) = PropertyHistoryChartModel.ResolveCustomRange(
                     _customFrom, _customTo, TimeProvider.GetUtcNow(), TimeZone.ToUtc);
+                bucket = to > from
+                    ? PropertyHistoryChartModel.ResolveBucket(period, to - from, timeZone, HistoryChartQuery.GetAvailableCoverage(stores, to))
+                    : null;
             }
             else
             {
                 to = TimeProvider.GetUtcNow();
-                from = to - PropertyHistoryChartModel.RangePresets[_rangeIndex].Range;
+                var preset = PropertyHistoryChartModel.RangePresets[_rangeIndex].Range;
+                bucket = PropertyHistoryChartModel.ResolveBucket(period, preset, timeZone, HistoryChartQuery.GetAvailableCoverage(stores, to));
+                from = PropertyHistoryChartModel.GetWindowStart(to, preset, bucket);
             }
 
             if (to <= from)
@@ -217,9 +227,6 @@
             }
 
             var range = to - from;
-            var stores = HistoryChartQuery.GetStores(Registry);
-            var bucket = PropertyHistoryChartModel.ResolveBucket(
-                PropertyHistoryChartModel.Periods[_periodIndex], range, HistoryChartQuery.GetAvailableCoverage(stores, to));
 
             _rangeHint = range <= TimeSpan.FromHours(24)
                 ? $"{TimeZone.ToZoned(from):HH:mm} to {TimeZone.ToZoned(to):HH:mm}"
@@ -230,7 +237,7 @@
             var isBucketedState = UseStateTimeline && bucket is not null;
             _periodHint = isBucketedState
                 ? "Not applicable to states."
-                : PropertyHistoryChartModel.DescribePeriod(PropertyHistoryChartModel.Periods[_periodIndex], bucket);
+                : PropertyHistoryChartModel.DescribePeriod(period, bucket);
             _aggregationHint = isBucketedState
                 ? "Only Count applies to states."
                 : PropertyHistoryChartModel.DescribeAggregation(_aggregation);

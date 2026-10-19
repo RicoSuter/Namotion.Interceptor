@@ -148,30 +148,9 @@ public static class StateUnitExtensions
     /// </summary>
     public static string FormatWithUnit(decimal value, StateUnit unit)
     {
-        // Check if this unit belongs to a scalable family
-        if (UnitFamilyLookup.TryGetValue(unit, out var lookup))
+        if (TryGetScaledUnit(unit, value, out var suffix, out var factor))
         {
-            var family = UnitFamilies[lookup.FamilyIndex];
-            var inputEntry = family[lookup.UnitIndex];
-
-            // Convert to base unit (multiply by the input unit's factor)
-            var baseValue = value * inputEntry.Factor;
-
-            // Find the best display unit: largest unit where |baseValue / factor| >= 1
-            var bestIndex = 0; // default to smallest
-            for (var i = family.Length - 1; i >= 0; i--)
-            {
-                if (Math.Abs(baseValue / family[i].Factor) >= 1m)
-                {
-                    bestIndex = i;
-                    break;
-                }
-            }
-
-            var bestEntry = family[bestIndex];
-            var displayValue = baseValue / bestEntry.Factor;
-
-            return FormatDecimalValue(displayValue, bestEntry.Suffix);
+            return FormatDecimalValue(value * factor, suffix);
         }
 
         // No family found: use static suffix with space handling
@@ -187,6 +166,42 @@ public static class StateUnitExtensions
         return unit == StateUnit.Default
             ? value.ToString(CultureInfo.InvariantCulture)
             : $"{value.ToString(CultureInfo.InvariantCulture)} {unit}";
+    }
+
+    /// <summary>
+    /// Gets the unit of its family that <see cref="FormatWithUnit"/> shows a value of <paramref name="magnitude"/> in: the
+    /// largest unit in which the value is at least 1, such as kWh for 1500 Wh. Returns false for a unit of no family.
+    /// </summary>
+    /// <param name="unit">The unit of the value.</param>
+    /// <param name="magnitude">The value in <paramref name="unit"/>; its sign is ignored.</param>
+    /// <param name="suffix">The suffix of the unit to show the value in.</param>
+    /// <param name="factor">The factor that converts a value in <paramref name="unit"/> to the unit to show it in.</param>
+    public static bool TryGetScaledUnit(StateUnit unit, decimal magnitude, out string suffix, out decimal factor)
+    {
+        if (!UnitFamilyLookup.TryGetValue(unit, out var lookup))
+        {
+            suffix = string.Empty;
+            factor = 1m;
+            return false;
+        }
+
+        var family = UnitFamilies[lookup.FamilyIndex];
+        var baseValue = Math.Abs(magnitude * family[lookup.UnitIndex].Factor);
+
+        // The largest unit in which the value is at least 1, or else the smallest.
+        var bestIndex = 0;
+        for (var index = family.Length - 1; index >= 0; index--)
+        {
+            if (baseValue / family[index].Factor >= 1m)
+            {
+                bestIndex = index;
+                break;
+            }
+        }
+
+        suffix = family[bestIndex].Suffix;
+        factor = family[lookup.UnitIndex].Factor / family[bestIndex].Factor;
+        return true;
     }
 
     private static string FormatDecimalValue(decimal value, string suffix)

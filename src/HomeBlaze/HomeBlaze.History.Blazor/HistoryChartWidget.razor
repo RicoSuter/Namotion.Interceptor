@@ -81,7 +81,7 @@
     private HistoryChartData? _data;
     private bool? _hasStores;
     private string? _queryError;
-    private TimeSpan? _bucket;
+    private HistoryBucket? _bucket;
 
     // The resolution of the series, kept until the configuration or the paths of the graph change, because the
     // legend renders on every change of a charted value.
@@ -251,6 +251,17 @@
     protected override void OnInitialized()
     {
         _refresh = new HistoryChartRefresh(TimeProvider, OnRefreshDue);
+        TimeZone.Changed += OnTimeZoneChanged;
+    }
+
+    // A calendar bucket starts at local midnight, so another time zone has other buckets. Until the zone of the viewer is
+    // known the buckets are aligned in UTC, which the view shows its times in as well.
+    private void OnTimeZoneChanged()
+    {
+        if (PropertyHistoryChartModel.TryGetPeriod(_resolvedBucket, out var period) && period.CalendarUnit is not null)
+        {
+            QueueRefresh();
+        }
     }
 
     protected override void OnAfterRender(bool firstRender)
@@ -514,8 +525,9 @@
             }
 
             var to = TimeProvider.GetUtcNow();
-            var from = to - range;
-            var bucket = PropertyHistoryChartModel.ResolveBucket(period, range, HistoryChartQuery.GetAvailableCoverage(stores, to));
+            var bucket = PropertyHistoryChartModel.ResolveBucket(
+                period, range, TimeZone.Zone ?? TimeZoneInfo.Utc, HistoryChartQuery.GetAvailableCoverage(stores, to));
+            var from = PropertyHistoryChartModel.GetWindowStart(to, range, bucket);
             var result = await HistoryChartQuery.QueryAsync(stores, requests, from, to, bucket, cancellationToken);
             if (cancellationToken.IsCancellationRequested || _isDisposed)
             {
@@ -564,6 +576,7 @@
     public void Dispose()
     {
         _isDisposed = true;
+        TimeZone.Changed -= OnTimeZoneChanged;
         _refresh?.Dispose();
 
         // Cancel before disposing: disposing does not cancel the token of a running query.

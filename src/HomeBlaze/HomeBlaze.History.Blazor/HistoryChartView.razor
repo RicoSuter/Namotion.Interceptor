@@ -1,5 +1,8 @@
+@using System.Globalization
 @using HomeBlaze.History.Abstractions
 @using HomeBlaze.Components.Abstractions.TimeZones
+@using HomeBlaze.Services.Display
+@using MudBlazor.Charts
 @using MudBlazor.Services
 @using Microsoft.JSInterop
 @using Microsoft.AspNetCore.Components.Rendering
@@ -185,8 +188,12 @@
     private bool _shouldRender = true;
     private volatile bool _isDisposed;
     private List<ChartSeries<double>>? _chartSeries;
-    private TimeSeriesChartOptions _chartOptions = new();
+    private IChartOptions _chartOptions = new TimeSeriesChartOptions();
     private string[] _palette = [];
+
+    // The label of each group of bars, and the unit the bars are drawn in with a space before it, or empty.
+    private string[] _barLabels = [];
+    private string _barUnit = string.Empty;
     private double _valueMinimum;
     private double _valueMaximum;
     private bool _isPercent;
@@ -301,6 +308,8 @@
         builder.OpenComponent<HistoryChartPlot>(0);
         builder.AddComponentParameter(1, nameof(HistoryChartPlot.ChartSeries), _chartSeries);
         builder.AddComponentParameter(2, nameof(HistoryChartPlot.ChartOptions), _chartOptions);
+        // Without axes the bars have no labels, and the options change with the axes, which draws the bars again.
+        builder.AddComponentParameter(3, nameof(HistoryChartPlot.ChartLabels), ShowAxes ? _barLabels : []);
         builder.CloseComponent();
     }
 
@@ -552,9 +561,16 @@
     {
         _builtData = Data;
         _chartSeries = null;
+        _barLabels = [];
         BuildStateRows();
         if (Data is not { } data)
         {
+            return;
+        }
+
+        if (data.IsBars)
+        {
+            BuildBars(data);
             return;
         }
 
@@ -622,11 +638,119 @@
         }
     }
 
+    // One group of bars per bucket of the window, and one bar in it per line. A bucket without a value has a bar of
+    // height 0, which draws nothing.
+    private void BuildBars(HistoryChartData data)
+    {
+        if (data.Bucket is not { } bucket || !HasPoint(data))
+        {
+            return;
+        }
+
+        var starts = PropertyHistoryChartModel.GetBucketStarts(data.From, data.To, bucket);
+
+        var minimum = 0.0;
+        var maximum = 0.0;
+        foreach (var line in data.Lines)
+        {
+            foreach (var run in line.Runs)
+            {
+                foreach (var point in run)
+                {
+                    minimum = Math.Min(minimum, point.Number!.Value);
+                    maximum = Math.Max(maximum, point.Number!.Value);
+                }
+            }
+        }
+
+        // All lines have one unit, see HistoryChartSeriesResolver.FindArgumentError, which is scaled to the largest bar.
+        var unit = data.Lines[0].Unit;
+        var magnitude = Math.Max(-minimum, maximum);
+        var factor = 1.0;
+        var suffix = StateUnitExtensions.GetUnitSuffix(unit);
+        if (magnitude < (double)decimal.MaxValue &&
+            StateUnitExtensions.TryGetScaledUnit(unit, (decimal)magnitude, out var scaledSuffix, out var scaledFactor))
+        {
+            suffix = scaledSuffix;
+            factor = (double)scaledFactor;
+        }
+
+        _barUnit = string.IsNullOrEmpty(suffix) ? string.Empty : " " + suffix;
+        var valueFormat = string.IsNullOrEmpty(suffix) ? "0.##" : $"0.## '{suffix}'";
+        var chartSeries = new List<ChartSeries<double>>(data.Lines.Count);
+        var palette = new string[data.Lines.Count];
+        for (var lineIndex = 0; lineIndex < data.Lines.Count; lineIndex++)
+        {
+            var line = data.Lines[lineIndex];
+            var values = new double[starts.Count];
+
+            // Both are ascending, and every point of a bucketed query is at the start of its bucket.
+            var startIndex = 0;
+            foreach (var run in line.Runs)
+            {
+                foreach (var point in run)
+                {
+                    while (startIndex < starts.Count && starts[startIndex] < point.Timestamp)
+                    {
+                        startIndex++;
+                    }
+
+                    if (startIndex < starts.Count && starts[startIndex] == point.Timestamp)
+                    {
+                        values[startIndex] = point.Number!.Value * factor;
+                    }
+                }
+            }
+
+            chartSeries.Add(new ChartSeries<double>
+            {
+                Name = line.Label,
+                Visible = true,
+                Data = values,
+                TooltipYValueFormat = valueFormat
+            });
+            palette[lineIndex] = line.Color;
+        }
+
+        var format = HistoryChartAxis.GetTimeLabelFormat(data.To - data.From, PropertyHistoryChartModel.GetNominalLength(bucket));
+        _barLabels = new string[starts.Count];
+        for (var index = 0; index < starts.Count; index++)
+        {
+            _barLabels[index] = TimeZone.ToZoned(starts[index]).ToString(format, CultureInfo.CurrentCulture);
+        }
+
+        _palette = palette;
+        _valueMinimum = minimum * factor;
+        _valueMaximum = maximum * factor;
+        _isPercent = false;
+        _chartSeries = chartSeries;
+        BuildOptions();
+    }
+
+    private static bool HasPoint(HistoryChartData data)
+    {
+        foreach (var line in data.Lines)
+        {
+            if (line.Runs.Count > 0)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     // A new instance, because the chart draws again only for other options.
     private void BuildOptions()
     {
         if (Data is not { } data)
         {
+            return;
+        }
+
+        if (data.IsBars)
+        {
+            BuildBarOptions();
             return;
         }
 
@@ -640,7 +764,8 @@
             ? HistoryChartAxis.GetPercentValueAxis(_valueMinimum, _valueMaximum, height)
             : HistoryChartAxis.GetValueAxis(_valueMinimum, _valueMaximum, height);
         var range = data.To - data.From;
-        var timeLabelSpacing = HistoryChartAxis.GetTimeLabelSpacing(range, data.Bucket, width);
+        var timeLabelSpacing = HistoryChartAxis.GetTimeLabelSpacing(
+            range, data.Bucket is { } bucket ? PropertyHistoryChartModel.GetNominalLength(bucket) : null, width);
         _chartOptions = new TimeSeriesChartOptions
         {
             ChartPalette = _palette,
@@ -661,6 +786,32 @@
             // The chart doubles the step while it has more labels, which only a range beyond the largest step needs.
             MaxNumYAxisTicks = _valueLabelCount,
             YAxisRequireZeroPoint = valueAxis.IncludesZero,
+            YAxisSuggestedMax = valueAxis.SuggestedMaximum
+        };
+    }
+
+    private void BuildBarOptions()
+    {
+        var height = _linesHeight > 0 ? _linesHeight : MaxHeight ?? 300;
+        var width = _linesWidth > 0 ? _linesWidth : height * 2;
+        _valueLabelCount = HistoryChartAxis.GetValueLabelCount(height);
+        _timeLabelCount = HistoryChartAxis.GetTimeLabelCount(width);
+        _axesLabels = $"{_valueLabelCount}x{_timeLabelCount}";
+        var valueAxis = HistoryChartAxis.GetValueAxis(_valueMinimum, _valueMaximum, height);
+        var unit = _barUnit;
+        _chartOptions = new BarChartOptions
+        {
+            ChartPalette = _palette,
+            ShowLegend = false,
+            // Every bar has its label, which its tooltip shows; the script of the view hides those that would overlap.
+            YAxisToStringFunc = ShowAxes ? value => value.ToString("0.##", CultureInfo.CurrentCulture) + unit : EmptyAxisLabel,
+            YAxisLines = ShowAxes,
+            ShowToolTips = ShowAxes,
+            TooltipTitleFormat = "{{Y_VALUE}}",
+            TooltipSubtitleFormat = "{{SERIES_NAME}}, {{X_VALUE}}",
+            BarWidthRatio = 0.7,
+            YAxisTicks = valueAxis.Step,
+            MaxNumYAxisTicks = _valueLabelCount,
             YAxisSuggestedMax = valueAxis.SuggestedMaximum
         };
     }

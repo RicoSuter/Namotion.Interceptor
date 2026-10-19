@@ -2,6 +2,9 @@ const leftProperty = '--history-chart-plot-left';
 const rightProperty = '--history-chart-plot-right';
 const readyAttribute = 'data-plot-ready';
 
+// The least space between two labels of the time axis of bars, in pixels.
+const barLabelGap = 8;
+
 // The follower that owns the ready attribute and the margins of each view, so a superseded follower that is disposed after
 // a newer one started leaves them alone.
 const followers = new WeakMap();
@@ -28,6 +31,7 @@ export function followPlot(lines, alignBands) {
             return;
         }
 
+        thinBarLabels(lines);
         if (!view.hasAttribute(readyAttribute) && isPlaced(lines)) {
             view.setAttribute(readyAttribute, '');
         }
@@ -84,7 +88,7 @@ export function followPlot(lines, alignBands) {
 function isPlaced(lines) {
     const chart = lines.querySelector('svg');
     const viewBox = chart?.viewBox.baseVal;
-    if (!viewBox || !chart.querySelector('.mud-charts-timeseries-series path')) {
+    if (!viewBox || !chart.querySelector('.mud-charts-timeseries-series path, .mud-charts-bar-series path')) {
         return false;
     }
 
@@ -97,6 +101,34 @@ function isPlaced(lines) {
         Math.abs(viewBox.height - height) <= 1 &&
         [...chart.querySelectorAll('.mud-charts-yaxis text')]
             .every(text => text.textContent.trim() === '' || text.getBoundingClientRect().left >= size.left - 1);
+}
+
+// MudChart labels every group of bars, also where the labels overlap, so only every so many are shown, counted from the
+// newest one. A label that is hidden keeps its text, which the tooltip of its bars shows.
+function thinBarLabels(lines) {
+    const chart = lines.querySelector('svg');
+    if (!chart?.querySelector('.mud-charts-bar-series')) {
+        return;
+    }
+
+    const labels = [...chart.querySelectorAll('.mud-charts-xaxis text')];
+    if (labels.length < 2) {
+        return;
+    }
+
+    const spacing = Math.abs(labels[1].getAttribute('x') - labels[0].getAttribute('x'));
+    let widest = 0;
+    for (const label of labels) {
+        widest = Math.max(widest, label.getComputedTextLength());
+    }
+
+    const step = spacing > 0 ? Math.max(1, Math.ceil((widest + barLabelGap) / spacing)) : labels.length;
+    labels.forEach((label, index) => {
+        const visibility = (labels.length - 1 - index) % step === 0 ? '' : 'hidden';
+        if (label.style.visibility !== visibility) {
+            label.style.visibility = visibility;
+        }
+    });
 }
 
 // Sets only a changed value, because setting one changes the style attribute that is observed.

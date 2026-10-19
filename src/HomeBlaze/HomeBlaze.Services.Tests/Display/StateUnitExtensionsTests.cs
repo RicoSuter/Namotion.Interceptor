@@ -79,6 +79,35 @@ public class StateUnitExtensionsTests
     }
 
     [Theory]
+    [InlineData(StateUnit.WattHour, 12345, "kWh", 0.001)]
+    [InlineData(StateUnit.WattHour, -12345, "kWh", 0.001)]
+    [InlineData(StateUnit.WattHour, 500, "Wh", 1)]
+    [InlineData(StateUnit.KilowattHour, 0.5, "Wh", 1000)]
+    [InlineData(StateUnit.Byte, 1500000, "MB", 0.000001)]
+    public void WhenAUnitOfAFamilyIsScaled_ThenItGetsTheLargestUnitInWhichTheValueIsAtLeastOne(
+        StateUnit unit, double magnitude, string expectedSuffix, double expectedFactor)
+    {
+        // Act
+        var isScaled = StateUnitExtensions.TryGetScaledUnit(unit, Convert.ToDecimal(magnitude), out var suffix, out var factor);
+
+        // Assert
+        Assert.True(isScaled);
+        Assert.Equal(expectedSuffix, suffix);
+        Assert.Equal(Convert.ToDecimal(expectedFactor), factor);
+    }
+
+    [Fact]
+    public void WhenAUnitHasNoFamily_ThenItIsNotScaled()
+    {
+        // Act
+        var isScaled = StateUnitExtensions.TryGetScaledUnit(StateUnit.DegreeCelsius, 1000m, out _, out var factor);
+
+        // Assert
+        Assert.False(isScaled);
+        Assert.Equal(1m, factor);
+    }
+
+    [Theory]
     [InlineData(0.756, "75.6%")]
     [InlineData(0.75, "75%")]
     [InlineData(0.0, "0%")]
