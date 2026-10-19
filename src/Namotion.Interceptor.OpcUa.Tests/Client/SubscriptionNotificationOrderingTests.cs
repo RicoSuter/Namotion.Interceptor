@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.Connectors;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.OpcUa.Client;
 using Namotion.Interceptor.OpcUa.Client.Connection;
 using Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
@@ -167,6 +168,24 @@ public class SubscriptionNotificationOrderingTests
     }
 
     [Fact]
+    public async Task WhenTheWriteThrowsAfterStoringTheValue_ThenAnOlderMessageIsStillSkipped()
+    {
+        // Arrange
+        await using var harness = await Harness.CreateAsync();
+        ((IInterceptorSubject)harness.Root).Context.AddService<IWriteInterceptor>(new ThrowAfterStoreInterceptor("Stored"));
+        var name = harness.Track(nameof(TestRoot.Name));
+        harness.Notify(sequenceNumber: 5, (name, "Old"));
+
+        // Act
+        harness.Notify(sequenceNumber: 10, (name, "Stored"));
+        harness.Notify(sequenceNumber: 9, (name, "Older"));
+
+        // Assert
+        Assert.Single(harness.Errors);
+        Assert.Equal("Stored", harness.Root.Name);
+    }
+
+    [Fact]
     public async Task WhenAMessageCarriesNoSequenceNumber_ThenItIsApplied()
     {
         // Arrange
@@ -205,6 +224,21 @@ public class SubscriptionNotificationOrderingTests
     {
         public override object? ConvertToPropertyValue(object? nodeValue, RegisteredSubjectProperty property) =>
             Equals(nodeValue, unassignableValue) ? 0 : base.ConvertToPropertyValue(nodeValue, property);
+    }
+
+    /// <summary>
+    /// Throws after the rest of the chain stored <paramref name="throwingValue"/>, as a failing change observer does.
+    /// </summary>
+    private sealed class ThrowAfterStoreInterceptor(string throwingValue) : IWriteInterceptor
+    {
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            next(ref context);
+            if (Equals(context.NewValue, throwingValue))
+            {
+                throw new InvalidOperationException("Failed after the value was stored.");
+            }
+        }
     }
 
     private sealed class Harness : IAsyncDisposable

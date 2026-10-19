@@ -281,6 +281,12 @@ internal class SubscriptionManager : IAsyncDisposable
                         }
                         catch (Exception e)
                         {
+                            // A change observer can throw after the value was stored, which still counts as applied.
+                            if (stamp != 0 && Equals(monitoredItem.Property.GetValue(), change.Value))
+                            {
+                                Interlocked.Exchange(ref monitoredItem.LastAppliedStamp, stamp);
+                            }
+
                             s.manager.ReportErrorIfRunning(e);
                             s.logger.LogError(e, "Failed to apply change for property {PropertyName}.", monitoredItem.Property.Name);
                         }
@@ -722,7 +728,7 @@ internal class SubscriptionManager : IAsyncDisposable
     /// <summary>
     /// Ranks the notification messages of one subscription object. A stamp packs a 24-bit epoch that
     /// identifies the object into the high bits and the message's sequence number, extended past the
-    /// 32-bit wrap, into the low 40 bits, which last 2^40 messages per subscription object.
+    /// 32-bit wrap, into the low 40 bits, which last about 2^40 messages per subscription object.
     /// </summary>
     private sealed class SubscriptionApplyState
     {
