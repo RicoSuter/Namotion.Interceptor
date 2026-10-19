@@ -288,6 +288,60 @@ public class SubjectTransactionWriterTests
             change.GetNewValue<string>() == "original|d1");
     }
 
+    [Theory]
+    [InlineData(TransactionFailureHandling.BestEffort)]
+    [InlineData(TransactionFailureHandling.Rollback)]
+    public async Task WhenCommitTimesOutWhileRevertingAfterLocalApply_ThenCommitFailsTerminally(TransactionFailureHandling failureHandling)
+    {
+        // Arrange
+        var handler = new RecordingHandler();
+        var probe = new CommitWriteProbe(handler) { ThrowOnConsumedProperty = nameof(Person.LastName) };
+        var context = CreateTransactionContext();
+        context.AddService<ITransactionHandler>(handler);
+        context.AddService<ITransactionWriter>(new RevertUntilCancelledTransactionWriter());
+        context.AddService(probe);
+        var person = new Person(context) { FirstName = "Ann", LastName = "Lee" };
+        using var transaction = await context.BeginTransactionAsync(
+            failureHandling, commitTimeout: TimeSpan.FromMilliseconds(50));
+        person.FirstName = "Bob";
+        person.LastName = "Kim";
+
+        // Act
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+        var retryException = await Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await transaction.CommitAsync(CancellationToken.None));
+
+        // Assert
+        Assert.Contains(exception.Errors, error => error is OperationCanceledException);
+        Assert.Contains(exception.FailedChanges, change => change.Property.Name == nameof(Person.LastName));
+        Assert.Equal("Lee", person.LastName);
+        Assert.Contains("already been committed", retryException.Message);
+    }
+
+    /// <summary>
+    /// Accepts every write and completes a revert only when the commit timeout cancels it.
+    /// </summary>
+    private sealed class RevertUntilCancelledTransactionWriter : ITransactionWriter
+    {
+        public ValueTask<SourceWriteResult> WriteToSourcesAsync(
+            Memory<SubjectPropertyChange> changes,
+            TransactionRequirement requirement,
+            CancellationToken cancellationToken)
+        {
+            return new(new SourceWriteResult(changes.ToArray(), [], [], RevertState: null));
+        }
+
+        public async ValueTask<SourceRevertResult> RevertSourceWritesAsync(
+            IReadOnlyList<SubjectPropertyChange> written,
+            object? revertState,
+            CancellationToken cancellationToken)
+        {
+            await Task.Delay(Timeout.Infinite, cancellationToken);
+            return new SourceRevertResult([], []);
+        }
+    }
+
     private static void AssertDerivedChange(
         SubjectPropertyChange change,
         string propertyName,

@@ -867,7 +867,7 @@ public sealed class SubjectTransaction : IDisposable
         var rejectionErrors = rollBackSourceFailure ? null : CheckBeforeLocalApply(changes.Span, failedSource);
         if (rollBackSourceFailure || rejectionErrors is not null)
         {
-            var revert = await RevertSourceWritesSafelyAsync(writer, written, revertState, cancellationToken).ConfigureAwait(false);
+            var revert = await RevertSourceWritesSafelyAsync(writer, written, revertState, afterLocalApply: false, cancellationToken).ConfigureAwait(false);
 
             // A rejection fails every checked change, which includes every written one. After a source failure, the
             // written changes that were reverted cleanly are not reported.
@@ -918,7 +918,7 @@ public sealed class SubjectTransaction : IDisposable
             if (_failureHandling == TransactionFailureHandling.Rollback)
             {
                 // All-or-nothing: revert local applies, then the source writes.
-                var sourceRevert = await RevertSourceWritesSafelyAsync(writer, written, revertState, cancellationToken).ConfigureAwait(false);
+                var sourceRevert = await RevertSourceWritesSafelyAsync(writer, written, revertState, afterLocalApply: true, cancellationToken).ConfigureAwait(false);
                 // The no-source local changes were applied then reverted; under all-or-nothing they did not
                 // commit, so report them as failed too (consistent with the source-write-failure branch and
                 // the documented Rollback contract). Exclude source-bound changes (in 'written'; failedSource
@@ -934,7 +934,7 @@ public sealed class SubjectTransaction : IDisposable
             // BestEffort: keep source == model for failed-apply properties by reverting only the source writes whose
             // property failed to apply (matched by Property equality).
             var toRevert = SubjectPropertyChangeOperations.IntersectByProperty(applyFailed, written);
-            var bestEffortRevert = await RevertSourceWritesSafelyAsync(writer, toRevert, revertState, cancellationToken).ConfigureAwait(false);
+            var bestEffortRevert = await RevertSourceWritesSafelyAsync(writer, toRevert, revertState, afterLocalApply: true, cancellationToken).ConfigureAwait(false);
             return CreateFailureException(
                 applied,
                 SubjectPropertyChangeOperations.Concat(failedSource, applyFailed, bestEffortRevert.Failed),
@@ -999,19 +999,22 @@ public sealed class SubjectTransaction : IDisposable
     /// Converts a contract-violating throw from <see cref="ITransactionWriter.RevertSourceWritesAsync"/>
     /// into "every requested revert failed" so the commit stays on the reported-failure path and becomes
     /// terminal; a propagating throw would leave the transaction retryable, and a retry would re-push
-    /// to sources that already accepted writes. Only the commit timeout propagates.
+    /// to sources that already accepted writes. Only the commit timeout propagates, and only when
+    /// <paramref name="afterLocalApply"/> is false: once the local model changed, a retry would replay the
+    /// snapshot onto it, so the timeout is reported as a failed revert too.
     /// </summary>
     private static async ValueTask<SourceRevertResult> RevertSourceWritesSafelyAsync(
         ITransactionWriter writer,
         IReadOnlyList<SubjectPropertyChange> written,
         object? revertState,
+        bool afterLocalApply,
         CancellationToken cancellationToken)
     {
         try
         {
             return await writer.RevertSourceWritesAsync(written, revertState, cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception exception) when (!IsCommitCancellation(exception, cancellationToken))
+        catch (Exception exception) when (afterLocalApply || !IsCommitCancellation(exception, cancellationToken))
         {
             return new SourceRevertResult(written, [exception]);
         }
