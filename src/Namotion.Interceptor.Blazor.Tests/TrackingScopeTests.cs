@@ -46,7 +46,7 @@ public class TrackingScopeTests
         await RenderAsync(renderer, Fragments.Scope(context, Fragments.Read<DeferredReader>("reader", person, log)));
 
         // The empty first render, the content in a batch of its own and the render of the scope after its first render.
-        await WaitAsync(() => log.Renders("reader") >= 3 && renderer.UnacknowledgedBatchCount == 0);
+        await WaitAsync(() => log.Renders("reader") >= 3 && renderer.IsSettled);
 
         // Act
         person.FirstName = "Changed";
@@ -76,7 +76,7 @@ public class TrackingScopeTests
         await WaitAsync(() => log.Value("reader") == "Changed" && renderer.UnacknowledgedBatchCount >= 2);
         var unacknowledgedBatchesAfterChange = renderer.UnacknowledgedBatchCount;
         renderer.ReleaseAcknowledgements();
-        await WaitAsync(() => log.Renders("reader") >= 3 && renderer.UnacknowledgedBatchCount == 0);
+        await WaitAsync(() => log.Renders("reader") >= 3 && renderer.IsSettled);
         person.FirstName = "Changed again";
 
         // Assert
@@ -120,10 +120,7 @@ public class TrackingScopeTests
 
         await using var renderer = new TestRenderer(TestRenderMode.Server, maximumUnacknowledgedBatches: 1);
         await RenderAsync(renderer, Fragments.Scope(context, Fragments.Read("reader", person, log)));
-
-        // Waits for the second batch to be acknowledged rather than for none to be unacknowledged: the reader renders
-        // before its batch reaches the renderer, so holding the acknowledgements in between would hold that batch too.
-        await WaitAsync(() => log.Renders("reader") == 2 && renderer.AcknowledgedBatchCount == 2);
+        await WaitAsync(() => log.Renders("reader") == 2 && renderer.IsSettled);
 
         renderer.HoldAcknowledgements();
         person.FirstName = "First";
