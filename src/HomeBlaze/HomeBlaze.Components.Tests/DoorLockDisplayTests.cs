@@ -50,19 +50,19 @@ public class DoorLockDisplayTests
     {
         Cases =
         [
-            new ValueMapCase { Value = "Locked", Text = "zu", Color = Color.Tertiary, Icon = "Key" },
-            new ValueMapCase { Value = "unlocked", Text = "offen", Color = Color.Warning },
+            new ValueMapCase { Value = "Locked", Text = "Secured", Color = Color.Tertiary, Icon = "Key" },
+            new ValueMapCase { Value = "unlocked", Text = "Not secured", Color = Color.Warning },
             new ValueMapCase { Value = "Locking", Color = Color.Info, Icon = "Sync" },
-            new ValueMapCase { Value = "Unlatched", Text = "entriegelt" }
+            new ValueMapCase { Value = "Unlatched", Text = "Latch pulled" }
         ]
     };
 
     [Theory]
-    [InlineData(DoorLockState.Locked, DoorState.Closed, ClosedDoor, Icons.Material.Filled.Key, Color.Tertiary, "zu", "zu, unlocks on click", "Unlock")]
-    [InlineData(DoorLockState.Locked, DoorState.Open, OpenDoor, Icons.Material.Filled.Key, Color.Tertiary, "zu", "zu, unlocks on click", "Unlock")]
-    [InlineData(DoorLockState.Unlocked, DoorState.Open, OpenDoor, Unlocked, Color.Warning, "offen", "offen, locks on click", "Lock")]
+    [InlineData(DoorLockState.Locked, DoorState.Closed, ClosedDoor, Icons.Material.Filled.Key, Color.Tertiary, "Secured", "Secured, unlocks on click", "Unlock")]
+    [InlineData(DoorLockState.Locked, DoorState.Open, OpenDoor, Icons.Material.Filled.Key, Color.Tertiary, "Secured", "Secured, unlocks on click", "Unlock")]
+    [InlineData(DoorLockState.Unlocked, DoorState.Open, OpenDoor, Unlocked, Color.Warning, "Not secured", "Not secured, locks on click", "Lock")]
     [InlineData(DoorLockState.Locking, DoorState.Open, OpenDoor, Icons.Material.Filled.Sync, Color.Info, "Locking…", "Locking…", null)]
-    [InlineData(DoorLockState.Unlatched, DoorState.Closed, ClosedDoor, Unlocked, Color.Default, "entriegelt", "entriegelt, locks on click", "Lock")]
+    [InlineData(DoorLockState.Unlatched, DoorState.Closed, ClosedDoor, Unlocked, Color.Default, "Latch pulled", "Latch pulled, locks on click", "Lock")]
     public void WhenMapHasACaseForTheLockState_ThenTheCaseGivesTheTextFillAndBadgeWithoutTheOpenDoor(
         DoorLockState lockState, DoorState doorState,
         string doorIcon, string badgeIcon, Color fill, string subtitle, string description, string? operation)

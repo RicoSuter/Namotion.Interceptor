@@ -22,8 +22,8 @@ The door lock tile tests change the lock at runtime and reset it after each test
 ::
 
 :: HomeBlaze.Components.ValueMap#lockmap
-::: Case Value=Locked Text="zu" Color=Tertiary Icon=Key
-::: Case Value=Unlocked Text="offen" Color=Warning Icon=LockOpen
+::: Case Value=Locked Text="Secured" Color=Tertiary Icon=Key
+::: Case Value=Unlocked Text="Not secured" Color=Warning Icon=LockOpen
 
 :: HomeBlaze.Components.GridLayout#mappedlockgrid Rows=1 Columns=2 CellAspectRatio=1:1
 ::: Cell Row=0 Column=0
