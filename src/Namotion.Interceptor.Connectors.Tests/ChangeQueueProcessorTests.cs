@@ -284,9 +284,9 @@ public class ChangeQueueProcessorTests
         var subject = new Person(context);
         var written = new ConcurrentQueue<string>();
 
-        // A large buffer time keeps the periodic flush from draining the queue during the test, so the
-        // bound is exercised purely by enqueue-side overflow. A non-null source ensures the direct
-        // (source-less) property changes are not filtered out as self-originated.
+        // A large buffer time keeps the periodic tick out of the test, which drives the drain and the flush
+        // itself. A non-null source ensures the direct (source-less) property changes are not filtered out
+        // as self-originated.
         using var processor = new ChangeQueueProcessor(
             source: new object(),
             context: context,
@@ -309,9 +309,8 @@ public class ChangeQueueProcessorTests
         var processing = processor.ProcessAsync(cancellation.Token);
 
         subject.FirstName = "warmup";
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => processor.QueueDepth == 1,
-            message: "The processor should start before the overflow changes are produced");
+        TriggerDrain(processor);
+        Assert.Equal(1, processor.QueueDepth);
         await TriggerFlushAsync(processor);
         written.Clear();
 
@@ -322,9 +321,7 @@ public class ChangeQueueProcessorTests
         subject.FirstName_MaxLength_Unit = "v3";
         subject.FirstName_MaxLength++;
 
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => processor.DropCount >= 2,
-            message: "Two of the four changes should be dropped");
+        TriggerDrain(processor);
         await TriggerFlushAsync(processor);
 
         // Assert
@@ -396,7 +393,7 @@ public class ChangeQueueProcessorTests
         using var subscription = context.CreatePropertyChangeQueueSubscription();
         var written = new ConcurrentQueue<(string Property, string? Value)>();
 
-        // The long buffer time leaves the teardown flush as the only flush, so the whole backlog
+        // The long buffer time leaves the teardown drain and flush as the only ones, so the whole backlog
         // passes through the bounded queue before anything is written.
         using var processor = new ChangeQueueProcessor(
             source: new object(),
@@ -426,11 +423,6 @@ public class ChangeQueueProcessorTests
         using var cancellation = new CancellationTokenSource(TestTimeout);
         var processing = processor.ProcessAsync(cancellation.Token);
 
-        // The buffered path does not await between dequeues, so an empty subscription means the last
-        // change is decided before the loop observes the cancellation.
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => subscription.Count == 0,
-            message: "The processor should dequeue the whole backlog");
         await cancellation.CancelAsync();
         try
         {
@@ -838,16 +830,15 @@ public class ChangeQueueProcessorTests
         using var cancellation = new CancellationTokenSource(TestTimeout);
         var processing = processor.ProcessAsync(cancellation.Token);
 
-        // Act: v1 commits and is held before it can enqueue, so it is dequeued after v2 superseded it.
+        // Act: v1 commits and is held before it can enqueue, so it is drained after v2 superseded it.
         var olderWrite = Task.Run(() => subject.FirstName = "v1");
         try
         {
             Assert.True(interceptor.Committed.Wait(TestTimeout), "v1 should commit");
 
             subject.FirstName = "v2";
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => processor.QueueDepth == 1,
-                message: "v2 should reach the bounded queue");
+            TriggerDrain(processor);
+            Assert.Equal(1, processor.QueueDepth);
         }
         finally
         {
@@ -856,11 +847,7 @@ public class ChangeQueueProcessorTests
 
         await olderWrite.WaitAsync(TestTimeout);
 
-        // The buffered path does not await between dequeues, so an empty subscription means v1 is
-        // decided before the loop observes the cancellation.
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => subscription.Count == 0,
-            message: "The processor should dequeue v1");
+        TriggerDrain(processor);
         await cancellation.CancelAsync();
         try
         {
@@ -874,6 +861,393 @@ public class ChangeQueueProcessorTests
         // Assert
         Assert.Equal([(nameof(Person.FirstName), "v2")], written.ToArray());
         Assert.Equal(0, processor.DropCount);
+    }
+
+    [Fact]
+    public async Task WhenAWriteIsInFlight_ThenLaterTicksKeepTheSubscriptionDrainedAndBounded()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithRegistry()
+            .WithPropertyChangeSubscriptions();
+        var subject = new Person(context);
+        using var subscription = context.CreatePropertyChangeQueueSubscription();
+        var writeEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var written = new ConcurrentQueue<string>();
+
+        using var processor = new ChangeQueueProcessor(
+            source: new object(),
+            subscription: subscription,
+            propertyFilter: _ => true,
+            writeHandler: async (changes, _) =>
+            {
+                foreach (var change in changes.ToArray())
+                {
+                    written.Enqueue(change.Property.Name);
+                }
+
+                writeEntered.TrySetResult();
+                await releaseWrite.Task.ConfigureAwait(false);
+            },
+            bufferTime: TimeSpan.FromMilliseconds(10),
+            maxQueueDepth: 2,
+            logger: NullLogger.Instance,
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
+
+        using var watchdog = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var watchdogRegistration = watchdog.Token.Register(() => releaseWrite.TrySetResult());
+        using var cancellation = new CancellationTokenSource();
+        var processing = processor.ProcessAsync(cancellation.Token);
+
+        subject.FirstName = "first";
+        await writeEntered.Task.WaitAsync(TestTimeout);
+
+        try
+        {
+            // Act: three changes on their own properties into a bound of two while the first write hangs.
+            subject.LastName = "a";
+            subject.FirstName_MaxLength_Unit = "b";
+            subject.FirstName_MaxLength++;
+
+            // Assert
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => processor.DropCount == 1 && subscription.Count == 0,
+                message: "The ticks should drain the subscription into the bound while the write is in flight.");
+            Assert.Equal(2, processor.QueueDepth);
+        }
+        finally
+        {
+            releaseWrite.TrySetResult();
+        }
+
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => written.Count == 3,
+            message: "The changes kept within the bound should be written once the write completes.");
+        await cancellation.CancelAsync();
+        await processing.WaitAsync(TestTimeout);
+
+        Assert.Equal(
+            [nameof(Person.FirstName), nameof(Person.FirstName_MaxLength_Unit), nameof(Person.FirstName_MaxLength)],
+            written.ToArray());
+    }
+
+    [Fact]
+    public async Task WhenThePropertyFilterChangesBeforeTheTick_ThenTheTickTimeDecisionApplies()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithRegistry()
+            .WithPropertyChangeSubscriptions();
+        var subject = new Person(context);
+        var accept = false;
+        var written = new ConcurrentQueue<string>();
+
+        using var processor = new ChangeQueueProcessor(
+            source: new object(),
+            context: context,
+            propertyFilter: _ => Volatile.Read(ref accept),
+            writeHandler: (changes, _) =>
+            {
+                foreach (var change in changes.ToArray())
+                {
+                    written.Enqueue(change.GetNewValue<string>()!);
+                }
+
+                return ValueTask.CompletedTask;
+            },
+            bufferTime: TimeSpan.FromMinutes(5),
+            maxQueueDepth: null,
+            logger: NullLogger.Instance,
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
+
+        using var cancellation = new CancellationTokenSource();
+        var processing = processor.ProcessAsync(cancellation.Token);
+
+        // Act: nothing consumes the subscription between the write and the tick, so the filter runs only then.
+        subject.FirstName = "written-while-rejected";
+        Volatile.Write(ref accept, true);
+        TriggerDrain(processor);
+        await TriggerFlushAsync(processor);
+
+        // Assert
+        Assert.Equal(["written-while-rejected"], written.ToArray());
+
+        // Cleanup
+        await cancellation.CancelAsync();
+        await processing.WaitAsync(TestTimeout);
+    }
+
+    [Fact]
+    public async Task WhenProcessingStopsWithChangesStillInTheSubscription_ThenTheTeardownDrainWritesThem()
+    {
+        // Arrange: no tick runs during the test, so the changes are still in the subscription at the stop.
+        var context = InterceptorSubjectContext.Create()
+            .WithRegistry()
+            .WithPropertyChangeSubscriptions();
+        var subject = new Person(context);
+        var written = new ConcurrentQueue<string>();
+
+        using var processor = new ChangeQueueProcessor(
+            source: new object(),
+            context: context,
+            propertyFilter: _ => true,
+            writeHandler: (changes, _) =>
+            {
+                foreach (var change in changes.ToArray())
+                {
+                    written.Enqueue(change.GetNewValue<string>()!);
+                }
+
+                return ValueTask.CompletedTask;
+            },
+            bufferTime: TimeSpan.FromMinutes(5),
+            maxQueueDepth: null,
+            logger: NullLogger.Instance,
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
+
+        using var cancellation = new CancellationTokenSource();
+        var processing = processor.ProcessAsync(cancellation.Token);
+        subject.FirstName = "John";
+        subject.LastName = "Doe";
+
+        // Act
+        await cancellation.CancelAsync();
+        await processing.WaitAsync(TestTimeout);
+
+        // Assert
+        Assert.Equal(["John", "Doe"], written.ToArray());
+        Assert.Equal(0, processor.DropCount);
+    }
+
+    [Fact]
+    public async Task WhenAWriteIsInFlightAtStop_ThenTheSubscriptionIsDrainedBeforeTheStopReturns()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithRegistry()
+            .WithPropertyChangeSubscriptions();
+        var subject = new Person(context);
+        using var subscription = context.CreatePropertyChangeQueueSubscription();
+        var writeEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        using var processor = new ChangeQueueProcessor(
+            source: new object(),
+            subscription: subscription,
+            propertyFilter: _ => true,
+            writeHandler: async (_, _) =>
+            {
+                writeEntered.TrySetResult();
+                await releaseWrite.Task.ConfigureAwait(false);
+            },
+            bufferTime: TimeSpan.FromMilliseconds(10),
+            maxQueueDepth: null,
+            logger: NullLogger.Instance,
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
+
+        using var watchdog = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var watchdogRegistration = watchdog.Token.Register(() => releaseWrite.TrySetResult());
+        using var cancellation = new CancellationTokenSource();
+        var processing = processor.ProcessAsync(cancellation.Token);
+        subject.FirstName = "in-flight";
+        await writeEntered.Task.WaitAsync(TestTimeout);
+
+        try
+        {
+            // Act: the write ignores the stop, so the stop ends at the bound while it is still awaited.
+            subject.LastName = "pending";
+            await cancellation.CancelAsync();
+            await processing.WaitAsync(TestTimeout);
+
+            // Assert: nothing is left for the subscription's owner to race the processor for, and both
+            // changes are counted, the in-flight one as unconfirmed and the drained one as undelivered.
+            Assert.False(releaseWrite.Task.IsCompleted);
+            Assert.Equal(0, subscription.Count);
+            Assert.Equal(2, processor.DropCount);
+        }
+        finally
+        {
+            releaseWrite.TrySetResult();
+        }
+    }
+
+    [Fact]
+    public async Task WhenTheTeardownDrainOutlivesTheBound_ThenTheRestOfAnExternalSubscriptionStaysWithItsOwner()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithRegistry()
+            .WithPropertyChangeSubscriptions();
+        var subject = new Person(context);
+        using var subscription = context.CreatePropertyChangeQueueSubscription();
+        var filterEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFilter = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var completionReached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        using var processor = new ChangeQueueProcessor(
+            source: new object(),
+            subscription: subscription,
+            propertyFilter: _ =>
+            {
+                filterEntered.TrySetResult();
+                releaseFilter.Task.GetAwaiter().GetResult();
+                return true;
+            },
+            writeHandler: (_, _) => ValueTask.CompletedTask,
+            bufferTime: TimeSpan.FromMinutes(5),
+            maxQueueDepth: null,
+            logger: NullLogger.Instance,
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale,
+            completionHandler: _ =>
+            {
+                completionReached.TrySetResult();
+                return ValueTask.CompletedTask;
+            });
+
+        using var watchdog = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var watchdogRegistration = watchdog.Token.Register(() => releaseFilter.TrySetResult());
+        using var cancellation = new CancellationTokenSource();
+        var processing = processor.ProcessAsync(cancellation.Token);
+        subject.FirstName = "taken";
+        subject.LastName = "left";
+
+        try
+        {
+            // Act: the teardown drain blocks in the filter on the first change until the stop gives up.
+            await cancellation.CancelAsync();
+            await filterEntered.Task.WaitAsync(TestTimeout);
+            await processing.WaitAsync(TeardownWaitTimeout);
+            releaseFilter.TrySetResult();
+            await completionReached.Task.WaitAsync(TestTimeout);
+
+            // Assert
+            Assert.Equal(1, subscription.Count);
+            Assert.True(subscription.TryDequeueImmediate(out var left));
+            Assert.Equal(nameof(Person.LastName), left.Property.Name);
+            Assert.Equal(1, processor.DropCount);
+        }
+        finally
+        {
+            releaseFilter.TrySetResult();
+        }
+    }
+
+    [Fact]
+    public async Task WhenAProcessorWithAnOwnedSubscriptionIsDisposed_ThenChangesLeftInItAreCountedAsDropped()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithRegistry()
+            .WithPropertyChangeSubscriptions();
+        var subject = new Person(context);
+        var writeHandlerInvoked = false;
+
+        var processor = new ChangeQueueProcessor(
+            source: new object(),
+            context: context,
+            propertyFilter: _ => true,
+            writeHandler: (_, _) =>
+            {
+                writeHandlerInvoked = true;
+                return ValueTask.CompletedTask;
+            },
+            bufferTime: TimeSpan.FromMinutes(5),
+            maxQueueDepth: null,
+            logger: NullLogger.Instance,
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
+
+        using var cancellation = new CancellationTokenSource();
+        var processing = processor.ProcessAsync(cancellation.Token);
+        subject.FirstName = "undelivered";
+
+        // Act: disposing ends the loop at once rather than at a tick five minutes away.
+        processor.Dispose();
+        await processing.WaitAsync(TestTimeout);
+
+        // Assert
+        Assert.False(writeHandlerInvoked);
+        Assert.Equal(1, processor.DropCount);
+    }
+
+    [Fact]
+    public async Task WhenThePropertyFilterThrowsOnATick_ThenProcessingFaultsWithThatException()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithRegistry()
+            .WithPropertyChangeSubscriptions();
+        var subject = new Person(context);
+
+        using var processor = new ChangeQueueProcessor(
+            source: new object(),
+            context: context,
+            propertyFilter: _ => throw new FilterException(),
+            writeHandler: (_, _) => ValueTask.CompletedTask,
+            bufferTime: TimeSpan.FromMilliseconds(10),
+            maxQueueDepth: null,
+            logger: NullLogger.Instance,
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
+
+        using var cancellation = new CancellationTokenSource(TestTimeout);
+        var processing = processor.ProcessAsync(cancellation.Token);
+
+        // Act & Assert: a second change is still queued, so a teardown drain would throw again.
+        subject.FirstName = "first";
+        subject.LastName = "second";
+        await Assert.ThrowsAsync<FilterException>(() => processing);
+    }
+
+    [Fact]
+    public async Task WhenTheNextProcessorTakesOverAnExternalSubscription_ThenItDeliversWhatArrivedInBetween()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithRegistry()
+            .WithPropertyChangeSubscriptions();
+        var subject = new Person(context);
+        using var subscription = context.CreatePropertyChangeQueueSubscription();
+        var firstWritten = new ConcurrentQueue<string>();
+        var secondWritten = new ConcurrentQueue<string>();
+
+        ChangeQueueProcessor CreateProcessor(ConcurrentQueue<string> written) => new(
+            source: new object(),
+            subscription: subscription,
+            propertyFilter: _ => true,
+            writeHandler: (changes, _) =>
+            {
+                foreach (var change in changes.ToArray())
+                {
+                    written.Enqueue(change.GetNewValue<string>()!);
+                }
+
+                return ValueTask.CompletedTask;
+            },
+            bufferTime: TimeSpan.FromMinutes(5),
+            maxQueueDepth: null,
+            logger: NullLogger.Instance,
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
+
+        using (var first = CreateProcessor(firstWritten))
+        {
+            using var firstCancellation = new CancellationTokenSource();
+            var firstProcessing = first.ProcessAsync(firstCancellation.Token);
+            subject.FirstName = "before-stop";
+            await firstCancellation.CancelAsync();
+            await firstProcessing.WaitAsync(TestTimeout);
+        }
+
+        // Act
+        subject.FirstName = "in-between";
+        using var second = CreateProcessor(secondWritten);
+        using var secondCancellation = new CancellationTokenSource();
+        var secondProcessing = second.ProcessAsync(secondCancellation.Token);
+        await secondCancellation.CancelAsync();
+        await secondProcessing.WaitAsync(TestTimeout);
+
+        // Assert
+        Assert.Equal(["before-stop"], firstWritten.ToArray());
+        Assert.Equal(["in-between"], secondWritten.ToArray());
     }
 
     /// <summary>
@@ -1081,6 +1455,16 @@ public class ChangeQueueProcessorTests
             .GetField("_changes", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
 
         return (ConcurrentQueue<SubjectPropertyChange>)changesField!.GetValue(processor)!;
+    }
+
+    // What a flush tick does before it flushes. Only for a buffer time no tick reaches during the test,
+    // since the drain is single consumer.
+    private static void TriggerDrain(ChangeQueueProcessor processor)
+    {
+        var drainMethod = typeof(ChangeQueueProcessor)
+            .GetMethod("DrainSubscription", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+        drainMethod!.Invoke(processor, []);
     }
 
     private static async Task TriggerFlushAsync(ChangeQueueProcessor processor)
@@ -1358,9 +1742,8 @@ public class ChangeQueueProcessorTests
         var processing = processor.ProcessAsync(cancellation.Token);
 
         subject.FirstName = "buffered";
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => processor.QueueDepth == 1,
-            message: "The change should be buffered by the processor before it stops");
+        TriggerDrain(processor);
+        Assert.Equal(1, processor.QueueDepth);
 
         // Act
         await cancellation.CancelAsync();
@@ -1528,12 +1911,12 @@ public class ChangeQueueProcessorTests
         using var cancellation = new CancellationTokenSource();
         var processing = processor.ProcessAsync(cancellation.Token);
         subject.FirstName = "buffered";
-        await filterEntered.Task.WaitAsync(TestTimeout);
 
         try
         {
-            // Act
+            // Act: no tick runs before the stop, so the teardown drain is what blocks in the filter.
             await cancellation.CancelAsync();
+            await filterEntered.Task.WaitAsync(TestTimeout);
             await processing.WaitAsync(TeardownWaitTimeout);
             processor.Dispose();
             releaseFilter.TrySetResult();
@@ -1643,7 +2026,8 @@ public class ChangeQueueProcessorTests
                 lateHandoffAdmitted = !Volatile.Read(ref ownerRetired);
                 return ValueTask.CompletedTask;
             },
-            bufferTime: TimeSpan.FromMinutes(5),
+            // Short, so a tick's drain is what blocks in the filter when the processor is disposed.
+            bufferTime: TimeSpan.FromMilliseconds(10),
             maxQueueDepth: null,
             logger: NullLogger.Instance,
             deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale,
@@ -1792,11 +2176,7 @@ public class ChangeQueueProcessorTests
             context: context,
             propertyFilter: _ =>
             {
-                if (Interlocked.Increment(ref filterCalls) == 3)
-                {
-                    cancellation.Cancel();
-                }
-
+                Interlocked.Increment(ref filterCalls);
                 return true;
             },
             writeHandler: (_, _) => ValueTask.CompletedTask,
@@ -1814,12 +2194,14 @@ public class ChangeQueueProcessorTests
             });
         var processing = processor.ProcessAsync(cancellation.Token);
         subject.FirstName = "first";
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => processor.QueueDepth == 1,
-            message: "The first change should reach the bounded processor queue.");
+        TriggerDrain(processor);
+        Assert.Equal(1, processor.QueueDepth);
 
-        // Act
+        // Act: the handler throws on the overflow of the second change, after writing a third.
         subject.FirstName = "second";
+        TriggerDrain(processor);
+        TriggerDrain(processor);
+        await cancellation.CancelAsync();
         await processing.WaitAsync(TestTimeout);
 
         // Assert
@@ -2174,9 +2556,8 @@ public class ChangeQueueProcessorTests
         using var cancellation = new CancellationTokenSource();
         var processing = processor.ProcessAsync(cancellation.Token);
         subject.FirstName = "buffered";
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => processor.QueueDepth == 1,
-            message: "The change should reach the processor buffer before cancellation.");
+        TriggerDrain(processor);
+        Assert.Equal(1, processor.QueueDepth);
 
         // Act
         await cancellation.CancelAsync();
@@ -2667,9 +3048,8 @@ public class ChangeQueueProcessorTests
         var processing = processor.ProcessAsync(cancellation.Token);
 
         subject.FirstName = "buffered";
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => processor.QueueDepth == 1,
-            message: "The change should be buffered by the processor before it stops");
+        TriggerDrain(processor);
+        Assert.Equal(1, processor.QueueDepth);
 
         try
         {

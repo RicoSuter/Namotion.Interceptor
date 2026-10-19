@@ -1452,16 +1452,14 @@ public class SubjectSourceBaseTests
         using var watchdog = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         using var watchdogRegistration = watchdog.Token.Register(() => releaseCurrentWrite.TrySetResult());
         await source.StartAsync(CancellationToken.None);
-        var probeValue = 0;
-        await AsyncTestHelpers.WaitUntilAsync(() =>
-        {
-            subject.LastName = "probe" + probeValue++;
-            return source.Diagnostics.OutboundChanges.Depth > 0;
-        }, message: "The connected processor did not start buffering the warmup write.");
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => source.IsOutboundChangeQueueRegistered,
+            message: "The connected processor did not start.");
+        subject.LastName = "warmup";
         await warmupWritten.Task.WaitAsync(TestTimeout);
-        // Changes are delivered in order, so once the fence is written no probe is left to share the
+        // Changes are delivered in order, so once the fence is written no warmup is left to share the
         // current write's batch, which the single drop asserted below relies on.
-        subject.FirstName_MaxLength = -probeValue;
+        subject.FirstName_MaxLength = -1;
         await warmupFenceWritten.Task.WaitAsync(TestTimeout);
 
         Volatile.Write(ref failCurrentWrite, true);
@@ -2063,12 +2061,10 @@ public class SubjectSourceBaseTests
         using var watchdog = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         using var watchdogRegistration = watchdog.Token.Register(() => releaseStoppedNotification.TrySetResult());
         await source.StartAsync(CancellationToken.None);
-        var probeValue = 0;
-        await AsyncTestHelpers.WaitUntilAsync(() =>
-        {
-            subject.LastName = "probe" + probeValue++;
-            return source.Diagnostics.OutboundChanges.Depth > 0;
-        }, message: "The connected processor did not buffer the warmup write.");
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => source.IsOutboundChangeQueueRegistered,
+            message: "The connected processor did not start.");
+        subject.LastName = "warmup";
         await warmupWritten.Task.WaitAsync(TestTimeout);
         await AsyncTestHelpers.WaitUntilAsync(
             () => source.Diagnostics.OutboundChanges.Depth == 0,
@@ -2488,9 +2484,9 @@ public class SubjectSourceBaseTests
     [Fact]
     public async Task WhenSourceStopsWithBufferedChanges_ThenTheyStillReachTheSource()
     {
-        // Arrange: a buffer time no periodic tick reaches during the test, so every change the pump takes
-        // off its subscription stays in the change processor buffer until the source stops. A change left
-        // there is invisible to the retry queue, which is only fed from the subscription.
+        // Arrange: a buffer time no periodic tick reaches during the test, so a change written while the
+        // change processor runs is still in the subscription when the source stops, and only the
+        // processor's teardown drain can deliver it.
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry()
@@ -2518,38 +2514,12 @@ public class SubjectSourceBaseTests
         await source.StartAsync(CancellationToken.None);
         try
         {
-            // The probe is re-written on each poll because writes captured before the change processor
-            // runs are parked in the retry queue and reconciled rather than buffered.
-            var probeValue = 0;
             await AsyncTestHelpers.WaitUntilAsync(
-                () =>
-                {
-                    person.LastName = "Probe" + probeValue++;
-                    return source.Diagnostics.OutboundChanges.Depth > 0;
-                },
-                message: "The pump did not start buffering changes.");
-
-            // The probe written by the last predicate evaluation may not be dequeued yet, and one that
-            // lands after the depth is read would satisfy the wait below on its own: the wait would then
-            // return before FirstName is dequeued, and the stop strands it in the subscription. Wait for
-            // the depth to hold across two polls first, so only the FirstName write can still grow it.
-            var previousDepth = -1;
-            await AsyncTestHelpers.WaitUntilAsync(
-                () =>
-                {
-                    var depth = source.Diagnostics.OutboundChanges.Depth;
-                    var isSettled = depth == previousDepth;
-                    previousDepth = depth;
-                    return isSettled;
-                },
-                message: "The buffered depth did not settle after the probe loop.");
+                () => source.IsOutboundChangeQueueRegistered,
+                message: "The change processor did not start.");
 
             // Act
-            var bufferedBeforeWrite = previousDepth;
             person.FirstName = "John";
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => source.Diagnostics.OutboundChanges.Depth > bufferedBeforeWrite,
-                message: "The write was not buffered by the change processor.");
         }
         finally
         {

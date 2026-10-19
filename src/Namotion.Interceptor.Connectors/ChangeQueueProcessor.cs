@@ -37,7 +37,7 @@ public class ChangeQueueProcessor : IDisposable
     private readonly Func<CancellationToken, ValueTask>? _completionHandler;
     private readonly Func<int, bool>? _mergedDeliveryAdmission;
 
-    // Use a concurrent, lock-free queue for collecting changes from the dequeue loop.
+    // Filled by the tick's drain while a flush may be emptying it, hence concurrent.
     private readonly ConcurrentQueue<SubjectPropertyChange> _changes = new();
 
     private readonly int? _maxQueueDepth;
@@ -45,6 +45,7 @@ public class ChangeQueueProcessor : IDisposable
     private int _deliveryState;
     private int _flushGate; // 0 = free, 1 = flushing
     private int _lifecycleState;
+    private PeriodicTimer? _periodicTimer;
 
     /// <summary>
     /// The rule this processor decides supersession with. Exposed so a connector can pin which rule it
@@ -60,14 +61,19 @@ public class ChangeQueueProcessor : IDisposable
 
     /// <summary>
     /// Gets the number of changes currently buffered. Approximate: read without a lock while the
-    /// pump is running. Normally 0 on the immediate path, except while a cancelled delivery is being
-    /// handed to terminal accounting during teardown.
+    /// pump is running. Counts changes taken off the subscription and not yet flushed, so it rises while
+    /// a write stays in flight across flush ticks; changes still waiting in the subscription for the
+    /// next tick are not included. Normally 0 on the immediate path, except while a cancelled delivery
+    /// is being handed to terminal accounting during teardown.
     /// </summary>
     public int QueueDepth => _changes.Count;
 
     // Scratch state used only while holding the flush gate (single-threaded access)
     private readonly List<SubjectPropertyChange> _flushChanges = [];
     private ChangeMerger? _changeMerger;
+
+    // Reused by every flush: the flush gate admits one at a time.
+    private readonly LocalYield _flushYield = new();
 
     // Reusable single-item buffer for the no-buffer (immediate) path
     private readonly SubjectPropertyChange[] _immediateBuffer = new SubjectPropertyChange[1];
@@ -96,8 +102,10 @@ public class ChangeQueueProcessor : IDisposable
     /// <param name="bufferTime">Time to buffer changes before flushing.</param>
     /// <param name="maxQueueDepth">Bound on the buffered change queue, or null for unbounded (existing
     /// connector behavior). When set, enqueuing past the bound drops the oldest unprocessed change and
-    /// increments <see cref="DropCount"/>, so the newest change is retained. A change already superseded
-    /// when it is dequeued is skipped before it reaches the queue and is not counted as dropped. Read only
+    /// increments <see cref="DropCount"/>, so the newest change is retained. Applied as each flush tick
+    /// takes changes off the subscription, including while a slow write is in flight, so up to one buffer
+    /// time of changes waits in the subscription before the bound applies. A change already superseded
+    /// when it is taken is skipped before it reaches the queue and is not counted as dropped. Read only
     /// on the buffered path, so a processor with a buffer time of zero never touches the queue this
     /// bounds.</param>
     /// <param name="logger">The logger.</param>
@@ -304,102 +312,98 @@ public class ChangeQueueProcessor : IDisposable
     {
         try
         {
-            using var periodicTimer = _bufferTime > TimeSpan.Zero ? new PeriodicTimer(_bufferTime) : null;
+            var buffered = _bufferTime > TimeSpan.Zero;
+            var drainAtTeardown = buffered;
 
-            // Not Task.Run: that queues to this thread's local queue, behind the dequeue loop below.
-            // Called directly, it suspends at the first tick and every tick resumes from the timer.
-            var flushTask = periodicTimer is not null
-                ? RunFlushLoopAsync(periodicTimer, processingToken)
-                : Task.CompletedTask;
-
-            if (periodicTimer is null)
-            {
-                _logger.LogWarning(
-                    "Change queue processor is running without buffering (bufferTime <= 0). " +
-                    "Each property change will be processed individually without merging, " +
-                    "which can cause high CPU usage under load. " +
-                    "Consider setting a bufferTime (e.g., 8-50ms) to enable batching and merging.");
-            }
+            // The flush a tick started and has not yet observed. Awaited once, at the next tick that finds
+            // it complete or at teardown: it is a pooled task, so it must not be observed twice.
+            var pendingFlush = default(ValueTask);
+            var flushFailureReported = false;
 
             try
             {
-                // Checked before every dequeue so stopping is observed while producers keep the queue fed.
-                while (!processingToken.IsCancellationRequested)
+                if (buffered)
                 {
-                    if (!_subscription.TryDequeueImmediate(out var change))
+                    using var periodicTimer = new PeriodicTimer(_bufferTime);
+
+                    // A full fence, paired with the one in Dispose: either Dispose sees the timer and
+                    // disposes it, or the loop condition below sees the disposed state.
+                    Interlocked.Exchange(ref _periodicTimer, periodicTimer);
+
+                    try
                     {
-                        // Awaited rather than blocking, so an idle processor holds no thread-pool thread.
-                        if (!await _subscription.WaitToDequeueAsync(processingToken).ConfigureAwait(false))
+                        while (Volatile.Read(ref _lifecycleState) != DisposedState &&
+                               await periodicTimer.WaitForNextTickAsync(processingToken).ConfigureAwait(false))
                         {
-                            break;
-                        }
+                            DrainSubscription();
 
-                        continue;
-                    }
-
-                    if (ReferenceEquals(change.Origin.Source, _source) && !ChangeDeliveryFilter.NeedsWriteBack(in change))
-                    {
-                        continue;
-                    }
-
-                    if (!_propertyFilter(change.Property))
-                    {
-                        continue;
-                    }
-
-                    if (periodicTimer is null)
-                    {
-                        // Commit order, not enqueue order, decides delivery; see ChangeDeliveryFilter.
-                        if (!ChangeDeliveryFilter.TryAcceptForDelivery(in change, _deliveryRule))
-                        {
-                            continue;
-                        }
-
-                        _immediateBuffer[0] = change;
-                        await WriteChangesAsync(_immediateBuffer, processingToken).ConfigureAwait(false);
-                    }
-                    else
-                    {
-                        if (_maxQueueDepth is int maxQueueDepth)
-                        {
-                            // A bounded queue drops its oldest entries on overflow, so keep superseded changes out of it.
-                            if (!ChangeDeliveryFilter.IsCurrent(in change, _deliveryRule))
+                            // Not awaited, so the next tick still drains and bounds the queue while a slow
+                            // write is in flight; the flush gate keeps flushes from overlapping.
+                            if (pendingFlush.IsCompleted)
                             {
-                                continue;
-                            }
-
-                            _changes.Enqueue(change);
-                            if (_changes.Count > maxQueueDepth)
-                            {
-                                DropOverflow(maxQueueDepth);
+                                ObserveFlush(pendingFlush, processingToken, ref flushFailureReported);
+                                pendingFlush = TryFlushAsync(processingToken);
                             }
                         }
-                        else
-                        {
-                            _changes.Enqueue(change);
-                        }
                     }
+                    catch (OperationCanceledException) when (processingToken.IsCancellationRequested)
+                    {
+                    }
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "Change queue processor is running without buffering (bufferTime <= 0). " +
+                        "Each property change will be processed individually without merging, " +
+                        "which can cause high CPU usage under load. " +
+                        "Consider setting a bufferTime (e.g., 8-50ms) to enable batching and merging.");
+
+                    await RunImmediateLoopAsync(processingToken).ConfigureAwait(false);
                 }
             }
             catch (Exception exception)
             {
+                // A filter that threw here would throw again in the teardown drain and replace this exception.
+                drainAtTeardown = false;
                 teardownStarted.TrySetResult(ExceptionDispatchInfo.Capture(exception));
                 throw;
             }
             finally
             {
                 teardownStarted.TrySetResult(null);
-                periodicTimer?.Dispose();
-                await flushTask.ConfigureAwait(false);
+                Interlocked.Exchange(ref _periodicTimer, null);
                 try
                 {
-                    await TryFlushAsync(teardownToken).ConfigureAwait(false);
+                    // Before any await, so it cannot outlive ProcessAsync giving up at the teardown bound.
+                    if (drainAtTeardown)
+                    {
+                        DrainSubscription();
+                    }
                 }
                 finally
                 {
-                    if (_completionHandler is not null)
+                    try
                     {
-                        await _completionHandler(teardownToken).ConfigureAwait(false);
+                        await pendingFlush.ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException) when (processingToken.IsCancellationRequested)
+                    {
+                    }
+                    catch (Exception exception)
+                    {
+                        ReportFlushFailure(exception, ref flushFailureReported);
+                    }
+
+                    try
+                    {
+                        await TryFlushAsync(teardownToken).ConfigureAwait(false);
+                    }
+                    finally
+                    {
+                        if (_completionHandler is not null)
+                        {
+                            await _completionHandler(teardownToken).ConfigureAwait(false);
+                        }
                     }
                 }
             }
@@ -414,26 +418,123 @@ public class ChangeQueueProcessor : IDisposable
         }
     }
 
-    private async Task RunFlushLoopAsync(PeriodicTimer periodicTimer, CancellationToken processingToken)
+    private async Task RunImmediateLoopAsync(CancellationToken processingToken)
     {
-        var flushFailureReported = false;
+        // Checked before every dequeue so stopping is observed while producers keep the queue fed.
+        while (!processingToken.IsCancellationRequested)
+        {
+            if (!_subscription.TryDequeueImmediate(out var change))
+            {
+                // Awaited rather than blocking, so an idle processor holds no thread-pool thread.
+                if (!await _subscription.WaitToDequeueAsync(processingToken).ConfigureAwait(false))
+                {
+                    break;
+                }
+
+                continue;
+            }
+
+            if (!ShouldDeliver(in change))
+            {
+                continue;
+            }
+
+            // Commit order, not enqueue order, decides delivery; see ChangeDeliveryFilter.
+            if (!ChangeDeliveryFilter.TryAcceptForDelivery(in change, _deliveryRule))
+            {
+                continue;
+            }
+
+            _immediateBuffer[0] = change;
+            await WriteChangesAsync(_immediateBuffer, processingToken).ConfigureAwait(false);
+        }
+    }
+
+    private bool ShouldDeliver(in SubjectPropertyChange change) =>
+        (!ReferenceEquals(change.Origin.Source, _source) || ChangeDeliveryFilter.NeedsWriteBack(in change)) &&
+        _propertyFilter(change.Property);
+
+    /// <summary>
+    /// Moves the changes queued on the subscription into the buffered queue, applying the filters and the
+    /// queue bound. Takes at most what was queued when it started, so a producer outpacing it cannot keep
+    /// a tick from reaching its flush.
+    /// </summary>
+    private void DrainSubscription()
+    {
+        var remaining = _subscription.Count;
+        if (remaining == 0)
+        {
+            return;
+        }
+
+        // Once ProcessAsync gives up at the teardown bound it disposes this processor and returns, and the
+        // owner of an external subscription may start draining it again: a second consumer.
+        var stopWhenDisposed = _ownedSubscription is null;
+        var maxQueueDepth = _maxQueueDepth;
+        var queued = maxQueueDepth is null ? 0 : _changes.Count;
+        var droppedCount = 0L;
         try
         {
-            while (await periodicTimer.WaitForNextTickAsync(processingToken).ConfigureAwait(false))
+            while (remaining-- > 0)
             {
-                // Catch per tick so a consumer callback cannot permanently stop delivery while dequeueing continues.
-                try
+                if (stopWhenDisposed && Volatile.Read(ref _lifecycleState) == DisposedState)
                 {
-                    await TryFlushAsync(processingToken).ConfigureAwait(false);
-                    flushFailureReported = false;
+                    break;
                 }
-                catch (Exception exception) when (exception is not OperationCanceledException)
+
+                if (!_subscription.TryDequeueImmediate(out var change))
                 {
-                    ReportFlushFailure(exception, ref flushFailureReported);
+                    break;
+                }
+
+                if (!ShouldDeliver(in change))
+                {
+                    continue;
+                }
+
+                if (maxQueueDepth is int bound)
+                {
+                    // A bounded queue drops its oldest entries on overflow, so keep superseded changes out of it.
+                    if (!ChangeDeliveryFilter.IsCurrent(in change, _deliveryRule))
+                    {
+                        continue;
+                    }
+
+                    _changes.Enqueue(change);
+
+                    // An upper bound on the queue's count: the flush only ever removes from it.
+                    if (++queued > bound)
+                    {
+                        droppedCount += DropOverflow(bound);
+                        queued = _changes.Count;
+                    }
+                }
+                else
+                {
+                    _changes.Enqueue(change);
                 }
             }
         }
-        catch (OperationCanceledException) { }
+        finally
+        {
+            if (droppedCount > 0)
+            {
+                InvokeDropHandler(droppedCount);
+            }
+        }
+    }
+
+    // Observes a completed flush once. A cancellation is the stop that the loop is about to observe.
+    private void ObserveFlush(ValueTask flush, CancellationToken processingToken, ref bool flushFailureReported)
+    {
+        try
+        {
+            flush.GetAwaiter().GetResult();
+            flushFailureReported = false;
+        }
+        catch (OperationCanceledException) when (processingToken.IsCancellationRequested)
+        {
+        }
         catch (Exception exception)
         {
             ReportFlushFailure(exception, ref flushFailureReported);
@@ -604,10 +705,10 @@ public class ChangeQueueProcessor : IDisposable
 
     /// <summary>
     /// Drops the oldest buffered changes until the queue is back within <paramref name="maxQueueDepth"/>,
-    /// incrementing <see cref="DropCount"/> for each. Best-effort: a concurrent flush may drain the queue
-    /// below the bound first, in which case fewer drops occur.
+    /// incrementing <see cref="DropCount"/> for each, and returns how many it dropped. Best-effort: a
+    /// concurrent flush may drain the queue below the bound first, in which case fewer drops occur.
     /// </summary>
-    private void DropOverflow(int maxQueueDepth)
+    private long DropOverflow(int maxQueueDepth)
     {
         var droppedCount = 0L;
         while (_changes.Count > maxQueueDepth && _changes.TryDequeue(out _))
@@ -616,10 +717,7 @@ public class ChangeQueueProcessor : IDisposable
             droppedCount++;
         }
 
-        if (droppedCount > 0)
-        {
-            InvokeDropHandler(droppedCount);
-        }
+        return droppedCount;
     }
 
     [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder))]
@@ -648,6 +746,10 @@ public class ChangeQueueProcessor : IDisposable
             {
                 return;
             }
+
+            // Off the tick from here: a merge waiting for a subject lock, or a write handler that blocks
+            // synchronously, would otherwise stop the next ticks from draining into the bound.
+            await _flushYield;
 
             merged = true;
             var mergedChanges = _changeMerger!.Merge(
@@ -682,7 +784,7 @@ public class ChangeQueueProcessor : IDisposable
             finally
             {
                 // Unconditionally, and after the cleanup rather than with it: a gate left at 1 makes every
-                // later flush return at the try-enter while the dequeue loop keeps filling the queue, so
+                // later flush return at the try-enter while the tick keeps filling the queue, so
                 // cleanup throwing would stop delivery permanently and grow the queue without bound.
                 Volatile.Write(ref _flushGate, 0);
             }
@@ -699,6 +801,9 @@ public class ChangeQueueProcessor : IDisposable
         {
             _ownedSubscription?.Dispose();
         }
+
+        // Ends a running tick loop now rather than at its next tick.
+        Volatile.Read(ref _periodicTimer)?.Dispose();
 
         ReportTerminalDrops(CloseDeliveryAndDrain());
         if (previousState == IdleState)
@@ -720,4 +825,36 @@ public class ChangeQueueProcessor : IDisposable
 
     // Called only before processing starts or after its final flush, so nulling cannot race merger use.
     private void DisposeMerger() => Interlocked.Exchange(ref _changeMerger, null)?.Dispose();
+
+    /// <summary>
+    /// Resumes the awaiting method from the current thread's local queue, so the thread runs it as soon
+    /// as it is free rather than behind the pool's global queue, without allocating. One await at a time.
+    /// </summary>
+    private sealed class LocalYield : ICriticalNotifyCompletion, IThreadPoolWorkItem
+    {
+        private Action? _continuation;
+
+        public LocalYield GetAwaiter() => this;
+
+        public bool IsCompleted => false;
+
+        public void GetResult()
+        {
+        }
+
+        public void OnCompleted(Action continuation) => UnsafeOnCompleted(continuation);
+
+        public void UnsafeOnCompleted(Action continuation)
+        {
+            _continuation = continuation;
+            ThreadPool.UnsafeQueueUserWorkItem(this, preferLocal: true);
+        }
+
+        void IThreadPoolWorkItem.Execute()
+        {
+            var continuation = _continuation!;
+            _continuation = null;
+            continuation();
+        }
+    }
 }
