@@ -90,7 +90,7 @@ A map with CSS colors for a badge on a tile that is always filled. The switch ti
 :::::: HomeBlaze.Components.Indicator Path=../Fan/IsAtTargetSpeed Map=speedbadge Kind=Icon Icon=Speed
 ::
 
-A map with a text color for a dashboard of light tiles. While the fan is off, its tiles are filled with the info color and have white text, and while it runs they are filled with the warning color and keep the dark text that goes with it:
+A map with a text color for a dashboard of light tiles. In the dark theme, where the status colors have dark text, the tiles of the fan are filled with the info color and have white text while it is off, and are filled with the warning color and keep the dark text that goes with it while it runs. In the light theme the text on both fills is white already:
 
 <!-- sample: live -->
 ~~~~markdown
@@ -119,7 +119,7 @@ A map with a text color for a dashboard of light tiles. While the fan is off, it
 :::: HomeBlaze.Components.ValueTile Kind=Tile Path=../Fan/IsPowered Map=fanlight Label="Fan"
 ::
 
-A map with a theme color with transparency, which follows the theme. The speed icon in the badge of the fan has the surface color while the fan is at its target speed and the surface color at 30 percent otherwise, dark in the dark theme and white in the light theme:
+A map with a theme color with transparency, which follows the theme. The speed icon in the badge of the fan has the surface color while the fan is at its target speed and the surface color at 30 percent otherwise, dark in the dark theme and white in the light theme. The case for the target speed uses `Surface 100%`, because MudBlazor colors no icon with the theme color `Surface`, which leaves the icon in the text color of the tile:
 
 <!-- sample: live -->
 ~~~~markdown
@@ -129,7 +129,7 @@ A map with a theme color with transparency, which follows the theme. The speed i
 ::
 
 :: HomeBlaze.Components.ValueMap#speedfaint
-::: Case Value=True Text="At target speed" Color=Surface
+::: Case Value=True Text="At target speed" Color="Surface 100%"
 ::: Case Value=False Text="Below target speed" Color="Surface 30%"
 ::
 
@@ -147,7 +147,7 @@ A map with a theme color with transparency, which follows the theme. The speed i
 ::
 
 :: HomeBlaze.Components.ValueMap#speedfaint
-::: Case Value=True Text="At target speed" Color=Surface
+::: Case Value=True Text="At target speed" Color="Surface 100%"
 ::: Case Value=False Text="Below target speed" Color="Surface 30%"
 ::
 

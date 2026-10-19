@@ -211,7 +211,6 @@ public class DoorLockTileTests : IDisposable
         await Assertions.Expect(badge).ToHaveCSSAsync("color", warningText);
     }
 
-
     [Fact]
     public async Task WhenMappedTileDoorOpens_ThenTheTextOfTheCaseStaysWithoutTheOpenDoor()
     {

@@ -61,8 +61,9 @@ public sealed partial class ValueColor
 
     /// <summary>
     /// The inline style that redefines the primary color of MudBlazor as the CSS color, and the text on it as black or
-    /// white, whichever contrasts more, the text color of the theme for a <c>var()</c>, or the text of the palette color
-    /// for a theme color with alpha, which <c>Primary</c> with alpha keeps as it is. Null for a theme color.
+    /// white, whichever contrasts more, the text color of the theme for a <c>var()</c> and for <c>Surface</c> with alpha,
+    /// or the text of the palette color for another theme color with alpha, which <c>Primary</c> with alpha keeps as it
+    /// is. Null for a theme color.
     /// </summary>
     public string? Style { get; }
 
