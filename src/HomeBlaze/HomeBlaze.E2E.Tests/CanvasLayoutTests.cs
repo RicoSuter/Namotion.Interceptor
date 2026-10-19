@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 using HomeBlaze.E2E.Tests.Infrastructure;
@@ -26,6 +27,8 @@ public class CanvasLayoutTests
 
     // The page that tests overwrite. Each of them writes its own content before it opens the page.
     private const string ScratchPage = "Scratch.md";
+
+    private static readonly Regex ComputedAnglePattern = new(@"^\s*(-?[0-9.]+)deg\s*$");
 
     private static readonly Regex FirstNodePositionPattern = new("^::: Node X=(-?\\d+) Y=(-?\\d+) ", RegexOptions.Multiline);
 
@@ -578,6 +581,7 @@ public class CanvasLayoutTests
         Assert.InRange(sizes.SizerWidth, drawnWidth - 1, drawnWidth + 1);
         Assert.InRange(sizes.SizerHeight, height * factor - 1, height * factor + 1);
         Assert.InRange(sizes.Scale, factor - 0.001, factor + 0.001);
+        AssertAngleIsComputed(sizes, factor);
     }
 
     [Fact]
@@ -607,6 +611,9 @@ public class CanvasLayoutTests
         Assert.InRange(inner.SizerHeight, inner.SizerWidth * 100 / 250 - 1, inner.SizerWidth * 100 / 250 + 1);
         Assert.InRange(second.Scale, second.FrameWidth / 400 - 0.001, second.FrameWidth / 400 + 0.001);
         Assert.InRange(second.SizerHeight, second.FrameWidth * 100 / 400 - 1, second.FrameWidth * 100 / 400 + 1);
+        AssertAngleIsComputed(outer, outer.FrameWidth / 1000);
+        AssertAngleIsComputed(inner, inner.FrameWidth / 250);
+        AssertAngleIsComputed(second, second.FrameWidth / 400);
     }
 
     private async Task AssertWheelScrollsPageAsync(Func<Box, (double X, double Y)> getTarget)
@@ -829,9 +836,11 @@ public class CanvasLayoutTests
     }
 
     // The width of the frame in its own pixels, which is what the canvas fits, the drawn size of the sizer and the canvas as
-    // the page shows them, and the factor of the transform of the canvas.
+    // the page shows them, the factor of the transform of the canvas, and the computed angle of the sizer.
     private static async Task<ScaledSizes> GetScaledSizesAsync(ILocator frame)
     {
+        var angle = await frame.EvaluateAsync<string>(
+            "frame => getComputedStyle(frame.firstElementChild).getPropertyValue('--canvas-scale-angle')");
         var values = await frame.EvaluateAsync<double[]>(
             """
             frame => {
@@ -843,10 +852,20 @@ public class CanvasLayoutTests
             }
             """);
 
-        return new ScaledSizes(values[0], values[1], values[2], values[3], values[4]);
+        return new ScaledSizes(values[0], values[1], values[2], values[3], values[4], angle);
     }
 
-    private sealed record ScaledSizes(double FrameWidth, double SizerWidth, double SizerHeight, double CanvasWidth, double Scale);
+    // Only a registered angle property computes to degrees; an unregistered one keeps the atan2 text, which WebKit then
+    // computes wrong. This fails when the registration of CanvasLayoutWidget.razor.css does not reach the page.
+    private static void AssertAngleIsComputed(ScaledSizes sizes, double factor)
+    {
+        var match = ComputedAnglePattern.Match(sizes.Angle);
+        Assert.True(match.Success, $"The angle is not computed, so its property is not registered: '{sizes.Angle}'");
+        var expectedDegrees = Math.Atan(factor) * 180 / Math.PI;
+        Assert.InRange(double.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture), expectedDegrees - 0.05, expectedDegrees + 0.05);
+    }
+
+    private sealed record ScaledSizes(double FrameWidth, double SizerWidth, double SizerHeight, double CanvasWidth, double Scale, string Angle);
 
     // A canvas that fits the width with a node at its left edge.
     private static string CreateFitWidthCanvasPage(int designWidth, int height, int? minWidth, int? maxWidth)

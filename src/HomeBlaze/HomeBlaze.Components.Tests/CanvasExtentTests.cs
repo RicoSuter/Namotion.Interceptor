@@ -110,17 +110,6 @@ public class CanvasExtentTests
         Assert.Equal("clamp(720px, 100cqw, 1104px)", drawnWidth);
     }
 
-    [Fact]
-    public void WhenCanvasIsScaled_ThenTheFactorIsTheTangentOfTheRegisteredAngle()
-    {
-        // Act
-        var factor = CanvasExtent.Factor;
-
-        // Assert
-        Assert.Equal("--canvas-scale-angle", CanvasExtent.AngleProperty);
-        Assert.Equal("tan(var(--canvas-scale-angle))", factor);
-    }
-
     [Theory]
     [InlineData(0)]
     [InlineData(-5)]
