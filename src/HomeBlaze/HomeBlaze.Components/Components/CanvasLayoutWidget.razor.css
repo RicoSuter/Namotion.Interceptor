@@ -1,0 +1,7 @@
+/* CanvasExtent.AngleProperty, which works only registered as an angle (see CanvasExtent.Factor). A registration cannot be
+   an inline style, and the style element of the widget would need its syntax escaped from Razor. */
+@property --canvas-scale-angle {
+    syntax: '<angle>';
+    inherits: true;
+    initial-value: 0deg;
+}

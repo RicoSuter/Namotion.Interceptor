@@ -549,6 +549,66 @@ public class CanvasLayoutTests
         await WaitForCanvasToFitItsFrameAsync(page.GetByTestId("canvas-scale-frame"), designWidth: 400);
     }
 
+    [Theory]
+    [InlineData(390, null, null)]
+    [InlineData(390, 720, null)]
+    [InlineData(390, null, 250)]
+    [InlineData(390, 971, 1410)]
+    [InlineData(ViewportWidth, null, null)]
+    [InlineData(ViewportWidth, null, 600)]
+    public async Task WhenCanvasThatFitsTheWidthIsShown_ThenItIsDrawnAtTheFactorOfItsDrawnWidthToItsDesignWidth(
+        int viewportWidth, int? minWidth, int? maxWidth)
+    {
+        // Arrange
+        const int designWidth = 1410;
+        const int height = 300;
+        await _fixture.WriteDemoPageAsync(ScratchPage, CreateFitWidthCanvasPage(designWidth, height, minWidth, maxWidth));
+
+        // Act
+        var page = await OpenScratchPageAsync(viewportWidth);
+
+        // Assert: the drawn width is the width of the frame within the least and the largest width, of which the least wins.
+        var frame = page.GetByTestId("canvas-scale-frame");
+        await frame.Locator(".canvas-node").First.WaitForAsync(new() { Timeout = Timeout });
+        var sizes = await GetScaledSizesAsync(frame);
+        var drawnWidth = Math.Max(Math.Min(sizes.FrameWidth, maxWidth ?? double.MaxValue), minWidth ?? 0);
+        var factor = drawnWidth / designWidth;
+        Assert.True(sizes.FrameWidth > 0, $"The frame has no width: {sizes.FrameWidth}");
+        Assert.InRange(sizes.CanvasWidth, drawnWidth - 1, drawnWidth + 1);
+        Assert.InRange(sizes.SizerWidth, drawnWidth - 1, drawnWidth + 1);
+        Assert.InRange(sizes.SizerHeight, height * factor - 1, height * factor + 1);
+        Assert.InRange(sizes.Scale, factor - 0.001, factor + 0.001);
+    }
+
+    [Fact]
+    public async Task WhenCanvasesThatFitTheWidthAreNestedOrOnOnePage_ThenEachIsDrawnAtItsOwnFactor()
+    {
+        // Arrange: the inner canvas is drawn larger than its design width in the node of the outer one, which is drawn smaller
+        // than its design width on the page, and the second canvas below has a design width of its own.
+        await _fixture.WriteDemoPageAsync(ScratchPage, CreateNestedFitWidthCanvasPage());
+
+        // Act
+        var page = await OpenScratchPageAsync(390);
+
+        // Assert
+        var frames = page.GetByTestId("canvas-scale-frame");
+        await Assertions.Expect(frames).ToHaveCountAsync(3, new() { Timeout = Timeout });
+        await frames.Nth(1).Locator(".canvas-node").First.WaitForAsync(new() { Timeout = Timeout });
+        await frames.Nth(2).Locator(".canvas-node").First.WaitForAsync(new() { Timeout = Timeout });
+
+        var outer = await GetScaledSizesAsync(frames.Nth(0));
+        var inner = await GetScaledSizesAsync(frames.Nth(1));
+        var second = await GetScaledSizesAsync(frames.Nth(2));
+
+        Assert.InRange(outer.Scale, outer.FrameWidth / 1000 - 0.001, outer.FrameWidth / 1000 + 0.001);
+        Assert.InRange(outer.SizerHeight, outer.FrameWidth * 400 / 1000 - 1, outer.FrameWidth * 400 / 1000 + 1);
+        Assert.True(inner.FrameWidth > 250, $"The node does not give the inner canvas its width: {inner.FrameWidth}");
+        Assert.InRange(inner.Scale, inner.FrameWidth / 250 - 0.001, inner.FrameWidth / 250 + 0.001);
+        Assert.InRange(inner.SizerHeight, inner.SizerWidth * 100 / 250 - 1, inner.SizerWidth * 100 / 250 + 1);
+        Assert.InRange(second.Scale, second.FrameWidth / 400 - 0.001, second.FrameWidth / 400 + 0.001);
+        Assert.InRange(second.SizerHeight, second.FrameWidth * 100 / 400 - 1, second.FrameWidth * 100 / 400 + 1);
+    }
+
     private async Task AssertWheelScrollsPageAsync(Func<Box, (double X, double Y)> getTarget)
     {
         var page = await OpenCanvasPageAsync(withTextBelow: true);
@@ -766,6 +826,66 @@ public class CanvasLayoutTests
             """,
             new object[] { await frame.ElementHandleAsync(), designWidth },
             new() { Timeout = Timeout });
+    }
+
+    // The width of the frame in its own pixels, which is what the canvas fits, the drawn size of the sizer and the canvas as
+    // the page shows them, and the factor of the transform of the canvas.
+    private static async Task<ScaledSizes> GetScaledSizesAsync(ILocator frame)
+    {
+        var values = await frame.EvaluateAsync<double[]>(
+            """
+            frame => {
+                const sizer = frame.firstElementChild;
+                const canvas = frame.querySelector('.canvas-layout-container');
+                const sizerRectangle = sizer.getBoundingClientRect();
+                return [frame.clientWidth, sizerRectangle.width, sizerRectangle.height, canvas.getBoundingClientRect().width,
+                    new DOMMatrixReadOnly(getComputedStyle(canvas).transform).a];
+            }
+            """);
+
+        return new ScaledSizes(values[0], values[1], values[2], values[3], values[4]);
+    }
+
+    private sealed record ScaledSizes(double FrameWidth, double SizerWidth, double SizerHeight, double CanvasWidth, double Scale);
+
+    // A canvas that fits the width with a node at its left edge.
+    private static string CreateFitWidthCanvasPage(int designWidth, int height, int? minWidth, int? maxWidth)
+    {
+        var builder = new StringBuilder();
+        builder.Append("---\ntitle: Scratch\n---\n\n# Scratch\n\n");
+        builder.Append($":: HomeBlaze.Components.CanvasLayout#canvas Width={designWidth}");
+        if (minWidth is { } least)
+        {
+            builder.Append($" MinWidth={least}");
+        }
+
+        if (maxWidth is { } largest)
+        {
+            builder.Append($" MaxWidth={largest}");
+        }
+
+        builder.Append($" Scale=FitWidth MinHeight={height}\n");
+        builder.Append($"::: Node X=0 Y=0 Width=300 Height={height}\n");
+        builder.Append(":::: HomeBlaze.Components.Card Title=\"Scaled\"\n");
+        builder.Append("::\n");
+        return builder.ToString();
+    }
+
+    // A canvas 1000 pixels wide with a node 500 pixels wide that holds a canvas 250 pixels wide, and another canvas 400 pixels
+    // wide below them, all of which fit the width.
+    private static string CreateNestedFitWidthCanvasPage()
+    {
+        return "---\ntitle: Scratch\n---\n\n# Scratch\n\n"
+            + ":: HomeBlaze.Components.CanvasLayout#outer Width=1000 Scale=FitWidth MinHeight=400\n"
+            + "::: Node#holder X=0 Y=0 Width=500 Height=400\n"
+            + ":::: HomeBlaze.Components.CanvasLayout#inner Width=250 Scale=FitWidth MinHeight=100\n"
+            + "::::: Node X=0 Y=0 Width=250 Height=100\n"
+            + ":::::: HomeBlaze.Components.Card Title=\"Inner\"\n"
+            + "::\n\n"
+            + ":: HomeBlaze.Components.CanvasLayout#second Width=400 Scale=FitWidth MinHeight=100\n"
+            + "::: Node X=0 Y=0 Width=400 Height=100\n"
+            + ":::: HomeBlaze.Components.Card Title=\"Second\"\n"
+            + "::\n";
     }
 
     // Each tab holds a canvas whose node stands at the right edge of its 1104 pixel design width.

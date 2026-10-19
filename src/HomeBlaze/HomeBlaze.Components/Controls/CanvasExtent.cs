@@ -53,10 +53,25 @@ internal static class CanvasExtent
     };
 
     /// <summary>
-    /// Gets the CSS number a canvas that <see cref="IsScaled"/> is drawn at: its <see cref="GetDrawnWidth"/> over its
-    /// design width.
+    /// The custom property that holds the <see cref="GetAngle"/> of a canvas, which the canvas widget sets on an element in
+    /// the frame, so that the element and its descendants can use the <see cref="Factor"/>.
+    /// </summary>
+    // Registered as an inherited angle in CanvasLayoutWidget.razor.css, which must use the same name.
+    public const string AngleProperty = "--canvas-scale-angle";
+
+    /// <summary>
+    /// Gets the CSS angle whose tangent is the factor a canvas that <see cref="IsScaled"/> is drawn at: the angle between
+    /// its <see cref="GetDrawnWidth"/> and its design width.
     /// </summary>
     // CSS divides a length by a length only through the tangent of the angle between them.
-    public static string GetFactor(int designWidth, int? minWidth, int? maxWidth) =>
-        string.Create(CultureInfo.InvariantCulture, $"tan(atan2({GetDrawnWidth(minWidth, maxWidth)}, {designWidth}px))");
+    public static string GetAngle(int designWidth, int? minWidth, int? maxWidth) =>
+        string.Create(CultureInfo.InvariantCulture, $"atan2({GetDrawnWidth(minWidth, maxWidth)}, {designWidth}px)");
+
+    /// <summary>
+    /// The CSS number a canvas that <see cref="IsScaled"/> is drawn at, from the <see cref="AngleProperty"/> set on the
+    /// element or an ancestor in the frame: its <see cref="GetDrawnWidth"/> over its design width.
+    /// </summary>
+    // Not tan(atan2(...)) directly: WebKit takes an atan2 that depends on the layout, as one of cqw does, for degrees and
+    // its tangent for radians. It computes the registered angle property right.
+    public const string Factor = "tan(var(" + AngleProperty + "))";
 }

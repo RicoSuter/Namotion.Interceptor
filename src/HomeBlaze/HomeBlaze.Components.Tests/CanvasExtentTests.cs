@@ -62,11 +62,11 @@ public class CanvasExtentTests
     public void WhenCanvasHasNoMinWidth_ThenItIsDrawnAtTheWidthOfItsFrame()
     {
         // Act
-        var factor = CanvasExtent.GetFactor(1104, null, null);
+        var angle = CanvasExtent.GetAngle(1104, null, null);
 
         // Assert
         Assert.Equal("100cqw", CanvasExtent.GetDrawnWidth(null, null));
-        Assert.Equal("tan(atan2(100cqw, 1104px))", factor);
+        Assert.Equal("atan2(100cqw, 1104px)", angle);
     }
 
     [Theory]
@@ -82,22 +82,22 @@ public class CanvasExtentTests
     public void WhenCanvasHasAMinWidth_ThenItIsDrawnAtLeastThatWide()
     {
         // Act
-        var factor = CanvasExtent.GetFactor(1000, 750, null);
+        var angle = CanvasExtent.GetAngle(1000, 750, null);
 
         // Assert
         Assert.Equal("max(100cqw, 750px)", CanvasExtent.GetDrawnWidth(750, null));
-        Assert.Equal("tan(atan2(max(100cqw, 750px), 1000px))", factor);
+        Assert.Equal("atan2(max(100cqw, 750px), 1000px)", angle);
     }
 
     [Fact]
     public void WhenCanvasHasAMaxWidth_ThenItIsDrawnAtMostThatWide()
     {
         // Act
-        var factor = CanvasExtent.GetFactor(1104, null, 1104);
+        var angle = CanvasExtent.GetAngle(1104, null, 1104);
 
         // Assert
         Assert.Equal("min(100cqw, 1104px)", CanvasExtent.GetDrawnWidth(null, 1104));
-        Assert.Equal("tan(atan2(min(100cqw, 1104px), 1104px))", factor);
+        Assert.Equal("atan2(min(100cqw, 1104px), 1104px)", angle);
     }
 
     [Fact]
@@ -108,6 +108,17 @@ public class CanvasExtentTests
 
         // Assert
         Assert.Equal("clamp(720px, 100cqw, 1104px)", drawnWidth);
+    }
+
+    [Fact]
+    public void WhenCanvasIsScaled_ThenTheFactorIsTheTangentOfTheRegisteredAngle()
+    {
+        // Act
+        var factor = CanvasExtent.Factor;
+
+        // Assert
+        Assert.Equal("--canvas-scale-angle", CanvasExtent.AngleProperty);
+        Assert.Equal("tan(var(--canvas-scale-angle))", factor);
     }
 
     [Theory]
