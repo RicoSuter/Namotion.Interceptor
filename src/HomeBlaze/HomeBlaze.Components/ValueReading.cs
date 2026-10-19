@@ -22,6 +22,12 @@ public sealed record ValueReading(
     /// <summary>The reading of a widget that has no value to show and knows no property and no map.</summary>
     public static ValueReading Missing { get; } = new(null, null, ValueReader.MissingText, ValueColor.Default, null, null);
 
+    /// <summary>
+    /// The text color of the matched case on a tile or a chip that <see cref="Color"/> fills, or
+    /// <see cref="ValueColor.Default"/> for the text color that goes with the fill.
+    /// </summary>
+    public ValueColor TextColor { get; init; } = ValueColor.Default;
+
     /// <summary>Whether there is no value to show.</summary>
     public bool IsMissing => Value is null;
 }

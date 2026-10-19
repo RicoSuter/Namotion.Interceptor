@@ -191,6 +191,36 @@ public class DoorLockTileTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenCaseOfTheStateHasATextColor_ThenTheTextAndTheBadgeHaveItAndAStateWithoutOneKeepsTheTextOfTheFill()
+    {
+        // Arrange
+        var (page, tile) = await OpenMappedTileAsync(DoorLockState.Locked, "Secured");
+        var root = GetTileRoot(tile);
+        var badge = root.GetByTestId("tile-badge").Locator("svg");
+        var white = await page.ResolveColorAsync("#ffffff");
+        await Assertions.Expect(root).ToHaveCSSAsync("color", white, new() { Timeout = Timeout });
+        await Assertions.Expect(badge).ToHaveCSSAsync("color", white);
+
+        // Act
+        GetLock().LockState = DoorLockState.Unlocked;
+
+        // Assert
+        await Assertions.Expect(tile.GetByTestId("tile-subtitle")).ToHaveTextAsync("Not secured", new() { Timeout = Timeout });
+        var warningText = await page.ResolveColorAsync("var(--mud-palette-warning-text)");
+        await Assertions.Expect(root).ToHaveCSSAsync("color", warningText);
+        await Assertions.Expect(badge).ToHaveCSSAsync("color", warningText);
+    }
+
+    private async Task<(IPage Page, ILocator Tile)> OpenMappedTileAsync(DoorLockState lockState, string expectedSubtitle)
+    {
+        SetLockState(lockState, DoorState.Closed);
+        var page = await OpenPageAsync();
+        var tile = GetTile(page, "Mapped front door");
+        await Assertions.Expect(tile.GetByTestId("tile-subtitle")).ToHaveTextAsync(expectedSubtitle, new() { Timeout = Timeout });
+        return (page, tile);
+    }
+
+    [Fact]
     public async Task WhenMappedTileDoorOpens_ThenTheTextOfTheCaseStaysWithoutTheOpenDoor()
     {
         // Arrange

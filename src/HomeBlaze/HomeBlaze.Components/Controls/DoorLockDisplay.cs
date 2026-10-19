@@ -7,9 +7,9 @@ namespace HomeBlaze.Components.Controls;
 /// <summary>
 /// What a door lock tile shows. <see cref="Description"/> is the text of the state followed by what a click does, and
 /// <see cref="Operation"/> names the operation a click invokes; when a click does nothing, they are the text of the
-/// state alone and null.
+/// state alone and null. <see cref="TextColor"/> is <see cref="ValueColor.Default"/> for the text color of the fill.
 /// </summary>
-internal readonly record struct DoorLockAppearance(string DoorIcon, string BadgeIcon, ValueColor Fill, string Subtitle, string Description, string? Operation);
+internal readonly record struct DoorLockAppearance(string DoorIcon, string BadgeIcon, ValueColor Fill, ValueColor TextColor, string Subtitle, string Description, string? Operation);
 
 /// <summary>
 /// Gets what a door lock tile shows for the state of the lock and of its door.
@@ -18,7 +18,7 @@ internal static class DoorLockDisplay
 {
     /// <summary>
     /// Gets the appearance of the tile. The case of the map for the name of the lock state, when there is one, gives
-    /// the fill, the badge icon when it has one, and the text without the open door, which the door icon shows.
+    /// the fill, its text color, the badge icon when it has one, and the text without the open door, which the door icon shows.
     /// </summary>
     public static DoorLockAppearance Get(DoorLockState? lockState, DoorState? doorState, ValueMap? map = null)
     {
@@ -51,13 +51,14 @@ internal static class DoorLockDisplay
                 doorIcon,
                 MudBlazorIconResolver.ResolveOrNull(matched.Icon) ?? badgeIcon,
                 matched.GetColor(),
+                matched.GetTextColor(),
                 text,
                 operation is null ? text : string.Concat(text, clickText),
                 operation);
         }
 
         return isOpen
-            ? new DoorLockAppearance(doorIcon, badgeIcon, fill, openSubtitle, openDescription ?? openSubtitle, operation)
-            : new DoorLockAppearance(doorIcon, badgeIcon, fill, subtitle, description ?? subtitle, operation);
+            ? new DoorLockAppearance(doorIcon, badgeIcon, fill, ValueColor.Default, openSubtitle, openDescription ?? openSubtitle, operation)
+            : new DoorLockAppearance(doorIcon, badgeIcon, fill, ValueColor.Default, subtitle, description ?? subtitle, operation);
     }
 }

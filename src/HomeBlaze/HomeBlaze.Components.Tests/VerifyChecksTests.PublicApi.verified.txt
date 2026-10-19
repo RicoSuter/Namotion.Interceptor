@@ -826,6 +826,8 @@ namespace HomeBlaze.Components
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public string? Text { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string? TextColor { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
         public string? Value { get; set; }
         public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
         public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
@@ -833,6 +835,7 @@ namespace HomeBlaze.Components
         public HomeBlaze.Components.ValueColor GetColor() { }
         protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
         protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        public HomeBlaze.Components.ValueColor GetTextColor() { }
         protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
         protected void RaisePropertyChanged(string propertyName) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
@@ -859,6 +862,7 @@ namespace HomeBlaze.Components
         public string? MapError { get; init; }
         public Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? Property { get; init; }
         public string Text { get; init; }
+        public HomeBlaze.Components.ValueColor TextColor { get; init; }
         public object? Value { get; init; }
         public static HomeBlaze.Components.ValueReading Missing { get; }
     }
@@ -1382,6 +1386,8 @@ namespace HomeBlaze.Components.Components
         public string? Subtitle { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public string? TestId { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public HomeBlaze.Components.ValueColor TextColor { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public string? Tooltip { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]

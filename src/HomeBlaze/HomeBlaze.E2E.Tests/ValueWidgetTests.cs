@@ -430,6 +430,90 @@ public class ValueWidgetTests
     }
 
     [Fact]
+    public async Task WhenCaseOfAMapHasATextColor_ThenTheTilesAndTheChipHaveItAndACaseWithoutOneKeepsTheTextOfTheFill()
+    {
+        // Arrange
+        var (name, subject) = await _fixture.AddSubjectToRootAsync<LiveValuesSubject>();
+        subject.IsOn = false;
+        try
+        {
+            var page = await OpenQuietPageAsync(
+                ":: HomeBlaze.Components.ValueMap#light\n" +
+                "::: Case Value=False Text=\"aus\" Color=Info TextColor=\"#ffffff\"\n" +
+                "::: Case Value=True Text=\"an\" Color=Warning\n" +
+                "::\n\n" +
+                $":: HomeBlaze.Components.Switch Kind=Tile Path=\"/{name}/IsOn\" Map=light Label=\"Light\"\n::\n\n" +
+                $":: HomeBlaze.Components.ValueTile Path=\"/{name}/IsOn\" Map=light Kind=Tile\n::\n\n" +
+                $":: HomeBlaze.Components.Indicator Path=\"/{name}/IsOn\" Map=light\n::\n");
+            var switchTile = page.GetByTestId("switch-tile");
+            var valueTile = page.GetByTestId("value-tile");
+            var chip = page.GetByTestId("indicator").And(page.Locator(".mud-chip"));
+            var white = await page.ResolveColorAsync("#ffffff");
+            await Assertions.Expect(switchTile).ToHaveCSSAsync("color", white, new() { Timeout = Timeout });
+            await Assertions.Expect(switchTile).ToHaveCSSAsync("background-color", await page.ResolveColorAsync("var(--mud-palette-info)"));
+            await Assertions.Expect(valueTile).ToHaveCSSAsync("color", white);
+            await Assertions.Expect(chip).ToHaveCSSAsync("color", white);
+            await Assertions.Expect(chip).ToHaveCSSAsync("background-color", await page.ResolveColorAsync("var(--mud-palette-info)"));
+
+            // Act
+            subject.IsOn = true;
+
+            // Assert
+            var warningText = await page.ResolveColorAsync("var(--mud-palette-warning-text)");
+            await Assertions.Expect(switchTile).ToHaveCSSAsync("background-color", await page.ResolveColorAsync("var(--mud-palette-warning)"), new() { Timeout = Timeout });
+            await Assertions.Expect(switchTile).ToHaveCSSAsync("color", warningText);
+            await Assertions.Expect(valueTile).ToHaveCSSAsync("color", warningText);
+            await Assertions.Expect(chip).ToHaveCSSAsync("color", warningText);
+        }
+        finally
+        {
+            _fixture.RemoveSubjectFromRoot(name, subject);
+        }
+    }
+
+    [Fact]
+    public async Task WhenCaseOfAMapHasAThemeColorWithAPercentage_ThenTheIconAndTheChipHaveItWithAlphaInTheDarkAndTheLightTheme()
+    {
+        // Arrange
+        var (name, subject) = await _fixture.AddPlainSubjectToRootAsync(label: "quiet");
+        try
+        {
+            var page = await OpenQuietPageAsync(
+                ":: HomeBlaze.Components.ValueMap#motion\n" +
+                "::: Case Value=moving Color=Surface Icon=DirectionsRun\n" +
+                "::: Case Value=quiet Color=\"Surface 30%\" Icon=PersonOff\n" +
+                "::\n\n" +
+                ":: HomeBlaze.Components.ValueMap#half\n" +
+                "::: Case Value=quiet Color=\"Primary 50%\"\n" +
+                "::\n\n" +
+                $":: HomeBlaze.Components.Indicator Path=\"/{name}/Label\" Map=motion Kind=Icon\n::\n\n" +
+                $":: HomeBlaze.Components.Indicator Path=\"/{name}/Label\" Map=half\n::\n");
+            var icon = GetFirstIconIndicator(page);
+            var chip = page.GetByTestId("indicator").And(page.Locator(".mud-chip"));
+
+            // Act & Assert: the app starts in the dark theme.
+            var darkIcon = await page.ResolveColorAsync("color-mix(in srgb, var(--mud-palette-surface) 30%, transparent)");
+            await Assertions.Expect(icon).ToHaveCSSAsync("color", darkIcon, new() { Timeout = Timeout });
+            await Assertions.Expect(chip).ToHaveCSSAsync("background-color", await page.ResolveColorAsync("rgba(var(--mud-palette-primary-rgb), 0.5)"));
+            Assert.NotEqual(await page.ResolveColorAsync("var(--mud-palette-surface)"), darkIcon);
+
+            // Act
+            await page.GetByTitle("Toggle Dark Mode").ClickAsync();
+            await Assertions.Expect(page.Locator(".homeblaze-dark-mode")).ToHaveCountAsync(0, new() { Timeout = Timeout });
+
+            // Assert: the same case follows the light theme.
+            var lightIcon = await page.ResolveColorAsync("color-mix(in srgb, var(--mud-palette-surface) 30%, transparent)");
+            Assert.NotEqual(darkIcon, lightIcon);
+            await Assertions.Expect(icon).ToHaveCSSAsync("color", lightIcon, new() { Timeout = Timeout });
+            await Assertions.Expect(chip).ToHaveCSSAsync("background-color", await page.ResolveColorAsync("rgba(var(--mud-palette-primary-rgb), 0.5)"));
+        }
+        finally
+        {
+            _fixture.RemoveSubjectFromRoot(name, subject);
+        }
+    }
+
+    [Fact]
     public async Task WhenCaseOfAMapHasNoColor_ThenTheWidgetsOfTheMapShowTheErrorInTheirPlace()
     {
         // Arrange

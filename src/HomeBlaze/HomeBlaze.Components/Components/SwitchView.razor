@@ -55,6 +55,7 @@
               Subtitle="@subtitle"
               Icon="@icon"
               Color="@fill"
+              TextColor="@(matched?.GetTextColor() ?? ValueColor.Default)"
               Disabled="@isDisabled"
               IsBusy="@(_pending is not null)"
               Badge="@Badge"
