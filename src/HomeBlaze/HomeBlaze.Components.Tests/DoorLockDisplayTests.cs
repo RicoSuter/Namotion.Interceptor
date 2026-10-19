@@ -43,7 +43,7 @@ public class DoorLockDisplayTests
         var appearance = DoorLockDisplay.Get(lockState, doorState);
 
         // Assert
-        Assert.Equal(new DoorLockAppearance(doorIcon, badgeIcon, fill, subtitle, description, operation), appearance);
+        Assert.Equal(new DoorLockAppearance(doorIcon, badgeIcon, fill, subtitle, subtitle, description, operation), appearance);
     }
 
     private static ValueMap CreateMap() => new()
@@ -58,14 +58,14 @@ public class DoorLockDisplayTests
     };
 
     [Theory]
-    [InlineData(DoorLockState.Locked, DoorState.Closed, ClosedDoor, Icons.Material.Filled.Key, Color.Tertiary, "Secured", "Secured, unlocks on click", "Unlock")]
-    [InlineData(DoorLockState.Locked, DoorState.Open, OpenDoor, Icons.Material.Filled.Key, Color.Tertiary, "Secured", "Secured, unlocks on click", "Unlock")]
-    [InlineData(DoorLockState.Unlocked, DoorState.Open, OpenDoor, Unlocked, Color.Warning, "Not secured", "Not secured, locks on click", "Lock")]
-    [InlineData(DoorLockState.Locking, DoorState.Open, OpenDoor, Icons.Material.Filled.Sync, Color.Info, "Locking…", "Locking…", null)]
-    [InlineData(DoorLockState.Unlatched, DoorState.Closed, ClosedDoor, Unlocked, Color.Default, "Latch pulled", "Latch pulled, locks on click", "Lock")]
-    public void WhenMapHasACaseForTheLockState_ThenTheCaseGivesTheTextFillAndBadgeWithoutTheOpenDoor(
+    [InlineData(DoorLockState.Locked, DoorState.Closed, ClosedDoor, Icons.Material.Filled.Key, Color.Tertiary, "Secured", "Secured", "Secured, unlocks on click", "Unlock")]
+    [InlineData(DoorLockState.Locked, DoorState.Open, OpenDoor, Icons.Material.Filled.Key, Color.Tertiary, "Secured", "Secured · open", "Secured · open, unlocks on click", "Unlock")]
+    [InlineData(DoorLockState.Unlocked, DoorState.Open, OpenDoor, Unlocked, Color.Warning, "Not secured", "Not secured · open", "Not secured · open, locks on click", "Lock")]
+    [InlineData(DoorLockState.Locking, DoorState.Open, OpenDoor, Icons.Material.Filled.Sync, Color.Info, "Locking…", "Locking… · open", "Locking… · open", null)]
+    [InlineData(DoorLockState.Unlatched, DoorState.Closed, ClosedDoor, Unlocked, Color.Default, "Latch pulled", "Latch pulled", "Latch pulled, locks on click", "Lock")]
+    public void WhenMapHasACaseForTheLockState_ThenTheCaseGivesTheTextFillAndBadgeAndOnlyTheDescriptionNamesTheOpenDoor(
         DoorLockState lockState, DoorState doorState,
-        string doorIcon, string badgeIcon, Color fill, string subtitle, string description, string? operation)
+        string doorIcon, string badgeIcon, Color fill, string subtitle, string state, string description, string? operation)
     {
         // Arrange
         var map = CreateMap();
@@ -74,7 +74,7 @@ public class DoorLockDisplayTests
         var appearance = DoorLockDisplay.Get(lockState, doorState, map);
 
         // Assert
-        Assert.Equal(new DoorLockAppearance(doorIcon, badgeIcon, fill, subtitle, description, operation), appearance);
+        Assert.Equal(new DoorLockAppearance(doorIcon, badgeIcon, fill, subtitle, state, description, operation), appearance);
     }
 
     [Theory]

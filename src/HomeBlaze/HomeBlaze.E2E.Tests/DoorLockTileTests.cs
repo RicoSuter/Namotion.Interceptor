@@ -75,6 +75,13 @@ public class DoorLockTileTests : IDisposable
 
     private static ILocator GetTileRoot(ILocator tileButton) => tileButton.Locator("xpath=..");
 
+    private static async Task AssertFillAsync(IPage page, ILocator tile, string colorVariable)
+    {
+        var expected = await page.ResolveColorAsync(colorVariable);
+        var background = await GetTileRoot(tile).EvaluateAsync<string>("element => getComputedStyle(element).backgroundColor");
+        Assert.Equal(expected, background);
+    }
+
     private static ILocator GetConfirmationDialog(IPage page) =>
         page.GetByRole(AriaRole.Dialog).Filter(new() { HasText = "Are you sure you want to execute this operation?" });
 
@@ -158,15 +165,13 @@ public class DoorLockTileTests : IDisposable
     {
         // Arrange
         var (page, tile) = await OpenTileAsync(DoorLockState.Jammed, "Jammed");
-        var error = await page.ResolveColorAsync("var(--mud-palette-error)");
-        var background = await GetTileRoot(tile).EvaluateAsync<string>("element => getComputedStyle(element).backgroundColor");
+        await AssertFillAsync(page, tile, "var(--mud-palette-error)");
         await Assertions.Expect(tile).ToHaveAttributeAsync("title", "Lock");
 
         // Act
         await tile.ClickAsync();
 
         // Assert
-        Assert.Equal(error, background);
         await Assertions.Expect(tile.GetByTestId("tile-subtitle")).ToHaveTextAsync("Locked", new() { Timeout = Timeout });
         await Assertions.Expect(GetConfirmationDialog(page)).ToHaveCountAsync(0);
         Assert.Equal(DoorLockState.Locked, GetLock().LockState);
@@ -185,13 +190,11 @@ public class DoorLockTileTests : IDisposable
         // Assert
         await Assertions.Expect(tile.GetByTestId("tile-subtitle")).ToHaveTextAsync("Secured", new() { Timeout = Timeout });
         await Assertions.Expect(tile).ToHaveAccessibleDescriptionAsync("Secured, unlocks on click", new() { Timeout = Timeout });
-        var tertiary = await page.ResolveColorAsync("var(--mud-palette-tertiary)");
-        var background = await GetTileRoot(tile).EvaluateAsync<string>("element => getComputedStyle(element).backgroundColor");
-        Assert.Equal(tertiary, background);
+        await AssertFillAsync(page, tile, "var(--mud-palette-tertiary)");
     }
 
     [Fact]
-    public async Task WhenMappedTileDoorOpens_ThenTheTextOfTheCaseStaysWithoutTheOpenDoor()
+    public async Task WhenMappedTileDoorOpens_ThenTheDescriptionNamesTheOpenDoorAndTheTextOfTheCaseStays()
     {
         // Arrange
         SetLockState(DoorLockState.Unlocked, DoorState.Closed);
@@ -202,8 +205,8 @@ public class DoorLockTileTests : IDisposable
         // Act
         GetLock().DoorState = DoorState.Open;
 
-        // Assert: the unmapped tile of the same lock shows that the door opened before the mapped one is checked.
-        await Assertions.Expect(GetTile(page, "Front door").GetByTestId("tile-subtitle")).ToHaveTextAsync("Unlocked · open", new() { Timeout = Timeout });
+        // Assert: the description shows that the tile rendered the open door before its text is checked.
+        await Assertions.Expect(tile).ToHaveAccessibleDescriptionAsync("Not secured · open, locks on click", new() { Timeout = Timeout });
         await Assertions.Expect(tile.GetByTestId("tile-subtitle")).ToHaveTextAsync("Not secured");
     }
 
@@ -219,9 +222,7 @@ public class DoorLockTileTests : IDisposable
 
         // Assert
         await Assertions.Expect(tile.GetByTestId("tile-subtitle")).ToHaveTextAsync("Jammed", new() { Timeout = Timeout });
-        var error = await page.ResolveColorAsync("var(--mud-palette-error)");
-        var background = await GetTileRoot(tile).EvaluateAsync<string>("element => getComputedStyle(element).backgroundColor");
-        Assert.Equal(error, background);
+        await AssertFillAsync(page, tile, "var(--mud-palette-error)");
     }
 
     [Fact]

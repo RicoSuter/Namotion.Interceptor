@@ -35,7 +35,7 @@
         @* The label is the accessible name, which hides the subtitle, so the description carries the state, also under a custom subtitle. *@
         <TileView TestId="door-lock-tile"
                   AccessibleName="@label"
-                  AccessibleDescription="@(target is null ? null : disabled ? appearance.Subtitle : appearance.Description)"
+                  AccessibleDescription="@(target is null ? null : disabled ? appearance.State : appearance.Description)"
                   Tooltip="@operation?.Title"
                   Label="@label"
                   Subtitle="@subtitle"

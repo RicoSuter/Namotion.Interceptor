@@ -31,8 +31,8 @@ public partial class DoorLock : IConfigurable, ITitleProvider
     public partial string? Label { get; set; }
 
     /// <summary>
-    /// Name or path of the <see cref="ValueMap"/> that gives a lock state, by its name such as "Locked", the fill, the
-    /// badge icon and the text of the tile. A state without a case keeps the fill, badge and text of the tile.
+    /// Name or path of the <see cref="ValueMap"/> whose case for the lock state, matched by its name such as "Locked",
+    /// gives the text, the fill and the badge icon. A state without a case keeps those of the tile.
     /// </summary>
     [Configuration]
     [SubjectPath(typeof(ValueMap))]
