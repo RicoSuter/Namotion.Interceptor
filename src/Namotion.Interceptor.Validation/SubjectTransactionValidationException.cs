@@ -15,6 +15,7 @@ public sealed class SubjectTransactionValidationException : SubjectTransactionEx
     /// </summary>
     /// <param name="failedChanges">The invalid changes.</param>
     /// <param name="errors">The validation errors, one per invalid change.</param>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="errors"/> is empty.</exception>
     public SubjectTransactionValidationException(
         IReadOnlyList<SubjectPropertyChange> failedChanges,
         IReadOnlyList<Exception> errors)
@@ -23,7 +24,17 @@ public sealed class SubjectTransactionValidationException : SubjectTransactionEx
             [],
             failedChanges,
             errors,
-            errors.Count == 1 ? errors[0] : new AggregateException("Multiple transaction values are invalid.", errors))
+            CreateInnerException(errors))
     {
+    }
+
+    private static Exception CreateInnerException(IReadOnlyList<Exception> errors)
+    {
+        return errors.Count switch
+        {
+            0 => throw new ArgumentException("At least one validation error is required.", nameof(errors)),
+            1 => errors[0],
+            _ => new AggregateException("Multiple transaction values are invalid.", errors)
+        };
     }
 }

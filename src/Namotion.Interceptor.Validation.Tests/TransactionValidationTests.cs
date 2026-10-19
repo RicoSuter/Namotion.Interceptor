@@ -507,6 +507,14 @@ public class TransactionValidationTests
         Assert.Equal(0, motor.MotorSpeed);
     }
 
+    [Fact]
+    public void WhenValidationExceptionIsCreatedWithoutErrors_ThenItThrows()
+    {
+        // Act & Assert
+        var exception = Assert.Throws<ArgumentException>(() => new SubjectTransactionValidationException([], []));
+        Assert.Equal("errors", exception.ParamName);
+    }
+
     private static async Task<SubjectTransaction> BeginInOwnFlowAsync(IInterceptorSubjectContext context)
     {
         // An async method does not leak the transaction it begins into the caller's flow.
