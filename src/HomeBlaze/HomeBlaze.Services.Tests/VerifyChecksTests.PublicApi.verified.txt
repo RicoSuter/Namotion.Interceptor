@@ -59,6 +59,8 @@ namespace HomeBlaze.Services
             where TEnum :  struct, System.Enum { }
         public static string? GetString(this System.Collections.Generic.IReadOnlyDictionary<string, System.Text.Json.JsonElement>? metadata, string key) { }
         public static System.Collections.Immutable.ImmutableArray<string> GetStringArray(this System.Collections.Generic.IReadOnlyDictionary<string, System.Text.Json.JsonElement>? metadata, string key) { }
+        public static TEnum? ParseEnumName<TEnum>(string text)
+            where TEnum :  struct, System.Enum { }
     }
     public static class MetadataPaths
     {

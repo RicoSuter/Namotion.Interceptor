@@ -27,8 +27,12 @@ public static class MetadataDictionaryExtensions
     /// </summary>
     public static TEnum? GetEnum<TEnum>(this IReadOnlyDictionary<string, JsonElement>? metadata, string key)
         where TEnum : struct, Enum
-        => metadata.GetString(key) is { } text &&
-           Enum.TryParse(text, ignoreCase: true, out TEnum value) &&
+        => metadata.GetString(key) is { } text ? ParseEnumName<TEnum>(text) : null;
+
+    /// <summary>Gets the value of the enum that the text names, without regard to case; null for anything else, a number included.</summary>
+    public static TEnum? ParseEnumName<TEnum>(string text)
+        where TEnum : struct, Enum
+        => Enum.TryParse(text, ignoreCase: true, out TEnum value) &&
            string.Equals(value.ToString(), text, StringComparison.OrdinalIgnoreCase)
             ? value
             : null;

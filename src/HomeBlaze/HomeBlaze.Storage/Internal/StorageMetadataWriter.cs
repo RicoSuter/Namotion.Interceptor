@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using HomeBlaze.Components.Abstractions.Pages;
+using HomeBlaze.Services;
 
 namespace HomeBlaze.Storage.Internal;
 
@@ -244,7 +245,7 @@ internal static class StorageMetadataWriter
             var size = GetSize(key, value);
 
             // The order of a folder is limited by the file only, as it names every child.
-            if (!isOrder && GetText(value) is { Length: > MaxStringLength })
+            if (!isOrder && property.Value.ValueKind == JsonValueKind.String && GetString(key, property.Value) is { Length: > MaxStringLength })
             {
                 throw Refuse($"The value of {NameList.Format([key])} is longer than {MaxStringLength} characters.");
             }
@@ -288,8 +289,7 @@ internal static class StorageMetadataWriter
         return string.IsNullOrWhiteSpace(text) ? null : JsonValue.Create(text);
     }
 
-    // By name only, without regard to case, stored as the name: the name check leaves out the numbers and the lists of
-    // names that Enum.TryParse also takes.
+    // By name only, without regard to case, stored as the name.
     private static JsonNode? ToName<TEnum>(string key, JsonElement value) where TEnum : struct, Enum
     {
         if (ToString(key, value) is not { } node)
@@ -297,8 +297,7 @@ internal static class StorageMetadataWriter
             return null;
         }
 
-        var text = node.GetValue<string>();
-        return Enum.TryParse(text, ignoreCase: true, out TEnum name) && string.Equals(name.ToString(), text, StringComparison.OrdinalIgnoreCase)
+        return MetadataDictionaryExtensions.ParseEnumName<TEnum>(node.GetValue<string>()) is { } name
             ? JsonValue.Create(name.ToString())
             : throw Refuse($"'{key}' must be one of {string.Join(", ", Enum.GetNames<TEnum>())}.");
     }
@@ -334,19 +333,6 @@ internal static class StorageMetadataWriter
         catch (InvalidOperationException)
         {
             throw RefuseUnwritable(key);
-        }
-    }
-
-    // A string with a lone surrogate cannot be read as text, which a write refuses when it writes it.
-    private static string? GetText(JsonNode node)
-    {
-        try
-        {
-            return node is JsonValue value && value.TryGetValue<string>(out var text) ? text : null;
-        }
-        catch (InvalidOperationException)
-        {
-            return null;
         }
     }
 

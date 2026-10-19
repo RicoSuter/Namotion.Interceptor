@@ -15,20 +15,20 @@ public static class MetadataPaths
     public static PathProviderBase PathProvider { get; } = new DefaultPathProvider('/');
 
     /// <summary>
-    /// Resolves a path relative to <paramref name="origin"/> to a subject; the origin itself for an empty path or
-    /// <c>/</c>. A leading slash is ignored, so that a path of the subject tree reaches the subject when the origin
-    /// is the root. Null when no subject is at the path or the origin is not registered.
+    /// Resolves a path relative to <paramref name="origin"/> to a subject; the origin itself for a path of only
+    /// whitespace and slashes. Leading slashes are skipped, so that a path of the subject tree reaches the subject when
+    /// the origin is the root. Null when no subject is at the path or the origin is not registered.
     /// </summary>
     public static IInterceptorSubject? TryResolveSubject(IInterceptorSubject origin, string path)
     {
-        var relativePath = path.Trim().TrimStart('/');
-        if (relativePath.Length == 0)
+        var trimmedPath = path.Trim();
+        if (trimmedPath.AsSpan().TrimStart('/').IsEmpty)
         {
             return origin;
         }
 
         return origin.TryGetRegisteredSubject() is { } registered
-            ? PathProvider.TryGetSubjectFromPath(registered, relativePath)?.Subject
+            ? PathProvider.TryGetSubjectFromPath(registered, trimmedPath)?.Subject
             : null;
     }
 }
