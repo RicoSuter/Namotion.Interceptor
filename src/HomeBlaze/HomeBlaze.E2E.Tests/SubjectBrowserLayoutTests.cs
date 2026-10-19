@@ -2,6 +2,7 @@ using System.Text.RegularExpressions;
 using HomeBlaze.Abstractions;
 using HomeBlaze.E2E.Tests.Infrastructure;
 using HomeBlaze.Host.Components.Browser;
+using HomeBlaze.Host.Preferences;
 using HomeBlaze.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Playwright;
@@ -558,7 +559,7 @@ public class SubjectBrowserLayoutTests
         await WaitForRowLayoutAsync(page, isStacked);
         await page.WaitForFunctionAsync(
             "name => document.cookie.includes(`${name}=`)",
-            PropertyRowLayoutInitializer.CookieName,
+            BrowserPreferences.GetCookieName(SubjectBrowser.RowLayoutPreferenceKey),
             new() { Timeout = PageLoadTimeout });
 
         // Act
