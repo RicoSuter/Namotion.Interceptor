@@ -13,6 +13,7 @@ namespace HomeBlaze.Components;
 public partial class ValueMapCase : IConfigurable
 {
     private ParsedColor? _parsedColor;
+    private ParsedColor? _parsedTextColor;
 
     /// <summary>
     /// The value this case is for, as its raw text, for example "True" or the name of an enum value.
@@ -40,24 +41,39 @@ public partial class ValueMapCase : IConfigurable
     public partial string? Icon { get; set; }
 
     /// <summary>
+    /// The text color on a tile or a chip that the case fills, in the same forms as <see cref="Color"/>. Without it, or
+    /// with "Default", the text has the color that goes with the fill.
+    /// </summary>
+    [Configuration]
+    public partial string? TextColor { get; set; }
+
+    /// <summary>
     /// Gets the parsed <see cref="Color"/>, or <see cref="ValueColor.Default"/> when it is no color, which
     /// <see cref="ValueReader.ResolveMap"/> reports. The result is kept until the text changes, so that a render parses
     /// nothing and gets the same instance.
     /// </summary>
-    public ValueColor GetColor() => GetParsedColor().Color ?? ValueColor.Default;
+    public ValueColor GetColor() => GetParsed(Color, ref _parsedColor).Color ?? ValueColor.Default;
+
+    /// <summary>
+    /// Gets the parsed <see cref="TextColor"/>, or <see cref="ValueColor.Default"/> when it is not set or no color, kept
+    /// like <see cref="GetColor"/>.
+    /// </summary>
+    public ValueColor GetTextColor() => GetParsed(TextColor, ref _parsedTextColor).Color ?? ValueColor.Default;
 
     /// <summary>Gets whether <see cref="Color"/> is a theme color, a CSS color that <see cref="ValueColor.TryParse"/> takes, or not set.</summary>
-    internal bool IsColorValid() => GetParsedColor().Color is not null;
+    internal bool IsColorValid() => GetParsed(Color, ref _parsedColor).Color is not null;
 
-    private ParsedColor GetParsedColor()
+    /// <summary>Gets whether <see cref="TextColor"/> is a theme color, a CSS color that <see cref="ValueColor.TryParse"/> takes, or not set.</summary>
+    internal bool IsTextColorValid() => GetParsed(TextColor, ref _parsedTextColor).Color is not null;
+
+    private static ParsedColor GetParsed(string? text, ref ParsedColor? cache)
     {
-        var text = Color;
-        var parsed = _parsedColor;
+        var parsed = cache;
         if (parsed is null || !string.Equals(parsed.Text, text, StringComparison.Ordinal))
         {
             // Replaced as a whole, so that a render on another thread sees the text and its color together.
             parsed = new ParsedColor(text, ValueColor.TryParse(text, out var color) ? color : null);
-            _parsedColor = parsed;
+            cache = parsed;
         }
 
         return parsed;

@@ -33,6 +33,7 @@
                       Subtitle="@label"
                       Icon="@icon"
                       Color="@reading.Color"
+                      TextColor="@reading.TextColor"
                       Tooltip="@(canShowHistory ? "Show history" : reading.IsMissing ? path : null)"
                       OnClick="@(canShowHistory ? _showHistoryCallback : default)" />
         }

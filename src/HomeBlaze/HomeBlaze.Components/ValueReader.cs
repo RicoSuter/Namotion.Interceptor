@@ -90,7 +90,10 @@ public static class ValueReader
             GetText(property, value, matched, timeZone),
             matched?.GetColor() ?? ValueColor.Default,
             string.IsNullOrEmpty(matched?.Icon) ? null : matched.Icon,
-            mapError);
+            mapError)
+        {
+            TextColor = matched?.GetTextColor() ?? ValueColor.Default
+        };
     }
 
     /// <summary>
@@ -154,7 +157,8 @@ public static class ValueReader
     /// <param name="widget">The subject the map is relative to, usually the widget itself.</param>
     /// <param name="map">The name or path of the map as written.</param>
     /// <param name="error">The widget argument error when the map leads nowhere or to no <see cref="ValueMap"/>, or
-    /// when the <see cref="ValueMapCase.Color"/> of one of its cases is no color, otherwise null.</param>
+    /// when the <see cref="ValueMapCase.Color"/> or the <see cref="ValueMapCase.TextColor"/> of one of its cases is no
+    /// color, otherwise null.</param>
     public static ValueMap? ResolveMap(SubjectPathResolver resolver, IInterceptorSubject widget, string? map, out string? error)
     {
         error = null;
@@ -170,6 +174,12 @@ public static class ValueReader
                 if (!valueCase.IsColorValid())
                 {
                     error = ValueColor.GetError(valueCase.Color);
+                    return null;
+                }
+
+                if (!valueCase.IsTextColorValid())
+                {
+                    error = ValueColor.GetError(valueCase.TextColor);
                     return null;
                 }
             }

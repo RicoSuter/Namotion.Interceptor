@@ -43,7 +43,7 @@ public class DoorLockDisplayTests
         var appearance = DoorLockDisplay.Get(lockState, doorState);
 
         // Assert
-        Assert.Equal(new DoorLockAppearance(doorIcon, badgeIcon, fill, subtitle, description, operation), appearance);
+        Assert.Equal(new DoorLockAppearance(doorIcon, badgeIcon, fill, ValueColor.Default, subtitle, description, operation), appearance);
     }
 
     private static ValueMap CreateMap() => new()
@@ -74,7 +74,24 @@ public class DoorLockDisplayTests
         var appearance = DoorLockDisplay.Get(lockState, doorState, map);
 
         // Assert
-        Assert.Equal(new DoorLockAppearance(doorIcon, badgeIcon, fill, subtitle, description, operation), appearance);
+        Assert.Equal(new DoorLockAppearance(doorIcon, badgeIcon, fill, ValueColor.Default, subtitle, description, operation), appearance);
+    }
+
+    [Fact]
+    public void WhenCaseForTheLockStateHasATextColor_ThenTheAppearanceHasItWithTheFill()
+    {
+        // Arrange
+        var map = new ValueMap
+        {
+            Cases = [new ValueMapCase { Value = "Locked", Color = "Info", TextColor = "#ffffff" }]
+        };
+
+        // Act
+        var appearance = DoorLockDisplay.Get(DoorLockState.Locked, DoorState.Closed, map);
+
+        // Assert
+        Assert.Equal(Color.Info, appearance.Fill.Theme);
+        Assert.Equal("#ffffff", appearance.TextColor.Css);
     }
 
     [Theory]
