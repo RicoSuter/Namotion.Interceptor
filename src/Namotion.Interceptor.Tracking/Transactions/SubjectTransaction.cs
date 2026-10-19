@@ -237,8 +237,8 @@ public sealed class SubjectTransaction : IDisposable
     }
 
     /// <summary>
-    /// Reads a pending value for the handlers during the commit check or the pre-apply check. Returns false when the property is not part of the transaction, its change was cancelled, or its
-    /// source write failed.
+    /// Reads a pending value for the handlers during the commit check or the pre-apply check. Returns false when the
+    /// property is not part of the transaction, its change was cancelled, or its source write failed.
     /// </summary>
     internal bool TryGetCheckedValue<TProperty>(PropertyReference property, out TProperty value)
     {
@@ -532,7 +532,7 @@ public sealed class SubjectTransaction : IDisposable
     /// </exception>
     /// <exception cref="Exception">
     /// Any exception a transaction handler throws in the commit check propagates unchanged. Nothing was written, and
-    /// the transaction stays retryable with its pending changes.
+    /// the transaction stays retryable with its pending changes unless it was disposed.
     /// </exception>
     public ValueTask CommitAsync(CancellationToken cancellationToken)
     {

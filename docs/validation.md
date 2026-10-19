@@ -139,7 +139,7 @@ var context = InterceptorSubjectContext
     .WithService<IPropertyValidator>(() => new MyCustomValidator());
 ```
 
-Data Annotations and custom validators all run on each property write (in transactions, see [Transactions](#transactions)). If any validator returns errors, the write is rejected.
+Data Annotations and custom validators all run on each property write. If any validator returns errors, the write is rejected. Inside a transaction, the transaction's validation mode decides when they run, see [Transactions](#transactions).
 
 ## Transactions
 
@@ -161,17 +161,24 @@ motor.MaxAllowedSpeed = 200; // the order does not matter
 await transaction.CommitAsync(cancellationToken);
 ```
 
-The commit check validates every changed property with the validators of its subject's context while reads return the transaction's values, so the order of the writes does not matter. If a value is invalid, `CommitAsync` throws `SubjectTransactionValidationException` before anything is written. Its `FailedChanges` and `Errors` list the invalid changes and their validation errors in the same order. The pending changes stay intact, so the values can be fixed and the commit retried.
+At commit, the [commit check](tracking-transactions.md#transaction-handlers) validates every changed property with the validators of its subject's context while reads return the transaction's values, so the order of the writes does not matter. If a value is invalid, `CommitAsync` throws `SubjectTransactionValidationException` before anything is written. Its `FailedChanges` and `Errors` list the invalid changes and their validation errors in the same order. The pending changes stay intact, so the values can be fixed and the commit retried.
 
-With source transactions, the final set is checked again right before the local apply, after the sources were written, because an inbound update can change a value a validator reads. A failure there lands nothing from the checked set in either failure handling mode, because the other values were validated against the rejected ones: every written source is reverted, every checked change is reported as failed in a `SubjectTransactionException`, and the transaction ends.
+With source transactions, the [pre-apply check](tracking-transactions.md#transaction-handlers) validates the changes again right before the local apply, because an inbound update can change a value a validator reads while the sources are written. A failure there is not retryable: no value of the set lands, every written source is reverted, and `CommitAsync` throws a `SubjectTransactionException` that reports every checked change as failed.
 
 In `Immediate` mode the setter still throws `ValidationException` for a write that is invalid against the values written so far, so write order matters at the setter. `Deferred` accepts invalid intermediate values, and code running in the transaction's flow reads them until a later write replaces them or the commit checks the final value.
 
-The values a commit applies are not validated again, and neither are the values a rollback restores. Writes made while a commit applies its values, for example from change handlers or a hook that changes the value, and recalculated derived properties are validated as usual, after any source write. If applying one committed value fails, for example a hook throws, the values applied after it no longer land as the set that was checked, so they are validated against the model like any other write.
+The values a commit applies are not validated again, and neither are the values a rollback restores. Writes made while a commit applies its values, for example from change handlers or a hook that changes the value, and recalculated derived properties are validated as usual, after any source write. If applying one committed value fails, for example a hook throws, the values applied after it are validated against the model as it is at that point, so a value that depends on a later value of the set may then be rejected.
 
-During the commit checks, validators are called with `object` as the type parameter and the boxed value, and `Origin` is the captured origin of the change. Test the value (`context.Value is int speed`) rather than `typeof(TProperty)`.
+### Writing Validators for Transactions
 
-The commit check reads properties outside the transaction from the model. Writes outside transactions are not blocked by a commit, so such a property can still change before the apply. Validate a rule on every property it reads, and do not mutate a value object after writing it to a property.
+- **Arguments**: during the commit checks, validators are called with `object` as the type parameter and the boxed value, and `Origin` is the captured origin of the change. Test the value (`context.Value is int speed`) rather than `typeof(TProperty)`.
+- **Call count**: with source transactions, a value can be validated up to three times: when it is written in `Immediate` mode, in the commit check, and in the pre-apply check. Validators must be free of side effects.
+- **Errors**: each invalid property is reported as one `ValidationException` whose message joins the messages of all its errors. The individual `ValidationResult`s, including their member names, are not kept.
+- **Reads**: the checks read properties outside the transaction from the model. Writes outside transactions are not blocked by a commit, so such a property can still change before the apply. Validate a rule on every property it reads, and do not mutate a value object after writing it to a property.
+- **Object graph**: during the checks, registry and lifecycle state, such as parents and children, still reflect the landed graph; only property reads return the transaction's values.
+- **Timestamps**: during the checks, `SubjectChangeContext.Current` does not carry the timestamps of the checked changes.
+- **Derived properties**: a validator of a derived property runs only when the commit applies its values and recalculates it, after any source write, so it cannot reject the commit before the sources are written.
+- **New subjects**: validation covers the writes the transaction captures, which requires the written subject to already use the context. A subject created without the context and attached in the transaction is not validated.
 
 ### Interceptor Order
 
