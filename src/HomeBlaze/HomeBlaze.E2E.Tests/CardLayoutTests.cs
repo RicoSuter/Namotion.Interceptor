@@ -119,7 +119,7 @@ public class CardLayoutTests
     [InlineData("Grid Card", ".grid-cell-content", true)]
     [InlineData("Canvas Card", ".canvas-node-content", false)]
     [InlineData("Canvas Card", ".canvas-node-content", true)]
-    public async Task WhenACardIsInAGridCellOrACanvasNode_ThenItFillsItWithoutAFrameOfItsOwn(string title, string container, bool isInlineMode)
+    public async Task WhenACardIsInAGridCellOrACanvasNode_ThenItFillsItWithItsOwnOutline(string title, string container, bool isInlineMode)
     {
         // Arrange
         var page = await OpenPageAsync();
@@ -134,7 +134,7 @@ public class CardLayoutTests
                 .ToHaveCountAsync(1, new() { Timeout = Timeout });
         }
 
-        // Assert
+        // Assert: the cell or the node draws no frame, so the card keeps the border of an outlined card.
         var measures = await card.EvaluateAsync<double[]>(
             """
             (card, container) => {
@@ -142,16 +142,14 @@ public class CardLayoutTests
                 return [
                     card.getBoundingClientRect().height,
                     card.closest(container).getBoundingClientRect().height,
-                    parseFloat(style.borderTopWidth),
-                    style.boxShadow === 'none' ? 0 : 1
+                    parseFloat(style.borderTopWidth)
                 ];
             }
             """,
             container);
         Assert.True(measures[1] > 100, $"The container is {measures[1]} pixels high.");
         Assert.Equal(measures[1], measures[0], 1.0);
-        Assert.Equal(0, measures[2]);
-        Assert.Equal(0, measures[3]);
+        Assert.Equal(1, measures[2]);
     }
 
     [Theory]

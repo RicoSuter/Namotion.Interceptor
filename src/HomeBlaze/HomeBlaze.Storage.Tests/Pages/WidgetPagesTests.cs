@@ -178,7 +178,7 @@ public class WidgetPagesTests : IClassFixture<AdministrationFolderFixture>
     }
 
     [Fact]
-    public void WhenGridLayoutPageIsLoaded_ThenTheGridShowsTheMotorsAndItsLastCellHoldsText()
+    public void WhenGridLayoutPageIsLoaded_ThenTheGridShowsTheMotorsAndItsLastCellHoldsACardWithText()
     {
         // Act
         IPathScope page = _folder.FindPage(GetPagePath("grid-layout.md"));
@@ -192,8 +192,10 @@ public class WidgetPagesTests : IClassFixture<AdministrationFolderFixture>
             grid.Cells.Take(2).Select(cell => Assert.IsType<MarkdownFragment>(cell.Child).Children.Values.OfType<Widget>().Single().Path));
 
         var lastCell = Assert.IsType<MarkdownFragment>(grid.Cells[2].Child).Children.Values;
-        Assert.Empty(lastCell.OfType<Widget>());
-        Assert.Equal([$"{PumpPath}/TargetSpeed", $"{FanPath}/TargetSpeed"], lastCell.OfType<RenderExpression>().Select(expression => expression.Path));
+        var card = Assert.Single(lastCell.OfType<Card>());
+        var body = Assert.IsType<MarkdownFragment>(card.Content).Children.Values;
+        Assert.Empty(body.OfType<Widget>());
+        Assert.Equal([$"{PumpPath}/TargetSpeed", $"{FanPath}/TargetSpeed"], body.OfType<RenderExpression>().Select(expression => expression.Path));
     }
 
     [Fact]

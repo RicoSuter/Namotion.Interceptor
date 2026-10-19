@@ -200,7 +200,7 @@ public class SpacingLayoutTests
     }
 
     [Fact]
-    public async Task WhenContentStandsInAGridCellOrACanvasNode_ThenItHasTheRoomOfACardBodyUnlessItIsALoneCard()
+    public async Task WhenContentStandsInAGridCellOrACanvasNode_ThenTheCellOrTheNodeAddsNoRoom()
     {
         // Arrange
         var page = await OpenPageAsync();
@@ -230,10 +230,35 @@ public class SpacingLayoutTests
             """);
 
         // Assert
-        Assert.All(edges[0], edge => Assert.Equal(CardPadding, edge, Tolerance));
-        Assert.All(edges[1], edge => Assert.Equal(CardPadding, edge, Tolerance));
-        Assert.All(edges[2], edge => Assert.Equal(CardPadding, edge, Tolerance));
-        Assert.All(edges[3], edge => Assert.Equal(0, edge, Tolerance));
+        Assert.All(edges, room => Assert.All(room, edge => Assert.Equal(0, edge, Tolerance)));
+    }
+
+    [Fact]
+    public async Task WhenAGridCellOrACanvasNodeIsViewed_ThenItHasNoBorderAndNoBackgroundOfItsOwn()
+    {
+        // Arrange
+        var page = await OpenPageAsync();
+        await Assertions.Expect(page.GetByText("Text in a cell.", new() { Exact = true })).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetByText("Text in a node.", new() { Exact = true })).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Act: the border width and the background of the cell and of the node around each text.
+        var frames = await page.EvaluateAsync<string[][]>(
+            """
+            () => {
+                const paragraph = text => [...document.querySelectorAll('p')].find(p => p.textContent === text);
+                const frame = element => {
+                    const style = getComputedStyle(element);
+                    return [style.borderTopWidth, style.borderRightWidth, style.borderBottomWidth, style.borderLeftWidth, style.backgroundColor];
+                };
+                return [
+                    frame(paragraph('Text in a cell.').closest('.grid-cell')),
+                    frame(paragraph('Text in a node.').closest('.canvas-node'))
+                ];
+            }
+            """);
+
+        // Assert
+        Assert.All(frames, frame => Assert.Equal(["0px", "0px", "0px", "0px", "rgba(0, 0, 0, 0)"], frame));
     }
 
     [Fact]
