@@ -7,7 +7,7 @@ namespace Namotion.Devices.Nuki.Tests.Testing;
 /// <summary>
 /// Answers the requests of a bridge client like a bridge does, and records them.
 /// </summary>
-internal sealed class FakeNukiBridge : HttpMessageHandler, IHttpClientFactory
+internal sealed class FakeNukiBridge : HttpMessageHandler
 {
     private readonly ConcurrentQueue<Uri> _requests = new();
     private int _concurrentRequests;
@@ -41,7 +41,7 @@ internal sealed class FakeNukiBridge : HttpMessageHandler, IHttpClientFactory
 
     public int CountRequests(string path) => _requests.Count(uri => uri.AbsolutePath == "/" + path);
 
-    public HttpClient CreateClient(string name) => new(this, disposeHandler: false);
+    public HttpClient CreateClient() => new(this, disposeHandler: false);
 
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {

@@ -209,7 +209,7 @@ public class NukiBridgeConnectionTests
     public void WhenHostAddressIsSet_ThenIpAddressIsTheHostWithoutSchemeBracketsAndPort(string? hostAddress, string? expectedIpAddress)
     {
         // Arrange
-        using var bridge = new NukiBridge(new FakeNukiBridge(), NullLogger<NukiBridge>.Instance);
+        using var bridge = new NukiBridge(() => new FakeNukiBridge().CreateClient(), NullLogger<NukiBridge>.Instance);
 
         // Act
         bridge.HostAddress = hostAddress;

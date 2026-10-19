@@ -162,15 +162,14 @@
         _warningMessage = null;
         try
         {
-            using var httpClient = HttpClientFactory.CreateClient();
-            var token = await NukiBridgeDiscovery.PairAsync(httpClient, hostAddress, cancellationToken);
+            var token = await NukiBridgeDiscovery.PairAsync(hostAddress, cancellationToken);
             if (token is null)
             {
                 _errorMessage = "The bridge did not confirm the pairing. Press its button within 30 seconds after selecting Pair.";
                 return;
             }
 
-            var detection = await NukiBridgeDiscovery.DetectTokenModeAsync(httpClient, hostAddress, token, cancellationToken);
+            var detection = await NukiBridgeDiscovery.DetectTokenModeAsync(hostAddress, token, cancellationToken);
             _tokenMode = detection.Mode;
             _warningMessage = detection.Warning is { } warning ? "Paired. " + warning : null;
 
