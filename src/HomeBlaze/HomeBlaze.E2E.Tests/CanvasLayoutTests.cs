@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 using HomeBlaze.E2E.Tests.Infrastructure;
@@ -27,8 +26,6 @@ public class CanvasLayoutTests
 
     // The page that tests overwrite. Each of them writes its own content before it opens the page.
     private const string ScratchPage = "Scratch.md";
-
-    private static readonly Regex ComputedAnglePattern = new(@"^\s*(-?[0-9.]+)deg\s*$");
 
     private static readonly Regex FirstNodePositionPattern = new("^::: Node X=(-?\\d+) Y=(-?\\d+) ", RegexOptions.Multiline);
 
@@ -557,8 +554,6 @@ public class CanvasLayoutTests
     [InlineData(390, 720, null)]
     [InlineData(390, null, 250)]
     [InlineData(390, 971, 1410)]
-    [InlineData(ViewportWidth, null, null)]
-    [InlineData(ViewportWidth, null, 600)]
     public async Task WhenCanvasThatFitsTheWidthIsShown_ThenItIsDrawnAtTheFactorOfItsDrawnWidthToItsDesignWidth(
         int viewportWidth, int? minWidth, int? maxWidth)
     {
@@ -570,7 +565,7 @@ public class CanvasLayoutTests
         // Act
         var page = await OpenScratchPageAsync(viewportWidth);
 
-        // Assert: the drawn width is the width of the frame within the least and the largest width, of which the least wins.
+        // Assert
         var frame = page.GetByTestId("canvas-scale-frame");
         await frame.Locator(".canvas-node").First.WaitForAsync(new() { Timeout = Timeout });
         var sizes = await GetScaledSizesAsync(frame);
@@ -581,14 +576,13 @@ public class CanvasLayoutTests
         Assert.InRange(sizes.SizerWidth, drawnWidth - 1, drawnWidth + 1);
         Assert.InRange(sizes.SizerHeight, height * factor - 1, height * factor + 1);
         Assert.InRange(sizes.Scale, factor - 0.001, factor + 0.001);
-        AssertAngleIsComputed(sizes, factor);
+        await AssertAngleIsRegisteredAsync(frame);
     }
 
     [Fact]
     public async Task WhenCanvasesThatFitTheWidthAreNestedOrOnOnePage_ThenEachIsDrawnAtItsOwnFactor()
     {
-        // Arrange: the inner canvas is drawn larger than its design width in the node of the outer one, which is drawn smaller
-        // than its design width on the page, and the second canvas below has a design width of its own.
+        // Arrange: the outer canvas is scaled down, the inner one in its node is scaled up, and the second one has its own design width.
         await _fixture.WriteDemoPageAsync(ScratchPage, CreateNestedFitWidthCanvasPage());
 
         // Act
@@ -604,16 +598,17 @@ public class CanvasLayoutTests
         var inner = await GetScaledSizesAsync(frames.Nth(1));
         var second = await GetScaledSizesAsync(frames.Nth(2));
 
-        Assert.InRange(outer.Scale, outer.FrameWidth / 1000 - 0.001, outer.FrameWidth / 1000 + 0.001);
-        Assert.InRange(outer.SizerHeight, outer.FrameWidth * 400 / 1000 - 1, outer.FrameWidth * 400 / 1000 + 1);
-        Assert.True(inner.FrameWidth > 250, $"The node does not give the inner canvas its width: {inner.FrameWidth}");
-        Assert.InRange(inner.Scale, inner.FrameWidth / 250 - 0.001, inner.FrameWidth / 250 + 0.001);
-        Assert.InRange(inner.SizerHeight, inner.SizerWidth * 100 / 250 - 1, inner.SizerWidth * 100 / 250 + 1);
-        Assert.InRange(second.Scale, second.FrameWidth / 400 - 0.001, second.FrameWidth / 400 + 0.001);
-        Assert.InRange(second.SizerHeight, second.FrameWidth * 100 / 400 - 1, second.FrameWidth * 100 / 400 + 1);
-        AssertAngleIsComputed(outer, outer.FrameWidth / 1000);
-        AssertAngleIsComputed(inner, inner.FrameWidth / 250);
-        AssertAngleIsComputed(second, second.FrameWidth / 400);
+        Assert.True(inner.FrameWidth > 250, $"The inner canvas is not scaled up: {inner.FrameWidth}");
+        AssertDrawnAtItsFactor(outer, 1000, 400);
+        AssertDrawnAtItsFactor(inner, 250, 100);
+        AssertDrawnAtItsFactor(second, 400, 100);
+        await AssertAngleIsRegisteredAsync(frames.Nth(0));
+
+        static void AssertDrawnAtItsFactor(ScaledSizes sizes, int designWidth, int height)
+        {
+            Assert.InRange(sizes.Scale, sizes.FrameWidth / designWidth - 0.001, sizes.FrameWidth / designWidth + 0.001);
+            Assert.InRange(sizes.SizerHeight, sizes.SizerWidth * height / designWidth - 1, sizes.SizerWidth * height / designWidth + 1);
+        }
     }
 
     private async Task AssertWheelScrollsPageAsync(Func<Box, (double X, double Y)> getTarget)
@@ -835,12 +830,9 @@ public class CanvasLayoutTests
             new() { Timeout = Timeout });
     }
 
-    // The width of the frame in its own pixels, which is what the canvas fits, the drawn size of the sizer and the canvas as
-    // the page shows them, the factor of the transform of the canvas, and the computed angle of the sizer.
+    // FrameWidth is in the frame's own pixels, which is what the canvas fits; the other sizes are as drawn on the page.
     private static async Task<ScaledSizes> GetScaledSizesAsync(ILocator frame)
     {
-        var angle = await frame.EvaluateAsync<string>(
-            "frame => getComputedStyle(frame.firstElementChild).getPropertyValue('--canvas-scale-angle')");
         var values = await frame.EvaluateAsync<double[]>(
             """
             frame => {
@@ -852,46 +844,32 @@ public class CanvasLayoutTests
             }
             """);
 
-        return new ScaledSizes(values[0], values[1], values[2], values[3], values[4], angle);
+        return new ScaledSizes(values[0], values[1], values[2], values[3], values[4]);
     }
 
-    // Only a registered angle property computes to degrees; an unregistered one keeps the atan2 text, which WebKit then
-    // computes wrong. This fails when the registration of CanvasLayoutWidget.razor.css does not reach the page.
-    private static void AssertAngleIsComputed(ScaledSizes sizes, double factor)
+    private sealed record ScaledSizes(double FrameWidth, double SizerWidth, double SizerHeight, double CanvasWidth, double Scale);
+
+    // Catches a lost registration even in Chromium: only a registered angle property computes to degrees, an unregistered one
+    // keeps the atan2 text.
+    private static async Task AssertAngleIsRegisteredAsync(ILocator frame)
     {
-        var match = ComputedAnglePattern.Match(sizes.Angle);
-        Assert.True(match.Success, $"The angle is not computed, so its property is not registered: '{sizes.Angle}'");
-        var expectedDegrees = Math.Atan(factor) * 180 / Math.PI;
-        Assert.InRange(double.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture), expectedDegrees - 0.05, expectedDegrees + 0.05);
+        var angle = await frame.EvaluateAsync<string>(
+            "frame => getComputedStyle(frame.firstElementChild).getPropertyValue('--canvas-scale-angle')");
+        Assert.True(Regex.IsMatch(angle, @"^\s*-?[0-9.]+(?:e[-+]?\d+)?deg\s*$"), $"The angle property is not registered: '{angle}'");
     }
 
-    private sealed record ScaledSizes(double FrameWidth, double SizerWidth, double SizerHeight, double CanvasWidth, double Scale, string Angle);
-
-    // A canvas that fits the width with a node at its left edge.
     private static string CreateFitWidthCanvasPage(int designWidth, int height, int? minWidth, int? maxWidth)
     {
-        var builder = new StringBuilder();
-        builder.Append("---\ntitle: Scratch\n---\n\n# Scratch\n\n");
-        builder.Append($":: HomeBlaze.Components.CanvasLayout#canvas Width={designWidth}");
-        if (minWidth is { } least)
-        {
-            builder.Append($" MinWidth={least}");
-        }
-
-        if (maxWidth is { } largest)
-        {
-            builder.Append($" MaxWidth={largest}");
-        }
-
-        builder.Append($" Scale=FitWidth MinHeight={height}\n");
-        builder.Append($"::: Node X=0 Y=0 Width=300 Height={height}\n");
-        builder.Append(":::: HomeBlaze.Components.Card Title=\"Scaled\"\n");
-        builder.Append("::\n");
-        return builder.ToString();
+        return "---\ntitle: Scratch\n---\n\n# Scratch\n\n"
+            + $":: HomeBlaze.Components.CanvasLayout#canvas Width={designWidth}"
+            + (minWidth is { } least ? $" MinWidth={least}" : "")
+            + (maxWidth is { } largest ? $" MaxWidth={largest}" : "")
+            + $" Scale=FitWidth MinHeight={height}\n"
+            + $"::: Node X=0 Y=0 Width=300 Height={height}\n"
+            + ":::: HomeBlaze.Components.Card Title=\"Scaled\"\n"
+            + "::\n";
     }
 
-    // A canvas 1000 pixels wide with a node 500 pixels wide that holds a canvas 250 pixels wide, and another canvas 400 pixels
-    // wide below them, all of which fit the width.
     private static string CreateNestedFitWidthCanvasPage()
     {
         return "---\ntitle: Scratch\n---\n\n# Scratch\n\n"

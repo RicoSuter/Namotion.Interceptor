@@ -53,25 +53,25 @@ internal static class CanvasExtent
     };
 
     /// <summary>
-    /// The custom property that holds the <see cref="GetAngle"/> of a canvas, which the canvas widget sets on an element in
-    /// the frame, so that the element and its descendants can use the <see cref="Factor"/>.
+    /// The custom property that holds the <see cref="GetAngle"/> of a canvas, for <see cref="Factor"/> on the element that
+    /// sets it and on its descendants.
     /// </summary>
-    // Registered as an inherited angle in CanvasLayoutWidget.razor.css, which must use the same name.
+    // Must match the @property registration in CanvasLayoutWidget.razor.css.
     public const string AngleProperty = "--canvas-scale-angle";
 
     /// <summary>
-    /// Gets the CSS angle whose tangent is the factor a canvas that <see cref="IsScaled"/> is drawn at: the angle between
-    /// its <see cref="GetDrawnWidth"/> and its design width.
+    /// Gets the CSS angle whose tangent is the factor a canvas that <see cref="IsScaled"/> is drawn at: <c>atan2</c> of its
+    /// <see cref="GetDrawnWidth"/> and its design width.
     /// </summary>
-    // CSS divides a length by a length only through the tangent of the angle between them.
-    public static string GetAngle(int designWidth, int? minWidth, int? maxWidth) =>
-        string.Create(CultureInfo.InvariantCulture, $"atan2({GetDrawnWidth(minWidth, maxWidth)}, {designWidth}px)");
+    // Not calc(length / length): typed division is not supported in every target browser.
+    public static string GetAngle(string drawnWidth, int designWidth) =>
+        string.Create(CultureInfo.InvariantCulture, $"atan2({drawnWidth}, {designWidth}px)");
 
     /// <summary>
-    /// The CSS number a canvas that <see cref="IsScaled"/> is drawn at, from the <see cref="AngleProperty"/> set on the
-    /// element or an ancestor in the frame: its <see cref="GetDrawnWidth"/> over its design width.
+    /// The CSS number a canvas that <see cref="IsScaled"/> is drawn at, the tangent of the <see cref="AngleProperty"/> on the
+    /// element or an ancestor: its <see cref="GetDrawnWidth"/> over its design width.
     /// </summary>
-    // Not tan(atan2(...)) directly: WebKit takes an atan2 that depends on the layout, as one of cqw does, for degrees and
-    // its tangent for radians. It computes the registered angle property right.
+    // Do not inline tan(atan2(...)): WebKit computes it wrong when atan2 depends on the layout (cqw), and right through the
+    // registered angle property.
     public const string Factor = "tan(var(" + AngleProperty + "))";
 }

@@ -1,6 +1,6 @@
-/* CanvasExtent.AngleProperty, which works only registered as an angle (see CanvasExtent.Factor). A registration cannot be
-   an inline style, and the style element of the widget would need its syntax escaped from Razor. Where the angle is not
-   set, 45deg draws the canvas at its design size instead of collapsing it. */
+/* CanvasExtent.AngleProperty, registered so that WebKit computes it (see CanvasExtent.Factor). It lives here because a
+   registration cannot be inline and Razor reads <angle> as a tag. 45deg (tangent 1) draws an unset canvas at design
+   size. */
 @property --canvas-scale-angle {
     syntax: '<angle>';
     inherits: true;

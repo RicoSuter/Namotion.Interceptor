@@ -62,10 +62,11 @@ public class CanvasExtentTests
     public void WhenCanvasHasNoMinWidth_ThenItIsDrawnAtTheWidthOfItsFrame()
     {
         // Act
-        var angle = CanvasExtent.GetAngle(1104, null, null);
+        var drawnWidth = CanvasExtent.GetDrawnWidth(null, null);
+        var angle = CanvasExtent.GetAngle(drawnWidth, 1104);
 
         // Assert
-        Assert.Equal("100cqw", CanvasExtent.GetDrawnWidth(null, null));
+        Assert.Equal("100cqw", drawnWidth);
         Assert.Equal("atan2(100cqw, 1104px)", angle);
     }
 
@@ -82,10 +83,11 @@ public class CanvasExtentTests
     public void WhenCanvasHasAMinWidth_ThenItIsDrawnAtLeastThatWide()
     {
         // Act
-        var angle = CanvasExtent.GetAngle(1000, 750, null);
+        var drawnWidth = CanvasExtent.GetDrawnWidth(750, null);
+        var angle = CanvasExtent.GetAngle(drawnWidth, 1000);
 
         // Assert
-        Assert.Equal("max(100cqw, 750px)", CanvasExtent.GetDrawnWidth(750, null));
+        Assert.Equal("max(100cqw, 750px)", drawnWidth);
         Assert.Equal("atan2(max(100cqw, 750px), 1000px)", angle);
     }
 
@@ -93,10 +95,11 @@ public class CanvasExtentTests
     public void WhenCanvasHasAMaxWidth_ThenItIsDrawnAtMostThatWide()
     {
         // Act
-        var angle = CanvasExtent.GetAngle(1104, null, 1104);
+        var drawnWidth = CanvasExtent.GetDrawnWidth(null, 1104);
+        var angle = CanvasExtent.GetAngle(drawnWidth, 1104);
 
         // Assert
-        Assert.Equal("min(100cqw, 1104px)", CanvasExtent.GetDrawnWidth(null, 1104));
+        Assert.Equal("min(100cqw, 1104px)", drawnWidth);
         Assert.Equal("atan2(min(100cqw, 1104px), 1104px)", angle);
     }
 
