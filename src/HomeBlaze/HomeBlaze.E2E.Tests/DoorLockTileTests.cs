@@ -61,11 +61,11 @@ public class DoorLockTileTests : IDisposable
     }
 
     // Sets the lock state with the door closed, opens the page and waits until the tile of the lock shows the state.
-    private async Task<(IPage Page, ILocator Tile)> OpenTileAsync(DoorLockState lockState, string expectedSubtitle)
+    private async Task<(IPage Page, ILocator Tile)> OpenTileAsync(DoorLockState lockState, string expectedSubtitle, string label = "Front door")
     {
         SetLockState(lockState, DoorState.Closed);
         var page = await OpenPageAsync();
-        var tile = GetTile(page, "Front door");
+        var tile = GetTile(page, label);
         await Assertions.Expect(tile.GetByTestId("tile-subtitle")).ToHaveTextAsync(expectedSubtitle, new() { Timeout = Timeout });
         return (page, tile);
     }
@@ -194,7 +194,7 @@ public class DoorLockTileTests : IDisposable
     public async Task WhenCaseOfTheStateHasATextColor_ThenTheTextAndTheBadgeHaveItAndAStateWithoutOneKeepsTheTextOfTheFill()
     {
         // Arrange
-        var (page, tile) = await OpenMappedTileAsync(DoorLockState.Locked, "Secured");
+        var (page, tile) = await OpenTileAsync(DoorLockState.Locked, "Secured", "Mapped front door");
         var root = GetTileRoot(tile);
         var badge = root.GetByTestId("tile-badge").Locator("svg");
         var white = await page.ResolveColorAsync("#ffffff");
@@ -211,23 +211,12 @@ public class DoorLockTileTests : IDisposable
         await Assertions.Expect(badge).ToHaveCSSAsync("color", warningText);
     }
 
-    private async Task<(IPage Page, ILocator Tile)> OpenMappedTileAsync(DoorLockState lockState, string expectedSubtitle)
-    {
-        SetLockState(lockState, DoorState.Closed);
-        var page = await OpenPageAsync();
-        var tile = GetTile(page, "Mapped front door");
-        await Assertions.Expect(tile.GetByTestId("tile-subtitle")).ToHaveTextAsync(expectedSubtitle, new() { Timeout = Timeout });
-        return (page, tile);
-    }
 
     [Fact]
     public async Task WhenMappedTileDoorOpens_ThenTheTextOfTheCaseStaysWithoutTheOpenDoor()
     {
         // Arrange
-        SetLockState(DoorLockState.Unlocked, DoorState.Closed);
-        var page = await OpenPageAsync();
-        var tile = GetTile(page, "Mapped front door");
-        await Assertions.Expect(tile.GetByTestId("tile-subtitle")).ToHaveTextAsync("Not secured", new() { Timeout = Timeout });
+        var (page, tile) = await OpenTileAsync(DoorLockState.Unlocked, "Not secured", "Mapped front door");
 
         // Act
         GetLock().DoorState = DoorState.Open;

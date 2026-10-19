@@ -85,6 +85,8 @@ public class ValueColorTests
     [InlineData("var(--my-color)")]
     [InlineData("var(--mud-palette-primary, red)")]
     [InlineData("var(--mud-palette-primary);color:red")]
+    [InlineData("var(--mud-palette-text-primary); background: url(x)")]
+    [InlineData("#ffffff\"")]
     [InlineData("var(--mud-palette-primary-hover)")]
     [InlineData("var(--mud-palette-primary-text)")]
     [InlineData("var(--mud-palette-success-rgb)")]
@@ -195,7 +197,7 @@ public class ValueColorTests
         var error = ValueColor.GetError("Purple");
 
         // Assert
-        Assert.Equal("Unknown color 'Purple': use a theme color like Success or a CSS color like #ffffff80", error);
+        Assert.Equal("Unknown color 'Purple': use a theme color like Success or Surface 30%, or a CSS color like #ffffff80", error);
     }
 
     [Fact]
@@ -224,11 +226,6 @@ public class ValueColorTests
     [Theory]
     [InlineData("white")]
     [InlineData("#fff; background: red")]
-    [InlineData("#ffffff\"")]
-    [InlineData("rgb(255, 255, 255); position: fixed")]
-    [InlineData("var(--mud-palette-text-primary); background: url(x)")]
-    [InlineData("expression(alert(1))")]
-    [InlineData("4")]
     public void WhenCaseTextColorIsNoAllowedColor_ThenItIsInvalidAndHasNoTextColor(string text)
     {
         // Arrange
@@ -273,6 +270,7 @@ public class ValueColorTests
     }
 
     [Theory]
+    [InlineData(Color.Primary, "rgb(var(--mud-palette-primary-rgb))")]
     [InlineData(Color.Surface, "var(--mud-palette-surface)")]
     [InlineData(Color.Inherit, "inherit")]
     [InlineData(Color.Dark, "var(--mud-palette-dark)")]
@@ -362,17 +360,20 @@ public class ValueColorTests
         Assert.Null(color);
     }
 
-    [Fact]
-    public void WhenTextColorIsAThemeColorWithAPercentage_ThenTheTextHasTheMixedColor()
+    [Theory]
+    [InlineData("#000080")]
+    [InlineData("Secondary 30%")]
+    public void WhenTextColorIsPrimaryOnAFillThatRedefinesThePrimaryColor_ThenTheTextIsNotTheRedefinedPrimary(string fillText)
     {
         // Arrange
-        ValueColor.TryParse("Surface 70%", out var textColor);
+        ValueColor.TryParse(fillText, out var fill);
 
         // Act
-        var textOnFill = ValueColor.GetTextOnFill(Color.Info, textColor!);
+        var textOnFill = ValueColor.GetTextOnFill(fill!, Color.Primary);
 
-        // Assert
-        Assert.Equal("color-mix(in srgb, var(--mud-palette-surface) 70%, transparent)", textOnFill.TextCss);
-        Assert.Equal("color: color-mix(in srgb, var(--mud-palette-surface) 70%, transparent)", textOnFill.Style);
+        // Assert: the fill redefines --mud-palette-primary on the same element, so the text must not read it.
+        Assert.StartsWith("--mud-palette-primary: ", fill!.Style);
+        Assert.EndsWith("; color: rgb(var(--mud-palette-primary-rgb))", textOnFill.Style);
+        Assert.DoesNotContain("var(--mud-palette-primary)", textOnFill.TextCss);
     }
 }

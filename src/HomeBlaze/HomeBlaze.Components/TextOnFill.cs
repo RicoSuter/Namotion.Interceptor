@@ -12,12 +12,15 @@ internal sealed class TextOnFill
         Fill = fill;
         TextCss = text.Css ?? text.Theme switch
         {
+            // The Style of a CSS fill redefines the primary variable as the fill, so the primary text color is read from
+            // its channel variable, which Style leaves as it is.
+            Color.Primary => "rgb(var(--mud-palette-primary-rgb))",
             Color.Surface => "var(--mud-palette-surface)",
             Color.Inherit => "inherit",
             Color.Transparent => "transparent",
             _ => ValueColor.GetPaletteName(text.Theme) is { } name
                 ? $"var(--mud-palette-{name})"
-                : "var(--mud-palette-text-primary)"
+                : ValueColor.ThemeText
         };
         Style = fill.Style is { } fillStyle ? $"{fillStyle}; color: {TextCss}" : $"color: {TextCss}";
     }

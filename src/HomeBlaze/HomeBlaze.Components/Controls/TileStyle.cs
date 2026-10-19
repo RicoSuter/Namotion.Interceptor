@@ -17,7 +17,7 @@ internal static class TileStyle
     /// on the surface, as does a color or a variant that is not defined (a configuration can give any integer). A
     /// disabled tile keeps its style and is dimmed by its class instead. A CSS color fills the tile like a theme color,
     /// with the text color of <see cref="ValueColor.ContrastText"/>. A text color that is not <see cref="ValueColor.Default"/>
-    /// replaces the text color of every variant, also on the surface, and an outline keeps the color.
+    /// replaces the text color of every defined variant, also on the surface, and an outline keeps the color.
     /// </summary>
     public static string GetStyle(ValueColor color, Variant variant, ValueColor? textColor = null)
     {
@@ -31,7 +31,7 @@ internal static class TileStyle
         {
             // Built once per text color and fill and kept with them.
             var textOnFill = ValueColor.GetTextOnFill(color, textColor);
-            var textStyles = textOnFill.TileStyles ??= BuildTextStyles(GetFill(color), textOnFill.TextCss);
+            var textStyles = textOnFill.TileStyles ??= BuildStyles(GetFill(color), textOnFill.TextCss, textOnFill.TextCss);
             return textStyles[(int)variant];
         }
 
@@ -39,7 +39,7 @@ internal static class TileStyle
         {
             // Built once per CSS color and kept on it. A tile does not take the palette override of ValueColor.Style,
             // because its badge would inherit it.
-            var cssStyles = color.TileStyles ??= BuildStyles(css, color.ContrastText!);
+            var cssStyles = color.TileStyles ??= BuildStyles(css, color.ContrastText!, css);
             return cssStyles[(int)variant];
         }
 
@@ -65,11 +65,7 @@ internal static class TileStyle
         return styles;
     }
 
-    private static string[] BuildStyles(string fill, string fillText) => BuildStyles(fill, fillText, fill);
-
     // A null fill draws every variant on the surface.
-    private static string[] BuildTextStyles(string? fill, string text) => BuildStyles(fill, text, text);
-
     private static string[] BuildStyles(string? fill, string fillText, string surfaceText)
     {
         var styles = new string[Styles.GetLength(1)];

@@ -3,7 +3,7 @@
 @{
     var color = ValueReader.GetIndicatorColor(Reading, Map);
     var icon = MudBlazorIconResolver.ResolveOrNull(Reading.Icon ?? Icon);
-    // The text color of a case colors the text of the chip it fills; an icon alone has the color of the case.
+    // The text color of a case colors the text and the icon of the chip it fills; an icon alone has the color of the case.
     var chipStyle = Reading.TextColor.IsDefault ? color.Style : ValueColor.GetTextOnFill(color, Reading.TextColor).Style;
 }
 

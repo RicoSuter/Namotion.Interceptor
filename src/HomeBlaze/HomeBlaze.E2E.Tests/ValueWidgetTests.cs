@@ -491,7 +491,7 @@ public class ValueWidgetTests
             var icon = GetFirstIconIndicator(page);
             var chip = page.GetByTestId("indicator").And(page.Locator(".mud-chip"));
 
-            // Act & Assert: the app starts in the dark theme.
+            // The app starts in the dark theme.
             var darkIcon = await page.ResolveColorAsync("color-mix(in srgb, var(--mud-palette-surface) 30%, transparent)");
             await Assertions.Expect(icon).ToHaveCSSAsync("color", darkIcon, new() { Timeout = Timeout });
             await Assertions.Expect(chip).ToHaveCSSAsync("background-color", await page.ResolveColorAsync("rgba(var(--mud-palette-primary-rgb), 0.5)"));

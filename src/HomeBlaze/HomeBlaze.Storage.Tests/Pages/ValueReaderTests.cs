@@ -179,7 +179,7 @@ public class ValueReaderTests
 
         // Assert: the error does not depend on whether the value matches the case with the wrong color.
         Assert.Null(valueMap);
-        Assert.Equal("Unknown color 'red;background:url(x)': use a theme color like Success or a CSS color like #ffffff80", error);
+        Assert.Equal("Unknown color 'red;background:url(x)': use a theme color like Success or Surface 30%, or a CSS color like #ffffff80", error);
         Assert.Equal(error, reading.MapError);
         Assert.Equal(Color.Default, reading.Color);
     }
@@ -225,7 +225,7 @@ public class ValueReaderTests
 
         // Assert: the case with the wrong text color is not the one that matches.
         Assert.Null(valueMap);
-        Assert.Equal("Unknown color '#fff;background:url(x)': use a theme color like Success or a CSS color like #ffffff80", error);
+        Assert.Equal("Unknown color '#fff;background:url(x)': use a theme color like Success or Surface 30%, or a CSS color like #ffffff80", error);
         Assert.Equal(error, reading.MapError);
         Assert.Same(ValueColor.Default, reading.TextColor);
     }

@@ -13,7 +13,7 @@ public sealed partial class ValueColor
 {
     private const string DarkText = "rgba(0, 0, 0, 0.87)";
     private const string LightText = "#ffffff";
-    private const string ThemeText = "var(--mud-palette-text-primary)";
+    internal const string ThemeText = "var(--mud-palette-text-primary)";
     private const string PrimaryText = "var(--mud-palette-primary-text)";
 
     // One instance per theme color, so that converting a theme color allocates nothing.
@@ -24,10 +24,6 @@ public sealed partial class ValueColor
     private static readonly string[] ThemeNames = ThemeColors
         .Select(color => color.Theme.ToString())
         .ToArray();
-
-    // The theme colors whose palette variable has a text variant, -text, for the text on a fill of it.
-    private static readonly Color[] PaletteThemeColors =
-        [Color.Primary, Color.Secondary, Color.Tertiary, Color.Info, Color.Success, Color.Warning, Color.Error, Color.Dark];
 
     private ValueColor(Color theme)
     {
@@ -41,8 +37,8 @@ public sealed partial class ValueColor
         Theme = Color.Primary;
         Css = css;
         ContrastText = contrastText;
-        // The text on the primary color with alpha is the one of the theme, which a redefinition by itself would make
-        // invalid, so it is left as it is.
+        // The primary color with alpha keeps the primary text of the theme, because redefining that variable as itself
+        // would make it invalid.
         Style = contrastText == PrimaryText
             ? $"--mud-palette-primary: {css}; --mud-palette-primary-hover: color-mix(in srgb, {css} 6%, transparent)"
             : $"--mud-palette-primary: {css}; --mud-palette-primary-text: {contrastText}; --mud-palette-primary-hover: color-mix(in srgb, {css} 6%, transparent)";
@@ -65,7 +61,8 @@ public sealed partial class ValueColor
 
     /// <summary>
     /// The inline style that redefines the primary color of MudBlazor as the CSS color, and the text on it as black or
-    /// white, whichever contrasts more, or the text color of the theme for a <c>var()</c>. Null for a theme color.
+    /// white, whichever contrasts more, the text color of the theme for a <c>var()</c>, or the text of the palette color
+    /// for a theme color with alpha, which <c>Primary</c> with alpha keeps as it is. Null for a theme color.
     /// </summary>
     public string? Style { get; }
 
@@ -130,9 +127,8 @@ public sealed partial class ValueColor
     /// <c>var(--mud-palette-name)</c>. The variable of a theme color, such as <c>var(--mud-palette-success)</c>, gives
     /// that theme color. A theme color that has a palette variable followed by a percentage from 0 to 100, such as
     /// <c>Surface 30%</c>, is that color with that alpha, which follows the theme. Null, empty and white space give
-    /// <see cref="Default"/>. Anything else, a number for a theme
-    /// color, the primary text and hover variables that <see cref="Style"/> redefines and the <c>-rgb</c> variables
-    /// included, is no color.
+    /// <see cref="Default"/>. Anything else, a number for a theme color, the primary text and hover variables that
+    /// <see cref="Style"/> redefines and the <c>-rgb</c> variables included, is no color.
     /// </summary>
     public static bool TryParse(string? text, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out ValueColor? color)
     {
@@ -143,13 +139,10 @@ public sealed partial class ValueColor
             return true;
         }
 
-        for (var index = 0; index < ThemeNames.Length; index++)
+        if (IndexOfThemeName(trimmed) is var themeIndex and >= 0)
         {
-            if (trimmed.Equals(ThemeNames[index], StringComparison.OrdinalIgnoreCase))
-            {
-                color = ThemeColors[index];
-                return true;
-            }
+            color = ThemeColors[themeIndex];
+            return true;
         }
 
         var css = trimmed.ToString();
@@ -189,57 +182,50 @@ public sealed partial class ValueColor
 
     private static ValueColor? FromThemeAlpha(ReadOnlySpan<char> name, ReadOnlySpan<char> percentText)
     {
+        var index = IndexOfThemeName(name);
+        var isSurface = index == (int)Color.Surface;
+
+        // Default, Inherit and Transparent have no palette color to mix.
+        var paletteName = isSurface ? "surface" : index < 0 ? null : GetPaletteName((Color)index);
         var percent = double.Parse(percentText, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture);
-        if (percent > 100)
+        if (paletteName is null || percent > 100)
         {
             return null;
         }
 
-        var percentCss = percent.ToString("0.###", CultureInfo.InvariantCulture);
-        if (name.Equals(nameof(Color.Surface), StringComparison.OrdinalIgnoreCase))
-        {
-            return new ValueColor($"color-mix(in srgb, var(--mud-palette-surface) {percentCss}%, transparent)", ThemeText);
-        }
-
-        foreach (var theme in PaletteThemeColors)
-        {
-            if (!name.Equals(ThemeNames[(int)theme], StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            var paletteName = GetPaletteName(theme);
-
-            // Style redefines the primary variable on the element in terms of this color, so the primary color is
-            // read from its channel variable, which Style leaves as it is.
-            var css = theme == Color.Primary
-                ? $"rgba(var(--mud-palette-primary-rgb), {(percent / 100).ToString("0.#####", CultureInfo.InvariantCulture)})"
-                : $"color-mix(in srgb, var(--mud-palette-{paletteName}) {percentCss}%, transparent)";
-            return new ValueColor(css, $"var(--mud-palette-{paletteName}-text)");
-        }
-
-        // Default, Inherit and Transparent have no palette color to mix.
-        return null;
+        // Style redefines the primary variable on the element in terms of this color, so the primary color is read
+        // from its channel variable, which Style leaves as it is.
+        var css = index == (int)Color.Primary
+            ? $"rgba(var(--mud-palette-primary-rgb), {(percent / 100).ToString("0.#####", CultureInfo.InvariantCulture)})"
+            : $"color-mix(in srgb, var(--mud-palette-{paletteName}) {percent.ToString("0.###", CultureInfo.InvariantCulture)}%, transparent)";
+        return new ValueColor(css, isSurface ? ThemeText : $"var(--mud-palette-{paletteName}-text)");
     }
 
     private static ValueColor FromPaletteVariable(string css)
     {
-        // The regex matched, so the name stands between "--mud-palette-" and the closing parenthesis.
+        // The regex matched, so the name stands between "--mud-palette-" and the closing parenthesis. Only the theme
+        // colors with a palette fill are theme colors by their variable; var(--mud-palette-surface) stays a CSS color.
         var name = css.AsSpan(4, css.Length - 5).Trim(" \t\r\n\f")["--mud-palette-".Length..];
-        foreach (var theme in PaletteThemeColors)
+        var index = IndexOfThemeName(name);
+        return index >= 0 && GetPaletteName((Color)index) is not null ? ThemeColors[index] : new ValueColor(css, ThemeText);
+    }
+
+    private static int IndexOfThemeName(ReadOnlySpan<char> name)
+    {
+        for (var index = 0; index < ThemeNames.Length; index++)
         {
-            if (name.Equals(ThemeNames[(int)theme], StringComparison.OrdinalIgnoreCase))
+            if (name.Equals(ThemeNames[index], StringComparison.OrdinalIgnoreCase))
             {
-                return ThemeColors[(int)theme];
+                return index;
             }
         }
 
-        return new ValueColor(css, ThemeText);
+        return -1;
     }
 
     /// <summary>Gets the widget argument error of a color that <see cref="TryParse"/> does not take.</summary>
     internal static string GetError(string? text) =>
-        $"Unknown color '{text}': use a theme color like Success or a CSS color like #ffffff80";
+        $"Unknown color '{text}': use a theme color like Success or Surface 30%, or a CSS color like #ffffff80";
 
     public override string ToString() => Css ?? Theme.ToString();
 
