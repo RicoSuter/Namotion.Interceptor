@@ -76,6 +76,20 @@ public class StorageMetadataFileTests
     }
 
     [Fact]
+    public void WhenTheFirstEntryOfATargetHasNoKeys_ThenTheOtherIsReportedAndDoesNotApply()
+    {
+        // Arrange
+        const string json = """{ "$subjects": { "Channels[0]": { "navTitle": null }, "Channels/0": { "navTitle": "Second" } } }""";
+
+        // Act
+        var file = Parse(json);
+
+        // Assert
+        Assert.Null(file.FindSubject("Channels/0"));
+        Assert.Equal(["Channels/0"], file.DuplicatePaths);
+    }
+
+    [Fact]
     public void WhenAFileHasReservedKeys_ThenTheyAreNoMetadataAndATypeIsReported()
     {
         // Act

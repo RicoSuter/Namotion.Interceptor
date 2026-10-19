@@ -63,6 +63,16 @@ public class StorageMetadataWriterTests
     }
 
     [Fact]
+    public void WhenAValueHoldsCharactersOutsideTheBasicPlane_ThenTheyAreWrittenAsTheyAre()
+    {
+        // Act
+        var written = Merge("""{ "title": "Pump 😀" }""", Folder, """{ "note": "say \"hi\" \\ 🌱\t" }""");
+
+        // Assert
+        Assert.Equal("{\n  \"title\": \"Pump 😀\",\n  \"note\": \"say \\\"hi\\\" \\\\ 🌱\\t\"\n}\n", written);
+    }
+
+    [Fact]
     public void WhenAMergedKeyDiffersOnlyInCase_ThenItReplacesTheValueOfTheKeyOfTheFile()
     {
         // Act
@@ -113,6 +123,32 @@ public class StorageMetadataWriterTests
 
         // Assert
         Assert.Equal("{\n  \"$properties\": {\n    \"Power\": {\n      \"comment\": \"a\"\n    },\n    \"power\": {\n      \"comment\": \"b\"\n    }\n  }\n}\n", written);
+    }
+
+    [Fact]
+    public void WhenTheFileHasPathsThatDifferOnlyInCase_ThenAnotherWriteSucceeds()
+    {
+        // Arrange
+        const string file = """{ "$properties": { "Power": { "comment": "a" }, "power": { "comment": "b" } } }""";
+
+        // Act
+        var written = Merge(file, Property("Power"), """{ "comment": "c" }""");
+
+        // Assert
+        Assert.Equal("{\n  \"$properties\": {\n    \"Power\": {\n      \"comment\": \"c\"\n    },\n    \"power\": {\n      \"comment\": \"b\"\n    }\n  }\n}\n", written);
+    }
+
+    [Fact]
+    public void WhenAnEntryInTheRouteNotationIsWritten_ThenItKeepsItsPlaceInTheSection()
+    {
+        // Arrange
+        const string file = """{ "$subjects": { "Channels/0": { "a": 1 }, "Channel": { "b": 2 } } }""";
+
+        // Act
+        var written = Merge(file, NestedSubject("Channels[0]"), """{ "a": 3 }""");
+
+        // Assert
+        Assert.Equal("{\n  \"$subjects\": {\n    \"Channels[0]\": {\n      \"a\": 3\n    },\n    \"Channel\": {\n      \"b\": 2\n    }\n  }\n}\n", written);
     }
 
     [Fact]
@@ -179,6 +215,7 @@ public class StorageMetadataWriterTests
     [InlineData("""{ "title": 5 }""", "'title'")]
     [InlineData("""{ "navTitle": ["a"] }""", "'navTitle'")]
     [InlineData("""{ "note": "\ud800" }""", "'note'")]
+    [InlineData("""{ "note": "\t\ud800" }""", "'note'")]
     [InlineData("""{ "note": { "text": "\ud800" } }""", "'note'")]
     [InlineData("""{ "title": "\ud800" }""", "'title'")]
     [InlineData("""{ "\ud800": "x" }""", "lone surrogate")]

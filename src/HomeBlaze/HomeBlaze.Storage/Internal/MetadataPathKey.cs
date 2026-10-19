@@ -8,7 +8,8 @@ namespace HomeBlaze.Storage.Internal;
 /// <summary>
 /// The keys of the entries of a metadata file. An entry is written with the path that the registry writes
 /// (<c>Channels[0]/Power</c>) and read also in the route notation (<c>Channels/0/Power</c>): the key of a path is its
-/// names and keys in order, separated by slashes, so that both notations of a target have the same key.
+/// names and keys in order, separated by slashes, so that both notations of a target have the same key. A slash or a
+/// backslash in a name or a key is escaped with a backslash, so that a key with a slash differs from more segments.
 /// </summary>
 internal static class MetadataPathKey
 {
@@ -61,7 +62,7 @@ internal static class MetadataPathKey
 
     /// <summary>Gets the key of a property of the subject with the key <paramref name="subjectKey"/>, which is empty for the stored subject.</summary>
     public static string GetPropertyKey(string subjectKey, string propertyName)
-        => subjectKey.Length == 0 ? propertyName : $"{subjectKey}/{propertyName}";
+        => subjectKey.Length == 0 ? Escape(propertyName) : $"{subjectKey}/{Escape(propertyName)}";
 
     private static void Append(StringBuilder builder, string token)
     {
@@ -70,6 +71,9 @@ internal static class MetadataPathKey
             builder.Append('/');
         }
 
-        builder.Append(token);
+        builder.Append(Escape(token));
     }
+
+    private static string Escape(string token)
+        => token.Replace("\\", "\\\\").Replace("/", "\\/");
 }

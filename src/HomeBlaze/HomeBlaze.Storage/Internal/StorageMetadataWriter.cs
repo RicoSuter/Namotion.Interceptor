@@ -1,6 +1,5 @@
 using System.Buffers;
 using System.Text;
-using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using HomeBlaze.Components.Abstractions.Pages;
@@ -34,16 +33,21 @@ internal static class StorageMetadataWriter
         MetadataKeys.Order
     ];
 
-    private static readonly JsonNodeOptions NodeOptions = new() { PropertyNameCaseInsensitive = true };
+    // The keys of the file, its own included, and of an entry are matched without regard to case.
+    private static readonly JsonNodeOptions KeyOptions = new() { PropertyNameCaseInsensitive = true };
+
+    // The paths of a section and the keys inside a value are matched with regard to case. Set on every other object, as
+    // an object without options takes those of its parent.
+    private static readonly JsonNodeOptions CaseSensitiveOptions = new();
 
     private static readonly JsonWriterOptions FileOptions = new()
     {
         Indented = true,
         NewLine = "\n",
-        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+        Encoder = MinimalJsonEncoder.Instance
     };
 
-    private static readonly JsonWriterOptions CompactOptions = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+    private static readonly JsonWriterOptions CompactOptions = new() { Encoder = MinimalJsonEncoder.Instance };
 
     /// <summary>
     /// Merges values into the entry of the target: a key with a value is set, a nested value replacing the old one as
@@ -71,7 +75,7 @@ internal static class StorageMetadataWriter
             throw Refuse("values must be a JSON object, for example { \"navTitle\": \"Pump\" }.");
         }
 
-        var root = content is null ? new JsonObject(NodeOptions) : Parse(content);
+        var root = content is null ? new JsonObject(KeyOptions) : Parse(content);
         var sizeBefore = content is null ? 0 : Serialize(root).Length;
         var (section, entry) = GetEntry(root, target);
         MergeValues(entry, values, isContainer: target is { Section: null, IsContainer: true });
@@ -124,12 +128,20 @@ internal static class StorageMetadataWriter
             json = json[Encoding.UTF8.Preamble.Length..];
         }
 
-        return JsonNode.Parse(json, NodeOptions, StorageMetadataFile.DocumentOptions) as JsonObject
+        var root = JsonNode.Parse(json, CaseSensitiveOptions, StorageMetadataFile.DocumentOptions) as JsonObject
             ?? throw new JsonException("A metadata file holds a JSON object.");
+        return WithKeysWithoutCase(root);
     }
 
-    // The section and the entry of the target in it, or no section and the file itself for its own keys. A section is
-    // rebuilt with paths that match with regard to case, as paths are names of properties.
+    // The properties of the object, moved to one whose keys are matched without regard to case.
+    private static JsonObject WithKeysWithoutCase(JsonObject source)
+    {
+        var properties = source.ToArray();
+        source.Clear();
+        return new JsonObject(properties, KeyOptions);
+    }
+
+    // The section and the entry of the target in it, or no section and the file itself for its own keys.
     private static (JsonObject? Section, JsonObject Entry) GetEntry(JsonObject root, StorageMetadataTarget target)
     {
         if (target.Section is null)
@@ -137,48 +149,37 @@ internal static class StorageMetadataWriter
             return (null, root);
         }
 
-        var section = new JsonObject();
-        if (root[target.Section] is JsonObject parsedSection)
+        if (root[target.Section] is not JsonObject section)
         {
-            foreach (var (path, entry) in parsedSection.ToArray())
-            {
-                parsedSection.Remove(path);
-                section[path] = entry;
-            }
+            section = new JsonObject(CaseSensitiveOptions);
+            root[target.Section] = section;
         }
-
-        root[target.Section] = section;
 
         var key = MetadataPathKey.Normalize(target.Path!);
-        string? foundPath = null;
-        foreach (var (path, _) in section)
+        var foundIndex = -1;
+        for (var index = 0; index < section.Count; index++)
         {
-            if (MetadataPathKey.Normalize(path) == key)
+            if (MetadataPathKey.Normalize(section.GetAt(index).Key) == key)
             {
-                if (foundPath is not null)
+                if (foundIndex >= 0)
                 {
-                    throw Refuse($"The metadata file has two entries for the same target, {NameList.Format([foundPath, path])}. Remove one of them, then try again.");
+                    throw Refuse($"The metadata file has two entries for the same target, {NameList.Format([section.GetAt(foundIndex).Key, section.GetAt(index).Key])}. Remove one of them, then try again.");
                 }
 
-                foundPath = path;
+                foundIndex = index;
             }
         }
 
-        if (foundPath is null)
+        if (foundIndex < 0)
         {
-            var created = new JsonObject(NodeOptions);
+            var created = new JsonObject(KeyOptions);
             section[target.Path!] = created;
             return (section, created);
         }
 
-        var found = (JsonObject)section[foundPath]!;
-        if (foundPath != target.Path)
-        {
-            // Written with the path of the registry, whichever notation it was read in.
-            section.Remove(foundPath);
-            section[target.Path!] = found;
-        }
-
+        // Written with the path of the registry in its place, whichever notation it was read in.
+        var found = WithKeysWithoutCase((JsonObject)section.GetAt(foundIndex).Value!);
+        section.SetAt(foundIndex, target.Path!, found);
         return (section, found);
     }
 
@@ -268,7 +269,7 @@ internal static class StorageMetadataWriter
         => entry.Count(pair => pair.Value is not null && !pair.Key.StartsWith('$'));
 
     private static JsonNode? ToNode(JsonElement value)
-        => value.ValueKind == JsonValueKind.Null ? null : JsonNode.Parse(value.GetRawText(), NodeOptions);
+        => value.ValueKind == JsonValueKind.Null ? null : JsonNode.Parse(value.GetRawText(), CaseSensitiveOptions);
 
     // A blank string removes the key, so that a value of only spaces never shows.
     private static JsonNode? ToString(string key, JsonElement value)
@@ -315,7 +316,7 @@ internal static class StorageMetadataWriter
             throw Refuse($"{NameList.Format([key])} must be an array of names of children.");
         }
 
-        var order = new JsonArray(NodeOptions);
+        var order = new JsonArray(CaseSensitiveOptions);
         foreach (var item in value.EnumerateArray())
         {
             order.Add(JsonValue.Create(GetString(key, item)));

@@ -170,13 +170,16 @@ internal sealed class StorageMetadataFile
         }
 
         var entries = new Dictionary<string, ImmutableDictionary<string, JsonElement>>(StringComparer.Ordinal);
+
+        // With the keys of the entries without keys, which are left out but still come first.
+        var keys = new HashSet<string>(StringComparer.Ordinal);
         foreach (var entry in section.EnumerateObject())
         {
             var path = entry.Name;
             var key = MetadataPathKey.Normalize(path)
                 ?? throw new JsonException($"The path {NameList.Format([path])} cannot be read.");
             var values = ReadValues(entry.Value, reservedKeys: null);
-            if (entries.ContainsKey(key))
+            if (!keys.Add(key))
             {
                 (duplicatePaths ??= []).Add(path);
             }

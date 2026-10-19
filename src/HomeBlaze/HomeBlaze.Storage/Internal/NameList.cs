@@ -20,9 +20,21 @@ internal static class NameList
             .Take(MaxNameCount + 1)
             .Select(static (name, index) => index == MaxNameCount
                 ? "…"
-                : $"'{EscapeControlCharacters(name.Length > MaxNameLength ? name[..MaxNameLength] + "…" : name)}'")
+                : $"'{EscapeControlCharacters(Shorten(name))}'")
             .ToList();
         return formattedNames.Count > 0 ? string.Join(", ", formattedNames) : "none";
+    }
+
+    // Not within a surrogate pair, which would leave a lone surrogate.
+    private static string Shorten(string name)
+    {
+        if (name.Length <= MaxNameLength)
+        {
+            return name;
+        }
+
+        var length = char.IsHighSurrogate(name[MaxNameLength - 1]) ? MaxNameLength - 1 : MaxNameLength;
+        return name[..length] + "…";
     }
 
     private static string EscapeControlCharacters(string text)

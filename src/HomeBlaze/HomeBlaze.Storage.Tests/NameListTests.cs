@@ -29,6 +29,19 @@ public class NameListTests
     }
 
     [Fact]
+    public void WhenALongNameIsShortenedWithinASurrogatePair_ThenThePairIsLeftOut()
+    {
+        // Arrange
+        var name = new string('x', 63) + "😀" + "y";
+
+        // Act
+        var formatted = NameList.Format([name]);
+
+        // Assert
+        Assert.Equal($"'{new string('x', 63)}…'", formatted);
+    }
+
+    [Fact]
     public void WhenNoNameIsFormatted_ThenItIsNone()
     {
         // Act
