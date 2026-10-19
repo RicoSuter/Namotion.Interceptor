@@ -120,22 +120,15 @@ public class MethodMetadata
         if (result is Task task)
         {
             await task.ConfigureAwait(false);
-            if (ResultType != null)
-            {
-                // The task of an async method is a subclass of Task<T>, not Task<T> itself.
-                for (var taskType = task.GetType(); taskType is not null; taskType = taskType.BaseType)
-                {
-                    if (taskType.IsGenericType && taskType.GetGenericTypeDefinition() == typeof(Task<>))
-                    {
-                        return taskType.GetProperty(nameof(Task<object>.Result))?.GetValue(task);
-                    }
-                }
-            }
-            return null;
+            return ResultType != null ? GetTaskResult(task) : null;
         }
 
         return result;
     }
+
+    // An async method returns a subclass of Task<T> (its state machine box); GetProperty finds the inherited Result.
+    private static object? GetTaskResult(Task task) =>
+        task.GetType().GetProperty("Result")?.GetValue(task);
 
     private object?[] ResolveParameters(
         object?[]? userParameters,

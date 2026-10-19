@@ -449,12 +449,21 @@ namespace HomeBlaze.Abstractions.Devices.Locks
 {
     public enum DoorLockState
     {
-        Unlocking = 0,
-        Unlocked = 1,
-        Locking = 2,
-        Locked = 3,
-        Unlatching = 4,
-        Unlatched = 5,
+        Locked = 0,
+        Locking = 1,
+        Unlocked = 2,
+        Unlocking = 3,
+        Unlatched = 4,
+        Unlatching = 5,
+        Jammed = 6,
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Pulls the latch of a door lock so that the door can be pushed open.")]
+    public interface IDoorLatchController
+    {
+        [HomeBlaze.Abstractions.Attributes.Operation(RequiresConfirmation=true)]
+        [System.ComponentModel.Category("Lock")]
+        System.Threading.Tasks.Task UnlatchAsync(System.Threading.CancellationToken cancellationToken);
     }
     [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
     [System.ComponentModel.Description("Combined door lock with state and control operations.")]
@@ -464,10 +473,13 @@ namespace HomeBlaze.Abstractions.Devices.Locks
     public interface IDoorLockController
     {
         [HomeBlaze.Abstractions.Attributes.Operation]
+        [System.ComponentModel.Category("Lock")]
         System.Threading.Tasks.Task LockAsync(System.Threading.CancellationToken cancellationToken);
         [HomeBlaze.Abstractions.Attributes.Operation(RequiresConfirmation=true)]
+        [System.ComponentModel.Category("Lock")]
         System.Threading.Tasks.Task ToggleLockAsync(System.Threading.CancellationToken cancellationToken);
         [HomeBlaze.Abstractions.Attributes.Operation(RequiresConfirmation=true)]
+        [System.ComponentModel.Category("Lock")]
         System.Threading.Tasks.Task UnlockAsync(System.Threading.CancellationToken cancellationToken);
     }
     [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
@@ -476,8 +488,10 @@ namespace HomeBlaze.Abstractions.Devices.Locks
     {
         [HomeBlaze.Abstractions.Attributes.State(Position=131)]
         [Namotion.Interceptor.Attributes.Derived]
+        [System.ComponentModel.Category("Lock")]
         bool? IsLocked { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=130)]
+        [System.ComponentModel.Category("Lock")]
         HomeBlaze.Abstractions.Devices.Locks.DoorLockState? LockState { get; }
     }
 }
@@ -748,8 +762,36 @@ namespace HomeBlaze.Abstractions.Messaging
     [System.ComponentModel.Description("Sends notification messages.")]
     public interface INotificationPublisher
     {
-        [HomeBlaze.Abstractions.Attributes.Operation]
-        System.Threading.Tasks.Task SendNotificationAsync(string message, System.Threading.CancellationToken cancellationToken);
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Sends a notification to this recipient and returns the channel\'s id of it. Use th" +
+            "e Emergency priority only for safety-critical events.")]
+        System.Threading.Tasks.Task<HomeBlaze.Abstractions.Messaging.NotificationResult> SendNotificationAsync(HomeBlaze.Abstractions.Messaging.Notification notification, System.Threading.CancellationToken cancellationToken);
+    }
+    public sealed class Notification : System.IEquatable<HomeBlaze.Abstractions.Messaging.Notification>
+    {
+        public Notification() { }
+        [System.ComponentModel.Description("The message text, required and not empty.")]
+        public required string Message { get; init; }
+        [System.ComponentModel.Description(@"Low: no sound or vibration. Normal (default): the recipient's default alert. High: alerts also during quiet hours. Emergency: repeats until the recipient acknowledges it; use it only for safety-critical events. A channel without repeats delivers Emergency as High.")]
+        public HomeBlaze.Abstractions.Messaging.NotificationPriority Priority { get; init; }
+        [System.ComponentModel.Description("A short heading, or null for the channel\'s default.")]
+        public string? Title { get; init; }
+        [System.ComponentModel.Description("An absolute http or https address the recipient can open; any other value is left" +
+            " out.")]
+        public string? Url { get; init; }
+        [System.ComponentModel.Description("The text shown for the url, or null to show the address itself.")]
+        public string? UrlTitle { get; init; }
+    }
+    public enum NotificationPriority
+    {
+        Low = 0,
+        Normal = 1,
+        High = 2,
+        Emergency = 3,
+    }
+    public sealed class NotificationResult : System.IEquatable<HomeBlaze.Abstractions.Messaging.NotificationResult>
+    {
+        public NotificationResult() { }
+        public string? Id { get; init; }
     }
 }
 namespace HomeBlaze.Abstractions.Metadata
@@ -867,7 +909,6 @@ namespace HomeBlaze.Abstractions.Sensors
         PartiallyOpen = 2,
         Closing = 3,
         Closed = 4,
-        Unknown = 5,
     }
     [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
     [System.ComponentModel.Description("Reports barometric pressure in hectopascals.")]
@@ -899,11 +940,13 @@ namespace HomeBlaze.Abstractions.Sensors
     [System.ComponentModel.Description("Reports door state (open, closed, partially open).")]
     public interface IDoorSensor
     {
+        [HomeBlaze.Abstractions.Attributes.State(Position=230)]
+        [System.ComponentModel.Category("Door")]
+        HomeBlaze.Abstractions.Sensors.DoorState? DoorState { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=231)]
         [Namotion.Interceptor.Attributes.Derived]
-        bool? IsClosed { get; }
-        [HomeBlaze.Abstractions.Attributes.State(Position=230)]
-        HomeBlaze.Abstractions.Sensors.DoorState? State { get; }
+        [System.ComponentModel.Category("Door")]
+        bool? IsDoorClosed { get; }
     }
     [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
     [System.ComponentModel.Description("Reports electrical current in amperes.")]

@@ -1,5 +1,5 @@
 @* A tile that fills its place, with icon, label and subtitle centered. With OnClick it is one click target, with a
-   badge over its top right corner and, while it works, a progress circle over its bottom right corner; without OnClick it
+   badge (a subject or an icon) over its top right corner and, while it works, a progress circle over its bottom right corner; without OnClick it
    only shows its content and takes no input. The badge and the progress circle are siblings of the button, not inside
    it, so the markup stays valid; they take no pointer input, so a click on them reaches the button below. The style is
    on the root, so that they inherit the text color of the tile. A disabled tile (also a busy one and every tile in edit
@@ -16,6 +16,7 @@
                 role="@(Checked is null ? null : "switch")"
                 aria-checked="@(Checked is { } isChecked ? (isChecked ? "true" : "false") : null)"
                 aria-label="@AccessibleName"
+                aria-description="@AccessibleDescription"
                 aria-busy="@(IsBusy ? "true" : null)"
                 title="@Tooltip"
                 @onclick="OnClick">
@@ -38,6 +39,12 @@
             <SubjectComponent Subject="@Badge" Type="SubjectComponentType.Widget" />
         </div>
     }
+    else if (BadgeIcon is not null)
+    {
+        <div class="tile-widget-badge tile-widget-badge-icon" data-testid="tile-badge">
+            <MudIcon Icon="@BadgeIcon" />
+        </div>
+    }
 </div>
 
 @code {
@@ -54,8 +61,11 @@
     /// <summary>Whether a switch tile is on, which makes the button a switch; null for a plain button.</summary>
     [Parameter] public bool? Checked { get; set; }
 
-    /// <summary>The accessible name when the tile shows no label, such as the title of the operation of an icon tile.</summary>
+    /// <summary>The accessible name, which replaces the content of the tile as its name, such as the title of the operation of an icon tile.</summary>
     [Parameter] public string? AccessibleName { get; set; }
+
+    /// <summary>The accessible description, such as the state that the subtitle shows, which <see cref="AccessibleName"/> hides from the name.</summary>
+    [Parameter] public string? AccessibleDescription { get; set; }
 
     [Parameter] public string? Tooltip { get; set; }
 
@@ -76,6 +86,9 @@
 
     /// <summary>The content of the badge slot, or null for none.</summary>
     [Parameter] public IInterceptorSubject? Badge { get; set; }
+
+    /// <summary>The icon drawn as badge when no <see cref="Badge"/> subject is given, as resolved by <see cref="MudBlazorIconResolver"/>, or null for none.</summary>
+    [Parameter] public string? BadgeIcon { get; set; }
 
     /// <summary>What a click does. Without it the tile is no button and takes no input.</summary>
     [Parameter] public EventCallback<MouseEventArgs> OnClick { get; set; }

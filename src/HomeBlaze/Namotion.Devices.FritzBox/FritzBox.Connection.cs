@@ -80,6 +80,14 @@ public partial class FritzBox
                 continue;
             }
 
+            // The dialogs validate the address, but a value written another way must not send the login elsewhere.
+            if (!FritzBoxConnectionCheck.TryNormalizeHostAddress(hostAddress, out _))
+            {
+                SetError(FritzBoxConnectionCheck.InvalidHostAddressMessage);
+                await WaitForConfigurationChangeAsync(Timeout.InfiniteTimeSpan, stoppingToken);
+                continue;
+            }
+
             if (string.IsNullOrEmpty(Password))
             {
                 // A login without a password cannot succeed, and every failed one lengthens the router's lockout.

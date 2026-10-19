@@ -1,4 +1,7 @@
+using System.Collections;
+using System.ComponentModel;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Namotion.Interceptor.Mcp.Models;
 using Namotion.Interceptor.Mcp.Tools;
 
@@ -80,6 +83,126 @@ public class McpMethodParameterTests
         Assert.Equal("""{"name":"start","type":"string","format":"date-time"}""", dateJson);
         Assert.Equal("""{"name":"position","type":"string","format":"hh:mm:ss"}""", timeSpanJson);
         Assert.Equal("""{"name":"mode","type":"string","enum":["Off","On"]}""", enumJson);
+    }
+
+    [Fact]
+    public void WhenParameterIsRecord_ThenTheSchemaListsItsCamelCaseMembers()
+    {
+        // Act
+        var parameter = McpMethodParameter.Create("notification", typeof(TestNotification));
+
+        // Assert
+        Assert.Equal("object", parameter.Type);
+        var schema = parameter.Schema!.Value;
+        var properties = schema.GetProperty("properties");
+        Assert.Equal(["message", "code", "title", "priority"], properties.EnumerateObject().Select(property => property.Name));
+        Assert.Equal(["message", "code"], schema.GetProperty("required").EnumerateArray().Select(name => name.GetString()));
+        Assert.Equal("The text shown to the reader.", properties.GetProperty("message").GetProperty("description").GetString());
+        Assert.Equal(["Low", "Normal"], properties.GetProperty("priority").GetProperty("enum").EnumerateArray().Select(name => name.GetString()));
+    }
+
+    [Fact]
+    public void WhenTypeReferencesItself_ThenTheSchemaIsCreated()
+    {
+        // Act
+        var parameter = McpMethodParameter.Create("node", typeof(TestNode));
+
+        // Assert
+        Assert.True(parameter.Schema!.Value.GetProperty("properties").TryGetProperty("next", out _));
+    }
+
+    [Theory]
+    [InlineData(typeof(int))]
+    [InlineData(typeof(string))]
+    [InlineData(typeof(object))]
+    [InlineData(typeof(ArrayList))]
+    public void WhenParameterIsNoObjectWithMembers_ThenHasNoSchema(Type type)
+    {
+        // Act
+        var parameter = McpMethodParameter.Create("value", type);
+
+        // Assert
+        Assert.Null(parameter.Schema);
+    }
+
+    [Fact]
+    public void WhenRecordIsPositional_ThenTheSchemaRequiresConstructorParametersWithoutDefault()
+    {
+        // Act
+        var parameter = McpMethodParameter.Create("command", typeof(TestCommand));
+
+        // Assert
+        var schema = parameter.Schema!.Value;
+        Assert.Equal(["target", "level", "mode"], schema.GetProperty("properties").EnumerateObject().Select(property => property.Name));
+        Assert.Equal(["target", "level"], schema.GetProperty("required").EnumerateArray().Select(name => name.GetString()));
+    }
+
+    [Fact]
+    public void WhenParameterIsByRefPointerByRefLikeOrOpenGeneric_ThenItHasNoSchema()
+    {
+        // Arrange
+        Type[] types =
+        [
+            typeof(int).MakeByRefType(),
+            typeof(int).MakePointerType(),
+            typeof(Span<int>),
+            typeof(List<>),
+            typeof(List<>).GetGenericArguments()[0]
+        ];
+
+        // Act
+        var parameters = types.Select(type => McpMethodParameter.Create("value", type)).ToArray();
+
+        // Assert
+        Assert.All(parameters, parameter => Assert.Null(parameter.Schema));
+    }
+
+    [Fact]
+    public void WhenMemberNamesCollide_ThenTheParameterHasNoSchema()
+    {
+        // Act
+        var parameter = McpMethodParameter.Create("value", typeof(TestCollidingMessage));
+
+        // Assert
+        Assert.Equal("object", parameter.Type);
+        Assert.Null(parameter.Schema);
+    }
+
+    public sealed record TestNotification
+    {
+        [Description("The text shown to the reader.")]
+        public required string Message { get; init; }
+
+        [JsonRequired]
+        public int Code { get; init; }
+
+        public string? Title { get; init; }
+
+        public TestPriority Priority { get; init; }
+    }
+
+    public sealed record TestCommand(string Target, int Level, string Mode = "Auto");
+
+    public enum TestPriority
+    {
+        Low,
+        Normal
+    }
+
+    public sealed class TestNode
+    {
+        public string? Name { get; set; }
+
+        public TestNode? Next { get; set; }
+    }
+
+    public sealed class TestCollidingMessage
+    {
+        [JsonPropertyName("text")]
+        public string? First { get; set; }
+
+        [JsonPropertyName("text")]
+        public string? Second { get; set; }
     }
 
     public enum TestMode
