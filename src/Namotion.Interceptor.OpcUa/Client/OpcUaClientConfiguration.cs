@@ -187,10 +187,11 @@ public class OpcUaClientConfiguration
 
     /// <summary>
     /// Gets or sets whether to process subscription messages sequentially (in order).
-    /// When true, callbacks are invoked one at a time in sequence order, reducing throughput but guaranteeing order.
-    /// When false (default), messages may be processed in parallel for higher throughput.
-    /// Only enable this if your application requires strict ordering of property updates.
-    /// Default is false for optimal performance.
+    /// When true, callbacks are invoked one at a time in sequence order, reducing throughput but ordering
+    /// updates across properties.
+    /// When false (default), messages may be processed in parallel for higher throughput; a value from a
+    /// message older than the last one applied to the same property is skipped either way.
+    /// Only enable this if your application requires updates of different properties to apply in order.
     /// </summary>
     public bool SubscriptionSequentialPublishing { get; set; } = false;
 

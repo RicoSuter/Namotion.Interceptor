@@ -54,7 +54,11 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
         {
             logging.ClearProviders();
             logging.SetMinimumLevel(LogLevel.Debug);
-            logging.AddXunit(_logger, "Client", LogLevel.Information);
+            // Debug only for the connector itself, which logs a skipped stale notification at that level.
+            logging.AddXunit(_logger, "Client", LogLevel.Debug);
+            logging.AddFilter<XunitLoggerProvider>((category, level) =>
+                level >= LogLevel.Information ||
+                category?.StartsWith("Namotion.Interceptor.OpcUa.Client.", StringComparison.Ordinal) == true);
         });
 
         _context = InterceptorSubjectContext

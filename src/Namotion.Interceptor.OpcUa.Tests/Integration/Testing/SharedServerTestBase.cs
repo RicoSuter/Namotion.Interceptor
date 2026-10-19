@@ -18,6 +18,8 @@ public abstract class SharedServerTestBase<TClient> : IAsyncLifetime,
     protected readonly TestLogger Logger;
     protected TClient? Client;
 
+    private readonly long _serverLogPosition;
+
     protected SharedServerTestBase(
         SharedOpcUaServerFixture serverFixture,
         SharedOpcUaClientFixture clientFixture,
@@ -27,17 +29,36 @@ public abstract class SharedServerTestBase<TClient> : IAsyncLifetime,
         ClientFixture = clientFixture;
         Output = output;
         Logger = new TestLogger(output);
+        _serverLogPosition = serverFixture.ServerLog.Position;
     }
 
     public abstract Task InitializeAsync();
 
     public async Task DisposeAsync()
     {
+        WriteServerLog();
+
         // Client is disposed by SharedOpcUaClientFixture at class level
         // Only dispose if Client is a different type (e.g., DynamicSubject client)
         if (Client is IAsyncDisposable asyncDisposable && Client is not OpcUaTestClient<SharedTestModel>)
         {
             await asyncDisposable.DisposeAsync();
+        }
+    }
+
+    private void WriteServerLog()
+    {
+        var lines = ServerFixture.ServerLog.ReadFrom(_serverLogPosition);
+        if (lines.Length == 0)
+        {
+            return;
+        }
+
+        // Includes lines caused by test classes running in parallel; times count from the server start.
+        Output.WriteLine("Shared server log while this test ran:");
+        foreach (var line in lines)
+        {
+            Output.WriteLine(line);
         }
     }
 }
