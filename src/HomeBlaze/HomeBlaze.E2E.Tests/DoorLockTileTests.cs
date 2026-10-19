@@ -173,6 +173,58 @@ public class DoorLockTileTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenTileHasAMap_ThenTheCaseOfTheStateGivesTheTextTheFillAndTheDescription()
+    {
+        // Arrange
+        SetLockState(DoorLockState.Locked, DoorState.Closed);
+
+        // Act
+        var page = await OpenPageAsync();
+        var tile = GetTile(page, "Mapped front door");
+
+        // Assert
+        await Assertions.Expect(tile.GetByTestId("tile-subtitle")).ToHaveTextAsync("Secured", new() { Timeout = Timeout });
+        await Assertions.Expect(tile).ToHaveAccessibleDescriptionAsync("Secured, unlocks on click", new() { Timeout = Timeout });
+        var tertiary = await page.ResolveColorAsync("var(--mud-palette-tertiary)");
+        var background = await GetTileRoot(tile).EvaluateAsync<string>("element => getComputedStyle(element).backgroundColor");
+        Assert.Equal(tertiary, background);
+    }
+
+    [Fact]
+    public async Task WhenMappedTileDoorOpens_ThenTheTextOfTheCaseStaysWithoutTheOpenDoor()
+    {
+        // Arrange
+        SetLockState(DoorLockState.Unlocked, DoorState.Closed);
+        var page = await OpenPageAsync();
+        var tile = GetTile(page, "Mapped front door");
+        await Assertions.Expect(tile.GetByTestId("tile-subtitle")).ToHaveTextAsync("Not secured", new() { Timeout = Timeout });
+
+        // Act
+        GetLock().DoorState = DoorState.Open;
+
+        // Assert: the unmapped tile of the same lock shows that the door opened before the mapped one is checked.
+        await Assertions.Expect(GetTile(page, "Front door").GetByTestId("tile-subtitle")).ToHaveTextAsync("Unlocked · open", new() { Timeout = Timeout });
+        await Assertions.Expect(tile.GetByTestId("tile-subtitle")).ToHaveTextAsync("Not secured");
+    }
+
+    [Fact]
+    public async Task WhenMappedTileStateHasNoCase_ThenTheTileShowsItsOwnTextAndFill()
+    {
+        // Arrange
+        SetLockState(DoorLockState.Jammed, DoorState.Closed);
+
+        // Act
+        var page = await OpenPageAsync();
+        var tile = GetTile(page, "Mapped front door");
+
+        // Assert
+        await Assertions.Expect(tile.GetByTestId("tile-subtitle")).ToHaveTextAsync("Jammed", new() { Timeout = Timeout });
+        var error = await page.ResolveColorAsync("var(--mud-palette-error)");
+        var background = await GetTileRoot(tile).EvaluateAsync<string>("element => getComputedStyle(element).backgroundColor");
+        Assert.Equal(error, background);
+    }
+
+    [Fact]
     public async Task WhenTileIsTooSmallForItsText_ThenTheTextStaysBelowTheBadge()
     {
         // Arrange

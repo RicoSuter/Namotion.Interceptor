@@ -191,6 +191,9 @@ namespace HomeBlaze.Components
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public string? Label { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
+        [HomeBlaze.Abstractions.Attributes.SubjectPath(typeof(HomeBlaze.Components.ValueMap))]
+        public string? Map { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
         [HomeBlaze.Abstractions.Attributes.SubjectPath(typeof(HomeBlaze.Abstractions.Devices.Locks.IDoorLockState))]
         public string? Path { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
