@@ -53,8 +53,9 @@
 
         try
         {
-            // Shared with every other tab, so that the tree is walked once per interval and not once per tab.
-            _items = NavigationResolver.GetRecentAppBarItems(Root, RefreshInterval);
+            // Shared with every other tab, so that the tree is not walked once per tab. At most half an interval old,
+            // so that a tab shows a change within one and a half intervals.
+            _items = NavigationResolver.GetRecentAppBarItems(Root, RefreshInterval / 2);
         }
         catch (Exception exception)
         {
