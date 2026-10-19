@@ -161,6 +161,12 @@
     --place-gap: clamp(4px, 2.5cqmin, 8px);
 }
 
+/* A card or a tile that fills a grid cell or a canvas node keeps 8 pixels around it for its shadow, which the cell or
+   the node clips otherwise. Safari has no overflow-clip-margin and clips it. */
+::deep :is(.grid-cell, .canvas-node):has(> :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .place-filler, > :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty)) > .place-filler) {
+    overflow-clip-margin: 8px;
+}
+
 ::deep :is(.place-filler, .place-centered) .subject-component-wrapper {
     --place-primary-text: initial;
     --place-secondary-text: initial;

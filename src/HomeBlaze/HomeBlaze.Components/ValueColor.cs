@@ -24,6 +24,10 @@ public sealed partial class ValueColor
         .Select(color => color.Theme.ToString())
         .ToArray();
 
+    // The theme colors whose palette variable has a text variant, -text, for the text on a fill of it.
+    private static readonly Color[] PaletteThemeColors =
+        [Color.Primary, Color.Secondary, Color.Tertiary, Color.Info, Color.Success, Color.Warning, Color.Error, Color.Dark];
+
     private ValueColor(Color theme)
     {
         Theme = theme;
@@ -72,8 +76,10 @@ public sealed partial class ValueColor
     /// <summary>
     /// Parses the name of a theme color, without regard to case, or a CSS color: <c>#rgb</c>, <c>#rgba</c>,
     /// <c>#rrggbb</c>, <c>#rrggbbaa</c>, <c>rgb()</c> or <c>rgba()</c> with numbers or percentages, or
-    /// <c>var(--mud-palette-name)</c>. Null, empty and white space give <see cref="Default"/>. Anything else,
-    /// a number for a theme color included, is no color.
+    /// <c>var(--mud-palette-name)</c>. The variable of a theme color, such as <c>var(--mud-palette-success)</c>, gives
+    /// that theme color. Null, empty and white space give <see cref="Default"/>. Anything else, a number for a theme
+    /// color, the primary text and hover variables that <see cref="Style"/> redefines and the <c>-rgb</c> variables
+    /// included, is no color.
     /// </summary>
     public static bool TryParse(string? text, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out ValueColor? color)
     {
@@ -113,12 +119,27 @@ public sealed partial class ValueColor
 
         if (PaletteVariableRegex().IsMatch(css))
         {
-            color = new ValueColor(css, ThemeText);
+            color = FromPaletteVariable(css);
             return true;
         }
 
         color = null;
         return false;
+    }
+
+    private static ValueColor FromPaletteVariable(string css)
+    {
+        // The regex matched, so the name stands between "--mud-palette-" and the closing parenthesis.
+        var name = css.AsSpan(4, css.Length - 5).Trim(" \t\r\n\f")["--mud-palette-".Length..];
+        foreach (var theme in PaletteThemeColors)
+        {
+            if (name.Equals(ThemeNames[(int)theme], StringComparison.OrdinalIgnoreCase))
+            {
+                return ThemeColors[(int)theme];
+            }
+        }
+
+        return new ValueColor(css, ThemeText);
     }
 
     /// <summary>Gets the widget argument error of a color that <see cref="TryParse"/> does not take.</summary>
@@ -186,6 +207,8 @@ public sealed partial class ValueColor
         RegexOptions.CultureInvariant)]
     private static partial Regex RgbColorRegex();
 
-    [GeneratedRegex("^var\\(" + Space + "*--mud-palette-[a-z0-9]+(?:-[a-z0-9]+)*" + Space + "*\\)$", RegexOptions.CultureInvariant)]
+    // Style redefines the primary text and hover variables on the element, so a color of one of them would be the
+    // redefined text color or refer to itself. An -rgb variable holds the channels without rgb() around them.
+    [GeneratedRegex("^var\\(" + Space + "*--mud-palette-(?!(?:primary-text|primary-hover|[a-z0-9-]*-rgb)" + Space + "*\\))[a-z0-9]+(?:-[a-z0-9]+)*" + Space + "*\\)$", RegexOptions.CultureInvariant)]
     private static partial Regex PaletteVariableRegex();
 }
