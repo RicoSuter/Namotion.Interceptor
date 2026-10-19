@@ -40,7 +40,7 @@ public class CanvasExtentTests
     public void WhenWidthIsNotAboveZero_ThenItIsAnError(int value)
     {
         // Act & Assert
-        Assert.Equal($"Width must be above 0: {value}", CanvasExtent.Validate(value, null));
+        Assert.Equal($"Width must be above 0: {value}", CanvasExtent.Validate(value, null, null));
     }
 
     [Theory]
@@ -62,10 +62,10 @@ public class CanvasExtentTests
     public void WhenCanvasHasNoMinWidth_ThenItIsDrawnAtTheWidthOfItsFrame()
     {
         // Act
-        var factor = CanvasExtent.GetFactor(1104, null);
+        var factor = CanvasExtent.GetFactor(1104, null, null);
 
         // Assert
-        Assert.Equal("100cqw", CanvasExtent.GetDrawnWidth(null));
+        Assert.Equal("100cqw", CanvasExtent.GetDrawnWidth(null, null));
         Assert.Equal("tan(atan2(100cqw, 1104px))", factor);
     }
 
@@ -75,17 +75,55 @@ public class CanvasExtentTests
     public void WhenMinWidthIsNotAboveZero_ThenItIsAnError(int value)
     {
         // Act & Assert
-        Assert.Equal($"MinWidth must be above 0: {value}", CanvasExtent.Validate(null, value));
+        Assert.Equal($"MinWidth must be above 0: {value}", CanvasExtent.Validate(null, value, null));
     }
 
     [Fact]
     public void WhenCanvasHasAMinWidth_ThenItIsDrawnAtLeastThatWide()
     {
         // Act
-        var factor = CanvasExtent.GetFactor(1000, 750);
+        var factor = CanvasExtent.GetFactor(1000, 750, null);
 
         // Assert
-        Assert.Equal("max(100cqw, 750px)", CanvasExtent.GetDrawnWidth(750));
+        Assert.Equal("max(100cqw, 750px)", CanvasExtent.GetDrawnWidth(750, null));
         Assert.Equal("tan(atan2(max(100cqw, 750px), 1000px))", factor);
+    }
+
+    [Fact]
+    public void WhenCanvasHasAMaxWidth_ThenItIsDrawnAtMostThatWide()
+    {
+        // Act
+        var factor = CanvasExtent.GetFactor(1104, null, 1104);
+
+        // Assert
+        Assert.Equal("min(100cqw, 1104px)", CanvasExtent.GetDrawnWidth(null, 1104));
+        Assert.Equal("tan(atan2(min(100cqw, 1104px), 1104px))", factor);
+    }
+
+    [Fact]
+    public void WhenCanvasHasAMinWidthAndAMaxWidth_ThenItIsDrawnBetweenBoth()
+    {
+        // Act
+        var drawnWidth = CanvasExtent.GetDrawnWidth(720, 1104);
+
+        // Assert
+        Assert.Equal("clamp(720px, 100cqw, 1104px)", drawnWidth);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-5)]
+    public void WhenMaxWidthIsNotAboveZero_ThenItIsAnError(int value)
+    {
+        // Act & Assert
+        Assert.Equal($"MaxWidth must be above 0: {value}", CanvasExtent.Validate(null, null, value));
+    }
+
+    [Fact]
+    public void WhenMaxWidthIsBelowMinWidth_ThenItIsAnError()
+    {
+        // Act & Assert
+        Assert.Equal("MaxWidth must not be below MinWidth: 600", CanvasExtent.Validate(null, 720, 600));
+        Assert.Null(CanvasExtent.Validate(null, 720, 720));
     }
 }

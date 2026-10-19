@@ -46,6 +46,8 @@ namespace HomeBlaze.Components
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public bool IsSnapToGridEnabled { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
+        public int? MaxWidth { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
         public int? MinHeight { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public int? MinWidth { get; set; }

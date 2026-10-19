@@ -523,6 +523,39 @@ public class CanvasLayoutTests
         await WaitForCanvasToFitItsFrameAsync(frame);
     }
 
+    [Fact]
+    public async Task WhenCanvasWithAMaxWidthIsOnAWiderPage_ThenItKeepsThatWidthAtTheLeft()
+    {
+        // Arrange
+        await _fixture.WriteDemoPageAsync(ScratchPage, CreateCappedCanvasPage());
+
+        // Act
+        var page = await OpenScratchPageAsync(ViewportWidth);
+
+        // Assert: the frame is about 1000 pixels wide, so an uncapped canvas would be drawn at 2.5 times its 400 pixels.
+        var frame = page.GetByTestId("canvas-scale-frame");
+        await frame.Locator(".canvas-node").First.WaitForAsync(new() { Timeout = Timeout });
+        var frameBox = await GetBoxAsync(frame);
+        var canvasBox = await GetBoxAsync(frame.Locator(".canvas-layout-container"));
+        Assert.True(frameBox.Width > 800, $"The frame is too narrow to show the cap: {frameBox.Width}");
+        Assert.InRange(canvasBox.Width, 399, 401);
+        Assert.InRange(canvasBox.Left - frameBox.Left, -1, 1);
+        Assert.InRange(frameBox.Height, 199, 201);
+    }
+
+    [Fact]
+    public async Task WhenCanvasWithAMaxWidthIsOnANarrowerPage_ThenItFitsTheWidth()
+    {
+        // Arrange
+        await _fixture.WriteDemoPageAsync(ScratchPage, CreateCappedCanvasPage());
+
+        // Act
+        var page = await OpenScratchPageAsync(375);
+
+        // Assert
+        await WaitForCanvasToFitItsFrameAsync(page.GetByTestId("canvas-scale-frame"), designWidth: 400);
+    }
+
     private async Task AssertWheelScrollsPageAsync(Func<Box, (double X, double Y)> getTarget)
     {
         var page = await OpenCanvasPageAsync(withTextBelow: true);
@@ -711,11 +744,13 @@ public class CanvasLayoutTests
         return page.EvaluateAsync<double>($"() => ({ScrollPositionScript})('.canvas-layout-container')");
     }
 
-    private async Task<IPage> OpenTabbedCanvasPageAsync()
+    private Task<IPage> OpenTabbedCanvasPageAsync() => OpenScratchPageAsync(ViewportWidth);
+
+    private async Task<IPage> OpenScratchPageAsync(int width)
     {
         var page = await _fixture.CreatePageAsync(new BrowserNewContextOptions
         {
-            ViewportSize = new ViewportSize { Width = ViewportWidth, Height = ViewportHeight },
+            ViewportSize = new ViewportSize { Width = width, Height = ViewportHeight },
         });
         await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/{ScratchPage}");
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
@@ -723,19 +758,20 @@ public class CanvasLayoutTests
         return page;
     }
 
-    // The transformed canvas is as wide as its frame once it is scaled to it, and as wide as its design width before.
-    private static async Task WaitForCanvasToFitItsFrameAsync(ILocator frame)
+    // The transformed canvas is as wide as its frame once it is scaled to it. The frame is narrower than the design width, so
+    // an unscaled canvas would stand out of it.
+    private static async Task WaitForCanvasToFitItsFrameAsync(ILocator frame, int designWidth = 1104)
     {
         await frame.Locator(".canvas-node").First.WaitForAsync(new() { Timeout = Timeout });
         await frame.Page.WaitForFunctionAsync(
             """
-            frame => {
+            ([frame, designWidth]) => {
                 const frameWidth = frame.getBoundingClientRect().width;
                 const canvasWidth = frame.querySelector('.canvas-layout-container').getBoundingClientRect().width;
-                return frameWidth > 0 && frameWidth < 1100 && Math.abs(canvasWidth - frameWidth) < 2;
+                return frameWidth > 0 && frameWidth < designWidth && Math.abs(canvasWidth - frameWidth) < 2;
             }
             """,
-            await frame.ElementHandleAsync(),
+            new object[] { await frame.ElementHandleAsync(), designWidth },
             new() { Timeout = Timeout });
     }
 
@@ -755,6 +791,16 @@ public class CanvasLayoutTests
 
         builder.Append("::\n");
         return builder.ToString();
+    }
+
+    // A canvas designed 400 pixels wide that is never drawn wider, with a node on its left half.
+    private static string CreateCappedCanvasPage()
+    {
+        return "---\ntitle: Scratch\n---\n\n# Scratch\n\n"
+            + ":: HomeBlaze.Components.CanvasLayout#canvas Width=400 MaxWidth=400 Scale=FitWidth MinHeight=200\n"
+            + "::: Node X=0 Y=0 Width=200 Height=200\n"
+            + ":::: HomeBlaze.Components.Card Title=\"Capped\"\n"
+            + "::\n";
     }
 
     private static string CreateCanvasPage(bool withTextBelow, bool withOperableWidgets, bool withControlsWidget)

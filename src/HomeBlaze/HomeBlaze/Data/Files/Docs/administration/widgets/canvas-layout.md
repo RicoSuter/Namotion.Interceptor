@@ -18,6 +18,7 @@ An area on which content is placed at any position. Type name: `HomeBlaze.Compon
 | `Scale` | `None` or `FitWidth` | `None` | `None` draws the canvas in pixels. `FitWidth` draws a viewed canvas at the factor of the width of its place to its `Width` |
 | `Width` | Whole number above 0 | The right edge of the rightmost node | The design width of the canvas in pixels, which `FitWidth` fits to the width of the page |
 | `MinWidth` | Whole number above 0 | None | The least width in pixels at which `FitWidth` draws the canvas. On a narrower page the canvas keeps this width and scrolls horizontally |
+| `MaxWidth` | Whole number above 0, not below `MinWidth` | None | The largest width in pixels at which `FitWidth` draws the canvas. On a wider page the canvas keeps this width at the left. Set to `Width`, the canvas only gets smaller, never larger than designed |
 
 ## Slots
 
@@ -74,11 +75,11 @@ Pump
 Fan
 ::
 
-A wall of eight tiles that fits the width on a wide screen and keeps at least 720 pixels on a narrow one, where it scrolls horizontally, so that a phone shows it as about two screens side by side:
+A wall of eight tiles that fits the width, but is never drawn larger than its 1104 pixels on a wide screen and keeps at least 720 pixels on a narrow one, where it scrolls horizontally, so that a phone shows it as about two screens side by side:
 
 <!-- sample: live -->
 ~~~~markdown
-:: HomeBlaze.Components.CanvasLayout#fitwall MinHeight=124 Width=1104 MinWidth=720 Scale=FitWidth
+:: HomeBlaze.Components.CanvasLayout#fitwall MinHeight=124 Width=1104 MinWidth=720 MaxWidth=1104 Scale=FitWidth
 ::: Node X=0 Y=0 Width=124 Height=124
 :::: HomeBlaze.Components.ValueTile Kind=Tile Path=../Pump/CurrentSpeed Label="Pump speed"
 ::: Node X=140 Y=0 Width=124 Height=124
@@ -98,7 +99,7 @@ A wall of eight tiles that fits the width on a wide screen and keeps at least 72
 ::
 ~~~~
 
-:: HomeBlaze.Components.CanvasLayout#fitwall MinHeight=124 Width=1104 MinWidth=720 Scale=FitWidth
+:: HomeBlaze.Components.CanvasLayout#fitwall MinHeight=124 Width=1104 MinWidth=720 MaxWidth=1104 Scale=FitWidth
 ::: Node X=0 Y=0 Width=124 Height=124
 :::: HomeBlaze.Components.ValueTile Kind=Tile Path=../Pump/CurrentSpeed Label="Pump speed"
 ::: Node X=140 Y=0 Width=124 Height=124
@@ -123,10 +124,11 @@ A wall of eight tiles that fits the width on a wide screen and keeps at least 72
 - **Zoom and move**: A canvas can be zoomed with the mouse wheel and moved by dragging its background only while the page is edited. While the page is viewed, the canvas itself cannot be zoomed or moved, the wheel scrolls the page, and the widgets in its nodes work as anywhere else on the page. While the page is edited, the widgets in the nodes do not react to the mouse, so that a node can be moved without triggering what it shows. No line can be drawn between nodes in either mode.
 - **Fits the width**: A viewed canvas with `Scale=FitWidth` is drawn at the factor of the width of its place to its `Width`, also larger than 1, and its height is `MinHeight` times that factor.
 - **A least width**: With `MinWidth` a `FitWidth` canvas is never drawn narrower than that. On a narrower page it is drawn at `MinWidth` and scrolls horizontally, while the page around it keeps its width.
+- **A largest width**: With `MaxWidth` a `FitWidth` canvas is never drawn wider than that. On a wider page it is drawn at `MaxWidth` at the left of its place. `MaxWidth` equal to `Width` keeps the canvas at its design size on a large screen, while it still gets smaller on a narrow one. With both, `MinWidth` wins.
 - **Scaled by the browser**: The browser works out the factor from the width of the place of the canvas, so a `FitWidth` canvas fits from the moment the page is shown, also before the page reacts to input, and follows every change of the width at once. It takes its width from its place and adds none to it, so its place must get a width from around it, as the layouts give their content; in a place that is only as wide as its content it has no width.
 - **A page at the edge of a scrollbar**: In a browser whose scrollbar takes room, as on Windows and Linux, the height of a `FitWidth` canvas can decide whether the page needs a scrollbar, and the scrollbar in turn changes the width the canvas fits. The browser settles on one of the two widths, which can leave a scrollbar on a page that would just fit without it.
 - **Unscaled while edited**: While the page is edited, a `FitWidth` canvas is drawn unscaled, so that nodes move in canvas pixels. It scrolls horizontally when it is wider than the page.
-- **An invalid width**: A `Width` of 0 or less shows `Width must be above 0` with the value in place of the canvas, see [Value Widget Errors](../page-errors.md#value-widget-errors).
+- **An invalid width**: A `Width`, `MinWidth` or `MaxWidth` of 0 or less shows that it must be above 0, and a `MaxWidth` below `MinWidth` shows `MaxWidth must not be below MinWidth`, with the value in place of the canvas, see [Value Widget Errors](../page-errors.md#value-widget-errors).
 - **Fixed size**: A node has a fixed size and cuts off content that needs more room.
 - **Names**: Give a node a `#name` to keep it and everything in it when nodes are added or removed, as for the cells of a [GridLayout](grid-layout.md).
 - **Cards and tiles**: A [Card](card.md) in a node fills the node, as in a cell of a `GridLayout`, and so does a tile ([Switch](switch.md), [OperationButton](operation-button.md) or [ValueTile](value-tile.md) with `Kind=Tile`). A [Gauge](gauge.md) that is the only content of a node stands in the middle of the node.
