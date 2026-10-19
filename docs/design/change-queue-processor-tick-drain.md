@@ -6,7 +6,7 @@ Maintainer notes for how `ChangeQueueProcessor` consumes its `PropertyChangeQueu
 
 With a buffer time above zero the processor used to run two loops: a dequeue loop that awaited `WaitToDequeueAsync`, filtered each change and moved it into a `ConcurrentQueue`, and a flush loop that drained that queue on every `PeriodicTimer` tick. Nothing reaches the connector between ticks, so the dequeue loop only decided earlier what the tick would have decided anyway. Its cost was the wake-up: every write that finds the consumer idle queues a work item to the pool's global queue, which under a loaded pool takes milliseconds to run (about 15 ms median with 512 long items queued, against about 12 µs for a blocked thread).
 
-Buffered mode therefore has one loop. Each tick drains the subscription with `TryDequeueImmediate`, filters into the buffered queue, and starts a flush. The consumer never arms a wait, so a write costs the enqueue and a fence, and an idle processor costs one timer tick per buffer time, as the flush loop already did. Immediate mode (buffer time zero) keeps the `WaitToDequeueAsync` loop, since there each change is written as it is dequeued.
+Buffered mode therefore has one loop. Each tick takes the subscription with `TryDequeueImmediate`, applies the filters, and starts a flush. With no flush in flight, which is the common case, the changes go straight into the flush's batch under the flush gate. Only while a flush is still in flight do they go into the buffered `ConcurrentQueue`, which the next flush takes first, so that queue holds only what a slow write leaves behind and a burst is not copied through two queues. The consumer never arms a wait, so a write costs the enqueue and a fence, and an idle processor costs one timer tick per buffer time, as the flush loop already did. Immediate mode (buffer time zero) keeps the `WaitToDequeueAsync` loop, since there each change is written as it is dequeued.
 
 ## The tick does not await the flush
 
@@ -22,7 +22,7 @@ One consequence: once a slow write completes, the next flush waits for the next 
 
 ## maxQueueDepth
 
-The bound is enforced as the tick moves changes into the buffered queue, dropping the oldest and counting each drop in `DropCount`, as before. Drops are reported to the drop handler once per tick rather than once per overflowing change.
+The bound is enforced as the tick takes changes, dropping the oldest and counting each drop in `DropCount`, as before: on the buffered queue while a flush is in flight, and on the batch when the changes go straight into a flush. Drops are reported to the drop handler once per tick rather than once per overflowing change.
 
 Between two ticks the changes wait in the subscription queue, unbounded, as they waited before whenever the dequeue loop's wake-up was late. The memory held is therefore the bound plus at most one buffer time of writes plus the batch in flight. That is the same order as the batch a healthy tick takes anyway, and it does not grow with how long the connector stays slow.
 
@@ -47,7 +47,7 @@ Order after the loop ends, whether by cancellation or by `Dispose`:
 
 The drain comes before the await so that, for an externally owned subscription, it cannot run after `ProcessAsync` has given up at the bound and the owner has started consuming the subscription again. For the same reason it stops as soon as the processor is disposed when the subscription is external: what it leaves stays with the owner. With an owned subscription it keeps draining after `Dispose`, so a change left in the subscription is counted as a terminal drop at the final flush, as the dequeue loop counted it.
 
-A loop that ended by throwing (a property filter that threw) skips step 2, so a filter that throws on every change cannot replace the original exception from within `finally`. The changes left behind stay in the subscription, as they did when the dequeue loop threw.
+A loop that ended by throwing (a property filter that threw) skips step 2, so a filter that throws on every change cannot replace the original exception from within `finally`. The changes left behind stay in the subscription, as they did when the dequeue loop threw. A filter that throws while a tick fills a flush's batch puts what it already took back into the buffered queue and releases the gate, so the final flush still writes them.
 
 Terminal accounting does not change: `CloseDeliveryAndDrain`, `TryAdmitMergedDelivery` and the terminal handler see the same buffered queue and delivery state. `Dispose` additionally disposes the timer, so a running loop ends at once instead of at its next tick. It queues that disposal to the pool, after closing delivery and running the terminal handler: disposing a `PeriodicTimer` resumes its waiter synchronously, which would otherwise run the whole teardown, consumer filters included, on the caller's thread and before delivery is closed.
 
