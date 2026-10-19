@@ -2,12 +2,16 @@ const leftProperty = '--history-chart-plot-left';
 const rightProperty = '--history-chart-plot-right';
 const readyAttribute = 'data-plot-ready';
 
+// The follower that owns the ready attribute and the margins of each view, so a superseded follower that is disposed after
+// a newer one started leaves them alone.
+const followers = new WeakMap();
+
 // Follows the plot that MudChart draws in the lines. It marks the chart view as ready once MudChart has placed its
 // value labels: it draws them left of the chart first, measures them and draws again with room for them, and the view
 // hides the chart and its bands until then, so they appear where they stay. With alignBands it also keeps the
 // distances of the plot area from the edges of the chart view in two CSS properties of the view, which the bands use
 // as their margins. MudChart draws again whenever its size or its labels change, so every redraw is followed. Returns
-// a handle that stops it.
+// a handle that stops it. A view has one follower at a time: the latest replaces an earlier one.
 export function followPlot(lines, alignBands) {
     const view = lines?.parentElement;
 
@@ -51,25 +55,32 @@ export function followPlot(lines, alignBands) {
 
     // Blazor replaces the style attribute of the view when its style changes, which drops the properties.
     const changes = new MutationObserver(update);
-    changes.observe(lines, { subtree: true, childList: true, attributes: true, attributeFilter: ['d', 'viewBox', 'x'] });
+    changes.observe(lines, { subtree: true, childList: true, attributes: true, attributeFilter: ['d', 'viewBox'] });
     changes.observe(view, { attributes: true, attributeFilter: ['style'] });
     const resizes = new ResizeObserver(update);
     resizes.observe(lines);
-    update();
 
-    return {
+    const handle = {
         dispose: () => {
             changes.disconnect();
             resizes.disconnect();
-            view.removeAttribute(readyAttribute);
-            view.style.removeProperty(leftProperty);
-            view.style.removeProperty(rightProperty);
+            if (followers.get(view) === handle) {
+                followers.delete(view);
+                view.removeAttribute(readyAttribute);
+                view.style.removeProperty(leftProperty);
+                view.style.removeProperty(rightProperty);
+            }
         }
     };
+
+    followers.set(view, handle);
+    update();
+    return handle;
 }
 
 // Whether the chart is drawn at the size of its box with every value label inside it. The first svg is the chart. The
-// viewBox is in layout pixels, which a scaled canvas does not change, unlike the drawn size.
+// viewBox is in layout pixels, which a scaled canvas does not change, unlike the drawn size; the computed size is in
+// layout pixels in every browser, unlike the client size of an svg.
 function isPlaced(lines) {
     const chart = lines.querySelector('svg');
     const viewBox = chart?.viewBox.baseVal;
@@ -77,10 +88,13 @@ function isPlaced(lines) {
         return false;
     }
 
+    const style = getComputedStyle(chart);
+    const width = parseFloat(style.width);
+    const height = parseFloat(style.height);
     const size = chart.getBoundingClientRect();
-    return chart.clientWidth > 0 &&
-        Math.abs(viewBox.width - chart.clientWidth) <= 1 &&
-        Math.abs(viewBox.height - chart.clientHeight) <= 1 &&
+    return width > 0 &&
+        Math.abs(viewBox.width - width) <= 1 &&
+        Math.abs(viewBox.height - height) <= 1 &&
         [...chart.querySelectorAll('.mud-charts-yaxis text')]
             .every(text => text.textContent.trim() === '' || text.getBoundingClientRect().left >= size.left - 1);
 }

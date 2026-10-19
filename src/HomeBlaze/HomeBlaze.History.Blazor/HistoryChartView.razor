@@ -161,9 +161,11 @@
         $"height:calc(100% + {PlotTopSpace + PlotBottomSpace - 2 * StrokeMargin}px); display:flex;";
 
     private const string BandHeaderStyle = "display:flex; align-items:center; column-gap:16px; white-space:nowrap;";
-    private const string BandHeaderStartStyle = "display:flex; align-items:center; gap:6px; min-width:0; overflow:hidden;";
+    // The start keeps its size and does not clip, so the focus outline of its legend button stays whole. The states take
+    // the rest: right-aligned while they fit, and cut off at their end, not their start, when they do not.
+    private const string BandHeaderStartStyle = "display:flex; flex:none; align-items:center; gap:6px;";
     private const string BandLegendStyle =
-        "display:flex; column-gap:12px; min-width:0; margin-left:auto; overflow:hidden;";
+        "display:flex; flex:1 1 0; justify-content:safe flex-end; column-gap:12px; min-width:0; overflow:hidden;";
     private const string BandLegendEntryStyle = "display:flex; flex:0 0 auto; align-items:center; gap:6px;";
 
     private static readonly Func<double, string> EmptyAxisLabel = static _ => string.Empty;
@@ -230,7 +232,8 @@
 
     /// <summary>
     /// What the view reserves room for while <see cref="Data"/> is null: the lines at their size, <see cref="LineLegend"/>
-    /// and every band with its header, each showing that it loads. Without it the view renders nothing until it has data.
+    /// and every band with its header, while the room of the lines and the bands stays empty. Without it the view renders
+    /// nothing until it has data.
     /// </summary>
     [Parameter]
     public HistoryChartPlaceholder? Placeholder { get; set; }
@@ -417,27 +420,29 @@
     private async Task FollowPlotAsync(ElementReference? lines, bool alignsBands)
     {
         var generation = ++_alignmentGeneration;
+        var previous = _plotAlignment;
+        _plotAlignment = null;
         try
         {
-            var previous = _plotAlignment;
-            _plotAlignment = null;
+            IJSObjectReference? alignment = null;
+            if (lines is { } element && !_isDisposed)
+            {
+                // One import for every call, which DisposeAsync disposes once it has completed.
+                _module ??= JsRuntime.InvokeAsync<IJSObjectReference>("import", ModulePath).AsTask();
+                var module = await _module;
+                if (_isDisposed)
+                {
+                    // Disposed while the import ran, so DisposeAsync may have found it incomplete.
+                    await module.DisposeAsync();
+                }
+                else
+                {
+                    alignment = await module.InvokeAsync<IJSObjectReference>("followPlot", element, alignsBands);
+                }
+            }
+
+            // Disposed only after the new follower took over the view, so a view that stays ready is not hidden in between.
             await DisposeAlignmentAsync(previous);
-            if (lines is not { } element || _isDisposed)
-            {
-                return;
-            }
-
-            // One import for every call, which DisposeAsync disposes once it has completed.
-            _module ??= JsRuntime.InvokeAsync<IJSObjectReference>("import", ModulePath).AsTask();
-            var module = await _module;
-            if (_isDisposed)
-            {
-                // Disposed while the import ran, so DisposeAsync may have found it incomplete.
-                await module.DisposeAsync();
-                return;
-            }
-
-            var alignment = await module.InvokeAsync<IJSObjectReference>("followPlot", element, alignsBands);
 
             // The view can be disposed or show other lines while the script ran.
             if (_isDisposed || generation != _alignmentGeneration)
