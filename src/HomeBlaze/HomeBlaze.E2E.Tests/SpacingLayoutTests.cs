@@ -200,10 +200,11 @@ public class SpacingLayoutTests
     }
 
     [Fact]
-    public async Task WhenContentStandsInAGridCellOrACanvasNode_ThenItHasTheRoomOfACardBodyUnlessItIsALoneCard()
+    public async Task WhenContentStandsInAGridCellOrACanvasNode_ThenTheCellOrTheNodeAddsNoRoom()
     {
         // Arrange
         var page = await OpenPageAsync();
+        await Assertions.Expect(page.GetByText("Text in a cell.", new() { Exact = true })).ToBeVisibleAsync(new() { Timeout = Timeout });
         await Assertions.Expect(page.GetByText("Text in a node.", new() { Exact = true })).ToBeVisibleAsync(new() { Timeout = Timeout });
         await Assertions.Expect(page.GetCard("Cell Card")).ToBeVisibleAsync(new() { Timeout = Timeout });
         await Assertions.Expect(page.GetByTestId("value-tile").Filter(new() { HasText = "Cell Speed" })).ToBeVisibleAsync(new() { Timeout = Timeout });
@@ -230,10 +231,36 @@ public class SpacingLayoutTests
             """);
 
         // Assert
-        Assert.All(edges[0], edge => Assert.Equal(CardPadding, edge, Tolerance));
-        Assert.All(edges[1], edge => Assert.Equal(CardPadding, edge, Tolerance));
-        Assert.All(edges[2], edge => Assert.Equal(CardPadding, edge, Tolerance));
-        Assert.All(edges[3], edge => Assert.Equal(0, edge, Tolerance));
+        Assert.All(edges, room => Assert.All(room, edge => Assert.Equal(0, edge, Tolerance)));
+    }
+
+    [Fact]
+    public async Task WhenAGridCellOrACanvasNodeIsViewed_ThenItHasNoBorderAndNoBackgroundOfItsOwn()
+    {
+        // Arrange & Act
+        var page = await OpenPageAsync();
+
+        // Assert
+        foreach (var (selector, text) in new[] { (".grid-cell", "Text in a cell."), (".canvas-node", "Text in a node.") })
+        {
+            var frame = page.Locator(selector).Filter(new() { Has = page.GetByText(text, new() { Exact = true }) });
+            await Assertions.Expect(frame).ToHaveCSSAsync("border-width", "0px", new() { Timeout = Timeout });
+            await Assertions.Expect(frame).ToHaveCSSAsync("background-color", "rgba(0, 0, 0, 0)");
+        }
+    }
+
+    [Fact]
+    public async Task WhenAGridCellHasWiderContentThanItsColumn_ThenTheColumnsStayEqualAndTheCellCutsItOff()
+    {
+        // Arrange & Act
+        var page = await OpenPageAsync(width: 375);
+        var cells = page.Locator(".grid-cell").Filter(new() { Has = page.GetByText("Narrow cell.", new() { Exact = true }) })
+            .Locator("xpath=..").Locator(":scope > .grid-cell");
+        await Assertions.Expect(cells).ToHaveCountAsync(2, new() { Timeout = Timeout });
+
+        // Assert
+        var widths = await cells.EvaluateAllAsync<double[]>("cells => cells.map(cell => cell.getBoundingClientRect().width)");
+        Assert.Equal(widths[1], widths[0], Tolerance);
     }
 
     [Fact]

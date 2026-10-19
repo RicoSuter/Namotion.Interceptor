@@ -121,6 +121,13 @@ In a cell.
 :::: HomeBlaze.Components.ValueTile Path=spacingmotor/CurrentSpeed Label="Cell Speed"
 ::
 
+:: HomeBlaze.Components.GridLayout#widegrid Rows=1 Columns=2
+::: Cell Row=0 Column=0
+WideUnbreakableContentThatNeedsMoreRoomThanANarrowCellHas
+::: Cell Row=0 Column=1
+Narrow cell.
+::
+
 :: HomeBlaze.Components.CanvasLayout#spacingcanvas MinHeight=200
 ::: Node X=20 Y=20 Width=300 Height=120
 Text in a node.

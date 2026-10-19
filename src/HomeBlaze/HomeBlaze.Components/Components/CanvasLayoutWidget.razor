@@ -139,11 +139,10 @@ else
         border: 1px dashed rgba(128,128,128,0.3);
     }
 
+    /* Clips content that needs more room, but leaves 8 pixels for the shadow of a card that fills the node. */
     .canvas-node {
-        background: var(--mud-palette-surface);
-        border: 1px solid rgba(128,128,128,0.2);
-        border-radius: 4px;
-        overflow: hidden;
+        overflow: clip;
+        overflow-clip-margin: 8px;
         width: 100%;
         height: 100%;
         position: relative;
@@ -153,6 +152,7 @@ else
     .canvas-node.editing {
         cursor: move;
         border: 2px dashed var(--mud-palette-primary);
+        border-radius: 4px;
     }
 
     /* The library moves a node only when the press is on the node itself, so the content, and every widget in it,
@@ -169,11 +169,11 @@ else
     }
 
     /*
-     * The node draws its own frame, and the outline of the selected widget is its only highlight. The library draws rects
-     * of its own: a light box under every node, and in edit mode an animated dashed stroke on the rect that moves the node
-     * that a press selected and a stroke on its border strip. Every rect loses its stroke, and the box under a node, the
-     * rect with the cursor default (checked for 4.1.136), also its fill, which would show at the rounded corners of the
-     * node. The animation is an inline style.
+     * The outline of the selected widget is the only highlight of a node. The library draws rects of its own: a light
+     * box under every node, and in edit mode an animated dashed stroke on the rect that moves the node that a press
+     * selected and a stroke on its border strip. Every rect loses its stroke, and the box under a node, the rect with the
+     * cursor default (checked for 4.1.136), also its fill, which would show around content that does not fill the node.
+     * The animation is an inline style.
      */
     .canvas-diagram > svg rect {
         stroke: transparent;

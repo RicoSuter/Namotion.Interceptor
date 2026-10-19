@@ -62,17 +62,21 @@ A canvas that fits the width. `Width=420` is the width the two nodes were design
 ~~~~markdown
 :: HomeBlaze.Components.CanvasLayout#fitplan MinHeight=200 Width=420 Scale=FitWidth
 ::: Node X=0 Y=0 Width=200 Height=200
-Pump
+:::: HomeBlaze.Components.Card Title="Pump"
+The pump of the sample.
 ::: Node X=220 Y=0 Width=200 Height=200
-Fan
+:::: HomeBlaze.Components.Card Title="Fan"
+The fan of the sample.
 ::
 ~~~~
 
 :: HomeBlaze.Components.CanvasLayout#fitplan MinHeight=200 Width=420 Scale=FitWidth
 ::: Node X=0 Y=0 Width=200 Height=200
-Pump
+:::: HomeBlaze.Components.Card Title="Pump"
+The pump of the sample.
 ::: Node X=220 Y=0 Width=200 Height=200
-Fan
+:::: HomeBlaze.Components.Card Title="Fan"
+The fan of the sample.
 ::
 
 A wall of eight tiles that fits the width, but is never drawn larger than its 1104 pixels on a wide screen and keeps at least 720 pixels on a narrow one, where it scrolls horizontally, so that a phone shows it as about two screens side by side:
@@ -129,6 +133,7 @@ A wall of eight tiles that fits the width, but is never drawn larger than its 11
 - **A page at the edge of a scrollbar**: In a browser whose scrollbar takes room, as on Windows and Linux, the height of a `FitWidth` canvas can decide whether the page needs a scrollbar, and the scrollbar in turn changes the width the canvas fits. The browser settles on one of the two widths, which can leave a scrollbar on a page that would just fit without it.
 - **Unscaled while edited**: While the page is edited, a `FitWidth` canvas is drawn unscaled, so that nodes move in canvas pixels. It scrolls horizontally when it is wider than the page.
 - **An invalid width**: A `Width`, `MinWidth` or `MaxWidth` of 0 or less shows that it must be above 0, and a `MaxWidth` below `MinWidth` shows `MaxWidth must not be below MinWidth`, with the value in place of the canvas, see [Value Widget Errors](../page-errors.md#value-widget-errors).
+- **No frame**: A node draws no border, no background and no room around its content, it only places it. Content that needs a surface brings its own: put it into a [Card](card.md), or use a tile.
 - **Fixed size**: A node has a fixed size and cuts off content that needs more room.
 - **Names**: Give a node a `#name` to keep it and everything in it when nodes are added or removed, as for the cells of a [GridLayout](grid-layout.md).
 - **Cards and tiles**: A [Card](card.md) in a node fills the node, as in a cell of a `GridLayout`, and so does a tile ([Switch](switch.md), [OperationButton](operation-button.md) or [ValueTile](value-tile.md) with `Kind=Tile`). A [Gauge](gauge.md) that is the only content of a node stands in the middle of the node.
