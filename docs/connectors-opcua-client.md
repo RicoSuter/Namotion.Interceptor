@@ -153,7 +153,7 @@ Beyond the settings shown above, the following properties are available on `OpcU
 | `SubscriptionPriority` | 0 | Subscription priority (0 = server default) |
 | `SubscriptionMaxNotificationsPerPublish` | 0 | Max notifications per publish (0 = server default) |
 | `MinPublishRequestCount` | 3 | Minimum outstanding publish requests |
-| `SubscriptionSequentialPublishing` | false | Apply a subscription's messages in order across its properties (reduces throughput); see [Thread Safety](#thread-safety) |
+| `SubscriptionSequentialPublishing` | false | Order messages across properties, at a throughput cost ([Thread Safety](#thread-safety)) |
 
 **Polling Fallback:**
 
@@ -524,7 +524,7 @@ For 24/7 production use, the default configuration provides robust resilience:
 | `SubscriptionHealthCheckInterval` | 5s | Interval for health checks and post-reconnection state sync |
 | `WriteRetryQueueSize` | 1000 | Updates buffered during disconnection |
 | `SessionDisposalTimeout` | 5s | Max wait for graceful session close |
-| `SubscriptionSequentialPublishing` | false | Apply a subscription's messages in order across its properties (see Thread Safety) |
+| `SubscriptionSequentialPublishing` | false | Order messages across properties, at a throughput cost (see Thread Safety) |
 
 Final outbound delivery on stop shares the internal five-second safety bound described in [Flushing On Stop](connectors.md#flushing-on-stop). It cannot be configured per connector.
 
@@ -764,9 +764,9 @@ The library ensures thread-safe operations across all OPC UA interactions. Prope
 Write queue operations use `Interlocked` operations for thread-safe counter updates and flush operations are protected by semaphores to prevent concurrent flush issues.
 
 **Update ordering:**
-By default (`SubscriptionSequentialPublishing = false`), the SDK delivers a subscription's notification messages as they arrive, so a message whose publish response is delayed, or that is republished after going missing, reaches the client after newer ones. The client ranks each value by the sequence number the server assigned to its notification message and skips a value from a message older than the last one applied to the same property within that subscription. The ranking does not depend on clocks. A skipped value is logged at `Debug` level. After a reconnect that recreates a subscription, a late message of the replaced subscription is not ranked against the new one, and values read rather than notified (the initial and post-reconnect state reads, polling, read-after-write) are not ranked against notifications.
+The SDK can deliver a subscription's notification messages out of order, for example a delayed or republished one after newer ones. The client skips a value from a message older than the last one applied to the same property, ranked by the server-assigned sequence number (logged at `Debug`). Not ranked against notifications: values that are read (initial and post-reconnect reads, polling, read-after-write) and late messages of a subscription replaced on reconnect.
 
-Set `SubscriptionSequentialPublishing = true` to also apply the messages of one subscription in sequence order across its properties, at the cost of reduced throughput. Neither setting orders notifications against local writes: a transaction commit does not wait for subscription echoes, and a notification the server sent before it received a local write can overwrite that newer local state or cause a transaction conflict.
+`SubscriptionSequentialPublishing = true` additionally applies a subscription's messages in order across its properties, at a throughput cost. Neither orders notifications against local writes: a notification sent before the server received a local write can overwrite it or cause a transaction conflict.
 
 To prevent feedback loops when external sources update properties, apply inbound values with the `SetValueFromSource()` extension method, which stamps the write with a `FromSource` origin (source marking is per write, not through an ambient scope):
 
