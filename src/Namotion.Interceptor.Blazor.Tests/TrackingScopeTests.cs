@@ -71,7 +71,9 @@ public class TrackingScopeTests
 
         // Act
         person.FirstName = "Changed";
-        await WaitAsync(() => log.Value("reader") == "Changed");
+
+        // The reader renders before its batch reaches the renderer, so the batch is waited for as well.
+        await WaitAsync(() => log.Value("reader") == "Changed" && renderer.UnacknowledgedBatchCount >= 2);
         var unacknowledgedBatchesAfterChange = renderer.UnacknowledgedBatchCount;
         renderer.ReleaseAcknowledgements();
         await WaitAsync(() => log.Renders("reader") >= 3 && renderer.UnacknowledgedBatchCount == 0);
