@@ -151,7 +151,7 @@ Target speed: {{ ../Pump/TargetSpeed }} RPM
 - **Spacing**: [Spacing](basics.md#spacing) has the room inside a card and around it.
 - **Width**: A card is as wide as the place it stands in. Put cards into a [FlowLayout](flow-layout.md) to place them next to each other.
 - **A fixed height**: A card with a `Height` or an `AspectRatio` keeps the size of its header, its picture and its footer, and its body takes the rest of the height. A body that does not fit scrolls.
-- **In a cell or a node**: A card that is the subject of a [GridLayout](grid-layout.md) cell or a [CanvasLayout](canvas-layout.md) node fills it and ignores `AspectRatio`. A `Height` of its own still wins. It keeps its border or its shadow, because the cell or the node draws no frame of its own, and its body scrolls like that of a card with a height.
+- **In a cell or a node**: A card that is the subject of a [GridLayout](grid-layout.md) cell or a [CanvasLayout](canvas-layout.md) node fills it and ignores `AspectRatio`. A `Height` of its own still wins, and its body scrolls like that of a card with a height.
 - **Parts**: A card has no other parts than the header, the picture, the body and the footer. It has no buttons.
 
 ## Related

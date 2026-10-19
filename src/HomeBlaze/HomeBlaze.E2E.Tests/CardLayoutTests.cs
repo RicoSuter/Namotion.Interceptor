@@ -134,22 +134,13 @@ public class CardLayoutTests
                 .ToHaveCountAsync(1, new() { Timeout = Timeout });
         }
 
-        // Assert: the cell or the node draws no frame, so the card keeps the border of an outlined card.
-        var measures = await card.EvaluateAsync<double[]>(
-            """
-            (card, container) => {
-                const style = getComputedStyle(card);
-                return [
-                    card.getBoundingClientRect().height,
-                    card.closest(container).getBoundingClientRect().height,
-                    parseFloat(style.borderTopWidth)
-                ];
-            }
-            """,
+        // Assert
+        var heights = await card.EvaluateAsync<double[]>(
+            "(card, container) => [card.getBoundingClientRect().height, card.closest(container).getBoundingClientRect().height]",
             container);
-        Assert.True(measures[1] > 100, $"The container is {measures[1]} pixels high.");
-        Assert.Equal(measures[1], measures[0], 1.0);
-        Assert.Equal(1, measures[2]);
+        Assert.True(heights[1] > 100, $"The container is {heights[1]} pixels high.");
+        Assert.Equal(heights[1], heights[0], 1.0);
+        await Assertions.Expect(card).ToHaveCSSAsync("border-top-width", "1px");
     }
 
     [Theory]

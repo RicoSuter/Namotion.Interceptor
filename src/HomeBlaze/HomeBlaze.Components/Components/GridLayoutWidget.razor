@@ -79,9 +79,10 @@ else
 }
 
 <style>
-    /* A cell draws no frame: its content brings its own surface, such as a card. It cuts off content that needs more
-       room, but leaves room for the shadow of a card that fills it. */
+    /* Clips content that needs more room, but leaves 8 pixels for the shadow of a card that fills the cell. A clipping
+       cell is no scroll container, so without min-width: 0 its content would widen its column. */
     .grid-cell {
+        min-width: 0;
         min-height: 100px;
         overflow: clip;
         overflow-clip-margin: 8px;

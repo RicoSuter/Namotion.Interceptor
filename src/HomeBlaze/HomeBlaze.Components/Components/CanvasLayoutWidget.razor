@@ -139,8 +139,7 @@ else
         border: 1px dashed rgba(128,128,128,0.3);
     }
 
-    /* A node draws no frame: its content brings its own surface, such as a card. It cuts off content that needs more
-       room, but leaves room for the shadow of a card that fills it. */
+    /* Clips content that needs more room, but leaves 8 pixels for the shadow of a card that fills the node. */
     .canvas-node {
         overflow: clip;
         overflow-clip-margin: 8px;

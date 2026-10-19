@@ -280,8 +280,7 @@ public class ValueTileWidgetTests
         var frame = tile.Locator("xpath=ancestor::div[@data-testid='canvas-scale-frame'][1]");
         var node = tile.Locator("xpath=ancestor::div[contains(concat(' ', normalize-space(@class), ' '), ' canvas-node ')][1]");
 
-        // Act: the node is half of the 400 pixel design width, so it is half of the drawn width once the
-        // frame is measured.
+        // Act: the node is half of the 400 pixel design width, so it is half of the drawn width once the frame is measured.
         var drawnWidth = await frame.EvaluateAsync<double>("frame => Math.max(frame.clientWidth, 600)");
         await page.WaitForFunctionAsync(
             "([node, expected]) => Math.abs(node.getBoundingClientRect().width - expected) < 2",

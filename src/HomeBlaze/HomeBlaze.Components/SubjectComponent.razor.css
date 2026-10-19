@@ -136,9 +136,9 @@
 /* A widget that fills its place (a card, a tile: the class place-filler) or is centered in it (a gauge: the class
    place-centered) and is the only content of a grid cell or a canvas node takes the whole cell or node, unless a card has
    a height of its own, which the inline style gives. It ignores its own minimum height, which a place smaller than it
-   would clip, and an aspect ratio, which the inline style also gives. It keeps its own frame, such as the outline or the
-   shadow of a card, because the cell or the node draws none. It is a size container and gives its content the sizes of the place, which grow with the smaller side of
-   the place, from their least sizes at about 150 pixels to twice them, so that a tile and a gauge side by side show the
+   would clip, and an aspect ratio, which the inline style also gives. It is a size container and gives its content the
+   sizes of the place, which grow with the smaller side of the place, from their least sizes at about 150 pixels to twice
+   them, so that a tile and a gauge side by side show the
    same kind of text in the same size: the primary line (the value of a value, the name of a switch), the secondary line
    (the label of a value, the state of a switch), the icon and the gap between them. A widget inside one of them, such as
    in the body of a card, has its own sizes again. */

@@ -204,6 +204,7 @@ public class SpacingLayoutTests
     {
         // Arrange
         var page = await OpenPageAsync();
+        await Assertions.Expect(page.GetByText("Text in a cell.", new() { Exact = true })).ToBeVisibleAsync(new() { Timeout = Timeout });
         await Assertions.Expect(page.GetByText("Text in a node.", new() { Exact = true })).ToBeVisibleAsync(new() { Timeout = Timeout });
         await Assertions.Expect(page.GetCard("Cell Card")).ToBeVisibleAsync(new() { Timeout = Timeout });
         await Assertions.Expect(page.GetByTestId("value-tile").Filter(new() { HasText = "Cell Speed" })).ToBeVisibleAsync(new() { Timeout = Timeout });
@@ -236,29 +237,30 @@ public class SpacingLayoutTests
     [Fact]
     public async Task WhenAGridCellOrACanvasNodeIsViewed_ThenItHasNoBorderAndNoBackgroundOfItsOwn()
     {
-        // Arrange
+        // Arrange & Act
         var page = await OpenPageAsync();
-        await Assertions.Expect(page.GetByText("Text in a cell.", new() { Exact = true })).ToBeVisibleAsync(new() { Timeout = Timeout });
-        await Assertions.Expect(page.GetByText("Text in a node.", new() { Exact = true })).ToBeVisibleAsync(new() { Timeout = Timeout });
-
-        // Act: the border width and the background of the cell and of the node around each text.
-        var frames = await page.EvaluateAsync<string[][]>(
-            """
-            () => {
-                const paragraph = text => [...document.querySelectorAll('p')].find(p => p.textContent === text);
-                const frame = element => {
-                    const style = getComputedStyle(element);
-                    return [style.borderTopWidth, style.borderRightWidth, style.borderBottomWidth, style.borderLeftWidth, style.backgroundColor];
-                };
-                return [
-                    frame(paragraph('Text in a cell.').closest('.grid-cell')),
-                    frame(paragraph('Text in a node.').closest('.canvas-node'))
-                ];
-            }
-            """);
 
         // Assert
-        Assert.All(frames, frame => Assert.Equal(["0px", "0px", "0px", "0px", "rgba(0, 0, 0, 0)"], frame));
+        foreach (var (selector, text) in new[] { (".grid-cell", "Text in a cell."), (".canvas-node", "Text in a node.") })
+        {
+            var frame = page.Locator(selector).Filter(new() { Has = page.GetByText(text, new() { Exact = true }) });
+            await Assertions.Expect(frame).ToHaveCSSAsync("border-width", "0px", new() { Timeout = Timeout });
+            await Assertions.Expect(frame).ToHaveCSSAsync("background-color", "rgba(0, 0, 0, 0)");
+        }
+    }
+
+    [Fact]
+    public async Task WhenAGridCellHasWiderContentThanItsColumn_ThenTheColumnsStayEqualAndTheCellCutsItOff()
+    {
+        // Arrange & Act
+        var page = await OpenPageAsync(width: 375);
+        var cells = page.Locator(".grid-cell").Filter(new() { Has = page.GetByText("Narrow cell.", new() { Exact = true }) })
+            .Locator("xpath=..").Locator(":scope > .grid-cell");
+        await Assertions.Expect(cells).ToHaveCountAsync(2, new() { Timeout = Timeout });
+
+        // Assert
+        var widths = await cells.EvaluateAllAsync<double[]>("cells => cells.map(cell => cell.getBoundingClientRect().width)");
+        Assert.Equal(widths[1], widths[0], Tolerance);
     }
 
     [Fact]
