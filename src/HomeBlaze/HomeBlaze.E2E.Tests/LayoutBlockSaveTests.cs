@@ -212,31 +212,39 @@ public class LayoutBlockSaveTests
 
             await canvas.WaitForCanvasNodesAsync(2, Timeout);
             var node = canvas.Locator(".canvas-node").Filter(new() { HasText = "first node" });
-            await node.ScrollIntoViewIfNeededAsync();
-            var box = await GetBoxAsync(node);
-            var startX = box.Left + box.Width / 2;
-            var startY = box.Top + box.Height / 2;
 
             // Act
-            await DragAsync(page, startX, startY, startX + 100, startY + 60);
+            await node.DragNodeAsync(100, 60, timeout: Timeout);
 
             // Assert: the position is the final one only after the events of the drag have arrived, and the page is
             // written at the release.
             var x = 0;
             var y = 0;
-            var text = await _fixture.WaitForDemoPageTextAsync(
-                CanvasPage,
-                written =>
-                {
-                    if (TryGetFirstCanvasNode() is not { } firstNode)
+            var lastText = string.Empty;
+            string text;
+            try
+            {
+                text = await _fixture.WaitForDemoPageTextAsync(
+                    CanvasPage,
+                    written =>
                     {
-                        return false;
-                    }
+                        lastText = written;
+                        if (TryGetFirstCanvasNode() is not { } firstNode)
+                        {
+                            return false;
+                        }
 
-                    (x, y) = (firstNode.X, firstNode.Y);
-                    return x != 40 && y != 40 && written.Contains($"::: Node X={x} Y={y} Width=200 Height=100\n");
-                },
-                "The page was not written with the new position of the moved node");
+                        (x, y) = (firstNode.X, firstNode.Y);
+                        return x != 40 && y != 40 && written.Contains($"::: Node X={x} Y={y} Width=200 Height=100\n");
+                    },
+                    "The page was not written with the new position of the moved node");
+            }
+            catch (TimeoutException exception)
+            {
+                // Tells a node that never moved from a move that was not written.
+                var nodeLines = string.Join(", ", lastText.Split('\n').Where(line => line.StartsWith("::: Node", StringComparison.Ordinal)));
+                throw new TimeoutException($"{exception.Message}: the moved node is at X={x} Y={y}, and the page has {nodeLines}", exception);
+            }
 
             Assert.True(x > 40, $"X is {x}");
             Assert.True(y > 40, $"Y is {y}");
