@@ -63,7 +63,11 @@ internal class GetPropertyTool
         var attributes = new Dictionary<string, object?>();
         foreach (var attribute in property.Attributes)
         {
-            attributes[attribute.BrowseName] = attribute.GetValue();
+            // An attribute without a value says nothing about its property.
+            if (attribute.GetValue() is { } value)
+            {
+                attributes[attribute.BrowseName] = value;
+            }
         }
 
         var response = new Dictionary<string, object?>

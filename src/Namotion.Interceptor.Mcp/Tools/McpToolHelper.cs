@@ -222,7 +222,11 @@ internal static class McpToolHelper
             attributes = [];
             foreach (var attribute in property.Attributes)
             {
-                attributes.Add(new PropertyAttribute(attribute.BrowseName, attribute.GetValue()));
+                // An attribute without a value says nothing about its property.
+                if (attribute.GetValue() is { } value)
+                {
+                    attributes.Add(new PropertyAttribute(attribute.BrowseName, value));
+                }
             }
 
             if (attributes.Count == 0)
