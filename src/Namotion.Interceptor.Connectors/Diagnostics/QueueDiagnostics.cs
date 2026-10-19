@@ -39,4 +39,9 @@ public sealed class QueueDiagnostics
     /// buffer being recreated.
     /// </summary>
     public long TotalDropped => _metrics.TotalDropped;
+
+    /// <summary>
+    /// Gets whether a buffer currently reports its depth here.
+    /// </summary>
+    internal bool IsRegistered => _metrics.IsRegistered;
 }

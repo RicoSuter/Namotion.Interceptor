@@ -502,7 +502,8 @@ public class ChangeQueueProcessor : IDisposable
 
                     _changes.Enqueue(change);
 
-                    // An upper bound on the queue's count: the flush only ever removes from it.
+                    // An upper bound on the queue's count, since the flush only removes from it, except when a
+                    // canceled flush requeues its batch at stop, which can leave the queue one batch over.
                     if (++queued > bound)
                     {
                         droppedCount += DropOverflow(bound);
@@ -802,8 +803,6 @@ public class ChangeQueueProcessor : IDisposable
             _ownedSubscription?.Dispose();
         }
 
-        // Ends a running tick loop now rather than at its next tick.
-        Volatile.Read(ref _periodicTimer)?.Dispose();
 
         ReportTerminalDrops(CloseDeliveryAndDrain());
         if (previousState == IdleState)
@@ -811,6 +810,14 @@ public class ChangeQueueProcessor : IDisposable
             DisposeMerger();
         }
         InvokeTerminalHandlerOnce();
+
+        // Ends a running tick loop now rather than at its next tick. Not inline: disposal resumes the
+        // waiting loop synchronously, which would run its teardown, with consumer filters and the final
+        // flush, on this caller's thread. Queued last, so the loop observes delivery already closed.
+        if (Volatile.Read(ref _periodicTimer) is { } periodicTimer)
+        {
+            ThreadPool.UnsafeQueueUserWorkItem(static timer => timer.Dispose(), periodicTimer, preferLocal: false);
+        }
     }
 
     private void InvokeTerminalHandlerOnce()

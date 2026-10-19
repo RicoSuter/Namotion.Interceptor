@@ -24,10 +24,6 @@ public sealed class TestSubjectSource : SubjectSourceBase
 
     public override IInterceptorSubject RootSubject => _subject;
 
-    /// <summary>Whether the connected phase's change processor has registered its outbound queue depth,
-    /// which it does right before it starts processing.</summary>
-    public bool IsOutboundChangeQueueRegistered => Metrics.OutboundChanges.IsRegistered;
-
     /// <summary>Exposes the protected ReportConnectionLost seam for tests.</summary>
     public void SimulateConnectionLost() => ReportConnectionLost();
 

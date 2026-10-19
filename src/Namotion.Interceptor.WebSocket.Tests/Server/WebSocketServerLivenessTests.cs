@@ -52,11 +52,9 @@ public class WebSocketServerLivenessTests
     [Fact]
     public async Task WhenTheListenerIsUp_ThenItsOutboundChangeQueueIsRegisteredAsUnbounded()
     {
-        // Arrange: a buffer time that outlasts the test, so a captured change stays in the processor's
-        // queue instead of being flushed away before the depth can be read.
+        // Arrange
         using var port = await WebSocketTestPortPool.AcquireAsync();
-        await using var server = CreateServer(port.Port, bufferTime: TimeSpan.FromMinutes(5));
-        var root = (TestRoot)server.RootSubject;
+        await using var server = CreateServer(port.Port);
 
         await server.StartAsync(CancellationToken.None);
         try
@@ -66,15 +64,9 @@ public class WebSocketServerLivenessTests
                 message: "The server should report operational once the listener is accepting connections.");
 
             // Act
-            // Re-written on each poll because the processor only captures changes once it is running.
-            var probeValue = 0;
             await AsyncTestHelpers.WaitUntilAsync(
-                () =>
-                {
-                    root.Name = "v" + probeValue++;
-                    return server.Diagnostics.OutboundChanges.Depth > 0;
-                },
-                message: "The outbound change queue never reported a depth, so it was never registered.");
+                () => server.Diagnostics.OutboundChanges.IsRegistered,
+                message: "The outbound change queue was never registered.");
 
             // Assert
             Assert.Null(server.Diagnostics.OutboundChanges.Capacity);

@@ -347,7 +347,7 @@ public class OutboundDropCountingTests
         await source.StopAsync(CancellationToken.None);
 
         // Assert
-        Assert.False(source.IsOutboundChangeQueueRegistered);
+        Assert.False(source.Diagnostics.OutboundChanges.IsRegistered);
         Assert.Equal(0, source.Diagnostics.OutboundChanges.Depth);
     }
 
@@ -401,7 +401,7 @@ public class OutboundDropCountingTests
 
     private static Task WaitForOutboundChangeQueueRegistrationAsync(TestSubjectSource source) =>
         AsyncTestHelpers.WaitUntilAsync(
-            () => source.IsOutboundChangeQueueRegistered,
+            () => source.Diagnostics.OutboundChanges.IsRegistered,
             message: "The outbound change queue was never registered.");
 
     private static ChangeQueueProcessor CreateBoundedProcessor(

@@ -1453,7 +1453,7 @@ public class SubjectSourceBaseTests
         using var watchdogRegistration = watchdog.Token.Register(() => releaseCurrentWrite.TrySetResult());
         await source.StartAsync(CancellationToken.None);
         await AsyncTestHelpers.WaitUntilAsync(
-            () => source.IsOutboundChangeQueueRegistered,
+            () => source.Diagnostics.OutboundChanges.IsRegistered,
             message: "The connected processor did not start.");
         subject.LastName = "warmup";
         await warmupWritten.Task.WaitAsync(TestTimeout);
@@ -2062,7 +2062,7 @@ public class SubjectSourceBaseTests
         using var watchdogRegistration = watchdog.Token.Register(() => releaseStoppedNotification.TrySetResult());
         await source.StartAsync(CancellationToken.None);
         await AsyncTestHelpers.WaitUntilAsync(
-            () => source.IsOutboundChangeQueueRegistered,
+            () => source.Diagnostics.OutboundChanges.IsRegistered,
             message: "The connected processor did not start.");
         subject.LastName = "warmup";
         await warmupWritten.Task.WaitAsync(TestTimeout);
@@ -2515,7 +2515,7 @@ public class SubjectSourceBaseTests
         try
         {
             await AsyncTestHelpers.WaitUntilAsync(
-                () => source.IsOutboundChangeQueueRegistered,
+                () => source.Diagnostics.OutboundChanges.IsRegistered,
                 message: "The change processor did not start.");
 
             // Act

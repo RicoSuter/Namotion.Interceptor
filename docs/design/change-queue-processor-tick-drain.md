@@ -49,11 +49,11 @@ The drain comes before the await so that, for an externally owned subscription, 
 
 A loop that ended by throwing (a property filter that threw) skips step 2, so a filter that throws on every change cannot replace the original exception from within `finally`. The changes left behind stay in the subscription, as they did when the dequeue loop threw.
 
-Terminal accounting does not change: `CloseDeliveryAndDrain`, `TryAdmitMergedDelivery` and the terminal handler see the same buffered queue and delivery state. `Dispose` additionally disposes the timer, so a running loop ends at once instead of at its next tick.
+Terminal accounting does not change: `CloseDeliveryAndDrain`, `TryAdmitMergedDelivery` and the terminal handler see the same buffered queue and delivery state. `Dispose` additionally disposes the timer, so a running loop ends at once instead of at its next tick. It queues that disposal to the pool, after closing delivery and running the terminal handler: disposing a `PeriodicTimer` resumes its waiter synchronously, which would otherwise run the whole teardown, consumer filters included, on the caller's thread and before delivery is closed.
 
 ## Externally owned subscriptions
 
-The internal constructor takes a subscription that outlives the processor, and the source base reuses it across reconnects. Single consumer holds by construction: the loop and the teardown drain run on the processing task and never concurrently with each other, and the teardown drain finishes before anything is awaited (see Teardown).
+The internal constructor takes a subscription that outlives the processor, and the source base reuses it across reconnects. The loop and the teardown drain run on the processing task and never concurrently with each other, and the teardown drain finishes before anything is awaited (see Teardown). The one exception is a drain that outlives the teardown bound, for example in a slow filter: it stops at its next change once the processor is disposed, but the change it is deciding, and a dequeue racing the disposal, can still overlap with the owner, as one change in the dequeue loop could. The source base never drains after a stop, so it never meets this.
 
 Changes that arrive after the teardown drain stay in the subscription for its owner, which parks them in the retry queue before the next attempt. That is the same handover as before, with the drain taking what the dequeue loop would have taken.
 
