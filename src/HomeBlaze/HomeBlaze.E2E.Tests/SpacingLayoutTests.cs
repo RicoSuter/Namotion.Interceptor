@@ -285,34 +285,26 @@ public class SpacingLayoutTests
     [Theory]
     [InlineData(400)]
     [InlineData(1400)]
-    public async Task WhenAPageHasATitle_ThenItsTimeAndTheEditButtonDoNotOverlapItOrEachOther(int width)
+    public async Task WhenAPageHasATitle_ThenTheButtonOfThePageMenuDoesNotOverlapIt(int width)
     {
         // Arrange
         var page = await OpenPageAsync(width: width);
-        await Assertions.Expect(page.GetByTestId("page-last-modified")).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetByTestId("edit-mode-menu")).ToBeVisibleAsync(new() { Timeout = Timeout });
 
         // Act
-        var overlaps = await page.EvaluateAsync<string[]>(
+        var overlappingLines = await page.EvaluateAsync<int>(
             """
             () => {
                 const range = document.createRange();
                 range.selectNodeContents(document.querySelector('.markdown-content h1'));
-                const boxes = {
-                    time: [document.querySelector('[data-testid=page-last-modified]').getBoundingClientRect()],
-                    button: [document.querySelector('[data-testid=edit-mode-menu]').getBoundingClientRect()],
-                    title: [...range.getClientRects()]
-                };
+                const button = document.querySelector('[data-testid=edit-mode-menu]').getBoundingClientRect();
                 const intersect = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
-                const result = [];
-                for (const [first, second] of [['time', 'button'], ['time', 'title'], ['button', 'title']]) {
-                    if (boxes[first].some(a => boxes[second].some(b => intersect(a, b)))) result.push(`${first} and ${second}`);
-                }
-                return result;
+                return [...range.getClientRects()].filter(line => intersect(line, button)).length;
             }
             """);
 
         // Assert
-        Assert.Empty(overlaps);
+        Assert.Equal(0, overlappingLines);
     }
 
     [Fact]

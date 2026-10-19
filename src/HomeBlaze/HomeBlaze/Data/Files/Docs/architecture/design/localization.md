@@ -81,7 +81,7 @@ The preference is stored in a `homeblaze.timezone` cookie (`SameSite=Lax`, one y
 |---|---|
 | `StateUnitExtensions.GetPropertyDisplayValue` (state panel) | Takes an optional `ITimeZoneDisplay`; the `DateTime` and `DateTimeOffset` branches format through it. Used by `SubjectPropertyPanel`. |
 | `PropertyHistoryDialog` | The chart axis, the table, and the range hints use `ToZoned`; the custom-range date pickers use `ToUtc`, so the queried UTC window matches the wall-clock the user picked. |
-| `MarkdownFilePageComponent` | The file modified timestamp formats through the service. |
+| `Pages` (page menu) | The time of the last change of a file page formats through the service. |
 
 The zone and the preference are tracked properties (`TimeZoneState`, read through `TimeZoneDisplayService`), so a component that formats a timestamp in its render reads the zone there and renders again when it changes, with no subscription. Only components that build their data outside the render subscribe to `ITimeZoneDisplay.Changed`: `HistoryChartView` rebuilds its chart, `PropertyHistoryDialog` reloads, since its query window depends on the zone, and `AgentPage` passes a version down so that its timeline renders past its own `ShouldRender` checks. Changing the zone updates everything live with no page reload.
 
