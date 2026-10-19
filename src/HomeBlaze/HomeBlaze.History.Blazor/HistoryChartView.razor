@@ -253,9 +253,8 @@
     /// <summary>
     /// The legend of the lines, rendered right below them. The view renders every time its parent does while it has
     /// this or <see cref="BandHeader"/>, so the content may show values that change; the lines are drawn again only for
-    /// other data. The CSS property <c>--history-chart-plot-right</c> holds the measured distance of the right end of the
-    /// plot from the right edge of the view while the view has bands, and <c>--history-chart-plot-end</c> the space MudChart
-    /// keeps there, so the legend can end where the plot does.
+    /// other data. The CSS property <c>--history-chart-plot-end</c> holds the space MudChart keeps right of the plot, the
+    /// same before and after the lines are drawn, so the legend can end where the plot does without moving.
     /// </summary>
     [Parameter]
     public RenderFragment? LineLegend { get; set; }
@@ -367,9 +366,9 @@
     private void BuildStyles(bool isClickable)
     {
         _hasStyles = true;
-        // A placeholder of lines keeps the space the plot will keep, so the legend does not move either.
-        var hasPlot = _chartSeries is not null || (Data is null && Placeholder is { HasLines: true });
-        var plotEnd = !hasPlot || !ShowAxes ? 0 : PlotEndSpace;
+        // Follows the box of the lines rather than the drawn plot, so the legend stays where it was while the lines load.
+        var hasLines = Data is null ? Placeholder is { HasLines: true } : Data.Lines.Count > 0;
+        var plotEnd = !hasLines || !ShowAxes ? 0 : PlotEndSpace;
         _rootStyle = $"width:100%; display:flex; flex-direction:column; align-items:center; gap:8px; --history-chart-plot-end:{plotEnd}px; {Style}";
 
         var size = MaxHeight is { } maxHeight

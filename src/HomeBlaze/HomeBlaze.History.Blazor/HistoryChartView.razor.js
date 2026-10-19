@@ -43,8 +43,10 @@ export function followPlot(lines, alignBands) {
             return;
         }
 
-        setProperty(view, leftProperty, gridLine.left - box.left);
-        setProperty(view, rightProperty, box.right - gridLine.right);
+        // A view in a scaled canvas is drawn larger or smaller than its layout, and the margins are layout pixels.
+        const scale = view.offsetWidth / box.width;
+        setProperty(view, leftProperty, (gridLine.left - box.left) * scale);
+        setProperty(view, rightProperty, (box.right - gridLine.right) * scale);
     };
 
     // Blazor replaces the style attribute of the view when its style changes, which drops the properties.
@@ -66,7 +68,8 @@ export function followPlot(lines, alignBands) {
     };
 }
 
-// Whether the chart is drawn at the size of its box with every value label inside it. The first svg is the chart.
+// Whether the chart is drawn at the size of its box with every value label inside it. The first svg is the chart. The
+// viewBox is in layout pixels, which a scaled canvas does not change, unlike the drawn size.
 function isPlaced(lines) {
     const chart = lines.querySelector('svg');
     const viewBox = chart?.viewBox.baseVal;
@@ -75,9 +78,9 @@ function isPlaced(lines) {
     }
 
     const size = chart.getBoundingClientRect();
-    return size.width > 0 &&
-        Math.abs(viewBox.width - size.width) <= 1 &&
-        Math.abs(viewBox.height - size.height) <= 1 &&
+    return chart.clientWidth > 0 &&
+        Math.abs(viewBox.width - chart.clientWidth) <= 1 &&
+        Math.abs(viewBox.height - chart.clientHeight) <= 1 &&
         [...chart.querySelectorAll('.mud-charts-yaxis text')]
             .every(text => text.textContent.trim() === '' || text.getBoundingClientRect().left >= size.left - 1);
 }
