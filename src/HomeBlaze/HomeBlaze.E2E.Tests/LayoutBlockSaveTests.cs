@@ -218,9 +218,8 @@ public class LayoutBlockSaveTests
 
             // Assert: the position is the final one only after the events of the drag have arrived, and the page is
             // written at the release.
-            var x = 0;
-            var y = 0;
-            var lastText = string.Empty;
+            int? x = null;
+            int? y = null;
             string text;
             try
             {
@@ -228,7 +227,6 @@ public class LayoutBlockSaveTests
                     CanvasPage,
                     written =>
                     {
-                        lastText = written;
                         if (TryGetFirstCanvasNode() is not { } firstNode)
                         {
                             return false;
@@ -242,8 +240,10 @@ public class LayoutBlockSaveTests
             catch (TimeoutException exception)
             {
                 // Tells a node that never moved from a move that was not written.
-                var nodeLines = string.Join(", ", lastText.Split('\n').Where(line => line.StartsWith("::: Node", StringComparison.Ordinal)));
-                throw new TimeoutException($"{exception.Message}: the moved node is at X={x} Y={y}, and the page has {nodeLines}", exception);
+                var written = Normalize(await _fixture.ReadFileAsync(_fixture.GetDemoPagePath(CanvasPage)));
+                var nodeLines = string.Join(", ", written.Split('\n').Where(line => line.StartsWith("::: Node", StringComparison.Ordinal)));
+                var position = x is null ? "not found" : $"at X={x} Y={y}";
+                throw new TimeoutException($"{exception.Message}: the moved node is {position}, and the page has {nodeLines}", exception);
             }
 
             Assert.True(x > 40, $"X is {x}");

@@ -251,10 +251,9 @@ public class CanvasLayoutTests
         var page = await OpenCanvasPageAsync(editMode: "Split");
         var node = GetNodes(page).First;
         var positionsBefore = await GetNodePositionsAsync(page);
-        var box = await GetBoxAsync(node);
 
         // Act: the border moves the node like the rest of it does, so a moved node is what the drag causes.
-        await node.DragNodeAsync(box.Width / 2, box.Height / 2 + 60, startX: 0, timeout: Timeout);
+        await node.DragNodeAsync(80, 60, fromLeftEdge: true, timeout: Timeout);
         await WaitForServerAsync(page, "Split");
         var movedPosition = await WaitForNodeToBeMovedAsync(page, positionsBefore);
         await WaitForPositionToBeWrittenAsync(movedPosition);
