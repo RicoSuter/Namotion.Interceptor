@@ -60,6 +60,7 @@ namespace HomeBlaze.Services
         public static System.Collections.Immutable.ImmutableArray<HomeBlaze.Services.MetadataLink> GetLinks(this System.Collections.Generic.IReadOnlyDictionary<string, System.Text.Json.JsonElement>? metadata, string key) { }
         public static string? GetString(this System.Collections.Generic.IReadOnlyDictionary<string, System.Text.Json.JsonElement>? metadata, string key) { }
         public static System.Collections.Immutable.ImmutableArray<string> GetStringArray(this System.Collections.Generic.IReadOnlyDictionary<string, System.Text.Json.JsonElement>? metadata, string key) { }
+        public static System.Collections.Immutable.ImmutableArray<string> GetTags(this System.Collections.Generic.IReadOnlyDictionary<string, System.Text.Json.JsonElement>? metadata) { }
         public static TEnum? ParseEnumName<TEnum>(string text)
             where TEnum :  struct, System.Enum { }
     }
@@ -94,6 +95,13 @@ namespace HomeBlaze.Services
         [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         [System.Text.Json.Serialization.JsonPropertyName("property")]
         public string? Property { get; init; }
+    }
+    public static class MetadataText
+    {
+        public const int MaxItemCount = 20;
+        public const int MaxTagLength = 64;
+        public static bool HasControlOrFormatCharacter(string text) { }
+        public static bool IsAllowedTag(string tag) { }
     }
     public sealed class ObjectParameterMember : System.IEquatable<HomeBlaze.Services.ObjectParameterMember>
     {

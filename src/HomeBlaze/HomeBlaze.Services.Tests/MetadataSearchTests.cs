@@ -102,4 +102,19 @@ public class MetadataSearchTests
         // Assert
         Assert.Equal(["Root"], tags);
     }
+
+    [Fact]
+    public void WhenATagWasEditedByHandToABlankOne_ThenItIsNotListed()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var root = new MetadataPathsTestFolder(context);
+        TestMetadata.Set(root, """{ "tags": ["", " ", "pump"] }""");
+
+        // Act
+        var tags = MetadataSearch.GetTags(root);
+
+        // Assert
+        Assert.Equal(["pump"], tags);
+    }
 }

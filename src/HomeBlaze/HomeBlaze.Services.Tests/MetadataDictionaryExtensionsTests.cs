@@ -136,4 +136,51 @@ public class MetadataDictionaryExtensionsTests
         Assert.Equal(20, links.Length);
         Assert.Equal("/Devices/19", links[^1].Path);
     }
+
+    [Fact]
+    public void WhenTagsWereEditedByHand_ThenOnlyTagsThatMayBeWrittenAreReadTrimmedAndOnce()
+    {
+        // Arrange
+        var metadata = Metadata($$"""
+            {
+              "tags": ["", " ", " pump ", "PUMP", "{{new string('a', 65)}}", "a\u202Eb", "a\u200Bb", "a\tb", 5, "floor-2"]
+            }
+            """);
+
+        // Act
+        var tags = metadata.GetTags();
+
+        // Assert
+        Assert.Equal(["pump", "floor-2"], tags.ToArray());
+    }
+
+    [Fact]
+    public void WhenAFileHoldsMoreTagsThanMayBeWritten_ThenOnlyTheFirstTwentyAreRead()
+    {
+        // Arrange
+        var items = Enumerable.Range(0, 1000).Select(index => $"\"tag{index}\"");
+        var metadata = Metadata($$"""{ "tags": [{{string.Join(", ", items)}}] }""");
+
+        // Act
+        var tags = metadata.GetTags();
+
+        // Assert
+        Assert.Equal(20, tags.Length);
+        Assert.Equal("tag19", tags[^1]);
+    }
+
+    [Fact]
+    public void WhenTheMembersOfALinkHaveWhitespaceAroundThem_ThenTheyAreReadTrimmed()
+    {
+        // Arrange
+        var metadata = Metadata("""{ "links": [{ "title": " Manual ", "url": " https://example.com/manual.pdf" }, { "path": "\t/Devices/Pump " }] }""");
+
+        // Act
+        var links = metadata.GetLinks(MetadataKeys.Links);
+
+        // Assert
+        Assert.Equal(
+            [new MetadataLink("Manual", "https://example.com/manual.pdf", null), new MetadataLink(null, null, "/Devices/Pump")],
+            links.ToArray());
+    }
 }

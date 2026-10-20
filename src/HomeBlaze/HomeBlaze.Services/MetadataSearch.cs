@@ -1,6 +1,5 @@
 using System.Collections.Immutable;
 using System.Text.Json;
-using HomeBlaze.Components.Abstractions.Pages;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -61,7 +60,7 @@ public static class MetadataSearch
     public static IReadOnlyList<string> GetTags(IInterceptorSubject root, Func<IInterceptorSubject, bool>? isExcluded = null)
         => Walk(root, isExcluded)
             .SelectMany(GetEntries)
-            .SelectMany(static entry => entry.Metadata.GetStringArray(MetadataKeys.Tags))
+            .SelectMany(static entry => entry.Metadata.GetTags())
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Order(StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -82,7 +81,7 @@ public static class MetadataSearch
     }
 
     private static bool IsMatch(ImmutableDictionary<string, JsonElement> metadata, string? tag, string? key, string? value)
-        => (tag is null || metadata.GetStringArray(MetadataKeys.Tags).Contains(tag, StringComparer.OrdinalIgnoreCase)) &&
+        => (tag is null || metadata.GetTags().Contains(tag, StringComparer.OrdinalIgnoreCase)) &&
            (key is null || metadata.ContainsKey(key)) &&
            (value is null || (key is null ? metadata.Keys.SelectMany(name => GetStrings(metadata, name)) : GetStrings(metadata, key))
                .Contains(value, StringComparer.OrdinalIgnoreCase));

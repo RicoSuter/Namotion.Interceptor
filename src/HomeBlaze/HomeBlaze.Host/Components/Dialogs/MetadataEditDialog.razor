@@ -137,8 +137,7 @@
             _links.Add(new LinkInput { Title = link.Title, Address = link.Url ?? link.Path });
         }
 
-        // Each once, as a chip is keyed by its tag; a file written by hand may repeat one.
-        _tags.AddRange(metadata.GetStringArray(MetadataKeys.Tags).Distinct(StringComparer.OrdinalIgnoreCase));
+        _tags.AddRange(metadata.GetTags());
 
         // Once per dialog, as finding them walks the whole tree.
         _tagsInUse = RootManager.Root is { } root ? MetadataSearch.GetTags(root, static subject => subject.IsExcludedFrom(ExclusionTarget.UserInterface)) : [];

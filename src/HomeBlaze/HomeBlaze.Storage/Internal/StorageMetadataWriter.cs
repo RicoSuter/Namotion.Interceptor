@@ -29,12 +29,6 @@ internal static class StorageMetadataWriter
     /// <summary>The largest file, which a write that does not make the file larger may exceed.</summary>
     public const int MaxFileSize = 512 * 1024;
 
-    /// <summary>The most links and tags.</summary>
-    public const int MaxItemCount = 20;
-
-    /// <summary>The longest tag.</summary>
-    public const int MaxTagLength = 64;
-
     private static readonly string[] KnownKeys =
     [
         MetadataKeys.Title, MetadataKeys.NavigationTitle, MetadataKeys.Icon, MetadataKeys.Location, MetadataKeys.Alignment,
@@ -356,9 +350,9 @@ internal static class StorageMetadataWriter
             return null;
         }
 
-        if (value.ValueKind != JsonValueKind.Array || value.GetArrayLength() > MaxItemCount)
+        if (value.ValueKind != JsonValueKind.Array || value.GetArrayLength() > MetadataText.MaxItemCount)
         {
-            throw Refuse($"'{key}' must be an array of at most {MaxItemCount} links, for example [{{ \"title\": \"Manual\", \"url\": \"https://example.com/manual.pdf\" }}].");
+            throw Refuse($"'{key}' must be an array of at most {MetadataText.MaxItemCount} links, for example [{{ \"title\": \"Manual\", \"url\": \"https://example.com/manual.pdf\" }}].");
         }
 
         var links = new JsonArray(CaseSensitiveOptions);
@@ -439,10 +433,10 @@ internal static class StorageMetadataWriter
             return null;
         }
 
-        if (value.ValueKind != JsonValueKind.Array || value.GetArrayLength() > MaxItemCount ||
+        if (value.ValueKind != JsonValueKind.Array || value.GetArrayLength() > MetadataText.MaxItemCount ||
             value.EnumerateArray().Any(static item => item.ValueKind != JsonValueKind.String))
         {
-            throw Refuse($"'{key}' must be an array of at most {MaxItemCount} strings.");
+            throw Refuse($"'{key}' must be an array of at most {MetadataText.MaxItemCount} strings.");
         }
 
         var tags = new JsonArray(CaseSensitiveOptions);
@@ -450,9 +444,9 @@ internal static class StorageMetadataWriter
         foreach (var item in value.EnumerateArray())
         {
             var tag = GetString(key, item)!.Trim();
-            if (tag.Length == 0 || tag.Length > MaxTagLength)
+            if (tag.Length == 0 || tag.Length > MetadataText.MaxTagLength)
             {
-                throw Refuse($"Each tag of '{key}' has 1 to {MaxTagLength} characters.");
+                throw Refuse($"Each tag of '{key}' has 1 to {MetadataText.MaxTagLength} characters.");
             }
 
             if (tag.Any(char.IsControl))
