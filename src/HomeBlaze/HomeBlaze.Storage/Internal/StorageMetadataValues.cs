@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 using HomeBlaze.Abstractions;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 
 namespace HomeBlaze.Storage.Internal;
@@ -29,11 +30,18 @@ internal static class StorageMetadataValues
     /// handles it synchronously must not write a property that holds subjects: that takes the lifecycle lock of the
     /// context, while a thread that attaches a subject holds the lifecycle lock and waits for this one.
     /// </remarks>
-    public static void Set(RegisteredSubject subject, string? propertyName, ImmutableDictionary<string, JsonElement>? values)
+    public static void Set(RegisteredSubject registeredSubject, string? propertyName, ImmutableDictionary<string, JsonElement>? values)
     {
         var name = propertyName is null ? KnownAttributes.Metadata : $"{propertyName}@{KnownAttributes.Metadata}";
-        lock (subject.Subject.SyncRoot)
+        lock (registeredSubject.Subject.SyncRoot)
         {
+            // The registration of the caller is stale when the subject was detached and attached again since it was read,
+            // and a property added to it would be missing from the current one.
+            if (registeredSubject.Subject.TryGetRegisteredSubject() is not { } subject)
+            {
+                return;
+            }
+
             if (subject.Subject.Data.TryGetValue((name, ValueKey), out var data))
             {
                 var value = (StrongBox<ImmutableDictionary<string, JsonElement>?>)data!;
