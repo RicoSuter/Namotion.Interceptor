@@ -45,8 +45,13 @@ internal sealed class MarkdownSearchSourceFinder
         {
             var file = registered.Subject as MarkdownFile;
 
-            // Agents neither change nor find the metadata of agents, see AgentMetadataAccess.
-            var notes = _forAgents && registered.Subject.TryGetFirstParentOrSelf<LlmAgentBase>() is not null ? null : TryGetNotes(registered);
+            // Agents neither change nor find the metadata of agents, see AgentMetadataAccess; the parents are walked only
+            // for notes, as most subjects have none.
+            var notes = TryGetNotes(registered);
+            if (notes is not null && _forAgents && registered.Subject.TryGetFirstParentOrSelf<LlmAgentBase>() is not null)
+            {
+                notes = null;
+            }
 
             // Most subjects are neither, and the path and the exclusion walk up the parents.
             if ((file is null && notes is null) ||
