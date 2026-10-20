@@ -18,8 +18,7 @@ public class MetadataLifecycleHandlerTests
         => new(InterceptorSubjectContext.Create()
             .WithFullPropertyTracking()
             .WithRegistry()
-            .WithService<ILifecycleHandler>(() => new MetadataLifecycleHandler(), handler => handler is MetadataLifecycleHandler)
-            .WithService<IPropertyLifecycleHandler>(() => new MetadataLifecycleHandler(), handler => handler is MetadataLifecycleHandler));
+            .WithService<ILifecycleHandler>(() => new MetadataLifecycleHandler(), handler => handler is MetadataLifecycleHandler));
 
     [Fact]
     public void WhenASubjectAttachesBelowAStore_ThenTheStoreAppliesItOnce()
