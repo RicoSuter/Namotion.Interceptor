@@ -1,3 +1,5 @@
+using HomeBlaze.Storage.Metadata;
+
 namespace HomeBlaze.Storage.Internal;
 
 /// <summary>

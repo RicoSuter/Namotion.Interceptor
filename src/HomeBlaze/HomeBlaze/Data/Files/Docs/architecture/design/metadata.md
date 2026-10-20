@@ -25,7 +25,7 @@ Docs (folder)                        HomeBlaze:Metadata             = { title, o
 - **Added on demand.** The property or attribute is added only once an entry exists. The registry cannot remove a property, so removed metadata sets the value to null, and null means no metadata.
 - **One step with its file.** Setting a value and reading the file it comes from are one step under the `SyncRoot` of the subject, so a subject that attaches during a write takes the new value.
 - **Readers.** Navigation, the browser and the order of children read the known keys (`MetadataKeys`) through `SubjectNavigationExtensions` and `ChildOrdering`. The path picker does not list the metadata.
-- **Contracts.** `IMetadataStore`, `IMetadataContainer` and `MetadataKeys` are in `HomeBlaze.Storage.Abstractions`, next to `IConfigurationWriter`.
+- **Code.** The contracts `IMetadataStore`, `IMetadataContainer` and `MetadataKeys` are in the namespace `HomeBlaze.Storage.Abstractions.Metadata`, the readers in `HomeBlaze.Services.Metadata`, and the files, applying and writing of a storage in `HomeBlaze.Storage.Metadata`. A storage is the `IMetadataStore` of what it holds and hands the work to its `StorageMetadataStore`.
 
 ## Files and Applying [Implemented]
 

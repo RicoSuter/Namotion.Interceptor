@@ -1,5 +1,5 @@
 using HomeBlaze.Abstractions;
-using HomeBlaze.Services;
+using HomeBlaze.Services.Metadata;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
 

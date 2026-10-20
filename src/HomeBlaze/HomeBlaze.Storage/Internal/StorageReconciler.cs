@@ -3,7 +3,9 @@ using FluentStorage.Blobs;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Abstractions;
+using HomeBlaze.Storage.Abstractions.Metadata;
 using HomeBlaze.Storage.Files;
+using HomeBlaze.Storage.Metadata;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Tracking.Lifecycle;
@@ -336,7 +338,7 @@ internal sealed class StorageReconciler
                 var file = FindMetadata(StorageMetadataPath.GetSubjectFilePath(entry.Path)) ?? StorageMetadataFile.Empty;
                 if (!ReferenceEquals(entry.AppliedMetadata, file))
                 {
-                    _storage.MetadataApplier.Apply(entry.Subject!, file);
+                    _storage.MetadataStore.Applier.Apply(entry.Subject!, file);
                     entry.AppliedMetadata = file;
                 }
             }

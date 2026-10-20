@@ -1,7 +1,8 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.AI.Agents;
 using HomeBlaze.Services;
-using HomeBlaze.Storage.Abstractions;
+using HomeBlaze.Services.Metadata;
+using HomeBlaze.Storage.Abstractions.Metadata;
 using HomeBlaze.Storage.Files;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;

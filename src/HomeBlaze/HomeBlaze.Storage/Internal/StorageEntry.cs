@@ -1,3 +1,4 @@
+using HomeBlaze.Storage.Metadata;
 using Namotion.Interceptor;
 
 namespace HomeBlaze.Storage.Internal;

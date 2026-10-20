@@ -5,7 +5,8 @@ using HomeBlaze.Components.Abstractions.Attributes;
 using HomeBlaze.Components.Abstractions.Pages;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Components;
-using HomeBlaze.Storage.Abstractions;
+using HomeBlaze.Services.Metadata;
+using HomeBlaze.Storage.Abstractions.Metadata;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 

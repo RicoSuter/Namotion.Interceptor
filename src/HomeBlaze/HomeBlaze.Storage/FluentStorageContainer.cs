@@ -1,4 +1,3 @@
-using System.Buffers;
 using System.Collections.Immutable;
 using System.ComponentModel;
 using System.Text;
@@ -8,15 +7,17 @@ using FluentStorage.Blobs;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Services;
+using HomeBlaze.Services.Metadata;
 using HomeBlaze.Storage.Abstractions;
+using HomeBlaze.Storage.Abstractions.Metadata;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
+using HomeBlaze.Storage.Metadata;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
-using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Attributes;
 using StoragePath = HomeBlaze.Storage.Internal.StoragePath;
 
@@ -42,9 +43,6 @@ public partial class FluentStorageContainer :
 {
     private static readonly IReadOnlySet<string> NoPaths = new HashSet<string>();
 
-    // The characters of a path in a metadata file, which a property with metadata cannot have in its name.
-    private static readonly SearchValues<char> PathCharacters = SearchValues.Create("/\\[]'");
-
     private readonly FileSubjectFactory _subjectFactory;
     private readonly IServiceProvider _serviceProvider;
     private readonly ConfigurableSubjectSerializer _serializer;
@@ -65,15 +63,15 @@ public partial class FluentStorageContainer :
     // only what it read, so its item never touches the index or the client of a later connection.
     private volatile StorageConnection? _connection;
 
-    private StorageConnection Connection => _connection is { IsEnded: false } connection
+    internal StorageConnection Connection => _connection is { IsEnded: false } connection
         ? connection
         : throw new StorageRefusedException("Storage not connected");
 
     /// <summary>The clock for timeouts and timers. Read when the storage connects.</summary>
     internal TimeProvider TimeProvider { get; set; } = TimeProvider.System;
 
-    /// <summary>Applies the metadata files of the subjects of this storage.</summary>
-    internal StorageMetadataApplier MetadataApplier { get; }
+    /// <summary>Applies and writes the metadata of this storage.</summary>
+    internal StorageMetadataStore MetadataStore { get; }
 
     /// <summary>Wraps the storage client when the storage connects.</summary>
     internal Func<IBlobStorage, IBlobStorage>? ClientDecorator { get; set; }
@@ -161,7 +159,7 @@ public partial class FluentStorageContainer :
         _serviceProvider = serviceProvider;
         _serializer = serializer;
         _logger = logger;
-        MetadataApplier = new StorageMetadataApplier(this);
+        MetadataStore = new StorageMetadataStore(this, logger);
 
         StorageType = "disk";
         ConnectionString = string.Empty;
@@ -595,234 +593,22 @@ public partial class FluentStorageContainer :
     }
 
     /// <inheritdoc />
-    public bool CanStoreMetadata(IInterceptorSubject subject) => MetadataApplier.CanStoreMetadata(subject);
+    public bool CanStoreMetadata(IInterceptorSubject subject) => MetadataStore.Applier.CanStoreMetadata(subject);
 
     /// <inheritdoc />
     public void ApplyStoredMetadata(IInterceptorSubject subject, string? propertyName)
-        => MetadataApplier.ApplyStoredMetadata(subject, propertyName);
+        => MetadataStore.Applier.ApplyStoredMetadata(subject, propertyName);
 
     /// <inheritdoc />
     /// <remarks>
     /// Keeps the metadata of this storage and of its folders in their <c>.metadata.json</c>, and that of a subject
     /// stored as <c>X.json</c>, of the subjects inside it and of their properties in <c>X.metadata.json</c> beside it.
     /// </remarks>
-    public async Task SetMetadataAsync(IInterceptorSubject subject, string? propertyName, JsonElement values, CancellationToken cancellationToken)
-    {
-        // A copy, as the worker reads the values later, and the caller can dispose the document that holds them.
-        var copy = values.Clone();
-        await WriteMetadataAsync(subject, propertyName, () => copy, cancellationToken);
-    }
-
-    /// <summary>
-    /// Sets the order of a folder of this storage or of its root: see <see cref="MetadataStoreExtensions.SetOrderAsync"/>.
-    /// </summary>
-    internal Task WriteOrderAsync(IInterceptorSubject folder, string[] names, CancellationToken cancellationToken)
-        => WriteMetadataAsync(folder, null, () => CreateOrder(folder, names), cancellationToken);
-
-    // The values are made on the worker, so that values that depend on the tree are those of the tree they are written for.
-    private async Task WriteMetadataAsync(
-        IInterceptorSubject subject, string? propertyName, Func<JsonElement> getValues, CancellationToken cancellationToken)
-    {
-        var connection = Connection;
-        await RunOperationAsync(connection, async token =>
-        {
-            var target = GetMetadataTarget(connection, subject, propertyName);
-            var values = getValues();
-
-            // Fresh from the storage, so that an edit that no pass has seen yet is kept.
-            var content = await connection.Reconciler.ReadMetadataFileAsync(target.FilePath, token);
-            var written = StorageMetadataWriter.Merge(content, target, values);
-            if (target.IsContainer && GetOrderError(subject, values) is { } orderError)
-            {
-                throw new StorageRefusedException(orderError);
-            }
-
-            await WriteMetadataFileAsync(connection, target.FilePath, written, token);
-        }, cancellationToken);
-    }
-
-    // The given names first, then the other children in the order in which they are shown.
-    private static JsonElement CreateOrder(IInterceptorSubject folder, string[] names)
-    {
-        var listedNames = new HashSet<string>(names, StringComparer.Ordinal);
-        var buffer = new ArrayBufferWriter<byte>();
-        using (var writer = new Utf8JsonWriter(buffer))
-        {
-            writer.WriteStartObject();
-            writer.WriteStartArray(MetadataKeys.Order);
-            foreach (var name in names)
-            {
-                writer.WriteStringValue(name);
-            }
-
-            foreach (var name in ChildOrdering.GetShownNames(folder))
-            {
-                if (!listedNames.Contains(name))
-                {
-                    writer.WriteStringValue(name);
-                }
-            }
-
-            writer.WriteEndArray();
-            writer.WriteEndObject();
-        }
-
-        return JsonElement.Parse(buffer.WrittenSpan);
-    }
-
-    // Runs on the worker, after the writer accepted the values, so that their keys and names can be read. The names of
-    // an order are children of the folder, each given once, which also bounds the size of the order.
-    private static string? GetOrderError(IInterceptorSubject folder, JsonElement values)
-    {
-        if (!values.TryGetProperty(MetadataKeys.Order, out var order) || order.ValueKind != JsonValueKind.Array)
-        {
-            return null;
-        }
-
-        var children = new HashSet<string>(ChildOrdering.GetShownNames(folder), StringComparer.Ordinal);
-        var listedNames = new HashSet<string>(StringComparer.Ordinal);
-        var repeatedNames = new SortedSet<string>(StringComparer.Ordinal);
-        var unknownNames = new List<string>();
-        foreach (var item in order.EnumerateArray())
-        {
-            var name = item.GetString()!;
-            if (!listedNames.Add(name))
-            {
-                repeatedNames.Add(name);
-            }
-            else if (!children.Contains(name))
-            {
-                unknownNames.Add(name);
-            }
-        }
-
-        if (repeatedNames.Count > 0)
-        {
-            return $"Names given more than once: {NameList.Format(repeatedNames)}.";
-        }
-
-        return unknownNames.Count > 0
-            ? $"Names that are not children of the folder: {NameList.Format(unknownNames)}. Its children: {NameList.Format(children.Order(StringComparer.Ordinal))}."
-            : null;
-    }
-
-    // Runs on the worker. The own keys of the file of this storage or of a folder of it, or the entry of a subject or
-    // property in the file beside the stored subject that holds it.
-    private StorageMetadataTarget GetMetadataTarget(StorageConnection connection, IInterceptorSubject subject, string? propertyName)
-    {
-        if (ReferenceEquals(subject, this) || subject is VirtualFolder)
-        {
-            return propertyName is null
-                ? new StorageMetadataTarget(StorageMetadataPath.GetFolderFilePath(GetFolderPath(connection, subject)), null, null, IsContainer: true)
-                : throw new StorageRefusedException("A folder and the root of a storage have metadata of their own, but their properties have none.");
-        }
-
-        if (subject.TryGetRegisteredSubject() is not { } registered ||
-            !MetadataApplier.TryFindStoredSubject(registered, out var storedSubject) ||
-            !connection.Index.TryGetEntry(storedSubject.Subject, out var entry) ||
-            entry is not { IsPlaced: true, HasSidecar: true, Subject: not IMetadataStore })
-        {
-            throw new StorageRefusedException(
-                "Only a storage, its folders, the subjects of its JSON files and the subjects and properties inside them have metadata.");
-        }
-
-        if (propertyName is not null && (propertyName == KnownAttributes.Metadata || registered.TryGetProperty(propertyName) is not { IsAttribute: false }))
-        {
-            throw new StorageRefusedException(GetNoPropertyMessage(propertyName));
-        }
-
-        // A path in a metadata file cannot hold them, so the entry would not apply or would be that of another property.
-        if (propertyName is not null && propertyName.AsSpan().ContainsAny(PathCharacters))
-        {
-            throw new StorageRefusedException(
-                $"The property {NameList.Format([propertyName])} cannot have metadata: its name has a character of a path (/, \\, [, ] or ').");
-        }
-
-        var filePath = StorageMetadataPath.GetSubjectFilePath(entry.Path);
-        var path = MetadataPathKey.GetPath(registered, storedSubject)
-            ?? throw new StorageRefusedException("The subject cannot be reached from the subject of its file.");
-        if (propertyName is not null)
-        {
-            return new StorageMetadataTarget(filePath, StorageMetadataFile.PropertiesKey, MetadataPathKey.GetPropertyKey(path, propertyName), IsContainer: false);
-        }
-
-        return path.Length == 0
-            ? new StorageMetadataTarget(filePath, null, null, IsContainer: false)
-            : new StorageMetadataTarget(filePath, StorageMetadataFile.SubjectsKey, path, IsContainer: false);
-    }
-
-    // Runs on the worker. Empty for this storage, else the path of the folder. Only the placed folder counts, so that a
-    // folder that was deleted cannot write into a folder of the same name that was created after it.
-    private string GetFolderPath(StorageConnection connection, IInterceptorSubject owner)
-    {
-        if (ReferenceEquals(owner, this))
-        {
-            return string.Empty;
-        }
-
-        var folder = (VirtualFolder)owner;
-        var path = StoragePath.Normalize(folder.RelativePath);
-        if (!connection.Index.TryGet(path, out var entry) || entry is not { IsFolder: true, IsPlaced: true, Subject: VirtualFolder placedFolder })
-        {
-            throw new StorageRefusedException($"No folder at '{path}'.");
-        }
-
-        return ReferenceEquals(placedFolder, folder)
-            ? path
-            : throw new StorageRefusedException($"The folder '{path}' is no longer in the storage.");
-    }
-
-    // Runs on the worker. No content deletes the file, so that a metadata file exists only while it holds something.
-    private async Task WriteMetadataFileAsync(
-        StorageConnection connection, string path, (byte[] Content, StorageMetadataFile File)? written, CancellationToken cancellationToken)
-    {
-        if (written is null)
-        {
-            await DeleteMetadataFileAsync(connection, path, cancellationToken);
-            connection.Reconciler.Apply();
-            _logger?.LogDebug("Removed empty metadata from storage: {Path}", path);
-            return;
-        }
-
-        var (content, file) = written.Value;
-        var entry = new StorageEntry { Path = path, IsFolder = false, Metadata = file };
-        await WriteAndRecordAsync(connection, entry, content, cancellationToken);
-        connection.Index.Set(entry);
-        connection.Reconciler.Apply();
-        _logger?.LogDebug("Wrote metadata to storage: {Path}", path);
-    }
-
-    private static async Task DeleteMetadataFileAsync(StorageConnection connection, string path, CancellationToken cancellationToken)
-    {
-        if (connection.Index.TryGet(path, out var entry))
-        {
-            // A folder with the name of a metadata file is no metadata file, and deleting the path would delete it with all it holds.
-            if (entry.IsFolder)
-            {
-                return;
-            }
-        }
-        else if (!await connection.Client.ExistsAsync(path, cancellationToken))
-        {
-            // A file that no pass has listed yet is deleted as well.
-            return;
-        }
-
-        try
-        {
-            await connection.Client.DeleteAsync(path, cancellationToken: cancellationToken);
-        }
-        catch (Exception exception) when (CanHaveReachedStorage(exception))
-        {
-            connection.NotifyChanged(path);
-            throw;
-        }
-
-        connection.Index.Remove(path);
-    }
+    public Task SetMetadataAsync(IInterceptorSubject subject, string? propertyName, JsonElement values, CancellationToken cancellationToken)
+        => MetadataStore.SetMetadataAsync(subject, propertyName, values, cancellationToken);
 
     // Recording version and hash is what keeps the event that this write raises from reloading the subject.
-    private async Task WriteAndRecordAsync(
+    internal async Task WriteAndRecordAsync(
         StorageConnection connection, StorageEntry entry, byte[] content, CancellationToken cancellationToken)
     {
         await WriteAsync(connection, entry.Path, content, cancellationToken);
@@ -847,7 +633,7 @@ public partial class FluentStorageContainer :
     /// <exception cref="InvalidOperationException">
     /// The connection ended before the operation was done, which is the same as no connection.
     /// </exception>
-    private static async Task RunOperationAsync(
+    internal static async Task RunOperationAsync(
         StorageConnection connection, Func<CancellationToken, Task> operation, CancellationToken cancellationToken)
     {
         try
@@ -880,7 +666,7 @@ public partial class FluentStorageContainer :
 
     // A call that failed can have changed the storage, and one that was given up can still do so. The pass
     // that finds out is asked for by the operation, because not every storage has a file watcher that would.
-    private static bool CanHaveReachedStorage(Exception exception)
+    internal static bool CanHaveReachedStorage(Exception exception)
         => exception is not (StorageRootUnavailableException or StorageUnresponsiveException { IsRefusal: true });
 
     /// <summary>
@@ -1033,21 +819,7 @@ public partial class FluentStorageContainer :
     [Operation(Title = "Set Metadata", Description = StorageMetadataMethods.SetMetadataDescription, Position = 3)]
     [ExcludeFrom(ExclusionTarget.UserInterface)]
     public Task SetMetadataAsync(string path, string? property, JsonElement values, CancellationToken cancellationToken)
-        => StorageMetadataMethods.RunAsync(() =>
-        {
-            // An agent can send null for any argument.
-            ArgumentNullException.ThrowIfNull(path);
-            if (values.ValueKind != JsonValueKind.Object)
-            {
-                throw new ArgumentException("values must be a JSON object, for example {\"navTitle\": \"Hall light\"}.", nameof(values));
-            }
-
-            var subject = MetadataPaths.TryResolveSubject(this, path)
-                ?? throw new ArgumentException(GetNoSubjectMessage(path));
-            var store = subject.FindMetadataStore()
-                ?? throw new ArgumentException("The subject is in no storage.", nameof(path));
-            return store.SetMetadataAsync(subject, property, values, cancellationToken);
-        });
+        => StorageMetadataMethods.RunAsync(() => MetadataStore.SetMetadataAsync(path, property, values, cancellationToken));
 
     /// <summary>
     /// Finds the subjects and properties in this storage whose metadata matches every filter that is given, for agents:
@@ -1214,12 +986,12 @@ public partial class FluentStorageContainer :
         catch (Exception exception) when (CanHaveReachedStorage(exception))
         {
             connection.NotifyChanged(entry.Path);
-            await DeleteSidecarAsync(connection, entry, isFileKnownGone: false);
+            await MetadataStore.DeleteSidecarAsync(connection, entry, isFileKnownGone: false);
             throw;
         }
 
         // Before the tree follows, so that a failure of the tree cannot leave the metadata file behind.
-        await DeleteSidecarAsync(connection, entry, isFileKnownGone: true);
+        await MetadataStore.DeleteSidecarAsync(connection, entry, isFileKnownGone: true);
 
         connection.Index.Remove(entry.Path);
         connection.Reconciler.Apply();
@@ -1229,56 +1001,6 @@ public partial class FluentStorageContainer :
         connection.NotifyChanged(entry.Path);
 
         _logger?.LogDebug("Deleted blob from storage: {Path}", entry.Path);
-    }
-
-    // The metadata of a subject goes with it once its file is gone, also when the caller has given up by now, as
-    // nothing would delete it later. A failure here is only logged, so the delete succeeds or fails as it did without it.
-    private async Task DeleteSidecarAsync(StorageConnection connection, StorageEntry entry, bool isFileKnownGone)
-    {
-        if (!entry.HasSidecar)
-        {
-            return;
-        }
-
-        try
-        {
-            // A file in a folder that is gone is gone with its metadata file.
-            if (!isFileKnownGone &&
-                (await connection.Reconciler.IsFolderGoneAsync(entry.Parent, CancellationToken.None) ||
-                 await connection.Client.ExistsAsync(entry.Path, CancellationToken.None)))
-            {
-                return;
-            }
-        }
-        catch (Exception exception)
-        {
-            _logger?.LogWarning(exception, "Failed to find out whether the file of a subject is gone, so its metadata file is kept: {Path}", entry.Path);
-            return;
-        }
-
-        var metadataPath = StorageMetadataPath.GetSubjectFilePath(entry.Path);
-        try
-        {
-            await DeleteMetadataFileAsync(connection, metadataPath, CancellationToken.None);
-        }
-        catch (Exception exception)
-        {
-            _logger?.LogWarning(exception, "Failed to delete the metadata file of a deleted subject: {Path}", metadataPath);
-            return;
-        }
-
-        // A known gone file is removed from the index by the caller, which applies both at once.
-        if (!isFileKnownGone)
-        {
-            try
-            {
-                connection.Reconciler.Apply();
-            }
-            catch (Exception exception)
-            {
-                _logger?.LogWarning(exception, "Failed to apply the deleted metadata file of a deleted subject: {Path}", metadataPath);
-            }
-        }
     }
 
     /// <summary>

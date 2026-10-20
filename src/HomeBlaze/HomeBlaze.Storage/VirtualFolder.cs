@@ -1,9 +1,10 @@
 using System.Collections.Immutable;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
-using HomeBlaze.Services;
+using HomeBlaze.Services.Metadata;
 using HomeBlaze.Storage.Abstractions;
-using HomeBlaze.Storage.Internal;
+using HomeBlaze.Storage.Abstractions.Metadata;
+using HomeBlaze.Storage.Metadata;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry;
