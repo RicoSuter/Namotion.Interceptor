@@ -60,11 +60,11 @@ public sealed class HistoryChartQueryReuseTests : IDisposable
         recording.Clear();
 
         // Act
-        var reused = await HistoryChartQuery.QueryAsync([recording], Requests, Day(1), _now, Bucket, previous, CancellationToken.None);
+        var reused = await HistoryChartQuery.QueryAsync([recording], Requests, Day(1), _now, Bucket, previous.ReuseState, CancellationToken.None);
         var full = await HistoryChartQuery.QueryAsync([store], Requests, Day(1), _now, Bucket, CancellationToken.None);
 
         // Assert
-        Assert.All(recording.ReceivedQueries, query => Assert.Equal(Day(4), query.From));
+        AssertQueriedFrom(recording, Day(4));
         AssertSameBars(full, reused);
     }
 
@@ -87,22 +87,22 @@ public sealed class HistoryChartQueryReuseTests : IDisposable
         recording.Clear();
 
         // Act
-        var reused = await HistoryChartQuery.QueryAsync([recording], Requests, Day(1), _now, Bucket, previous, CancellationToken.None);
+        var reused = await HistoryChartQuery.QueryAsync([recording], Requests, Day(1), _now, Bucket, previous.ReuseState, CancellationToken.None);
         var full = await HistoryChartQuery.QueryAsync([store], Requests, Day(1), _now, Bucket, CancellationToken.None);
 
         // Assert
-        Assert.All(recording.ReceivedQueries, query => Assert.Equal(Day(3), query.From));
+        AssertQueriedFrom(recording, Day(3));
         AssertSameBars(full, reused);
     }
 
     [Fact]
     public async Task WhenAStoreServingAnEndedDayHasNotFlushed_ThenThatDayIsQueriedAgainAlthoughAnotherStoreCoversUpToNow()
     {
-        // Arrange - the memory store covers only the last minute, so the persistent store serves day 3, whose last
-        // reading it still holds pending when the previous query runs.
+        // Arrange - the memory store covers only the last 12 hours, so the persistent store serves day 3, whose last
+        // reading it still holds pending when the previous query runs. Together they cover up to now without a gap.
         _now = Day(0);
         var inMemory = new InMemoryHistoryStore(
-            priority: 100, maxPointsPerProperty: 100_000, TimeSpan.FromMinutes(1), maxJsonSize: 8192, () => _now);
+            priority: 100, maxPointsPerProperty: 100_000, TimeSpan.FromHours(12), maxJsonSize: 8192, () => _now);
         var sqlite = new SqliteHistoryStore(
             priority: 50, _directory, PartitionInterval.Weekly, TimeSpan.FromDays(3650), maxJsonSize: 8192, () => _now);
         _disposables.Add(sqlite);
@@ -121,11 +121,11 @@ public sealed class HistoryChartQueryReuseTests : IDisposable
         recording.Clear();
 
         // Act
-        var reused = await HistoryChartQuery.QueryAsync(stores, Requests, Day(1), _now, Bucket, previous, CancellationToken.None);
+        var reused = await HistoryChartQuery.QueryAsync(stores, Requests, Day(1), _now, Bucket, previous.ReuseState, CancellationToken.None);
         var full = await HistoryChartQuery.QueryAsync([inMemory, sqlite], Requests, Day(1), _now, Bucket, CancellationToken.None);
 
         // Assert
-        Assert.All(recording.ReceivedQueries, query => Assert.Equal(Day(3), query.From));
+        AssertQueriedFrom(recording, Day(3));
         AssertSameBars(full, reused);
     }
 
@@ -147,11 +147,11 @@ public sealed class HistoryChartQueryReuseTests : IDisposable
         recording.Clear();
 
         // Act
-        var reused = await HistoryChartQuery.QueryAsync([recording], Requests, Day(1), _now, Bucket, previous, CancellationToken.None);
+        var reused = await HistoryChartQuery.QueryAsync([recording], Requests, Day(1), _now, Bucket, previous.ReuseState, CancellationToken.None);
         var full = await HistoryChartQuery.QueryAsync([store], Requests, Day(1), _now, Bucket, CancellationToken.None);
 
         // Assert
-        Assert.All(recording.ReceivedQueries, query => Assert.Equal(Day(3), query.From));
+        AssertQueriedFrom(recording, Day(3));
         AssertSameBars(full, reused);
     }
 
@@ -178,12 +178,33 @@ public sealed class HistoryChartQueryReuseTests : IDisposable
         var count = store.ReceivedQueries.Count;
 
         // Act
-        await HistoryChartQuery.QueryAsync([store], Requests, Day(2), Day(4).AddMinutes(30), Bucket, previous, CancellationToken.None);
+        await HistoryChartQuery.QueryAsync([store], Requests, Day(2), Day(4).AddMinutes(30), Bucket, previous.ReuseState, CancellationToken.None);
 
         // Assert
         var refreshed = store.ReceivedQueries.Skip(count).ToArray();
         Assert.NotEmpty(refreshed);
         Assert.All(refreshed, query => Assert.Equal(Day(2), query.From));
+    }
+
+    [Fact]
+    public async Task WhenTheBucketIsFixed_ThenEverythingIsQueried()
+    {
+        // Arrange - both queries end in the same hour.
+        var store = CreateTestStore();
+        HistoryBucket bucket = TimeSpan.FromHours(1);
+        var previous = await HistoryChartQuery.QueryAsync(
+            [store], Requests, Day(1), Day(3).AddMinutes(10), bucket, CancellationToken.None);
+        var count = store.ReceivedQueries.Count;
+
+        // Act
+        await HistoryChartQuery.QueryAsync(
+            [store], Requests, Day(1), Day(3).AddMinutes(40), bucket, previous.ReuseState, CancellationToken.None);
+
+        // Assert
+        var refreshed = store.ReceivedQueries.Skip(count).ToArray();
+        Assert.Null(previous.ReuseState);
+        Assert.NotEmpty(refreshed);
+        Assert.All(refreshed, query => Assert.Equal(Day(1), query.From));
     }
 
     [Fact]
@@ -312,6 +333,13 @@ public sealed class HistoryChartQueryReuseTests : IDisposable
         Assert.Equal(Day(1), queryFrom["/meter/Status"]);
     }
 
+    private static void AssertQueriedFrom(QueryRecordingStore store, DateTimeOffset from)
+    {
+        var queries = store.ReceivedQueries;
+        Assert.NotEmpty(queries);
+        Assert.All(queries, query => Assert.Equal(from, query.From));
+    }
+
     // The first query of a test store, which ends at 01:00 of day 3.
     private static Task<HistoryChartResult> QueryFirstAsync(
         TestHistoryStore store, IReadOnlyList<HistoryChartSeriesRequest>? requests = null) =>
@@ -328,7 +356,7 @@ public sealed class HistoryChartQueryReuseTests : IDisposable
     {
         var count = store.ReceivedQueries.Count;
         await HistoryChartQuery.QueryAsync(
-            stores ?? [store], requests ?? Requests, from ?? Day(1), Day(3).AddHours(2), bucket ?? Bucket, previous, CancellationToken.None);
+            stores ?? [store], requests ?? Requests, from ?? Day(1), Day(3).AddHours(2), bucket ?? Bucket, previous.ReuseState, CancellationToken.None);
         var refreshed = store.ReceivedQueries.Skip(count).ToArray();
         Assert.NotEmpty(refreshed);
         return refreshed;
