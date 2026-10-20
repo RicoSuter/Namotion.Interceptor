@@ -26,6 +26,11 @@ public static class MetadataStoreExtensions
     public static Task SetOrderAsync(this IInterceptorSubject folder, IReadOnlyList<string> names, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(names);
+        if (names.Any(static name => name is null))
+        {
+            throw new StorageRefusedException("A name is null.");
+        }
+
         var storage = folder.FindMetadataStore() as FluentStorageContainer
             ?? throw new StorageRefusedException("The folder is in no storage.");
         return storage.WriteOrderAsync(folder, [.. names], cancellationToken);

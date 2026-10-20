@@ -356,6 +356,22 @@ public class StorageMetadataWriteTests : StorageTestBase
         Assert.Equal(["b.md", "a.md"], storage.ChildOrder.ToArray());
     }
 
+    [Fact]
+    public async Task WhenOrderHasANullName_ThenItIsRefusedSayingSo()
+    {
+        // Arrange
+        WriteFile("a.md");
+        var storage = await ConnectAsync();
+
+        // Act
+        var exception = await Assert.ThrowsAsync<StorageRefusedException>(() =>
+            MetadataStoreExtensions.SetOrderAsync(storage, ["a.md", null!], CancellationToken.None));
+
+        // Assert
+        Assert.Equal("A name is null.", exception.Message);
+        Assert.False(File.Exists(GetFullPath(".metadata.json")));
+    }
+
     [Theory]
     [InlineData("Docs", "b.md,gone.md","Names that are not children of the folder: 'gone.md'. Its children: 'a.md', 'b.md'.")]
     [InlineData("Docs", "b.md,a.md,b.md", "Names given more than once: 'b.md'.")]
