@@ -1,7 +1,9 @@
+using System.Globalization;
 using HomeBlaze.Abstractions;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Tracking;
 
 namespace HomeBlaze.Services;
@@ -66,15 +68,48 @@ public static class SubjectPathResolverExtensions
     public static IInterceptorSubject? FindChildByIndex(RegisteredSubjectProperty property, string indexStr)
     {
         var value = property.GetValue();
-        if (value == null)
-            return null;
+        return value is not null ? FindChildByIndex(property, value, indexStr) : null;
+    }
 
+    /// <summary>
+    /// Finds a child subject in <paramref name="value"/>, the current value of <paramref name="property"/>. A
+    /// dictionary key matches when its invariant text, see <see cref="PathExtensions.FormatPathIndex"/>, equals
+    /// <paramref name="indexText"/>.
+    /// </summary>
+    internal static IInterceptorSubject? FindChildByIndex(RegisteredSubjectProperty property, object value, string indexText)
+    {
         if (property.IsSubjectDictionary)
-            return SubjectLookup.FindSubjectInDictionary(value, indexStr);
+        {
+            // Finds a string key, so that only a dictionary with other keys pays for the scan below.
+            var child = SubjectLookup.FindSubjectInDictionary(value, indexText);
+            if (child is not null || SubjectLookup.GetDictionaryKeyType(value.GetType()) == typeof(string))
+                return child;
 
-        if (property.IsSubjectCollection && int.TryParse(indexStr, out var index))
+            // The registered children are the entries of the dictionary's last assignment, as in the core path resolver.
+            foreach (var entry in property.Children)
+            {
+                if (entry.Index is not null && KeyTextEquals(entry.Index, indexText))
+                    return entry.Subject;
+            }
+
+            return null;
+        }
+
+        if (property.IsSubjectCollection && int.TryParse(indexText, out var index))
             return SubjectLookup.FindSubjectInCollection(value, index);
 
         return null;
+    }
+
+    private static bool KeyTextEquals(object key, string text)
+    {
+        if (key is ISpanFormattable formattable)
+        {
+            Span<char> buffer = stackalloc char[64];
+            if (formattable.TryFormat(buffer, out var written, default, CultureInfo.InvariantCulture))
+                return buffer[..written].SequenceEqual(text);
+        }
+
+        return PathExtensions.FormatPathIndex(key) == text;
     }
 }

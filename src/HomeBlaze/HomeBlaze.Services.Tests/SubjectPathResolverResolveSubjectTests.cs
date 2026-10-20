@@ -345,6 +345,75 @@ public class SubjectPathResolverResolveSubjectTests : SubjectPathResolverTestBas
         Assert.Same(file, result);
     }
 
+    [Theory]
+    [InlineData("/Items/3", PathStyle.Route)]
+    [InlineData("/Items[3]", PathStyle.Canonical)]
+    public void WhenDictionaryHasIntKeys_ThenResolveSubjectFindsEntryByKeyText(string path, PathStyle style)
+    {
+        // Arrange
+        var item = new TestContainer(Context) { Name = "Item" };
+        var root = new TestContainerWithKeyedChildren(Context);
+        root.Items = new Dictionary<int, TestContainer> { [3] = item };
+        RootManager.Root = root;
+
+        // Act
+        var result = Resolver.ResolveSubject(path, style);
+
+        // Assert
+        Assert.Same(item, result);
+    }
+
+    [Fact]
+    public void WhenDictionaryHasGuidKeys_ThenResolveSubjectFindsEntryByKeyText()
+    {
+        // Arrange
+        var id = Guid.Parse("0f8fad5b-d9cb-469f-a165-70867728950e");
+        var item = new TestContainer(Context) { Name = "Item" };
+        var root = new TestContainerWithKeyedChildren(Context);
+        root.ItemsById = new Dictionary<Guid, TestContainer> { [id] = item };
+        RootManager.Root = root;
+
+        // Act
+        var result = Resolver.ResolveSubject("/ItemsById/0f8fad5b-d9cb-469f-a165-70867728950e", PathStyle.Route);
+
+        // Assert
+        Assert.Same(item, result);
+    }
+
+    [Fact]
+    public void WhenDictionaryHasNoEntryForIntKeyText_ThenResolveSubjectReturnsNull()
+    {
+        // Arrange
+        var root = new TestContainerWithKeyedChildren(Context);
+        root.Items = new Dictionary<int, TestContainer> { [3] = new TestContainer(Context) { Name = "Item" } };
+        RootManager.Root = root;
+
+        // Act
+        var result = Resolver.ResolveSubject("/Items/4", PathStyle.Route);
+
+        // Assert
+        Assert.Null(result);
+    }
+
+    [Theory]
+    [InlineData(PathStyle.Route)]
+    [InlineData(PathStyle.Canonical)]
+    public void WhenWrittenPathOfIntKeyedEntryIsResolved_ThenReturnsEntry(PathStyle style)
+    {
+        // Arrange
+        var item = new TestContainer(Context) { Name = "Item" };
+        var root = new TestContainerWithKeyedChildren(Context);
+        root.Items = new Dictionary<int, TestContainer> { [3] = item };
+        RootManager.Root = root;
+        var path = Resolver.GetPath(item, style)!;
+
+        // Act
+        var result = Resolver.ResolveSubject(path, style);
+
+        // Assert
+        Assert.Same(item, result);
+    }
+
     #endregion
 
     #region InlinePaths resolution
