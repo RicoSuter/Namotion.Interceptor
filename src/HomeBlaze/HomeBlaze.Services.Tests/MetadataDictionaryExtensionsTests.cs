@@ -238,7 +238,7 @@ public class MetadataDictionaryExtensionsTests
         Assert.Equal(expected, hasNotesLinksOrTags);
     }
 
-    // JSON string content: raw characters and escapes, which the check reads without and with the string.
+    // JSON string content, with raw characters and with escapes.
     public static TheoryData<string> StringValues =>
     [
         "", " ", "\u00A0\u3000", "\\u0020", "\\t", "pump", " pump ", "\\u0070ump", "\u00E9t\u00E9", "\U0001F600",
@@ -294,7 +294,7 @@ public class MetadataDictionaryExtensionsTests
     }
 
     [Fact]
-    public void WhenMetadataIsCheckedForNotesLinksOrTags_ThenNothingIsAllocated()
+    public void WhenTheSameMetadataIsCheckedAgainForNotesLinksOrTags_ThenNothingIsAllocated()
     {
         // Arrange
         var notes = Metadata("""{ "notes": " Calibrated in 2026, see the manual." }""");
@@ -302,7 +302,7 @@ public class MetadataDictionaryExtensionsTests
         var links = Metadata("""{ "links": [{ "title": "Manual", "URL": "https://example.com/manual.pdf" }] }""");
         var none = Metadata("""{ "notes": " ", "tags": [" "], "links": [{ "title": "Neither" }] }""");
         bool Check() => notes.HasNotesLinksOrTags() && tags.HasNotesLinksOrTags() && links.HasNotesLinksOrTags() && !none.HasNotesLinksOrTags();
-        Check();
+        var firstResult = Check();
 
         // Act
         var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
@@ -310,7 +310,24 @@ public class MetadataDictionaryExtensionsTests
         var allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
 
         // Assert
+        Assert.True(firstResult);
         Assert.True(result);
         Assert.Equal(0, allocated);
+    }
+
+    [Fact]
+    public void WhenAMutableDictionaryChanges_ThenTheCheckForNotesLinksOrTagsSeesTheChange()
+    {
+        // Arrange
+        var metadata = new Dictionary<string, JsonElement>();
+        var hadNotes = metadata.HasNotesLinksOrTags();
+
+        // Act
+        metadata[MetadataKeys.Notes] = JsonElement.Parse("\"Calibrated\"");
+        var hasNotes = metadata.HasNotesLinksOrTags();
+
+        // Assert
+        Assert.False(hadNotes);
+        Assert.True(hasNotes);
     }
 }
