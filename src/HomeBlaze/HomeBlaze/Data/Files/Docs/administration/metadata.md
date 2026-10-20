@@ -89,7 +89,7 @@ The **Metadata** button in the header of the browser opens a dialog for every it
 | `location` | `NavBar` or `AppBar`, for a subject that has a page |
 | `alignment` | `Left` or `Right` in the top bar |
 
-A field left empty removes its key, and the other keys are kept. Metadata never changes the title or the icon of the subject itself. A subject that is a page itself decides its place in navigation, so it does not use `location` and `alignment`. Pages keep their metadata in their frontmatter, which the dialog does not change.
+Saving writes only the fields that were changed: a field left empty removes its key, and every other key is kept, also one that changed while the dialog was open or that holds a value the dialog cannot show. Metadata never changes the title or the icon of the subject itself. A subject that is a page itself decides its place in navigation, so it does not use `location` and `alignment`. Pages keep their metadata in their frontmatter, which the dialog does not change.
 
 ---
 

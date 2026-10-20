@@ -75,6 +75,9 @@
     private AppBarAlignment? _alignment;
     private bool _isSaving;
 
+    // The values of the fields as loaded, so that a save writes only what was changed.
+    private Dictionary<string, string?> _loadedValues = [];
+
     protected override void OnInitialized()
     {
         _isFolder = IsFolder(Owner);
@@ -97,6 +100,8 @@
             _location = metadata.GetEnum<NavigationLocation>(MetadataKeys.Location);
             _alignment = metadata.GetEnum<AppBarAlignment>(MetadataKeys.Alignment);
         }
+
+        _loadedValues = GetValues();
     }
 
     private void Cancel() => MudDialog?.Cancel();
@@ -112,25 +117,24 @@
             return;
         }
 
+        // Only the fields that were changed, so that a field left empty removes its key, and a value that the dialog
+        // cannot show, such as a number edited by hand, or that was written while the dialog was open, stays.
+        var values = new JsonObject();
+        foreach (var (key, value) in GetValues())
+        {
+            if (value != _loadedValues[key])
+                values[key] = value;
+        }
+
+        if (values.Count == 0)
+        {
+            MudDialog?.Close(DialogResult.Ok(true));
+            return;
+        }
+
         _isSaving = true;
         try
         {
-            // Every field the dialog shows, so that a field left empty removes its key and the other keys stay.
-            var values = new JsonObject
-            {
-                [MetadataKeys.NavigationTitle] = GetValue(_navigationTitle),
-                [MetadataKeys.Icon] = GetValue(_icon)
-            };
-            if (_isFolder)
-            {
-                values.Insert(0, MetadataKeys.Title, GetValue(_title));
-            }
-            else
-            {
-                values[MetadataKeys.Location] = _location?.ToString();
-                values[MetadataKeys.Alignment] = _location == NavigationLocation.AppBar ? _alignment?.ToString() : null;
-            }
-
             await store.SetMetadataAsync(Owner, null, JsonElement.Parse(values.ToJsonString()), CancellationToken.None);
             MudDialog?.Close(DialogResult.Ok(true));
         }
@@ -142,6 +146,26 @@
         {
             _isSaving = false;
         }
+    }
+
+    // The value of each field the dialog shows, by its key; null for a field left empty.
+    private Dictionary<string, string?> GetValues()
+    {
+        var values = new Dictionary<string, string?>();
+        if (_isFolder)
+        {
+            values[MetadataKeys.Title] = GetValue(_title);
+        }
+
+        values[MetadataKeys.NavigationTitle] = GetValue(_navigationTitle);
+        values[MetadataKeys.Icon] = GetValue(_icon);
+        if (!_isFolder)
+        {
+            values[MetadataKeys.Location] = _location?.ToString();
+            values[MetadataKeys.Alignment] = _location == NavigationLocation.AppBar ? _alignment?.ToString() : null;
+        }
+
+        return values;
     }
 
     private static string? GetValue(string? value)

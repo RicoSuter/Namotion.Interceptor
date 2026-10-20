@@ -511,4 +511,73 @@ public class NavigationMetadataTests
             await RestoreFileAsync(sidecarPath, originalSidecar);
         }
     }
+
+    [Fact]
+    public async Task WhenAnAgentChangesAKeyWhileTheDialogIsOpen_ThenSavingAnotherFieldKeepsTheChange()
+    {
+        // Arrange
+        var motor = GetDemoFolder().Children["Motor"];
+        var sidecarPath = _fixture.GetDemoPagePath("Motor.metadata.json");
+        var originalSidecar = File.Exists(sidecarPath) ? await File.ReadAllTextAsync(sidecarPath) : null;
+        try
+        {
+            var (page, pane) = await OpenPaneAsync("Demo/Motor");
+            await pane.GetByTestId("edit-metadata-button").ClickAsync();
+
+            // MudDialog puts its test id on its content, which does not hold the actions.
+            var dialog = page.Locator(".mud-dialog").Filter(new() { Has = page.GetByTestId("metadata-edit-dialog") });
+            await dialog.GetByTestId("metadata-navigation-title").FillAsync("Pump motor");
+            await motor.FindMetadataStore()!.SetMetadataAsync(
+                motor, null, JsonElement.Parse("""{ "icon": "WaterDrop" }"""), CancellationToken.None);
+
+            // Act
+            await dialog.GetByTestId("metadata-save").ClickAsync();
+            await Assertions.Expect(dialog).ToHaveCountAsync(0, new() { Timeout = PageLoadTimeout });
+
+            // Assert
+            using var sidecar = JsonDocument.Parse(await File.ReadAllTextAsync(sidecarPath));
+            Assert.Equal("Pump motor", sidecar.RootElement.GetProperty("navTitle").GetString());
+            Assert.Equal("WaterDrop", sidecar.RootElement.GetProperty("icon").GetString());
+        }
+        finally
+        {
+            await RestoreFileAsync(sidecarPath, originalSidecar);
+        }
+    }
+
+    [Fact]
+    public async Task WhenAValueEditedByHandCannotBeShownByTheDialog_ThenSavingAnotherFieldKeepsIt()
+    {
+        // Arrange
+        var motor = GetDemoFolder().Children["Motor"];
+        var sidecarPath = _fixture.GetDemoPagePath("Motor.metadata.json");
+        var originalSidecar = File.Exists(sidecarPath) ? await File.ReadAllTextAsync(sidecarPath) : null;
+        try
+        {
+            await File.WriteAllTextAsync(sidecarPath, """{ "navTitle": 5, "location": "Top" }""");
+            await _fixture.ReconcileStorageAsync();
+            Assert.NotNull(motor.GetMetadata());
+
+            var (page, pane) = await OpenPaneAsync("Demo/Motor");
+            await pane.GetByTestId("edit-metadata-button").ClickAsync();
+
+            // MudDialog puts its test id on its content, which does not hold the actions.
+            var dialog = page.Locator(".mud-dialog").Filter(new() { Has = page.GetByTestId("metadata-edit-dialog") });
+            await dialog.GetByTestId("metadata-icon").FillAsync("WaterDrop");
+
+            // Act
+            await dialog.GetByTestId("metadata-save").ClickAsync();
+            await Assertions.Expect(dialog).ToHaveCountAsync(0, new() { Timeout = PageLoadTimeout });
+
+            // Assert
+            using var sidecar = JsonDocument.Parse(await File.ReadAllTextAsync(sidecarPath));
+            Assert.Equal(5, sidecar.RootElement.GetProperty("navTitle").GetInt32());
+            Assert.Equal("Top", sidecar.RootElement.GetProperty("location").GetString());
+            Assert.Equal("WaterDrop", sidecar.RootElement.GetProperty("icon").GetString());
+        }
+        finally
+        {
+            await RestoreFileAsync(sidecarPath, originalSidecar);
+        }
+    }
 }
