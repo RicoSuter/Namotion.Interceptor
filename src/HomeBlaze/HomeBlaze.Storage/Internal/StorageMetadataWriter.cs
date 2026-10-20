@@ -455,6 +455,11 @@ internal static class StorageMetadataWriter
                 throw Refuse($"Each tag of '{key}' has 1 to {MaxTagLength} characters.");
             }
 
+            if (tag.Any(char.IsControl))
+            {
+                throw Refuse($"The tag {NameList.Format([tag])} has control characters.");
+            }
+
             if (!givenTags.Add(tag))
             {
                 throw Refuse($"The tag {NameList.Format([tag])} is given more than once, without regard to case.");
