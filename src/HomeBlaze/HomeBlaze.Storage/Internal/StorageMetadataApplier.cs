@@ -86,10 +86,18 @@ internal sealed class StorageMetadataApplier
             return;
         }
 
+        // Without entries in this file and in the one applied before, nothing inside the stored subject has metadata.
+        var hasEntries = HasEntries(file) || (_files.TryGetValue(storedSubject, out var previous) && HasEntries(previous));
+
         // Published before the values are set: a subject that attaches meanwhile reads the file under the SyncRoot of
         // the subject, which setting its values takes as well, so either it reads this file or its values are set
         // after it.
         _files.AddOrUpdate(storedSubject, file);
+        if (!hasEntries)
+        {
+            StorageMetadataValues.Set(stored, null, file.Own);
+            return;
+        }
 
         var visited = new HashSet<RegisteredSubject>(ReferenceEqualityComparer.Instance);
         var pending = new Stack<RegisteredSubject>();
@@ -126,21 +134,31 @@ internal sealed class StorageMetadataApplier
     // Sets the metadata of the subject and of its properties from the file, and null where an entry is gone.
     private static void ApplyEntries(RegisteredSubject subject, RegisteredSubject stored, StorageMetadataFile file)
     {
-        var isStored = ReferenceEquals(subject, stored);
         if (MetadataPathKey.GetKey(subject, stored) is not { } key)
         {
             return;
         }
 
-        StorageMetadataValues.Set(subject, null, isStored ? file.Own : file.FindSubject(key));
+        var values = key.Length == 0 ? file.Own : file.FindSubject(key);
+        if (values is not null || subject.TryGetProperty(KnownAttributes.Metadata) is not null)
+        {
+            StorageMetadataValues.Set(subject, null, values);
+        }
+
         foreach (var property in subject.Properties)
         {
-            if (!property.IsAttribute && property.Name != KnownAttributes.Metadata)
+            if (property.IsAttribute || property.Name == KnownAttributes.Metadata)
             {
-                // The key of a property is built only when the file has entries of properties.
-                var values = file.HasProperties ? file.FindProperty(MetadataPathKey.GetPropertyKey(key, property.Name)) : null;
+                continue;
+            }
+
+            values = file.HasProperties ? file.FindProperty(MetadataPathKey.GetPropertyKey(key, property.Name)) : null;
+            if (values is not null || property.TryGetAttribute(KnownAttributes.Metadata) is not null)
+            {
                 StorageMetadataValues.Set(subject, property.Name, values);
             }
         }
     }
+
+    private static bool HasEntries(StorageMetadataFile file) => file.HasSubjects || file.HasProperties;
 }
