@@ -21,16 +21,17 @@
     var isScaled = CanvasExtent.IsScaled(scale, IsEditing, designWidth);
     // The browser works out the factor from the width of the frame, its container, so the prerendered page is already
     // scaled. A transform leaves the layout box at the design width, so the sizer gives the frame the drawn size, which it
-    // scrolls when the canvas is held at its least width.
-    var factor = isScaled ? CanvasExtent.GetFactor(designWidth, canvas?.MinWidth, canvas?.MaxWidth) : null;
+    // scrolls when the canvas is held at its least width. The angle goes on the sizer, not the frame, so that its cqw
+    // resolves against the frame; the container inherits it.
+    var drawnWidth = isScaled ? CanvasExtent.GetDrawnWidth(canvas?.MinWidth, canvas?.MaxWidth) : null;
     var frameStyle = isScaled
         ? "width: 100%; container-type: inline-size; overflow-x: auto; overflow-y: hidden;"
         : "width: 100%; overflow-x: auto;";
     var sizerStyle = isScaled
-        ? string.Create(CultureInfo.InvariantCulture, $"width: {CanvasExtent.GetDrawnWidth(canvas?.MinWidth, canvas?.MaxWidth)}; height: calc({height}px * {factor}); overflow: hidden;")
+        ? string.Create(CultureInfo.InvariantCulture, $"{CanvasExtent.AngleProperty}: {CanvasExtent.GetAngle(drawnWidth!, designWidth)}; width: {drawnWidth}; height: calc({height}px * {CanvasExtent.Factor}); overflow: hidden;")
         : null;
     var containerStyle = isScaled
-        ? string.Create(CultureInfo.InvariantCulture, $"position: relative; width: {designWidth}px; min-height: {height}px; transform: scale({factor}); transform-origin: 0 0;")
+        ? string.Create(CultureInfo.InvariantCulture, $"position: relative; width: {designWidth}px; min-height: {height}px; transform: scale({CanvasExtent.Factor}); transform-origin: 0 0;")
         : scale == CanvasScale.FitWidth
             ? string.Create(CultureInfo.InvariantCulture, $"position: relative; width: max(100%, {designWidth}px); min-height: {height}px;")
             : string.Create(CultureInfo.InvariantCulture, $"position: relative; width: 100%; min-height: {height}px;");

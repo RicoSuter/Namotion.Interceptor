@@ -549,6 +549,68 @@ public class CanvasLayoutTests
         await WaitForCanvasToFitItsFrameAsync(page.GetByTestId("canvas-scale-frame"), designWidth: 400);
     }
 
+    [Theory]
+    [InlineData(390, null, null)]
+    [InlineData(390, 720, null)]
+    [InlineData(390, null, 250)]
+    [InlineData(390, 971, 1410)]
+    public async Task WhenCanvasThatFitsTheWidthIsShown_ThenItIsDrawnAtTheFactorOfItsDrawnWidthToItsDesignWidth(
+        int viewportWidth, int? minWidth, int? maxWidth)
+    {
+        // Arrange
+        const int designWidth = 1410;
+        const int height = 300;
+        await _fixture.WriteDemoPageAsync(ScratchPage, CreateFitWidthCanvasPage(designWidth, height, minWidth, maxWidth));
+
+        // Act
+        var page = await OpenScratchPageAsync(viewportWidth);
+
+        // Assert
+        var frame = page.GetByTestId("canvas-scale-frame");
+        await frame.Locator(".canvas-node").First.WaitForAsync(new() { Timeout = Timeout });
+        var sizes = await GetScaledSizesAsync(frame);
+        var drawnWidth = Math.Max(Math.Min(sizes.FrameWidth, maxWidth ?? double.MaxValue), minWidth ?? 0);
+        var factor = drawnWidth / designWidth;
+        Assert.True(sizes.FrameWidth > 0, $"The frame has no width: {sizes.FrameWidth}");
+        Assert.InRange(sizes.CanvasWidth, drawnWidth - 1, drawnWidth + 1);
+        Assert.InRange(sizes.SizerWidth, drawnWidth - 1, drawnWidth + 1);
+        Assert.InRange(sizes.SizerHeight, height * factor - 1, height * factor + 1);
+        Assert.InRange(sizes.Scale, factor - 0.001, factor + 0.001);
+        await AssertAngleIsRegisteredAsync(frame);
+    }
+
+    [Fact]
+    public async Task WhenCanvasesThatFitTheWidthAreNestedOrOnOnePage_ThenEachIsDrawnAtItsOwnFactor()
+    {
+        // Arrange: the outer canvas is scaled down, the inner one in its node is scaled up, and the second one has its own design width.
+        await _fixture.WriteDemoPageAsync(ScratchPage, CreateNestedFitWidthCanvasPage());
+
+        // Act
+        var page = await OpenScratchPageAsync(390);
+
+        // Assert
+        var frames = page.GetByTestId("canvas-scale-frame");
+        await Assertions.Expect(frames).ToHaveCountAsync(3, new() { Timeout = Timeout });
+        await frames.Nth(1).Locator(".canvas-node").First.WaitForAsync(new() { Timeout = Timeout });
+        await frames.Nth(2).Locator(".canvas-node").First.WaitForAsync(new() { Timeout = Timeout });
+
+        var outer = await GetScaledSizesAsync(frames.Nth(0));
+        var inner = await GetScaledSizesAsync(frames.Nth(1));
+        var second = await GetScaledSizesAsync(frames.Nth(2));
+
+        Assert.True(inner.FrameWidth > 250, $"The inner canvas is not scaled up: {inner.FrameWidth}");
+        AssertDrawnAtItsFactor(outer, 1000, 400);
+        AssertDrawnAtItsFactor(inner, 250, 100);
+        AssertDrawnAtItsFactor(second, 400, 100);
+        await AssertAngleIsRegisteredAsync(frames.Nth(0));
+
+        static void AssertDrawnAtItsFactor(ScaledSizes sizes, int designWidth, int height)
+        {
+            Assert.InRange(sizes.Scale, sizes.FrameWidth / designWidth - 0.001, sizes.FrameWidth / designWidth + 0.001);
+            Assert.InRange(sizes.SizerHeight, sizes.SizerWidth * height / designWidth - 1, sizes.SizerWidth * height / designWidth + 1);
+        }
+    }
+
     private async Task AssertWheelScrollsPageAsync(Func<Box, (double X, double Y)> getTarget)
     {
         var page = await OpenCanvasPageAsync(withTextBelow: true);
@@ -766,6 +828,61 @@ public class CanvasLayoutTests
             """,
             new object[] { await frame.ElementHandleAsync(), designWidth },
             new() { Timeout = Timeout });
+    }
+
+    // FrameWidth is in the frame's own pixels, which is what the canvas fits; the other sizes are as drawn on the page.
+    private static async Task<ScaledSizes> GetScaledSizesAsync(ILocator frame)
+    {
+        var values = await frame.EvaluateAsync<double[]>(
+            """
+            frame => {
+                const sizer = frame.firstElementChild;
+                const canvas = frame.querySelector('.canvas-layout-container');
+                const sizerRectangle = sizer.getBoundingClientRect();
+                return [frame.clientWidth, sizerRectangle.width, sizerRectangle.height, canvas.getBoundingClientRect().width,
+                    new DOMMatrixReadOnly(getComputedStyle(canvas).transform).a];
+            }
+            """);
+
+        return new ScaledSizes(values[0], values[1], values[2], values[3], values[4]);
+    }
+
+    private sealed record ScaledSizes(double FrameWidth, double SizerWidth, double SizerHeight, double CanvasWidth, double Scale);
+
+    // Catches a lost registration even in Chromium: only a registered angle property computes to degrees, an unregistered one
+    // keeps the atan2 text.
+    private static async Task AssertAngleIsRegisteredAsync(ILocator frame)
+    {
+        var angle = await frame.EvaluateAsync<string>(
+            "frame => getComputedStyle(frame.firstElementChild).getPropertyValue('--canvas-scale-angle')");
+        Assert.True(Regex.IsMatch(angle, @"^\s*-?[0-9.]+(?:e[-+]?\d+)?deg\s*$"), $"The angle property is not registered: '{angle}'");
+    }
+
+    private static string CreateFitWidthCanvasPage(int designWidth, int height, int? minWidth, int? maxWidth)
+    {
+        return "---\ntitle: Scratch\n---\n\n# Scratch\n\n"
+            + $":: HomeBlaze.Components.CanvasLayout#canvas Width={designWidth}"
+            + (minWidth is { } least ? $" MinWidth={least}" : "")
+            + (maxWidth is { } largest ? $" MaxWidth={largest}" : "")
+            + $" Scale=FitWidth MinHeight={height}\n"
+            + $"::: Node X=0 Y=0 Width=300 Height={height}\n"
+            + ":::: HomeBlaze.Components.Card Title=\"Scaled\"\n"
+            + "::\n";
+    }
+
+    private static string CreateNestedFitWidthCanvasPage()
+    {
+        return "---\ntitle: Scratch\n---\n\n# Scratch\n\n"
+            + ":: HomeBlaze.Components.CanvasLayout#outer Width=1000 Scale=FitWidth MinHeight=400\n"
+            + "::: Node#holder X=0 Y=0 Width=500 Height=400\n"
+            + ":::: HomeBlaze.Components.CanvasLayout#inner Width=250 Scale=FitWidth MinHeight=100\n"
+            + "::::: Node X=0 Y=0 Width=250 Height=100\n"
+            + ":::::: HomeBlaze.Components.Card Title=\"Inner\"\n"
+            + "::\n\n"
+            + ":: HomeBlaze.Components.CanvasLayout#second Width=400 Scale=FitWidth MinHeight=100\n"
+            + "::: Node X=0 Y=0 Width=400 Height=100\n"
+            + ":::: HomeBlaze.Components.Card Title=\"Second\"\n"
+            + "::\n";
     }
 
     // Each tab holds a canvas whose node stands at the right edge of its 1104 pixel design width.
