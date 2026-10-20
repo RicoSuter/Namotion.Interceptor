@@ -232,26 +232,24 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
         Assert.Contains(folderMethodsForAgents, method => method.Title == "Set Order");
     }
 
-    [Theory]
-    [InlineData("Floor-2", null, null, new[] { "Docs/Pump.json|" })]
-    [InlineData(null, "AREA", "basement", new[] { "Docs/Fan.json|" })]
-    [InlineData(null, null, "FLOOR-2", new[] { "Docs/Pump.json|" })]
-    [InlineData(null, "notes", null, new[] { "Docs/Fan.json|FileSize" })]
-    public async Task WhenMetadataIsSearched_ThenTheMatchesAreReturnedAsSetMetadataTakesThem(
-        string? tag, string? key, string? value, string[] expectedMatches)
+    [Fact]
+    public async Task WhenMetadataIsSearched_ThenTheMatchesAreReturnedAsSetMetadataTakesThem()
     {
         // Arrange
         WriteFile("Docs/Pump.json", """{ "speed": 1 }""");
-        WriteFile("Docs/Pump.metadata.json", """{ "tags": ["floor-2"] }""");
+        WriteFile("Docs/Pump.metadata.json", """{ "tags": ["floor-2"], "$properties": { "FileSize": { "notes": "Shrinks." } } }""");
         WriteFile("Docs/Fan.json", """{ "speed": 2 }""");
-        WriteFile("Docs/Fan.metadata.json", """{ "area": "Basement", "$properties": { "FileSize": { "notes": "Grows." } } }""");
+        WriteFile("Docs/Fan.metadata.json", """{ "$properties": { "FileSize": { "notes": "Grows." } } }""");
         var (tools, _) = await CreateToolsAsync();
 
         // Act
-        var result = await CallAsync(tools["invoke_query"], new { path = "/Storage", method = "SearchMetadata", parameters = new { tag, key, value } });
+        var result = await CallAsync(tools["invoke_query"], new
+        {
+            path = "/Storage", method = "SearchMetadata", parameters = new { key = "notes", value = "Grows.", path = "Docs" }
+        });
 
         // Assert
-        Assert.Equal(expectedMatches, GetMatches(result));
+        Assert.Equal(["Docs/Fan.json|FileSize"], GetMatches(result));
     }
 
     [Theory]

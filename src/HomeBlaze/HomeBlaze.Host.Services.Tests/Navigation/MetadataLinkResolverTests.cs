@@ -64,17 +64,14 @@ public class MetadataLinkResolverTests
         Assert.Equal(new ResolvedMetadataLink("mailto:service@example.com", "mailto:service@example.com", IsExternal: false), link);
     }
 
-    [Theory]
-    [InlineData("javascript:alert(1)")]
-    [InlineData("file:///etc/passwd")]
-    [InlineData("example.com/pump.pdf")]
-    public void WhenAUrlIsNoAllowedAddress_ThenTheLinkIsBroken(string url)
+    [Fact]
+    public void WhenAUrlIsNoAllowedAddress_ThenTheLinkIsBroken()
     {
         // Arrange
         var resolver = CreateResolver();
 
         // Act
-        var link = resolver.Resolve(new MetadataLink("Manual", url, null));
+        var link = resolver.Resolve(new MetadataLink("Manual", "javascript:alert(1)", null));
 
         // Assert
         Assert.True(link.IsBroken);

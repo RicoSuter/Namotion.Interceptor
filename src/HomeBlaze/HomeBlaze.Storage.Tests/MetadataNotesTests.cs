@@ -29,6 +29,7 @@ public class MetadataNotesTests
     [InlineData("# Pump {#app}")]
     [InlineData("[Setup](/Docs/Setup.md){.mud-button}")]
     [InlineData("Text {data-value=1}")]
+    [InlineData("::: Card\n:::")]
     public void WhenNotesBreakTheRules_ThenTheyAreNotRenderedAsHtml(string notes)
     {
         // Act
