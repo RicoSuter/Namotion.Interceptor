@@ -13,9 +13,8 @@ internal static class StorageMetadataMethods
         "every other key stays; keys match exactly, case included. HomeBlaze reads title (of a folder), navTitle, icon (a MudBlazor icon name), location (NavBar or " +
         "AppBar), alignment (Left or Right), notes (Markdown of up to 4 KB without HTML, pictures or blocks), links (an array of at most 20 objects with an " +
         "optional title and either url, an http, https or mailto address, or path, the absolute path of a page, subject or property) and tags (an array of " +
-        "at most 20 strings of up to 64 characters, unique without regard to case); any other key, such as comment, is stored as given. At most 64 keys, key " +
-        "names of up to 64 characters, strings of up to 256 characters and values of up to 4 KB. The order of the children of a folder is set with SetOrder " +
-        "of the folder. Example: {\"navTitle\": \"Hall light\", \"tags\": [\"floor-2\"], \"icon\": null}.";
+        "at most 20 strings of up to 64 characters, unique without regard to case); any other key, such as comment, is stored as given. " +
+        "Example: {\"navTitle\": \"Hall light\", \"tags\": [\"floor-2\"], \"icon\": null}.";
 
     public const string SearchMetadataDescription =
         "Finds the subjects and properties in this storage whose metadata matches every filter that is given, and returns them by path and then " +
