@@ -57,7 +57,7 @@ public static class JsonSchemaTypeMapper
             return true;
         }
 
-        return type.GetInterfaces().Any(IsGenericDictionaryDefinition);
+        return Array.Exists(TypeInterfaces.Get(type), IsGenericDictionaryDefinition);
     }
 
     private static bool IsGenericDictionaryDefinition(Type type) =>

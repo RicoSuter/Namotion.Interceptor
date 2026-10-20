@@ -33,7 +33,7 @@ internal static class McpToolHelper
 
         if (requestExcludeTypes is not null && requestExcludeTypes.Length > 0)
         {
-            var interfaces = subjectType.GetInterfaces();
+            var interfaces = TypeInterfaces.Get(subjectType);
             foreach (var name in requestExcludeTypes)
             {
                 if (subjectType.FullName == name || subjectType.Name == name)
@@ -41,9 +41,12 @@ internal static class McpToolHelper
                     return true;
                 }
 
-                if (interfaces.Any(i => i.FullName == name || i.Name == name))
+                foreach (var interfaceType in interfaces)
                 {
-                    return true;
+                    if (interfaceType.FullName == name || interfaceType.Name == name)
+                    {
+                        return true;
+                    }
                 }
             }
         }
