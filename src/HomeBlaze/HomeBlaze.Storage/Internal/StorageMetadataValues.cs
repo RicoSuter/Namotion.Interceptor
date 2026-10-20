@@ -21,7 +21,8 @@ internal static class StorageMetadataValues
     /// <summary>
     /// Sets the metadata of the subject, or of its property <paramref name="propertyName"/>. The property or attribute
     /// is added on the first value that is not null and stays, as the registry cannot remove a property, so null is set
-    /// to remove the metadata. The same dictionary again changes nothing.
+    /// to remove the metadata. The same dictionary again changes nothing, and so does a registration that is no longer
+    /// the current one of the subject.
     /// </summary>
     /// <remarks>
     /// Holds the <see cref="IInterceptorSubject.SyncRoot"/> of the subject, which adding a property takes as well, as
@@ -30,14 +31,14 @@ internal static class StorageMetadataValues
     /// handles it synchronously must not write a property that holds subjects: that takes the lifecycle lock of the
     /// context, while a thread that attaches a subject holds the lifecycle lock and waits for this one.
     /// </remarks>
-    public static void Set(RegisteredSubject registeredSubject, string? propertyName, ImmutableDictionary<string, JsonElement>? values)
+    public static void Set(RegisteredSubject subject, string? propertyName, ImmutableDictionary<string, JsonElement>? values)
     {
         var name = propertyName is null ? KnownAttributes.Metadata : $"{propertyName}@{KnownAttributes.Metadata}";
-        lock (registeredSubject.Subject.SyncRoot)
+        lock (subject.Subject.SyncRoot)
         {
             // The registration of the caller is stale when the subject was detached and attached again since it was read,
-            // and a property added to it would be missing from the current one.
-            if (registeredSubject.Subject.TryGetRegisteredSubject() is not { } subject)
+            // or detached for good. Its values may be those of its previous place; the attach applies the current ones.
+            if (!ReferenceEquals(subject.Subject.TryGetRegisteredSubject(), subject))
             {
                 return;
             }

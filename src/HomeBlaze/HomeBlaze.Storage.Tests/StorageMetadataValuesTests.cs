@@ -15,7 +15,7 @@ public class StorageMetadataValuesTests
         => JsonElement.Parse(json).EnumerateObject().ToImmutableDictionary(property => property.Name, property => property.Value);
 
     [Fact]
-    public void WhenTheSubjectAttachedAgainAfterItsRegistrationWasRead_ThenItsValuesStillChange()
+    public void WhenTheSubjectAttachedAgainAfterItsRegistrationWasRead_ThenTheStaleRegistrationSetsNothingAndTheCurrentOneSets()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
@@ -24,20 +24,39 @@ public class StorageMetadataValuesTests
         var staleRegistration = channel.TryGetRegisteredSubject()!;
         device.Channel = null;
         device.Channel = channel;
-        var first = Parse("""{ "navTitle": "Pump" }""");
-        var second = Parse("""{ "navTitle": "Fan" }""");
+        var current = Parse("""{ "navTitle": "Fan" }""");
+        var stale = Parse("""{ "navTitle": "Pump" }""");
+        var registration = channel.TryGetRegisteredSubject()!;
 
         // Act
-        StorageMetadataValues.Set(staleRegistration, null, first);
-        StorageMetadataValues.Set(staleRegistration, nameof(MetadataTestChannel.Power), first);
-        var registration = channel.TryGetRegisteredSubject()!;
-        StorageMetadataValues.Set(registration, null, second);
-        StorageMetadataValues.Set(registration, nameof(MetadataTestChannel.Power), second);
+        StorageMetadataValues.Set(registration, null, current);
+        StorageMetadataValues.Set(registration, nameof(MetadataTestChannel.Power), current);
+        StorageMetadataValues.Set(staleRegistration, null, stale);
+        StorageMetadataValues.Set(staleRegistration, nameof(MetadataTestChannel.Power), stale);
 
         // Assert
         Assert.NotSame(staleRegistration, registration);
-        Assert.Same(second, channel.GetMetadata());
-        Assert.Same(second, registration.TryGetProperty(nameof(MetadataTestChannel.Power))!.GetMetadata());
+        Assert.Same(current, channel.GetMetadata());
+        Assert.Same(current, registration.TryGetProperty(nameof(MetadataTestChannel.Power))!.GetMetadata());
+    }
+
+    [Fact]
+    public void WhenTheSubjectAttachedAgainBeforeAnyValueWasSet_ThenTheStaleRegistrationAddsNothing()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var channel = new MetadataTestChannel();
+        var device = new MetadataTestDevice(context) { Channel = channel };
+        var staleRegistration = channel.TryGetRegisteredSubject()!;
+        device.Channel = null;
+        device.Channel = channel;
+
+        // Act
+        StorageMetadataValues.Set(staleRegistration, null, Parse("""{ "navTitle": "Pump" }"""));
+
+        // Assert
+        Assert.Null(channel.GetMetadata());
+        Assert.Null(channel.TryGetRegisteredSubject()!.TryGetProperty(KnownAttributes.Metadata));
     }
 
     [Fact]
