@@ -216,10 +216,21 @@
                 return;
             }
 
-            var range = to - from;
             var stores = HistoryChartQuery.GetStores(Registry);
+            var period = PropertyHistoryChartModel.Periods[_periodIndex];
+            HistoryChartSeriesRequest[] requests =
+                [new(PropertyPath, DisplayName, PropertyType, UseStateTimeline, _aggregation, Unit: Unit)];
             var bucket = PropertyHistoryChartModel.ResolveBucket(
-                PropertyHistoryChartModel.Periods[_periodIndex], range, HistoryChartQuery.GetAvailableCoverage(stores, to));
+                period, to - from, TimeZone.Zone ?? TimeZoneInfo.Utc, HistoryChartQuery.GetAvailableCoverage(stores, to),
+                HistoryChartQuery.IsBars(requests));
+
+            // A calendar bucket starts a range at the start of a period, so that its first bar is a whole one.
+            if (bucket is { CalendarUnit: not null } calendar)
+            {
+                from = _useCustom ? BucketAlignment.Start(from, calendar) : PropertyHistoryChartModel.GetWindowStart(to, to - from, calendar);
+            }
+
+            var range = to - from;
 
             _rangeHint = range <= TimeSpan.FromHours(24)
                 ? $"{TimeZone.ToZoned(from):HH:mm} to {TimeZone.ToZoned(to):HH:mm}"
@@ -230,13 +241,12 @@
             var isBucketedState = UseStateTimeline && bucket is not null;
             _periodHint = isBucketedState
                 ? "Not applicable to states."
-                : PropertyHistoryChartModel.DescribePeriod(PropertyHistoryChartModel.Periods[_periodIndex], bucket);
+                : PropertyHistoryChartModel.DescribePeriod(period, bucket);
             _aggregationHint = isBucketedState
                 ? "Only Count applies to states."
                 : PropertyHistoryChartModel.DescribeAggregation(_aggregation);
 
-            var request = new HistoryChartSeriesRequest(PropertyPath, DisplayName, PropertyType, UseStateTimeline, _aggregation, Unit: Unit);
-            var result = await HistoryChartQuery.QueryAsync(stores, [request], from, to, bucket, cancellationToken);
+            var result = await HistoryChartQuery.QueryAsync(stores, requests, from, to, bucket, cancellationToken);
 
             // Superseded by a newer load while this query ran; leave the newer result in place.
             if (cancellationToken.IsCancellationRequested)

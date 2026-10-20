@@ -1,5 +1,8 @@
+@using System.Globalization
 @using HomeBlaze.History.Abstractions
 @using HomeBlaze.Components.Abstractions.TimeZones
+@using HomeBlaze.Services.Display
+@using MudBlazor.Charts
 @using MudBlazor.Services
 @using Microsoft.JSInterop
 @using Microsoft.AspNetCore.Components.Rendering
@@ -25,18 +28,18 @@
                renders, and a box that is not displayed, like one in a hidden tab, has no height yet. So the chart
                renders only once the box was measured with a size. *@
             <div @ref="_linesBox" data-testid="history-chart-lines" data-axes-labels="@_axesLabels" style="@_linesStyle"
-                 title="@LinesTitle" @onclick="LinesClicked">
+                 title="@LinesTitle" @onclick="@(LinesClicked.HasDelegate ? _linesClicked : default)">
                 @if (_chartSeries is not null)
                 {
                     @if (_linesWidth > 0)
                     {
-                        @if (ShowAxes)
+                        @if (ShowAxes && !data!.IsBars)
                         {
                             @_plot
                         }
                         else
                         {
-                            <div style="@CompactPlotStyle">@_plot</div>
+                            <div style="@(ShowAxes ? BarPlotStyle : CompactPlotStyle)">@_plot</div>
                         }
                     }
                 }
@@ -155,6 +158,12 @@
     private const int PlotBottomSpace = 30;
     private const int StrokeMargin = 4;
 
+    // MudChart keeps the same space right of bars as of lines, where only lines need it for their last time label, so the
+    // bars are drawn that much wider than their box and end where it does. The box clips the space, which would otherwise
+    // widen the page, so the tooltip of a bar opens towards the middle, see RenderBarTooltip.
+    private static readonly string BarPlotStyle =
+        $"position:absolute; left:0; top:0; width:calc(100% + {PlotEndSpace}px); height:100%; display:flex;";
+
     private static readonly string CompactPlotStyle =
         $"position:absolute; left:-{PlotStartSpace}px; top:-{PlotTopSpace - StrokeMargin}px; " +
         $"width:calc(100% + {PlotStartSpace + PlotEndSpace}px); " +
@@ -185,8 +194,21 @@
     private bool _shouldRender = true;
     private volatile bool _isDisposed;
     private List<ChartSeries<double>>? _chartSeries;
-    private TimeSeriesChartOptions _chartOptions = new();
+    private IChartOptions _chartOptions = new TimeSeriesChartOptions();
     private string[] _palette = [];
+
+    // The line of Data.Lines that each chart series draws, -1 for the series that holds the time axis to the window.
+    private int[] _chartSeriesLines = [];
+
+    // See OnPlotSeriesClicked.
+    private bool _isSeriesClick;
+    private readonly EventCallback<int> _plotSeriesClicked;
+    private readonly EventCallback _linesClicked;
+    private readonly RenderFragment<(SvgPath Segment, string Color)> _barTooltip;
+
+    // The label of each group of bars, and the format of their values with their unit.
+    private string[] _barLabels = [];
+    private string _barValueFormat = "0.##";
     private double _valueMinimum;
     private double _valueMaximum;
     private bool _isPercent;
@@ -284,15 +306,69 @@
     [Parameter]
     public bool ShowAxes { get; set; } = true;
 
-    /// <summary>Called when the lines are clicked. With it the lines show a pointer.</summary>
+    /// <summary>
+    /// Called when the lines are clicked beside a line or a bar, and on a line or a bar without <see cref="SeriesClicked"/>.
+    /// With it the lines show a pointer, and only with it <see cref="SeriesClicked"/> is called.
+    /// </summary>
     [Parameter]
     public EventCallback LinesClicked { get; set; }
+
+    /// <summary>Called with the index in <see cref="HistoryChartData.Lines"/> of the line or bar that was clicked.</summary>
+    [Parameter]
+    public EventCallback<int> SeriesClicked { get; set; }
 
     /// <summary>The tooltip of the lines, which says what a click on them does.</summary>
     [Parameter]
     public string? LinesTitle { get; set; }
 
-    public HistoryChartView() => _plot = RenderPlot;
+    public HistoryChartView()
+    {
+        _plot = RenderPlot;
+        _plotSeriesClicked = EventCallback.Factory.Create<int>(this, OnPlotSeriesClicked);
+        _linesClicked = EventCallback.Factory.Create(this, OnLinesClicked);
+        _barTooltip = RenderBarTooltip;
+    }
+
+    // The tooltip of MudChart, which opens towards the middle of the bars, so the box of the lines cuts it at neither end.
+    // A bar is found by its label, which is its own, see BuildBars, so the decision needs no width in any scale.
+    private RenderFragment RenderBarTooltip((SvgPath Segment, string Color) context) => builder =>
+    {
+        var segment = context.Segment;
+        var name = (uint)segment.Index < (uint)(_chartSeries?.Count ?? 0) ? _chartSeries![segment.Index].Name : string.Empty;
+        var isRightHalf = 2 * Array.IndexOf(_barLabels, segment.LabelXValue) >= _barLabels.Length;
+        builder.OpenComponent<ChartTooltip>(0);
+        builder.AddComponentParameter(1, nameof(ChartTooltip.Title), segment.LabelYValue);
+        builder.AddComponentParameter(2, nameof(ChartTooltip.Subtitle), $"{name}, {segment.LabelXValue}");
+        builder.AddComponentParameter(3, nameof(ChartTooltip.Color), context.Color);
+        builder.AddComponentParameter(4, nameof(ChartTooltip.AnchorPositionX),
+            isRightHalf ? ChartTooltipAnchorPositionX.End : ChartTooltipAnchorPositionX.Start);
+        builder.CloseComponent();
+    };
+
+    // Blazor hands a click to the handler of the clicked line or bar first and then to the one of the lines around it,
+    // one after the other, so the flag set here tells the second that the click is taken.
+    private Task OnPlotSeriesClicked(int chartSeries)
+    {
+        var line = (uint)chartSeries < (uint)_chartSeriesLines.Length ? _chartSeriesLines[chartSeries] : -1;
+        if (line < 0 || !SeriesClicked.HasDelegate || !LinesClicked.HasDelegate)
+        {
+            return Task.CompletedTask;
+        }
+
+        _isSeriesClick = true;
+        return SeriesClicked.InvokeAsync(line);
+    }
+
+    private Task OnLinesClicked()
+    {
+        if (_isSeriesClick)
+        {
+            _isSeriesClick = false;
+            return Task.CompletedTask;
+        }
+
+        return LinesClicked.InvokeAsync();
+    }
 
     protected override void OnInitialized() => TimeZone.Changed += OnTimeZoneChanged;
 
@@ -301,6 +377,10 @@
         builder.OpenComponent<HistoryChartPlot>(0);
         builder.AddComponentParameter(1, nameof(HistoryChartPlot.ChartSeries), _chartSeries);
         builder.AddComponentParameter(2, nameof(HistoryChartPlot.ChartOptions), _chartOptions);
+        // Without axes the bars have no labels, and the options change with the axes, which draws the bars again.
+        builder.AddComponentParameter(3, nameof(HistoryChartPlot.ChartLabels), ShowAxes ? _barLabels : []);
+        builder.AddComponentParameter(4, nameof(HistoryChartPlot.SeriesClicked), _plotSeriesClicked);
+        builder.AddComponentParameter(5, nameof(HistoryChartPlot.TooltipTemplate), Data is { IsBars: true } ? _barTooltip : null);
         builder.CloseComponent();
     }
 
@@ -371,13 +451,14 @@
         _hasStyles = true;
         // Follows the box of the lines rather than the drawn plot, so the legend stays where it was while the lines load.
         var hasLines = Data is null ? Placeholder is { HasLines: true } : Data.Lines.Count > 0;
-        var plotEnd = !hasLines || !ShowAxes ? 0 : PlotEndSpace;
+        var isBars = Data is null ? Placeholder is { IsBars: true } : Data.IsBars;
+        var plotEnd = !hasLines || !ShowAxes || isBars ? 0 : PlotEndSpace;
         _rootStyle = $"width:100%; display:flex; flex-direction:column; align-items:center; gap:8px; --history-chart-plot-end:{plotEnd}px; {Style}";
 
         var size = MaxHeight is { } maxHeight
             ? $"max-height:{maxHeight}px; min-height:0; aspect-ratio:2 / 1;"
             : "height:100%; min-height:0;";
-        var frame = ShowAxes ? string.Empty : " position:relative; overflow:clip;";
+        var frame = !ShowAxes ? " position:relative; overflow:clip;" : isBars ? " position:relative; overflow-x:clip;" : string.Empty;
         var cursor = isClickable ? " cursor:pointer;" : string.Empty;
         _linesStyle = $"display:flex; width:100%; {size}{frame}{cursor}";
     }
@@ -552,20 +633,29 @@
     {
         _builtData = Data;
         _chartSeries = null;
+        _barLabels = [];
         BuildStateRows();
         if (Data is not { } data)
         {
             return;
         }
 
+        if (data.IsBars)
+        {
+            BuildBars(data);
+            return;
+        }
+
         var chartSeries = new List<ChartSeries<double>>();
+        var chartSeriesLines = new List<int>();
         var palette = new List<string>();
         double? anchorValue = null;
         var minimum = double.PositiveInfinity;
         var maximum = double.NegativeInfinity;
         var isPercent = true;
-        foreach (var line in data.Lines)
+        for (var lineIndex = 0; lineIndex < data.Lines.Count; lineIndex++)
         {
+            var line = data.Lines[lineIndex];
             isPercent &= line.IsPercent || line.Runs.Count == 0;
             foreach (var run in line.Runs)
             {
@@ -577,6 +667,8 @@
                     {
                         number = HistoryChartAxis.ToPercent(number);
                     }
+
+                    number *= line.Sign;
 
                     anchorValue ??= number;
                     minimum = Math.Min(minimum, number);
@@ -591,6 +683,7 @@
                     Data = new ChartData<double>(points),
                     TooltipYValueFormat = "0.###"
                 });
+                chartSeriesLines.Add(lineIndex);
                 palette.Add(line.Color);
             }
         }
@@ -612,14 +705,137 @@
                 ])
             });
             palette.Add("transparent");
+            chartSeriesLines.Add(-1);
 
             _palette = palette.ToArray();
+            _chartSeriesLines = chartSeriesLines.ToArray();
             _valueMinimum = minimum;
             _valueMaximum = maximum;
             _isPercent = isPercent;
             _chartSeries = chartSeries;
             BuildOptions();
         }
+    }
+
+    // One group of bars per bucket of the window, and one bar in it per line. A bucket without a value has a bar of
+    // height 0, which draws nothing.
+    private void BuildBars(HistoryChartData data)
+    {
+        if (data.Bucket is not { } bucket)
+        {
+            return;
+        }
+
+        var hasPoint = false;
+        var minimum = 0.0;
+        var maximum = 0.0;
+        foreach (var line in data.Lines)
+        {
+            foreach (var run in line.Runs)
+            {
+                foreach (var point in run)
+                {
+                    var number = point.Number!.Value * line.Sign;
+                    minimum = Math.Min(minimum, number);
+                    maximum = Math.Max(maximum, number);
+                    hasPoint = true;
+                }
+            }
+        }
+
+        if (!hasPoint)
+        {
+            return;
+        }
+
+        var starts = PropertyHistoryChartModel.GetBucketStarts(data.From, data.To, bucket);
+
+        // All lines have one unit, see HistoryChartSeriesResolver.FindArgumentError, which is scaled to the largest bar.
+        var unit = data.Lines[0].Unit;
+        var magnitude = Math.Max(-minimum, maximum);
+        var factor = 1.0;
+        var suffix = StateUnitExtensions.GetUnitSuffix(unit);
+        if (magnitude < (double)decimal.MaxValue &&
+            StateUnitExtensions.TryGetScaledUnit(unit, (decimal)magnitude, out var scaledSuffix, out var scaledFactor))
+        {
+            suffix = scaledSuffix;
+            factor = (double)scaledFactor;
+        }
+
+        _barValueFormat = string.IsNullOrEmpty(suffix) ? "0.##" : $"0.## '{suffix}'";
+        var chartSeries = new List<ChartSeries<double>>(data.Lines.Count);
+        var palette = new string[data.Lines.Count];
+        var chartSeriesLines = new int[data.Lines.Count];
+        for (var lineIndex = 0; lineIndex < data.Lines.Count; lineIndex++)
+        {
+            var line = data.Lines[lineIndex];
+            var values = new double[starts.Count];
+
+            // Both are ascending, and every point of a bucketed query is at the start of its bucket.
+            var startIndex = 0;
+            foreach (var run in line.Runs)
+            {
+                foreach (var point in run)
+                {
+                    while (startIndex < starts.Count && starts[startIndex] < point.Timestamp)
+                    {
+                        startIndex++;
+                    }
+
+                    if (startIndex < starts.Count && starts[startIndex] == point.Timestamp)
+                    {
+                        values[startIndex] = point.Number!.Value * line.Sign * factor;
+                    }
+                }
+            }
+
+            chartSeries.Add(new ChartSeries<double>
+            {
+                Name = line.Label,
+                Visible = true,
+                Data = values,
+                TooltipYValueFormat = _barValueFormat
+            });
+            palette[lineIndex] = line.Color;
+            chartSeriesLines[lineIndex] = lineIndex;
+        }
+
+        // A calendar bucket is labeled in the zone it was aligned in, which the viewer's zone can have left meanwhile.
+        var localStarts = new DateTime[starts.Count];
+        for (var index = 0; index < starts.Count; index++)
+        {
+            localStarts[index] = bucket.TimeZone is { } zone ? TimeZoneInfo.ConvertTime(starts[index], zone).DateTime : TimeZone.ToZoned(starts[index]);
+        }
+
+        // Every bar gets a label of its own, which its tooltip names and finds it by, see RenderBarTooltip, so a format whose
+        // labels repeat, such as the weekday over more than a week, gives way to a longer one.
+        string? format = HistoryChartAxis.GetTimeLabelFormat(data.To - data.From, PropertyHistoryChartModel.GetNominalLength(bucket));
+        var labels = new string[starts.Count];
+        var distinct = new HashSet<string>(StringComparer.Ordinal);
+        do
+        {
+            distinct.Clear();
+            for (var index = 0; index < labels.Length; index++)
+            {
+                labels[index] = localStarts[index].ToString(format, CultureInfo.CurrentCulture);
+                distinct.Add(labels[index]);
+            }
+
+            format = distinct.Count < labels.Length ? HistoryChartAxis.GetLongerTimeLabelFormat(format) : null;
+        }
+        while (format is not null);
+
+        _barLabels = labels;
+
+        _palette = palette;
+
+        _chartSeriesLines = chartSeriesLines;
+
+        _valueMinimum = minimum * factor;
+        _valueMaximum = maximum * factor;
+        _isPercent = false;
+        _chartSeries = chartSeries;
+        BuildOptions();
     }
 
     // A new instance, because the chart draws again only for other options.
@@ -639,8 +855,27 @@
         var valueAxis = _isPercent
             ? HistoryChartAxis.GetPercentValueAxis(_valueMinimum, _valueMaximum, height)
             : HistoryChartAxis.GetValueAxis(_valueMinimum, _valueMaximum, height);
+        if (data.IsBars)
+        {
+            var format = _barValueFormat;
+            _chartOptions = new BarChartOptions
+            {
+                ChartPalette = _palette,
+                ShowLegend = false,
+                YAxisToStringFunc = ShowAxes ? value => value.ToString(format, CultureInfo.CurrentCulture) : EmptyAxisLabel,
+                YAxisLines = ShowAxes,
+                ShowToolTips = ShowAxes,
+                BarWidthRatio = 0.7,
+                YAxisTicks = valueAxis.Step,
+                MaxNumYAxisTicks = _valueLabelCount,
+                YAxisSuggestedMax = valueAxis.SuggestedMaximum
+            };
+            return;
+        }
+
         var range = data.To - data.From;
-        var timeLabelSpacing = HistoryChartAxis.GetTimeLabelSpacing(range, data.Bucket, width);
+        var timeLabelSpacing = HistoryChartAxis.GetTimeLabelSpacing(
+            range, data.Bucket is { } bucket ? PropertyHistoryChartModel.GetNominalLength(bucket) : null, width);
         _chartOptions = new TimeSeriesChartOptions
         {
             ChartPalette = _palette,

@@ -53,10 +53,25 @@ internal static class CanvasExtent
     };
 
     /// <summary>
-    /// Gets the CSS number a canvas that <see cref="IsScaled"/> is drawn at: its <see cref="GetDrawnWidth"/> over its
-    /// design width.
+    /// The custom property that holds the <see cref="GetAngle"/> of a canvas, for <see cref="Factor"/> on the element that
+    /// sets it and on its descendants.
     /// </summary>
-    // CSS divides a length by a length only through the tangent of the angle between them.
-    public static string GetFactor(int designWidth, int? minWidth, int? maxWidth) =>
-        string.Create(CultureInfo.InvariantCulture, $"tan(atan2({GetDrawnWidth(minWidth, maxWidth)}, {designWidth}px))");
+    // Must match the @property registration in CanvasLayoutWidget.razor.css.
+    public const string AngleProperty = "--canvas-scale-angle";
+
+    /// <summary>
+    /// Gets the CSS angle whose tangent is the factor a canvas that <see cref="IsScaled"/> is drawn at: <c>atan2</c> of its
+    /// <see cref="GetDrawnWidth"/> and its design width.
+    /// </summary>
+    // Not calc(length / length): typed division is not supported in every target browser.
+    public static string GetAngle(string drawnWidth, int designWidth) =>
+        string.Create(CultureInfo.InvariantCulture, $"atan2({drawnWidth}, {designWidth}px)");
+
+    /// <summary>
+    /// The CSS number a canvas that <see cref="IsScaled"/> is drawn at, the tangent of the <see cref="AngleProperty"/> on the
+    /// element or an ancestor: its <see cref="GetDrawnWidth"/> over its design width.
+    /// </summary>
+    // Do not inline tan(atan2(...)): WebKit computes it wrong when atan2 depends on the layout (cqw), and right through the
+    // registered angle property.
+    public const string Factor = "tan(var(" + AngleProperty + "))";
 }

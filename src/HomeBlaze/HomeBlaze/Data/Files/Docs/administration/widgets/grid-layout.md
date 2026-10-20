@@ -89,7 +89,7 @@ A grid with cells that keep their shape. `CellAspectRatio=1:1` makes each cell a
 - **Tiles**: A tile ([Switch](switch.md), [OperationButton](operation-button.md) or [ValueTile](value-tile.md) with `Kind=Tile`) in a cell fills the cell, as a card does. Square cells suit tiles.
 - **Gauges**: A [Gauge](gauge.md) that is the only content of a cell stands in the middle of the cell.
 - **Cards**: A [Card](card.md) in a cell fills the cell and ignores its `AspectRatio`, unless it has a `Height` of its own. Its body scrolls when its content does not fit.
-- **Fixed columns**: The grid keeps its columns at every width of the screen. A cell cuts off content that needs more room than the cell has, which a narrow window shows in the first row of the grid above. Use a `FlowLayout` where the cells should wrap.
+- **Fixed columns**: The grid keeps its columns at every width of the screen. A cell cuts off content that needs more room than the cell has, which a narrow window shows in the first row of the grid above. Only the shadow of a card or a tile that fills the cell reaches past it, except in Safari, which cuts it off too. Use a `FlowLayout` where the cells should wrap.
 - **Names**: Give a cell a `#name` to keep it and everything in it when cells are added or removed, see [What an Edit of the Page Keeps](../pages.md#what-an-edit-of-the-page-keeps).
 - **Edit mode**: While the page is in edit mode, each cell has buttons to edit and remove it, which show while the grid or a widget in one of its cells is selected. A click on a cell without a widget, or on a free place, selects the grid, and once the grid itself is selected, a click on the plus in a free place adds a cell there, see [Editing in the Page Editor](../pages.md#editing-in-the-page-editor).
 
