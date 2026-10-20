@@ -31,32 +31,16 @@
                 @{ _ = PathResolver.PathsVersion; }
                 @foreach (var link in _links.Select(LinkResolver.Resolve))
                 {
-                    @if (link.IsBroken)
-                    {
-                        <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Outlined"
-                                 Icon="@Icons.Material.Filled.LinkOff" title="Broken link" data-testid="metadata-link">@link.Title</MudChip>
-                    }
-                    else
-                    {
-                        @* A link that opens in a new tab shows so by its icon. *@
-                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
-                                 Icon="@(link.IsExternal ? Icons.Material.Filled.OpenInNew : Icons.Material.Filled.Link)"
-                                 Href="@link.Href" Target="@(link.IsExternal ? "_blank" : null)"
-                                 Rel="@(link.IsExternal ? "noopener noreferrer" : null)" data-testid="metadata-link">@link.Title</MudChip>
-                    }
+                    @* A link that opens in a new tab shows so by its icon. *@
+                    <MudChip T="string" Size="Size.Small" Color="@(link.IsBroken ? Color.Error : Color.Default)" Variant="Variant.Outlined"
+                             Icon="@(link.IsBroken ? Icons.Material.Filled.LinkOff : link.IsExternal ? Icons.Material.Filled.OpenInNew : Icons.Material.Filled.Link)"
+                             title="@(link.IsBroken ? "Broken link" : null)" Href="@link.Href" Target="@(link.IsExternal ? "_blank" : null)"
+                             Rel="@(link.IsExternal ? "noopener noreferrer" : null)" data-testid="metadata-link">@link.Title</MudChip>
                 }
                 @foreach (var tag in _tags)
                 {
-                    @if (OnTagClick.HasDelegate)
-                    {
-                        <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Text" Icon="@Icons.Material.Filled.Tag"
-                                 OnClick="@(() => OnTagClick.InvokeAsync(tag))" data-testid="metadata-tag">@tag</MudChip>
-                    }
-                    else
-                    {
-                        <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Text" Icon="@Icons.Material.Filled.Tag"
-                                 data-testid="metadata-tag">@tag</MudChip>
-                    }
+                    <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Text" Icon="@Icons.Material.Filled.Tag"
+                             OnClick="@(OnTagClick.HasDelegate ? EventCallback.Factory.Create<MouseEventArgs>(this, () => OnTagClick.InvokeAsync(tag)) : default)" data-testid="metadata-tag">@tag</MudChip>
                 }
             </div>
         }
@@ -72,7 +56,6 @@
 
     [Parameter] public string Class { get; set; } = "px-4 py-2";
 
-    private bool _isRead;
     private ImmutableDictionary<string, JsonElement>? _readMetadata;
     private string? _notes;
     private string? _notesHtml;
@@ -82,10 +65,9 @@
     protected override void OnParametersSet()
     {
         // Once per value, as the parent renders on every change of its subject and the notes are parsed here.
-        if (_isRead && ReferenceEquals(_readMetadata, Metadata))
+        if (ReferenceEquals(_readMetadata, Metadata))
             return;
 
-        _isRead = true;
         _readMetadata = Metadata;
         _notes = Metadata.GetString(MetadataKeys.Notes);
         _notesHtml = _notes is null ? null : MetadataNotes.ToHtml(_notes);
