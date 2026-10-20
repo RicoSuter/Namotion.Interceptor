@@ -389,6 +389,30 @@ public class StorageMetadataApplyTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenAStorageThatAnotherOneHoldsWritesItsOrderInAnotherCase_ThenItIsAccepted()
+    {
+        // Arrange
+        var nestedDirectory = CreateTemporaryDirectory();
+        File.WriteAllText(Path.Combine(nestedDirectory.FullName, "a.md"), "a");
+        WriteFile("Nested.json", SerializeStorage(nestedDirectory.FullName));
+        var storage = await ConnectAsync();
+        var nested = Assert.IsType<FluentStorageContainer>(storage.Children["Nested"]);
+        await nested.ConnectAsync(CancellationToken.None);
+        try
+        {
+            // Act
+            await nested.SetMetadataAsync(nested, null, Values("""{ "Order": ["a.md"] }"""), CancellationToken.None);
+
+            // Assert
+            Assert.Equal(["a.md"], nested.ChildOrder.ToArray());
+        }
+        finally
+        {
+            nested.Dispose();
+        }
+    }
+
+    [Fact]
     public async Task WhenANestedStorageIsRemovedFromTheOuterStorage_ThenItsMetadataIsNoLongerWritten()
     {
         // Arrange

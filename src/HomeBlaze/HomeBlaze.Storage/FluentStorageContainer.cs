@@ -625,48 +625,49 @@ public partial class FluentStorageContainer :
         var connection = Connection;
         await RunOperationAsync(connection, async token =>
         {
-            var target = GetMetadataTarget(connection, subject, propertyName, copy);
+            var target = GetMetadataTarget(connection, subject, propertyName);
 
             // Fresh from the storage, so that an edit that no pass has seen yet is kept.
             var content = await connection.Reconciler.ReadMetadataFileAsync(target.FilePath, token);
             var written = StorageMetadataWriter.Merge(content, target, copy);
-            if (target.IsContainer && GetOrderError(subject, copy) is { } orderError)
+            if (target.IsContainer && GetContainerValuesError(subject, copy) is { } error)
             {
-                throw new StorageRefusedException(orderError);
+                throw new StorageRefusedException(error);
             }
 
             await WriteMetadataFileAsync(connection, target.FilePath, written, token);
         }, cancellationToken);
     }
 
-    // Runs on the worker, after the writer accepted the values, so that their keys and names can be read. The names of
-    // an order are children of the folder, each given once, which also bounds the size of the order.
-    private static string? GetOrderError(IInterceptorSubject folder, JsonElement values)
+    // Runs on the worker, after the writer accepted the values, so that their keys and names can be read. A storage that
+    // another storage holds keeps only its order here. The names of an order are children of the folder, each given
+    // once, which also bounds the size of the order.
+    private string? GetContainerValuesError(IInterceptorSubject folder, JsonElement values)
     {
+        string? orderError = null;
         foreach (var property in values.EnumerateObject())
         {
-            if (string.Equals(property.Name, MetadataKeys.Order, StringComparison.OrdinalIgnoreCase) &&
-                property.Value.ValueKind == JsonValueKind.Array)
+            if (!string.Equals(property.Name, MetadataKeys.Order, StringComparison.OrdinalIgnoreCase))
+            {
+                if (ReferenceEquals(folder, this) && !IsOwnMetadataStore)
+                {
+                    return "This storage is held by another storage, which keeps its metadata in the file beside the file of this storage; its own .metadata.json keeps only its order.";
+                }
+            }
+            else if (property.Value.ValueKind == JsonValueKind.Array)
             {
                 string[] names = [.. property.Value.EnumerateArray().Select(static item => item.GetString()!)];
-                return ChildOrderNames.GetError(names, ChildOrdering.GetShownNames(folder));
+                orderError = ChildOrderNames.GetError(names, ChildOrdering.GetShownNames(folder));
             }
         }
 
-        return null;
+        return orderError;
     }
 
     // Runs on the worker. The own keys of the file of this storage or of a folder of it, or the entry of a subject or
     // property in the file beside the stored subject that holds it.
-    private StorageMetadataTarget GetMetadataTarget(StorageConnection connection, IInterceptorSubject subject, string? propertyName, JsonElement values)
+    private StorageMetadataTarget GetMetadataTarget(StorageConnection connection, IInterceptorSubject subject, string? propertyName)
     {
-        if (ReferenceEquals(subject, this) && !IsOwnMetadataStore &&
-            values.ValueKind == JsonValueKind.Object && values.EnumerateObject().Any(static property => !property.NameEquals(MetadataKeys.Order)))
-        {
-            throw new StorageRefusedException(
-                "This storage is held by another storage, which keeps its metadata in the file beside the file of this storage; its own .metadata.json keeps only its order.");
-        }
-
         if (ReferenceEquals(subject, this) || subject is VirtualFolder)
         {
             return propertyName is null
