@@ -1,6 +1,8 @@
 using HomeBlaze.Abstractions;
+using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Components.Abstractions.Pages;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.Services.Lifecycle;
@@ -10,6 +12,8 @@ namespace HomeBlaze.Services.Lifecycle;
 /// <see cref="SubjectMetadataExtensions.FindMetadataStore"/>) apply it when the subject attaches, and apply the
 /// metadata of each property that is added to the subject later.
 /// </summary>
+// After the method properties are added, so that applying the subject covers them.
+[RunsAfter(typeof(MethodPropertyInitializer))]
 public sealed class MetadataLifecycleHandler : ILifecycleHandler, IPropertyLifecycleHandler
 {
     /// <inheritdoc />
@@ -24,10 +28,12 @@ public sealed class MetadataLifecycleHandler : ILifecycleHandler, IPropertyLifec
     /// <inheritdoc />
     public void AttachProperty(SubjectPropertyLifecycleChange change)
     {
-        // A property that the subject is created with is applied with the subject; the metadata itself and the
-        // attributes have no metadata of their own.
+        // A property that the subject is created with, and a method, are applied with the subject; the metadata itself
+        // and the attributes have no metadata of their own.
+        var metadata = change.Property.Metadata;
         var propertyName = change.Property.Name;
-        if (change.Property.Metadata.IsDynamic && propertyName != KnownAttributes.Metadata && !propertyName.Contains('@'))
+        if (metadata.IsDynamic && metadata.Type != typeof(MethodMetadata) &&
+            propertyName != KnownAttributes.Metadata && !propertyName.Contains('@'))
         {
             Apply(change.Subject, propertyName);
         }

@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Text.Json;
 using HomeBlaze.Abstractions;
+using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Components.Abstractions.Pages;
 using HomeBlaze.Services.Lifecycle;
 using Namotion.Interceptor;
@@ -54,6 +55,38 @@ public class MetadataLifecycleHandlerTests
         // Assert
         var applied = Assert.Single(store.Applied);
         Assert.Equal((child, "Extra"), applied);
+    }
+
+    [Fact]
+    public void WhenAMethodPropertyIsAddedToAnAttachedSubject_ThenTheStoreDoesNotApplyIt()
+    {
+        // Arrange
+        var store = CreateStore();
+        var child = new LifecycleTestChild();
+        store.Child = child;
+        store.Applied.Clear();
+
+        // Act
+        child.TryGetRegisteredSubject()!.AddProperty("Run", typeof(MethodMetadata), _ => null, null);
+
+        // Assert
+        Assert.Empty(store.Applied);
+    }
+
+    [Fact]
+    public void WhenRegisteredBeforeTheMethodPropertyInitializer_ThenItRunsAfterIt()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithService<ILifecycleHandler>(() => new MetadataLifecycleHandler(), handler => handler is MetadataLifecycleHandler)
+            .WithService<ILifecycleHandler>(() => new MethodPropertyInitializer(), handler => handler is MethodPropertyInitializer);
+
+        // Act
+        var handlers = context.GetServices<ILifecycleHandler>();
+
+        // Assert
+        Assert.IsType<MethodPropertyInitializer>(handlers[0]);
+        Assert.IsType<MetadataLifecycleHandler>(handlers[1]);
     }
 }
 

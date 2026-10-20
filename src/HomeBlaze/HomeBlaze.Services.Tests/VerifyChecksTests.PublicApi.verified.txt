@@ -373,6 +373,8 @@ namespace HomeBlaze.Services.Display
 }
 namespace HomeBlaze.Services.Lifecycle
 {
+    [Namotion.Interceptor.Attributes.RunsAfter(new System.Type[] {
+            typeof(HomeBlaze.Services.Lifecycle.MethodPropertyInitializer)})]
     public sealed class MetadataLifecycleHandler : Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler, Namotion.Interceptor.Tracking.Lifecycle.IPropertyLifecycleHandler
     {
         public MetadataLifecycleHandler() { }
