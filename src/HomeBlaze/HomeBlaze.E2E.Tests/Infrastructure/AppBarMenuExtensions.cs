@@ -44,11 +44,28 @@ internal static class AppBarMenuExtensions
         await page.CloseAppBarMenuAsync();
     }
 
-    /// <summary>Opens the menu and the submenu of the time zone, which lists the zones below a search field.</summary>
+    /// <summary>The search field of the time zone submenu, rendered while the submenu is open.</summary>
+    public static ILocator TimeZoneSearch(this IPage page) => page.GetByPlaceholder("Search timezone");
+
+    /// <summary>
+    /// Opens the menu and the submenu of the time zone, which lists the zones below a search field, and waits until
+    /// the search field has the focus, so that the next key reaches it.
+    /// </summary>
     public static async Task OpenTimeZoneMenuAsync(this IPage page)
+    {
+        await page.ClickTimeZoneMenuEntryAsync();
+        // The field takes the focus only after its first render; a key pressed before goes to the list of the menu.
+        await Assertions.Expect(page.TimeZoneSearch()).ToBeFocusedAsync(new() { Timeout = Timeout });
+    }
+
+    /// <summary>
+    /// Opens the menu and the submenu of the time zone and waits until its search field is shown, but not until it has
+    /// the focus; <see cref="OpenTimeZoneMenuAsync"/> is for a test that presses keys next.
+    /// </summary>
+    public static async Task ClickTimeZoneMenuEntryAsync(this IPage page)
     {
         await page.OpenAppBarMenuAsync();
         await page.TimeZoneMenuEntry().ClickAsync();
-        await Assertions.Expect(page.GetByPlaceholder("Search timezone")).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(page.TimeZoneSearch()).ToBeVisibleAsync(new() { Timeout = Timeout });
     }
 }
