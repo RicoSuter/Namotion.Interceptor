@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Collections.Immutable;
 using System.ComponentModel;
 using System.Text;
@@ -41,6 +42,9 @@ public partial class FluentStorageContainer :
     IStorageContainer, IConfigurationWriter, ITitleProvider, IIconProvider, IConfigurable, IMetadataContainer, IMetadataStore
 {
     private static readonly IReadOnlySet<string> NoPaths = new HashSet<string>();
+
+    // The characters of a path in a metadata file, which a property with metadata cannot have in its name.
+    private static readonly SearchValues<char> PathCharacters = SearchValues.Create("/\\[]'");
 
     private readonly FileSubjectFactory _subjectFactory;
     private readonly IServiceProvider _serviceProvider;
@@ -682,6 +686,13 @@ public partial class FluentStorageContainer :
         if (propertyName is not null && (propertyName == KnownAttributes.Metadata || registered.TryGetProperty(propertyName) is not { IsAttribute: false }))
         {
             throw new StorageRefusedException($"The subject has no property {NameList.Format([propertyName])}.");
+        }
+
+        // A path in a metadata file cannot hold them, so the entry would not apply or would be that of another property.
+        if (propertyName is not null && propertyName.AsSpan().ContainsAny(PathCharacters))
+        {
+            throw new StorageRefusedException(
+                $"The property {NameList.Format([propertyName])} cannot have metadata: its name has a character of a path (/, \\, [, ] or ').");
         }
 
         var filePath = StorageMetadataPath.GetSubjectFilePath(entry.Path);

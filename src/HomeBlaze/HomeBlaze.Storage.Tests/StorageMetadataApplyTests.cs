@@ -171,6 +171,26 @@ public class StorageMetadataApplyTests : StorageTestBase
         Assert.False(File.Exists(GetFullPath("Shelly.metadata.json")));
     }
 
+    [Theory]
+    [InlineData("A/B")]
+    [InlineData("A\\B")]
+    [InlineData("A[0]")]
+    [InlineData("A'B")]
+    public async Task WhenThePropertyNameHasACharacterOfAPath_ThenTheWriteIsRefused(string propertyName)
+    {
+        // Arrange
+        WriteFile("Shelly.json", MetadataTestDevice.Serialize());
+        var storage = await ConnectAsync();
+        var device = storage.Children["Shelly"];
+        device.TryGetRegisteredSubject()!.AddProperty(propertyName, typeof(int), _ => 1, null);
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<StorageRefusedException>(() =>
+            storage.SetMetadataAsync(device, propertyName, Values("""{ "comment": "x" }"""), CancellationToken.None));
+        Assert.Contains("cannot have metadata", exception.Message);
+        Assert.False(File.Exists(GetFullPath("Shelly.metadata.json")));
+    }
+
     [Fact]
     public async Task WhenThePropertyOfAFolderIsGiven_ThenTheWriteIsRefused()
     {
