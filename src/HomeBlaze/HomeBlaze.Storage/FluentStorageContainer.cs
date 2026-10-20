@@ -692,10 +692,11 @@ public partial class FluentStorageContainer :
             : throw new StorageRefusedException($"The folder '{path}' is no longer in the storage.");
     }
 
-    // Runs on the worker. Null content deletes the file, so that a metadata file exists only while it holds something.
-    private async Task WriteMetadataFileAsync(StorageConnection connection, string path, byte[]? content, CancellationToken cancellationToken)
+    // Runs on the worker. No content deletes the file, so that a metadata file exists only while it holds something.
+    private async Task WriteMetadataFileAsync(
+        StorageConnection connection, string path, (byte[] Content, StorageMetadataFile File)? written, CancellationToken cancellationToken)
     {
-        if (content is null)
+        if (written is null)
         {
             await DeleteMetadataFileAsync(connection, path, cancellationToken);
             connection.Reconciler.Apply();
@@ -703,12 +704,7 @@ public partial class FluentStorageContainer :
             return;
         }
 
-        // Read as a pass reads it, so that the registry holds what the file holds.
-        if (!StorageMetadataFile.TryParse(content, out var file, out var error))
-        {
-            throw new InvalidOperationException("The merged metadata cannot be read back.", error);
-        }
-
+        var (content, file) = written.Value;
         var entry = new StorageEntry { Path = path, IsFolder = false, Metadata = file };
         await WriteAndRecordAsync(connection, entry, content, cancellationToken);
         connection.Index.Set(entry);

@@ -57,27 +57,40 @@ internal static class StorageMetadataWriter
     /// written with <see cref="StorageMetadataTarget.Path"/>. An entry without keys is removed, and so is a section
     /// without entries.
     /// </summary>
-    /// <param name="content">The content of the file, which <see cref="StorageMetadataFile.TryParse"/> and
-    /// <see cref="CanBeWritten"/> accept; null without a file.</param>
+    /// <param name="content">The content of the file, which <see cref="StorageMetadataFile.TryParse"/> accepts; null
+    /// without a file.</param>
     /// <param name="target">The file and the entry.</param>
     /// <param name="values">A JSON object.</param>
-    /// <returns>The content to write, indented and ending with a new line, or null when the file holds no key any more
-    /// and is deleted.</returns>
+    /// <returns>The content to write, indented and ending with a new line, and the file as a pass reads it; or null
+    /// when the file holds no key any more and is deleted.</returns>
     /// <exception cref="StorageRefusedException">
     /// values is no JSON object, gives a key twice without regard to case, has a key that starts with $, sets
     /// <c>order</c> of anything but a folder or the root, has a known key with a value of another kind, has a key that
-    /// cannot be read or a value that cannot be written, or exceeds a limit; or the file has two entries of the target.
-    /// The message names the key.
+    /// cannot be read or a value that cannot be written, or exceeds a limit; or the file has two entries of the target,
+    /// or cannot be written back, such as with a string with a lone surrogate. The message names the key or the file.
     /// </exception>
-    public static byte[]? Merge(byte[]? content, StorageMetadataTarget target, JsonElement values)
+    public static (byte[] Content, StorageMetadataFile File)? Merge(byte[]? content, StorageMetadataTarget target, JsonElement values)
     {
         if (values.ValueKind != JsonValueKind.Object)
         {
             throw Refuse("values must be a JSON object, for example { \"navTitle\": \"Pump\" }.");
         }
 
-        var root = content is null ? new JsonObject(KeyOptions) : Parse(content);
-        var sizeBefore = content is null ? 0 : Serialize(root).Length;
+        var root = new JsonObject(KeyOptions);
+        var sizeBefore = 0;
+        if (content is not null)
+        {
+            try
+            {
+                root = Parse(content);
+                sizeBefore = Serialize(root).Length;
+            }
+            catch (Exception exception) when (exception is InvalidOperationException or JsonException or ArgumentException)
+            {
+                throw CreateUnreadableException(target.FilePath);
+            }
+        }
+
         var (section, entry) = GetEntry(root, target);
         MergeValues(entry, values, isContainer: target is { Section: null, IsContainer: true });
 
@@ -101,25 +114,14 @@ internal static class StorageMetadataWriter
             throw Refuse($"The metadata file would be larger than {MaxFileSize / 1024} KB with {NameList.Format(values.EnumerateObject().Select(static property => property.Name))}.");
         }
 
-        return written;
+        return StorageMetadataFile.TryParse(written, out var file, out var error)
+            ? (written, file)
+            : throw new InvalidOperationException("The merged metadata cannot be read back.", error);
     }
 
-    /// <summary>
-    /// Gets whether the content can be written back. A value that cannot, such as a string with a lone surrogate, is
-    /// found only by writing it, so a pass that reads the file does not look for it.
-    /// </summary>
-    public static bool CanBeWritten(byte[] content)
-    {
-        try
-        {
-            _ = Serialize(Parse(content));
-            return true;
-        }
-        catch (Exception exception) when (exception is InvalidOperationException or JsonException or ArgumentException)
-        {
-            return false;
-        }
-    }
+    /// <summary>The refusal of a write to a metadata file that cannot be read or written back.</summary>
+    public static StorageRefusedException CreateUnreadableException(string path)
+        => new($"The metadata file '{path}' could not be read. Fix or delete it, then try again.");
 
     private static JsonObject Parse(byte[] content)
     {

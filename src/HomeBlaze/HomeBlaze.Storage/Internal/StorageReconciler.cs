@@ -347,11 +347,11 @@ internal sealed class StorageReconciler
         => _index.TryGet(path, out var entry) ? entry.Metadata : null;
 
     /// <summary>
-    /// Reads a metadata file from the storage, and checks that it can be read and written back. Null for a file that
+    /// Reads a metadata file from the storage, and checks that it can be read as metadata. Null for a file that
     /// does not exist.
     /// </summary>
     /// <exception cref="InvalidOperationException">
-    /// The file cannot be read as metadata or cannot be written back, the path is a folder, its folder is gone, or the
+    /// The file cannot be read as metadata, the path is a folder, its folder is gone, or the
     /// index holds the file in another case under a name that is not a metadata file.
     /// </exception>
     public async Task<byte[]?> ReadMetadataFileAsync(string path, CancellationToken cancellationToken)
@@ -389,17 +389,14 @@ internal sealed class StorageReconciler
         {
             // The disk client reads a directory as a file that does not exist, and a write to it fails as access denied.
             return await IsDirectoryOnDiskAsync(path, cancellationToken)
-                ? throw CreateUnreadableException(path)
+                ? throw StorageMetadataWriter.CreateUnreadableException(path)
                 : null;
         }
 
-        return StorageMetadataFile.TryParse(content, out _, out _) && StorageMetadataWriter.CanBeWritten(content)
+        return StorageMetadataFile.TryParse(content, out _, out _)
             ? content
-            : throw CreateUnreadableException(path);
+            : throw StorageMetadataWriter.CreateUnreadableException(path);
     }
-
-    private static StorageRefusedException CreateUnreadableException(string path)
-        => new($"The metadata file '{path}' could not be read. Fix or delete it, then try again.");
 
     // Whether a subject or folder of the index has the path as its metadata file, in exact case. Used only for a
     // candidate that already differs from the path asked for only in case, which is rare.

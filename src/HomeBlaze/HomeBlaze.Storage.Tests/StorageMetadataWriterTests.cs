@@ -17,7 +17,7 @@ public class StorageMetadataWriterTests
     private static string? Merge(string? file, StorageMetadataTarget target, string values)
     {
         var written = StorageMetadataWriter.Merge(file is null ? null : Encoding.UTF8.GetBytes(file), target, JsonElement.Parse(values));
-        return written is null ? null : Encoding.UTF8.GetString(written);
+        return written is { } result ? Encoding.UTF8.GetString(result.Content) : null;
     }
 
     private static string JsonObject(IEnumerable<string> members) => "{" + string.Join(", ", members) + "}";
@@ -297,16 +297,22 @@ public class StorageMetadataWriterTests
         Assert.Contains("512 KB", exception.Message);
     }
 
-    [Theory]
-    [InlineData("""{ "note": "\ud800" }""", false)]
-    [InlineData("""{ "note": "ok" }""", true)]
-    public void WhenContentIsChecked_ThenContentWithALoneSurrogateCannotBeWritten(string json, bool expected)
+    [Fact]
+    public void WhenTheFileHasAValueThatCannotBeWrittenBack_ThenTheMergeIsRefusedNamingTheFile()
+    {
+        // Act & Assert
+        var exception = Assert.Throws<StorageRefusedException>(() => Merge("""{ "note": "\ud800" }""", Folder, """{ "title": "Docs" }"""));
+        Assert.Contains("'.metadata.json' could not be read", exception.Message);
+    }
+
+    [Fact]
+    public void WhenValuesAreMerged_ThenTheFileIsReturnedAsAPassReadsIt()
     {
         // Act
-        var canBeWritten = StorageMetadataWriter.CanBeWritten(Encoding.UTF8.GetBytes(json));
+        var written = StorageMetadataWriter.Merge(null, NestedSubject("Channels[0]"), JsonElement.Parse("""{ "navTitle": "Hall light" }"""));
 
         // Assert
-        Assert.Equal(expected, canBeWritten);
+        Assert.Equal("Hall light", written!.Value.File.FindSubject("Channels/0")!["navTitle"].GetString());
     }
 
     // Names of children that make a file of more than 512 KB.
