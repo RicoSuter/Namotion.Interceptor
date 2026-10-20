@@ -142,8 +142,10 @@
 
         _tags.AddRange(metadata.GetTags());
 
-        // Once per dialog, as finding them walks the whole tree.
-        _tagsInUse = RootManager.Root is { } root ? MetadataSearch.GetTags(root, static subject => subject.IsExcludedFrom(ExclusionTarget.UserInterface)) : [];
+        // Once per dialog, as finding them walks the whole tree; only those that the tag filter lists.
+        _tagsInUse = RootManager.Root is { } root
+            ? MetadataSearch.GetTags(root, static subject => subject.IsExcludedFrom(ExclusionTarget.UserInterface), static property => property.IsShownAsValue())
+            : [];
         if (PropertyName is null)
         {
             _isFolder = IsFolder(Owner);

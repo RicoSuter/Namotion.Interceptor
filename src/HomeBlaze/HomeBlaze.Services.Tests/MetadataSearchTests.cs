@@ -15,7 +15,7 @@ public class MetadataSearchTests
         TestMetadata.Set(root, """{ "tags": ["Root"], "floor": 2, "active": true }""");
         TestMetadata.Set(device, """{ "tags": ["floor-2", "Pumps"], "area": "Basement" }""");
         TestMetadata.Set(device.Channels[0], """{ "tags": ["floor-1"] }""");
-        var values = TestMetadata.Parse("""{ "notes": "Calibrated 2026", "tags": ["Floor-2"] }""");
+        var values = TestMetadata.Parse("""{ "notes": "Calibrated 2026", "tags": ["Floor-2", "channels-only"] }""");
         device.TryGetRegisteredSubject()!.TryGetProperty(nameof(MetadataPathsTestDevice.Channels))!
             .AddAttribute(KnownAttributes.Metadata, values.GetType(), _ => values, null);
 
@@ -72,7 +72,7 @@ public class MetadataSearchTests
         var tags = MetadataSearch.GetTags(root);
 
         // Assert
-        Assert.Equal(["floor-1", "floor-2", "Pumps", "Root"], tags);
+        Assert.Equal(["channels-only", "floor-1", "floor-2", "Pumps", "Root"], tags);
     }
 
     [Fact]
@@ -101,6 +101,19 @@ public class MetadataSearchTests
 
         // Assert
         Assert.Equal(["Root"], tags);
+    }
+
+    [Fact]
+    public void WhenAPropertyIsNotIncluded_ThenTheTagsOnlyOnItAreNotListed()
+    {
+        // Arrange
+        var root = CreateTree();
+
+        // Act
+        var tags = MetadataSearch.GetTags(root, isPropertyIncluded: property => property.Name != nameof(MetadataPathsTestDevice.Channels));
+
+        // Assert
+        Assert.Equal(["floor-1", "floor-2", "Pumps", "Root"], tags);
     }
 
     [Fact]

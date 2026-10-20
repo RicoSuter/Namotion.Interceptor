@@ -55,11 +55,16 @@ public static class MetadataSearch
 
     /// <summary>
     /// Gets every tag below <paramref name="root"/>, each once without regard to case, in order. A subject for which
-    /// <paramref name="isExcluded"/> returns true, and every subject below it, is skipped.
+    /// <paramref name="isExcluded"/> returns true, and every subject below it, is skipped, and so are the tags of a
+    /// property for which <paramref name="isPropertyIncluded"/> returns false.
     /// </summary>
-    public static IReadOnlyList<string> GetTags(IInterceptorSubject root, Func<IInterceptorSubject, bool>? isExcluded = null)
+    public static IReadOnlyList<string> GetTags(
+        IInterceptorSubject root, Func<IInterceptorSubject, bool>? isExcluded = null,
+        Func<RegisteredSubjectProperty, bool>? isPropertyIncluded = null)
         => Walk(root, isExcluded)
-            .SelectMany(GetEntries)
+            .SelectMany(subject => GetEntries(subject)
+                .Where(entry => entry.PropertyName is null || isPropertyIncluded is null ||
+                                (subject.TryGetProperty(entry.PropertyName) is { } property && isPropertyIncluded(property))))
             .SelectMany(static entry => entry.Metadata.GetTags())
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Order(StringComparer.OrdinalIgnoreCase)
