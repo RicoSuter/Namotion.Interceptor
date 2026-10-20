@@ -1,5 +1,5 @@
 using System.Collections.Immutable;
-using HomeBlaze.Components.Abstractions.Pages;
+using HomeBlaze.Storage.Abstractions;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry;

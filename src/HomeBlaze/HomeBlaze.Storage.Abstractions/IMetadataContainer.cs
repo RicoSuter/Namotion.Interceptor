@@ -1,6 +1,6 @@
 using System.Collections.Immutable;
 
-namespace HomeBlaze.Components.Abstractions.Pages;
+namespace HomeBlaze.Storage.Abstractions;
 
 /// <summary>
 /// A container that shows its children in an order of its own, which the key <see cref="MetadataKeys.Order"/> of its

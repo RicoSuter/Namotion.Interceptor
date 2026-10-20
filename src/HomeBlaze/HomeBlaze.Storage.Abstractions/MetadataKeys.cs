@@ -1,4 +1,4 @@
-namespace HomeBlaze.Components.Abstractions.Pages;
+namespace HomeBlaze.Storage.Abstractions;
 
 /// <summary>
 /// The keys of metadata that HomeBlaze reads, see <see cref="IMetadataStore"/>. Metadata can hold other keys as well.
@@ -14,10 +14,10 @@ public static class MetadataKeys
     /// <summary>The icon name, of a folder everywhere and of a subject in navigation.</summary>
     public const string Icon = "icon";
 
-    /// <summary>Where a subject with a page appears in navigation, a name of <see cref="NavigationLocation"/>.</summary>
+    /// <summary>Where a subject with a page appears in navigation, a name of <c>NavigationLocation</c>.</summary>
     public const string Location = "location";
 
-    /// <summary>The side of the top bar of a subject, a name of <see cref="AppBarAlignment"/>.</summary>
+    /// <summary>The side of the top bar of a subject, a name of <c>AppBarAlignment</c>.</summary>
     public const string Alignment = "alignment";
 
     /// <summary>The names of the children of a folder in the order they are shown.</summary>

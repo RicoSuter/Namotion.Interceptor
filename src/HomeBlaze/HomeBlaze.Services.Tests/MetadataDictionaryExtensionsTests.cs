@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Text.Json;
 using HomeBlaze.Components.Abstractions.Pages;
+using HomeBlaze.Storage.Abstractions;
 
 namespace HomeBlaze.Services.Tests;
 

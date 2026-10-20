@@ -1,7 +1,7 @@
 using System.Text.Json;
 using Namotion.Interceptor;
 
-namespace HomeBlaze.Components.Abstractions.Pages;
+namespace HomeBlaze.Storage.Abstractions;
 
 /// <summary>
 /// Keeps the metadata of subjects and of their properties, and is found up the parent chain of a subject. The registry
