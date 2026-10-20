@@ -42,7 +42,8 @@ public class HomeBlazeMarkdownSearchToolProvider : IMcpToolProvider
         $"truncated is true when more match than max_pages or the search stopped at its limit of {MaxSearchedPages} " +
         $"pages and notes or {SearchTimeout.TotalSeconds:0} seconds; narrow it with path. Read a found page with " +
         $"{HomeBlazeMcpToolProvider.InvokeQueryToolName} method ReadEvaluatedContent or ReadRawContent, and found notes with " +
-        "get_property of <path>/HomeBlaze:Metadata for a subject or <path>/<property>@HomeBlaze:Metadata for a property.";
+        "get_property of <path>/HomeBlaze:Metadata for a subject or <path>/<property>@HomeBlaze:Metadata for a property, with " +
+        "one slash at the root path /, such as /HomeBlaze:Metadata for the root.";
 
     private static readonly JsonElement Schema = JsonSerializer.SerializeToElement(new
     {

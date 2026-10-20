@@ -35,7 +35,7 @@ internal sealed class MarkdownSearchSourceFinder
 
     /// <summary>
     /// Gets the Markdown files and the notes of metadata in or under <paramref name="pathPrefix"/>, all when it is null,
-    /// in order of path and then property so that results and truncation are stable; without those of a subject of an
+    /// in order of path, then property and then a page before notes, so that results and truncation are stable; without those of a subject of an
     /// excluded type or below one, which browse and search do not show, and for agents without the notes of agents.
     /// </summary>
     public List<MarkdownSearchSource> Find(ISubjectRegistry registry, IInterceptorSubject rootSubject, string? pathPrefix)
@@ -70,12 +70,16 @@ internal sealed class MarkdownSearchSourceFinder
             }
         }
 
-        sources.Sort(static (left, right) =>
-        {
-            var order = string.CompareOrdinal(left.Path, right.Path);
-            return order != 0 ? order : string.CompareOrdinal(left.Property, right.Property);
-        });
+        sources.Sort(CompareSources);
         return sources;
+    }
+
+    // Sort is not stable, so a page comes before the notes of its own subject by a rule of its own.
+    private static int CompareSources(MarkdownSearchSource left, MarkdownSearchSource right)
+    {
+        var order = string.CompareOrdinal(left.Path, right.Path);
+        order = order != 0 ? order : string.CompareOrdinal(left.Property, right.Property);
+        return order != 0 ? order : (right.File is not null).CompareTo(left.File is not null);
     }
 
     // The notes of the subject, with its title, and those of each of its properties that the path provider includes,

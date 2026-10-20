@@ -422,6 +422,42 @@ public sealed class HomeBlazeMarkdownSearchToolTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenAPageHasNotes_ThenThePageComesBeforeItsNotes()
+    {
+        // Arrange
+        var (root, services) = await CreateGraphAsync([]);
+        var page = ((FluentStorageContainer)root.Children["Storage"]).Children["Notes.md"];
+        var metadata = ImmutableDictionary<string, JsonElement>.Empty.Add("notes", JsonElement.Parse("\"The freezer page.\""));
+        page.TryGetRegisteredSubject()!.AddProperty(KnownAttributes.Metadata, metadata.GetType(), _ => metadata, null);
+        var tool = CreateTool(services, root, forAgents: true);
+
+        // Act
+        var result = await CallAsync(tool, new { query = "freezer" });
+
+        // Assert
+        var matches = result.GetProperty("pages").EnumerateArray().ToArray();
+        Assert.Equal(["/Storage/Notes.md", "/Storage/Notes.md"], matches.Select(match => match.GetProperty("path").GetString()));
+        Assert.Equal([false, true], matches.Select(match => match.TryGetProperty("kind", out _)));
+    }
+
+    [Fact]
+    public async Task WhenTheRootHasNotes_ThenTheyAreFoundAtTheRootAndTheDescriptionSaysHowToReadThem()
+    {
+        // Arrange
+        var (root, services) = await CreateGraphAsync([]);
+        var metadata = ImmutableDictionary<string, JsonElement>.Empty.Add("notes", JsonElement.Parse("\"The freezer of the house.\""));
+        root.TryGetRegisteredSubject()!.AddProperty(KnownAttributes.Metadata, metadata.GetType(), _ => metadata, null);
+        var tool = CreateTool(services, root, forAgents: true);
+
+        // Act
+        var result = await CallAsync(tool, new { query = "house" });
+
+        // Assert
+        Assert.Equal("/", GetSinglePage(result).GetProperty("path").GetString());
+        Assert.Contains("/HomeBlaze:Metadata for the root", tool.Description);
+    }
+
+    [Fact]
     public async Task WhenTheConfigurationIsReadOnly_ThenSearchMarkdownIsOfferedAsAReadOnlyTool()
     {
         // Act
