@@ -268,7 +268,7 @@ public class MetadataDisplayTests
     });
 
     [Fact]
-    public Task WhenTagsAreTypedAndAddedWithEnter_ThenEachIsOneChipAndARemovedChipIsNotWritten() => WithSidecarAsync("Motor.metadata.json", "{}", async () =>
+    public Task WhenTagsAreTypedAndAddedWithEnter_ThenEachIsOneChipAndARemovedChipIsNotWritten() => WithSidecarAsync("Motor.metadata.json", TagInUseSidecar, async () =>
     {
         // Arrange
         var (page, pane) = await OpenPaneAsync("Demo/Motor");
@@ -277,6 +277,10 @@ public class MetadataDisplayTests
         // MudDialog puts its test id on its content, which does not hold the actions.
         var dialog = page.Locator(".mud-dialog").Filter(new() { Has = page.GetByTestId("metadata-edit-dialog") });
         var tagInput = dialog.GetByTestId("metadata-tag-input");
+
+        // The suggestions on focus show that the field takes keys, which it can lose while the dialog opens.
+        await tagInput.ClickAsync();
+        await Assertions.Expect(page.Locator(".mud-popover-open .mud-list-item")).ToHaveTextAsync(["e2e-heat-pump"], new() { Timeout = PageLoadTimeout });
         await tagInput.PressSequentiallyAsync("e2e-kept");
         await tagInput.PressAsync("Enter");
         await Assertions.Expect(tagInput).ToHaveValueAsync("", new() { Timeout = PageLoadTimeout });
@@ -442,14 +446,47 @@ public class MetadataDisplayTests
         // MudDialog puts its test id on its content, which does not hold the actions.
         var dialog = page.Locator(".mud-dialog").Filter(new() { Has = page.GetByTestId("metadata-edit-dialog") });
         var tagInput = dialog.GetByTestId("metadata-tag-input");
-        await tagInput.PressSequentiallyAsync("pump");
-        await Assertions.Expect(page.Locator(".mud-popover-open").GetByText("e2e-heat-pump")).ToHaveCountAsync(1, new() { Timeout = PageLoadTimeout });
+        var suggestions = page.Locator(".mud-popover-open .mud-list-item");
+
+        // The field suggests every tag in use on focus, which shows that it takes keys, and Enter could pick that
+        // suggestion while the search of the typed text runs.
+        await tagInput.ClickAsync();
+        await Assertions.Expect(suggestions).ToHaveTextAsync(["e2e-heat-pump"], new() { Timeout = PageLoadTimeout });
 
         // Act
+        await tagInput.PressSequentiallyAsync("pump");
         await tagInput.PressAsync("Enter");
 
         // Assert
         await Assertions.Expect(dialog.GetByTestId("metadata-tag-chip")).ToHaveTextAsync(["pump"], new() { Timeout = PageLoadTimeout });
+        await Assertions.Expect(tagInput).ToHaveValueAsync("");
+    });
+
+    [Fact]
+    public Task WhenASuggestionIsChosenWithTheArrowKeysAndEnterIsPressed_ThenTheTagInUseIsAdded() => WithSidecarAsync("Motor.metadata.json", TagInUseSidecar, async () =>
+    {
+        // Arrange
+        var (page, pane) = await OpenPaneAsync("Demo/Motor");
+        await pane.GetByTestId("edit-metadata-button").ClickAsync();
+
+        // MudDialog puts its test id on its content, which does not hold the actions.
+        var dialog = page.Locator(".mud-dialog").Filter(new() { Has = page.GetByTestId("metadata-edit-dialog") });
+        var tagInput = dialog.GetByTestId("metadata-tag-input");
+        var suggestions = page.Locator(".mud-popover-open .mud-list-item");
+        await tagInput.ClickAsync();
+        await Assertions.Expect(suggestions).ToHaveTextAsync(["e2e-heat-pump"], new() { Timeout = PageLoadTimeout });
+        await tagInput.PressSequentiallyAsync("heat");
+
+        // The typed text is the first suggestion only in the suggestions of the whole typed text.
+        await Assertions.Expect(suggestions).ToHaveTextAsync(["heat", "e2e-heat-pump"], new() { Timeout = PageLoadTimeout });
+
+        // Act
+        await tagInput.PressAsync("ArrowDown");
+        await tagInput.PressAsync("Enter");
+
+        // Assert
+        await Assertions.Expect(dialog.GetByTestId("metadata-tag-chip")).ToHaveTextAsync(["e2e-heat-pump"], new() { Timeout = PageLoadTimeout });
+        await Assertions.Expect(tagInput).ToHaveValueAsync("");
     });
 
     [Fact]
@@ -462,8 +499,12 @@ public class MetadataDisplayTests
         // MudDialog puts its test id on its content, which does not hold the actions.
         var dialog = page.Locator(".mud-dialog").Filter(new() { Has = page.GetByTestId("metadata-edit-dialog") });
         var tagInput = dialog.GetByTestId("metadata-tag-input");
+        var suggestions = page.Locator(".mud-popover-open .mud-list-item");
+        await tagInput.ClickAsync();
+        await Assertions.Expect(suggestions).ToHaveTextAsync(["e2e-heat-pump"], new() { Timeout = PageLoadTimeout });
         await tagInput.PressSequentiallyAsync("heat");
-        var suggestion = page.Locator(".mud-popover-open .mud-list-item").Filter(new() { HasText = "e2e-heat-pump" });
+        await Assertions.Expect(suggestions).ToHaveTextAsync(["heat", "e2e-heat-pump"], new() { Timeout = PageLoadTimeout });
+        var suggestion = suggestions.Filter(new() { HasText = "e2e-heat-pump" });
 
         // Act
         await suggestion.ClickAsync(new() { Timeout = PageLoadTimeout });

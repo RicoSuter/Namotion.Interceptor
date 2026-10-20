@@ -75,17 +75,21 @@
         }
         <MudButton StartIcon="@Icons.Material.Filled.AddLink" Variant="Variant.Text" OnClick="@(() => _links.Add(new LinkInput()))"
                    data-testid="metadata-add-link">Add link</MudButton>
-        @* The value changes only when a suggestion is picked; typed text is added on Enter, not on every keystroke. *@
-        <MudAutocomplete T="string"
-                         @ref="_tagInput"
-                         Label="Add tag"
-                         ValueChanged="AddTagAndClearInputAsync"
-                         TextChanged="@(text => _tagText = text)"
-                         OnKeyUp="OnTagKeyUpAsync"
-                         SearchFunc="SearchTagsAsync"
-                         CoerceText="false"
-                         Class="mt-4"
-                         data-testid="metadata-tag-input" />
+        @* The value changes only when a suggestion is picked; typed text is added on Enter, not on every keystroke. The
+           keys are seen on the element around the field, as the field passes a key on only after it handled it, which
+           can wait for the browser, so that a later key could be seen first. *@
+        <div @onkeydown="OnTagKeyDown">
+            <MudAutocomplete T="string"
+                             @ref="_tagInput"
+                             Label="Add tag"
+                             ValueChanged="AddTagAndClearInputAsync"
+                             TextChanged="OnTagTextChanged"
+                             OnKeyUp="OnTagKeyUpAsync"
+                             SearchFunc="SearchTagsAsync"
+                             CoerceText="false"
+                             Class="mt-4"
+                             data-testid="metadata-tag-input" />
+        </div>
         <div class="d-flex flex-wrap gap-1 mt-1">
             @foreach (var tag in _tags)
             {
@@ -122,6 +126,8 @@
     private readonly List<string> _tags = [];
     private IReadOnlyList<string> _tagsInUse = [];
     private string? _tagText;
+    private bool _isSuggestionChosen;
+    private string? _enterText;
     private MudAutocomplete<string>? _tagInput;
     private bool _isSaving;
 
@@ -180,25 +186,54 @@
         _tagText = null;
     }
 
-    // A picked suggestion; also called with null when the field is cleared.
+    // A picked suggestion; also called with null when the field is cleared. On Enter the field picks the highlighted
+    // suggestion, which can be one of a search for text typed before, so Enter adds the typed text instead unless a
+    // suggestion was chosen with the arrow keys.
     private async Task AddTagAndClearInputAsync(string? tag)
     {
         if (tag is null)
             return;
 
-        AddTag(tag);
+        AddTag(_enterText ?? tag);
+        _enterText = null;
 
         // The field keeps the text of what it added, which would look like a tag not added yet.
         if (_tagInput is not null)
             await _tagInput.ClearAsync();
     }
 
+    private void OnTagTextChanged(string? text)
+    {
+        _tagText = text;
+
+        // Typing searches again, which highlights the first suggestion.
+        _isSuggestionChosen = false;
+    }
+
+    // Runs in the order of the keys, before the field handles the release of Enter.
+    private void OnTagKeyDown(KeyboardEventArgs args)
+    {
+        if (args.Key is "ArrowDown" or "ArrowUp")
+            _isSuggestionChosen = true;
+        else if (args.Key is "Enter" or "NumpadEnter")
+            _enterText = _isSuggestionChosen ? null : _tagText ?? string.Empty;
+    }
+
     // Runs after the field handled the key: when Enter picked a suggestion, the field is cleared already.
-    private Task OnTagKeyUpAsync(KeyboardEventArgs args)
-        => args.Key is "Enter" or "NumpadEnter" ? AddTagAndClearInputAsync(_tagText) : Task.CompletedTask;
+    private async Task OnTagKeyUpAsync(KeyboardEventArgs args)
+    {
+        if (args.Key is not ("Enter" or "NumpadEnter"))
+            return;
+
+        var text = _enterText;
+        _enterText = null;
+        _isSuggestionChosen = false;
+        if (text is not null)
+            await AddTagAndClearInputAsync(text);
+    }
 
     // The tags in use that contain the text, so that the same tag is written the same way, after the text itself unless
-    // it is one of them: Enter picks the first suggestion, which is then what was typed.
+    // it is one of them.
     private Task<IEnumerable<string>> SearchTagsAsync(string? text, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(text))
