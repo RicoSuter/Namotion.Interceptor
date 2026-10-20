@@ -186,7 +186,18 @@ internal sealed class StorageMetadataApplier
             StorageMetadataValues.Set(subject, null, values);
         }
 
-        foreach (var property in subject.Properties)
+        // Collected in one pass, as looking up the attribute of each property scans all properties of the subject.
+        var properties = subject.Properties;
+        HashSet<string>? withMetadata = null;
+        foreach (var property in properties)
+        {
+            if (property.IsAttribute && property.AttributeMetadata.AttributeName == KnownAttributes.Metadata)
+            {
+                (withMetadata ??= []).Add(property.AttributeMetadata.PropertyName);
+            }
+        }
+
+        foreach (var property in properties)
         {
             if (property.IsAttribute || property.Name == KnownAttributes.Metadata)
             {
@@ -194,7 +205,7 @@ internal sealed class StorageMetadataApplier
             }
 
             values = key is not null && file.HasProperties ? file.FindProperty(MetadataPathKey.GetPropertyKey(key, property.Name)) : null;
-            if (values is not null || property.TryGetAttribute(KnownAttributes.Metadata) is not null)
+            if (values is not null || withMetadata?.Contains(property.Name) == true)
             {
                 StorageMetadataValues.Set(subject, property.Name, values);
             }
