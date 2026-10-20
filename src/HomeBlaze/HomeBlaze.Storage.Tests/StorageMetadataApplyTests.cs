@@ -338,6 +338,37 @@ public class StorageMetadataApplyTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenAStorageThatAnotherOneHoldsWritesItsOwnMetadata_ThenOnlyItsOrderIsAccepted()
+    {
+        // Arrange
+        var nestedDirectory = CreateTemporaryDirectory();
+        File.WriteAllText(Path.Combine(nestedDirectory.FullName, "a.md"), "a");
+        WriteFile("Nested.json", SerializeStorage(nestedDirectory.FullName));
+        var storage = await ConnectAsync();
+        var nested = Assert.IsType<FluentStorageContainer>(storage.Children["Nested"]);
+        await nested.ConnectAsync(CancellationToken.None);
+        try
+        {
+            // Act
+            var exception = await Assert.ThrowsAsync<StorageRefusedException>(() =>
+                nested.SetMetadataAsync(nested, null, Values("""{ "navTitle": "Archive", "order": ["a.md"] }"""), CancellationToken.None));
+            await nested.SetMetadataAsync(nested, null, Values("""{ "order": ["a.md"] }"""), CancellationToken.None);
+
+            // Assert
+            Assert.False(nested.CanStoreMetadata(nested));
+            Assert.True(storage.CanStoreMetadata(nested));
+            Assert.Contains("only its order", exception.Message);
+            Assert.Null(nested.GetMetadata());
+            Assert.Equal(["a.md"], nested.ChildOrder.ToArray());
+            Assert.DoesNotContain("navTitle", File.ReadAllText(Path.Combine(nestedDirectory.FullName, ".metadata.json")));
+        }
+        finally
+        {
+            nested.Dispose();
+        }
+    }
+
+    [Fact]
     public async Task WhenANestedStorageIsRemovedFromTheOuterStorage_ThenItsMetadataIsNoLongerWritten()
     {
         // Arrange

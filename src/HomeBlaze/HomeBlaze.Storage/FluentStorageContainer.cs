@@ -70,6 +70,9 @@ public partial class FluentStorageContainer :
     /// <summary>The clock for timeouts and timers. Read when the storage connects.</summary>
     internal TimeProvider TimeProvider { get; set; } = TimeProvider.System;
 
+    // False for a storage that another storage holds, which keeps the metadata of this one.
+    private bool IsOwnMetadataStore => ReferenceEquals(((IInterceptorSubject)this).FindMetadataStore(), this);
+
     /// <summary>Applies the metadata files of the subjects of this storage.</summary>
     internal StorageMetadataApplier MetadataApplier => _metadataApplier;
 
@@ -511,7 +514,7 @@ public partial class FluentStorageContainer :
     /// </summary>
     internal void ApplyMetadata(StorageMetadataFile? file)
     {
-        if (ReferenceEquals(((IInterceptorSubject)this).FindMetadataStore(), this) && this.TryGetRegisteredSubject() is { } registered)
+        if (IsOwnMetadataStore && this.TryGetRegisteredSubject() is { } registered)
         {
             StorageMetadataValues.Set(registered, null, file?.Own);
         }
@@ -616,7 +619,7 @@ public partial class FluentStorageContainer :
         var connection = Connection;
         await RunOperationAsync(connection, async token =>
         {
-            var target = GetMetadataTarget(connection, subject, propertyName);
+            var target = GetMetadataTarget(connection, subject, propertyName, copy);
             var content = await connection.Reconciler.ReadMetadataFileAsync(target.FilePath, token);
             var written = StorageMetadataWriter.Merge(content, target, copy);
             await WriteMetadataFileAsync(connection, target.FilePath, written, token);
@@ -625,8 +628,15 @@ public partial class FluentStorageContainer :
 
     // Runs on the worker. The own keys of the file of this storage or of a folder of it, or the entry of a subject or
     // property in the file beside the stored subject that holds it.
-    private StorageMetadataTarget GetMetadataTarget(StorageConnection connection, IInterceptorSubject subject, string? propertyName)
+    private StorageMetadataTarget GetMetadataTarget(StorageConnection connection, IInterceptorSubject subject, string? propertyName, JsonElement values)
     {
+        if (ReferenceEquals(subject, this) && !IsOwnMetadataStore &&
+            values.ValueKind == JsonValueKind.Object && values.EnumerateObject().Any(static property => !property.NameEquals(MetadataKeys.Order)))
+        {
+            throw new StorageRefusedException(
+                "This storage is held by another storage, which keeps its metadata in the file beside the file of this storage; its own .metadata.json keeps only its order.");
+        }
+
         if (ReferenceEquals(subject, this) || subject is VirtualFolder)
         {
             return propertyName is null

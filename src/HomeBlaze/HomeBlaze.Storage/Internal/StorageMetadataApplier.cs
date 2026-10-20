@@ -2,6 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Components.Abstractions.Pages;
+using HomeBlaze.Services;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -29,12 +30,17 @@ internal sealed class StorageMetadataApplier
     }
 
     /// <summary>
-    /// Gets whether the storage keeps the metadata of the subject: the storage itself, a folder of it, a stored subject
-    /// of it, and a subject inside one. Thread-safe.
+    /// Gets whether the storage keeps the metadata of the subject: the storage itself unless another storage holds it,
+    /// a folder of it, a stored subject of it, and a subject inside one. Thread-safe.
     /// </summary>
     public bool CanStoreMetadata(IInterceptorSubject subject)
     {
-        if (ReferenceEquals(subject, _storage) || (subject is VirtualFolder folder && ReferenceEquals(folder.Storage, _storage)))
+        if (ReferenceEquals(subject, _storage))
+        {
+            return ReferenceEquals(subject.FindMetadataStore(), _storage);
+        }
+
+        if (subject is VirtualFolder folder && ReferenceEquals(folder.Storage, _storage))
         {
             return true;
         }
