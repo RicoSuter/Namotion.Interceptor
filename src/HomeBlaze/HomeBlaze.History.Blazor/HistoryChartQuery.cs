@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.History.Abstractions;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -31,7 +32,20 @@ internal sealed record HistoryChartSeriesRequest(
 /// <param name="Data">What the chart draws.</param>
 /// <param name="Series">The query result of each request, in request order.</param>
 /// <param name="IsTruncated">Whether a series was cut to the point cap.</param>
-internal sealed record HistoryChartResult(HistoryChartData Data, IReadOnlyList<HistorySeries> Series, bool IsTruncated);
+internal sealed record HistoryChartResult(HistoryChartData Data, IReadOnlyList<HistorySeries> Series, bool IsTruncated)
+{
+    /// <summary>Gets the requests of the query, in request order.</summary>
+    public IReadOnlyList<HistoryChartSeriesRequest> Requests { get; init; } = [];
+
+    /// <summary>Gets the stores the query read.</summary>
+    public IReadOnlyList<IHistoryStore> Stores { get; init; } = [];
+
+    /// <summary>
+    /// Gets what the stores covered together before the query ran, which a later query of the same chart reuses the
+    /// result up to, or empty when the result cannot be reused (see <see cref="HistoryChartQuery.QueryAsync(IReadOnlyList{IHistoryStore}, IReadOnlyList{HistoryChartSeriesRequest}, DateTimeOffset, DateTimeOffset, HistoryBucket?, HistoryChartResult?, CancellationToken)"/>).
+    /// </summary>
+    public ImmutableArray<HistoryCoverage> Coverage { get; init; } = [];
+}
 
 /// <summary>
 /// Queries the history of the series of a chart and builds what the chart draws. Used by the history
@@ -98,14 +112,50 @@ internal static class HistoryChartQuery
     /// <returns>What the chart draws and the query result of each request.</returns>
     /// <exception cref="HistoryAggregationNotSupportedException">No store supports an aggregation.</exception>
     /// <exception cref="OperationCanceledException">The token was canceled.</exception>
+    public static Task<HistoryChartResult> QueryAsync(
+        IReadOnlyList<IHistoryStore> stores,
+        IReadOnlyList<HistoryChartSeriesRequest> requests,
+        DateTimeOffset from,
+        DateTimeOffset to,
+        HistoryBucket? bucket,
+        CancellationToken cancellationToken) =>
+        QueryAsync(stores, requests, from, to, bucket, previous: null, cancellationToken);
+
+    /// <summary>
+    /// Queries as <see cref="QueryAsync(IReadOnlyList{IHistoryStore}, IReadOnlyList{HistoryChartSeriesRequest}, DateTimeOffset, DateTimeOffset, HistoryBucket?, CancellationToken)"/>,
+    /// reusing the bars of <paramref name="previous"/> that cannot have changed since: a bar chart queries its lines only
+    /// from the bucket that held the end of what the stores had committed when <paramref name="previous"/> was queried,
+    /// and keeps the older bars. It queries everything when the requests, the stores, the bucket or the coverage of the
+    /// kept bars changed, when the window starts before <paramref name="previous"/> or ends before its end, and when a
+    /// series was cut to the point cap. Bands are always queried in full.
+    /// </summary>
+    /// <param name="stores">The history stores to merge.</param>
+    /// <param name="requests">The series in legend order.</param>
+    /// <param name="from">The start of the window.</param>
+    /// <param name="to">The end of the window.</param>
+    /// <param name="bucket">The bucket of the line queries, or null for raw samples.</param>
+    /// <param name="previous">The last result of the same chart, or null.</param>
+    /// <param name="cancellationToken">Cancels the queries.</param>
+    /// <returns>What the chart draws and the query result of each request.</returns>
+    /// <exception cref="HistoryAggregationNotSupportedException">No store supports an aggregation.</exception>
+    /// <exception cref="OperationCanceledException">The token was canceled.</exception>
     public static async Task<HistoryChartResult> QueryAsync(
         IReadOnlyList<IHistoryStore> stores,
         IReadOnlyList<HistoryChartSeriesRequest> requests,
         DateTimeOffset from,
         DateTimeOffset to,
         HistoryBucket? bucket,
+        HistoryChartResult? previous,
         CancellationToken cancellationToken)
     {
+        var isBars = bucket is not null && IsBars(requests);
+
+        // Taken before the queries, so everything it covers was committed when they ran.
+        var coverage = isBars ? GetCoverage(stores) : [];
+        var reuse = isBars && previous is not null
+            ? GetReuse(previous, stores, requests, from, to, bucket!.Value, coverage)
+            : null;
+
         var batches = new List<(List<int> Indexes, Task<IReadOnlyList<HistorySeries>> Query)>();
         foreach (var (isBand, indexes) in GroupBatches(requests))
         {
@@ -121,7 +171,7 @@ internal static class HistoryChartQuery
                 ? stores.QueryHistoryAsync(
                     paths, from, to, null, HistoryAggregations.Last, PropertyHistoryChartModel.MaxPoints, cancellationToken)
                 : stores.QueryHistoryAsync(
-                    paths, from, to, bucket, requests[indexes[0]].Aggregation, PropertyHistoryChartModel.MaxPoints, cancellationToken);
+                    paths, reuse?.QueryFrom ?? from, to, bucket, requests[indexes[0]].Aggregation, PropertyHistoryChartModel.MaxPoints, cancellationToken);
             batches.Add((indexes, query));
         }
 
@@ -162,11 +212,13 @@ internal static class HistoryChartQuery
             var results = query.Result;
             for (var position = 0; position < indexes.Count; position++)
             {
-                series[indexes[position]] = results[position];
+                var index = indexes[position];
+                series[index] = reuse is { } kept && !requests[index].IsBand
+                    ? Concat(previous!.Series[index], kept.KeepFrom, kept.QueryFrom, results[position])
+                    : results[position];
             }
         }
 
-        var isBars = bucket is not null && IsBars(requests);
         var palette = new HistoryStatePalette();
         var lines = new List<HistoryChartLine>();
         var bands = new List<HistoryChartBand>();
@@ -205,7 +257,138 @@ internal static class HistoryChartQuery
         }
 
         var data = new HistoryChartData(from, to, bucket, lines, bands, isBars);
-        return new HistoryChartResult(data, series, isTruncated);
+        return new HistoryChartResult(data, series, isTruncated)
+        {
+            Requests = requests,
+            Stores = stores,
+            Coverage = coverage
+        };
+    }
+
+    /// <summary>
+    /// The part of a previous result a query keeps: the line buckets from <paramref name="KeepFrom"/> to
+    /// <paramref name="QueryFrom"/>, which it then queries from.
+    /// </summary>
+    private readonly record struct Reuse(DateTimeOffset KeepFrom, DateTimeOffset QueryFrom);
+
+    private static ImmutableArray<HistoryCoverage> GetCoverage(IReadOnlyList<IHistoryStore> stores)
+    {
+        var ranges = new List<HistoryCoverage>();
+        foreach (var store in stores)
+        {
+            ranges.AddRange(store.CoverageRanges);
+        }
+
+        return HistoryCoverage.Normalize(ranges);
+    }
+
+    // A bucket that ended before what the stores had committed when the previous query ran holds its final increase:
+    // its readings, and the reading before it that seeds it, were all recorded. A store vouches for complete history
+    // only inside its coverage, so a sample flushed after that query is past the end of its coverage then.
+    private static Reuse? GetReuse(
+        HistoryChartResult previous,
+        IReadOnlyList<IHistoryStore> stores,
+        IReadOnlyList<HistoryChartSeriesRequest> requests,
+        DateTimeOffset from,
+        DateTimeOffset to,
+        HistoryBucket bucket,
+        ImmutableArray<HistoryCoverage> coverage)
+    {
+        if (previous.Coverage.IsEmpty ||
+            previous.Data.Bucket != bucket ||
+            from < previous.Data.From ||
+            to <= previous.Data.To ||
+            !HasSameQueries(previous, requests) ||
+            !HasSameStores(previous.Stores, stores))
+        {
+            return null;
+        }
+
+        // A window cut to the point cap starts later than a full query of it would.
+        var keepFrom = BucketAlignment.Start(from, bucket);
+        if (BucketAlignment.FirstBucketStart(from, to, bucket, PropertyHistoryChartModel.MaxPoints) != keepFrom)
+        {
+            return null;
+        }
+
+        var committed = previous.Coverage[^1].To;
+        var queryFrom = BucketAlignment.Start(committed < previous.Data.To ? committed : previous.Data.To, bucket);
+        if (queryFrom <= keepFrom)
+        {
+            return null;
+        }
+
+        // Retention or a store that lost history changes the kept buckets.
+        var kept = new HistoryCoverage(keepFrom, queryFrom);
+        return HistoryCoverage.Clip(previous.Coverage, kept).AsSpan().SequenceEqual(HistoryCoverage.Clip(coverage, kept).AsSpan())
+            ? new Reuse(keepFrom, queryFrom)
+            : null;
+    }
+
+    private static bool HasSameQueries(HistoryChartResult previous, IReadOnlyList<HistoryChartSeriesRequest> requests)
+    {
+        if (previous.Requests.Count != requests.Count)
+        {
+            return false;
+        }
+
+        for (var index = 0; index < requests.Count; index++)
+        {
+            var request = requests[index];
+            var previousRequest = previous.Requests[index];
+            if (request.PropertyPath != previousRequest.PropertyPath ||
+                request.IsBand != previousRequest.IsBand ||
+                request.Aggregation != previousRequest.Aggregation ||
+                (!request.IsBand && previous.Series[index].IsTruncated))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool HasSameStores(IReadOnlyList<IHistoryStore> previous, IReadOnlyList<IHistoryStore> stores)
+    {
+        if (previous.Count != stores.Count)
+        {
+            return false;
+        }
+
+        foreach (var store in stores)
+        {
+            var isKnown = false;
+            foreach (var previousStore in previous)
+            {
+                isKnown |= ReferenceEquals(store, previousStore);
+            }
+
+            if (!isKnown)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    // The kept buckets of the previous series followed by the queried ones.
+    private static HistorySeries Concat(
+        HistorySeries previous, DateTimeOffset keepFrom, DateTimeOffset queryFrom, HistorySeries queried)
+    {
+        var points = ImmutableArray.CreateBuilder<HistoryPoint>(previous.Points.Length + queried.Points.Length);
+        foreach (var point in previous.Points)
+        {
+            if (point.Timestamp >= keepFrom && point.Timestamp < queryFrom)
+            {
+                points.Add(point);
+            }
+        }
+
+        points.AddRange(queried.Points);
+        var coverage = HistoryCoverage.Normalize(
+            HistoryCoverage.Clip(previous.CoverageRanges, new HistoryCoverage(keepFrom, queryFrom)).Concat(queried.CoverageRanges));
+        return queried with { Points = points.DrainToImmutable(), CoverageRanges = coverage };
     }
 
     /// <summary>
