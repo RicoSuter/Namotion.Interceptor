@@ -447,6 +447,30 @@ public class SubjectBrowserLayoutTests
         }
     }
 
+    [Fact]
+    public async Task WhenAPathHasTheIntegerKeyOfAnInlinePathsEntry_ThenThePaneOfTheEntryOpens()
+    {
+        // Arrange
+        var (name, subject) = await _fixture.AddSubjectToRootAsync<IntKeyedInlineChildrenSubject>();
+        try
+        {
+            var entry = _fixture.ServerServices.GetRequiredService<SubjectFactory>().CreateSubject<PlainConfigurableSubject>();
+            entry.Website = new Uri("https://example.com/inline-entry-three");
+            subject.Items = new Dictionary<int, PlainConfigurableSubject> { [3] = entry };
+
+            // Act
+            var page = await OpenAsync($"browser/{name}/3", 1280, 720, paneCount: 3);
+
+            // Assert
+            await Assertions.Expect(ValueRow(LastPane(page), "Website").Locator("[data-testid='subject-pane-value-text']"))
+                .ToHaveTextAsync("https://example.com/inline-entry-three", new() { Timeout = PageLoadTimeout });
+        }
+        finally
+        {
+            _fixture.RemoveSubjectFromRoot(name, subject);
+        }
+    }
+
     [Theory]
     [InlineData("https://example.com/page", UriKind.Absolute, true)]
     [InlineData("javascript:alert(1)", UriKind.Absolute, false)]

@@ -85,7 +85,8 @@ public static class SubjectPathResolverExtensions
             if (child is not null || SubjectLookup.GetDictionaryKeyType(value.GetType()) == typeof(string))
                 return child;
 
-            // The registered children are the entries of the dictionary's last assignment, as in the core path resolver.
+            // The registered children are the entries of the dictionary's last assignment, so an entry added in place
+            // without assigning the dictionary again is not found.
             foreach (var entry in property.Children)
             {
                 if (entry.Index is not null && KeyTextEquals(entry.Index, indexText))
@@ -95,12 +96,13 @@ public static class SubjectPathResolverExtensions
             return null;
         }
 
-        if (property.IsSubjectCollection && int.TryParse(indexText, out var index))
+        if (property.IsSubjectCollection && int.TryParse(indexText, NumberStyles.None, CultureInfo.InvariantCulture, out var index))
             return SubjectLookup.FindSubjectInCollection(value, index);
 
         return null;
     }
 
+    // Mirrors PathSyntax.KeyTextEquals of the registry, which is internal.
     private static bool KeyTextEquals(object key, string text)
     {
         if (key is ISpanFormattable formattable)

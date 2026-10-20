@@ -280,11 +280,10 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
                 var inlinePathsPropertyName = InlinePathsAttribute.GetInlinePathsPropertyName(current.GetType());
                 if (inlinePathsPropertyName != null)
                 {
-                    var childrenProperty = registered?.TryGetProperty(inlinePathsPropertyName);
-                    var childrenValue = childrenProperty?.GetValue();
-                    if (childrenValue is not null)
+                    if (registered?.TryGetProperty(inlinePathsPropertyName) is { } childrenProperty &&
+                        childrenProperty.GetValue() is { } childrenValue)
                     {
-                        var childSubject = SubjectPathResolverExtensions.FindChildByIndex(childrenProperty!, childrenValue, segment);
+                        var childSubject = SubjectPathResolverExtensions.FindChildByIndex(childrenProperty, childrenValue, segment);
                         if (childSubject is not null)
                         {
                             current = childSubject;
