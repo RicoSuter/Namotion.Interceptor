@@ -889,7 +889,7 @@ public class MarkdownBlockTests
         var link = page.Locator(".markdown-content a", new() { HasTextString = "Theme link" });
 
         // Act
-        await page.GetByTitle("Toggle Dark Mode").ClickAsync();
+        await page.ToggleDarkModeAsync();
 
         // Assert: #3f2ddd, the primary color of the light palette.
         await Assertions.Expect(link).ToHaveCSSAsync("color", "rgb(63, 45, 221)");

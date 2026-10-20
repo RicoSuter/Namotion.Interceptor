@@ -60,7 +60,25 @@ position: 1
 | `icon` | string | MudBlazor icon name (e.g., `Dashboard`, `Settings`, `Article`) |
 | `position` | number | Sort order in navigation (lower = higher in list) |
 | `location` | string | Where to show in navigation: `NavBar` (sidebar, default) or `AppBar` (top bar) |
-| `alignment` | string | AppBar alignment: `Left` (default) or `Right`. Only used when `location` is `AppBar` |
+| `alignment` | string | AppBar alignment: `Left` (default), `Right` or `Menu` (see [The Top Bar Menu](#the-top-bar-menu)). Only used when `location` is `AppBar` |
+
+### The Top Bar Menu
+
+The ⋮ button at the right end of the top bar opens a menu with the developer mode, the time zone, the dark mode, and Home and Reload for a phone that shows no address bar. A page with `location: AppBar` and `alignment: Menu` is an entry at the top of this menu instead of an icon in the bar, which suits pages that are opened now and then:
+
+```yaml
+---
+title: Heating Schedule
+icon: Thermostat
+location: AppBar
+alignment: Menu
+position: 10
+---
+```
+
+The entries are sorted like the icons in the bar, by `position` and then by title.
+
+The start page, which Home opens, is the top bar page with the lowest `position` on the left, else on the right, else in the menu. Without one it is the sidebar page with the lowest `position`, and without any page the subject browser. Only pages at the top level of the data folder count.
 
 ---
 
@@ -111,7 +129,7 @@ A picture is shown in a size that fits the page, and it always keeps its proport
 The navigation follows pages that are added, removed or changed while a browser tab is open:
 
 - **Sidebar.** The menu re-reads its items every 5 seconds, including the contents of every expanded folder. A folder appears once it contains a page.
-- **Top bar.** Pages with `location: AppBar` are read when the layout renders, which happens on navigation. Only pages at the top level of the data folder appear there.
+- **Top bar.** Pages with `location: AppBar`, including the entries of its menu, are read when the layout renders, which happens on navigation. Only pages at the top level of the data folder appear there.
 
 ### Known Limitations and Follow-ups
 

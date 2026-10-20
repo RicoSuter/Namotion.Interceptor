@@ -27,7 +27,7 @@ public interface IPage
     NavigationLocation PageLocation { get; }
 
     /// <summary>
-    /// Gets the AppBar alignment (Left or Right). Only used when PageLocation is AppBar.
+    /// Gets the AppBar alignment (Left, Right or Menu). Only used when PageLocation is AppBar.
     /// </summary>
     AppBarAlignment AppBarAlignment { get; }
 }

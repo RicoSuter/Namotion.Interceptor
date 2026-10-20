@@ -3,7 +3,6 @@
 
 @inherits LayoutComponentBase
 
-@inject DeveloperModeService DeveloperMode
 @inject RootManager RootManager
 @inject NavigationItemResolver NavigationResolver
 @inject NavigationManager NavigationManager
@@ -24,9 +23,10 @@
         <MudLayout>
             <TimeZoneInitializer />
             <MudAppBar Elevation="1">
+                @{ var appBarItems = GetAppBarItems(); }
                 <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start"
                                OnClick="@DrawerToggleAsync" title="Toggle Navigation"/>
-                @foreach (var item in GetAppBarItems(AppBarAlignment.Left))
+                @foreach (var item in appBarItems.Where(item => item.Alignment == AppBarAlignment.Left))
                 {
                     <MudIconButton Icon="@SubjectIconExtensions.ResolveMudBlazorIcon(item.Icon)"
                                    Href="@item.PageUrl"
@@ -34,21 +34,15 @@
                                    title="@item.Title"/>
                 }
                 <MudSpacer/>
-                @foreach (var item in GetAppBarItems(AppBarAlignment.Right))
+                @foreach (var item in appBarItems.Where(item => item.Alignment == AppBarAlignment.Right))
                 {
                     <MudIconButton Icon="@SubjectIconExtensions.ResolveMudBlazorIcon(item.Icon)"
                                    Href="@item.PageUrl"
                                    Color="@(IsActive(item) ? Color.Primary : Color.Inherit)"
                                    title="@item.Title"/>
                 }
-                <MudIconButton Icon="@(DeveloperModeIcon)"
-                               Color="@(DeveloperMode.IsEnabled ? Color.Success : Color.Inherit)"
-                               OnClick="@DeveloperMode.Toggle"
-                               title="Toggle Developer Mode"/>
-                <TimeZoneSelector />
-                <MudIconButton Icon="@(DarkLightModeButtonIcon)" Color="Color.Inherit" OnClick="@DarkModeToggle"
-                               title="Toggle Dark Mode"/>
-                <MudIconButton Icon="@Icons.Material.Filled.MoreVert" Color="Color.Inherit" Edge="Edge.End"/>
+                <AppBarMenu Pages="@appBarItems.Where(item => item.Alignment == AppBarAlignment.Menu).ToList()"
+                            IsDarkMode="@_isDarkMode" OnToggleDarkMode="@DarkModeToggle"/>
             </MudAppBar>
             <MudDrawer id="nav-drawer" @bind-Open="_drawerOpen" ClipMode="DrawerClipMode.Always" Elevation="2">
                 <NavMenu Root="@RootManager.Root"/>
@@ -98,7 +92,6 @@
     protected override void OnInitialized()
     {
         base.OnInitialized();
-        DeveloperMode.OnChange += OnStateHasChanged;
         NavigationManager.LocationChanged += OnLocationChanged;
 
         _isRootLoaded = RootManager.RootLoaded.IsCompletedSuccessfully;
@@ -201,28 +194,12 @@
         LinesInputs = "rgba(255,255,255,0.4)"
     };
 
-    public string DarkLightModeButtonIcon => _isDarkMode switch
-    {
-        true => Icons.Material.Rounded.AutoMode,
-        false => Icons.Material.Outlined.DarkMode,
-    };
-
-    public string DeveloperModeIcon => DeveloperMode.IsEnabled
-        ? Icons.Material.Filled.DeveloperMode
-        : Icons.Material.Outlined.DeveloperMode;
-
     public void Dispose()
     {
-        DeveloperMode.OnChange -= OnStateHasChanged;
         NavigationManager.LocationChanged -= OnLocationChanged;
 
         _disposalTokenSource.Cancel();
         _disposalTokenSource.Dispose();
-    }
-
-    private void OnStateHasChanged()
-    {
-        InvokeAsync(StateHasChanged);
     }
 
     private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
@@ -230,13 +207,14 @@
         InvokeAsync(StateHasChanged);
     }
 
-    private IEnumerable<NavigationItem> GetAppBarItems(AppBarAlignment alignment)
+    private List<NavigationItem> GetAppBarItems()
     {
         if (RootManager.Root == null)
-            return Enumerable.Empty<NavigationItem>();
+            return [];
 
         return NavigationResolver.GetChildItems(RootManager.Root)
-            .Where(item => item.Location == NavigationLocation.AppBar && item.IsPage && item.Alignment == alignment);
+            .Where(item => item.Location == NavigationLocation.AppBar && item.IsPage)
+            .ToList();
     }
 
     // The error page is shown exactly when the system is unhealthy, so it must render even if the
@@ -245,9 +223,6 @@
         .ToBaseRelativePath(NavigationManager.Uri)
         .StartsWith("Error", StringComparison.OrdinalIgnoreCase);
 
-    private bool IsActive(NavigationItem item)
-    {
-        var currentPath = NavigationManager.ToBaseRelativePath(NavigationManager.Uri);
-        return currentPath.Equals(item.PageUrl, StringComparison.OrdinalIgnoreCase);
-    }
+    private bool IsActive(NavigationItem item) =>
+        item.IsPageUrlOf(NavigationManager.ToBaseRelativePath(NavigationManager.Uri));
 }

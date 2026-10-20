@@ -21,16 +21,16 @@
 
         var items = NavigationResolver.GetChildItems(Root).Where(i => i.IsPage).ToList();
 
-        // Try first AppBar page (left aligned first, then right)
+        // Try first AppBar page (left aligned first, then right, then the menu)
         var appBarPage = items
             .Where(i => i.Location == NavigationLocation.AppBar)
-            .OrderBy(i => i.Alignment == AppBarAlignment.Left ? 0 : 1)
+            .OrderBy(i => i.Alignment switch { AppBarAlignment.Left => 0, AppBarAlignment.Right => 1, _ => 2 })
             .ThenBy(i => i.Order)
             .FirstOrDefault();
 
         if (appBarPage != null)
         {
-            Navigation.NavigateTo(appBarPage.PageUrl);
+            Navigation.NavigateTo(appBarPage.PageUrl, replace: true);
             return;
         }
 
@@ -42,11 +42,11 @@
 
         if (navBarPage != null)
         {
-            Navigation.NavigateTo(navBarPage.PageUrl);
+            Navigation.NavigateTo(navBarPage.PageUrl, replace: true);
             return;
         }
 
         // Fallback to browser
-        Navigation.NavigateTo("/browser");
+        Navigation.NavigateTo("/browser", replace: true);
     }
 }
