@@ -177,21 +177,14 @@ public sealed class SubjectTransaction : IDisposable
     {
         lock (_pendingChangesLock)
         {
-            var pendingChanges = _pendingChanges;
-            if (pendingChanges is null)
+            var liveChangeCount = GetLiveChangeCount();
+            if (liveChangeCount == 0)
             {
                 return [];
             }
 
-            var result = new List<SubjectPropertyChange>(GetLiveChangeCount());
-            foreach (var change in pendingChanges.Values)
-            {
-                if (!IsCancelled(change.Property))
-                {
-                    result.Add(change);
-                }
-            }
-
+            var result = new SubjectPropertyChange[liveChangeCount];
+            CopyLiveChanges(result, excluded: null);
             return result;
         }
     }
@@ -205,9 +198,42 @@ public sealed class SubjectTransaction : IDisposable
     }
 
     /// <summary>
-    /// Returns true when the pending change for <paramref name="property"/> is cancelled. Must be called under
+    /// Returns true when <paramref name="property"/> has a pending change that is not cancelled. Must be called under
     /// <see cref="_pendingChangesLock"/>.
     /// </summary>
+    private bool TryGetLiveChange(PropertyReference property, out SubjectPropertyChange change)
+    {
+        if (_pendingChanges is not null && _pendingChanges.TryGetValue(property, out change) && !IsCancelled(property))
+        {
+            return true;
+        }
+
+        change = default;
+        return false;
+    }
+
+    /// <summary>
+    /// Copies the pending changes that are not cancelled and whose property is not in <paramref name="excluded"/> to
+    /// <paramref name="destination"/> in insertion order, and returns their number. Must be called under
+    /// <see cref="_pendingChangesLock"/>.
+    /// </summary>
+    private int CopyLiveChanges(Span<SubjectPropertyChange> destination, HashSet<PropertyReference>? excluded)
+    {
+        var count = 0;
+        if (_pendingChanges is not null)
+        {
+            foreach (var change in _pendingChanges.Values)
+            {
+                if (!IsCancelled(change.Property) && (excluded is null || !excluded.Contains(change.Property)))
+                {
+                    destination[count++] = change;
+                }
+            }
+        }
+
+        return count;
+    }
+
     private bool IsCancelled(PropertyReference property)
     {
         return _cancelledChanges is { Count: > 0 } cancelledChanges && cancelledChanges.Contains(property);
@@ -227,7 +253,7 @@ public sealed class SubjectTransaction : IDisposable
                 return false;
             }
 
-            if (_pendingChanges.TryGetValue(property, out var change) && !IsCancelled(property))
+            if (TryGetLiveChange(property, out var change))
             {
                 value = change.GetNewValue<TProperty>();
                 return true;
@@ -248,7 +274,7 @@ public sealed class SubjectTransaction : IDisposable
         {
             lock (_pendingChangesLock)
             {
-                if (_pendingChanges is not null && _pendingChanges.TryGetValue(property, out var change) && !IsCancelled(property))
+                if (TryGetLiveChange(property, out var change))
                 {
                     value = change.GetNewValue<TProperty>();
                     return true;
@@ -346,7 +372,7 @@ public sealed class SubjectTransaction : IDisposable
 
         lock (transaction._pendingChangesLock)
         {
-            return transaction._pendingChanges?.ContainsKey(property) == true && !transaction.IsCancelled(property);
+            return transaction.TryGetLiveChange(property, out _);
         }
     }
 
@@ -1043,7 +1069,6 @@ public sealed class SubjectTransaction : IDisposable
         lock (_pendingChangesLock)
         {
             // Rent before changing state so an allocation failure leaves the transaction reusable.
-            var pendingChanges = _pendingChanges;
             var changeCount = GetLiveChangeCount();
             var rentedArray = ArrayPool<SubjectPropertyChange>.Shared.Rent(changeCount);
 
@@ -1051,19 +1076,8 @@ public sealed class SubjectTransaction : IDisposable
             // and the end of the commit.
             _isCommitting = true;
 
-            var index = 0;
-            if (pendingChanges is not null)
-            {
-                foreach (var change in pendingChanges.Values)
-                {
-                    if (!IsCancelled(change.Property))
-                    {
-                        rentedArray[index++] = change;
-                    }
-                }
-            }
-
-            Debug.Assert(index == changeCount, "Cancelled changes must be a subset of the pending changes.");
+            var copiedCount = CopyLiveChanges(rentedArray, excluded: null);
+            Debug.Assert(copiedCount == changeCount, "Cancelled changes must be a subset of the pending changes.");
 
             return (rentedArray, rentedArray.AsMemory(0, changeCount));
         }
@@ -1165,22 +1179,8 @@ public sealed class SubjectTransaction : IDisposable
     {
         lock (_pendingChangesLock)
         {
-            var pendingChanges = _pendingChanges;
             var rentedArray = ArrayPool<SubjectPropertyChange>.Shared.Rent(GetLiveChangeCount());
-            var count = 0;
-            if (pendingChanges is not null)
-            {
-                foreach (var change in pendingChanges.Values)
-                {
-                    if (!IsCancelled(change.Property) &&
-                        (failedProperties is null || !failedProperties.Contains(change.Property)))
-                    {
-                        rentedArray[count++] = change;
-                    }
-                }
-            }
-
-            return (rentedArray, count);
+            return (rentedArray, CopyLiveChanges(rentedArray, failedProperties));
         }
     }
 
