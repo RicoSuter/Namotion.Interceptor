@@ -375,7 +375,9 @@ internal static class StorageMetadataWriter
         return buffer.WrittenCount;
     }
 
-    // Indented, ending with a new line, with the characters of the basic plane as they are and without the keys whose value is null.
+    // Indented, ending with a new line, and without the keys whose value is null. The built-in relaxed encoder writes most
+    // characters as they are and escapes a few: characters outside the basic plane such as emoji, U+2028, U+2029, U+FEFF,
+    // and private-use and unassigned characters.
     private static byte[] Serialize(JsonObject root)
     {
         var buffer = new ArrayBufferWriter<byte>();
