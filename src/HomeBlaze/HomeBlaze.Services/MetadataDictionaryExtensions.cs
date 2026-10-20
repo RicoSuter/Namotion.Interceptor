@@ -1,7 +1,9 @@
+using System.Buffers;
 using System.Collections.Immutable;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
+using System.Text.Unicode;
 using HomeBlaze.Components.Abstractions.Pages;
 
 namespace HomeBlaze.Services;
@@ -86,12 +88,14 @@ public static class MetadataDictionaryExtensions
     /// </summary>
     public static bool HasNotesLinksOrTags(this IReadOnlyDictionary<string, JsonElement>? metadata)
         => metadata is not null &&
-           (HasItem(metadata, MetadataKeys.Tags, static item => GetTag(item) is not null) ||
-            HasItem(metadata, MetadataKeys.Links, static item => TryGetTarget(item, out _, out _)) ||
-            metadata.GetString(MetadataKeys.Notes) is not null);
+           (HasItem(metadata, MetadataKeys.Tags, IsTag) ||
+            HasItem(metadata, MetadataKeys.Links, IsLink) ||
+            metadata.TryGetValue(MetadataKeys.Notes, out var notes) && HasText(notes));
 
-    // Whether one of the first 20 items of the array of the key is one, without the arrays of GetLinks and GetTags, as the
-    // rows of the browser check every render.
+    // The checks below read the raw UTF-8 of a string without escapes rather than the string, as the rows of the browser
+    // check every render; they apply the rules of GetString, GetTag and TryGetTarget.
+
+    // Whether one of the first 20 items of the array of the key is one.
     private static bool HasItem(IReadOnlyDictionary<string, JsonElement> metadata, string key, Func<JsonElement, bool> isItem)
     {
         if (!metadata.TryGetValue(key, out var value) || value.ValueKind != JsonValueKind.Array)
@@ -114,6 +118,117 @@ public static class MetadataDictionaryExtensions
         }
 
         return false;
+    }
+
+    private static bool HasText(JsonElement value)
+        => value.ValueKind == JsonValueKind.String &&
+           (TryGetUtf8Text(value, out var text) ? !TrimWhiteSpace(text).IsEmpty : !string.IsNullOrWhiteSpace(GetText(value)));
+
+    private static bool IsTag(JsonElement item)
+    {
+        if (item.ValueKind != JsonValueKind.String)
+        {
+            return false;
+        }
+
+        if (!TryGetUtf8Text(item, out var text))
+        {
+            return GetTag(item) is not null;
+        }
+
+        var tag = TrimWhiteSpace(text);
+        return !tag.IsEmpty && IsAllowedText(tag, MetadataText.MaxTagLength);
+    }
+
+    private static bool IsLink(JsonElement item)
+    {
+        if (item.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        JsonElement? url = null;
+        JsonElement? path = null;
+        foreach (var member in item.EnumerateObject())
+        {
+            if (member.Value.ValueKind != JsonValueKind.String)
+            {
+                continue;
+            }
+
+            if (url is null && HasName(member, "url"u8, "url"))
+            {
+                url = member.Value;
+            }
+            else if (path is null && HasName(member, "path"u8, "path"))
+            {
+                path = member.Value;
+            }
+        }
+
+        return IsAllowedTarget(url) is { } isUrlAllowed
+            ? isUrlAllowed && IsAllowedTarget(path) is null
+            : IsAllowedTarget(path) == true;
+    }
+
+    // Null for a member that is not set or blank, else whether it has no control or format character.
+    private static bool? IsAllowedTarget(JsonElement? member)
+    {
+        if (member is not { } value)
+        {
+            return null;
+        }
+
+        if (!TryGetUtf8Text(value, out var text))
+        {
+            var target = GetText(value)?.Trim();
+            return string.IsNullOrEmpty(target) ? null : !MetadataText.HasControlOrFormatCharacter(target);
+        }
+
+        text = TrimWhiteSpace(text);
+        return text.IsEmpty ? null : IsAllowedText(text, int.MaxValue);
+    }
+
+    // The text of a string as the raw UTF-8 between its quotes; false when it has escapes or is no valid UTF-8, as only
+    // GetString reads it then.
+    private static bool TryGetUtf8Text(JsonElement value, out ReadOnlySpan<byte> text)
+    {
+        text = JsonMarshal.GetRawUtf8Value(value)[1..^1];
+        return !text.Contains((byte)'\\') && Utf8.IsValid(text);
+    }
+
+    // As string.Trim, which trims the characters that are whitespace, none of which is outside the basic plane.
+    private static ReadOnlySpan<byte> TrimWhiteSpace(ReadOnlySpan<byte> text)
+    {
+        while (Rune.DecodeFromUtf8(text, out var character, out var size) == OperationStatus.Done && Rune.IsWhiteSpace(character))
+        {
+            text = text[size..];
+        }
+
+        while (Rune.DecodeLastFromUtf8(text, out var character, out var size) == OperationStatus.Done && Rune.IsWhiteSpace(character))
+        {
+            text = text[..^size];
+        }
+
+        return text;
+    }
+
+    // Whether the text has at most the length, in characters of UTF-16, and no control or format character.
+    private static bool IsAllowedText(ReadOnlySpan<byte> text, int maxLength)
+    {
+        var length = 0;
+        while (Rune.DecodeFromUtf8(text, out var character, out var size) == OperationStatus.Done)
+        {
+            length += character.Utf16SequenceLength;
+            if (length > maxLength || MetadataText.IsControlOrFormat(character))
+            {
+                return false;
+            }
+
+            text = text[size..];
+        }
+
+        return true;
     }
 
     // The item as a tag, trimmed; null when it is no string or breaks the rules of a tag.

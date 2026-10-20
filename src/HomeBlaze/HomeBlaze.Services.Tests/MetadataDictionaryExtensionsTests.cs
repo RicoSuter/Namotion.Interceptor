@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Text;
 using System.Text.Json;
 using HomeBlaze.Components.Abstractions.Pages;
 
@@ -235,5 +236,81 @@ public class MetadataDictionaryExtensionsTests
 
         // Assert
         Assert.Equal(expected, hasNotesLinksOrTags);
+    }
+
+    // JSON string content: raw characters and escapes, which the check reads without and with the string.
+    public static TheoryData<string> StringValues =>
+    [
+        "", " ", "\u00A0\u3000", "\\u0020", "\\t", "pump", " pump ", "\\u0070ump", "\u00E9t\u00E9", "\U0001F600",
+        "a\u200Bb", "a\u202Eb", "pump\U000E0041", "a\\u200Bb", "a\\tb", "\\uD800", "\\uD800 pump",
+        new string('a', 64), new string('a', 65), " " + new string('a', 64) + "\u3000", string.Concat(Enumerable.Repeat("\U0001F600", 32)),
+        string.Concat(Enumerable.Repeat("\U0001F600", 33)), "\\/Devices\\/Pump", "https://example.com/manual.pdf"
+    ];
+
+    [Theory]
+    [MemberData(nameof(StringValues))]
+    public void WhenMetadataIsCheckedForNotesLinksOrTags_ThenItAgreesWithWhatIsRead(string value)
+    {
+        // Arrange
+        var notes = Metadata($$"""{ "notes": "{{value}}" }""");
+        var tags = Metadata($$"""{ "tags": ["{{value}}"] }""");
+        var urls = Metadata($$"""{ "links": [{ "title": "Manual", "URL": "{{value}}" }] }""");
+        var paths = Metadata($$"""{ "links": [{ "\u0070ath": 1, "path": "{{value}}" }] }""");
+        var urlsAndPaths = Metadata($$"""{ "links": [{ "url": "{{value}}", "path": "/Devices" }] }""");
+
+        // Act & Assert
+        Assert.Equal(notes.GetString(MetadataKeys.Notes) is not null, notes.HasNotesLinksOrTags());
+        Assert.Equal(tags.GetTags().Length > 0, tags.HasNotesLinksOrTags());
+        Assert.Equal(urls.GetLinks(MetadataKeys.Links).Length > 0, urls.HasNotesLinksOrTags());
+        Assert.Equal(paths.GetLinks(MetadataKeys.Links).Length > 0, paths.HasNotesLinksOrTags());
+        Assert.Equal(urlsAndPaths.GetLinks(MetadataKeys.Links).Length > 0, urlsAndPaths.HasNotesLinksOrTags());
+    }
+
+    [Theory]
+    [InlineData("notes")]
+    [InlineData("tags")]
+    [InlineData("url")]
+    public void WhenAStringIsNoValidUtf8_ThenItIsNoNotesLinkOrTag(string key)
+    {
+        // Arrange
+        var json = key switch
+        {
+            "notes" => "{ \"notes\": \"pump \u0001\" }",
+            "tags" => "{ \"tags\": [\"pump \u0001\"] }",
+            _ => "{ \"links\": [{ \"url\": \"https://example.com/\u0001\" }] }"
+        };
+        var utf8 = Encoding.UTF8.GetBytes(json);
+        utf8[Array.IndexOf(utf8, (byte)1)] = 0xC3;
+        var metadata = JsonDocument.Parse(utf8).RootElement.EnumerateObject().ToImmutableDictionary(property => property.Name, property => property.Value.Clone());
+
+        // Act
+        var hasNotesLinksOrTags = metadata.HasNotesLinksOrTags();
+
+        // Assert
+        Assert.False(hasNotesLinksOrTags);
+        Assert.Null(metadata.GetString(MetadataKeys.Notes));
+        Assert.Empty(metadata.GetTags());
+        Assert.Empty(metadata.GetLinks(MetadataKeys.Links));
+    }
+
+    [Fact]
+    public void WhenMetadataIsCheckedForNotesLinksOrTags_ThenNothingIsAllocated()
+    {
+        // Arrange
+        var notes = Metadata("""{ "notes": " Calibrated in 2026, see the manual." }""");
+        var tags = Metadata("""{ "tags": [" ", "pump"] }""");
+        var links = Metadata("""{ "links": [{ "title": "Manual", "URL": "https://example.com/manual.pdf" }] }""");
+        var none = Metadata("""{ "notes": " ", "tags": [" "], "links": [{ "title": "Neither" }] }""");
+        bool Check() => notes.HasNotesLinksOrTags() && tags.HasNotesLinksOrTags() && links.HasNotesLinksOrTags() && !none.HasNotesLinksOrTags();
+        Check();
+
+        // Act
+        var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+        var result = Check();
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+
+        // Assert
+        Assert.True(result);
+        Assert.Equal(0, allocated);
     }
 }
