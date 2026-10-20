@@ -17,6 +17,10 @@ public class MetadataNotesTests
     [InlineData("[run](javascript:alert(1))")]
     [InlineData("![pump](https://example.com/pump.png)")]
     [InlineData("{{ Temperature }}")]
+    [InlineData("[home](//example.com)")]
+    [InlineData(@"[home](/\example.com)")]
+    [InlineData(@"[home](\\\\example.com)")]
+    [InlineData("[home]\n\n[home]: //example.com")]
     public void WhenNotesBreakTheRules_ThenTheyAreNotRenderedAsHtml(string notes)
     {
         // Act

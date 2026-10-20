@@ -1,13 +1,15 @@
 using System.Text;
 using HomeBlaze.Storage.Internal;
 using HomeBlaze.Storage.Pages;
+using Markdig.Syntax;
+using Markdig.Syntax.Inlines;
 
 namespace HomeBlaze.Storage;
 
 /// <summary>
 /// The <c>notes</c> of metadata: Markdown under the rules that the write operations of pages apply to new content, no
-/// HTML, pictures, blocks, element attributes or expressions, and links only to http, https, mailto or relative
-/// addresses.
+/// HTML, pictures, blocks, element attributes or expressions, and links only to http, https or mailto addresses or to
+/// relative paths in this application.
 /// </summary>
 public static class MetadataNotes
 {
@@ -16,7 +18,7 @@ public static class MetadataNotes
 
     private const string RulesMessage =
         "notes hold Markdown text without HTML, pictures, blocks, element attributes or {{ }} expressions, and links only to " +
-        "http, https or mailto addresses or to paths in this application.";
+        "http, https or mailto addresses or to relative paths in this application.";
 
     /// <summary>Gets why the notes are refused, or null when they may be written.</summary>
     public static string? GetError(string notes)
@@ -34,13 +36,28 @@ public static class MetadataNotes
         try
         {
             MarkdownWriteRules.EnsureActiveContentUnchanged(string.Empty, notes, nameof(notes));
-            return null;
+            return HasLinkToOtherHost(notes) ? RulesMessage : null;
         }
         catch (ArgumentException)
         {
             return RulesMessage;
         }
     }
+
+    // Browsers read a link that starts with two slashes or backslashes, ignoring whitespace and control characters, as
+    // one to another host.
+    private static bool HasLinkToOtherHost(string notes)
+        => MarkdownPageParser.Parse(notes).Document.Descendants().Any(static node => node switch
+        {
+            LinkInline { Url: { } url } => IsToOtherHost(url),
+            LinkReferenceDefinition { Url: { } url } => IsToOtherHost(url),
+            _ => false
+        });
+
+    private static bool IsToOtherHost(string url)
+        => url.Where(static character => !char.IsWhiteSpace(character) && !char.IsControl(character))
+              .Take(2)
+              .Count(static character => character is '/' or '\\') == 2;
 
     /// <summary>
     /// Converts the notes to HTML; null for notes that break the rules, such as after an edit of the file by hand,

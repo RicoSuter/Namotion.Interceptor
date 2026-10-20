@@ -403,6 +403,7 @@ public class StorageMetadataWriterTests
     [InlineData("""{ "notes": "![pump](https://example.com/pump.png)" }""", "notes hold Markdown")]
     [InlineData("""{ "notes": "[run](javascript:alert(1))" }""", "notes hold Markdown")]
     [InlineData("""{ "notes": "{{ Temperature }}" }""", "notes hold Markdown")]
+    [InlineData("""{ "notes": "[home](//example.com)" }""", "notes hold Markdown")]
     [InlineData("""{ "notes": "::: Card\n:::" }""", "notes hold Markdown")]
     [InlineData("""{ "notes": 1 }""", "'notes'")]
     [InlineData("""{ "links": [{ "title": "Manual" }] }""", "exactly one of a url and a path")]
