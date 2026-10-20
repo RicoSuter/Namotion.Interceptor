@@ -77,6 +77,13 @@ internal sealed class StorageMetadataFile
     /// <summary>Gets the entry of the property with the key; null without one.</summary>
     public ImmutableDictionary<string, JsonElement>? FindProperty(string key) => _properties.GetValueOrDefault(key);
 
+    /// <summary>Gets the JSON of the content of a metadata file, without a UTF-8 byte order mark.</summary>
+    public static ReadOnlySpan<byte> GetJson(byte[] content)
+    {
+        ReadOnlySpan<byte> json = content;
+        return json.StartsWith(Encoding.UTF8.Preamble) ? json[Encoding.UTF8.Preamble.Length..] : json;
+    }
+
     /// <summary>
     /// Reads the content of a metadata file. Content that is no JSON object, has a key that cannot be read, such as one
     /// with a lone surrogate, has a key of the file or of an entry twice, or has a section or an entry that is
@@ -86,15 +93,9 @@ internal sealed class StorageMetadataFile
     public static bool TryParse(
         byte[] content, [NotNullWhen(true)] out StorageMetadataFile? file, [NotNullWhen(false)] out Exception? error)
     {
-        ReadOnlySpan<byte> json = content;
-        if (json.StartsWith(Encoding.UTF8.Preamble))
-        {
-            json = json[Encoding.UTF8.Preamble.Length..];
-        }
-
         try
         {
-            var root = JsonElement.Parse(json, DocumentOptions);
+            var root = JsonElement.Parse(GetJson(content), DocumentOptions);
             if (root.ValueKind != JsonValueKind.Object)
             {
                 throw new JsonException("A metadata file holds a JSON object.");
