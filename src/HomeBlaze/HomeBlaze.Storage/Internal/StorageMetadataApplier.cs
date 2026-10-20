@@ -139,11 +139,14 @@ internal sealed class StorageMetadataApplier
     /// </summary>
     public void ApplyStoredMetadata(IInterceptorSubject attachedSubject, string? propertyName)
     {
-        // The own keys of a stored subject are set with its file, so a file without entries has nothing to apply here.
+        // A subject that attaches is applied with a file without entries as well, as it may bring metadata from where
+        // it was before; a property that is added has none, so it needs an entry. Metadata stays stale when the subject
+        // moves outside any storage or into a stored subject without an applied file, and when the reference to its
+        // new place is added before the old one is removed, as the subject then does not attach again.
         if (attachedSubject.TryGetRegisteredSubject() is not { } subject ||
             !TryFindStoredSubject(subject, out var stored) ||
             !_files.TryGetValue(stored.Subject, out var file) ||
-            !HasEntries(file))
+            (propertyName is not null && !file.HasProperties))
         {
             return;
         }
@@ -170,12 +173,14 @@ internal sealed class StorageMetadataApplier
     // Sets the metadata of the subject and of its properties from the file, and null where an entry is gone.
     private static void ApplyEntries(RegisteredSubject subject, RegisteredSubject stored, StorageMetadataFile file)
     {
-        if (MetadataPathKey.GetKey(subject, stored) is not { } key)
+        // Without entries, only the stored subject has keys, its own, so the path is not needed.
+        string? key = null;
+        if (HasEntries(file) && (key = MetadataPathKey.GetKey(subject, stored)) is null)
         {
             return;
         }
 
-        var values = key.Length == 0 ? file.Own : file.FindSubject(key);
+        var values = ReferenceEquals(subject, stored) ? file.Own : key is null ? null : file.FindSubject(key);
         if (values is not null || subject.TryGetProperty(KnownAttributes.Metadata) is not null)
         {
             StorageMetadataValues.Set(subject, null, values);
@@ -188,7 +193,7 @@ internal sealed class StorageMetadataApplier
                 continue;
             }
 
-            values = file.HasProperties ? file.FindProperty(MetadataPathKey.GetPropertyKey(key, property.Name)) : null;
+            values = key is not null && file.HasProperties ? file.FindProperty(MetadataPathKey.GetPropertyKey(key, property.Name)) : null;
             if (values is not null || property.TryGetAttribute(KnownAttributes.Metadata) is not null)
             {
                 StorageMetadataValues.Set(subject, property.Name, values);

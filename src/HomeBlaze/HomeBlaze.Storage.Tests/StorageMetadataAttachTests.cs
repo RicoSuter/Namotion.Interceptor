@@ -112,6 +112,23 @@ public class StorageMetadataAttachTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenASubjectMovesIntoAStoredSubjectWhoseFileHasNoEntries_ThenItLosesItsOldMetadata()
+    {
+        // Arrange
+        WriteFile("Other.json", MetadataTestDevice.Serialize());
+        var (storage, device) = await LoadDeviceAsync();
+        var other = Assert.IsType<MetadataTestDevice>(storage.Children["Other"]);
+        var channel = device.Channel!;
+
+        // Act
+        device.Channel = null;
+        other.Channel = channel;
+
+        // Assert
+        Assert.Null(channel.GetMetadata().GetString(MetadataKeys.NavigationTitle));
+    }
+
+    [Fact]
     public void WhenAStoredSubjectIsNoLongerUsed_ThenTheAppliedMetadataDoesNotKeepIt()
     {
         // Arrange
