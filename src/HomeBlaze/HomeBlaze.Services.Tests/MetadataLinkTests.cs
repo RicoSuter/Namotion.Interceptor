@@ -18,12 +18,12 @@ public class MetadataLinkTests
     [InlineData("manual.pdf", false)]
     [InlineData("//example.com", false)]
     [InlineData("", false)]
-    public void WhenAnAddressIsChecked_ThenOnlyAbsoluteHttpHttpsAndMailtoAddressesAreWebAddresses(string url, bool expected)
+    public void WhenAnAddressIsChecked_ThenOnlyAbsoluteHttpHttpsAndMailtoAddressesAreAllowed(string url, bool expected)
     {
         // Act
-        var isWebAddress = MetadataLink.IsWebAddress(url);
+        var isAllowed = MetadataLink.IsAllowedAddress(url);
 
         // Assert
-        Assert.Equal(expected, isWebAddress);
+        Assert.Equal(expected, isAllowed);
     }
 }

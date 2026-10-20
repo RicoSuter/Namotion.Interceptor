@@ -109,7 +109,7 @@ public class MetadataDictionaryExtensionsTests
     }
 
     [Fact]
-    public void WhenALinkWasEditedByHandToAnAddressThatIsNoWebAddress_ThenItIsReadAsNoWebAddress()
+    public void WhenALinkWasEditedByHandToAnAddressThatIsNotAllowed_ThenItIsReadAsNotAllowed()
     {
         // Arrange
         var metadata = Metadata("""{ "links": [{ "title": "Run", "url": "javascript:alert(1)" }] }""");
@@ -119,7 +119,7 @@ public class MetadataDictionaryExtensionsTests
 
         // Assert
         Assert.Equal("javascript:alert(1)", link.Url);
-        Assert.False(MetadataLink.IsWebAddress(link.Url!));
+        Assert.False(MetadataLink.IsAllowedAddress(link.Url!));
     }
 
     [Fact]

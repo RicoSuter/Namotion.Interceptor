@@ -348,7 +348,7 @@ internal static class StorageMetadataWriter
     }
 
     // An empty array removes the key. Each link is an object with an optional title and exactly one of an absolute
-    // http, https or mailto url and an absolute path.
+    // http, https or mailto url and an absolute path, each member trimmed.
     private static JsonNode? ToLinks(string key, JsonElement value)
     {
         if (value.ValueKind == JsonValueKind.Null)
@@ -418,7 +418,7 @@ internal static class StorageMetadataWriter
             throw Refuse($"Each item of '{key}' has exactly one of a url and a path.");
         }
 
-        if (url is not null && !MetadataLink.IsWebAddress(url))
+        if (url is not null && !MetadataLink.IsAllowedAddress(url))
         {
             throw Refuse($"The url {NameList.Format([url])} of '{key}' is no absolute http, https or mailto address.");
         }

@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
+using HomeBlaze.Services;
 using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Pages;
@@ -605,9 +606,7 @@ internal static partial class MarkdownWriteRules
         }
 
         var scheme = new string(url.AsSpan(0, colon).ToArray().Where(character => !char.IsWhiteSpace(character) && !char.IsControl(character)).ToArray());
-        return scheme.Equals("http", StringComparison.OrdinalIgnoreCase) ||
-               scheme.Equals("https", StringComparison.OrdinalIgnoreCase) ||
-               scheme.Equals("mailto", StringComparison.OrdinalIgnoreCase);
+        return MetadataLink.IsAllowedScheme(scheme);
     }
 
     // Whether every item of the new list has its own occurrence in the old list.

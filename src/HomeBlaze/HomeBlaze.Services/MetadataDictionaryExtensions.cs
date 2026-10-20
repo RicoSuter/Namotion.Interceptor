@@ -60,7 +60,7 @@ public static class MetadataDictionaryExtensions
     /// <summary>
     /// Gets the links of the first 20 items of the key, leaving out an item that is no object with exactly one of a
     /// <c>url</c> and a <c>path</c> string; empty without an array. The address of a link is returned as it is held, see
-    /// <see cref="MetadataLink.IsWebAddress"/>.
+    /// <see cref="MetadataLink.IsAllowedAddress"/>.
     /// </summary>
     public static ImmutableArray<MetadataLink> GetLinks(this IReadOnlyDictionary<string, JsonElement>? metadata, string key)
     {
