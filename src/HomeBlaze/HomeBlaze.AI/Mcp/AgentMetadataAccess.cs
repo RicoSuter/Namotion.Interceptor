@@ -19,7 +19,8 @@ internal static class AgentMetadataAccess
     // Guards against a cycle of parents, which a walk up would follow forever.
     private const int MaxDepth = 256;
 
-    // The description of SearchMetadata names this limit.
+    // The tools return at most this many matches of SearchMetadata, as its description says; the method itself returns
+    // every match.
     private const int MaxSearchMetadataMatches = 100;
 
     /// <summary>

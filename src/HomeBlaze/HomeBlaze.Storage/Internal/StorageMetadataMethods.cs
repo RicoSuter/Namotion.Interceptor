@@ -18,8 +18,8 @@ internal static class StorageMetadataMethods
         "of the folder. Example: {\"navTitle\": \"Hall light\", \"tags\": [\"floor-2\"], \"icon\": null}.";
 
     public const string SearchMetadataDescription =
-        "Finds the subjects and properties in this storage whose metadata matches every filter that is given, and returns at most the first 100 by path " +
-        "and then property, each with path, the path of the subject relative to this storage, and property, the name of the property or omitted for the " +
+        "Finds the subjects and properties in this storage whose metadata matches every filter that is given, and returns them by path and then " +
+        "property, at most the first 100 to MCP clients, each with path, the path of the subject relative to this storage, and property, the name of the property or omitted for the " +
         "subject, as SetMetadata takes them. tag: a tag in tags; key: a key that is set, such as notes; value: equals the whole value of a string, or of a " +
         "string in an array, of key when it is given, else of any key, and never a number or a boolean; path: the path of a subject relative to this " +
         "storage that the results are at or below. Keys, tags and values match without regard to case. To find text inside notes, use search_markdown. " +
