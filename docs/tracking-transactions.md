@@ -215,7 +215,7 @@ using var tx = await context.BeginTransactionAsync(
 
 ### Commit Timeout
 
-**Default: 30-second timeout**, applied only to the external source write/revert phase (commits with no sources are not timed). If a source write exceeds it, that write is reported as a failure in a `SubjectTransactionException`. If the source revert after a failed source write in `Rollback` mode is in progress when it fires, an `OperationCanceledException` is thrown and the transaction stays retryable; during a source revert after a pre-apply rejection or after the local apply started, the timeout is reported as a failed revert and the commit fails terminally.
+**Default: 30-second timeout**, applied only to the external source write/revert phase (commits with no sources are not timed). If a source write exceeds it, that write is reported as a failure in a `SubjectTransactionException`. If the source revert after a failed source write, or a writer error without failed changes, in `Rollback` mode is in progress when it fires, an `OperationCanceledException` is thrown and the transaction stays retryable; during a source revert after a pre-apply rejection or after the local apply started, the timeout is reported as a failed revert and the commit fails terminally.
 
 ```csharp
 // Custom timeout
@@ -317,7 +317,7 @@ catch (SubjectTransactionException ex)
 }
 ```
 
-The built-in `SourceTransactionWriter` never throws: a source that fails or throws is reported as a failed write and reverted through the normal failure handling. Only a custom `ITransactionWriter` that throws instead of reporting violates this contract. In that case the commit fails with a `SubjectTransactionException` reporting every change as failed, applies nothing to the local model, and the transaction becomes terminal (it must be disposed, not retried). Its sources are not reverted then, because the writer never returned the written set and revert state that reverting requires, so they may be left in an undefined state. A custom writer that throws from `RevertSourceWritesAsync` is handled the same way: the changes it was asked to revert are reported as failed reverts and the commit fails terminally. An in-place marking contract violation detected by `SubjectTransaction.ValidateWriterContract` (see [Implementing a Custom Transaction Writer](#implementing-a-custom-transaction-writer)) also fails terminally. A commit timeout during the source revert after a failed source write in `Rollback` mode (`OperationCanceledException`) is the one exception and stays retryable. A timeout during a source revert after a pre-apply rejection or after the local apply started is reported as a failed revert, and a timeout during a source write as a failed write; both are terminal.
+The built-in `SourceTransactionWriter` never throws: a source that fails or throws is reported as a failed write and reverted through the normal failure handling. Only a custom `ITransactionWriter` that throws instead of reporting violates this contract. In that case the commit fails with a `SubjectTransactionException` reporting every change as failed, applies nothing to the local model, and the transaction becomes terminal (it must be disposed, not retried). Its sources are not reverted then, because the writer never returned the written set and revert state that reverting requires, so they may be left in an undefined state. A custom writer that throws from `RevertSourceWritesAsync` is handled the same way: the changes it was asked to revert are reported as failed reverts and the commit fails terminally. An in-place marking contract violation detected by `SubjectTransaction.ValidateWriterContract` (see [Implementing a Custom Transaction Writer](#implementing-a-custom-transaction-writer)) also fails terminally. A commit timeout during the source revert after a failed source write, or a writer error without failed changes, in `Rollback` mode (`OperationCanceledException`) is the one exception and stays retryable. A timeout during a source revert after a pre-apply rejection or after the local apply started is reported as a failed revert, and a timeout during a source write as a failed write; both are terminal.
 
 ### SubjectTransactionConflictException
 
@@ -340,7 +340,7 @@ catch (SubjectTransactionConflictException ex)
 |-----------|-------|
 | `InvalidOperationException` | Nested transactions, already committed, transactions not enabled, committing from a different async flow |
 | `ObjectDisposedException` | Using a disposed transaction |
-| `OperationCanceledException` | Commit timeout during the source revert after a failed source write in `Rollback` mode (other commit timeouts are reported via `SubjectTransactionException`) |
+| `OperationCanceledException` | Commit timeout during the source revert after a failed source write, or a writer error without failed changes, in `Rollback` mode (other commit timeouts are reported via `SubjectTransactionException`) |
 | `SubjectTransactionValidationException` | The commit check found invalid values (validation package). Thrown before anything is written, so the transaction is retryable |
 
 ### Failure Flows and Consistency
@@ -348,7 +348,7 @@ catch (SubjectTransactionConflictException ex)
 A commit attempt ends in one of three states:
 
 - **Committed**: the commit succeeded. The transaction is finished and must be disposed.
-- **Failed, retryable**: the commit aborted before the local model was touched, either before anything was written at all (conflict detected, commit check rejected by a transaction handler, optimistic lock not acquired) or because a commit timeout interrupted the source revert after a failed source write in `Rollback` mode. The pending changes remain intact and `CommitAsync` can be called again on the same transaction. See [Retry After Conflict Detection](#retry-after-conflict-detection).
+- **Failed, retryable**: the commit aborted before the local model was touched, either before anything was written at all (conflict detected, commit check rejected by a transaction handler, optimistic lock not acquired) or because a commit timeout interrupted the source revert after a failed source write, or a writer error without failed changes, in `Rollback` mode. The pending changes remain intact and `CommitAsync` can be called again on the same transaction. See [Retry After Conflict Detection](#retry-after-conflict-detection).
 - **Failed, terminal**: the commit got past the source-write stage, so writes may have reached sources or the local model, and compensation (reverts) already ran once. The pending changes are cleared, a second `CommitAsync` throws `InvalidOperationException`, and the transaction must be disposed and replaced with a new one. Retrying would replay the snapshot onto state that has already moved, for example re-pushing values to a source that already accepted them.
 
 Note that "terminal" describes the transaction, not the result: a successful commit is also terminal. Transactions are one-shot once anything has moved.
@@ -362,7 +362,7 @@ The tables below list every flow and its end state per property. "Old" means the
 | All applies succeed | any | new | committed |
 | Some applies fail | BestEffort without transaction handlers | applied keep new, failed keep old | terminal failure, reported per change |
 | Some applies fail, reverts succeed | Rollback, or BestEffort with transaction handlers | all old | terminal failure |
-| Some applies fail, a revert also fails | Rollback, or BestEffort with transaction handlers | mixed, despite Rollback | terminal failure, stuck properties are in `FailedChanges` |
+| Some applies fail, a revert also fails | Rollback, or BestEffort with transaction handlers | mixed, despite Rollback | terminal failure, stuck properties are in `FailedChanges` (with transaction handlers, listed again after every change) |
 
 Commits with source writes (`WithSourceTransactions()` or a custom `ITransactionWriter`) involve two models that must agree: the external source and the local model. The next two tables split these flows by how they end.
 
@@ -380,11 +380,11 @@ Commits with source writes (`WithSourceTransactions()` or a custom `ITransaction
 | Writer reports an error without failed changes (custom writers only), reverts succeed | Rollback | all old | all old | terminal failure |
 | Writer reports an error without failed changes (custom writers only) | BestEffort | new | new | terminal failure, error surfaced in `Errors` |
 
-**Source writes, diverged end state.** A revert failed, was interrupted, or never ran, so a property can end with different values at the source and in the local model. The end state depends only on which revert got stuck, not on which stage triggered it, so each row covers every path that reaches it. Diverged properties are always reported in `FailedChanges` and `Errors`, except for a throwing writer where the transaction cannot know which sources were touched:
+**Source writes, diverged end state.** A revert failed, was interrupted, or never ran, so a property can end with different values at the source and in the local model. The end state depends only on which revert got stuck, not on which stage triggered it, so each row covers every path that reaches it. Diverged properties are always reported in `FailedChanges` and `Errors`, except for a throwing writer where the transaction cannot know which sources were touched. When `FailedChanges` holds every change, after a pre-apply rejection or a failed apply checked by transaction handlers, a diverged property appears a second time after the full list:
 
 | Scenario | Mode | Source ends | Local ends | Outcome | Divergence |
 |----------|------|-------------|------------|---------|------------|
-| Commit timeout during the source revert after a failed source write | Rollback | partially reverted | old | retryable failure | transient, a successful retry re-pushes everything |
+| Commit timeout during the source revert after a failed source write or a writer error without failed changes | Rollback | partially reverted | old | retryable failure | transient, a successful retry re-pushes everything |
 | A source revert fails or throws, or a commit timeout interrupts it after a pre-apply rejection or after the local apply started | any | new on the stuck source | old | terminal failure | source ahead of local |
 | A local revert fails after a failed apply | Rollback, or BestEffort with transaction handlers | old | new | terminal failure | local ahead of source |
 | Custom writer throws from `WriteToSourcesAsync` | any | unknown, never reverted | old | terminal failure | unknown and unreported |
@@ -490,7 +490,7 @@ An `ITransactionHandler` is called for the writes a transaction captures and che
 
 **Writes during a check.** Handlers must not write properties. A write on the committing thread throws `InvalidOperationException`, including a write to a settable derived property. A write of a property's landed value on the committing thread is dropped by the equality check before it reaches the transaction, same as outside a transaction. When the transaction is used from several threads, a write from another thread, for example a child task, can call `OnCapturing` while `OnCommitting` runs before it is rejected, so handlers must tolerate concurrent calls.
 
-**Applies and rollbacks.** A handler that also intercepts writes can call `SubjectTransaction.TryConsumeCommitWrite` to recognize the apply of a value it already checked, or a rollback restoring one, and skip checking it again. Only the first handler to call it for a write recognizes it; another handler that intercepts the same write checks it again. It does not recognize the applies after the first failed apply of a commit, or any apply after the transaction was disposed during the commit. The remaining applies after a failed apply no longer land as the checked set, so a handler that intercepts writes checks them against the model as it is at that point, and a value that depends on later values of the set may then be rejected. A failed apply invalidates the checked set, so in both failure handling modes the commit then reverts the applied values and every written source, and reports every change as failed.
+**Applies and rollbacks.** A handler that also intercepts writes can call `SubjectTransaction.TryConsumeCommitWrite` to recognize the apply of a value it already checked, or a rollback restoring one, and skip checking it again. Only the first handler to call it for a write recognizes it; another handler that intercepts the same write checks it again. It does not recognize any apply after the transaction was disposed during the commit. A failed apply invalidates the checked set, so in both failure handling modes the commit applies no further changes, reverts the applied values and every written source, and reports every change as failed in `FailedChanges`, followed again by each change whose local or source revert failed. A pre-apply rejection reports the same way.
 
 Writes outside transactions are not blocked by a commit, so a property a handler reads can change between its check and the local apply. The pre-apply check narrows that window to the synchronous apply itself; transactional writes cannot interleave, because every commit holds the context's transaction lock.
 

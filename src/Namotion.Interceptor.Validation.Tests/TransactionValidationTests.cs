@@ -328,7 +328,7 @@ public class TransactionValidationTests
     }
 
     [Fact]
-    public async Task WhenApplyOfLimitFailsInBestEffort_ThenSpeedCheckedAgainstItIsValidatedAndRejected()
+    public async Task WhenApplyOfLimitFailsInBestEffort_ThenSpeedCheckedAgainstItIsNotApplied()
     {
         // Arrange
         var context = CreateContext();
@@ -348,8 +348,7 @@ public class TransactionValidationTests
         Assert.Equal(
             [nameof(Motor.MaxAllowedSpeed), nameof(Motor.MotorSpeed)],
             exception.FailedChanges.Select(change => change.Property.Name));
-        Assert.IsType<InvalidOperationException>(exception.Errors[0]);
-        Assert.IsType<ValidationException>(exception.Errors[1]);
+        Assert.IsType<InvalidOperationException>(Assert.Single(exception.Errors));
         Assert.Equal(100, motor.MaxAllowedSpeed);
         Assert.Equal(0, motor.MotorSpeed);
     }
@@ -478,6 +477,7 @@ public class TransactionValidationTests
             [nameof(Motor.MaxAllowedSpeed), nameof(Motor.MotorSpeed)],
             exception.FailedChanges.Select(change => change.Property.Name));
         Assert.Contains("exceeds SpeedCap", Assert.IsType<ValidationException>(Assert.Single(exception.Errors)).Message);
+        Assert.Contains("No changes have been applied", exception.Message);
         Assert.Equal(100, motor.MaxAllowedSpeed);
         Assert.Equal(0, motor.MotorSpeed);
         Assert.Equal(2, writer.Reverted.Count);

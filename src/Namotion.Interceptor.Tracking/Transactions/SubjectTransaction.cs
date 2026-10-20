@@ -92,9 +92,8 @@ public sealed class SubjectTransaction : IDisposable
     /// </summary>
     /// <remarks>
     /// Only one handler can consume a mark. When another handler that also intercepts writes checks the same write
-    /// afterwards, this returns false for it, so it must check the write again. It also returns false for the applies
-    /// after the first failed apply of a commit, and for every apply after the transaction was disposed during the
-    /// commit.
+    /// afterwards, this returns false for it, so it must check the write again. It also returns false for every apply
+    /// after the transaction was disposed during the commit.
     /// </remarks>
     /// <typeparam name="TProperty">The type of the written value.</typeparam>
     /// <param name="handler">The handler asking whether it already checked the write.</param>
@@ -632,8 +631,9 @@ public sealed class SubjectTransaction : IDisposable
                         failure = CreateRollbackFailureException(
                             MarkingTransaction is null
                                 ? SubjectPropertyChangeOperations.Concat(applyFailed, revertFailed)
-                                : GetCheckedSetFailedChanges(changes.Span, []),
-                            SubjectPropertyChangeOperations.Concat(applyErrors, revertErrors));
+                                : GetCheckedSetFailedChanges(changes.Span, [], revertFailed, []),
+                            SubjectPropertyChangeOperations.Concat(applyErrors, revertErrors),
+                            localRevertFailed: revertFailed.Count > 0);
                     }
                     else
                     {
@@ -743,16 +743,18 @@ public sealed class SubjectTransaction : IDisposable
         {
             var revert = await RevertSourceWritesSafelyAsync(writer, written, revertState, propagateTimeout: rejectionErrors is null, cancellationToken).ConfigureAwait(false);
 
-            // A rejection fails every checked change, which includes every written one. After a source failure, the
-            // written changes that were reverted cleanly are not reported.
-            var notApplied = rejectionErrors is null
-                ? SubjectPropertyChangeOperations.Concat(
-                    SubjectPropertyChangeOperations.ExcludeByProperty(changes.Span, failedSource, written), revert.Failed)
-                : SubjectPropertyChangeOperations.ExcludeByProperty(changes.Span, failedSource, []);
-            return CreateFailureException(
-                [],
+            // A rejection fails every checked change, which includes every written one, and lists a change again when
+            // its source revert failed. After a source failure, the written changes that were reverted cleanly are not
+            // reported.
+            var notApplied = SubjectPropertyChangeOperations.Concat(
+                rejectionErrors is null
+                    ? SubjectPropertyChangeOperations.ExcludeByProperty(changes.Span, failedSource, written)
+                    : SubjectPropertyChangeOperations.ExcludeByProperty(changes.Span, failedSource, []),
+                revert.Failed);
+            return CreateRollbackFailureException(
                 SubjectPropertyChangeOperations.Concat(failedSource, notApplied),
-                SubjectPropertyChangeOperations.Concat(sourceErrors, rejectionErrors ?? [], revert.Errors));
+                SubjectPropertyChangeOperations.Concat(sourceErrors, rejectionErrors ?? [], revert.Errors),
+                localRevertFailed: false);
         }
 
         return await ApplyAfterSourceWritesAsync(writer, changes, writeResult, cancellationToken).ConfigureAwait(false);
@@ -793,11 +795,15 @@ public sealed class SubjectTransaction : IDisposable
             {
                 // All-or-nothing: revert local applies, then the source writes.
                 var sourceRevert = await RevertSourceWritesSafelyAsync(writer, written, revertState, propagateTimeout: false, cancellationToken).ConfigureAwait(false);
+                Debug.Assert(
+                    MarkingTransaction is not null || failedSource.Count == 0,
+                    "Without handlers only Rollback gets here, which reverts every source after a source write failure before the apply.");
                 return CreateRollbackFailureException(
                     MarkingTransaction is null
                         ? GetRolledBackFailedChanges(changes.Span, written, applyFailed, revertFailed, sourceRevert.Failed)
-                        : GetCheckedSetFailedChanges(changes.Span, failedSource),
-                    SubjectPropertyChangeOperations.Concat(sourceErrors, applyErrors, revertErrors, sourceRevert.Errors));
+                        : GetCheckedSetFailedChanges(changes.Span, failedSource, revertFailed, sourceRevert.Failed),
+                    SubjectPropertyChangeOperations.Concat(sourceErrors, applyErrors, revertErrors, sourceRevert.Errors),
+                    localRevertFailed: revertFailed.Count > 0);
             }
 
             // BestEffort without handlers: keep source == model for failed-apply properties by reverting only the source writes whose
@@ -815,15 +821,22 @@ public sealed class SubjectTransaction : IDisposable
     }
 
     /// <summary>
-    /// Returns every change, the source-write failures first, for a failed apply after handlers checked the changes:
-    /// they were checked as a set, so none of them commits once one fails, as after a pre-apply rejection.
+    /// Returns the changes a failed apply reports after handlers checked them: every change, the source-write failures
+    /// first, because they were checked as a set and none of them commits once one fails, as after a pre-apply
+    /// rejection. The changes whose local revert failed follow, then those whose source revert failed, so a stuck
+    /// property appears a second time.
     /// </summary>
     private static IReadOnlyList<SubjectPropertyChange> GetCheckedSetFailedChanges(
         ReadOnlySpan<SubjectPropertyChange> changes,
-        IReadOnlyList<SubjectPropertyChange> failedSource)
+        IReadOnlyList<SubjectPropertyChange> failedSource,
+        IReadOnlyList<SubjectPropertyChange> revertFailed,
+        IReadOnlyList<SubjectPropertyChange> sourceRevertFailed)
     {
         return SubjectPropertyChangeOperations.Concat(
-            failedSource, SubjectPropertyChangeOperations.ExcludeByProperty(changes, failedSource, []));
+            failedSource,
+            SubjectPropertyChangeOperations.ExcludeByProperty(changes, failedSource, []),
+            revertFailed,
+            SubjectPropertyChangeOperations.ExceptReported(sourceRevertFailed, revertFailed));
     }
 
     /// <summary>
@@ -837,8 +850,7 @@ public sealed class SubjectTransaction : IDisposable
         IReadOnlyList<SubjectPropertyChange> revertFailed,
         IReadOnlyList<SubjectPropertyChange> sourceRevertFailed)
     {
-        // Rollback reverts every source after a source write failure before the apply, so nothing failed at a source
-        // here, and every change outside 'written' has no source.
+        // Nothing failed at a source here, so every change outside 'written' has no source.
         var reported = SubjectPropertyChangeOperations.Concat(applyFailed, revertFailed);
         return SubjectPropertyChangeOperations.Concat(
             applyFailed,
@@ -1243,13 +1255,18 @@ public sealed class SubjectTransaction : IDisposable
     }
 
     /// <summary>
-    /// Creates the exception of a commit that rolled back its local applies, in either failure handling mode.
+    /// Creates the exception of a commit that landed nothing or rolled back its local applies, in either failure
+    /// handling mode.
     /// </summary>
     private static SubjectTransactionException CreateRollbackFailureException(
         IReadOnlyList<SubjectPropertyChange> failed,
-        IReadOnlyList<Exception> errors)
+        IReadOnlyList<Exception> errors,
+        bool localRevertFailed)
     {
-        return new SubjectTransactionException(RollbackFailureMessage, [], failed, errors);
+        var message = localRevertFailed
+            ? "One or more changes failed. Rollback was attempted, but some changes could not be reverted in the local model."
+            : RollbackFailureMessage;
+        return new SubjectTransactionException(message, [], failed, errors);
     }
 
     /// <summary>

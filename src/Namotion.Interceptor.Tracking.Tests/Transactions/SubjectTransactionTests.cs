@@ -349,8 +349,9 @@ public class SubjectTransactionTests
         SubjectTransactionException exception;
         using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
         {
-            subject.Plain = "applied";
+            // The failing change comes first, so the applies continue after it.
             subject.Failing = "fails";
+            subject.Plain = "applied";
             subject.ThrowOnFailingWrite = true;
             exception = await Assert.ThrowsAsync<SubjectTransactionException>(
                 () => transaction.CommitAsync(CancellationToken.None).AsTask());

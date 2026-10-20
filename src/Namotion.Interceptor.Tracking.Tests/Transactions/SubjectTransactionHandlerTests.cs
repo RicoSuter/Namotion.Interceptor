@@ -1,4 +1,7 @@
 using System.Reactive.Concurrency;
+using System.Reactive.Linq;
+using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Tests.Models;
 using Namotion.Interceptor.Tracking.Transactions;
@@ -390,6 +393,152 @@ public class SubjectTransactionHandlerTests
     }
 
     [Fact]
+    public async Task WhenWriterFlowWritesLandedValueOfPendingPropertyDuringSourceWrite_ThenWriteThrows()
+    {
+        // Arrange
+        var writer = new CountingTransactionWriter();
+        var context = CreateContext(out _, writer);
+        var person = new Person(context) { FirstName = "Ann" };
+        Exception? writeError = null;
+        writer.DuringWrite = () => writeError = Record.Exception(() => person.FirstName = "Ann");
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "Bob";
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        var exception = Assert.IsType<InvalidOperationException>(writeError);
+        Assert.Contains("commit is in progress", exception.Message);
+        Assert.Equal("Bob", person.FirstName);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenChangeHookWritesLandedValueOfPendingPropertyDuringApply_ThenWriteIsDropped(bool withWriter)
+    {
+        // Arrange
+        var context = CreateContext(out _, withWriter ? new CountingTransactionWriter() : null);
+        var subject = new TransactionCascadeSubject(context) { Plain = "plain", SideEffect = "landed" };
+        var sideEffectChanges = new List<(string? OldValue, string? NewValue)>();
+        using var subscription = context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Where(change => change.Property.Name == nameof(TransactionCascadeSubject.SideEffect))
+            .Subscribe(change => sideEffectChanges.Add((change.GetOldValue<string?>(), change.GetNewValue<string?>())));
+        Exception? writeError = null;
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        subject.Plain = "applied";
+        subject.SideEffect = "pending";
+        subject.PlainChangedAction = changed => writeError = Record.Exception(() => changed.SideEffect = "landed");
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Null(writeError);
+        Assert.Equal("applied", subject.Plain);
+        Assert.Equal("pending", subject.SideEffect);
+        Assert.Equal([("landed", "pending")], sideEffectChanges);
+    }
+
+    [Fact]
+    public async Task WhenApplyFailsAfterHandlersCheckedTheSet_ThenLaterChangesAreNotApplied()
+    {
+        // Arrange
+        var context = CreateContext(out var handler);
+        var probe = new CommitWriteProbe(handler) { ThrowOnConsumedProperty = nameof(Person.FirstName) };
+        context.AddService(probe);
+        var person = new Person(context) { FirstName = "Ann", LastName = "Lee" };
+        probe.Writes.Clear();
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "Bob";
+        person.LastName = "Kim";
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Assert
+        Assert.Equal([nameof(Person.FirstName)], probe.Writes.Select(write => write.Property));
+        Assert.Equal(
+            [nameof(Person.FirstName), nameof(Person.LastName)],
+            exception.FailedChanges.Select(change => change.Property.Name));
+        Assert.Equal("apply failed", Assert.Single(exception.Errors).Message);
+        Assert.Equal("Ann", person.FirstName);
+        Assert.Equal("Lee", person.LastName);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenLocalRevertFailsAfterHandlersCheckedTheSet_ThenStuckChangeIsReportedAgain(bool withWriter)
+    {
+        // Arrange
+        var writer = new CountingTransactionWriter();
+        var context = CreateContext(out _, withWriter ? writer : null);
+        var rejectingInterceptor = new ValueRejectingWriteInterceptor();
+        context.AddService(rejectingInterceptor);
+        var person = new Person(context) { FirstName = "Ann", LastName = "Lee" };
+        rejectingInterceptor.Rejected.Add((nameof(Person.LastName), "Kim"));
+        rejectingInterceptor.Rejected.Add((nameof(Person.FirstName), "Ann"));
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "Bob";
+        person.LastName = "Kim";
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Assert
+        // Every change fails, and FirstName, whose restore failed, is listed again as stuck.
+        Assert.Equal(
+            [nameof(Person.FirstName), nameof(Person.LastName), nameof(Person.FirstName)],
+            exception.FailedChanges.Select(change => change.Property.Name));
+        Assert.Equal(
+            ["LastName write failed.", "FirstName write failed."],
+            exception.Errors.Select(error => error.Message));
+        Assert.Contains("could not be reverted", exception.Message);
+        Assert.Empty(exception.AppliedChanges);
+        Assert.Equal("Bob", person.FirstName);
+        Assert.Equal("Lee", person.LastName);
+        Assert.Equal(
+            withWriter ? [nameof(Person.FirstName), nameof(Person.LastName)] : [],
+            writer.Reverted.Select(change => change.Property.Name));
+    }
+
+    [Fact]
+    public async Task WhenSourceWriteAndApplyFailAfterHandlersCheckedTheSet_ThenNothingLandsAndOnlyWrittenSourcesAreReverted()
+    {
+        // Arrange
+        var writer = new CountingTransactionWriter { FailedPropertyNames = { nameof(TransactionCascadeSubject.SideEffect) } };
+        var context = CreateContext(out _, writer);
+        var subject = new TransactionCascadeSubject(context) { Plain = "plain", Failing = "failing", SideEffect = "side" };
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        subject.Plain = "new plain";
+        subject.Failing = "new failing";
+        subject.SideEffect = "new side";
+        subject.ThrowOnFailingWrite = true;
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Assert
+        Assert.Equal("plain", subject.Plain);
+        Assert.Equal("failing", subject.Failing);
+        Assert.Equal("side", subject.SideEffect);
+        Assert.Empty(exception.AppliedChanges);
+        Assert.Equal(
+            [nameof(TransactionCascadeSubject.SideEffect), nameof(TransactionCascadeSubject.Plain), nameof(TransactionCascadeSubject.Failing)],
+            exception.FailedChanges.Select(change => change.Property.Name));
+        Assert.Equal(
+            [nameof(TransactionCascadeSubject.Plain), nameof(TransactionCascadeSubject.Failing)],
+            writer.Reverted.Select(change => change.Property.Name));
+        Assert.Equal(["source write failed", "Setter failed."], exception.Errors.Select(error => error.Message));
+    }
+
+    [Fact]
     public async Task WhenDisposedDuringOnCommitting_ThenLockIsReleasedOnlyAfterCommitEnds()
     {
         // Arrange
@@ -654,5 +803,25 @@ public class SubjectTransactionHandlerTests
             TransactionFailureHandling.BestEffort, TransactionLocking.Optimistic);
         person.LastName = "Lee";
         await transaction.CommitAsync(CancellationToken.None);
+    }
+
+    /// <summary>
+    /// Throws for every write of a configured value to the property of that name. Runs after the transaction
+    /// interceptor, so it sees only the writes that reach the model.
+    /// </summary>
+    [RunsAfter(typeof(SubjectTransactionInterceptor))]
+    private sealed class ValueRejectingWriteInterceptor : IWriteInterceptor
+    {
+        public HashSet<(string Property, object? Value)> Rejected { get; } = [];
+
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            if (Rejected.Contains((context.Property.Name, context.NewValue)))
+            {
+                throw new InvalidOperationException($"{context.Property.Name} write failed.");
+            }
+
+            next(ref context);
+        }
     }
 }

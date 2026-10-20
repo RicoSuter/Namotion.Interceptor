@@ -13,8 +13,8 @@ internal static class SubjectPropertyChangeOperations
     /// properties). Inspect Failed.Count == 0 to detect full success. The Successful list is returned empty
     /// only on the no-exclude full-success path, where the caller already holds the input span and does not
     /// need the applied set; with exclusions, or on any failure, Successful is populated. When
-    /// <paramref name="markingTransaction"/> is set, each applied write up to the first failed one carries the commit
-    /// write mark of that transaction.
+    /// <paramref name="markingTransaction"/> is set, each applied write carries the commit write mark of that
+    /// transaction, and the applies stop at the first failed one, whose transaction then reverts the set.
     /// </summary>
     internal static (IReadOnlyList<SubjectPropertyChange> Successful, IReadOnlyList<SubjectPropertyChange> Failed, IReadOnlyList<Exception> Errors)
         ApplyLocalChanges(ReadOnlySpan<SubjectPropertyChange> changes, IReadOnlyList<SubjectPropertyChange>? exclude, SubjectTransaction? markingTransaction = null)
@@ -74,14 +74,14 @@ internal static class SubjectPropertyChangeOperations
                 }
 
                 failed.Add(change);
-                if (error != null)
-                {
-                    (errors ??= []).Add(error);
-                }
+                (errors ??= []).Add(error);
 
                 // The handlers checked the changes as a set, which no longer lands as checked, so the remaining
-                // applies are not marked and handlers check them against the model.
-                markingTransaction = null;
+                // changes would only run hooks and notifications against a half-applied model before the revert.
+                if (markingTransaction is not null)
+                {
+                    break;
+                }
             }
         }
 
@@ -134,7 +134,10 @@ internal static class SubjectPropertyChangeOperations
         return (failed ?? (IReadOnlyList<SubjectPropertyChange>)[], errors ?? (IReadOnlyList<Exception>)[]);
     }
 
-    private static bool TryApplyLocalChange(this SubjectPropertyChange change, SubjectTransaction? markingTransaction, out Exception? error)
+    private static bool TryApplyLocalChange(
+        this SubjectPropertyChange change,
+        SubjectTransaction? markingTransaction,
+        [System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out Exception? error)
     {
         try
         {

@@ -306,8 +306,9 @@ public class SubjectTransactionWriterTests
             async () => await transaction.CommitAsync(CancellationToken.None));
 
         // Assert
+        // Every change fails, and each source revert that timed out lists its change again as stuck.
         Assert.Equal(
-            [nameof(Person.FirstName), nameof(Person.LastName)],
+            [nameof(Person.FirstName), nameof(Person.LastName), nameof(Person.FirstName), nameof(Person.LastName)],
             exception.FailedChanges.Select(change => change.Property.Name));
         Assert.Equal(2, exception.Errors.Count);
         Assert.Equal("apply failed", exception.Errors[0].Message);
@@ -354,8 +355,9 @@ public class SubjectTransactionWriterTests
             async () => await transaction.CommitAsync(CancellationToken.None));
 
         // Assert
+        // Every checked change fails, and each source revert that timed out lists its change again as stuck.
         Assert.Equal(
-            [nameof(Person.FirstName), nameof(Person.LastName)],
+            [nameof(Person.FirstName), nameof(Person.LastName), nameof(Person.FirstName), nameof(Person.LastName)],
             exception.FailedChanges.Select(change => change.Property.Name));
         Assert.Equal(2, exception.Errors.Count);
         Assert.Equal("rejected", exception.Errors[0].Message);
@@ -371,8 +373,8 @@ public class SubjectTransactionWriterTests
     {
         // Arrange
         var context = CreateContext();
-        context.AddService<ITransactionWriter>(
-            new RevertUntilCancelledTransactionWriter(failFirstWriteOf: nameof(Person.LastName)));
+        var writer = new RevertUntilCancelledTransactionWriter(failFirstWriteOf: nameof(Person.LastName));
+        context.AddService<ITransactionWriter>(writer);
         var person = new Person(context) { FirstName = "Ann", LastName = "Lee" };
         var flowWithoutTransaction = ExecutionContext.Capture()!;
         using var transaction = await context.BeginTransactionAsync(
@@ -391,6 +393,8 @@ public class SubjectTransactionWriterTests
         Assert.Equal("Ann", landedFirstName);
         Assert.Equal("Bob", person.FirstName);
         Assert.Equal("Kim", person.LastName);
+        Assert.Equal(2, writer.WrittenPropertyNames.Count);
+        Assert.Equal([nameof(Person.FirstName), nameof(Person.LastName)], writer.WrittenPropertyNames[1]);
     }
 
     /// <summary>
@@ -399,16 +403,17 @@ public class SubjectTransactionWriterTests
     /// </summary>
     private sealed class RevertUntilCancelledTransactionWriter(string? failFirstWriteOf = null) : ITransactionWriter
     {
-        private bool _hasWritten;
+        /// <summary>Gets the property names passed to each write call, in call order.</summary>
+        public List<string[]> WrittenPropertyNames { get; } = [];
 
         public ValueTask<SourceWriteResult> WriteToSourcesAsync(
             Memory<SubjectPropertyChange> changes,
             TransactionRequirement requirement,
             CancellationToken cancellationToken)
         {
-            var failedPropertyName = _hasWritten ? null : failFirstWriteOf;
-            _hasWritten = true;
+            var failedPropertyName = WrittenPropertyNames.Count == 0 ? failFirstWriteOf : null;
             var all = changes.ToArray();
+            WrittenPropertyNames.Add(all.Select(change => change.Property.Name).ToArray());
             var failed = all.Where(change => change.Property.Name == failedPropertyName).ToArray();
             var written = all.Where(change => change.Property.Name != failedPropertyName).ToArray();
             Exception[] errors = failed.Length > 0 ? [new InvalidOperationException("source write failed")] : [];
