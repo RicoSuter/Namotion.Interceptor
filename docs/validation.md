@@ -166,7 +166,7 @@ At commit:
 - An invalid value makes `CommitAsync` throw `SubjectTransactionValidationException`. Its `FailedChanges` and `Errors` list the invalid changes and their validation errors in the same order. The pending changes stay intact: fix the values and commit again, see [Retrying](tracking-transactions.md#retrying).
 - With source transactions, the [pre-apply check](tracking-transactions.md#transaction-handlers) validates the changes again right before the local apply. A failure there is terminal and lands no value of the set.
 - The values the commit applies and the values a rollback restores are not validated again. Writes made during the apply, for example from change handlers or a hook that changes the value, and recalculated derived properties are validated as usual, after any source write.
-- If applying one value fails, for example because a hook throws, no value of the set lands in either failure handling mode, see [Commit Failures](tracking-transactions.md#commit-failures).
+- If applying one value fails, for example because a hook throws, no value of the set lands in either failure handling mode, except the value whose apply failed after it was written ([#674](https://github.com/RicoSuter/Namotion.Interceptor/issues/674)), see [Commit Failures](tracking-transactions.md#commit-failures).
 
 ### Writing Validators for Transactions
 
