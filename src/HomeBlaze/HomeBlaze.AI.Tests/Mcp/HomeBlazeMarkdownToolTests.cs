@@ -182,7 +182,7 @@ public sealed class HomeBlazeMarkdownToolTests : IDisposable
         var (root, _, services) = await CreateGraphAsync();
         var invoker = new McpMethodInvoker(
             () => root, new StateAttributePathProvider(), services, NullLogger.Instance,
-            isReadOnly: false, operationFilter: (_, method) => $"{method.PropertyName} is refused.");
+            isReadOnly: false, operationFilter: (_, method, _) => $"{method.PropertyName} is refused.");
         var provider = new HomeBlazeMarkdownToolProvider(invoker, isReadOnly: false);
         var tools = provider.GetTools().ToDictionary(tool => tool.Name);
 

@@ -925,6 +925,52 @@ public partial class FluentStorageContainer :
     }
 
     /// <summary>
+    /// Sets metadata of a subject in this storage, or of one of its properties, for agents: see
+    /// <see cref="SetMetadataAsync(IInterceptorSubject, string?, JsonElement, CancellationToken)"/>. A subject that a
+    /// storage inside this one holds is written by that storage.
+    /// </summary>
+    /// <param name="path">The path of the subject relative to this storage, empty for the storage itself.</param>
+    /// <param name="property">The name of a property of the subject, or null for the subject.</param>
+    /// <param name="values">A JSON object.</param>
+    /// <param name="cancellationToken">Cancels the write.</param>
+    /// <exception cref="ArgumentException">
+    /// The path is null or leads to no subject, the values are no JSON object, or the write is refused; the message says why.
+    /// </exception>
+    [Operation(Title = "Set Metadata", Description = StorageMetadataMethods.SetMetadataDescription, Position = 3)]
+    [ExcludeFrom(ExclusionTarget.UserInterface)]
+    public Task SetMetadataAsync(string path, string? property, JsonElement values, CancellationToken cancellationToken)
+        => StorageMetadataMethods.RunAsync(() =>
+        {
+            // An agent can send null for any argument.
+            ArgumentNullException.ThrowIfNull(path);
+            if (values.ValueKind != JsonValueKind.Object)
+            {
+                throw new ArgumentException("values must be a JSON object, for example {\"navTitle\": \"Hall light\"}.", nameof(values));
+            }
+
+            var subject = MetadataPaths.TryResolveSubject(this, path)
+                ?? throw new ArgumentException($"No subject at {NameList.Format([path])} in this storage.", nameof(path));
+            var store = subject.FindMetadataStore()
+                ?? throw new ArgumentException("The subject is in no storage.", nameof(path));
+            return store.SetMetadataAsync(subject, property, values, cancellationToken);
+        });
+
+    /// <summary>Gets the names of the children of this storage in the order in which they are shown, for agents.</summary>
+    [Query(Title = "Get Order", Description = StorageMetadataMethods.GetOrderDescription, Position = 4)]
+    [ExcludeFrom(ExclusionTarget.UserInterface)]
+    public string[] GetOrder() => ChildOrdering.GetShownNames(this);
+
+    /// <summary>
+    /// Sets the order of the children of this storage, for agents: see
+    /// <see cref="MetadataStoreExtensions.SetOrderAsync"/>.
+    /// </summary>
+    /// <exception cref="ArgumentException">A name is refused, or the write is refused; the message says why.</exception>
+    [Operation(Title = "Set Order", Description = StorageMetadataMethods.SetOrderDescription, Position = 5)]
+    [ExcludeFrom(ExclusionTarget.UserInterface)]
+    public Task SetOrderAsync(string[] names, CancellationToken cancellationToken)
+        => StorageMetadataMethods.RunAsync(() => MetadataStoreExtensions.SetOrderAsync(this, names, cancellationToken));
+
+    /// <summary>
     /// Opens the create subject dialog to add a new subject to this storage.
     /// </summary>
     [Operation(Title = "Create", Icon = "Add", Position = 1)]

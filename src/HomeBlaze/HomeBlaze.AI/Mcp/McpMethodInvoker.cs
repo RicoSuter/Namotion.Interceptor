@@ -23,7 +23,7 @@ internal sealed class McpMethodInvoker
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger _logger;
     private readonly bool _isReadOnly;
-    private readonly Func<RegisteredSubject, MethodMetadata, string?>? _operationFilter;
+    private readonly Func<RegisteredSubject, MethodMetadata, object?[], string?>? _operationFilter;
 
     public McpMethodInvoker(
         Func<IInterceptorSubject> rootSubjectProvider,
@@ -31,7 +31,7 @@ internal sealed class McpMethodInvoker
         IServiceProvider serviceProvider,
         ILogger logger,
         bool isReadOnly,
-        Func<RegisteredSubject, MethodMetadata, string?>? operationFilter)
+        Func<RegisteredSubject, MethodMetadata, object?[], string?>? operationFilter)
     {
         _rootSubjectProvider = rootSubjectProvider;
         _pathProvider = pathProvider;
@@ -96,17 +96,19 @@ internal sealed class McpMethodInvoker
             return new { error = $"Method not found: {methodName}" };
         }
 
-        var callError = GetCallError(subject, methodName, method, allowedKind);
+        if (method.Kind != allowedKind)
+        {
+            return new { error = DescribeWrongKind(methodName, method.Kind) };
+        }
+
+        // Read before the refusals are checked, as an operation can be refused for what it is called on, such as an
+        // agent that a path names, and reported only after them.
+        var inputParameters = method.Parameters.Where(parameter => parameter.RequiresInput).ToArray();
+        var (arguments, argumentError) = ReadArguments(argumentsElement, inputParameters);
+        var callError = GetCallError(subject, methodName, method, arguments ?? []) ?? argumentError;
         if (callError is not null)
         {
             return new { error = callError };
-        }
-
-        var inputParameters = method.Parameters.Where(parameter => parameter.RequiresInput).ToArray();
-        var (arguments, argumentError) = ReadArguments(argumentsElement, inputParameters);
-        if (argumentError is not null)
-        {
-            return new { error = argumentError };
         }
 
         try
@@ -131,14 +133,10 @@ internal sealed class McpMethodInvoker
         }
     }
 
-    private string? GetCallError(RegisteredSubject subject, string methodName, MethodMetadata method, MethodKind allowedKind)
+    // The arguments are empty when they could not be read.
+    private string? GetCallError(RegisteredSubject subject, string methodName, MethodMetadata method, object?[] arguments)
     {
-        if (method.Kind != allowedKind)
-        {
-            return DescribeWrongKind(methodName, method.Kind);
-        }
-
-        if (method.Kind == MethodKind.Operation && _operationFilter?.Invoke(subject, method) is { } filterError)
+        if (method.Kind == MethodKind.Operation && _operationFilter?.Invoke(subject, method, arguments) is { } filterError)
         {
             return filterError;
         }

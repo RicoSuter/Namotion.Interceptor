@@ -4,6 +4,7 @@ using HomeBlaze.AI.Agents;
 using HomeBlaze.AI.Mcp;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Lifecycle;
+using HomeBlaze.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -37,6 +38,46 @@ public class AgentOperationAccessTests
         Assert.Equal(0, agent.ResetCount);
     }
 
+    [Theory]
+    [InlineData("Agent")]
+    [InlineData("/Agent")]
+    public async Task WhenAnAgentSetsTheMetadataOfAnAgent_ThenItIsRefused(string path)
+    {
+        // Arrange
+        var (root, agent, services) = CreateGraph();
+        var storage = CreateStorage(services);
+        root.Children = new Dictionary<string, IInterceptorSubject> { ["Storage"] = storage };
+        storage.Children = new Dictionary<string, IInterceptorSubject> { ["Agent"] = agent };
+        var invokeOperation = CreateTools(services, root, forAgents: true)["invoke_operation"];
+
+        // Act
+        var result = JsonSerializer.SerializeToElement(await invokeOperation.Handler(
+            JsonSerializer.SerializeToElement(new { path = "/Storage", method = "SetMetadata", parameters = new { path, values = new { navTitle = "x" } } }),
+            CancellationToken.None));
+
+        // Assert
+        Assert.Equal("Agents cannot change the metadata of agents.", result.GetProperty("error").GetString());
+    }
+
+    [Fact]
+    public async Task WhenAnExternalClientSetsTheMetadataOfAnAgent_ThenTheStorageDecides()
+    {
+        // Arrange
+        var (root, agent, services) = CreateGraph();
+        var storage = CreateStorage(services);
+        root.Children = new Dictionary<string, IInterceptorSubject> { ["Storage"] = storage };
+        storage.Children = new Dictionary<string, IInterceptorSubject> { ["Agent"] = agent };
+        var invokeOperation = CreateTools(services, root, forAgents: false)["invoke_operation"];
+
+        // Act
+        var result = JsonSerializer.SerializeToElement(await invokeOperation.Handler(
+            JsonSerializer.SerializeToElement(new { path = "/Storage", method = "SetMetadata", parameters = new { path = "Agent", values = new { navTitle = "x" } } }),
+            CancellationToken.None));
+
+        // Assert: the storage is not connected, which is its own refusal.
+        Assert.Equal("Storage not connected", result.GetProperty("error").GetString());
+    }
+
     [Fact]
     public async Task WhenAnExternalClientCallsAnOperationOfAnAgent_ThenItRuns()
     {
@@ -57,6 +98,7 @@ public class AgentOperationAccessTests
         var context = InterceptorSubjectContext.Create()
             .WithFullPropertyTracking()
             .WithRegistry()
+            .WithParents()
             .WithLifecycle()
             .WithService<IPropertyLifecycleHandler>(
                 () => new PropertyAttributeInitializer(),
@@ -74,6 +116,13 @@ public class AgentOperationAccessTests
             .AddSingleton<ILoggerFactory>(NullLoggerFactory.Instance)
             .BuildServiceProvider();
         return (root, agent, services);
+    }
+
+    // A storage that is not connected, which holds subjects only as the test assigns them.
+    private static FluentStorageContainer CreateStorage(IServiceProvider services)
+    {
+        var typeRegistry = services.GetRequiredService<SubjectTypeRegistry>();
+        return new FluentStorageContainer(typeRegistry, new ConfigurableSubjectSerializer(new TypeProvider(), services), services);
     }
 
     private static Dictionary<string, McpToolInfo> CreateTools(IServiceProvider services, AgentTestRoot root, bool forAgents)

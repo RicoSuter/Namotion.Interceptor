@@ -3,12 +3,14 @@ using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.AI.Agents;
 using HomeBlaze.Services;
+using HomeBlaze.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Mcp;
 using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Tracking.Parent;
 
 namespace HomeBlaze.AI.Mcp;
 
@@ -19,8 +21,7 @@ internal static class HomeBlazeMcpConfigurationFactory
 {
     private const string PathPrefix = "/";
 
-    private static readonly Func<RegisteredSubject, MethodMetadata, string?> RefuseAgentOperation =
-        (subject, _) => subject.Subject is LlmAgentBase ? "Agents cannot run operations of agents." : null;
+    private static readonly Func<RegisteredSubject, MethodMetadata, object?[], string?> RefuseAgentOperation = GetAgentOperationError;
 
     private static readonly Func<RegisteredSubjectProperty, string?> RefuseConfigurationWrite =
         property => property.IsConfigurationProperty() ? "It is a configuration property; set_property cannot change configuration, an operation of the subject may." : null;
@@ -36,7 +37,8 @@ internal static class HomeBlazeMcpConfigurationFactory
     /// <param name="isReadOnly">Whether set_property and operations are blocked.</param>
     /// <param name="forAgents">
     /// Whether the tools serve the built-in agents; invoke_operation and the Markdown tools then refuse every
-    /// operation of an agent (<see cref="LlmAgentBase"/>).
+    /// operation of an agent (<see cref="LlmAgentBase"/>), SetMetadata of a storage for an agent or a subject inside one,
+    /// and SetOrder of a folder inside an agent.
     /// </param>
     public static McpServerConfiguration Create(
         IServiceProvider serviceProvider,
@@ -93,6 +95,27 @@ internal static class HomeBlazeMcpConfigurationFactory
         }
 
         return configuration;
+    }
+
+    private static string? GetAgentOperationError(RegisteredSubject subject, MethodMetadata method, object?[] arguments)
+    {
+        if (subject.Subject is LlmAgentBase)
+        {
+            return "Agents cannot run operations of agents.";
+        }
+
+        // SetMetadata of a storage whose path leads to an agent or to a subject inside one, and SetOrder of a folder inside one.
+        var target = method.PropertyName switch
+        {
+            "SetMetadata" when subject.Subject is FluentStorageContainer storage && arguments is [string path, ..]
+                => MetadataPaths.TryResolveSubject(storage, path),
+            "SetOrder" => subject.Subject,
+            _ => null
+        };
+
+        return target?.TryGetFirstParentOrSelf<LlmAgentBase>() is not null
+            ? "Agents cannot change the metadata of agents."
+            : null;
     }
 
     /// <summary>

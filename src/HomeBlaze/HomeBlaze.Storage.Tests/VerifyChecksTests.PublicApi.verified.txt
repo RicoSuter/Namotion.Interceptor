@@ -160,11 +160,24 @@ namespace HomeBlaze.Storage
         protected override System.Threading.Tasks.Task ExecuteAsync(System.Threading.CancellationToken stoppingToken) { }
         public System.Threading.Tasks.Task<HomeBlaze.Storage.Abstractions.BlobMetadata?> GetBlobMetadataAsync(string path, System.Threading.CancellationToken cancellationToken) { }
         protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        [HomeBlaze.Abstractions.Attributes.ExcludeFrom(HomeBlaze.Abstractions.Attributes.ExclusionTarget.UserInterface)]
+        [HomeBlaze.Abstractions.Attributes.Query(Description="Gets the names of the children of this folder or storage in the order in which th" +
+            "ey are shown in navigation and in the browser.", Position=4, Title="Get Order")]
+        public string[] GetOrder() { }
         protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
         protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
         protected void RaisePropertyChanged(string propertyName) { }
         public System.Threading.Tasks.Task<System.IO.Stream> ReadBlobAsync(string path, System.Threading.CancellationToken cancellationToken) { }
         public System.Threading.Tasks.Task SetMetadataAsync(Namotion.Interceptor.IInterceptorSubject subject, string? propertyName, System.Text.Json.JsonElement values, System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.ExcludeFrom(HomeBlaze.Abstractions.Attributes.ExclusionTarget.UserInterface)]
+        [HomeBlaze.Abstractions.Attributes.Operation(Description=@"Sets metadata of a subject in this storage or of one of its properties. path is the path of the subject below this storage as browse shows it, for example Devices/Shelly/Channels[0] (a leading / is ignored), and empty for the storage itself; property is the name of a property of that subject, or omitted for the subject. values is a JSON object that is merged into the metadata: a key with a value is set, replacing a nested value as a whole, a key with null is removed, and every other key stays; keys match without regard to case. HomeBlaze reads title (of a folder), navTitle, icon (a MudBlazor icon name), location (NavBar or AppBar) and alignment (Left or Right); any other key, such as comment, is stored as given. At most 64 keys, key names of up to 64 characters, strings of up to 256 characters and values of up to 4 KB. The order of the children of a folder is set with SetOrder of the folder. Example: {""navTitle"": ""Hall light"", ""icon"": null}.", Position=3, Title="Set Metadata")]
+        public System.Threading.Tasks.Task SetMetadataAsync(string path, string? property, System.Text.Json.JsonElement values, System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.ExcludeFrom(HomeBlaze.Abstractions.Attributes.ExclusionTarget.UserInterface)]
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Sets the order in which the children of this folder or storage are shown: the giv" +
+            "en names first, in the given order, then the other children in the order in whic" +
+            "h they are shown now. Each name must be a name that GetOrder returns, given once" +
+            ".", Position=5, Title="Set Order")]
+        public System.Threading.Tasks.Task SetOrderAsync(string[] names, System.Threading.CancellationToken cancellationToken) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
         public override System.Threading.Tasks.Task StartAsync(System.Threading.CancellationToken cancellationToken) { }
         public override System.Threading.Tasks.Task StopAsync(System.Threading.CancellationToken cancellationToken) { }
@@ -207,10 +220,20 @@ namespace HomeBlaze.Storage
         public System.Threading.Tasks.Task DeleteSubjectAsync(Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken) { }
         public System.Threading.Tasks.Task<HomeBlaze.Storage.Abstractions.BlobMetadata?> GetBlobMetadataAsync(string path, System.Threading.CancellationToken cancellationToken) { }
         protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        [HomeBlaze.Abstractions.Attributes.ExcludeFrom(HomeBlaze.Abstractions.Attributes.ExclusionTarget.UserInterface)]
+        [HomeBlaze.Abstractions.Attributes.Query(Description="Gets the names of the children of this folder or storage in the order in which th" +
+            "ey are shown in navigation and in the browser.", Position=3, Title="Get Order")]
+        public string[] GetOrder() { }
         protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
         protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
         protected void RaisePropertyChanged(string propertyName) { }
         public System.Threading.Tasks.Task<System.IO.Stream> ReadBlobAsync(string path, System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.ExcludeFrom(HomeBlaze.Abstractions.Attributes.ExclusionTarget.UserInterface)]
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Sets the order in which the children of this folder or storage are shown: the giv" +
+            "en names first, in the given order, then the other children in the order in whic" +
+            "h they are shown now. Each name must be a name that GetOrder returns, given once" +
+            ".", Position=4, Title="Set Order")]
+        public System.Threading.Tasks.Task SetOrderAsync(string[] names, System.Threading.CancellationToken cancellationToken) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
         public System.Threading.Tasks.Task WriteBlobAsync(string path, System.IO.Stream content, System.Threading.CancellationToken cancellationToken) { }
         public System.Threading.Tasks.Task WriteBlobAsync(string path, System.ReadOnlyMemory<byte> content, System.Threading.CancellationToken cancellationToken) { }

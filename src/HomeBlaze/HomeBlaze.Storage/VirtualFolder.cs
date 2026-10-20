@@ -131,6 +131,20 @@ public partial class VirtualFolder : ITitleProvider, IIconProvider, IStorageCont
     public Task CreateAsync([FromServices] ISubjectSetupService subjectSetupService, CancellationToken cancellationToken)
         => subjectSetupService.CreateSubjectAndAddToStorageAsync(this, cancellationToken);
 
+    /// <summary>Gets the names of the children of this folder in the order in which they are shown, for agents.</summary>
+    [Query(Title = "Get Order", Description = StorageMetadataMethods.GetOrderDescription, Position = 3)]
+    [ExcludeFrom(ExclusionTarget.UserInterface)]
+    public string[] GetOrder() => ChildOrdering.GetShownNames(this);
+
+    /// <summary>
+    /// Sets the order of the children of this folder, for agents: see <see cref="MetadataStoreExtensions.SetOrderAsync"/>.
+    /// </summary>
+    /// <exception cref="ArgumentException">A name is refused, or the write is refused; the message says why.</exception>
+    [Operation(Title = "Set Order", Description = StorageMetadataMethods.SetOrderDescription, Position = 4)]
+    [ExcludeFrom(ExclusionTarget.UserInterface)]
+    public Task SetOrderAsync(string[] names, CancellationToken cancellationToken)
+        => StorageMetadataMethods.RunAsync(() => MetadataStoreExtensions.SetOrderAsync(this, names, cancellationToken));
+
     /// <summary>
     /// Creates a Markdown file in this folder and adds it as a page.
     /// </summary>
