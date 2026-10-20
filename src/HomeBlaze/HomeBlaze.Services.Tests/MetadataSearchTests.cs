@@ -25,7 +25,7 @@ public class MetadataSearchTests
     [Theory]
     [InlineData("floor-2", null, null, null, new[] { "Pump|", "Pump|Channels" })]
     [InlineData(null, "notes", null, null, new[] { "Pump|Channels" })]
-    [InlineData(null, "AREA", null, null, new[] { "Pump|" })]
+    [InlineData(null, "AREA", null, null, new string[0])]
     [InlineData(null, "area", "basement", null, new[] { "Pump|" })]
     [InlineData(null, "area", "Base", null, new string[0])]
     [InlineData(null, null, "FLOOR-1", null, new[] { "Pump/Channels[0]|" })]

@@ -34,8 +34,8 @@
 
     protected override void OnInitialized()
     {
-        // Refreshed as NavMenu is, so that a change of the tree or of metadata shows.
-        _refreshTimer = new Timer(_ => InvokeAsync(StateHasChanged),
+        // Refreshed as NavMenu is, so that a change of the tree or of metadata shows, and rendered only on a change.
+        _refreshTimer = new Timer(_ => InvokeAsync(RefreshItems),
             null, RefreshInterval, RefreshInterval);
 
         NavigationManager.LocationChanged += OnLocationChanged;
@@ -44,6 +44,13 @@
     private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
     {
         InvokeAsync(StateHasChanged);
+    }
+
+    private void RefreshItems()
+    {
+        var shownItems = _items;
+        if (GetItems() != shownItems)
+            StateHasChanged();
     }
 
     private ImmutableArray<NavigationItem> GetItems()

@@ -7,7 +7,6 @@ using FluentStorage;
 using FluentStorage.Blobs;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
-using HomeBlaze.Components.Abstractions.Pages;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Files;
@@ -513,13 +512,7 @@ public partial class FluentStorageContainer :
     /// </summary>
     internal void ApplyMetadata(StorageMetadataFile? file)
     {
-        if (this.TryGetRegisteredSubject() is { } registered)
-        {
-            StorageMetadataValues.Set(registered, null, file?.Own);
-        }
-
-        var childOrder = file?.Order ?? [];
-        if (!childOrder.SequenceEqual(ChildOrder))
+        if (StorageMetadataValues.SetOwnMetadata(this, ChildOrder, file) is { } childOrder)
         {
             ChildOrder = childOrder;
         }
@@ -638,17 +631,36 @@ public partial class FluentStorageContainer :
     // an order are children of the folder, each given once, which also bounds the size of the order.
     private static string? GetOrderError(IInterceptorSubject folder, JsonElement values)
     {
-        foreach (var property in values.EnumerateObject())
+        if (!values.TryGetProperty(MetadataKeys.Order, out var order) || order.ValueKind != JsonValueKind.Array)
         {
-            if (string.Equals(property.Name, MetadataKeys.Order, StringComparison.OrdinalIgnoreCase) &&
-                property.Value.ValueKind == JsonValueKind.Array)
+            return null;
+        }
+
+        var children = new HashSet<string>(ChildOrdering.GetShownNames(folder), StringComparer.Ordinal);
+        var listedNames = new HashSet<string>(StringComparer.Ordinal);
+        var repeatedNames = new SortedSet<string>(StringComparer.Ordinal);
+        var unknownNames = new List<string>();
+        foreach (var item in order.EnumerateArray())
+        {
+            var name = item.GetString()!;
+            if (!listedNames.Add(name))
             {
-                string[] names = [.. property.Value.EnumerateArray().Select(static item => item.GetString()!)];
-                return ChildOrderNames.GetError(names, ChildOrdering.GetShownNames(folder));
+                repeatedNames.Add(name);
+            }
+            else if (!children.Contains(name))
+            {
+                unknownNames.Add(name);
             }
         }
 
-        return null;
+        if (repeatedNames.Count > 0)
+        {
+            return $"Names given more than once: {NameList.Format(repeatedNames)}.";
+        }
+
+        return unknownNames.Count > 0
+            ? $"Names that are not children of the folder: {NameList.Format(unknownNames)}. Its children: {NameList.Format(children.Order(StringComparer.Ordinal))}."
+            : null;
     }
 
     // Runs on the worker. The own keys of the file of this storage or of a folder of it, or the entry of a subject or

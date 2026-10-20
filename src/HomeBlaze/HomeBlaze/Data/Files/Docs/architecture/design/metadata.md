@@ -25,6 +25,7 @@ Docs (folder)                        HomeBlaze:Metadata             = { title, o
 - **Added on demand.** The property or attribute is added only once an entry exists. The registry cannot remove a property, so metadata that is removed sets the value to null, and null means no metadata.
 - **One step with its file.** Setting a value and reading the file it comes from are one step under the `SyncRoot` of the subject, so a subject that attaches during a write takes the new value.
 - **Readers.** Navigation, the browser and the order of children read the known keys (`MetadataKeys`) from these dictionaries through `SubjectNavigationExtensions` and `ChildOrdering`. The path picker does not list the metadata.
+- **Contracts.** `IMetadataStore`, `IMetadataContainer` and `MetadataKeys` are in `HomeBlaze.Storage.Abstractions`, next to `IConfigurationWriter`.
 
 ## Files and Applying [Implemented]
 
@@ -51,7 +52,7 @@ Agents read metadata with `browse`, `search` and `get_property`, which list it o
 
 ## Search [Implemented]
 
-- **`MetadataSearch`.** One service finds metadata for the storage, the tag filter and the suggested tags. It walks the tree below a subject on each call and keeps nothing, matches a tag, a key that is set and a string value without regard to case, and sorts the matches by path and then property. A subject that the caller excludes is skipped with everything below it.
+- **`MetadataSearch`.** One service finds metadata for the storage, the tag filter and the suggested tags. It walks the tree below a subject on each call and keeps nothing, matches a key that is set exactly, and a tag and a string value without regard to case, and sorts the matches by path and then property. A subject that the caller excludes is skipped with everything below it.
 - **`SearchMetadata`.** A `[Query]` of a storage over `MetadataSearch`, see [Agents](../../administration/metadata.md#agents) for its arguments and result and [Write Limits](ai.md#write-limits-implemented) for what the MCP tools leave out.
 - **Tag filter.** A click on a tag opens `MetadataTagFilterDialog`, which lists everything with the tag, without subjects excluded from user interfaces and what is below them, and without properties that the browser does not show. The tag field of the **Metadata** dialog loads the tags in use once when the dialog opens, with the same exclusions, and suggests those that contain the typed text.
 - **Notes in `search_markdown`.** `MarkdownSearchSourceFinder` gives `search_markdown` the pages and the notes of metadata in one list in path order, and a match in notes has `kind: notes`, the path of its subject and the name of its property, see [Markdown Tools](ai.md#markdown-tools).
@@ -65,12 +66,13 @@ The limits of entries, keys, values and files are in [Limits](../../administrati
 - **A dictionary instead of typed records.** Metadata is a generic dictionary of key to JSON value, so a new key needs no new type, and keys that HomeBlaze does not know are kept, whether a person, an agent or a later version wrote them.
 - **A dynamic property and an attribute.** The metadata of a subject is a dynamic property and that of a property an attribute, both named `HomeBlaze:Metadata`, so the registry and the MCP tools carry it like any other value, and no new tools are needed.
 - **A sidecar per stored file.** A subject inside a stored subject has no file of its own, so the sidecar of the JSON file covers that subject and its whole tree, and it is versioned, moved and deleted with that file. The file of a folder holds only the keys of the folder and its order, because its children have files of their own.
+- **Exact keys.** Keys are matched exactly, case included, like the keys of subject files and frontmatter, so each key has one spelling and a file with keys that differ only in case can still be read. A known key in another case is refused on save instead of being stored where HomeBlaze does not read it.
 - **Paths instead of a nested tree.** Most subjects and properties have no metadata, and flat path keys under `$subjects` and `$properties` are easier to read and to write for people and agents than a tree that mirrors the subject. The two maps tell "the metadata of the property `Channel`" apart from "the metadata of the subject held by `Channel`".
 - **One write path.** The browser and agents both write through `IMetadataStore`, so they get the same merge, validation and refusals, and the file and the values in memory agree.
 - **The whole file applied again.** After a load or a write the whole file is applied to its tree instead of updating single entries. This is simple, applies a hand edit and a write the same way, and costs little because metadata changes rarely.
 - **Nested storages keep their own metadata.** A storage stored inside another storage keeps all its metadata in its own root, so each file has one owner and a storage keeps its metadata wherever it is mounted.
 - **Agents cannot change the metadata of agents.** Like the settings and operations of agents, this keeps an agent from changing agents.
-- **Null attributes left out by MCP.** Because the registry cannot remove an attribute, removed metadata stays as a null value, and the MCP tools leave out attributes without a value so that it reads as no metadata.
+- **Null attributes left out by MCP.** Because the registry cannot remove an attribute, removed metadata stays as a null value, and the MCP tools leave out read-only attributes without a value, as the metadata attribute is, so that it reads as no metadata.
 - **Notes under the rules of pages.** Notes are shown inside the page of the application, so they follow the rules for new content of pages and cannot run or load anything.
 - **Tags as plain strings.** A tag needs no definition before it is used, and tags are unique without regard to case so that `Floor-2` and `floor-2` are one tag.
 - **No search cache.** Metadata changes rarely and walking the tree is cheap enough, while a cache would need to be invalidated on every change of a path.
@@ -79,6 +81,8 @@ The limits of entries, keys, values and files are in [Limits](../../administrati
 
 ## Planned
 
+- **Metadata in search results.** `SearchMetadata` returning the metadata of each match (`includeMetadata`), so that an agent needs no further call to read it.
+- **Several targets in one call.** One `SetMetadata` call for several subjects and properties, grouped into one write per file.
 - **Annotations.** More known keys that group subjects across folders, such as `area: "Kitchen"` (the equivalent of Home Assistant areas), `group: "cooling-system"` or `owner: "maintenance-team-b"`. Until then such keys are stored as given. All annotations are meant to be queryable through the registry, transmitted over the wire via WebSocket sync and visible in the UI, without a separate subsystem.
 - **Page blocks.** Metadata of the subjects that blocks of a Markdown page create, kept in the frontmatter of the page.
 - **Display overrides.** A display name or a unit of a property taken from its metadata.
@@ -87,4 +91,8 @@ The limits of entries, keys, values and files are in [Limits](../../administrati
 - **Custom root files.** A `root.metadata.json` for subjects in a custom `root.json`. The default `root.json` holds only the root storage.
 - **Search cache.** A cache for the metadata search and the suggested tags, if walking the tree on demand turns out too slow.
 - **Content search.** The MCP tool `search_markdown` renamed to `search_content`, since it searches pages, documents and notes.
+- **Known keys checked once.** The known keys of a file checked when it is read, instead of on every read of a value.
+- **Entries without a target.** A list of the entries that match no subject or property.
+- **Library support.** Removing a dynamic property or attribute, and telling whether a property was attached with its subject, which would simplify `MetadataLifecycleHandler` and drop the null values of removed metadata.
+- **Metadata of files.** Notes and tags for pages and other files, in the frontmatter of a page and in a sidecar such as `Manual.pdf.metadata.json`.
 - **Properties without state.** The metadata of a property that is not `[State]` can be written but is not shown by `browse`, because the property itself is not listed. Whether such a property is listed when it has metadata is open.

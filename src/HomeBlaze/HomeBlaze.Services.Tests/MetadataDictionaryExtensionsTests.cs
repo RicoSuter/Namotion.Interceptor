@@ -2,6 +2,7 @@ using System.Collections.Immutable;
 using System.Text;
 using System.Text.Json;
 using HomeBlaze.Components.Abstractions.Pages;
+using HomeBlaze.Storage.Abstractions;
 
 namespace HomeBlaze.Services.Tests;
 
@@ -10,10 +11,10 @@ public class MetadataDictionaryExtensionsTests
     private static ImmutableDictionary<string, JsonElement> Metadata(string json) => TestMetadata.Parse(json);
 
     [Fact]
-    public void WhenKnownKeysHaveTheirShape_ThenTheyAreReadWithoutRegardToCase()
+    public void WhenKnownKeysHaveTheirShape_ThenTheyAreRead()
     {
         // Arrange
-        var metadata = Metadata("""{ "NavTitle": "Pump", "location": "appBar", "alignment": "Right", "order": ["b", "a"] }""");
+        var metadata = Metadata("""{ "navTitle": "Pump", "location": "appBar", "alignment": "Right", "order": ["b", "a"] }""");
 
         // Act
         var navigationTitle = metadata.GetString(MetadataKeys.NavigationTitle);

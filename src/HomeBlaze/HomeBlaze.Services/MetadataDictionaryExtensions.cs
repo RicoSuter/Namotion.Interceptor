@@ -3,7 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
-using HomeBlaze.Components.Abstractions.Pages;
+using HomeBlaze.Storage.Abstractions;
 
 namespace HomeBlaze.Services;
 

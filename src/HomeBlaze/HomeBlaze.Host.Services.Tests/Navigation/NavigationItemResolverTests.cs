@@ -7,6 +7,7 @@ using HomeBlaze.Components.Abstractions.Pages;
 using HomeBlaze.Host.Services.Navigation;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Components;
+using HomeBlaze.Storage.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
@@ -153,6 +154,27 @@ public class NavigationItemResolverTests
         Assert.Equal(["/Alpha"], first.Select(item => item.Path));
         Assert.Equal(["/Alpha"], withinMaximumAge.Select(item => item.Path));
         Assert.Equal(["/Alpha", "/Beta"], afterMaximumAge.Select(item => item.Path));
+    }
+
+    [Fact]
+    public void WhenTheAppBarItemsAreWalkedAgainWithoutAChange_ThenTheSameArrayIsReturned()
+    {
+        // Arrange
+        var maximumAge = TimeSpan.FromSeconds(5);
+        var root = CreateFolder(new() { ["Alpha"] = CreateTopBarPage() });
+        var resolver = CreateResolver(root);
+        var first = resolver.GetRecentAppBarItems(root, maximumAge);
+        _timeProvider.Advance(maximumAge);
+
+        // Act
+        var unchanged = resolver.GetRecentAppBarItems(root, maximumAge);
+        root.Children = new() { ["Alpha"] = root.Children["Alpha"], ["Beta"] = CreateTopBarPage() };
+        _timeProvider.Advance(maximumAge);
+        var changed = resolver.GetRecentAppBarItems(root, maximumAge);
+
+        // Assert
+        Assert.True(first == unchanged);
+        Assert.False(first == changed);
     }
 
     [Fact]
@@ -307,7 +329,7 @@ public class NavigationItemResolverTests
         var shared = CreateFolder(new() { ["Readme.md"] = new NavigationTestPage(_context) });
         var topBarFolder = CreateFolder(new() { ["Shared"] = shared });
         var metadata = JsonElement.Parse("""{ "location": "AppBar" }""").EnumerateObject()
-            .ToImmutableDictionary(property => property.Name, property => property.Value, StringComparer.OrdinalIgnoreCase);
+            .ToImmutableDictionary(property => property.Name, property => property.Value);
         topBarFolder.TryGetRegisteredSubject()!.AddProperty(KnownAttributes.Metadata, metadata.GetType(), _ => metadata, null);
 
         var root = CreateFolder(new()

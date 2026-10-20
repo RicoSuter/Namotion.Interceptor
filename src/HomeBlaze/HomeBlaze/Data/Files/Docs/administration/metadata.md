@@ -61,21 +61,13 @@ Pages, folders and subjects appear in the same order in the sidebar, the top bar
 
 A name in `order` is the name of a child as the browser shows it in its address: a subject file without `.json` (`Motor` for `Motor.json`), any other file with its extension (`Readme.md`) and a folder by its name. Children that are not listed follow the listed ones: `readme` first, `index` second, then by navigation title. A name of a child that no longer exists is ignored. A JSON file that does not load as a subject, for example while its JSON is invalid, is listed under its file name with `.json`, so its entry does not match it until it loads again, and it is shown among the children that are not listed meanwhile.
 
-`position:` in the frontmatter of a page is no longer read and has no effect. Order the pages with **Reorder** in the browser or in the `order` of their folder.
-
 ### The Top Bar
 
 The top bar collects its items from the whole tree, not only from the top level: every page with `location: AppBar`, and every subject with a page whose `X.metadata.json` sets `location` to `AppBar`, appears there, in whichever folder it is. The items follow the navigation order: the folders are walked in their order, and the items inside a folder come in the order of that folder. **Reorder** in the folder of an item moves it among the items of that folder, and the place of the folder in its parent moves its items with it. Each item goes to the left or the right of the top bar by its `alignment`, set in the frontmatter of a page or in the **Metadata** dialog of a subject, and each side keeps the navigation order. The sidebar shows a folder only when it holds a page for the sidebar, reached through folders and subjects that are in the sidebar themselves, so a folder whose pages are all in the top bar does not appear there, and neither does a page that can only be reached through an item of the top bar. A folder that is a page itself and holds no page for the sidebar shows as a link to its page.
 
 ### Ordering in the Browser
 
-The **Reorder** button in the header of a folder with at least two children switches its list of children to reorder mode, and **Done** switches it back. **Reorder** is disabled while the storage is not connected. In reorder mode, dragging and the arrows are disabled while the storage is not connected, and a click on a row does not open it.
-
-Drag a row anywhere with the mouse to move it. A line shows where it will land: above the row under the pointer while the pointer is in the upper half of that row, and below it in the lower half. Dragging near the top or the bottom edge of the pane scrolls it, and Escape cancels the drag. Each move writes the whole order of the folder to its `.metadata.json`, so after the first move every child has its place, and a child added later comes after them until it is moved.
-
-On a touch screen or with a pen, drag a row by its handle, so that swiping elsewhere on a row scrolls the list. Each row also shows up and down arrows, which move it by one place.
-
-With a keyboard, press Tab to reach the arrows of a row, which show while they have focus, and press Enter or Space to move the row by one place.
+**Reorder** in the header of a folder with at least two children switches its list of children to reorder mode, where a row moves by dragging it, by its handle on a touch screen, or by one place with its up and down arrows, which Tab reaches from the keyboard; **Done** switches back. Reordering is disabled while the storage is not connected. Each move writes the whole order of the folder to its `.metadata.json`, so after the first move every child has its place, and a child added later comes after them until it is moved.
 
 ---
 
@@ -90,7 +82,7 @@ The **Metadata** button in the header of the browser opens a dialog for every it
 | `location` | `NavBar` or `AppBar`, for a subject that has a page |
 | `alignment` | `Left` or `Right` in the top bar |
 
-A save writes only the keys whose fields were changed: a field left empty removes its key, and every other key stays as it is, also one that was written while the dialog was open, and one whose value the dialog does not show as it is held, such as links or tags edited by hand that break the [rules](#notes-links-and-tags). A changed key is written as the dialog shows it, replacing what was written meanwhile, and a change to any link writes all links as the dialog shows them, without those it could not read, such as a link edited by hand without a url or path, and without members other than `title`, `url` and `path`. Metadata never changes the title or the icon of the subject itself. A subject that is a page itself decides its place in navigation, so it does not use `location` and `alignment`. Pages keep their metadata in their frontmatter, which the dialog does not change.
+A save writes only the keys whose fields were changed: a field left empty removes its key, and every other key stays as it is, also one that was written while the dialog was open, and one whose value the dialog does not show as it is held, such as a number, or links or tags that break the [rules](#notes-links-and-tags), edited by hand. A changed key is written as the dialog shows it, replacing what was written meanwhile, and a change to any link writes all links as the dialog shows them, without those it could not read, such as a link edited by hand without a url or path, and without members other than `title`, `url` and `path`. Metadata never changes the title or the icon of the subject itself. A subject that is a page itself decides its place in navigation, so it does not use `location` and `alignment`. Pages keep their metadata in their frontmatter, which the dialog does not change.
 
 ---
 
@@ -119,7 +111,7 @@ Every folder, subject and property can have notes, links and tags; pages and oth
 
 ## File Format
 
-Keys are read without regard to upper or lower case, and the file may have comments and a trailing comma after its last value. A file with two keys that differ only in case cannot be read. File names are matched exactly: the file of a folder is `.metadata.json` and the file beside `X.json` is `X.metadata.json`, with `.metadata.json` in lower case. Keys that HomeBlaze does not know, such as `comment`, are kept when HomeBlaze writes the file. HomeBlaze writes the file indented and without comments, with characters such as `ü` as they are and characters outside the basic multilingual plane, such as emoji, as escapes like `\uD83D\uDE00`, and deletes it once no key has a value.
+Keys are matched exactly, case included, so `NavTitle` is a key of its own that HomeBlaze does not read as `navTitle`, and a save that sets a known key in another case is refused with the name of the known key. The file may have comments and a trailing comma after its last value. File names are matched exactly: the file of a folder is `.metadata.json` and the file beside `X.json` is `X.metadata.json`, with `.metadata.json` in lower case. Keys that HomeBlaze does not know, such as `comment`, are kept when HomeBlaze writes the file. HomeBlaze writes the file indented and without comments, with characters such as `ü` as they are and characters outside the basic multilingual plane, such as emoji, as escapes like `\uD83D\uDE00`, and deletes it once no key has a value.
 
 ### Subjects and Properties
 
@@ -164,7 +156,7 @@ A path names the properties on the way, separated by `/`, with the index of a co
 
 ### Collections and Moves
 
-Items of a collection are matched by their index, so when the items of a collection change places, the metadata stays at its index and belongs to another item until the file is applied again. A subject that moves keeps the metadata of its previous place when it moves out of every storage or into a stored subject whose file was not applied, and when it is added to its new place before it is removed from the old one.
+Items of a collection are matched by their index. When the items of a collection change places, each item keeps the metadata it has until the file is applied again, which gives the metadata of an index to the item now at that index. A subject that moves keeps the metadata of its previous place when it moves out of every storage or into a stored subject whose file was not applied, and when it is added to its new place before it is removed from the old one.
 
 ### Nested Storages
 
@@ -172,7 +164,7 @@ A storage that is stored as a JSON file inside another storage keeps all its met
 
 ### Limits
 
-Metadata is read and saved under these limits: at most 64 keys per entry, key names of up to 64 characters, strings of up to 256 characters and values of up to 4 KB, except for the `order` of a folder and for `notes`, which have a limit of their own, and a file of up to 512 KB, which a save that does not make it larger may exceed. An entry without keys is removed, and a file without keys is deleted.
+Saving metadata is refused beyond these limits: at most 64 keys per entry, key names of up to 64 characters, strings of up to 256 characters and values of up to 4 KB, except for the `order` of a folder and for `notes`, which have a limit of their own, and a file of up to 512 KB, which a save that does not make it larger may exceed. The limits are checked only on save, so a file edited by hand is read whatever its size. An entry without keys is removed, and a file without keys is deleted.
 
 ### Reserved Names
 
@@ -197,7 +189,7 @@ Agents read metadata with the MCP tools: `browse` and `search` show the metadata
 | `SetMetadata` | a storage, such as the root `/` | Takes `path`, the path of a subject relative to the storage, such as `Devices/Shelly/Channels[0]` (empty for the storage itself, a leading `/` ignored), an optional `property`, the name of one of its properties, and `values`, a JSON object that is merged into the metadata: a key with a value is set, a nested value replacing the old one as a whole, a key with `null` is removed, and every other key stays |
 | `GetOrder` | a folder, a storage | Returns the names of the children in the order in which they are shown. These names, like those that the message of a refused order lists, are names of children and not secret, so they include children that are hidden from agents |
 | `SetOrder` | a folder, a storage | Takes `names` and stores them first, in that order, then the other children in the order in which they are shown. A name that is not a child, or that is given twice, is refused |
-| `SearchMetadata` | a storage | Takes `tag`, `key`, `value` and `path`, each optional, and returns the subjects and properties whose metadata matches all that are given: a tag in `tags`; a key that is set, such as `notes`; a value that equals the whole of a string, or of a string in an array, of `key` when it is given, else of any key, and never a number or a boolean; and a `path` relative to the storage at or below which they are. Keys, tags and values match without regard to case. Each match has `path`, the path of its subject relative to the storage, and `property`, omitted for a subject, as `SetMetadata` takes them. The matches are sorted by path and then property. The MCP tools return at most the first 100 and never one of a subject or property that they do not show, and to an agent never one that `SetMetadata` would refuse it, such as the metadata of an agent |
+| `SearchMetadata` | a storage | Takes `tag`, `key`, `value` and `path`, each optional, and returns the subjects and properties whose metadata matches all that are given: a tag in `tags`; a key that is set, such as `notes`; a value that equals the whole of a string, or of a string in an array, of `key` when it is given, else of any key, and never a number or a boolean; and a `path` relative to the storage at or below which they are. Keys match exactly, and tags and values without regard to case. Each match has `path`, the path of its subject relative to the storage, and `property`, omitted for a subject, as `SetMetadata` takes them. The matches are sorted by path and then property. The MCP tools return at most the first 100 and never one of a subject or property that they do not show, and to an agent never one that `SetMetadata` would refuse it, such as the metadata of an agent |
 
 `SetMetadata` checks the keys HomeBlaze knows: `title`, `navTitle` and `icon` take a string, and a blank string removes the key; `location` takes the name `NavBar` or `AppBar` and `alignment` the name `Left` or `Right`; `notes`, `links` and `tags` follow the rules of [Notes, Links and Tags](#notes-links-and-tags), and an empty array or a blank string removes the key; `order`, which only a folder or a storage has, takes an array of names, which `SetOrder` checks against the children. Other keys are stored as given, within the [limits](#limits). A refused call returns its reason to the agent, such as a file that could not be read or a storage that is not connected. Agents cannot change the metadata of an agent or of a subject inside one.
 

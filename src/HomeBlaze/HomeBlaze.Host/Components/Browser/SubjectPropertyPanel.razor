@@ -9,8 +9,8 @@
 @using HomeBlaze.Storage
 @using HomeBlaze.Storage.Abstractions
 @using HomeBlaze.Components.Abstractions.TimeZones
-@using HomeBlaze.Components.Abstractions.Pages
 @using HomeBlaze.Host.Components.Dialogs
+@using Microsoft.Extensions.Logging
 
 @implements IAsyncDisposable
 
@@ -21,6 +21,7 @@
 @inject ITimeZoneDisplay TimeZone
 @inject IJSRuntime JsRuntime
 @inject ISnackbar Snackbar
+@inject ILogger<SubjectPropertyPanel> Logger
 
 @if (Subject != null)
 {
@@ -1348,8 +1349,8 @@
         }
         catch (Exception exception)
         {
-            // Nothing awaits this task, so an exception would otherwise go unobserved.
-            await DispatchExceptionAsync(exception);
+            // Nothing awaits this task. Dispatching the exception would end the circuit for a message box that failed.
+            Logger.LogWarning(exception, "Failed to show that moving a child failed: {Message}", message);
         }
     }
 

@@ -105,6 +105,7 @@ Storage.Abs.   Components.Abs.   Abstractions
 - `IStorageContainer` - Blob storage abstraction
 - `IStorageFile` - File subject interface
 - `IConfigurationWriter` - Configuration persistence
+- `IMetadataStore`, `IMetadataContainer`, `MetadataKeys` - Metadata persistence, the order of children and the known keys
 - `IConfigurable` - Subjects with persistent config
 - `StorageStatus` - Storage connection status
 - `[Configuration]` - Property persistence marker

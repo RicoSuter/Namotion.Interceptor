@@ -149,7 +149,7 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
         });
         var unknownName = await CallAsync(tools["invoke_operation"], new
         {
-            path = "/Storage/Docs", method = "SetOrder", parameters = new { names = new[] { "gone.md" } }
+            path = "/Storage", method = "SetOrder", parameters = new { names = new[] { "gone.md" } }
         });
 
         // Assert

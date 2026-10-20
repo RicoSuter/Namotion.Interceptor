@@ -117,11 +117,7 @@ A picture is shown in a size that fits the page, and it always keeps its proport
 The navigation follows pages that are added, removed or changed while a browser tab is open:
 
 - **Sidebar.** The menu re-reads its items every 5 seconds, including the contents of every expanded folder. A folder appears once it contains a page for the sidebar, at any depth.
-- **Top bar.** Pages with `location: AppBar` are read from every folder when the layout renders, which happens on navigation.
-
-### Known Limitations and Follow-ups
-
-- A page or subject in the top bar that is added, removed or moved to or from it while a tab is open, through its frontmatter or the **Metadata** dialog, appears in or disappears from the top bar only after the next navigation in that tab. The 5 second refresh re-renders the sidebar menu, not the layout that owns the top bar.
+- **Top bar.** The top bar re-reads its items from every folder every 5 seconds and on navigation: the pages with `location: AppBar` and the subjects whose metadata sets `location` to `AppBar`.
 
 ---
 

@@ -323,6 +323,9 @@
 
             currentPathParts.Add(propertyName);
 
+            // Check for collections/dictionaries BEFORE subject references
+            // because IDictionary<string, IInterceptorSubject> is an interface (IsSubjectReference would be true)
+            // but it's actually a dictionary of subjects, not a single subject reference
             if (property.IsSubjectDictionary || property.IsSubjectCollection)
             {
                 // Collection/Dictionary - next segment is the index/key

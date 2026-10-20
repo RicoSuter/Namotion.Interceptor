@@ -2,6 +2,7 @@ using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.AI.Agents;
 using HomeBlaze.Services;
 using HomeBlaze.Storage;
+using HomeBlaze.Storage.Abstractions;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
@@ -31,7 +32,7 @@ internal static class AgentMetadataAccess
         RegisteredSubject subject, MethodMetadata method, object? result, bool forAgents, PathProviderBase pathProvider, Type[] excludeTypes)
     {
         if (method.PropertyName != nameof(FluentStorageContainer.SearchMetadata) ||
-            subject.Subject is not FluentStorageContainer ||
+            subject.Subject is not IMetadataStore ||
             result is not MetadataSearchMatch[] matches)
         {
             return result;

@@ -1,8 +1,8 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using HomeBlaze.Abstractions;
-using HomeBlaze.Components.Abstractions.Pages;
 using HomeBlaze.Services;
+using HomeBlaze.Storage.Abstractions;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -187,8 +187,22 @@ internal sealed class StorageMetadataApplier
             StorageMetadataValues.Set(subject, null, values);
         }
 
-        // Collected in one pass, as looking up the attribute of each property scans all properties of the subject.
         var properties = subject.Properties;
+        if (key is null || !file.HasProperties)
+        {
+            // Without entries of properties, only a property that has metadata changes, to none.
+            foreach (var property in properties)
+            {
+                if (property.IsAttribute && property.AttributeMetadata.AttributeName == KnownAttributes.Metadata)
+                {
+                    StorageMetadataValues.Set(subject, property.AttributeMetadata.PropertyName, null);
+                }
+            }
+
+            return;
+        }
+
+        // Collected in one pass, as looking up the attribute of each property scans all properties of the subject.
         HashSet<string>? withMetadata = null;
         foreach (var property in properties)
         {
@@ -205,7 +219,7 @@ internal sealed class StorageMetadataApplier
                 continue;
             }
 
-            values = key is not null && file.HasProperties ? file.FindProperty(MetadataPathKey.GetPropertyKey(key, property.Name)) : null;
+            values = file.FindProperty(MetadataPathKey.GetPropertyKey(key, property.Name));
             if (values is not null || withMetadata?.Contains(property.Name) == true)
             {
                 StorageMetadataValues.Set(subject, property.Name, values);

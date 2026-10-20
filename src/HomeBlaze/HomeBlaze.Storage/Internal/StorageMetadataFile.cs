@@ -2,15 +2,15 @@ using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using System.Text.Json;
-using HomeBlaze.Components.Abstractions.Pages;
 using HomeBlaze.Services;
+using HomeBlaze.Storage.Abstractions;
 
 namespace HomeBlaze.Storage.Internal;
 
 /// <summary>
 /// The content of a metadata file as it applies: the own keys, and the entries of <see cref="SubjectsKey"/> and
 /// <see cref="PropertiesKey"/> by their key (see <see cref="MetadataPathKey"/>). It holds paths and JSON values,
-/// never subjects. Keys are matched without regard to case, paths with regard to it.
+/// never subjects. Keys and paths are matched exactly.
 /// </summary>
 /// <remarks>Immutable, so that every thread reads it once it is published.</remarks>
 internal sealed class StorageMetadataFile
@@ -34,7 +34,6 @@ internal sealed class StorageMetadataFile
 
     private readonly Dictionary<string, ImmutableDictionary<string, JsonElement>> _subjects;
     private readonly Dictionary<string, ImmutableDictionary<string, JsonElement>> _properties;
-    private ImmutableArray<string> _order;
 
     private StorageMetadataFile(
         ImmutableDictionary<string, JsonElement>? own,
@@ -44,6 +43,7 @@ internal sealed class StorageMetadataFile
         bool holdsSubjectType)
     {
         Own = own;
+        Order = own.GetStringArray(MetadataKeys.Order);
         _subjects = subjects;
         _properties = properties;
         DuplicatePaths = duplicatePaths;
@@ -56,22 +56,8 @@ internal sealed class StorageMetadataFile
     /// <summary>Gets the own keys of the file, those of the stored subject, the folder or the root; null without one.</summary>
     public ImmutableDictionary<string, JsonElement>? Own { get; }
 
-    /// <summary>
-    /// Gets the names of the <c>order</c> of the own keys, of a folder or of the root, read once; empty without one.
-    /// </summary>
-    public ImmutableArray<string> Order
-    {
-        get
-        {
-            // Threads that race each read equal arrays; an ImmutableArray is a single reference, so a read is never torn.
-            if (_order.IsDefault)
-            {
-                _order = Own.GetStringArray(MetadataKeys.Order);
-            }
-
-            return _order;
-        }
-    }
+    /// <summary>Gets the names of the <c>order</c> of the own keys, of a folder or of the root; empty without one.</summary>
+    public ImmutableArray<string> Order { get; }
 
     /// <summary>Gets whether the file has an entry of a subject.</summary>
     public bool HasSubjects => _subjects.Count > 0;
@@ -93,7 +79,7 @@ internal sealed class StorageMetadataFile
 
     /// <summary>
     /// Reads the content of a metadata file. Content that is no JSON object, has a key that cannot be read, such as one
-    /// with a lone surrogate, has two keys of an entry that differ only in case, or has a section or an entry that is
+    /// with a lone surrogate, has a key of the file or of an entry twice, or has a section or an entry that is
     /// no JSON object or a path that cannot be read, is no metadata. A key with null is left out, and so is an entry
     /// without keys.
     /// </summary>
@@ -122,15 +108,15 @@ internal sealed class StorageMetadataFile
             var holdsSubjectType = false;
             foreach (var reservedKey in reservedKeys)
             {
-                if (string.Equals(reservedKey.Name, SubjectsKey, StringComparison.OrdinalIgnoreCase))
+                if (reservedKey.Name == SubjectsKey)
                 {
                     subjects = ReadEntries(reservedKey.Value, ref duplicatePaths);
                 }
-                else if (string.Equals(reservedKey.Name, PropertiesKey, StringComparison.OrdinalIgnoreCase))
+                else if (reservedKey.Name == PropertiesKey)
                 {
                     properties = ReadEntries(reservedKey.Value, ref duplicatePaths);
                 }
-                else if (string.Equals(reservedKey.Name, TypeKey, StringComparison.OrdinalIgnoreCase))
+                else if (reservedKey.Name == TypeKey)
                 {
                     holdsSubjectType = true;
                 }
@@ -159,15 +145,15 @@ internal sealed class StorageMetadataFile
             throw new JsonException("An entry of a metadata file holds a JSON object.");
         }
 
-        var values = ImmutableDictionary.CreateBuilder<string, JsonElement>(StringComparer.OrdinalIgnoreCase);
-        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var values = ImmutableDictionary.CreateBuilder<string, JsonElement>();
+        var names = new HashSet<string>();
         foreach (var property in entry.EnumerateObject())
         {
             // Throws for a name with a lone surrogate.
             var name = property.Name;
             if (!names.Add(name))
             {
-                throw new JsonException($"The keys {NameList.Format([name])} differ only in case.");
+                throw new JsonException($"The key {NameList.Format([name])} is given twice.");
             }
 
             if (name.StartsWith('$'))

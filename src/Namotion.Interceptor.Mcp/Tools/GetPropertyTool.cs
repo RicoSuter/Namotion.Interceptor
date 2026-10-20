@@ -63,8 +63,9 @@ internal class GetPropertyTool
         var attributes = new Dictionary<string, object?>();
         foreach (var attribute in property.Attributes)
         {
-            // An attribute without a value says nothing about its property.
-            if (attribute.GetValue() is { } value)
+            // A read-only attribute without a value says nothing about its property; a writable one can be set.
+            var value = attribute.GetValue();
+            if (value is not null || attribute.HasSetter)
             {
                 attributes[attribute.BrowseName] = value;
             }

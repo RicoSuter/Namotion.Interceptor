@@ -1,7 +1,6 @@
 using System.Collections.Immutable;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
-using HomeBlaze.Components.Abstractions.Pages;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Internal;
@@ -66,13 +65,7 @@ public partial class VirtualFolder : ITitleProvider, IIconProvider, IStorageCont
     /// </summary>
     internal void ApplyMetadata(StorageMetadataFile? file)
     {
-        if (this.TryGetRegisteredSubject() is { } registered)
-        {
-            StorageMetadataValues.Set(registered, null, file?.Own);
-        }
-
-        var childOrder = file?.Order ?? [];
-        if (!childOrder.SequenceEqual(ChildOrder))
+        if (StorageMetadataValues.SetOwnMetadata(this, ChildOrder, file) is { } childOrder)
         {
             ChildOrder = childOrder;
         }

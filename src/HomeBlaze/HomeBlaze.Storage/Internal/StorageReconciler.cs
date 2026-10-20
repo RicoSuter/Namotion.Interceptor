@@ -1,7 +1,6 @@
 using System.Text;
 using FluentStorage.Blobs;
 using HomeBlaze.Abstractions;
-using HomeBlaze.Components.Abstractions.Pages;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Files;
@@ -349,12 +348,12 @@ internal sealed class StorageReconciler
         => _index.TryGet(path, out var entry) ? entry.Metadata : null;
 
     /// <summary>
-    /// Reads a metadata file from the storage, and checks that it can be read as metadata. Null for a file that
-    /// does not exist.
+    /// Reads the content of a metadata file from the storage, which may be no metadata; null for a file that does not
+    /// exist.
     /// </summary>
     /// <exception cref="InvalidOperationException">
-    /// The file cannot be read as metadata, the path is a folder, its folder is gone, or the
-    /// index holds the file in another case under a name that is not a metadata file.
+    /// The path is a folder, on disk or in the index, its folder is gone, or the index holds the file in another case
+    /// under a name that is not a metadata file.
     /// </exception>
     public async Task<byte[]?> ReadMetadataFileAsync(string path, CancellationToken cancellationToken)
     {
@@ -395,9 +394,7 @@ internal sealed class StorageReconciler
                 : null;
         }
 
-        return StorageMetadataFile.TryParse(content, out _, out _)
-            ? content
-            : throw StorageMetadataWriter.CreateUnreadableException(path);
+        return content;
     }
 
     // Whether a subject or folder of the index has the path as its metadata file, in exact case. Used only for a

@@ -1,6 +1,6 @@
 using System.Collections.Immutable;
 using System.Runtime.InteropServices;
-using HomeBlaze.Components.Abstractions.Pages;
+using HomeBlaze.Storage.Abstractions;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 

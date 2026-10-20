@@ -662,7 +662,7 @@ public class BrowseToolTests
     }
 
     [Fact]
-    public async Task WhenAnAttributeHasNoValue_ThenBrowseLeavesItOut()
+    public async Task WhenAReadOnlyAttributeHasNoValue_ThenBrowseLeavesItOutAndKeepsAWritableOne()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create()
@@ -674,6 +674,7 @@ public class BrowseToolTests
         registered.TryGetProperty("Temperature")!.AddAttribute<string>("Unit", _ => "Celsius");
         registered.TryGetProperty("Temperature")!.AddAttribute<string>("Note", _ => null);
         registered.TryGetProperty("Name")!.AddAttribute<string>("Note", _ => null);
+        registered.TryGetProperty("Name")!.AddAttribute("Comment", typeof(string), _ => null, (_, _) => { });
 
         var config = new McpServerConfiguration { PathProvider = DefaultPathProvider.Instance };
         var browseTool = new McpToolFactory(room, config).CreateTools().First(t => t.Name == "browse");
@@ -686,6 +687,7 @@ public class BrowseToolTests
         var properties = json.GetProperty("result").GetProperty("properties");
         var temperatureAttribute = Assert.Single(properties.GetProperty("Temperature").GetProperty("attributes").EnumerateArray());
         Assert.Equal("Unit", temperatureAttribute.GetProperty("name").GetString());
-        Assert.False(properties.GetProperty("Name").TryGetProperty("attributes", out _));
+        var nameAttribute = Assert.Single(properties.GetProperty("Name").GetProperty("attributes").EnumerateArray());
+        Assert.Equal("Comment", nameAttribute.GetProperty("name").GetString());
     }
 }

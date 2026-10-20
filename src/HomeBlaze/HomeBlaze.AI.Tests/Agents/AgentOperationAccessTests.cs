@@ -193,7 +193,31 @@ public class AgentOperationAccessTests
             CancellationToken.None));
 
         // Assert
-        Assert.StartsWith("values must be a JSON object", result.GetProperty("error").GetString());
+        Assert.Equal(HomeBlazeMcpConfigurationFactory.SetMetadataArgumentsMessage, result.GetProperty("error").GetString());
+    }
+
+    [Theory]
+    [InlineData("""{ "path": "Thing", "values": ["x"] }""")]
+    [InlineData("""{ "path": "Thing", "values": null }""")]
+    [InlineData("""{ "path": "Thing", "values": "x" }""")]
+    [InlineData("""{ "values": { "navTitle": "x" } }""")]
+    [InlineData("""{ "path": null, "values": { "navTitle": "x" } }""")]
+    public async Task WhenAnAgentSetsMetadataWithArgumentsOfAnotherShape_ThenItIsRefusedBeforeTheMethodRuns(string parameters)
+    {
+        // Arrange
+        var (root, _, services) = CreateGraph();
+        var storage = CreateStorage(services);
+        root.Children = new Dictionary<string, IInterceptorSubject> { ["Storage"] = storage };
+        storage.Children = new Dictionary<string, IInterceptorSubject> { ["Thing"] = new AgentTestRoot() };
+        var invokeOperation = CreateTools(services, root, forAgents: true)["invoke_operation"];
+
+        // Act
+        var result = JsonSerializer.SerializeToElement(await invokeOperation.Handler(
+            JsonSerializer.SerializeToElement(new { path = "/Storage", method = "SetMetadata", parameters = JsonElement.Parse(parameters) }),
+            CancellationToken.None));
+
+        // Assert
+        Assert.Equal(HomeBlazeMcpConfigurationFactory.SetMetadataArgumentsMessage, result.GetProperty("error").GetString());
     }
 
     [Fact]

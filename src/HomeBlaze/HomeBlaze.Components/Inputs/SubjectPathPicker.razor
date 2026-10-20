@@ -220,8 +220,8 @@
                 var isInlinePathsProperty = parent.Subject != null &&
                     InlinePathsAttribute.IsInlinePathsProperty(parent.Subject.GetType(), parent.Property.Name);
 
-                // For collection/dictionary, show child subjects by index. A subject excluded from user interfaces, such
-                // as the metadata of a subject, is not offered, nor what it holds.
+                // For collection/dictionary, show child subjects by index. A subject excluded from user interfaces is
+                // not offered, nor what it holds.
                 foreach (var child in parent.Property.Children)
                 {
                     if (child.Subject.IsExcludedFrom(ExclusionTarget.UserInterface))

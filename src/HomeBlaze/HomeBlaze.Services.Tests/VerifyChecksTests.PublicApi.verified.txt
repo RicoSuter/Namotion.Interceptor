@@ -173,7 +173,7 @@ namespace HomeBlaze.Services
     }
     public static class SubjectMetadataExtensions
     {
-        public static HomeBlaze.Components.Abstractions.Pages.IMetadataStore? FindMetadataStore(this Namotion.Interceptor.IInterceptorSubject subject) { }
+        public static HomeBlaze.Storage.Abstractions.IMetadataStore? FindMetadataStore(this Namotion.Interceptor.IInterceptorSubject subject) { }
         public static System.Collections.Immutable.ImmutableDictionary<string, System.Text.Json.JsonElement>? GetMetadata(this Namotion.Interceptor.IInterceptorSubject subject) { }
         public static System.Collections.Immutable.ImmutableDictionary<string, System.Text.Json.JsonElement>? GetMetadata(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
         public static bool IsMetadata(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
@@ -411,15 +411,6 @@ namespace HomeBlaze.Services.Display
 }
 namespace HomeBlaze.Services.Lifecycle
 {
-    [Namotion.Interceptor.Attributes.RunsAfter(new System.Type[] {
-            typeof(HomeBlaze.Services.Lifecycle.MethodPropertyInitializer)})]
-    public sealed class MetadataLifecycleHandler : Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler, Namotion.Interceptor.Tracking.Lifecycle.IPropertyLifecycleHandler
-    {
-        public MetadataLifecycleHandler() { }
-        public void AttachProperty(Namotion.Interceptor.Tracking.Lifecycle.SubjectPropertyLifecycleChange change) { }
-        public void DetachProperty(Namotion.Interceptor.Tracking.Lifecycle.SubjectPropertyLifecycleChange change) { }
-        public void HandleLifecycleChange(Namotion.Interceptor.Tracking.Lifecycle.SubjectLifecycleChange change) { }
-    }
     public class MethodPropertyInitializer : Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler
     {
         public MethodPropertyInitializer() { }

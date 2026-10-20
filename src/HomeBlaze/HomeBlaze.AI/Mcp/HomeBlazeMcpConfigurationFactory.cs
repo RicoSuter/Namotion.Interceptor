@@ -5,6 +5,7 @@ using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.AI.Agents;
 using HomeBlaze.Services;
 using HomeBlaze.Storage;
+using HomeBlaze.Storage.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
@@ -22,6 +23,10 @@ internal static class HomeBlazeMcpConfigurationFactory
 {
     private const string PathPrefix = "/";
 
+    /// <summary>The refusal of a call of SetMetadata by an agent whose arguments do not have the shape of the method.</summary>
+    internal const string SetMetadataArgumentsMessage =
+        "SetMetadata takes path, a string, an optional property and values, a JSON object, for example {\"path\": \"Devices/Pump\", \"values\": {\"navTitle\": \"Pump\"}}.";
+
     private static readonly Func<RegisteredSubjectProperty, string?> RefuseConfigurationWrite =
         property => property.IsConfigurationProperty() ? "It is a configuration property; set_property cannot change configuration, an operation of the subject may." : null;
 
@@ -36,10 +41,10 @@ internal static class HomeBlazeMcpConfigurationFactory
     /// <param name="isReadOnly">Whether set_property and operations are blocked.</param>
     /// <param name="forAgents">
     /// Whether the tools serve the built-in agents; invoke_operation and the Markdown tools then refuse every
-    /// operation of an agent (<see cref="LlmAgentBase"/>), and SetMetadata of a storage for an agent, a subject that an
-    /// agent holds through any parent, and a subject or property hidden from agents, which is refused as a missing one;
-    /// SearchMetadata of a storage and search_markdown then leave out the metadata and notes of agents. SearchMetadata
-    /// leaves out the subjects and properties that the tools do not show either way.
+    /// operation of an agent (<see cref="LlmAgentBase"/>), and SetMetadata of a storage with arguments of another shape,
+    /// for an agent, a subject that an agent holds through any parent, and a subject or property hidden from agents,
+    /// which is refused as a missing one; SearchMetadata of a storage and search_markdown then leave out the metadata and
+    /// notes of agents. SearchMetadata leaves out the subjects and properties that the tools do not show either way.
     /// </param>
     public static McpServerConfiguration Create(
         IServiceProvider serviceProvider,
@@ -107,16 +112,16 @@ internal static class HomeBlazeMcpConfigurationFactory
             return "Agents cannot run operations of agents.";
         }
 
-        // The arguments are the input parameters in declaration order: path, property and values of SetMetadata. Other
-        // arguments are left to the method, which refuses them before it resolves the path.
-        if (method.PropertyName == FluentStorageContainer.SetMetadataMethodName &&
-            subject.Subject is FluentStorageContainer &&
-            arguments is [string path, var property, JsonElement { ValueKind: JsonValueKind.Object }, ..])
+        if (method.PropertyName != FluentStorageContainer.SetMetadataMethodName || subject.Subject is not IMetadataStore)
         {
-            return AgentMetadataAccess.GetError(subject, path, property as string, pathProvider, excludeTypes, forAgents: true);
+            return null;
         }
 
-        return null;
+        // The input parameters in declaration order, empty when they could not be read. Any other shape is refused
+        // without looking at the path, so that a subject hidden from agents reads as a missing one.
+        return arguments is [string path, string or null, JsonElement { ValueKind: JsonValueKind.Object }, ..]
+            ? AgentMetadataAccess.GetError(subject, path, arguments[1] as string, pathProvider, excludeTypes, forAgents: true)
+            : SetMetadataArgumentsMessage;
     }
 
     /// <summary>

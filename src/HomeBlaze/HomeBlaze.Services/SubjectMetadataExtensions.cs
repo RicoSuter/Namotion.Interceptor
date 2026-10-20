@@ -1,7 +1,7 @@
 using System.Collections.Immutable;
 using System.Text.Json;
 using HomeBlaze.Abstractions;
-using HomeBlaze.Components.Abstractions.Pages;
+using HomeBlaze.Storage.Abstractions;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;

@@ -889,7 +889,7 @@ Device interfaces compose small capability interfaces, split into state and cont
 
 ### HomeBlaze.Storage.Abstractions
 
-Storage contracts: `IStorageContainer`, `IStorageFile`, `IConfigurationWriter`, `StorageStatus`, `[FileExtension]`.
+Storage contracts: `IStorageContainer`, `IStorageFile`, `IConfigurationWriter`, `IMetadataStore`, `StorageStatus`, `[FileExtension]`.
 
 ### HomeBlaze.Components.Abstractions
 

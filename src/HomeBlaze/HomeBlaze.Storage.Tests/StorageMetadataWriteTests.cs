@@ -1,6 +1,6 @@
 using System.Text.Json;
-using HomeBlaze.Components.Abstractions.Pages;
 using HomeBlaze.Services;
+using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
 using Namotion.Interceptor;
@@ -334,23 +334,25 @@ public class StorageMetadataWriteTests : StorageTestBase
     [Theory]
     [InlineData("Docs", "b.md,gone.md", "Names that are not children of the folder: 'gone.md'. Its children: 'a.md', 'b.md'.")]
     [InlineData("Docs", "b.md,a.md,b.md", "Names given more than once: 'b.md'.")]
-    [InlineData("Motor", "a.md", "Only a folder or the root of a storage has an order.")]
-    public async Task WhenOrderHasAnUnknownOrRepeatedNameOrIsSetOnNoFolder_ThenItFailsSayingWhy(string childName, string names, string expectedMessage)
+    [InlineData("Motor", "a.md", "'order' is the order of the children of a folder; only a folder or the root of a storage has one.")]
+    public async Task WhenOrderHasAnUnknownOrRepeatedNameOrIsSetOnNoFolder_ThenItIsRefusedSayingWhy(string childName, string names, string expectedMessage)
     {
         // Arrange
         WriteFile("Docs/a.md");
         WriteFile("Docs/b.md");
         WriteFile("Motor.json", SerializeMotor("Motor 1"));
         var storage = await ConnectAsync();
+        var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
 
         // Act
-        var exception = await Assert.ThrowsAsync<ArgumentException>(() =>
+        var exception = await Assert.ThrowsAsync<StorageRefusedException>(() =>
             MetadataStoreExtensions.SetOrderAsync(storage.Children[childName], names.Split(','), CancellationToken.None));
 
         // Assert
-        Assert.StartsWith(expectedMessage, exception.Message);
+        Assert.Equal(expectedMessage, exception.Message);
         Assert.False(File.Exists(GetFullPath("Docs/.metadata.json")));
         Assert.False(File.Exists(GetFullPath("Motor.metadata.json")));
+        Assert.Empty(docs.ChildOrder);
     }
 
     [Fact]
@@ -363,7 +365,7 @@ public class StorageMetadataWriteTests : StorageTestBase
         var names = Enumerable.Range(0, 20).Select(index => $"{index:D2}{new string('x', 1000)}").ToArray();
 
         // Act
-        var exception = await Assert.ThrowsAsync<ArgumentException>(() =>
+        var exception = await Assert.ThrowsAsync<StorageRefusedException>(() =>
             MetadataStoreExtensions.SetOrderAsync(docs, names, CancellationToken.None));
 
         // Assert
@@ -371,27 +373,6 @@ public class StorageMetadataWriteTests : StorageTestBase
         Assert.DoesNotContain(new string('x', 63), exception.Message);
         Assert.DoesNotContain("'10x", exception.Message);
         Assert.Contains("'a.md'", exception.Message);
-    }
-
-    [Theory]
-    [InlineData("""{ "order": ["a.md", "x.md"] }""", "Names that are not children of the folder: 'x.md'. Its children: 'a.md', 'b.md'.")]
-    [InlineData("""{ "Order": ["a.md", "b.md", "a.md"] }""", "Names given more than once: 'a.md'.")]
-    public async Task WhenOrderIsSetAsMetadataWithNamesThatAreNoChildrenOrRepeated_ThenItIsRefused(string values, string expectedMessage)
-    {
-        // Arrange
-        WriteFile("Docs/a.md");
-        WriteFile("Docs/b.md");
-        var storage = await ConnectAsync();
-        var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
-
-        // Act
-        var exception = await Assert.ThrowsAsync<StorageRefusedException>(() =>
-            storage.SetMetadataAsync(docs, null, Values(values), CancellationToken.None));
-
-        // Assert
-        Assert.Equal(expectedMessage, exception.Message);
-        Assert.False(File.Exists(GetFullPath("Docs/.metadata.json")));
-        Assert.Empty(docs.ChildOrder);
     }
 
     [Fact]

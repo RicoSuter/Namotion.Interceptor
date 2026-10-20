@@ -16,10 +16,10 @@ public static class MetadataSearch
     /// <summary>
     /// Gets the subjects and properties at or below the subject at <paramref name="path"/> (<paramref name="root"/> when
     /// null) whose metadata matches every filter that is given: a tag in <c>tags</c>, a key that is set, and a value that
-    /// equals a string value, or a string in an array, of the key when one is given, else of any key. Keys, tags and
-    /// values match without regard to case. <paramref name="path"/> and the paths of the matches are relative to
-    /// <paramref name="root"/>, as <see cref="MetadataPaths"/> resolves them. The matches are ordered by path and then
-    /// property, ordinal; none are found when no subject is at <paramref name="path"/>. A subject for which
+    /// equals a string value, or a string in an array, of the key when one is given, else of any key. Keys match
+    /// exactly, and tags and values without regard to case. <paramref name="path"/> and the paths of the matches are
+    /// relative to <paramref name="root"/>, as <see cref="MetadataPaths"/> resolves them. The matches are ordered by path
+    /// and then property, ordinal; none are found when no subject is at <paramref name="path"/>. A subject for which
     /// <paramref name="isExcluded"/> returns true, and every subject below it, is skipped.
     /// </summary>
     public static IReadOnlyList<MetadataSearchMatch> Search(

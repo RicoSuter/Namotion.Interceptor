@@ -1,5 +1,6 @@
 @using HomeBlaze.Abstractions.Attributes
 @using HomeBlaze.Components.Abstractions.Pages
+@using HomeBlaze.Storage.Abstractions
 @using System.Text.Json
 @using System.Text.Json.Nodes
 @using HomeBlaze.Components.Inputs
@@ -98,7 +99,7 @@
         </div>
     </DialogContent>
     <DialogActions>
-        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton OnClick="Cancel" Disabled="@_isSaving">Cancel</MudButton>
         <MudButton Color="Color.Primary" OnClick="SaveAsync" Disabled="@_isSaving" data-testid="metadata-save">Save</MudButton>
     </DialogActions>
 </MudDialog>
@@ -263,7 +264,7 @@
         AddTag(_tagText);
 
         // Only the fields that were changed, so that a field left empty removes its key, and the value of a key whose field
-        // was not changed stays, also one that the dialog does not show as it is held, such as a link it cannot read, or
+        // was not changed stays, also one that the dialog cannot show, such as a number or a link edited by hand, or one
         // that was written while the dialog was open.
         var values = new JsonObject();
         foreach (var (key, value) in GetValues())

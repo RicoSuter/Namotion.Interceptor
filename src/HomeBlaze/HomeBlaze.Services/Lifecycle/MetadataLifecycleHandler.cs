@@ -1,6 +1,5 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Metadata;
-using HomeBlaze.Components.Abstractions.Pages;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Tracking.Lifecycle;
@@ -14,7 +13,7 @@ namespace HomeBlaze.Services.Lifecycle;
 /// </summary>
 // After the method properties are added, so that applying the subject covers them.
 [RunsAfter(typeof(MethodPropertyInitializer))]
-public sealed class MetadataLifecycleHandler : ILifecycleHandler, IPropertyLifecycleHandler
+internal sealed class MetadataLifecycleHandler : ILifecycleHandler, IPropertyLifecycleHandler
 {
     // The properties of the subject that attached last on this thread, after it was applied. The lifecycle attaches
     // each property that a subject has when it attaches after the subject itself, and those were applied with it. A
