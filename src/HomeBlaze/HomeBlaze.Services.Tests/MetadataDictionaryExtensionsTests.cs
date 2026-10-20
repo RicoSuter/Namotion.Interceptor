@@ -121,4 +121,19 @@ public class MetadataDictionaryExtensionsTests
         Assert.Equal("javascript:alert(1)", link.Url);
         Assert.False(MetadataLink.IsWebAddress(link.Url!));
     }
+
+    [Fact]
+    public void WhenAFileHoldsMoreLinksThanMayBeWritten_ThenOnlyTheFirstTwentyAreRead()
+    {
+        // Arrange
+        var items = Enumerable.Range(0, 1000).Select(index => $$"""{ "path": "/Devices/{{index}}" }""");
+        var metadata = Metadata($$"""{ "links": [{{string.Join(", ", items)}}] }""");
+
+        // Act
+        var links = metadata.GetLinks(MetadataKeys.Links);
+
+        // Assert
+        Assert.Equal(20, links.Length);
+        Assert.Equal("/Devices/19", links[^1].Path);
+    }
 }

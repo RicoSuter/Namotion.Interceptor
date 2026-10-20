@@ -9,6 +9,9 @@ namespace HomeBlaze.Services;
 /// </summary>
 public static class MetadataDictionaryExtensions
 {
+    // The most links that a write accepts, so that a file edited by hand does not show more.
+    private const int MaxLinkCount = 20;
+
     /// <summary>Gets the string of the key; null when it is not set, no string, blank or cannot be read.</summary>
     public static string? GetString(this IReadOnlyDictionary<string, JsonElement>? metadata, string key)
     {
@@ -55,8 +58,8 @@ public static class MetadataDictionaryExtensions
     }
 
     /// <summary>
-    /// Gets the links of the key, leaving out an item that is no object with exactly one of a <c>url</c> and a
-    /// <c>path</c> string; empty without an array. The address of a link is returned as it is held, see
+    /// Gets the links of the first 20 items of the key, leaving out an item that is no object with exactly one of a
+    /// <c>url</c> and a <c>path</c> string; empty without an array. The address of a link is returned as it is held, see
     /// <see cref="MetadataLink.IsWebAddress"/>.
     /// </summary>
     public static ImmutableArray<MetadataLink> GetLinks(this IReadOnlyDictionary<string, JsonElement>? metadata, string key)
@@ -67,7 +70,7 @@ public static class MetadataDictionaryExtensions
         }
 
         var links = ImmutableArray.CreateBuilder<MetadataLink>();
-        foreach (var item in value.EnumerateArray())
+        foreach (var item in value.EnumerateArray().Take(MaxLinkCount))
         {
             if (item.ValueKind != JsonValueKind.Object)
             {
