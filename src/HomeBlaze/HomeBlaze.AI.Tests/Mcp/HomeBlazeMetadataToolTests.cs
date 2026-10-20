@@ -262,7 +262,7 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
         // Arrange
         WriteFile("Docs/Pump.json", """{ "speed": 1 }""");
         WriteFile("Docs/Pump.metadata.json", """{ "tags": ["floor-2"] }""");
-        WriteFile("Docs/Hidden.json", $$"""{ "$type": "{{typeof(MetadataSearchHiddenDevice).FullName}}" }""");
+        WriteFile("Docs/Hidden.json", $$"""{ "$type": "{{typeof(AgentExcludedDevice).FullName}}" }""");
         WriteFile("Docs/Hidden.metadata.json", """{ "tags": ["floor-2"] }""");
         WriteFile("Docs/Device.json", $$"""{ "$type": "{{typeof(MetadataSearchTestDevice).FullName}}" }""");
         WriteFile("Docs/Device.metadata.json", """{ "tags": ["floor-2"], "$properties": { "Host": { "tags": ["floor-2"] } } }""");
@@ -361,12 +361,5 @@ public partial class MetadataSearchTestDevice : IConfigurable
     [Configuration]
     public partial string? Host { get; set; }
 
-    public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
-}
-
-[InterceptorSubject]
-[ExcludeFrom(ExclusionTarget.Agents)]
-public partial class MetadataSearchHiddenDevice : IConfigurable
-{
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }

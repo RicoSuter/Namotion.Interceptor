@@ -382,6 +382,21 @@ public sealed class HomeBlazeMarkdownSearchToolTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenNotesBelongToASubjectOfATypeHiddenFromAgents_ThenTheyAreNotSearched()
+    {
+        // Arrange
+        var tool = await CreateToolAsync(
+            ("Docs/Hidden.json", $$"""{ "$type": "{{typeof(AgentExcludedDevice).FullName}}" }"""),
+            ("Docs/Hidden.metadata.json", """{ "notes": "The freezer key hangs here." }"""));
+
+        // Act
+        var result = await CallAsync(tool, new { query = "freezer" });
+
+        // Assert
+        Assert.Equal(["/Storage/Notes.md"], result.GetProperty("pages").EnumerateArray().Select(page => page.GetProperty("path").GetString()));
+    }
+
+    [Fact]
     public async Task WhenTheConfigurationIsReadOnly_ThenSearchMarkdownIsOfferedAsAReadOnlyTool()
     {
         // Act

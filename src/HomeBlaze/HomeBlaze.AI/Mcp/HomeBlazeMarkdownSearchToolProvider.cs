@@ -65,11 +65,16 @@ public class HomeBlazeMarkdownSearchToolProvider : IMcpToolProvider
     /// <param name="rootSubjectProvider">Resolves the root subject when the tool runs.</param>
     /// <param name="pathProvider">Builds the paths of the pages, as the other tools resolve them.</param>
     /// <param name="pathPrefix">The prefix of every path, <see cref="McpServerConfiguration.PathPrefix"/> of the configuration.</param>
-    internal HomeBlazeMarkdownSearchToolProvider(Func<IInterceptorSubject> rootSubjectProvider, PathProviderBase pathProvider, string pathPrefix)
+    /// <param name="excludeTypes">
+    /// <see cref="McpServerConfiguration.ExcludeTypes"/> of the configuration: the pages and notes of a subject of one of
+    /// these types, or below one through the first parents, are not searched.
+    /// </param>
+    internal HomeBlazeMarkdownSearchToolProvider(
+        Func<IInterceptorSubject> rootSubjectProvider, PathProviderBase pathProvider, string pathPrefix, Type[] excludeTypes)
     {
         _rootSubjectProvider = rootSubjectProvider;
         _pathPrefix = pathPrefix;
-        _sourceFinder = new MarkdownSearchSourceFinder(pathProvider, pathPrefix);
+        _sourceFinder = new MarkdownSearchSourceFinder(pathProvider, pathPrefix, excludeTypes);
     }
 
     public IEnumerable<McpToolInfo> GetTools()

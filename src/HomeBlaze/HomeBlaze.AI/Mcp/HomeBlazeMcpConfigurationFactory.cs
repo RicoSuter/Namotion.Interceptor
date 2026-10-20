@@ -78,7 +78,7 @@ internal static class HomeBlazeMcpConfigurationFactory
             {
                 new HomeBlazeMcpToolProvider(invoker, isReadOnly),
                 new HomeBlazeMarkdownToolProvider(invoker, isReadOnly),
-                new HomeBlazeMarkdownSearchToolProvider(rootSubjectProvider, pathProvider, PathPrefix)
+                new HomeBlazeMarkdownSearchToolProvider(rootSubjectProvider, pathProvider, PathPrefix, excludeTypes)
             },
             ToolDescriptionAdditions =
             {

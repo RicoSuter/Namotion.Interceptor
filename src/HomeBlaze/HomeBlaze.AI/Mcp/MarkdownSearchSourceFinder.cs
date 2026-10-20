@@ -18,18 +18,22 @@ internal sealed class MarkdownSearchSourceFinder
 {
     private readonly PathProviderBase _pathProvider;
     private readonly string _pathPrefix;
+    private readonly Type[] _excludeTypes;
 
     /// <param name="pathProvider">Builds the paths of the pages, as the other tools resolve them.</param>
     /// <param name="pathPrefix">The prefix of every path.</param>
-    public MarkdownSearchSourceFinder(PathProviderBase pathProvider, string pathPrefix)
+    /// <param name="excludeTypes">The types whose subjects, and the subjects below them, are left out.</param>
+    public MarkdownSearchSourceFinder(PathProviderBase pathProvider, string pathPrefix, Type[] excludeTypes)
     {
         _pathProvider = pathProvider;
         _pathPrefix = pathPrefix;
+        _excludeTypes = excludeTypes;
     }
 
     /// <summary>
     /// Gets the Markdown files and the notes of metadata in or under <paramref name="pathPrefix"/>, all when it is null,
-    /// in path order so that results and truncation are stable.
+    /// in path order so that results and truncation are stable; without those of a subject of an excluded type or below
+    /// one, which browse and search do not show.
     /// </summary>
     public List<MarkdownSearchSource> Find(ISubjectRegistry registry, IInterceptorSubject rootSubject, string? pathPrefix)
     {
@@ -38,7 +42,7 @@ internal sealed class MarkdownSearchSourceFinder
         {
             var subject = registered.Subject;
             var path = ReferenceEquals(subject, rootSubject) ? _pathPrefix : TryGetPath(registered, rootSubject);
-            if (path is null)
+            if (path is null || AgentMetadataAccess.IsOfExcludedType(registered, rootSubject, _excludeTypes))
             {
                 continue;
             }
