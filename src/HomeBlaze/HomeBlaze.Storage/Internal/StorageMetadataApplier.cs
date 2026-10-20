@@ -21,8 +21,8 @@ internal sealed class StorageMetadataApplier
 
     private readonly FluentStorageContainer _storage;
 
-    // The file applied last to each stored subject. Weak, so that a subject that has left the storage is not kept; a
-    // file holds no subject.
+    // The file applied last to each stored subject, for the lookups of an attaching subject, which has no entry at hand.
+    // Weak, so that a subject that has left the storage is not kept; a file holds no subject.
     private readonly ConditionalWeakTable<IInterceptorSubject, StorageMetadataFile> _files = new();
 
     public StorageMetadataApplier(FluentStorageContainer storage)

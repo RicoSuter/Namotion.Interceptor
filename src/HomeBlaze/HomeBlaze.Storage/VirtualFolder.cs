@@ -38,6 +38,9 @@ public partial class VirtualFolder : ITitleProvider, IIconProvider, IStorageCont
     /// <inheritdoc />
     public partial ImmutableArray<string> ChildOrder { get; private set; }
 
+    // Title and IconName read the metadata dictionary and must not be [Derived]: reading the dynamic metadata property
+    // bypasses interception, so derived tracking would not fire. Observers watch HomeBlaze:Metadata instead.
+
     /// <summary>Gets the <c>title</c> of the metadata of the folder, else the name of the directory.</summary>
     public string Title => this.GetMetadata().GetString(MetadataKeys.Title) ?? Path.GetFileName(RelativePath.TrimEnd('/'));
 
