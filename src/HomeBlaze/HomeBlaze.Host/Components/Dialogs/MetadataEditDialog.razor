@@ -74,14 +74,15 @@
         }
         <MudButton StartIcon="@Icons.Material.Filled.AddLink" Variant="Variant.Text" OnClick="@(() => _links.Add(new LinkInput()))"
                    data-testid="metadata-add-link">Add link</MudButton>
+        @* The value changes only when a suggestion is picked; typed text is added on Enter, not on every keystroke. *@
         <MudAutocomplete T="string"
+                         @ref="_tagInput"
                          Label="Add tag"
-                         Value="@_tagText"
-                         ValueChanged="AddTag"
+                         ValueChanged="AddTagAndClearInputAsync"
                          TextChanged="@(text => _tagText = text)"
+                         OnKeyUp="OnTagKeyUpAsync"
                          SearchFunc="SearchTagsAsync"
-                         CoerceValue="true"
-                         ResetValueOnEmptyText="true"
+                         CoerceText="false"
                          Class="mt-4"
                          data-testid="metadata-tag-input" />
         <div class="d-flex flex-wrap gap-1 mt-1">
@@ -120,6 +121,7 @@
     private readonly List<string> _tags = [];
     private IReadOnlyList<string> _tagsInUse = [];
     private string? _tagText;
+    private MudAutocomplete<string>? _tagInput;
     private bool _isSaving;
 
     protected override void OnInitialized()
@@ -169,6 +171,23 @@
 
         _tagText = null;
     }
+
+    // A picked suggestion; also called with null when the field is cleared.
+    private async Task AddTagAndClearInputAsync(string? tag)
+    {
+        if (tag is null)
+            return;
+
+        AddTag(tag);
+
+        // The field keeps the text of what it added, which would look like a tag not added yet.
+        if (_tagInput is not null)
+            await _tagInput.ClearAsync();
+    }
+
+    // Runs after the field handled the key: when Enter picked a suggestion, the field is cleared already.
+    private Task OnTagKeyUpAsync(KeyboardEventArgs args)
+        => args.Key is "Enter" or "NumpadEnter" ? AddTagAndClearInputAsync(_tagText) : Task.CompletedTask;
 
     // The tags in use that contain the text, so that the same tag is written the same way.
     private Task<IEnumerable<string>> SearchTagsAsync(string? text, CancellationToken cancellationToken)

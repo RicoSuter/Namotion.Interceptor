@@ -259,6 +259,37 @@ public class MetadataDisplayTests
     });
 
     [Fact]
+    public Task WhenTagsAreTypedAndAddedWithEnter_ThenEachIsOneChipAndARemovedChipIsNotWritten() => WithSidecarAsync("Motor.metadata.json", "{}", async () =>
+    {
+        // Arrange
+        var (page, pane) = await OpenPaneAsync("Demo/Motor");
+        await pane.GetByTestId("edit-metadata-button").ClickAsync();
+
+        // MudDialog puts its test id on its content, which does not hold the actions.
+        var dialog = page.Locator(".mud-dialog").Filter(new() { Has = page.GetByTestId("metadata-edit-dialog") });
+        var tagInput = dialog.GetByTestId("metadata-tag-input");
+        await tagInput.PressSequentiallyAsync("e2e-kept");
+        await tagInput.PressAsync("Enter");
+        await Assertions.Expect(tagInput).ToHaveValueAsync("", new() { Timeout = PageLoadTimeout });
+        await tagInput.PressSequentiallyAsync("e2e-removed");
+        await tagInput.PressAsync("Enter");
+        var chips = dialog.GetByTestId("metadata-tag-chip");
+        await Assertions.Expect(chips).ToHaveTextAsync(["e2e-kept", "e2e-removed"], new() { Timeout = PageLoadTimeout });
+        await Assertions.Expect(tagInput).ToHaveValueAsync("");
+
+        // Act
+        await chips.Filter(new() { HasText = "e2e-removed" }).Locator(".mud-chip-close-button").ClickAsync();
+        await Assertions.Expect(chips).ToHaveTextAsync(["e2e-kept"]);
+        await dialog.GetByTestId("metadata-save").ClickAsync();
+
+        // Assert
+        await Assertions.Expect(dialog).ToHaveCountAsync(0, new() { Timeout = PageLoadTimeout });
+        var text = await _fixture.WaitForDemoPageTextAsync("Motor.metadata.json", text => text.Contains("e2e-kept"), "The tag was not written");
+        using var sidecar = JsonDocument.Parse(text);
+        Assert.Equal(["e2e-kept"], sidecar.RootElement.GetProperty("tags").EnumerateArray().Select(tag => tag.GetString()));
+    });
+
+    [Fact]
     public Task WhenAnAgentWritesTheFirstMetadataWhileThePaneIsOpen_ThenThePaneShowsIt() => WithValuesSubjectAsync(null, async () =>
     {
         // Arrange
