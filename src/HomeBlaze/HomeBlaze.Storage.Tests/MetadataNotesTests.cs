@@ -21,6 +21,10 @@ public class MetadataNotesTests
     [InlineData(@"[home](/\example.com)")]
     [InlineData(@"[home](\\\\example.com)")]
     [InlineData("[home]\n\n[home]: //example.com")]
+    [InlineData("Text {.mud-overlay}")]
+    [InlineData("# Pump {#app}")]
+    [InlineData("[Setup](/Docs/Setup.md){.mud-button}")]
+    [InlineData("Text {data-value=1}")]
     public void WhenNotesBreakTheRules_ThenTheyAreNotRenderedAsHtml(string notes)
     {
         // Act
@@ -39,5 +43,15 @@ public class MetadataNotesTests
 
         // Assert
         Assert.Contains("4 KB", error);
+    }
+
+    [Fact]
+    public void WhenNotesHaveAHeading_ThenItIsRenderedWithoutIdentifier()
+    {
+        // Act
+        var html = MetadataNotes.ToHtml("# Pump\n\n- [x] Calibrated");
+
+        // Assert
+        Assert.StartsWith("<h1>Pump</h1>\n", html);
     }
 }

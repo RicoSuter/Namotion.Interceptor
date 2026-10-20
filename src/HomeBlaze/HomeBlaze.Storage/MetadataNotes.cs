@@ -1,6 +1,10 @@
 using System.Text;
 using HomeBlaze.Storage.Internal;
 using HomeBlaze.Storage.Pages;
+using Markdig;
+using Markdig.Extensions.AutoIdentifiers;
+using Markdig.Extensions.GenericAttributes;
+using Markdig.Renderers.Html;
 using Markdig.Syntax;
 using Markdig.Syntax.Inlines;
 
@@ -8,13 +12,21 @@ namespace HomeBlaze.Storage;
 
 /// <summary>
 /// The <c>notes</c> of metadata: Markdown under the rules that the write operations of pages apply to new content, no
-/// HTML, pictures, blocks, element attributes or expressions, and links only to http, https or mailto addresses or to
-/// relative paths in this application.
+/// HTML, pictures, blocks or expressions, and links only to http, https or mailto addresses or to relative paths in this
+/// application; and without any attributes, also no identifier or class, as notes are shown inside the page of the
+/// application.
 /// </summary>
 public static class MetadataNotes
 {
     /// <summary>The largest notes, in bytes of UTF-8.</summary>
     public const int MaxSize = 4 * 1024;
+
+    // The pipeline of pages without attributes and without the identifiers that it gives headings, so that notes put no
+    // identifier or class of the application on the page that shows them.
+    private static readonly MarkdownPipeline Pipeline = CreatePipeline(withAttributes: false);
+
+    // The same with attributes, to find the attributes that notes give.
+    private static readonly MarkdownPipeline AttributesPipeline = CreatePipeline(withAttributes: true);
 
     private const string RulesMessage =
         "notes hold Markdown text without HTML, pictures, blocks, element attributes or {{ }} expressions, and links only to " +
@@ -36,7 +48,7 @@ public static class MetadataNotes
         try
         {
             MarkdownWriteRules.EnsureActiveContentUnchanged(string.Empty, notes, nameof(notes));
-            return HasLinkToOtherHost(notes) ? RulesMessage : null;
+            return HasLinkToOtherHost(notes) || HasAttributes(notes) ? RulesMessage : null;
         }
         catch (ArgumentException)
         {
@@ -59,6 +71,32 @@ public static class MetadataNotes
               .Take(2)
               .Count(static character => character is '/' or '\\') == 2;
 
+    // Extensions set attributes as well, such as the classes of a task list, so attributes are given by the notes where
+    // they differ from those without the attributes extension.
+    private static bool HasAttributes(string notes)
+        => !GetAttributes(Markdown.Parse(notes, AttributesPipeline)).SequenceEqual(GetAttributes(Markdown.Parse(notes, Pipeline)), StringComparer.Ordinal);
+
+    private static IEnumerable<string> GetAttributes(MarkdownDocument document)
+        => document.Descendants()
+            .Select(static node => node.TryGetAttributes())
+            .OfType<HtmlAttributes>()
+            .Select(static attributes => string.Join(" ",
+                attributes.Id,
+                string.Join(".", attributes.Classes ?? []),
+                string.Join(",", attributes.Properties?.Select(static property => property.Key + "=" + property.Value) ?? [])));
+
+    private static MarkdownPipeline CreatePipeline(bool withAttributes)
+    {
+        var builder = MarkdownPageParser.CreatePipelineBuilder();
+        builder.Extensions.TryRemove<AutoIdentifierExtension>();
+        if (!withAttributes)
+        {
+            builder.Extensions.TryRemove<GenericAttributesExtension>();
+        }
+
+        return builder.Build();
+    }
+
     /// <summary>
     /// Converts the notes to HTML; null for notes that break the rules, such as after an edit of the file by hand,
     /// which are to be shown as text instead.
@@ -72,7 +110,7 @@ public static class MetadataNotes
 
         try
         {
-            return Markdig.Markdown.ToHtml(notes, MarkdownPageParser.Pipeline);
+            return Markdown.ToHtml(notes, Pipeline);
         }
         catch (ArgumentException)
         {

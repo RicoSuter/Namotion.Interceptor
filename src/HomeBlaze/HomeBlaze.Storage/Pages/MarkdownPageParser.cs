@@ -270,7 +270,7 @@ public sealed class MarkdownPage
 /// <summary>Turns page text into a tree of blocks. Knows nothing about subjects.</summary>
 public static class MarkdownPageParser
 {
-    internal static readonly MarkdownPipeline Pipeline = CreatePipeline();
+    internal static readonly MarkdownPipeline Pipeline = CreatePipelineBuilder().Build();
 
     public static MarkdownPage Parse(string source)
     {
@@ -280,7 +280,8 @@ public static class MarkdownPageParser
         return page;
     }
 
-    private static MarkdownPipeline CreatePipeline()
+    /// <summary>Creates a builder of the pipeline with which pages are parsed and rendered.</summary>
+    internal static MarkdownPipelineBuilder CreatePipelineBuilder()
     {
         var builder = new MarkdownPipelineBuilder()
             .UseAdvancedExtensions()
@@ -290,7 +291,7 @@ public static class MarkdownPageParser
         // Blocks have a parser of their own, so that a run of fence characters has one meaning only.
         builder.Extensions.TryRemove<CustomContainerExtension>();
         builder.Extensions.Add(new MarkdownBlockContainerExtension());
-        return builder.Build();
+        return builder;
     }
 
     /// <summary>Finds the end of the line at <paramref name="position"/>, before its line ending, for the redaction of a page.</summary>
