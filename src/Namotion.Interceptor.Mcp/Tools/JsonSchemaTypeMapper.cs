@@ -35,6 +35,13 @@ public static class JsonSchemaTypeMapper
             return "number";
         }
 
+        // A dictionary is also IEnumerable, so this check must run before the array check below;
+        // its JSON value is a map (a JSON object), not a sequence.
+        if (IsDictionary(type))
+        {
+            return "object";
+        }
+
         if (type.IsArray || (type.IsGenericType && typeof(System.Collections.IEnumerable).IsAssignableFrom(type)))
         {
             return "array";
@@ -42,6 +49,20 @@ public static class JsonSchemaTypeMapper
 
         return "object";
     }
+
+    private static bool IsDictionary(Type type)
+    {
+        if (typeof(System.Collections.IDictionary).IsAssignableFrom(type) || IsGenericDictionaryDefinition(type))
+        {
+            return true;
+        }
+
+        return type.GetInterfaces().Any(IsGenericDictionaryDefinition);
+    }
+
+    private static bool IsGenericDictionaryDefinition(Type type) =>
+        type.IsGenericType &&
+        (type.GetGenericTypeDefinition() == typeof(IDictionary<,>) || type.GetGenericTypeDefinition() == typeof(IReadOnlyDictionary<,>));
 
     /// <summary>
     /// Gets the format label of the string a value of <paramref name="type"/> is written and read as by System.Text.Json:
