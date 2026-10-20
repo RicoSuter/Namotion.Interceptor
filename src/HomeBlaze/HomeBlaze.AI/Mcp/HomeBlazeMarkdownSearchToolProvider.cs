@@ -69,12 +69,13 @@ public class HomeBlazeMarkdownSearchToolProvider : IMcpToolProvider
     /// <see cref="McpServerConfiguration.ExcludeTypes"/> of the configuration: the pages and notes of a subject of one of
     /// these types, or below one through the first parents, are not searched.
     /// </param>
+    /// <param name="forAgents">Whether the tool serves the built-in agents, which do not search the notes of agents.</param>
     internal HomeBlazeMarkdownSearchToolProvider(
-        Func<IInterceptorSubject> rootSubjectProvider, PathProviderBase pathProvider, string pathPrefix, Type[] excludeTypes)
+        Func<IInterceptorSubject> rootSubjectProvider, PathProviderBase pathProvider, string pathPrefix, Type[] excludeTypes, bool forAgents)
     {
         _rootSubjectProvider = rootSubjectProvider;
         _pathPrefix = pathPrefix;
-        _sourceFinder = new MarkdownSearchSourceFinder(pathProvider, pathPrefix, excludeTypes);
+        _sourceFinder = new MarkdownSearchSourceFinder(pathProvider, pathPrefix, excludeTypes, forAgents);
     }
 
     public IEnumerable<McpToolInfo> GetTools()

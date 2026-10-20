@@ -255,9 +255,9 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
     }
 
     [Theory]
-    [InlineData(false, new[] { "Docs/Device|", "Docs/Device|Host", "Docs/Hidden|", "Docs/Pump.json|" })]
-    [InlineData(true, new[] { "Docs/Device|", "Docs/Pump.json|" })]
-    public async Task WhenAgentsSearchMetadata_ThenTheSubjectsAndPropertiesHiddenFromAgentsAreLeftOut(bool forAgents, string[] expectedMatches)
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenMetadataIsSearchedThroughTheTools_ThenTheSubjectsAndPropertiesHiddenFromTheToolsAreLeftOut(bool forAgents)
     {
         // Arrange
         WriteFile("Docs/Pump.json", """{ "speed": 1 }""");
@@ -272,7 +272,7 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
         var result = await CallAsync(tools["invoke_query"], new { path = "/Storage", method = "SearchMetadata", parameters = new { tag = "floor-2" } });
 
         // Assert
-        Assert.Equal(expectedMatches, GetMatches(result));
+        Assert.Equal(["Docs/Device|", "Docs/Pump.json|"], GetMatches(result));
     }
 
     [Fact]

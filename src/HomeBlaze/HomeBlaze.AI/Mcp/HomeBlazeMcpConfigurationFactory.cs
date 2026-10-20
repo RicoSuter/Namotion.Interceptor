@@ -38,8 +38,8 @@ internal static class HomeBlazeMcpConfigurationFactory
     /// Whether the tools serve the built-in agents; invoke_operation and the Markdown tools then refuse every
     /// operation of an agent (<see cref="LlmAgentBase"/>), and SetMetadata of a storage for an agent, a subject that an
     /// agent holds through any parent, and a subject or property hidden from agents, which is refused as a missing one;
-    /// SearchMetadata of a storage then leaves out the matches that SetMetadata refuses. SearchMetadata returns at most
-    /// the first 100 matches either way.
+    /// SearchMetadata of a storage and search_markdown then leave out the metadata and notes of agents. SearchMetadata
+    /// leaves out the subjects and properties that the tools do not show either way.
     /// </param>
     public static McpServerConfiguration Create(
         IServiceProvider serviceProvider,
@@ -78,7 +78,7 @@ internal static class HomeBlazeMcpConfigurationFactory
             {
                 new HomeBlazeMcpToolProvider(invoker, isReadOnly),
                 new HomeBlazeMarkdownToolProvider(invoker, isReadOnly),
-                new HomeBlazeMarkdownSearchToolProvider(rootSubjectProvider, pathProvider, PathPrefix, excludeTypes)
+                new HomeBlazeMarkdownSearchToolProvider(rootSubjectProvider, pathProvider, PathPrefix, excludeTypes, forAgents)
             },
             ToolDescriptionAdditions =
             {

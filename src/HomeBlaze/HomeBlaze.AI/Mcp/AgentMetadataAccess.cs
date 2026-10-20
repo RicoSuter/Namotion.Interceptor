@@ -10,8 +10,9 @@ using Namotion.Interceptor.Tracking.Parent;
 namespace HomeBlaze.AI.Mcp;
 
 /// <summary>
-/// The metadata that the tools let agents change and find: SetMetadata and SearchMetadata of a storage reach the same
-/// subjects and properties, those that the tools show and that no agent holds.
+/// The metadata that the tools let their clients find and agents change: SearchMetadata of a storage finds only the
+/// subjects and properties that the tools show, and for agents only those that SetMetadata lets them change, which no
+/// agent holds.
 /// </summary>
 internal static class AgentMetadataAccess
 {
@@ -22,8 +23,9 @@ internal static class AgentMetadataAccess
     private const int MaxSearchMetadataMatches = 100;
 
     /// <summary>
-    /// Gets the first 100 matches of SearchMetadata of a storage, for agents without those that
-    /// <see cref="GetSetMetadataError"/> refuses; any other result is returned unchanged.
+    /// Gets the first 100 matches of SearchMetadata of a storage without those of a subject or property that the tools
+    /// do not show, and for agents also without those that <see cref="GetSetMetadataError"/> refuses; any other result is
+    /// returned unchanged.
     /// </summary>
     public static object? FilterSearchMetadataResult(
         RegisteredSubject subject, MethodMetadata method, object? result, bool forAgents, PathProviderBase pathProvider, Type[] excludeTypes)
@@ -36,7 +38,7 @@ internal static class AgentMetadataAccess
         }
 
         return matches
-            .Where(match => !forAgents || GetSetMetadataError(subject, match.Path, match.Property, pathProvider, excludeTypes) is null)
+            .Where(match => GetError(subject, match.Path, match.Property, pathProvider, excludeTypes, forAgents) is null)
             .Take(MaxSearchMetadataMatches)
             .ToArray();
     }
@@ -48,26 +50,39 @@ internal static class AgentMetadataAccess
     /// </summary>
     public static string? GetSetMetadataError(
         RegisteredSubject storage, string path, string? propertyName, PathProviderBase pathProvider, Type[] excludeTypes)
+        => GetError(storage, path, propertyName, pathProvider, excludeTypes, forAgents: true);
+
+    // The checks of GetSetMetadataError; without forAgents, only those of what the tools show.
+    private static string? GetError(
+        RegisteredSubject storage, string path, string? propertyName, PathProviderBase pathProvider, Type[] excludeTypes, bool forAgents)
     {
-        var target = MetadataPaths.TryResolveSubject(storage.Subject, path);
-        var trimmedPath = path.Trim();
-        var visibleTarget = trimmedPath.AsSpan().TrimStart('/').IsEmpty ? storage : pathProvider.TryGetSubjectFromPath(storage, trimmedPath);
-        if (target is null || !ReferenceEquals(visibleTarget?.Subject, target) || IsOfExcludedType(visibleTarget, storage.Subject, excludeTypes))
+        if (TryGetVisibleTarget(storage, path, pathProvider, excludeTypes) is not { } target)
         {
             return FluentStorageContainer.GetNoSubjectMessage(path);
         }
 
-        if (target.TryGetFirstParentOrSelf<LlmAgentBase>() is not null)
+        if (forAgents && target.Subject.TryGetFirstParentOrSelf<LlmAgentBase>() is not null)
         {
             return "Agents cannot change the metadata of agents.";
         }
 
-        if (propertyName is not null && IsPropertyChecked(target) && !IsPropertyVisible(visibleTarget, propertyName, pathProvider))
+        if (propertyName is not null && IsPropertyChecked(target.Subject) && !IsPropertyVisible(target, propertyName, pathProvider))
         {
             return FluentStorageContainer.GetNoPropertyMessage(propertyName);
         }
 
         return null;
+    }
+
+    // The subject at the path of the storage when the tools resolve the path to it and show it, else null.
+    private static RegisteredSubject? TryGetVisibleTarget(RegisteredSubject storage, string path, PathProviderBase pathProvider, Type[] excludeTypes)
+    {
+        var target = MetadataPaths.TryResolveSubject(storage.Subject, path);
+        var trimmedPath = path.Trim();
+        var visibleTarget = trimmedPath.AsSpan().TrimStart('/').IsEmpty ? storage : pathProvider.TryGetSubjectFromPath(storage, trimmedPath);
+        return target is not null && ReferenceEquals(visibleTarget?.Subject, target) && !IsOfExcludedType(visibleTarget, storage.Subject, excludeTypes)
+            ? visibleTarget
+            : null;
     }
 
     /// <summary>
