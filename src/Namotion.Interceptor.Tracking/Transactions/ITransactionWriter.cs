@@ -66,6 +66,7 @@ public interface ITransactionWriter
     ///
     /// Implementations must report revert failures via <see cref="SourceRevertResult"/> rather than
     /// throwing. A throw is treated as if every requested revert failed and the commit fails terminally.
+    /// <see cref="SourceRevertResult.Failed"/> must contain only changes from <paramref name="written"/>.
     /// </remarks>
     /// <param name="written">The previously-written changes to revert, as returned in <see cref="SourceWriteResult.Written"/>.</param>
     /// <param name="revertState">The opaque writer-owned state from <see cref="SourceWriteResult.RevertState"/> identifying the original target sources.</param>

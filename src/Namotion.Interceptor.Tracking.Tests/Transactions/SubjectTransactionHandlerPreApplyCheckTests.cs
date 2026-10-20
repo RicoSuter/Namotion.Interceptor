@@ -342,6 +342,51 @@ public class SubjectTransactionHandlerPreApplyCheckTests
         Assert.Contains("already been committed", retryException.Message);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task WhenPreApplyRejectionReportsErrorsOfUncheckedChanges_ThenEveryErrorIsReported(bool withFailedChanges)
+    {
+        // Arrange
+        var calls = 0;
+        var person = default(Person)!;
+        var firstNameError = new InvalidOperationException("invalid first name");
+        var lastNameError = new InvalidOperationException("invalid last name");
+        var writer = new CountingTransactionWriter();
+        var context = CreateContext(out var handler, writer);
+        handler.OnCommittingAction = (_, changes) =>
+        {
+            if (++calls == 2)
+            {
+                // LastName is not part of the transaction, so its change and error are unchecked.
+                var uncheckedChange = SubjectPropertyChange.Create(
+                    new PropertyReference(person, nameof(Person.LastName)),
+                    ChangeOrigin.Local,
+                    DateTimeOffset.UtcNow,
+                    null,
+                    "Lee",
+                    "Kim");
+                IReadOnlyList<SubjectPropertyChange> failedChanges = withFailedChanges
+                    ? [changes.Single(change => change.Property.Name == nameof(Person.FirstName)), uncheckedChange]
+                    : [];
+                throw new SubjectTransactionException("invalid", [], failedChanges, [firstNameError, lastNameError]);
+            }
+        };
+        person = new Person(context) { FirstName = "Ann", LastName = "Lee" };
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "Bob";
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Assert
+        Assert.Equal([firstNameError, lastNameError], exception.Errors);
+        Assert.Equal(nameof(Person.FirstName), Assert.Single(exception.FailedChanges).Property.Name);
+        Assert.Equal("Ann", person.FirstName);
+        Assert.Equal("Lee", person.LastName);
+        Assert.Equal(nameof(Person.FirstName), Assert.Single(writer.Reverted).Property.Name);
+    }
+
     [Fact]
     public async Task WhenWriterMarksAcceptedSlotsAsConfirmed_ThenBothChecksSeeTheCapturedOrigin()
     {

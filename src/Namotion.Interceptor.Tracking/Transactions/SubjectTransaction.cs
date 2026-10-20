@@ -166,7 +166,8 @@ public sealed class SubjectTransaction : IDisposable
     /// context, when a subject of it is written and the transaction is about to capture the write.
     /// </summary>
     /// <exception cref="InvalidOperationException">
-    /// Thrown while a commit is in progress, like the capture would.
+    /// Thrown while a commit is in progress and <paramref name="subjectContext"/> adds handlers, like the capture
+    /// would (see <see cref="TransactionHandlerSet.Include"/>).
     /// </exception>
     internal void IncludeHandlersOf(IInterceptorSubjectContext subjectContext)
     {
@@ -424,7 +425,7 @@ public sealed class SubjectTransaction : IDisposable
     internal static void ThrowWriteDuringHandlerCheck()
     {
         throw new InvalidOperationException(
-            "Cannot write a property while transaction handlers check the transaction. " +
+            "Cannot write a property while transaction handlers run a check. " +
             "Transaction handlers must not write properties.");
     }
 
@@ -842,7 +843,8 @@ public sealed class SubjectTransaction : IDisposable
 
             // BestEffort without handlers: keep source == model for failed-apply properties by reverting only the source
             // writes whose property failed to apply. A failed revert is one of those writes (a throwing writer fails
-            // all of them, and a writer reports only reverts it was asked for), so applyFailed already reports it.
+            // all of them, and a reporting writer may only report requested ones, see
+            // ITransactionWriter.RevertSourceWritesAsync), so applyFailed already reports it.
             var toRevert = SubjectPropertyChangeOperations.FilterByProperty(written, applyFailed, keepMatches: true);
             var bestEffortRevert = await RevertSourceWritesSafelyAsync(writer, toRevert, revertState, propagateTimeout: false, cancellationToken).ConfigureAwait(false);
             return CreateFailureException(
