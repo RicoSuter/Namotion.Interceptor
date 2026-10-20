@@ -66,6 +66,7 @@
                     <MudTooltip Text="Metadata">
                         <MudIconButton OnClick="@OpenMetadataDialogAsync"
                                        Icon="@Icons.Material.Filled.Label"
+                                       Color="@(HasOwnMetadata() ? Color.Primary : Color.Default)"
                                        Variant="Variant.Text"
                                        Size="Size.Small"
                                        Disabled="@(!IsConnected(metadataStore))"
@@ -1023,6 +1024,10 @@
            (!ReferenceEquals(store, Subject) || Subject.TryGetRegisteredSubject() is { Parents: [var parent, ..] } && parent.Property.Parent.Subject.FindMetadataStore() is not null)
             ? store
             : null;
+
+    // Whether the shown subject itself holds metadata, which colors its button the same as the filled icon of a
+    // property with notes, links or tags.
+    private bool HasOwnMetadata() => Subject?.GetMetadata() is { Count: > 0 };
 
     private async Task OpenPropertyMetadataDialogAsync(RegisteredSubjectProperty property, string displayName)
     {
