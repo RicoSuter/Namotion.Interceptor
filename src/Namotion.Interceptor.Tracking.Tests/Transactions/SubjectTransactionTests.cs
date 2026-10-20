@@ -702,9 +702,7 @@ public class SubjectTransactionTests
     public async Task WhenPropertyIsWrittenBackToLandedValue_ThenCommitKeepsLandedValue()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create()
-            .WithFullPropertyTracking()
-            .WithTransactions();
+        var context = CreateTransactionContext();
         var person = new Person(context) { FirstName = "Ann" };
 
         // Act
@@ -725,9 +723,7 @@ public class SubjectTransactionTests
     public async Task WhenLandedValueIsWrittenWithoutPendingChange_ThenNothingIsCaptured()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create()
-            .WithFullPropertyTracking()
-            .WithTransactions();
+        var context = CreateTransactionContext();
         var person = new Person(context) { FirstName = "Ann" };
 
         // Act
@@ -743,9 +739,7 @@ public class SubjectTransactionTests
     {
         // Arrange
         var changes = new List<SubjectPropertyChange>();
-        var context = InterceptorSubjectContext.Create()
-            .WithFullPropertyTracking()
-            .WithTransactions();
+        var context = CreateTransactionContext();
 
         context
             .GetPropertyChangeObservable(ImmediateScheduler.Instance)
@@ -770,9 +764,7 @@ public class SubjectTransactionTests
     public async Task WhenPropertyIsRewrittenAfterWriteBack_ThenItKeepsItsOldValueAndPosition()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create()
-            .WithFullPropertyTracking()
-            .WithTransactions();
+        var context = CreateTransactionContext();
         var person = new Person(context) { FirstName = "Ann" };
 
         // Act
@@ -782,15 +774,16 @@ public class SubjectTransactionTests
         person.LastName = "Smith";
         person.FirstName = "Carl";
 
-        // Assert
         var pending = transaction.GetPendingChanges();
-        Assert.Equal([nameof(Person.FirstName), nameof(Person.LastName)], pending.Select(c => c.Property.Name));
-
         var firstNameChange = pending.Single(c => c.Property.Name == nameof(Person.FirstName));
-        Assert.Equal("Ann", firstNameChange.GetOldValue<string?>());
-        Assert.Equal("Carl", firstNameChange.GetNewValue<string?>());
+        var firstNameOldValue = firstNameChange.GetOldValue<string?>();
 
         await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal([nameof(Person.FirstName), nameof(Person.LastName)], pending.Select(c => c.Property.Name));
+        Assert.Equal("Ann", firstNameOldValue);
+        Assert.Equal("Carl", firstNameChange.GetNewValue<string?>());
         Assert.Equal("Carl", person.FirstName);
         Assert.Equal("Smith", person.LastName);
     }
@@ -822,5 +815,4 @@ public class SubjectTransactionTests
         await RunWithoutAsyncLocalFlowAsync(() => landedValue = person.FirstName);
         Assert.Equal("External", landedValue);
     }
-
 }
