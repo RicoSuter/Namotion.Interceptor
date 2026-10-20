@@ -24,6 +24,7 @@ Docs (folder)                        HomeBlaze:Metadata             = { title, o
 - **Added on demand.** The property or attribute is added only once an entry exists. The registry cannot remove a property, so metadata that is removed sets the value to null, and null means no metadata.
 - **One step with its file.** Setting a value and reading the file it comes from are one step under the `SyncRoot` of the subject, so a subject that attaches during a write takes the new value.
 - **Readers.** Navigation, the browser and the order of children read the known keys (`MetadataKeys`) from these dictionaries through `SubjectNavigationExtensions` and `ChildOrdering`. The path picker does not list the metadata.
+- **Contracts.** `IMetadataStore`, `IMetadataContainer` and `MetadataKeys` are in `HomeBlaze.Storage.Abstractions`, next to `IConfigurationWriter`.
 
 ## Files and Applying [Implemented]
 
@@ -64,11 +65,16 @@ The limits of entries, keys, values and files are in [Limits](../../administrati
 ## Planned
 
 - **Notes, links and tags.** Known keys for notes in Markdown, links to URLs or to pages, subjects and properties, and tags such as `tags: ["floor-2", "critical", "hvac"]` for a grouping independent of the folder hierarchy, with their display and editing in the browser for subjects and properties.
-- **Search.** A query of the storage that finds subjects and properties by tag, key or value, a tag filter in the browser, and notes found by `search_markdown`.
+- **Search.** A query of the storage that finds subjects and properties by tag, key or value and can return their metadata (`includeMetadata`), a tag filter in the browser, and notes found by `search_markdown`.
+- **Several targets in one call.** One `SetMetadata` call for several subjects and properties, grouped into one write per file.
 - **Annotations.** More known keys that group subjects across folders, such as `area: "Kitchen"` (the equivalent of Home Assistant areas), `group: "cooling-system"` or `owner: "maintenance-team-b"`. Until then such keys are stored as given. All annotations are meant to be queryable through the registry, transmitted over the wire via WebSocket sync and visible in the UI, without a separate subsystem.
 - **Page blocks.** Metadata of the subjects that blocks of a Markdown page create, kept in the frontmatter of the page.
 - **Display overrides.** A display name or a unit of a property taken from its metadata.
 - **Generic search.** Attribute filters in the generic `search` tool of the library.
 - **Naming.** `IConfigurationWriter` renamed to `IConfigurationStore`, next to `IMetadataStore`.
 - **Custom root files.** A `root.metadata.json` for subjects in a custom `root.json`. The default `root.json` holds only the root storage.
+- **Known keys checked once.** The known keys of a file checked when it is read, instead of on every read of a value.
+- **Entries without a target.** A list of the entries that match no subject or property.
+- **Library support.** Removing a dynamic property or attribute, and telling whether a property was attached with its subject, which would simplify `MetadataLifecycleHandler` and drop the null values of removed metadata.
+- **Metadata of files.** Notes and tags for pages and other files, in the frontmatter of a page and in a sidecar such as `Manual.pdf.metadata.json`.
 - **Properties without state.** The metadata of a property that is not `[State]` can be written but is not shown by `browse`, because the property itself is not listed. Whether such a property is listed when it has metadata is open.

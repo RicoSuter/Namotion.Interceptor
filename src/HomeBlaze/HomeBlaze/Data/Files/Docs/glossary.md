@@ -129,7 +129,7 @@ A `.metadata.json` in a folder holds the metadata of the folder, such as its tit
 
 ### Metadata
 
-Keys and JSON values that describe a subject or a property, such as its navigation title or a comment, kept in a [Metadata File](#metadata-file). The registry holds the metadata of a subject in its property `HomeBlaze:Metadata` and that of a property in its attribute of that name. Agents change it through `SetMetadata` of a storage. See [Metadata](administration/metadata.md) and, for agents, [Metadata: Agents](administration/metadata.md#agents).
+Keys and JSON values that describe a folder, a subject or a property, such as its navigation title or a comment, kept in a [Metadata File](#metadata-file) and held by the registry as `HomeBlaze:Metadata`. See [Metadata](administration/metadata.md), and for agents [Metadata: Agents](administration/metadata.md#agents).
 
 ### Navigation Location
 

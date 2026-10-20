@@ -240,7 +240,7 @@ Each turn offers exactly the tools in `AllowedTools`, plus `update_memory`. This
 | `update_memory` | always | Changes the agent's memory |
 | `web_search`, `web_fetch` | off | Search the web and load pages, see [Web tools](#web-tools) |
 
-Only methods marked `[Query]` or `[Operation]` are visible to the tools, without those excluded from agents (see [Building Subjects](../development/building-subjects.md#excluding-subjects-and-methods)). A string result longer than 64K characters is cut and ends with a `[truncated: N characters]` line. Agents read metadata with `browse`, `search` and `get_property` and, with `invoke_operation` allowed, change it with `SetMetadata` of a storage and the order of a folder with its `SetOrder`, see [Metadata: Agents](metadata.md#agents).
+Only methods marked `[Query]` or `[Operation]` are visible to the tools, without those excluded from agents (see [Building Subjects](../development/building-subjects.md#excluding-subjects-and-methods)). A string result longer than 64K characters is cut and ends with a `[truncated: N characters]` line. How agents read and change metadata and the order of folders is in [Metadata: Agents](metadata.md#agents).
 
 ### Reading pages and documents
 

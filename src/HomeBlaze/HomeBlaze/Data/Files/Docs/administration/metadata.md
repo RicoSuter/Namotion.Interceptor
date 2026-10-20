@@ -60,21 +60,13 @@ Pages, folders and subjects appear in the same order in the sidebar, the top bar
 
 A name in `order` is the name of a child as the browser shows it in its address: a subject file without `.json` (`Motor` for `Motor.json`), any other file with its extension (`Readme.md`) and a folder by its name. Children that are not listed follow the listed ones: `readme` first, `index` second, then by navigation title. A name of a child that no longer exists is ignored. A JSON file that does not load as a subject, for example while its JSON is invalid, is listed under its file name with `.json`, so its entry does not match it until it loads again, and it is shown among the children that are not listed meanwhile.
 
-`position:` in the frontmatter of a page is no longer read and has no effect. Order the pages with **Reorder** in the browser or in the `order` of their folder.
-
 ### The Top Bar
 
 The top bar collects its items from the whole tree, not only from the top level: every page with `location: AppBar`, and every subject with a page whose `X.metadata.json` sets `location` to `AppBar`, appears there, in whichever folder it is. The items follow the navigation order: the folders are walked in their order, and the items inside a folder come in the order of that folder. **Reorder** in the folder of an item moves it among the items of that folder, and the place of the folder in its parent moves its items with it. Each item goes to the left or the right of the top bar by its `alignment`, set in the frontmatter of a page or in the **Metadata** dialog of a subject, and each side keeps the navigation order. The sidebar shows a folder only when it holds a page for the sidebar, reached through folders and subjects that are in the sidebar themselves, so a folder whose pages are all in the top bar does not appear there, and neither does a page that can only be reached through an item of the top bar. A folder that is a page itself and holds no page for the sidebar shows as a link to its page.
 
 ### Ordering in the Browser
 
-The **Reorder** button in the header of a folder with at least two children switches its list of children to reorder mode, and **Done** switches it back. **Reorder** is disabled while the storage is not connected. In reorder mode, dragging and the arrows are disabled while the storage is not connected, and a click on a row does not open it.
-
-Drag a row anywhere with the mouse to move it. A line shows where it will land: above the row under the pointer while the pointer is in the upper half of that row, and below it in the lower half. Dragging near the top or the bottom edge of the pane scrolls it, and Escape cancels the drag. Each move writes the whole order of the folder to its `.metadata.json`, so after the first move every child has its place, and a child added later comes after them until it is moved.
-
-On a touch screen or with a pen, drag a row by its handle, so that swiping elsewhere on a row scrolls the list. Each row also shows up and down arrows, which move it by one place.
-
-With a keyboard, press Tab to reach the arrows of a row, which show while they have focus, and press Enter or Space to move the row by one place.
+**Reorder** in the header of a folder with at least two children switches its list of children to reorder mode, where a row moves by dragging it, by its handle on a touch screen, or by one place with its up and down arrows, which Tab reaches from the keyboard; **Done** switches back. Reordering is disabled while the storage is not connected. Each move writes the whole order of the folder to its `.metadata.json`, so after the first move every child has its place, and a child added later comes after them until it is moved.
 
 ---
 
@@ -140,7 +132,7 @@ A path names the properties on the way, separated by `/`, with the index of a co
 
 ### Collections and Moves
 
-Items of a collection are matched by their index, so when the items of a collection change places, the metadata stays at its index and belongs to another item until the file is applied again. A subject that moves keeps the metadata of its previous place when it moves out of every storage or into a stored subject whose file was not applied, and when it is added to its new place before it is removed from the old one.
+Items of a collection are matched by their index. When the items of a collection change places, each item keeps the metadata it has until the file is applied again, which gives the metadata of an index to the item now at that index. A subject that moves keeps the metadata of its previous place when it moves out of every storage or into a stored subject whose file was not applied, and when it is added to its new place before it is removed from the old one.
 
 ### Nested Storages
 
@@ -148,7 +140,7 @@ A storage that is stored as a JSON file inside another storage keeps all its met
 
 ### Limits
 
-Metadata is read and saved under these limits: at most 64 keys per entry, key names of up to 64 characters, strings of up to 256 characters and values of up to 4 KB, except for the `order` of a folder, and a file of up to 512 KB, which a save that does not make it larger may exceed. An entry without keys is removed, and a file without keys is deleted.
+Saving metadata is refused beyond these limits: at most 64 keys per entry, key names of up to 64 characters, strings of up to 256 characters and values of up to 4 KB, except for the `order` of a folder, and a file of up to 512 KB, which a save that does not make it larger may exceed. The limits are checked only on save, so a file edited by hand is read whatever its size. An entry without keys is removed, and a file without keys is deleted.
 
 ### Reserved Names
 
