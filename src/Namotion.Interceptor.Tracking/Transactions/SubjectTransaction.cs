@@ -738,7 +738,7 @@ public sealed class SubjectTransaction : IDisposable
         // What the handlers read can change while the sources are written (inbound updates, raw writes), so the
         // final set is checked again right before it lands. Its reads return the pending values of every checked
         // change, so a rejection invalidates the whole checked set in both failure handling modes.
-        var rejectionErrors = rollBackSourceFailure ? null : RunPreApplyCheck(changes.Span, failedSource);
+        var rejectionErrors = rollBackSourceFailure ? null : RunPreApplyCheck(failedSource);
         if (rollBackSourceFailure || rejectionErrors is not null)
         {
             var revert = await RevertSourceWritesSafelyAsync(writer, written, revertState, propagateTimeout: rejectionErrors is null, cancellationToken).ConfigureAwait(false);
@@ -1114,12 +1114,10 @@ public sealed class SubjectTransaction : IDisposable
 
     /// <summary>
     /// Calls the handlers again right before the local apply with the changes that will be applied, with reads
-    /// returning the transaction's values for them. Returns null when they accept the set, or the errors of their
-    /// rejection otherwise.
+    /// returning the transaction's values for them. Returns null when they accept the set, or otherwise the errors of
+    /// a thrown <see cref="SubjectTransactionException"/> that has any, or the thrown exception itself.
     /// </summary>
-    private IReadOnlyList<Exception>? RunPreApplyCheck(
-        ReadOnlySpan<SubjectPropertyChange> changes,
-        IReadOnlyList<SubjectPropertyChange> failedSource)
+    private IReadOnlyList<Exception>? RunPreApplyCheck(IReadOnlyList<SubjectPropertyChange> failedSource)
     {
         // A transaction disposed from another flow mid-commit has dropped the pending values the reads need.
         if (_handlerSet.Handlers.Length == 0 || IsDisposed)
@@ -1146,7 +1144,9 @@ public sealed class SubjectTransaction : IDisposable
             }
             catch (Exception exception)
             {
-                return PreApplyCheckRejection.GetErrors(exception, SubjectPropertyChangeOperations.ExcludeByProperty(changes, failedSource, []));
+                return exception is SubjectTransactionException { Errors.Count: > 0 } transactionException
+                    ? transactionException.Errors
+                    : [exception];
             }
         }
         finally

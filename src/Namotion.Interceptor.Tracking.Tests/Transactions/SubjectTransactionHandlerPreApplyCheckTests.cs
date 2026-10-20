@@ -207,44 +207,6 @@ public class SubjectTransactionHandlerPreApplyCheckTests
     }
 
     [Fact]
-    public async Task WhenPreApplyCheckRejectsUncheckedChange_ThenEveryCheckedChangeFails()
-    {
-        // Arrange
-        var calls = 0;
-        var person = default(Person)!;
-        var writer = new CountingTransactionWriter();
-        var context = CreateContext(out var handler, writer);
-        handler.OnCommittingAction = (_, _) =>
-        {
-            if (++calls == 2)
-            {
-                var uncheckedChange = SubjectPropertyChange.Create(
-                    new PropertyReference(person, nameof(Person.LastName)),
-                    ChangeOrigin.Local,
-                    DateTimeOffset.UtcNow,
-                    null,
-                    "Lee",
-                    "Kim");
-                throw new SubjectTransactionException(
-                    "invalid", [], [uncheckedChange], [new InvalidOperationException("invalid last name")]);
-            }
-        };
-        person = new Person(context) { FirstName = "Ann", LastName = "Lee" };
-
-        // Act
-        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-        person.FirstName = "Bob";
-        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None).AsTask());
-
-        // Assert
-        Assert.Equal("Ann", person.FirstName);
-        Assert.Equal("Lee", person.LastName);
-        Assert.Equal(nameof(Person.FirstName), Assert.Single(exception.FailedChanges).Property.Name);
-        Assert.IsType<SubjectTransactionException>(Assert.Single(exception.Errors));
-        Assert.Equal(nameof(Person.FirstName), Assert.Single(writer.Reverted).Property.Name);
-    }
-
-    [Fact]
     public async Task WhenEverySourceWriteFails_ThenOnCommittingIsNotCalledAgainAndNothingIsApplied()
     {
         // Arrange
@@ -378,42 +340,6 @@ public class SubjectTransactionHandlerPreApplyCheckTests
         Assert.IsType<OperationCanceledException>(Assert.Single(exception.Errors));
         Assert.Equal("Ann", person.FirstName);
         Assert.Contains("already been committed", retryException.Message);
-    }
-
-    [Fact]
-    public async Task WhenRejectionErrorsAlignWithFailedChanges_ThenOnlyErrorsOfCheckedChangesAreKept()
-    {
-        // Arrange
-        var calls = 0;
-        var person = default(Person)!;
-        var checkedError = new InvalidOperationException("invalid first name");
-        var context = CreateContext(out var handler, new CountingTransactionWriter());
-        handler.OnCommittingAction = (_, changes) =>
-        {
-            if (++calls == 2)
-            {
-                var firstName = changes.Single(change => change.Property.Name == nameof(Person.FirstName));
-                var uncheckedChange = SubjectPropertyChange.Create(
-                    new PropertyReference(person, nameof(Person.LastName)),
-                    ChangeOrigin.Local,
-                    DateTimeOffset.UtcNow,
-                    null,
-                    "Lee",
-                    "Kim");
-                throw new SubjectTransactionException(
-                    "invalid", [], [firstName, uncheckedChange], [checkedError, new InvalidOperationException("invalid last name")]);
-            }
-        };
-        person = new Person(context) { FirstName = "Ann", LastName = "Lee" };
-
-        // Act
-        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-        person.FirstName = "Bob";
-        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None).AsTask());
-
-        // Assert
-        Assert.Equal(nameof(Person.FirstName), Assert.Single(exception.FailedChanges).Property.Name);
-        Assert.Same(checkedError, Assert.Single(exception.Errors));
     }
 
     [Fact]
