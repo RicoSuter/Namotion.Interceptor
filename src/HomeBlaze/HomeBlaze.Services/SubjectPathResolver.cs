@@ -154,17 +154,14 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
         PathStyle style)
     {
         _ = _pathsVersion.Value;
-        IReadOnlyList<string> canonicalPaths;
         var version = Volatile.Read(ref _pathsVersionValue);
-        if (_canonicalPathsCache.TryGetValue(subject, out var cached) && cached.Version == version)
+        if (!_canonicalPathsCache.TryGetValue(subject, out var cached) || cached.Version != version)
         {
-            canonicalPaths = cached.Paths;
+            cached = (version, ComputeCanonicalPaths(subject));
+            _canonicalPathsCache[subject] = cached;
         }
-        else
-        {
-            canonicalPaths = ComputeCanonicalPaths(subject);
-            _canonicalPathsCache[subject] = (version, canonicalPaths);
-        }
+
+        var canonicalPaths = cached.Paths;
 
         if (style == PathStyle.Canonical)
             return canonicalPaths;
