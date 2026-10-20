@@ -649,10 +649,7 @@
         // Read in the render, so that a property added at run time, which increments the version, renders the panel again.
         _ = PathResolver.PathsVersion;
         return _registeredSubject.Properties
-            .Where(p =>
-                p.GetStateMetadata() != null
-                && p is { IsAttribute: false, CanContainSubjects: false }
-                && p.GetConfigurationMetadata()?.IsSecret != true)
+            .Where(static p => p.IsShownAsValue())
             .OrderBy(p => p.GetDisplayPosition());
     }
 

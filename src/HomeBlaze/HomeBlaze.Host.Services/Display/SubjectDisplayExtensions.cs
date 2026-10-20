@@ -23,6 +23,15 @@ public static class SubjectDisplayExtensions
     }
 
     /// <summary>
+    /// Gets whether the browser shows the property as a value of its subject: a property with state metadata that is
+    /// no attribute, holds no subjects and is no secret configuration property.
+    /// </summary>
+    public static bool IsShownAsValue(this RegisteredSubjectProperty property)
+        => property is { IsAttribute: false, CanContainSubjects: false } &&
+           property.GetStateMetadata() is not null &&
+           property.GetConfigurationMetadata()?.IsSecret != true;
+
+    /// <summary>
     /// Gets the label of a child subject listed under its parent property.
     /// A direct subject reference is labeled with the property display name.
     /// A collection or dictionary item is labeled with its <see cref="ITitleProvider"/> title,

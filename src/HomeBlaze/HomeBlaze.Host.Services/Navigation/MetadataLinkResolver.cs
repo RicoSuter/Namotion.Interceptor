@@ -60,7 +60,7 @@ public sealed class MetadataLinkResolver
         var separator = path.LastIndexOf('/');
         if (separator >= 0 &&
             _pathResolver.ResolveSubject(separator == 0 ? "/" : path[..separator], PathStyle.Canonical) is { } owner &&
-            owner.TryGetRegisteredSubject()?.TryGetProperty(path[(separator + 1)..]) is { IsAttribute: false } property)
+            owner.TryGetRegisteredSubject()?.TryGetProperty(path[(separator + 1)..]) is { } property)
         {
             return Resolve(owner, property.Name, link.Title);
         }
@@ -71,7 +71,8 @@ public sealed class MetadataLinkResolver
     /// <summary>
     /// Resolves a link to the subject, or to its property when <paramref name="propertyName"/> is given. Without a
     /// title, the link shows the title of the subject, followed by the name of the property. Broken for a subject
-    /// without a path in the tree.
+    /// without a path in the tree and for a property that the browser does not show as a value, see
+    /// <see cref="SubjectDisplayExtensions.IsShownAsValue"/>.
     /// </summary>
     public ResolvedMetadataLink Resolve(IInterceptorSubject subject, string? propertyName, string? title = null)
     {
@@ -93,10 +94,12 @@ public sealed class MetadataLinkResolver
             return new ResolvedMetadataLink(title ?? subject.GetTitle(), href, IsExternal: false);
         }
 
-        title ??= subject.TryGetRegisteredSubject()?.TryGetProperty(propertyName) is { } property
+        // A property that the browser does not show has no row to highlight.
+        var property = subject.TryGetRegisteredSubject()?.TryGetProperty(propertyName);
+        title ??= property is not null
             ? $"{subject.GetTitle()} {property.GetDisplayName()}"
             : $"{subject.GetTitle()} {propertyName}";
-        var propertyHref = _pathResolver.GetPath(subject, PathStyle.Route) is { } ownerRoutePath
+        var propertyHref = property is not null && property.IsShownAsValue() && _pathResolver.GetPath(subject, PathStyle.Route) is { } ownerRoutePath
             ? $"{BrowserUrls.FromRoutePath(ownerRoutePath)}?{PropertyQueryParameter}={Uri.EscapeDataString(propertyName)}"
             : null;
         return new ResolvedMetadataLink(title, propertyHref, IsExternal: false);

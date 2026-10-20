@@ -41,10 +41,15 @@
         // Once per dialog, as the search walks the whole tree.
         foreach (var match in MetadataSearch.Search(root, tag: Tag, isExcluded: static subject => subject.IsExcludedFrom(ExclusionTarget.UserInterface)))
         {
+            // A property that the browser does not show is not listed either.
+            var subject = MetadataPaths.TryResolveSubject(root, match.Path);
+            if (match.Property is not null && subject?.TryGetRegisteredSubject()?.TryGetProperty(match.Property)?.IsShownAsValue() != true)
+                continue;
+
             // Written as the path of a link, the name of a property after the path of its subject.
             var subjectPath = $"/{match.Path}";
             var path = match.Property is null ? subjectPath : $"{subjectPath.TrimEnd('/')}/{match.Property}";
-            var link = MetadataPaths.TryResolveSubject(root, match.Path) is { } subject
+            var link = subject is not null
                 ? LinkResolver.Resolve(subject, match.Property)
                 : new ResolvedMetadataLink(path, null, IsExternal: false);
             _items.Add((path, link));

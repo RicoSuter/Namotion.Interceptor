@@ -35,7 +35,8 @@ public class MetadataDisplayTests
             { "title": "Script", "url": "javascript:alert(1)" }
           ],
           "$properties": {
-            "Temperature": { "notes": "Measured at the housing", "tags": ["{{MotorTag}}"], "links": [{ "title": "Values", "path": "/Demo/HistoryValues" }] }
+            "Temperature": { "notes": "Measured at the housing", "tags": ["{{MotorTag}}"], "links": [{ "title": "Values", "path": "/Demo/HistoryValues" }] },
+            "SimulationInterval": { "tags": ["{{MotorTag}}"] }
           }
         }
         """;

@@ -1,9 +1,14 @@
+using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Host.Services.Navigation;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Components;
+using HomeBlaze.Services.Lifecycle;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Tracking.Lifecycle;
 using Xunit;
 
 namespace HomeBlaze.Host.Services.Tests.Navigation;
@@ -12,15 +17,18 @@ public class MetadataLinkResolverTests
 {
     private static MetadataLinkResolver CreateResolver() => CreateResolver(out _);
 
-    private static MetadataLinkResolver CreateResolver(out NavigationTestFolder root)
+    private static MetadataLinkResolver CreateResolver(out MetadataLinkTestFolder root)
     {
-        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
-        root = new NavigationTestFolder(context)
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry()
+            .WithService<IPropertyLifecycleHandler>(() => new PropertyAttributeInitializer(), handler => handler is PropertyAttributeInitializer);
+        root = new MetadataLinkTestFolder(context)
         {
             Children = new Dictionary<string, IInterceptorSubject>
             {
                 ["Readme.md"] = new NavigationTestPage(context),
-                ["Devices"] = new NavigationTestFolder(context)
+                ["Devices"] = new MetadataLinkTestFolder(context)
             }
         };
 
@@ -98,7 +106,7 @@ public class MetadataLinkResolverTests
 
         // Assert
         Assert.Equal("/browser/Devices", link.Href);
-        Assert.Equal(nameof(NavigationTestFolder), link.Title);
+        Assert.Equal(nameof(MetadataLinkTestFolder), link.Title);
     }
 
     [Fact]
@@ -108,10 +116,10 @@ public class MetadataLinkResolverTests
         var resolver = CreateResolver();
 
         // Act
-        var link = resolver.Resolve(new MetadataLink("Order", null, "/Devices/ChildOrder"));
+        var link = resolver.Resolve(new MetadataLink("Name", null, "/Devices/Name"));
 
         // Assert
-        Assert.Equal(new ResolvedMetadataLink("Order", "/browser/Devices?property=ChildOrder", IsExternal: false), link);
+        Assert.Equal(new ResolvedMetadataLink("Name", "/browser/Devices?property=Name", IsExternal: false), link);
     }
 
     [Fact]
@@ -121,10 +129,10 @@ public class MetadataLinkResolverTests
         var resolver = CreateResolver();
 
         // Act
-        var link = resolver.Resolve(new MetadataLink("Order", null, "/ChildOrder"));
+        var link = resolver.Resolve(new MetadataLink("Name", null, "/Name"));
 
         // Assert
-        Assert.Equal("/browser?property=ChildOrder", link.Href);
+        Assert.Equal("/browser?property=Name", link.Href);
     }
 
     [Fact]
@@ -150,10 +158,44 @@ public class MetadataLinkResolverTests
 
         // Act
         var subjectLink = resolver.Resolve(devices, null);
-        var propertyLink = resolver.Resolve(devices, "ChildOrder");
+        var propertyLink = resolver.Resolve(devices, "Name");
 
         // Assert
-        Assert.Equal(new ResolvedMetadataLink(nameof(NavigationTestFolder), "/browser/Devices", IsExternal: false), subjectLink);
-        Assert.Equal(new ResolvedMetadataLink($"{nameof(NavigationTestFolder)} ChildOrder", "/browser/Devices?property=ChildOrder", IsExternal: false), propertyLink);
+        Assert.Equal(new ResolvedMetadataLink(nameof(MetadataLinkTestFolder), "/browser/Devices", IsExternal: false), subjectLink);
+        Assert.Equal(new ResolvedMetadataLink($"{nameof(MetadataLinkTestFolder)} Name", "/browser/Devices?property=Name", IsExternal: false), propertyLink);
+    }
+
+    [Theory]
+    [InlineData("/Devices/Internal")]
+    [InlineData("/Devices/Children")]
+    public void WhenAPathLeadsToAPropertyThatTheBrowserDoesNotShow_ThenTheLinkIsBroken(string path)
+    {
+        // Arrange
+        var resolver = CreateResolver(out var root);
+
+        // Act
+        var link = resolver.Resolve(new MetadataLink(null, null, path));
+        var propertyLink = resolver.Resolve(root.Children["Devices"], path.Split('/')[^1]);
+
+        // Assert
+        Assert.True(link.IsBroken);
+        Assert.True(propertyLink.IsBroken);
+    }
+}
+
+[InterceptorSubject]
+public partial class MetadataLinkTestFolder
+{
+    [InlinePaths]
+    public partial Dictionary<string, IInterceptorSubject> Children { get; set; }
+
+    [State]
+    public partial string? Name { get; set; }
+
+    public partial string? Internal { get; set; }
+
+    public MetadataLinkTestFolder()
+    {
+        Children = new();
     }
 }
