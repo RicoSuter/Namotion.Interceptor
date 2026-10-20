@@ -197,7 +197,7 @@ Agents read metadata with the MCP tools: `browse` and `search` show the metadata
 { "navTitle": "Hall light", "icon": null }
 ```
 
-To find text inside notes, agents use `search_markdown`, which also searches the notes of metadata and marks each such match with `kind: notes`, the path of its subject and, for the notes of a property, `property`, the name of the property. It does not search the notes of subjects of a type excluded from agents, nor of what is below them, and for agents not the notes of an agent or of a subject inside one.
+To find text inside notes, agents use `search_markdown`, which also searches the notes of metadata and marks each such match with `kind: notes`, the path of its subject, for the notes of a property `property`, the name of the property, and `read`, the path that `get_property` reads the metadata with. It does not search the notes of subjects of a type excluded from agents, nor of what is below them, and for agents not the notes of an agent or of a subject inside one.
 
 Which tools an agent may use is set in [AI Agents](ai-agents.md#tools-and-permissions).
 

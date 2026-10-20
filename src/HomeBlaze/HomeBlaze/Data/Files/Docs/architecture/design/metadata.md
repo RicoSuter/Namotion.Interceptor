@@ -55,7 +55,7 @@ Agents read metadata with `browse`, `search` and `get_property`, which list it o
 - **`MetadataSearch`.** One service finds metadata for the storage, the tag filter and the suggested tags. It walks the tree below a subject on each call and keeps nothing, matches a key that is set exactly, and a tag and a string value without regard to case, and sorts the matches by path and then property. A subject that the caller excludes is skipped with everything below it.
 - **`SearchMetadata`.** A `[Query]` of a storage over `MetadataSearch`, see [Agents](../../administration/metadata.md#agents) for its arguments and result and [Write Limits](ai.md#write-limits-implemented) for what the MCP tools leave out.
 - **Tag filter.** A click on a tag opens `MetadataTagFilterDialog`, which lists everything with the tag, without subjects excluded from user interfaces and what is below them, and without properties that the browser does not show. The tag field of the **Metadata** dialog loads the tags in use once when the dialog opens, with the same exclusions, and suggests those that contain the typed text.
-- **Notes in `search_markdown`.** `MarkdownSearchSourceFinder` gives `search_markdown` the pages and the notes of metadata in one list in path order, and a match in notes has `kind: notes`, the path of its subject and the name of its property, see [Markdown Tools](ai.md#markdown-tools).
+- **Notes in `search_markdown`.** `MarkdownSearchSourceFinder` gives `search_markdown` the pages and the notes of metadata in one list in path order, and a match in notes has `kind: notes`, the path of its subject, the name of its property and the path to read it, see [Markdown Tools](ai.md#markdown-tools).
 
 ## Limits
 
