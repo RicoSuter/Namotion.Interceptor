@@ -195,7 +195,7 @@ The **Unified Namespace (UNS)** is the live state layer: all subject properties 
 | Time-Series Store | Property history, configurable retention | `get_property_history` MCP tool, plugin-based (see [History](design/history.md)) |
 | File Storage | **Subject files** (`.json` with `$type`) are deserialized into typed subjects; the file is the persistence format. **Documents** (Markdown, PDFs, images, manuals) become document subjects visible as-is in the graph. See [Storage](design/storage.md) | Subject files via configuration system, documents via `browse` or `search` + `invoke_query` (for example `ReadEvaluatedContent` of a Markdown page) |
 
-Folders, subjects and properties can also carry user-defined metadata, such as titles, icons, order, notes, links, tags and comments, held by the registry and persisted in `.metadata.json` files separate from subject configuration. It is applied again on restart, allowing operators to enrich the knowledge graph without modifying subject code. Links connect them to other subjects, and metadata can be searched by tag, key or value; annotations are planned. See [Metadata](design/metadata.md) for details.
+Folders, subjects and properties can also carry user-defined metadata, such as titles, icons, notes, links and tags, persisted in `.metadata.json` files separate from subject configuration, so operators enrich the knowledge graph without modifying subject code. See [Metadata](design/metadata.md).
 
 **How each consumer accesses the knowledge graph:**
 
