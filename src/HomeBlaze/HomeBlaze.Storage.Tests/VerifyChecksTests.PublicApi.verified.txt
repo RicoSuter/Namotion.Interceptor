@@ -146,6 +146,7 @@ namespace HomeBlaze.Storage
         public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
         public System.Threading.Tasks.Task AddSubjectAsync(string path, Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken) { }
         public System.Threading.Tasks.Task ApplyConfigurationAsync(System.Threading.CancellationToken cancellationToken) { }
+        public void ApplyStoredMetadata(Namotion.Interceptor.IInterceptorSubject subject, string? propertyName) { }
         public bool CanStoreMetadata(Namotion.Interceptor.IInterceptorSubject subject) { }
         public System.Threading.Tasks.Task ConnectAsync(System.Threading.CancellationToken cancellationToken) { }
         [HomeBlaze.Abstractions.Attributes.Operation(Icon="Add", Position=1, Title="Create")]

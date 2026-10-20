@@ -605,6 +605,10 @@ public partial class FluentStorageContainer :
     public bool CanStoreMetadata(IInterceptorSubject subject) => MetadataApplier.CanStoreMetadata(subject);
 
     /// <inheritdoc />
+    public void ApplyStoredMetadata(IInterceptorSubject subject, string? propertyName)
+        => MetadataApplier.ApplyStoredMetadata(subject, propertyName);
+
+    /// <inheritdoc />
     /// <remarks>
     /// Keeps the metadata of this storage and of its folders in their <c>.metadata.json</c>, and that of a subject
     /// stored as <c>X.json</c>, of the subjects inside it and of their properties in <c>X.metadata.json</c> beside it.

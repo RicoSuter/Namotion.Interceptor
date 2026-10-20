@@ -11,7 +11,8 @@ namespace HomeBlaze.Storage.Internal;
 
 /// <summary>
 /// Applies the metadata file beside each subject that a storage holds as a JSON file, its stored subject, to that
-/// subject and to the subjects and properties inside it.
+/// subject and to the subjects and properties inside it: the whole file when it is loaded or written, and the entries
+/// of a subject or property that attaches later.
 /// </summary>
 internal sealed class StorageMetadataApplier
 {
@@ -127,6 +128,41 @@ internal sealed class StorageMetadataApplier
                         pending.Push(registeredChild);
                     }
                 }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Applies the entries of a subject that attached and of its properties, or with <paramref name="propertyName"/>
+    /// the entry of a property that was added to an attached subject, so that a subject that is created or replaced
+    /// inside a stored subject, and a property that is added at run time, take their metadata. Thread-safe.
+    /// </summary>
+    public void ApplyStoredMetadata(IInterceptorSubject attachedSubject, string? propertyName)
+    {
+        // The own keys of a stored subject are set with its file, so a file without entries has nothing to apply here.
+        if (attachedSubject.TryGetRegisteredSubject() is not { } subject ||
+            !TryFindStoredSubject(subject, out var stored) ||
+            !_files.TryGetValue(stored.Subject, out var file) ||
+            !HasEntries(file))
+        {
+            return;
+        }
+
+        lock (attachedSubject.SyncRoot)
+        {
+            // Read again under the lock, see Apply.
+            if (!_files.TryGetValue(stored.Subject, out file))
+            {
+                return;
+            }
+
+            if (propertyName is null)
+            {
+                ApplyEntries(subject, stored, file);
+            }
+            else if (file.HasProperties && MetadataPathKey.GetKey(subject, stored) is { } key)
+            {
+                StorageMetadataValues.Set(subject, propertyName, file.FindProperty(MetadataPathKey.GetPropertyKey(key, propertyName)));
             }
         }
     }

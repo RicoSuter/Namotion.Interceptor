@@ -34,6 +34,12 @@ public static class SubjectContextFactory
             .WithService<IPropertyLifecycleHandler>(
                 () => new PropertyAttributeInitializer(),
                 handler => handler is PropertyAttributeInitializer)
+            .WithService<ILifecycleHandler>(
+                () => new MetadataLifecycleHandler(),
+                handler => handler is MetadataLifecycleHandler)
+            .WithService<IPropertyLifecycleHandler>(
+                () => new MetadataLifecycleHandler(),
+                handler => handler is MetadataLifecycleHandler)
             .WithDataAnnotationValidation()
             .WithHostedServices(services);
     }

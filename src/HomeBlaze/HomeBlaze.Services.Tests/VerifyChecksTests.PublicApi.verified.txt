@@ -373,6 +373,13 @@ namespace HomeBlaze.Services.Display
 }
 namespace HomeBlaze.Services.Lifecycle
 {
+    public sealed class MetadataLifecycleHandler : Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler, Namotion.Interceptor.Tracking.Lifecycle.IPropertyLifecycleHandler
+    {
+        public MetadataLifecycleHandler() { }
+        public void AttachProperty(Namotion.Interceptor.Tracking.Lifecycle.SubjectPropertyLifecycleChange change) { }
+        public void DetachProperty(Namotion.Interceptor.Tracking.Lifecycle.SubjectPropertyLifecycleChange change) { }
+        public void HandleLifecycleChange(Namotion.Interceptor.Tracking.Lifecycle.SubjectLifecycleChange change) { }
+    }
     public class MethodPropertyInitializer : Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler
     {
         public MethodPropertyInitializer() { }

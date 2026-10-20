@@ -16,6 +16,16 @@ public interface IMetadataStore
     bool CanStoreMetadata(IInterceptorSubject subject);
 
     /// <summary>
+    /// Applies the metadata that the store keeps for a subject that attached and for its properties, or for a property
+    /// that was added to an attached subject, so that a subject or property that appears after the store applied its
+    /// metadata takes it. Called for every subject that attaches below the store and every property added later, also
+    /// for those whose metadata the store does not keep, which it leaves alone. Thread-safe.
+    /// </summary>
+    /// <param name="subject">The subject that attached, or the subject of the property.</param>
+    /// <param name="propertyName">The name of the property that was added, neither the metadata nor an attribute; null for a subject that attached.</param>
+    void ApplyStoredMetadata(IInterceptorSubject subject, string? propertyName);
+
+    /// <summary>
     /// Merges values, a JSON object, into the metadata of the subject, or of its property
     /// <paramref name="propertyName"/>, at the top level: a key with a value is set, a nested value replacing the old one
     /// as a whole, a key with null is removed, and every other key stays. Keys are matched without regard to case. The

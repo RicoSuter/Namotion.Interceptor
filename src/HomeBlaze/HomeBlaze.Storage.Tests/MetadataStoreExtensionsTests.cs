@@ -102,6 +102,10 @@ public partial class OrderTestStore : IMetadataStore
 
     public bool CanStoreMetadata(IInterceptorSubject subject) => true;
 
+    public void ApplyStoredMetadata(IInterceptorSubject subject, string? propertyName)
+    {
+    }
+
     public Task SetMetadataAsync(IInterceptorSubject subject, string? propertyName, JsonElement values, CancellationToken cancellationToken)
     {
         Writes.Add((subject, propertyName, values));
