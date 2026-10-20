@@ -540,6 +540,33 @@ public class MetadataDisplayTests
     });
 
     [Fact]
+    public Task WhenASuggestionIsChosenWithTheArrowKeysAndEscapeIsPressedBeforeEnter_ThenTheTypedTagIsAdded() => WithSidecarAsync("Motor.metadata.json", TagInUseSidecar, async () =>
+    {
+        // Arrange
+        var (page, pane) = await OpenPaneAsync("Demo/Motor");
+        await pane.GetByTestId("edit-metadata-button").ClickAsync();
+
+        // MudDialog puts its test id on its content, which does not hold the actions.
+        var dialog = page.Locator(".mud-dialog").Filter(new() { Has = page.GetByTestId("metadata-edit-dialog") });
+        var tagInput = dialog.GetByTestId("metadata-tag-input");
+        var suggestions = page.Locator(".mud-popover-open .mud-list-item");
+        await tagInput.ClickAsync();
+        await Assertions.Expect(suggestions).ToHaveTextAsync(["e2e-heat-pump"], new() { Timeout = PageLoadTimeout });
+        await tagInput.PressSequentiallyAsync("heat");
+        await Assertions.Expect(suggestions).ToHaveTextAsync(["heat", "e2e-heat-pump"], new() { Timeout = PageLoadTimeout });
+        await tagInput.PressAsync("ArrowDown");
+
+        // Act
+        await tagInput.PressAsync("Escape");
+        await Assertions.Expect(suggestions).ToHaveCountAsync(0, new() { Timeout = PageLoadTimeout });
+        await tagInput.PressAsync("Enter");
+
+        // Assert
+        await Assertions.Expect(dialog.GetByTestId("metadata-tag-chip")).ToHaveTextAsync(["heat"], new() { Timeout = PageLoadTimeout });
+        await Assertions.Expect(tagInput).ToHaveValueAsync("");
+    });
+
+    [Fact]
     public Task WhenATagSuggestionIsPicked_ThenTheTagInUseIsAdded() => WithSidecarAsync("Motor.metadata.json", TagInUseSidecar, async () =>
     {
         // Arrange

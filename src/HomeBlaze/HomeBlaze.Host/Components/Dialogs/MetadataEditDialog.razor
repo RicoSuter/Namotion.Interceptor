@@ -188,7 +188,7 @@
 
     // A picked suggestion; also called with null when the field is cleared. On Enter the field picks the highlighted
     // suggestion, which can be one of a search for text typed before, so Enter adds the typed text instead unless a
-    // suggestion was chosen with the arrow keys.
+    // suggestion was chosen with the arrow keys and not dismissed with Escape since.
     private async Task AddTagAndClearInputAsync(string? tag)
     {
         if (tag is null)
@@ -215,6 +215,8 @@
     {
         if (args.Key is "ArrowDown" or "ArrowUp")
             _isSuggestionChosen = true;
+        else if (args.Key is "Escape")
+            _isSuggestionChosen = false;
         else if (args.Key is "Enter" or "NumpadEnter")
             _enterText = _isSuggestionChosen ? null : _tagText ?? string.Empty;
     }
