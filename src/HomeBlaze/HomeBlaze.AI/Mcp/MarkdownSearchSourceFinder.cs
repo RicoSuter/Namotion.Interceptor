@@ -30,29 +30,36 @@ internal sealed class MarkdownSearchSourceFinder
 
     /// <summary>
     /// Gets the Markdown files and the notes of metadata in or under <paramref name="pathPrefix"/>, all when it is null,
-    /// in order of path and then property so that results and truncation are stable; without those of a subject of an excluded type or below
-    /// one, which browse and search do not show.
+    /// in order of path and then property so that results and truncation are stable; without those of a subject of an
+    /// excluded type or below one, which browse and search do not show.
     /// </summary>
     public List<MarkdownSearchSource> Find(ISubjectRegistry registry, IInterceptorSubject rootSubject, string? pathPrefix)
     {
         var sources = new List<MarkdownSearchSource>();
         foreach (var (_, registered) in registry.KnownSubjects)
         {
-            var subject = registered.Subject;
-            var path = ReferenceEquals(subject, rootSubject) ? _pathPrefix : TryGetPath(registered, rootSubject);
-            if (path is null || AgentMetadataAccess.IsOfExcludedType(registered, rootSubject, _excludeTypes))
+            var file = registered.Subject as MarkdownFile;
+            var notes = TryGetNotes(registered);
+
+            // Most subjects are neither, and the path and the exclusion walk up the parents.
+            if ((file is null && notes is null) ||
+                TryGetPath(registered, rootSubject) is not { } path ||
+                !IsInOrUnder(path, pathPrefix))
             {
                 continue;
             }
 
-            if (subject is MarkdownFile file)
+            if (file is not null)
             {
-                Add(new MarkdownSearchSource(path, null, file.Title, file, null));
+                sources.Add(new MarkdownSearchSource(path, null, file.Title, file, null));
             }
 
-            foreach (var (propertyName, title, notes) in GetNotes(registered))
+            if (notes is not null)
             {
-                Add(new MarkdownSearchSource(path, propertyName, title, null, notes));
+                foreach (var (propertyName, title, text) in notes)
+                {
+                    sources.Add(new MarkdownSearchSource(path, propertyName, title, null, text));
+                }
             }
         }
 
@@ -62,56 +69,56 @@ internal sealed class MarkdownSearchSourceFinder
             return order != 0 ? order : string.CompareOrdinal(left.Property, right.Property);
         });
         return sources;
-
-        void Add(MarkdownSearchSource source)
-        {
-            if (pathPrefix is null || IsInOrUnder(source.Path, pathPrefix))
-            {
-                sources.Add(source);
-            }
-        }
     }
 
     // The notes of the subject, with its title, and those of each of its properties that the path provider includes,
-    // with the name and the display name of the property.
-    private IEnumerable<(string? PropertyName, string? Title, string Notes)> GetNotes(RegisteredSubject subject)
+    // with the name and the display name of the property; null without any.
+    private List<(string? PropertyName, string? Title, string Notes)>? TryGetNotes(RegisteredSubject subject)
     {
+        List<(string? PropertyName, string? Title, string Notes)>? notes = null;
         foreach (var (propertyName, metadata) in MetadataSearch.GetEntries(subject))
         {
-            if (metadata.GetString(MetadataKeys.Notes) is not { } notes)
+            if (metadata.GetString(MetadataKeys.Notes) is not { } text)
             {
                 continue;
             }
 
             if (propertyName is null)
             {
-                yield return (null, (subject.Subject as ITitleProvider)?.Title, notes);
+                (notes ??= []).Add((null, (subject.Subject as ITitleProvider)?.Title, text));
             }
             else if (subject.TryGetProperty(propertyName) is { } property && _pathProvider.IsPropertyIncluded(property))
             {
-                yield return (propertyName, property.GetDisplayName(), notes);
+                (notes ??= []).Add((propertyName, property.GetDisplayName(), text));
             }
         }
+
+        return notes;
     }
 
-    // The path as browse and search show it: the path through the first parent, after the path prefix.
+    // The path as browse and search show it: the path through the first parent, after the path prefix; null for a
+    // subject of an excluded type or below one.
     private string? TryGetPath(RegisteredSubject subject, IInterceptorSubject rootSubject)
     {
-        var parents = subject.Parents;
-        if (parents.Length == 0)
+        if (ReferenceEquals(subject.Subject, rootSubject))
+        {
+            return _pathPrefix;
+        }
+
+        if (subject.Parents is not [var parent, ..] || AgentMetadataAccess.IsOfExcludedType(subject, rootSubject, _excludeTypes))
         {
             return null;
         }
 
-        var parent = parents[0];
         var path = parent.Property.TryGetPath(_pathProvider, rootSubject, parent.Index);
         return path is null ? null : _pathPrefix + path;
     }
 
-    // Whole segments only, so /Docs does not match /DocsArchive/Page.md.
-    private static bool IsInOrUnder(string path, string pathPrefix) =>
-        path.StartsWith(pathPrefix, StringComparison.OrdinalIgnoreCase) &&
-        (path.Length == pathPrefix.Length || path[pathPrefix.Length] == '/');
+    // Whole segments only, so /Docs does not match /DocsArchive/Page.md; every path is under no prefix.
+    private static bool IsInOrUnder(string path, string? pathPrefix) =>
+        pathPrefix is null ||
+        (path.StartsWith(pathPrefix, StringComparison.OrdinalIgnoreCase) &&
+         (path.Length == pathPrefix.Length || path[pathPrefix.Length] == '/'));
 }
 
 /// <summary>
