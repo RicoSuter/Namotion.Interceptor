@@ -34,7 +34,9 @@
                     }
                     else
                     {
-                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Icon="@Icons.Material.Filled.Link"
+                        @* A link that opens in a new tab shows so by its icon. *@
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                                 Icon="@(link.IsExternal ? Icons.Material.Filled.OpenInNew : Icons.Material.Filled.Link)"
                                  Href="@link.Href" Target="@(link.IsExternal ? "_blank" : null)"
                                  Rel="@(link.IsExternal ? "noopener noreferrer" : null)" data-testid="metadata-link">@link.Title</MudChip>
                     }

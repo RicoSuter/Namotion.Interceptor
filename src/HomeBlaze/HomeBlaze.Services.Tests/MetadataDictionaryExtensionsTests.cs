@@ -183,4 +183,17 @@ public class MetadataDictionaryExtensionsTests
             [new MetadataLink("Manual", "https://example.com/manual.pdf", null), new MetadataLink(null, null, "/Devices/Pump")],
             links.ToArray());
     }
+
+    [Fact]
+    public void WhenTheTitleOfALinkHasAControlOrFormatCharacter_ThenTheLinkIsReadWithoutTitle()
+    {
+        // Arrange
+        var metadata = Metadata("""{ "links": [{ "title": "Manual\u202Efdp.exe", "url": "https://example.com" }, { "title": "A\u0007", "path": "/Devices" }] }""");
+
+        // Act
+        var links = metadata.GetLinks(MetadataKeys.Links);
+
+        // Assert
+        Assert.Equal([new MetadataLink(null, "https://example.com", null), new MetadataLink(null, null, "/Devices")], links.ToArray());
+    }
 }

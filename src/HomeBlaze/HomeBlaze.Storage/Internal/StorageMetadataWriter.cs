@@ -402,6 +402,11 @@ internal static class StorageMetadataWriter
                 throw Refuse($"The {name} of an item of '{key}' is longer than {MaxStringLength} characters.");
             }
 
+            if (name == "title" && MetadataText.HasControlOrFormatCharacter(text))
+            {
+                throw Refuse($"The title {NameList.Format([text])} of an item of '{key}' has control or format characters.");
+            }
+
             link[name] = JsonValue.Create(text);
         }
 
@@ -449,9 +454,9 @@ internal static class StorageMetadataWriter
                 throw Refuse($"Each tag of '{key}' has 1 to {MetadataText.MaxTagLength} characters.");
             }
 
-            if (tag.Any(char.IsControl))
+            if (MetadataText.HasControlOrFormatCharacter(tag))
             {
-                throw Refuse($"The tag {NameList.Format([tag])} has control characters.");
+                throw Refuse($"The tag {NameList.Format([tag])} has control or format characters.");
             }
 
             if (!givenTags.Add(tag))

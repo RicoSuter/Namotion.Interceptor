@@ -82,7 +82,8 @@ public static class MetadataDictionaryExtensions
     /// <summary>
     /// Gets the links of the first 20 items of the key, leaving out an item that is no object with exactly one of a
     /// <c>url</c> and a <c>path</c> string; empty without an array. The members are returned without whitespace around them,
-    /// and the address of a link otherwise as it is held, see <see cref="MetadataLink.IsAllowedAddress"/>.
+    /// a title with a control or format character as none, and the address of a link otherwise as it is held, see
+    /// <see cref="MetadataLink.IsAllowedAddress"/>.
     /// </summary>
     public static ImmutableArray<MetadataLink> GetLinks(this IReadOnlyDictionary<string, JsonElement>? metadata, string key)
     {
@@ -103,7 +104,8 @@ public static class MetadataDictionaryExtensions
             var path = GetMember(item, "path");
             if ((url is null) != (path is null))
             {
-                links.Add(new MetadataLink(GetMember(item, "title"), url, path));
+                var title = GetMember(item, "title");
+                links.Add(new MetadataLink(title is not null && MetadataText.HasControlOrFormatCharacter(title) ? null : title, url, path));
             }
         }
 

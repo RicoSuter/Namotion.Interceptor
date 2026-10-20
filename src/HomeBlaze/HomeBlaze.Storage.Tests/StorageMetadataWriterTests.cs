@@ -432,8 +432,12 @@ public class StorageMetadataWriterTests
     [InlineData("""{ "links": "https://example.com" }""", "an array")]
     [InlineData("""{ "tags": ["floor-2", "Floor-2"] }""", "'Floor-2'")]
     [InlineData("""{ "tags": [" "] }""", "1 to 64 characters")]
-    [InlineData("""{ "tags": ["floor\n2"] }""", "control characters")]
-    [InlineData("""{ "tags": ["floor\u00072"] }""", "control characters")]
+    [InlineData("""{ "tags": ["floor\n2"] }""", "control or format characters")]
+    [InlineData("""{ "tags": ["floor\u00072"] }""", "control or format characters")]
+    [InlineData("""{ "tags": ["floor\u202E2"] }""", "control or format characters")]
+    [InlineData("""{ "tags": ["floor\u200B2"] }""", "control or format characters")]
+    [InlineData("""{ "links": [{ "title": "Man\u202Eual", "url": "https://example.com" }] }""", "control or format characters")]
+    [InlineData("""{ "links": [{ "title": "Man\nual", "path": "/Devices" }] }""", "control or format characters")]
     [InlineData("""{ "tags": [1] }""", "an array of at most 20 strings")]
     public void WhenNotesLinksOrTagsBreakTheirRules_ThenTheWriteIsRefused(string values, string expectedPart)
     {

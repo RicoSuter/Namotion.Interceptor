@@ -62,6 +62,9 @@ public class MetadataDisplayTests
         => pane.GetByTestId("subject-pane-value")
             .Filter(new() { Has = page.GetByTestId("subject-pane-value-name").GetByText(displayName, new() { Exact = true }) });
 
+    // The path of an icon is what tells two icons of MudBlazor apart.
+    private static Task<string?> GetIconShapeAsync(ILocator chip) => chip.Locator("svg path").Last.GetAttributeAsync("d");
+
     // Writes a sidecar in the demo folder of the test data, runs a pass so that its subject has it, and restores it after the test.
     private async Task WithSidecarAsync(string fileName, string content, Func<Task> test)
     {
@@ -130,6 +133,8 @@ public class MetadataDisplayTests
         await Assertions.Expect(links.Nth(0)).ToHaveAttributeAsync("href", "https://example.com/motor.pdf");
         await Assertions.Expect(links.Nth(0)).ToHaveAttributeAsync("target", "_blank");
         await Assertions.Expect(links.Nth(0)).ToHaveAttributeAsync("rel", "noopener noreferrer");
+
+        Assert.NotEqual(await GetIconShapeAsync(links.Nth(1)), await GetIconShapeAsync(links.Nth(0)));
 
         await Assertions.Expect(links.Nth(1)).ToHaveAttributeAsync("href", "pages/Demo/Inline.md");
         await Assertions.Expect(links.Nth(2)).ToHaveAttributeAsync("href", "/browser/Demo/HistoryValues");
