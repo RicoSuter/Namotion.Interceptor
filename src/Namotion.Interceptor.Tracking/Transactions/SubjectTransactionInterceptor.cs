@@ -74,7 +74,7 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
     {
         if (transaction.IsInCommitScope)
         {
-            value = transaction.IsCheckingCommit && transaction.TryGetCheckedValue<TProperty>(context.Property, out var checkedValue)
+            value = transaction.IsInHandlerCheck && transaction.TryGetCheckedValue<TProperty>(context.Property, out var checkedValue)
                 ? checkedValue
                 : next(ref context);
             return true;
@@ -160,9 +160,9 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
     {
         if (transaction.IsInCommitScope)
         {
-            if (transaction.IsCheckingCommit)
+            if (transaction.IsInHandlerCheck)
             {
-                SubjectTransaction.ThrowWriteDuringCommitCheck();
+                SubjectTransaction.ThrowWriteDuringHandlerCheck();
             }
 
             return true;

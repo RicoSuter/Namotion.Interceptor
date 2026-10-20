@@ -66,7 +66,7 @@ public sealed class SubjectTransaction : IDisposable
     // Written only by the committing thread as it enters and leaves a commit scope, and read only after
     // IsInCommitScope matched on that same thread, so they need no synchronization. The excluded properties are those
     // whose source write failed, set only during the pre-apply check.
-    private bool _isCheckingCommit;
+    private bool _isInHandlerCheck;
     private HashSet<PropertyReference>? _checkExcludedProperties;
 
     /// <summary>
@@ -137,7 +137,7 @@ public sealed class SubjectTransaction : IDisposable
     /// Gets a value indicating whether the commit scope runs a handler check, where reads return the checked values
     /// and writes throw. Only meaningful when <see cref="IsInCommitScope"/> is true.
     /// </summary>
-    internal bool IsCheckingCommit => _isCheckingCommit;
+    internal bool IsInHandlerCheck => _isInHandlerCheck;
 
     /// <summary>
     /// Gets the interceptor this transaction is bound to (for cross-context validation).
@@ -413,10 +413,10 @@ public sealed class SubjectTransaction : IDisposable
         return true;
     }
 
-    internal static void ThrowWriteDuringCommitCheck()
+    internal static void ThrowWriteDuringHandlerCheck()
     {
         throw new InvalidOperationException(
-            "Cannot write a property while transaction handlers check the commit. " +
+            "Cannot write a property while transaction handlers check the transaction. " +
             "Transaction handlers must not write properties.");
     }
 
@@ -1093,7 +1093,7 @@ public sealed class SubjectTransaction : IDisposable
             return;
         }
 
-        RunCommitHandlers(changes, excludedProperties: null);
+        RunHandlerCheck(changes, excludedProperties: null);
 
         if (IsDisposed)
         {
@@ -1105,9 +1105,9 @@ public sealed class SubjectTransaction : IDisposable
     /// Calls the handlers on this thread with reads returning the pending values, except those of
     /// <paramref name="excludedProperties"/>, and writes throwing.
     /// </summary>
-    private void RunCommitHandlers(ReadOnlySpan<SubjectPropertyChange> changes, HashSet<PropertyReference>? excludedProperties)
+    private void RunHandlerCheck(ReadOnlySpan<SubjectPropertyChange> changes, HashSet<PropertyReference>? excludedProperties)
     {
-        using var scope = EnterCommitCheck(excludedProperties);
+        using var scope = EnterHandlerCheck(excludedProperties);
         foreach (var handler in _handlerSet.Handlers)
         {
             handler.OnCommitting(this, changes);
@@ -1141,7 +1141,7 @@ public sealed class SubjectTransaction : IDisposable
 
             try
             {
-                RunCommitHandlers(new ReadOnlySpan<SubjectPropertyChange>(rentedArray, 0, checkedCount), failedProperties);
+                RunHandlerCheck(new ReadOnlySpan<SubjectPropertyChange>(rentedArray, 0, checkedCount), failedProperties);
                 return null;
             }
             catch (Exception exception)
@@ -1191,15 +1191,15 @@ public sealed class SubjectTransaction : IDisposable
             : new CancellationTokenSource(_commitTimeout);
     }
 
-    private CommitScope EnterCommitModelAccess() => new(this, isCheck: false, checkExcludedProperties: null);
+    private CommitScope EnterCommitModelAccess() => new(this, isHandlerCheck: false, checkExcludedProperties: null);
 
-    private CommitScope EnterCommitCheck(HashSet<PropertyReference>? excludedProperties) => new(this, isCheck: true, excludedProperties);
+    private CommitScope EnterHandlerCheck(HashSet<PropertyReference>? excludedProperties) => new(this, isHandlerCheck: true, excludedProperties);
 
     /// <summary>
     /// Authorizes synchronous commit-owned work of the transaction on this thread: a handler check when
-    /// <c>isCheck</c> is true, whose reads skip the pending values of <c>checkExcludedProperties</c>, and model access
-    /// otherwise. The previous identity is restored on disposal, so a scope of another transaction can nest. Callers
-    /// must dispose the scope before awaiting external code.
+    /// <c>isHandlerCheck</c> is true, whose reads skip the pending values of <c>checkExcludedProperties</c>, and
+    /// model access otherwise. The previous identity is restored on disposal, so a scope of another transaction can
+    /// nest. Callers must dispose the scope before awaiting external code.
     /// </summary>
     private readonly struct CommitScope : IDisposable
     {
@@ -1207,14 +1207,14 @@ public sealed class SubjectTransaction : IDisposable
         private readonly SubjectTransaction? _previousTransaction;
 
         [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S3010", Justification = "This scope deliberately installs the current thread's commit identity and restores the previous identity on disposal, including nested scopes.")]
-        public CommitScope(SubjectTransaction transaction, bool isCheck, HashSet<PropertyReference>? checkExcludedProperties)
+        public CommitScope(SubjectTransaction transaction, bool isHandlerCheck, HashSet<PropertyReference>? checkExcludedProperties)
         {
             // Dispose resets the check state instead of restoring it, which holds only while the scopes of one
             // transaction run one after another.
             Debug.Assert(!ReferenceEquals(_commitScopeTransaction, transaction), "Commit scopes of one transaction must not nest.");
             _transaction = transaction;
             _previousTransaction = _commitScopeTransaction;
-            transaction._isCheckingCommit = isCheck;
+            transaction._isInHandlerCheck = isHandlerCheck;
             transaction._checkExcludedProperties = checkExcludedProperties;
             _commitScopeTransaction = transaction;
         }
@@ -1222,7 +1222,7 @@ public sealed class SubjectTransaction : IDisposable
         public void Dispose()
         {
             _commitScopeTransaction = _previousTransaction;
-            _transaction._isCheckingCommit = false;
+            _transaction._isInHandlerCheck = false;
             _transaction._checkExcludedProperties = null;
         }
     }
