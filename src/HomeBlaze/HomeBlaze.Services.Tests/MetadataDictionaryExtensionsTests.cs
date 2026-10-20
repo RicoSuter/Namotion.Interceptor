@@ -210,6 +210,19 @@ public class MetadataDictionaryExtensionsTests
         Assert.Equal([new MetadataLink(null, null, "/Devices")], links.ToArray());
     }
 
+    [Fact]
+    public void WhenALinkHasAMemberWhoseNameCannotBeRead_ThenTheLinkIsReadWithoutIt()
+    {
+        // Arrange
+        var metadata = Metadata("""{ "links": [{ "\uD800": "x", "\u0055rl": "https://example.com" }] }""");
+
+        // Act
+        var links = metadata.GetLinks(MetadataKeys.Links);
+
+        // Assert
+        Assert.Equal([new MetadataLink(null, "https://example.com", null)], links.ToArray());
+    }
+
     [Theory]
     [InlineData("""{ "notes": " ", "links": [{ "url": 1 }, { "title": "Neither" }, { "path": "/Pump\u202E" }], "tags": [5, " ", "a\u200Bb"], "comment": "x" }""", false)]
     [InlineData("""{ "notes": "Calibrated" }""", true)]
