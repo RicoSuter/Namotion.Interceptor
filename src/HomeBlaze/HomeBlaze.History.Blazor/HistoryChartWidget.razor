@@ -80,6 +80,9 @@
     private HistoryChartRefresh? _refresh;
     private CancellationTokenSource? _queryCancellation;
     private HistoryChartData? _data;
+
+    // What the last query recorded so that a refresh of a bar chart keeps its ended bars, see HistoryChartQuery.QueryAsync.
+    private HistoryChartReuseState? _reuseState;
     private bool? _hasStores;
     private string? _queryError;
     private HistoryBucket? _bucket;
@@ -573,7 +576,7 @@
                 HistoryChartQuery.IsBars(requests));
             var from = PropertyHistoryChartModel.GetWindowStart(to, range, bucket);
             _isCalendarQuery = bucket is { CalendarUnit: not null };
-            var result = await HistoryChartQuery.QueryAsync(stores, requests, from, to, bucket, cancellationToken);
+            var result = await HistoryChartQuery.QueryAsync(stores, requests, from, to, bucket, _reuseState, cancellationToken);
             if (cancellationToken.IsCancellationRequested || _isDisposed)
             {
                 return;
@@ -587,6 +590,7 @@
             }
 
             _data = result.Data;
+            _reuseState = result.ReuseState;
             SetBands(series, bandSeries.ToArray(), hasBand, queryNotes, lineSeries.ToArray());
             _bucket = bucket;
             _queryError = null;
