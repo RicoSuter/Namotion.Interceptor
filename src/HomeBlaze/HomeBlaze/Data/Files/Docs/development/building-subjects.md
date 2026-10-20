@@ -1078,14 +1078,14 @@ Use this for internal subjects that are part of a parent subject's implementatio
 | `Agents` | listed by MCP `browse`, `search` and `list_types` and by the built-in agents | listed by `list_methods` and `$methods`, or run by `invoke_query`, `invoke_operation`, the Markdown tools and the built-in agents |
 | `All` | any of the above, also for targets added later | any of the above, also for targets added later |
 
-Exclusion decides where a subject or a method is offered, and is no access control: an agent still reaches a subject of a type excluded from agents by its explicit path and calls its methods, as it does for the metadata subject at `<path>/HomeBlaze:Metadata`, and a path to a method excluded from the user interface that a person types into a widget, such as an operation button, still runs it. Code checks a subject with the extension `IsExcludedFrom(target)`, a type with `ExcludeFromAttribute.IsExcluded(type, target)`, and lists the methods for a target with `GetAllMethods(target)`.
+Exclusion decides where a subject or a method is offered, and is no access control: an agent still reaches a subject of a type excluded from agents by its explicit path and calls its methods, and a path to a method excluded from the user interface that a person types into a widget, such as an operation button, still runs it. Code checks a subject with the extension `IsExcludedFrom(target)`, a type with `ExcludeFromAttribute.IsExcluded(type, target)`, and lists the methods for a target with `GetAllMethods(target)`.
 
-Use `UserInterface` on a method that gives an agent what a person does through other controls, as the metadata subject does for the order that people change by dragging:
+Use `UserInterface` on a method that gives an agent what a person does through other controls, as a folder does for the order that people change by dragging:
 
 ```csharp
 [Query(Title = "Get Order", Description = "Gets the names of the children in the order in which they are shown.")]
 [ExcludeFrom(ExclusionTarget.UserInterface)]
-public Task<string[]> GetOrderAsync(CancellationToken cancellationToken)
+public string[] GetOrder() => ChildOrdering.GetShownNames(this);
 ```
 
 ### Page Layout Types

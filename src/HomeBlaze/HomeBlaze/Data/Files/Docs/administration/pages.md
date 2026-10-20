@@ -81,17 +81,17 @@ Pages, folders and subjects appear in the same order in the sidebar, the top bar
 | `icon` | MudBlazor icon name of the folder. Defaults to `Folder` |
 | `order` | Names of the children in the order they are shown |
 
-Keys are read without regard to upper or lower case, and the file may have comments and a trailing comma after its last value. A file with two keys that differ only in case cannot be read. File names are matched exactly: the file of a folder is `.metadata.json` and the file beside `X.json` is `X.metadata.json`, with `.metadata.json` in lower case. Keys that HomeBlaze does not know, such as `tags`, are kept when HomeBlaze writes the file. HomeBlaze writes the file indented and without comments, and deletes it once no key has a value.
+Keys are read without regard to upper or lower case, and the file may have comments and a trailing comma after its last value. A file with two keys that differ only in case cannot be read. File names are matched exactly: the file of a folder is `.metadata.json` and the file beside `X.json` is `X.metadata.json`, with `.metadata.json` in lower case. Keys that HomeBlaze does not know, such as `comment`, are kept when HomeBlaze writes the file. HomeBlaze writes the file indented and without comments, and deletes it once no key has a value.
 
 A name in `order` is the name of a child as the browser shows it in its address: a subject file without `.json` (`Motor` for `Motor.json`), any other file with its extension (`Readme.md`) and a folder by its name. Children that are not listed follow the listed ones: `readme` first, `index` second, then by navigation title. A name of a child that no longer exists is ignored. A JSON file that does not load as a subject, for example while its JSON is invalid, is listed under its file name with `.json`, so its entry does not match it until it loads again, and it is shown among the children that are not listed meanwhile.
 
-The `.metadata.json` in the data folder itself only holds the `order` of the top level. Its other keys are kept, but not used.
+The `.metadata.json` in the data folder itself holds the `order` of the top level and the metadata of the root of the storage.
 
 `position:` in the frontmatter of a page is no longer read and has no effect. Order the pages with **Reorder** in the browser or in the `order` of their folder.
 
 The top bar collects its items from the whole tree, not only from the top level: every page with `location: AppBar`, and every subject with a page whose `X.metadata.json` sets `location` to `AppBar`, appears there, in whichever folder it is. The items follow the navigation order: the folders are walked in their order, and the items inside a folder come in the order of that folder. **Reorder** in the folder of an item moves it among the items of that folder, and the place of the folder in its parent moves its items with it. Each item goes to the left or the right of the top bar by its `alignment`, set in the frontmatter of a page or in the **Metadata** dialog of a subject, and each side keeps the navigation order. The sidebar shows a folder only when it holds a page for the sidebar, reached through folders and subjects that are in the sidebar themselves, so a folder whose pages are all in the top bar does not appear there, and neither does a page that can only be reached through an item of the top bar. A folder that is a page itself and holds no page for the sidebar shows as a link to its page.
 
-A metadata file that cannot be read, because its JSON is invalid or one of its keys cannot be read, is ignored with a warning: the folder or subject then shows no metadata, and reading it through `GetMetadata`, saving or moving a child is refused with an error until the file is fixed or deleted by hand. Every save reads the file again first, so a change made by hand that HomeBlaze has not loaded yet is kept.
+A metadata file that cannot be read, because its JSON is invalid or one of its keys cannot be read, is ignored with a warning: the folder or subject then shows no metadata, and saving metadata or moving a child is refused with an error until the file is fixed or deleted by hand. Every save reads the file again first, so a change made by hand that HomeBlaze has not loaded yet is kept.
 
 When a [seed directory](configuration.md#homeblazeseeddirectory) is set, the documentation under `/Docs` is replaced with the bundled documentation on every start, so changes to its order or metadata are lost on the next start.
 
@@ -105,9 +105,9 @@ On a touch screen or with a pen, drag a row by its handle, so that swiping elsew
 
 With a keyboard, press Tab to reach the arrows of a row, which show while they have focus, and press Enter or Space to move the row by one place.
 
-### Metadata of a Folder or Subject
+### Metadata of Folders, Subjects and Properties
 
-The **Metadata** button in the header of a folder or of a subject file opens a dialog. It is not shown for the root folder or for pages, and it is disabled while the storage is not connected. For a folder it sets `title`, `navTitle` and `icon`. For a subject stored as `X.json` it writes `X.metadata.json` beside it, also when `X.json` loads as a plain JSON file:
+The **Metadata** button in the header of the browser opens a dialog for every item whose metadata a storage keeps: a folder, the root, a subject stored as `X.json` and every subject inside one, at any depth. It is not shown for pages and the subjects of their blocks, and it is disabled while the storage is not connected. For a folder it sets `title`, `navTitle` and `icon`; for a subject `navTitle`, `icon`, `location` and `alignment`:
 
 | Key | Description |
 |-----|-------------|
@@ -116,25 +116,67 @@ The **Metadata** button in the header of a folder or of a subject file opens a d
 | `location` | `NavBar` or `AppBar`, for a subject that has a page |
 | `alignment` | `Left` or `Right` in the top bar |
 
-A subject metadata file never changes the title or the icon of the subject itself. A subject that is a page itself decides its place in navigation, so it does not use `location` and `alignment` of its metadata file. Pages keep their metadata in their frontmatter, which the dialog does not change. A field left empty removes its key, and the keys HomeBlaze does not know are kept when the dialog saves.
+A field left empty removes its key, and the other keys are kept. Metadata never changes the title or the icon of the subject itself. A subject that is a page itself decides its place in navigation, so it does not use `location` and `alignment`. Pages keep their metadata in their frontmatter, which the dialog does not change.
+
+The metadata of a subject stored as `X.json`, of every subject inside it and of their properties is kept in `X.metadata.json` beside it, also when `X.json` loads as a plain JSON file. The keys at the top describe the subject of `X.json` itself, so a simple file looks like the file of a folder:
+
+```json
+{ "navTitle": "Pump", "icon": "WaterDrop" }
+```
+
+`$properties` holds an entry for each property with metadata, and `$subjects` one for each subject inside, by its path relative to the subject of `X.json`. A property of the subject of `X.json` itself is just its name:
+
+```json
+{
+  "navTitle": "Heat Pump",
+  "$properties": {
+    "FlowTemperature": { "comment": "measured at the outlet" }
+  }
+}
+```
+
+A path names the properties on the way, separated by `/`, with the index of a collection or the key of a dictionary in brackets, as `browse` shows it:
+
+```json
+{
+  "navTitle": "Shelly Pro 4PM",
+  "icon": "ElectricalServices",
+  "$subjects": {
+    "Channel": { "navTitle": "Pump relay" },
+    "Channels[0]": { "navTitle": "Hall light" },
+    "Meters['Main']/Phases[2]": { "area": "Utility room" }
+  },
+  "$properties": {
+    "Firmware": { "comment": "auto-update disabled" },
+    "Channels[0]/Power": { "comment": "includes the hall heater" }
+  }
+}
+```
+
+`Channel` in `$subjects` is the subject held by the property `Channel`, and in `$properties` the property itself. HomeBlaze writes paths in this notation and also reads the notation of browser addresses, such as `Channels/0/Power`. Two entries for the same subject or property are a mistake, of which the first one applies, and saving metadata of that subject or property is refused until one is removed. Keys that start with `$` are reserved. An entry whose subject or property does not exist is kept and applies once it exists.
+
+Items of a collection are matched by their index, so when the items of a collection change places, the metadata stays at its index and belongs to another item until the file is applied again. A subject that moves keeps the metadata of its previous place when it moves out of every storage or into a stored subject whose file was not applied, and when it is added to its new place before it is removed from the old one.
+
+A storage that is stored as a JSON file inside another storage keeps its metadata in the sidecar beside that file, and its own `.metadata.json` keeps only its `order`.
+
+Metadata is read and saved under these limits: at most 64 keys per entry, key names of up to 64 characters, strings of up to 256 characters and values of up to 4 KB, except for the `order` of a folder, and a file of up to 512 KB, which a save that does not make it larger may exceed. An entry without keys is removed, and a file without keys is deleted.
 
 A file whose name ends with `.metadata.json` in lower case is never loaded as a subject, and one that holds a `$type`, such as a subject file that was named so before, is logged with a warning. A file whose name ends in another case, such as `Pump.Metadata.json`, is neither a subject nor a metadata file, and is logged with a warning to rename it in lower case. A subject cannot be named `Something.metadata` in any case, as on a file system that ignores case its file would be the metadata file of `Something.json`. Deleting a subject also deletes its `X.metadata.json` sidecar. A sidecar of a file that is moved or renamed outside HomeBlaze has to be moved or renamed with it.
 
 ### Ordering and Metadata by Agents
 
-Every subject stored as a JSON file, every folder and the root of the storage has a metadata subject at `<path>/HomeBlaze:Metadata`, for example `/Devices/Motor/HomeBlaze:Metadata`. It is left out of the browser and of the agent listings but reached by that path, see [Excluding Subjects and Methods](../development/building-subjects.md#excluding-subjects-and-methods): agents call the queries with `invoke_query` and the operations with `invoke_operation`. The browser saves through the same operations.
+Agents read metadata with the MCP tools: `browse` and `search` show the metadata of a subject as its property `HomeBlaze:Metadata` with `includeProperties`, and the metadata of a property as its attribute `@HomeBlaze:Metadata` with `includeAttributes`, both only where there is metadata. `get_property` reads `/Devices/Shelly/HomeBlaze:Metadata` and `/Devices/Shelly/Firmware@HomeBlaze:Metadata`. `set_property` cannot change metadata; agents change it with these methods through `invoke_operation` and `invoke_query`, when the agent may use these tools. The browser does not show the methods:
 
-| Method | Description |
-|--------|-------------|
-| `GetMetadata` | Returns every key of the metadata file as a JSON object, keys HomeBlaze does not know included, and `{}` without a file. For a folder or the root the `order` is left out |
-| `SetMetadata` | Takes `values`, a JSON object, and merges it into the file at the top level: a key with a value is set, a nested value replacing the old one as a whole, a key with `null` is removed, and every other key stays. A key given twice in different case is refused, and so is `order` for a folder or the root |
-| `GetOrder` | Returns the names of the children in the order in which they are shown. Only for a folder or the root |
-| `SetOrder` | Takes `names` and stores them first, in that order, then the other children in their current order. A name that is not a child, or that is given twice, is refused. Only for a folder or the root |
+| Method | On | Description |
+|--------|----|-------------|
+| `SetMetadata` | a storage, such as the root `/` | Takes `path`, the path of a subject relative to the storage, such as `Devices/Shelly/Channels[0]` (empty for the storage itself, a leading `/` ignored), an optional `property`, the name of one of its properties, and `values`, a JSON object that is merged into the metadata: a key with a value is set, a nested value replacing the old one as a whole, a key with `null` is removed, and every other key stays |
+| `GetOrder` | a folder, a storage | Returns the names of the children in the order in which they are shown |
+| `SetOrder` | a folder, a storage | Takes `names` and stores them first, in that order, then the other children in the order in which they are shown. A name that is not a child, or that is given twice, is refused |
 
-`SetMetadata` checks the keys HomeBlaze knows: `title`, `navTitle` and `icon` of a folder, and `navTitle`, `icon`, `location` (`NavBar` or `AppBar`) and `alignment` (`Left` or `Right`) of a subject, each take a string, and a blank string removes the key. A file holds, and a call of `SetMetadata` takes, at most 64 keys, key names of up to 64 characters, strings of up to 256 characters and values of up to 4 KB. A change that would make the file larger than 16 KB is refused, while a file that is already larger still takes a change that does not make it larger. A refused call returns its reason to the agent, such as a file that could not be read or a storage that is not connected.
+`SetMetadata` checks the keys HomeBlaze knows: `title`, `navTitle` and `icon` take a string, and a blank string removes the key; `location` takes the name `NavBar` or `AppBar` and `alignment` the name `Left` or `Right`; `order`, which only a folder or a storage has, takes an array of names, which `SetOrder` checks against the children. Other keys are stored as given, within the limits above. A refused call returns its reason to the agent, such as a file that could not be read or a storage that is not connected. Agents cannot change the metadata of an agent or of a subject inside one.
 
 ```json
-{ "navTitle": "Pump", "icon": null }
+{ "navTitle": "Hall light", "icon": null }
 ```
 
 ---
