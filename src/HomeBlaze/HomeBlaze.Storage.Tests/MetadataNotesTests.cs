@@ -36,6 +36,12 @@ public class MetadataNotesTests
     [InlineData("$$\nx^2\n$$")]
     [InlineData("*[HTML]: Hyper Text\n\nHTML")]
     [InlineData("Calibrated[^1]\n\n[^1]: Setup.md")]
+    [InlineData("<javascript:alert(1)>")]
+    [InlineData("[x](&#106;avascript:alert(1))")]
+    [InlineData("[x](<javascript:alert(1)>)")]
+    [InlineData("[x](JAVASCRIPT:alert(1))")]
+    [InlineData("[x](data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==)")]
+    [InlineData("![x][r]\n\n[r]: https://example.com/pump.png")]
     public void WhenNotesBreakTheRules_ThenTheyAreNotRenderedAsHtml(string notes)
     {
         // Act
@@ -59,6 +65,16 @@ public class MetadataNotesTests
 
         // Assert
         Assert.Contains(expectedRule, error);
+    }
+
+    [Fact]
+    public void WhenNotesHaveEscapedHtml_ThenItIsRenderedAsText()
+    {
+        // Act
+        var html = MetadataNotes.ToHtml("&lt;script&gt;alert(1)&lt;/script&gt;");
+
+        // Assert
+        Assert.Equal("<p>&lt;script&gt;alert(1)&lt;/script&gt;</p>\n", html);
     }
 
     [Fact]
