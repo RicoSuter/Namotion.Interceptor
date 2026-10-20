@@ -331,6 +331,28 @@ public class StorageMetadataWriteTests : StorageTestBase
         Assert.Equal(["b.md", "a.md", "c.md"], storage.ChildOrder.ToArray());
     }
 
+    [Theory]
+    [InlineData("Docs", "b.md,gone.md", "Names that are not children of the folder: 'gone.md'. Its children: 'a.md', 'b.md'.")]
+    [InlineData("Docs", "b.md,a.md,b.md", "Names given more than once: 'b.md'.")]
+    [InlineData("Motor", "a.md", "Only a folder or the root of a storage has an order.")]
+    public async Task WhenOrderHasAnUnknownOrRepeatedNameOrIsSetOnNoFolder_ThenItFailsSayingWhy(string childName, string names, string expectedMessage)
+    {
+        // Arrange
+        WriteFile("Docs/a.md");
+        WriteFile("Docs/b.md");
+        WriteFile("Motor.json", SerializeMotor("Motor 1"));
+        var storage = await ConnectAsync();
+
+        // Act
+        var exception = await Assert.ThrowsAsync<ArgumentException>(() =>
+            MetadataStoreExtensions.SetOrderAsync(storage.Children[childName], names.Split(','), CancellationToken.None));
+
+        // Assert
+        Assert.StartsWith(expectedMessage, exception.Message);
+        Assert.False(File.Exists(GetFullPath("Docs/.metadata.json")));
+        Assert.False(File.Exists(GetFullPath("Motor.metadata.json")));
+    }
+
     [Fact]
     public async Task WhenOrderHasManyLongUnknownNames_ThenTheMessageShowsTheFirstOnesShortened()
     {

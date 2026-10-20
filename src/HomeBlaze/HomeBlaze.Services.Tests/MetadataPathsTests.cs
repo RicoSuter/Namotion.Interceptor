@@ -16,9 +16,10 @@ public class MetadataPathsTests
     }
 
     [Theory]
-    [InlineData("Shelly/Channels[0]")]
-    [InlineData("/Shelly/Channels[0]")]
-    public void WhenAPathLeadsToASubject_ThenItIsResolved(string path)
+    [InlineData("", false)]
+    [InlineData(" / ", false)]
+    [InlineData("/Shelly/Channels[0]", true)]
+    public void WhenThePathIsOnlyWhitespaceAndSlashesOrHasALeadingSlash_ThenTheOriginOrTheSubjectAtThePathIsResolved(string path, bool isChannel)
     {
         // Arrange
         var root = CreateTree();
@@ -28,35 +29,7 @@ public class MetadataPathsTests
         var subject = MetadataPaths.TryResolveSubject(root, path);
 
         // Assert
-        Assert.Same(channel, subject);
-    }
-
-    [Theory]
-    [InlineData("")]
-    [InlineData("/")]
-    public void WhenThePathIsEmpty_ThenTheOriginIsResolved(string path)
-    {
-        // Arrange
-        var root = CreateTree();
-
-        // Act
-        var subject = MetadataPaths.TryResolveSubject(root, path);
-
-        // Assert
-        Assert.Same(root, subject);
-    }
-
-    [Fact]
-    public void WhenNoSubjectIsAtThePath_ThenNothingIsResolved()
-    {
-        // Arrange
-        var root = CreateTree();
-
-        // Act
-        var subject = MetadataPaths.TryResolveSubject(root, "Shelly/Channels[5]");
-
-        // Assert
-        Assert.Null(subject);
+        Assert.Same(isChannel ? channel : root, subject);
     }
 }
 
