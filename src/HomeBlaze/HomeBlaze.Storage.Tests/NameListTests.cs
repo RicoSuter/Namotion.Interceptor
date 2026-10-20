@@ -15,6 +15,16 @@ public class NameListTests
     }
 
     [Fact]
+    public void WhenNamesWithInvisibleFormatCharactersOrLineSeparatorsAreFormatted_ThenTheCharactersAreEscaped()
+    {
+        // Act
+        var formatted = NameList.Format(["a\u202Eb\u2028c\u2029d\U000E0041e"]);
+
+        // Assert
+        Assert.Equal("'a\\u202Eb\\u2028c\\u2029d\\uDB40\\uDC41e'", formatted);
+    }
+
+    [Fact]
     public void WhenManyLongNamesAreFormatted_ThenTheFirstTenAreShownShortened()
     {
         // Arrange

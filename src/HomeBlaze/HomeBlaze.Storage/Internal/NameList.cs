@@ -1,3 +1,5 @@
+using System.Buffers;
+using System.Globalization;
 using System.Text;
 
 namespace HomeBlaze.Storage.Internal;
@@ -11,8 +13,8 @@ internal static class NameList
     private const int MaxNameCount = 10;
 
     /// <summary>
-    /// Formats names to show in a message, each in quotes, shortened to 64 characters and with control characters
-    /// escaped as <c>\uXXXX</c>, at most 10 of them followed by an ellipsis; "none" for no name.
+    /// Formats names to show in a message, each in quotes, shortened to 64 characters and with control, format and line
+    /// or paragraph separator characters escaped as <c>\uXXXX</c>, at most 10 of them followed by an ellipsis; "none" for no name.
     /// </summary>
     public static string Format(IEnumerable<string> names)
     {
@@ -20,7 +22,7 @@ internal static class NameList
             .Take(MaxNameCount + 1)
             .Select(static (name, index) => index == MaxNameCount
                 ? "…"
-                : $"'{EscapeControlCharacters(Shorten(name))}'")
+                : $"'{EscapeHiddenCharacters(Shorten(name))}'")
             .ToList();
         return formattedNames.Count > 0 ? string.Join(", ", formattedNames) : "none";
     }
@@ -37,26 +39,35 @@ internal static class NameList
         return name[..length] + "…";
     }
 
-    private static string EscapeControlCharacters(string text)
+    // Control, format (such as a bidirectional override) and line or paragraph separator characters, which change how
+    // a message shows or hide text in it. Each UTF-16 code unit of such a character is escaped, a pair as two.
+    private static string EscapeHiddenCharacters(string text)
     {
-        if (!text.Any(char.IsControl))
+        StringBuilder? builder = null;
+        var index = 0;
+        while (index < text.Length)
         {
-            return text;
-        }
-
-        var builder = new StringBuilder(text.Length + 10);
-        foreach (var character in text)
-        {
-            if (char.IsControl(character))
+            var status = Rune.DecodeFromUtf16(text.AsSpan(index), out var rune, out var length);
+            if (status == OperationStatus.Done && IsEscaped(rune))
             {
-                builder.Append($"\\u{(int)character:X4}");
+                builder ??= new StringBuilder(text.Length + 10).Append(text, 0, index);
+                for (var offset = 0; offset < length; offset++)
+                {
+                    builder.Append($"\\u{(int)text[index + offset]:X4}");
+                }
             }
             else
             {
-                builder.Append(character);
+                builder?.Append(text, index, length);
             }
+
+            index += length;
         }
 
-        return builder.ToString();
+        return builder?.ToString() ?? text;
     }
+
+    private static bool IsEscaped(Rune rune)
+        => Rune.IsControl(rune) ||
+           Rune.GetUnicodeCategory(rune) is UnicodeCategory.Format or UnicodeCategory.LineSeparator or UnicodeCategory.ParagraphSeparator;
 }
