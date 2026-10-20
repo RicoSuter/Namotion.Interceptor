@@ -35,7 +35,7 @@ public class MetadataDisplayTests
             { "title": "Script", "url": "javascript:alert(1)" }
           ],
           "$properties": {
-            "Temperature": { "notes": "Measured at the housing", "tags": ["{{MotorTag}}"] }
+            "Temperature": { "notes": "Measured at the housing", "tags": ["{{MotorTag}}"], "links": [{ "title": "Values", "path": "/Demo/HistoryValues" }] }
           }
         }
         """;
@@ -335,6 +335,7 @@ public class MetadataDisplayTests
             var tooltip = page.Locator(".mud-popover-open").GetByTestId("metadata-summary");
             await Assertions.Expect(tooltip.GetByTestId("metadata-notes")).ToHaveTextAsync("Measured at the housing", new() { Timeout = PageLoadTimeout });
             await icon.ClickAsync();
+            await page.GetByTestId("metadata-summary-edit").ClickAsync();
 
             // Assert
             await Assertions.Expect(page.Locator(".mud-snackbar").GetByText("The metadata cannot be edited while the storage is not connected."))
@@ -348,7 +349,7 @@ public class MetadataDisplayTests
     });
 
     [Fact]
-    public async Task WhenAPropertyOfTheStorageRootHasNotes_ThenItsRowShowsThemWithoutEditing()
+    public async Task WhenAPropertyOfTheStorageRootHasNotes_ThenItsIconShowsThemWithoutEditing()
     {
         // Arrange - the storage root keeps no metadata of its properties, so the notes are set as metadata written by hand would be.
         var storage = (FluentStorageContainer)_fixture.ServerServices.GetRequiredService<RootManager>().Root!;
@@ -366,7 +367,10 @@ public class MetadataDisplayTests
             // Assert
             var tooltip = page.Locator(".mud-popover-open").GetByTestId("metadata-summary");
             await Assertions.Expect(tooltip.GetByTestId("metadata-notes")).ToHaveTextAsync("Written by hand", new() { Timeout = PageLoadTimeout });
-            await Assertions.Expect(pane.Locator("button[data-testid='subject-pane-value-metadata']")).ToHaveCountAsync(0);
+            await icon.ClickAsync();
+            var dialog = page.Locator(".mud-dialog").Filter(new() { Has = page.GetByTestId("metadata-summary-dialog") });
+            await Assertions.Expect(dialog.GetByTestId("metadata-notes")).ToHaveTextAsync("Written by hand", new() { Timeout = PageLoadTimeout });
+            await Assertions.Expect(dialog.GetByTestId("metadata-summary-edit")).ToHaveCountAsync(0);
         }
         finally
         {
@@ -490,5 +494,22 @@ public class MetadataDisplayTests
         {
             motor.Name = name;
         }
+    });
+
+    [Fact]
+    public Task WhenALinkOfAPropertyIsClicked_ThenItsTargetOpens() => WithSidecarAsync("Motor.metadata.json", MotorSidecar, async () =>
+    {
+        // Arrange
+        var (page, pane) = await OpenPaneAsync("Demo/Motor");
+        await GetRow(page, pane, "Temperature").GetByTestId("subject-pane-value-metadata").ClickAsync();
+        var dialog = page.Locator(".mud-dialog").Filter(new() { Has = page.GetByTestId("metadata-summary-dialog") });
+        var link = dialog.GetByTestId("metadata-link").Filter(new() { HasText = "Values" });
+
+        // Act
+        await link.ClickAsync(new() { Timeout = PageLoadTimeout });
+
+        // Assert
+        await page.WaitForURLAsync("**/browser/Demo/HistoryValues", new() { Timeout = PageLoadTimeout });
+        await Assertions.Expect(dialog).ToHaveCountAsync(0, new() { Timeout = PageLoadTimeout });
     });
 }

@@ -873,32 +873,21 @@
                                data-copy-value="@displayValue"
                                data-testid="subject-pane-value-copy" />
             }
-            @* With notes, links or tags the icon shows them in a tooltip, also without a store to edit them, such as on the
-               storage root; without, it shows while the row is hovered, as the copy button does. The buttons stay enabled
-               while the storage is disconnected, as a disabled button shows no tooltip. *@
+            @* With notes, links or tags the icon shows them in a tooltip and, on a click, in a dialog where links and tags
+               can be opened, also without a store to edit them, such as on the storage root; without, it shows while the
+               row is hovered, as the copy button does. The buttons stay enabled while the storage is disconnected, as a
+               disabled button shows no tooltip. *@
             @if (!prop.IsAttribute && propertyMetadata.HasNotesLinksOrTags())
             {
                 <MudTooltip>
                     <ChildContent>
-                        @if (_metadataStore is not null)
-                        {
-                            <MudIconButton Icon="@Icons.Material.Filled.StickyNote2"
-                                           Size="Size.Small"
-                                           Color="Color.Primary"
-                                           Class="pa-0 ml-2"
-                                           aria-label="@($"Metadata of {displayName}")"
-                                           OnClick="@(() => OpenPropertyMetadataDialogAsync(prop, displayName))"
-                                           data-testid="subject-pane-value-metadata" />
-                        }
-                        else
-                        {
-                            <MudIcon Icon="@Icons.Material.Filled.StickyNote2"
-                                     Size="Size.Small"
-                                     Color="Color.Primary"
-                                     Class="ml-2"
-                                     aria-label="@($"Metadata of {displayName}")"
-                                     data-testid="subject-pane-value-metadata" />
-                        }
+                        <MudIconButton Icon="@Icons.Material.Filled.StickyNote2"
+                                       Size="Size.Small"
+                                       Color="Color.Primary"
+                                       Class="pa-0 ml-2"
+                                       aria-label="@($"Metadata of {displayName}")"
+                                       OnClick="@(() => OpenPropertyMetadataSummaryAsync(prop, displayName, propertyMetadata))"
+                                       data-testid="subject-pane-value-metadata" />
                     </ChildContent>
                     <TooltipContent>
                         <MetadataSummary Metadata="@propertyMetadata" Class="py-1" />
@@ -1051,6 +1040,11 @@
 
         await MetadataEditDialog.ShowAsync(DialogService, Subject, $"Metadata of {displayName}", property.Name);
     }
+
+    private Task OpenPropertyMetadataSummaryAsync(
+        RegisteredSubjectProperty property, string displayName, ImmutableDictionary<string, JsonElement>? metadata)
+        => MetadataSummaryDialog.ShowAsync(DialogService, $"Metadata of {displayName}", metadata,
+            _metadataStore is not null ? () => OpenPropertyMetadataDialogAsync(property, displayName) : null);
 
     private Task OpenTagFilterAsync(string tag) => MetadataTagFilterDialog.ShowAsync(DialogService, tag);
 
