@@ -1,4 +1,5 @@
 using System.Text.Json;
+using FluentStorage.Blobs;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Files;
@@ -331,8 +332,32 @@ public class StorageMetadataWriteTests : StorageTestBase
         Assert.Equal(["b.md", "a.md", "c.md"], storage.ChildOrder.ToArray());
     }
 
+    [Fact]
+    public async Task WhenAChildIsDeletedBetweenTheCallAndTheWrite_ThenTheOrderIsSetWithoutIt()
+    {
+        // Arrange
+        WriteFile("a.md");
+        WriteFile("b.md");
+        WriteFile("Motor.json", SerializeMotor("Motor 1"));
+        PausableBlobStorage? client = null;
+        var storage = await ConnectAsync(configure: container => container.ClientDecorator = inner => client = new PausableBlobStorage(inner));
+        var motor = storage.Children["Motor"];
+        var writeReached = client!.PauseNext(nameof(IBlobStorage.WriteAsync));
+        var heldWrite = storage.SetMetadataAsync(storage, null, Values("""{ "color": "red" }"""), CancellationToken.None);
+        await writeReached;
+        var delete = storage.DeleteSubjectAsync(motor, CancellationToken.None);
+
+        // Act
+        var setOrder = MetadataStoreExtensions.SetOrderAsync(storage, ["b.md"], CancellationToken.None);
+        client.Release();
+        await Task.WhenAll(heldWrite, delete, setOrder).WaitAsync(DeadlockTimeout);
+
+        // Assert
+        Assert.Equal(["b.md", "a.md"], storage.ChildOrder.ToArray());
+    }
+
     [Theory]
-    [InlineData("Docs", "b.md,gone.md", "Names that are not children of the folder: 'gone.md'. Its children: 'a.md', 'b.md'.")]
+    [InlineData("Docs", "b.md,gone.md","Names that are not children of the folder: 'gone.md'. Its children: 'a.md', 'b.md'.")]
     [InlineData("Docs", "b.md,a.md,b.md", "Names given more than once: 'b.md'.")]
     [InlineData("Motor", "a.md", "'order' is the order of the children of a folder; only a folder or the root of a storage has one.")]
     public async Task WhenOrderHasAnUnknownOrRepeatedNameOrIsSetOnNoFolder_ThenItIsRefusedSayingWhy(string childName, string names, string expectedMessage)
