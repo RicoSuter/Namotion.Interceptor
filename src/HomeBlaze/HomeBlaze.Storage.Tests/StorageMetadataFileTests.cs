@@ -11,7 +11,7 @@ public class StorageMetadataFileTests
         => StorageMetadataFile.TryParse(Encoding.UTF8.GetBytes(json), out var file, out var error) ? file : throw error;
 
     [Fact]
-    public void WhenTheOrderIsReadTwice_ThenItIsReadFromTheFileOnce()
+    public void WhenTheOrderIsRead_ThenItIsTheSameArrayOfTheStringsOfTheFile()
     {
         // Arrange
         var file = Parse("""{ "order": ["b.md", 1, "a.md"] }""");

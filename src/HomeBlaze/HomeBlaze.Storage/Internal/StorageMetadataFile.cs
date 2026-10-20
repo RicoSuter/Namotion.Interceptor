@@ -34,7 +34,6 @@ internal sealed class StorageMetadataFile
 
     private readonly Dictionary<string, ImmutableDictionary<string, JsonElement>> _subjects;
     private readonly Dictionary<string, ImmutableDictionary<string, JsonElement>> _properties;
-    private ImmutableArray<string> _order;
 
     private StorageMetadataFile(
         ImmutableDictionary<string, JsonElement>? own,
@@ -44,6 +43,7 @@ internal sealed class StorageMetadataFile
         bool holdsSubjectType)
     {
         Own = own;
+        Order = own.GetStringArray(MetadataKeys.Order);
         _subjects = subjects;
         _properties = properties;
         DuplicatePaths = duplicatePaths;
@@ -56,22 +56,8 @@ internal sealed class StorageMetadataFile
     /// <summary>Gets the own keys of the file, those of the stored subject, the folder or the root; null without one.</summary>
     public ImmutableDictionary<string, JsonElement>? Own { get; }
 
-    /// <summary>
-    /// Gets the names of the <c>order</c> of the own keys, of a folder or of the root, read once; empty without one.
-    /// </summary>
-    public ImmutableArray<string> Order
-    {
-        get
-        {
-            // Threads that race each read equal arrays; an ImmutableArray is a single reference, so a read is never torn.
-            if (_order.IsDefault)
-            {
-                _order = Own.GetStringArray(MetadataKeys.Order);
-            }
-
-            return _order;
-        }
-    }
+    /// <summary>Gets the names of the <c>order</c> of the own keys, of a folder or of the root; empty without one.</summary>
+    public ImmutableArray<string> Order { get; }
 
     /// <summary>Gets whether the file has an entry of a subject.</summary>
     public bool HasSubjects => _subjects.Count > 0;
