@@ -121,15 +121,11 @@ A full-page component for a subject type. Pages appear in the navigation when th
 
 ## Navigation
 
-Set via markdown frontmatter on `.md` files — see [Markdown Pages — Frontmatter](administration/pages.md#frontmatter).
-
-### Metadata File
-
-A `.metadata.json` in a folder holds the metadata of the folder, such as its title, icon and order, and an `X.metadata.json` beside a subject file `X.json` holds the metadata of that subject, of the subjects inside it and of their properties. See [Metadata: Where Metadata Is Stored](administration/metadata.md#where-metadata-is-stored).
+Set in the frontmatter of a page, see [Markdown Pages: Frontmatter](administration/pages.md#frontmatter), and in the metadata of folders and subjects, see [Metadata](administration/metadata.md).
 
 ### Metadata
 
-Keys and JSON values that describe a folder, a subject or a property, such as its navigation title or a comment, kept in a [Metadata File](#metadata-file) and held by the registry as `HomeBlaze:Metadata`. See [Metadata](administration/metadata.md), and for agents [Metadata: Agents](administration/metadata.md#agents).
+Keys and values that describe a folder, a subject or a property, such as its navigation title, its icon or a comment, stored in `.metadata.json` files. See [Metadata](administration/metadata.md).
 
 ### Navigation Location
 

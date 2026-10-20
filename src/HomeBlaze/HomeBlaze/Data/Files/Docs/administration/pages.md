@@ -11,7 +11,6 @@ On this page:
 
 - [How It Works](#how-it-works): what happens to a markdown file in the data folder
 - [Frontmatter](#frontmatter): the title, the icon and the place in the navigation
-- [Navigation Order and Metadata](#navigation-order-and-metadata): where the order of the navigation comes from
 - [Relative Links](#relative-links): links to other pages and to the sections of a page
 - [Navigation Updates](#navigation-updates): when the menu follows a change
 - [Live Expressions](#live-expressions): values in the text that update while the page is open
@@ -57,14 +56,10 @@ icon: Dashboard
 | `title` | string | Full page title displayed in the header |
 | `navTitle` | string | Short title for navigation menu (optional, defaults to `title`) |
 | `icon` | string | MudBlazor icon name (e.g., `Dashboard`, `Settings`, `Article`) |
-| `location` | string | Where to show in navigation: `NavBar` (sidebar, default) or `AppBar` (top bar). A page in any folder can be in the top bar |
+| `location` | string | Where to show in navigation: `NavBar` (sidebar, default) or `AppBar` (top bar) |
 | `alignment` | string | AppBar alignment: `Left` (default) or `Right`. Only used when `location` is `AppBar` |
 
----
-
-## Navigation Order and Metadata
-
-The order of pages, folders and subjects in the sidebar, the top bar and the browser, the titles and icons of folders, and the place of subjects in the top bar come from metadata, which [Metadata](metadata.md) describes. A page keeps its own title, icon, `location` and `alignment` in its frontmatter; its place among the other children of its folder is set with **Reorder** in the browser or in the `order` of the folder, see [Navigation Order](metadata.md#navigation-order).
+The place of a page among the other children of its folder is set with **Reorder** in the browser, see [Navigation Order](metadata.md#navigation-order).
 
 ---
 
