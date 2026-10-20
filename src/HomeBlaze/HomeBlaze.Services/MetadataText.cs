@@ -32,6 +32,6 @@ public static class MetadataText
         return false;
     }
 
-    internal static bool IsControlOrFormat(Rune character)
+    private static bool IsControlOrFormat(Rune character)
         => Rune.GetUnicodeCategory(character) is UnicodeCategory.Control or UnicodeCategory.Format;
 }
