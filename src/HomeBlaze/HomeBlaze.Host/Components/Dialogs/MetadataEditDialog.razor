@@ -53,7 +53,7 @@
         }
     </DialogContent>
     <DialogActions>
-        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton OnClick="Cancel" Disabled="@_isSaving">Cancel</MudButton>
         <MudButton Color="Color.Primary" OnClick="SaveAsync" Disabled="@_isSaving" data-testid="metadata-save">Save</MudButton>
     </DialogActions>
 </MudDialog>
