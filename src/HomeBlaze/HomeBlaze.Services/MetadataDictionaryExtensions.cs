@@ -32,10 +32,7 @@ public static class MetadataDictionaryExtensions
     /// <summary>Gets the value of the enum that the text names, without regard to case; null for anything else, a number included.</summary>
     public static TEnum? ParseEnumName<TEnum>(string text)
         where TEnum : struct, Enum
-        => Enum.TryParse(text, ignoreCase: true, out TEnum value) &&
-           string.Equals(value.ToString(), text, StringComparison.OrdinalIgnoreCase)
-            ? value
-            : null;
+        => IsName(text) && Enum.TryParse(text, ignoreCase: true, out TEnum value) ? value : null;
 
     /// <summary>Gets the strings of the array of the key, leaving out the items that are no string; empty without an array.</summary>
     public static ImmutableArray<string> GetStringArray(this IReadOnlyDictionary<string, JsonElement>? metadata, string key)
@@ -55,6 +52,25 @@ public static class MetadataDictionaryExtensions
         }
 
         return items.DrainToImmutable();
+    }
+
+    // Enum.TryParse also reads numbers, lists of names and names with spaces around them.
+    private static bool IsName(string text)
+    {
+        if (text.Length == 0 || char.IsDigit(text[0]))
+        {
+            return false;
+        }
+
+        foreach (var character in text)
+        {
+            if (!char.IsLetterOrDigit(character) && character != '_')
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     // A string with a lone surrogate cannot be read as text, which counts as no value.

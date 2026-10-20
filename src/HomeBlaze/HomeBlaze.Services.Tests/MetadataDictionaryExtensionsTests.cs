@@ -50,6 +50,24 @@ public class MetadataDictionaryExtensionsTests
         Assert.Equal(["a"], order.ToArray());
     }
 
+    [Theory]
+    [InlineData("1")]
+    [InlineData("-1")]
+    [InlineData("5")]
+    [InlineData("+1")]
+    [InlineData(" 1")]
+    [InlineData("Left, Right")]
+    [InlineData("Left ")]
+    [InlineData("")]
+    public void WhenTheTextIsNoNameOfTheEnum_ThenItIsNotParsed(string text)
+    {
+        // Act
+        var alignment = MetadataDictionaryExtensions.ParseEnumName<AppBarAlignment>(text);
+
+        // Assert
+        Assert.Null(alignment);
+    }
+
     [Fact]
     public void WhenThereIsNoMetadata_ThenNoKeyIsSet()
     {
