@@ -951,9 +951,6 @@ public partial class FluentStorageContainer :
     /// </summary>
     public const string SetMetadataMethodName = "SetMetadata";
 
-    /// <summary>The name of the method with which agents search metadata, <see cref="SearchMetadata"/>.</summary>
-    public const string SearchMetadataMethodName = "SearchMetadata";
-
     /// <summary>
     /// Gets the message with which <see cref="SetMetadataAsync(string, string?, JsonElement, CancellationToken)"/>
     /// refuses a path at which it finds no subject, so that a caller that hides a subject refuses it alike.

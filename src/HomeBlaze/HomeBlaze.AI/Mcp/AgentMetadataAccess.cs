@@ -31,7 +31,7 @@ internal static class AgentMetadataAccess
     public static object? FilterSearchMetadataResult(
         RegisteredSubject subject, MethodMetadata method, object? result, bool forAgents, PathProviderBase pathProvider, Type[] excludeTypes)
     {
-        if (method.PropertyName != FluentStorageContainer.SearchMetadataMethodName ||
+        if (method.PropertyName != nameof(FluentStorageContainer.SearchMetadata) ||
             subject.Subject is not FluentStorageContainer ||
             result is not MetadataSearchMatch[] matches)
         {

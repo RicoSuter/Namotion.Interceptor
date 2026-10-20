@@ -57,7 +57,7 @@ public static class MetadataDictionaryExtensions
 
     /// <summary>
     /// Gets the tags of the first 20 items of <c>tags</c>, without whitespace around them and each once without regard to
-    /// case, leaving out the items that are no string or that <see cref="MetadataText.IsAllowedTag"/> rejects.
+    /// case, leaving out the items that are no string or that have no 1 to 64 characters or a control or format character.
     /// </summary>
     public static ImmutableArray<string> GetTags(this IReadOnlyDictionary<string, JsonElement>? metadata)
     {

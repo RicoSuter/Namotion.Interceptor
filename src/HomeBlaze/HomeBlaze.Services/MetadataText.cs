@@ -15,7 +15,7 @@ public static class MetadataText
     public const int MaxTagLength = 64;
 
     /// <summary>Gets whether the tag, without whitespace around it, has 1 to 64 characters and no control or format character.</summary>
-    public static bool IsAllowedTag(string tag)
+    internal static bool IsAllowedTag(string tag)
         => tag.Length is > 0 and <= MaxTagLength && !HasControlOrFormatCharacter(tag);
 
     /// <summary>

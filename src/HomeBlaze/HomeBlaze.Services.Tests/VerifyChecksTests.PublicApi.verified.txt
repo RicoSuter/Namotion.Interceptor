@@ -103,7 +103,6 @@ namespace HomeBlaze.Services
         public const int MaxItemCount = 20;
         public const int MaxTagLength = 64;
         public static bool HasControlOrFormatCharacter(string text) { }
-        public static bool IsAllowedTag(string tag) { }
     }
     public sealed class ObjectParameterMember : System.IEquatable<HomeBlaze.Services.ObjectParameterMember>
     {
