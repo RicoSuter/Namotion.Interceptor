@@ -29,7 +29,6 @@ public static class ServiceCollectionExtensions
         // The root accessor is deferred so constructing the resolver does not pull in RootManager,
         // which depends on the resolver.
         services.AddSingleton(sp => new SubjectPathResolver(() => sp.GetRequiredService<RootManager>().Root));
-        services.AddSingleton<MetadataSearch>();
         services.AddSingleton<DeveloperModeService>();
         services.AddScoped<ITimeZoneDisplay, TimeZoneDisplayService>();
         services.AddHostedService(sp => sp.GetRequiredService<RootManager>());

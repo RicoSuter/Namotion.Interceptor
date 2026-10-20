@@ -24,8 +24,8 @@ internal static class HomeBlazeMcpInstructions
         "property HomeBlaze:Metadata of a subject (includeProperties) and the attribute @HomeBlaze:Metadata of a property (includeAttributes). " +
         "Change it with invoke_operation, when available, method SetMetadata of the storage (/ or the storage that holds the subject): path of the subject " +
         "relative to the storage, optional property, and values, a JSON object that is merged; find metadata, such as everything with a tag, " +
-        "with invoke_query, method SearchMetadata of the storage. A folder and the storage have the query GetOrder and the operation " +
-        "SetOrder (names) for the order of their children.";
+        "with invoke_query, method SearchMetadata of the storage, which returns path and property as SetMetadata takes them. A folder and the " +
+        "storage have the query GetOrder and the operation SetOrder (names) for the order of their children.";
 
     /// <summary>The server instructions of the HomeBlaze MCP server.</summary>
     public const string ServerInstructions =

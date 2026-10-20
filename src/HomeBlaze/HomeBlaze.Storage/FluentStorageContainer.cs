@@ -951,6 +951,9 @@ public partial class FluentStorageContainer :
     /// </summary>
     public const string SetMetadataMethodName = "SetMetadata";
 
+    /// <summary>The name of the method with which agents search metadata, <see cref="SearchMetadata"/>.</summary>
+    public const string SearchMetadataMethodName = "SearchMetadata";
+
     /// <summary>
     /// Gets the message with which <see cref="SetMetadataAsync(string, string?, JsonElement, CancellationToken)"/>
     /// refuses a path at which it finds no subject, so that a caller that hides a subject refuses it alike.
@@ -998,11 +1001,11 @@ public partial class FluentStorageContainer :
     /// Finds the subjects and properties in this storage whose metadata matches every filter that is given, for agents:
     /// see <see cref="MetadataSearch.Search"/>.
     /// </summary>
-    /// <returns>The absolute paths of the subjects and properties.</returns>
+    /// <returns>Every match, in order, with the path of its subject relative to this storage, as <see cref="SetMetadataAsync(string, string?, JsonElement, CancellationToken)"/> takes it.</returns>
     [Query(Title = "Search Metadata", Description = StorageMetadataMethods.SearchMetadataDescription, Position = 6)]
     [ExcludeFrom(ExclusionTarget.UserInterface)]
-    public string[] SearchMetadata(string? tag, string? key, string? value, string? path, [FromServices] MetadataSearch search)
-        => [.. search.Search(this, tag, key, value, path)];
+    public MetadataSearchMatch[] SearchMetadata(string? tag, string? key, string? value, string? path)
+        => [.. MetadataSearch.Search(this, tag, key, value, path)];
 
     /// <summary>Gets the names of the children of this storage in the order in which they are shown, for agents.</summary>
     [Query(Title = "Get Order", Description = StorageMetadataMethods.GetOrderDescription, Position = 4)]

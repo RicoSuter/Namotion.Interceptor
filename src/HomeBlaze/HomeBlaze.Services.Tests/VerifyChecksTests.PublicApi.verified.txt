@@ -77,11 +77,23 @@ namespace HomeBlaze.Services
         public static Namotion.Interceptor.Registry.Paths.PathProviderBase PathProvider { get; }
         public static Namotion.Interceptor.IInterceptorSubject? TryResolveSubject(Namotion.Interceptor.IInterceptorSubject origin, string path) { }
     }
-    public sealed class MetadataSearch
+    public static class MetadataSearch
     {
-        public MetadataSearch(HomeBlaze.Services.SubjectPathResolver pathResolver) { }
-        public System.Collections.Generic.IReadOnlyList<string> GetTags(Namotion.Interceptor.IInterceptorSubject root) { }
-        public System.Collections.Generic.IReadOnlyList<string> Search(Namotion.Interceptor.IInterceptorSubject root, string? tag = null, string? key = null, string? value = null, string? path = null) { }
+        [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
+                "PropertyName",
+                "Metadata"})]
+        public static System.Collections.Generic.IEnumerable<System.ValueTuple<string?, System.Collections.Immutable.ImmutableDictionary<string, System.Text.Json.JsonElement>>> GetEntries(Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject) { }
+        public static System.Collections.Generic.IReadOnlyList<string> GetTags(Namotion.Interceptor.IInterceptorSubject root) { }
+        public static System.Collections.Generic.IReadOnlyList<HomeBlaze.Services.MetadataSearchMatch> Search(Namotion.Interceptor.IInterceptorSubject root, string? tag = null, string? key = null, string? value = null, string? path = null) { }
+    }
+    public sealed class MetadataSearchMatch : System.IEquatable<HomeBlaze.Services.MetadataSearchMatch>
+    {
+        public MetadataSearchMatch(string Path, string? Property) { }
+        [System.Text.Json.Serialization.JsonPropertyName("path")]
+        public string Path { get; init; }
+        [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        [System.Text.Json.Serialization.JsonPropertyName("property")]
+        public string? Property { get; init; }
     }
     public sealed class ObjectParameterMember : System.IEquatable<HomeBlaze.Services.ObjectParameterMember>
     {

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.AI.Mcp;
 using HomeBlaze.AI.Tests.Agents;
@@ -9,6 +10,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Mcp;
 using Namotion.Interceptor.Mcp.Tools;
 using Namotion.Interceptor.Registry;
@@ -230,29 +232,80 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
         Assert.Contains(folderMethodsForAgents, method => method.Title == "Set Order");
     }
 
-    [Fact]
-    public async Task WhenSubjectsAreTagged_ThenSearchMetadataFindsThem()
+    [Theory]
+    [InlineData("Floor-2", null, null, new[] { "Docs/Pump.json|" })]
+    [InlineData(null, "AREA", "basement", new[] { "Docs/Fan.json|" })]
+    [InlineData(null, null, "FLOOR-2", new[] { "Docs/Pump.json|" })]
+    [InlineData(null, "notes", null, new[] { "Docs/Fan.json|FileSize" })]
+    public async Task WhenMetadataIsSearched_ThenTheMatchesAreReturnedAsSetMetadataTakesThem(
+        string? tag, string? key, string? value, string[] expectedMatches)
     {
         // Arrange
         WriteFile("Docs/Pump.json", """{ "speed": 1 }""");
+        WriteFile("Docs/Pump.metadata.json", """{ "tags": ["floor-2"] }""");
         WriteFile("Docs/Fan.json", """{ "speed": 2 }""");
+        WriteFile("Docs/Fan.metadata.json", """{ "area": "Basement", "$properties": { "FileSize": { "notes": "Grows." } } }""");
         var (tools, _) = await CreateToolsAsync();
-        await CallAsync(tools["invoke_operation"], new
-        {
-            path = "/Storage", method = "SetMetadata", parameters = new { path = "Docs/Pump.json", values = new { tags = new[] { "floor-2" } } }
-        });
 
         // Act
-        var result = await CallAsync(tools["invoke_query"], new { path = "/Storage", method = "SearchMetadata", parameters = new { tag = "Floor-2" } });
+        var result = await CallAsync(tools["invoke_query"], new { path = "/Storage", method = "SearchMetadata", parameters = new { tag, key, value } });
 
         // Assert
-        Assert.Equal(["/Storage/Docs/Pump.json"], result.GetProperty("result").EnumerateArray().Select(item => item.GetString()));
+        Assert.Equal(expectedMatches, GetMatches(result));
     }
+
+    [Theory]
+    [InlineData(false, new[] { "Docs/Device|", "Docs/Device|Host", "Docs/Hidden|", "Docs/Pump.json|" })]
+    [InlineData(true, new[] { "Docs/Device|", "Docs/Pump.json|" })]
+    public async Task WhenAgentsSearchMetadata_ThenTheSubjectsAndPropertiesHiddenFromAgentsAreLeftOut(bool forAgents, string[] expectedMatches)
+    {
+        // Arrange
+        WriteFile("Docs/Pump.json", """{ "speed": 1 }""");
+        WriteFile("Docs/Pump.metadata.json", """{ "tags": ["floor-2"] }""");
+        WriteFile("Docs/Hidden.json", $$"""{ "$type": "{{typeof(MetadataSearchHiddenDevice).FullName}}" }""");
+        WriteFile("Docs/Hidden.metadata.json", """{ "tags": ["floor-2"] }""");
+        WriteFile("Docs/Device.json", $$"""{ "$type": "{{typeof(MetadataSearchTestDevice).FullName}}" }""");
+        WriteFile("Docs/Device.metadata.json", """{ "tags": ["floor-2"], "$properties": { "Host": { "tags": ["floor-2"] } } }""");
+        var (tools, _) = await CreateToolsAsync(forAgents);
+
+        // Act
+        var result = await CallAsync(tools["invoke_query"], new { path = "/Storage", method = "SearchMetadata", parameters = new { tag = "floor-2" } });
+
+        // Assert
+        Assert.Equal(expectedMatches, GetMatches(result));
+    }
+
+    [Fact]
+    public async Task WhenMoreThanAHundredSubjectsMatch_ThenTheFirstHundredAreReturned()
+    {
+        // Arrange
+        for (var index = 0; index < 101; index++)
+        {
+            WriteFile($"Docs/Pump{index:000}.json", """{ "speed": 1 }""");
+            WriteFile($"Docs/Pump{index:000}.metadata.json", """{ "tags": ["floor-2"] }""");
+        }
+
+        var (tools, _) = await CreateToolsAsync();
+
+        // Act
+        var result = await CallAsync(tools["invoke_query"], new { path = "/Storage", method = "SearchMetadata", parameters = new { tag = "floor-2" } });
+
+        // Assert
+        var matches = GetMatches(result);
+        Assert.Equal(100, matches.Length);
+        Assert.Equal("Docs/Pump000.json|", matches[0]);
+        Assert.Equal("Docs/Pump099.json|", matches[^1]);
+    }
+
+    private static string[] GetMatches(JsonElement result)
+        => [.. result.GetProperty("result").EnumerateArray().Select(match =>
+            $"{match.GetProperty("path").GetString()}|{(match.TryGetProperty("property", out var property) ? property.GetString() : null)}")];
 
     private async Task<(Dictionary<string, McpToolInfo> Tools, FluentStorageContainer Storage)> CreateToolsAsync(bool forAgents = false)
     {
         var typeProvider = new TypeProvider();
         typeProvider.AddAssembly(typeof(FluentStorageContainer).Assembly);
+        typeProvider.AddAssembly(typeof(MetadataSearchTestDevice).Assembly);
         var typeRegistry = new SubjectTypeRegistry(typeProvider);
 
         var services = new ServiceCollection();
@@ -264,7 +317,6 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
         services.AddSingleton<ConfigurableSubjectSerializer>();
         AgentTestRoot? root = null;
         services.AddSingleton(new SubjectPathResolver(() => root));
-        services.AddSingleton<MetadataSearch>();
         services.AddSingleton<MarkdownContentParser>();
         services.AddSingleton<ILoggerFactory>(NullLoggerFactory.Instance);
         var serviceProvider = services.BuildServiceProvider();
@@ -301,4 +353,20 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
 
         _directory.Delete(recursive: true);
     }
+}
+
+[InterceptorSubject]
+public partial class MetadataSearchTestDevice : IConfigurable
+{
+    [Configuration]
+    public partial string? Host { get; set; }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+}
+
+[InterceptorSubject]
+[ExcludeFrom(ExclusionTarget.Agents)]
+public partial class MetadataSearchHiddenDevice : IConfigurable
+{
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }
