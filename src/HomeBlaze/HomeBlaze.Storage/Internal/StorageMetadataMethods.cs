@@ -11,8 +11,17 @@ internal static class StorageMetadataMethods
         "for example Devices/Shelly/Channels[0] (a leading / is ignored), and empty for the storage itself; property is the name of a property of that subject, or omitted for the subject. " +
         "values is a JSON object that is merged into the metadata: a key with a value is set, replacing a nested value as a whole, a key with null is removed, and " +
         "every other key stays; keys match without regard to case. HomeBlaze reads title (of a folder), navTitle, icon (a MudBlazor icon name), location (NavBar or " +
-        "AppBar) and alignment (Left or Right); any other key, such as comment, is stored as given. At most 64 keys, key names of up to 64 characters, strings of up " +
-        "to 256 characters and values of up to 4 KB. The order of the children of a folder is set with SetOrder of the folder. Example: {\"navTitle\": \"Hall light\", \"icon\": null}.";
+        "AppBar), alignment (Left or Right), notes (Markdown of up to 4 KB without HTML, pictures or blocks), links (an array of at most 20 objects with an " +
+        "optional title and either url, an http, https or mailto address, or path, the absolute path of a page, subject or property) and tags (an array of " +
+        "at most 20 strings of up to 64 characters, unique without regard to case); any other key, such as comment, is stored as given. At most 64 keys, key " +
+        "names of up to 64 characters, strings of up to 256 characters and values of up to 4 KB. The order of the children of a folder is set with SetOrder " +
+        "of the folder. Example: {\"navTitle\": \"Hall light\", \"tags\": [\"floor-2\"], \"icon\": null}.";
+
+    public const string SearchMetadataDescription =
+        "Finds the subjects and properties in this storage whose metadata matches every filter that is given, and returns their absolute paths; a property " +
+        "path ends with the property name. tag: a tag in tags; key: a key that is set, such as notes; value: a string value, or a string in an array, of key " +
+        "when it is given, else of any key; path: an absolute path that the results are at or below. Strings match without regard to case. Example: " +
+        "tag floor-2 finds everything tagged floor-2.";
 
     public const string GetOrderDescription =
         "Gets the names of the children of this folder or storage in the order in which they are shown in navigation and in the browser.";

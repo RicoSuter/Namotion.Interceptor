@@ -23,8 +23,9 @@ internal static class HomeBlazeMcpInstructions
         "Metadata (such as navTitle, icon or a comment) of subjects, of their properties and of folders shows in browse and search, where set, as the " +
         "property HomeBlaze:Metadata of a subject (includeProperties) and the attribute @HomeBlaze:Metadata of a property (includeAttributes). " +
         "Change it with invoke_operation, when available, method SetMetadata of the storage (/ or the storage that holds the subject): path of the subject " +
-        "relative to the storage, optional property, and values, a JSON object that is merged. A folder and the storage have the query " +
-        "GetOrder and the operation SetOrder (names) for the order of their children.";
+        "relative to the storage, optional property, and values, a JSON object that is merged; find metadata, such as everything with a tag, " +
+        "with invoke_query, method SearchMetadata of the storage. A folder and the storage have the query GetOrder and the operation " +
+        "SetOrder (names) for the order of their children.";
 
     /// <summary>The server instructions of the HomeBlaze MCP server.</summary>
     public const string ServerInstructions =

@@ -230,6 +230,25 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
         Assert.Contains(folderMethodsForAgents, method => method.Title == "Set Order");
     }
 
+    [Fact]
+    public async Task WhenSubjectsAreTagged_ThenSearchMetadataFindsThem()
+    {
+        // Arrange
+        WriteFile("Docs/Pump.json", """{ "speed": 1 }""");
+        WriteFile("Docs/Fan.json", """{ "speed": 2 }""");
+        var (tools, _) = await CreateToolsAsync();
+        await CallAsync(tools["invoke_operation"], new
+        {
+            path = "/Storage", method = "SetMetadata", parameters = new { path = "Docs/Pump.json", values = new { tags = new[] { "floor-2" } } }
+        });
+
+        // Act
+        var result = await CallAsync(tools["invoke_query"], new { path = "/Storage", method = "SearchMetadata", parameters = new { tag = "Floor-2" } });
+
+        // Assert
+        Assert.Equal(["/Storage/Docs/Pump.json"], result.GetProperty("result").EnumerateArray().Select(item => item.GetString()));
+    }
+
     private async Task<(Dictionary<string, McpToolInfo> Tools, FluentStorageContainer Storage)> CreateToolsAsync(bool forAgents = false)
     {
         var typeProvider = new TypeProvider();
@@ -245,6 +264,7 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
         services.AddSingleton<ConfigurableSubjectSerializer>();
         AgentTestRoot? root = null;
         services.AddSingleton(new SubjectPathResolver(() => root));
+        services.AddSingleton<MetadataSearch>();
         services.AddSingleton<MarkdownContentParser>();
         services.AddSingleton<ILoggerFactory>(NullLoggerFactory.Instance);
         var serviceProvider = services.BuildServiceProvider();

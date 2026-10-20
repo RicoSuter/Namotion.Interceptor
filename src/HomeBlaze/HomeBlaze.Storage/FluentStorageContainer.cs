@@ -994,6 +994,16 @@ public partial class FluentStorageContainer :
             return store.SetMetadataAsync(subject, property, values, cancellationToken);
         });
 
+    /// <summary>
+    /// Finds the subjects and properties in this storage whose metadata matches every filter that is given, for agents:
+    /// see <see cref="MetadataSearch.Search"/>.
+    /// </summary>
+    /// <returns>The absolute paths of the subjects and properties.</returns>
+    [Query(Title = "Search Metadata", Description = StorageMetadataMethods.SearchMetadataDescription, Position = 6)]
+    [ExcludeFrom(ExclusionTarget.UserInterface)]
+    public string[] SearchMetadata(string? tag, string? key, string? value, string? path, [FromServices] MetadataSearch search)
+        => [.. search.Search(this, tag, key, value, path)];
+
     /// <summary>Gets the names of the children of this storage in the order in which they are shown, for agents.</summary>
     [Query(Title = "Get Order", Description = StorageMetadataMethods.GetOrderDescription, Position = 4)]
     [ExcludeFrom(ExclusionTarget.UserInterface)]
