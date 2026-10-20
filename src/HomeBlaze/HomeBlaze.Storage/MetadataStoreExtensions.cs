@@ -20,35 +20,19 @@ public static class MetadataStoreExtensions
     /// <param name="folder">An <see cref="IMetadataContainer"/>: a folder, or a storage, whose order is its own.</param>
     /// <param name="names">The names of the children to show first, as <see cref="ChildOrdering.GetShownNames"/> gives them.</param>
     /// <param name="cancellationToken">Cancels the write.</param>
-    /// <exception cref="ArgumentException">
-    /// The subject is no folder or storage, or is in none, or a name is null, given more than once or no child. The
-    /// message names them.
+    /// <exception cref="InvalidOperationException">
+    /// The subject is no folder or storage or is in none, a name is null, given more than once or no child, or the
+    /// store refused the write; the message says why.
     /// </exception>
-    /// <exception cref="InvalidOperationException">The store refused the write; the message says why.</exception>
     public static Task SetOrderAsync(this IInterceptorSubject folder, IReadOnlyList<string> names, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(names);
-        if (folder is not IMetadataContainer)
-        {
-            throw new ArgumentException("Only a folder or the root of a storage has an order.", nameof(folder));
-        }
-
         var store = folder.FindMetadataStore()
-            ?? throw new ArgumentException("The folder is in no storage.", nameof(folder));
+            ?? throw new StorageRefusedException("The folder is in no storage.");
 
-        // Null arrives from an agent that sends a JSON null in the array.
-        if (names.Any(static name => name is null))
-        {
-            throw new ArgumentException("A name is null.", nameof(names));
-        }
-
-        var shownNames = ChildOrdering.GetShownNames(folder);
-        if (ChildOrderNames.GetError(names, shownNames) is { } error)
-        {
-            throw new ArgumentException(error, nameof(names));
-        }
-
+        // The store checks the order, as it is written, against the children.
         var listedNames = new HashSet<string>(names, StringComparer.Ordinal);
+        var shownNames = ChildOrdering.GetShownNames(folder);
         return store.SetMetadataAsync(folder, null, CreateOrder([.. names, .. shownNames.Where(name => !listedNames.Contains(name))]), cancellationToken);
     }
 
