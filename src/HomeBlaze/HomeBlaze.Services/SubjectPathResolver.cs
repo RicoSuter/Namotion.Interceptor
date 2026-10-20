@@ -85,7 +85,8 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
             if (_resolveCache.TryGetValue(key, out var cached))
                 return cached;
 
-            return _resolveCache.GetOrAdd(key, ResolveInternal(root, path[1..], style));
+            var version = Volatile.Read(ref _pathsVersionValue);
+            return AddToCache(_resolveCache, key, ResolveInternal(root, path[1..], style), version);
         }
 
         // Explicit relative: ./...
@@ -147,7 +148,11 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
         PathStyle style)
     {
         _ = _pathsVersion.Value;
-        var canonicalPaths = _canonicalPathsCache.GetOrAdd(subject, ComputeCanonicalPaths);
+        if (!_canonicalPathsCache.TryGetValue(subject, out var canonicalPaths))
+        {
+            var version = Volatile.Read(ref _pathsVersionValue);
+            canonicalPaths = AddToCache(_canonicalPathsCache, subject, ComputeCanonicalPaths(subject), version);
+        }
 
         if (style == PathStyle.Canonical)
             return canonicalPaths;
@@ -180,8 +185,11 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
     /// </summary>
     public void HandleLifecycleChange(SubjectLifecycleChange change)
     {
+        // Incremented before the clear for AddToCache, and published after it so that a component that renders again
+        // on the new version finds the caches cleared.
+        var version = Interlocked.Increment(ref _pathsVersionValue);
         ClearCaches();
-        IncrementPathsVersion();
+        _pathsVersion.Value = version;
     }
 
     // A property added to a subject at run time changes what a path to a property resolves to. Every other property is
@@ -211,6 +219,21 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
     {
         _canonicalPathsCache.Clear();
         _resolveCache.Clear();
+    }
+
+    // A result computed while the graph changes must not outlive the clear that the change triggers. The version is
+    // read before computing and incremented before clearing: an entry added before the clear is removed by it, and
+    // an entry added after it sees the new version here and is removed again.
+    private TValue AddToCache<TKey, TValue>(
+        ConcurrentDictionary<TKey, TValue> cache, TKey key, TValue value, long version)
+        where TKey : notnull
+    {
+        if (cache.TryAdd(key, value) && Volatile.Read(ref _pathsVersionValue) != version)
+        {
+            cache.TryRemove(KeyValuePair.Create(key, value));
+        }
+
+        return value;
     }
 
     /// <summary>
