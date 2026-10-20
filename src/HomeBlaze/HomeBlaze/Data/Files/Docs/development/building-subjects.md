@@ -248,11 +248,19 @@ public partial Dictionary<string, HueLightbulb> Lights { get; set; }
 
 ```csharp
 [State]
-public partial GpioPin[] Pins { get; set; }
-// Path: /Devices/Gpio/Pins[0], pin 0 is always pin 0
+public partial ShellyEnergyMeterPhase[] Phases { get; internal set; }
+// Path: /Devices/Meter/Phases[0], phase 0 is always the first phase
 ```
 
-**Rule of thumb:** If reordering or re-discovery could change which item is at index N, use a dictionary with a stable key (e.g., hardware ID, API resource ID). If the index has inherent meaning (hardware pin numbers, fixed slots), arrays are fine.
+**Use a dictionary with a number as key when the numbers have gaps:**
+
+```csharp
+[State]
+public partial Dictionary<int, GpioPin> Pins { get; set; }
+// Path: /Devices/Gpio/Pins[17], pin 17 is always GPIO 17, whichever pins exist
+```
+
+**Rule of thumb:** If reordering or re-discovery could change which item is at index N, use a dictionary with a stable key (e.g., hardware ID, API resource ID, pin number). If the index has inherent meaning and has no gaps (fixed slots, phases), arrays are fine.
 
 **Dictionary keys must be:**
 - Stable across restarts and reconnections
