@@ -225,7 +225,7 @@ Each turn offers exactly the tools in `AllowedTools`, plus `update_memory`. This
 |---|---|---|
 | `browse` | on | Browses the subject tree and reads property values |
 | `search` | on | Finds subjects by title, path, type or property values |
-| `search_markdown` | on | Finds text in Markdown pages and documents, with line and snippet |
+| `search_markdown` | on | Finds text in Markdown pages and documents and in the notes of metadata, with line and snippet |
 | `get_property` | on | Reads one property value |
 | `list_types` | on | Lists interfaces and concrete types, to find subjects by capability |
 | `list_methods` | on | Lists a subject's methods with their kind (`query` or `operation`) and whether they require confirmation |

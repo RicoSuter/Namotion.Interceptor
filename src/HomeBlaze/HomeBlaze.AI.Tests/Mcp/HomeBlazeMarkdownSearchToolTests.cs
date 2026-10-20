@@ -343,6 +343,45 @@ public sealed class HomeBlazeMarkdownSearchToolTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenNotesOfMetadataMatch_ThenTheyAreReturnedWithThePathOfTheirSubjectOrProperty()
+    {
+        // Arrange
+        var tool = await CreateToolAsync(
+            ("Docs/Pump.json", """{ "speed": 1 }"""),
+            ("Docs/Pump.metadata.json", """{ "notes": "Check the freezer gasket.", "$properties": { "FileSize": { "notes": "Grows with the freezer log." } } }"""));
+
+        // Act
+        var result = await CallAsync(tool, new { query = "freezer" });
+
+        // Assert
+        var matches = result.GetProperty("pages").EnumerateArray().ToArray();
+        Assert.Equal(
+            ["/Storage/Docs/Pump.json", "/Storage/Docs/Pump.json/FileSize", "/Storage/Notes.md"],
+            matches.Select(match => match.GetProperty("path").GetString()));
+        Assert.Equal(["notes", "notes"], matches.Take(2).Select(match => match.GetProperty("kind").GetString()));
+        Assert.False(matches[2].TryGetProperty("kind", out _));
+        Assert.Equal("Check the freezer gasket.", matches[0].GetProperty("matches")[0].GetProperty("snippet").GetString());
+        Assert.Equal(1, matches[1].GetProperty("matches")[0].GetProperty("line").GetInt32());
+    }
+
+    [Fact]
+    public async Task WhenThePathIsGiven_ThenOnlyNotesInOrUnderItAreSearched()
+    {
+        // Arrange
+        var tool = await CreateToolAsync(
+            ("Docs/Pump.json", """{ "speed": 1 }"""),
+            ("Docs/Pump.metadata.json", """{ "notes": "Check the heat pump filter." }"""));
+
+        // Act
+        var result = await CallAsync(tool, new { query = "heat pump", path = "/Storage/Docs" });
+
+        // Assert
+        Assert.Equal(
+            ["/Storage/Docs/HeatPump.md", "/Storage/Docs/Pump.json"],
+            result.GetProperty("pages").EnumerateArray().Select(page => page.GetProperty("path").GetString()));
+    }
+
+    [Fact]
     public async Task WhenTheConfigurationIsReadOnly_ThenSearchMarkdownIsOfferedAsAReadOnlyTool()
     {
         // Act
