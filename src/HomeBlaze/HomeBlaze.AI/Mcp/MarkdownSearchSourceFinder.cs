@@ -1,5 +1,3 @@
-using System.Collections.Immutable;
-using System.Text.Json;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Components.Abstractions.Pages;
 using HomeBlaze.Services;
@@ -32,7 +30,7 @@ internal sealed class MarkdownSearchSourceFinder
 
     /// <summary>
     /// Gets the Markdown files and the notes of metadata in or under <paramref name="pathPrefix"/>, all when it is null,
-    /// in path order so that results and truncation are stable; without those of a subject of an excluded type or below
+    /// in order of path and then property so that results and truncation are stable; without those of a subject of an excluded type or below
     /// one, which browse and search do not show.
     /// </summary>
     public List<MarkdownSearchSource> Find(ISubjectRegistry registry, IInterceptorSubject rootSubject, string? pathPrefix)
@@ -49,16 +47,20 @@ internal sealed class MarkdownSearchSourceFinder
 
             if (subject is MarkdownFile file)
             {
-                Add(new MarkdownSearchSource(path, file.Title, file, null));
+                Add(new MarkdownSearchSource(path, null, file.Title, file, null));
             }
 
-            foreach (var (notesPath, title, notes) in GetNotes(registered, path))
+            foreach (var (propertyName, title, notes) in GetNotes(registered))
             {
-                Add(new MarkdownSearchSource(notesPath, title, null, notes));
+                Add(new MarkdownSearchSource(path, propertyName, title, null, notes));
             }
         }
 
-        sources.Sort((left, right) => string.CompareOrdinal(left.Path, right.Path));
+        sources.Sort(static (left, right) =>
+        {
+            var order = string.CompareOrdinal(left.Path, right.Path);
+            return order != 0 ? order : string.CompareOrdinal(left.Property, right.Property);
+        });
         return sources;
 
         void Add(MarkdownSearchSource source)
@@ -70,30 +72,24 @@ internal sealed class MarkdownSearchSourceFinder
         }
     }
 
-    // The notes of the subject, with its path and title, and those of each of its properties that the path provider
-    // includes, with the path of the subject followed by the property name and the display name of the property.
-    private IEnumerable<(string Path, string? Title, string Notes)> GetNotes(RegisteredSubject subject, string path)
+    // The notes of the subject, with its title, and those of each of its properties that the path provider includes,
+    // with the name and the display name of the property.
+    private IEnumerable<(string? PropertyName, string? Title, string Notes)> GetNotes(RegisteredSubject subject)
     {
-        if (subject.Subject.GetMetadata().GetString(MetadataKeys.Notes) is { } notes)
+        foreach (var (propertyName, metadata) in MetadataSearch.GetEntries(subject))
         {
-            yield return (path, (subject.Subject as ITitleProvider)?.Title, notes);
-        }
-
-        // The metadata of a property is its attribute, found in one pass over the properties.
-        foreach (var attribute in subject.Properties)
-        {
-            if (!attribute.IsAttribute || attribute.AttributeMetadata.AttributeName != KnownAttributes.Metadata)
+            if (metadata.GetString(MetadataKeys.Notes) is not { } notes)
             {
                 continue;
             }
 
-            var propertyNotes = (attribute.GetValue() as ImmutableDictionary<string, JsonElement>).GetString(MetadataKeys.Notes);
-            if (propertyNotes is not null &&
-                subject.TryGetProperty(attribute.AttributeMetadata.PropertyName) is { } property &&
-                _pathProvider.IsPropertyIncluded(property))
+            if (propertyName is null)
             {
-                var propertyPath = path.EndsWith('/') ? path + property.Name : $"{path}/{property.Name}";
-                yield return (propertyPath, property.GetDisplayName(), propertyNotes);
+                yield return (null, (subject.Subject as ITitleProvider)?.Title, notes);
+            }
+            else if (subject.TryGetProperty(propertyName) is { } property && _pathProvider.IsPropertyIncluded(property))
+            {
+                yield return (propertyName, property.GetDisplayName(), notes);
             }
         }
     }
@@ -118,8 +114,11 @@ internal sealed class MarkdownSearchSourceFinder
         (path.Length == pathPrefix.Length || path[pathPrefix.Length] == '/');
 }
 
-/// <summary>A page, or the notes of the metadata of a subject or property, that search_markdown searches.</summary>
-internal readonly record struct MarkdownSearchSource(string Path, string? Title, MarkdownFile? File, string? Notes)
+/// <summary>
+/// A page, or the notes of the metadata of a subject or of its property, that search_markdown searches: the path of the
+/// page or subject, and the name of the property or null.
+/// </summary>
+internal readonly record struct MarkdownSearchSource(string Path, string? Property, string? Title, MarkdownFile? File, string? Notes)
 {
     /// <summary>Gets the view of a page with secret values hidden, null while the page was not parsed yet; or the notes.</summary>
     public string? ReadContent() => File is not null ? File.ReadRawContent() : Notes;

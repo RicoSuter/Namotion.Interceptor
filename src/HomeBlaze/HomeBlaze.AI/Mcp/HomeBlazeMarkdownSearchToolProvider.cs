@@ -38,11 +38,11 @@ public class HomeBlazeMarkdownSearchToolProvider : IMcpToolProvider
         $"Searches the Markdown source as {HomeBlazeMcpToolProvider.InvokeQueryToolName} method ReadRawContent returns it, with " +
         "{{ path }} expressions unevaluated and secret values hidden (***). Returns the matching pages and notes in path order, " +
         $"each with its title, the number of matching lines and the line number and a snippet of up to {MaxMatchesPerPage} of " +
-        "them; notes have kind notes and the path of their subject, or of their property (the path of its subject followed by " +
-        $"its name). truncated is true when more match than max_pages or the search stopped at its limit of {MaxSearchedPages} " +
+        "them; notes have kind notes and the path of their subject, and the notes of a property also property, its name. " +
+        $"truncated is true when more match than max_pages or the search stopped at its limit of {MaxSearchedPages} " +
         $"pages and notes or {SearchTimeout.TotalSeconds:0} seconds; narrow it with path. Read a found page with " +
         $"{HomeBlazeMcpToolProvider.InvokeQueryToolName} method ReadEvaluatedContent or ReadRawContent, and found notes with " +
-        "get_property of <path>/HomeBlaze:Metadata for a subject or <subject path>/<property>@HomeBlaze:Metadata for a property.";
+        "get_property of <path>/HomeBlaze:Metadata for a subject or <path>/<property>@HomeBlaze:Metadata for a property.";
 
     private static readonly JsonElement Schema = JsonSerializer.SerializeToElement(new
     {
@@ -196,9 +196,12 @@ public class HomeBlazeMarkdownSearchToolProvider : IMcpToolProvider
                     break;
                 }
 
-                pages.Add(source.File is null
-                    ? new { path, title = source.Title, kind = "notes", match_count = scan.MatchCount, matches = scan.Matches }
-                    : new { path, title = source.Title, match_count = scan.MatchCount, matches = scan.Matches });
+                pages.Add(source switch
+                {
+                    { File: not null } => new { path, title = source.Title, match_count = scan.MatchCount, matches = scan.Matches },
+                    { Property: { } property } => new { path, property, title = source.Title, kind = "notes", match_count = scan.MatchCount, matches = scan.Matches },
+                    _ => (object)new { path, title = source.Title, kind = "notes", match_count = scan.MatchCount, matches = scan.Matches }
+                });
             }
 
             if (scan.IsTimedOut)

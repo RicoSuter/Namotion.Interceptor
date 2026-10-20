@@ -343,7 +343,7 @@ public sealed class HomeBlazeMarkdownSearchToolTests : IDisposable
     }
 
     [Fact]
-    public async Task WhenNotesOfMetadataMatch_ThenTheyAreReturnedWithThePathOfTheirSubjectOrProperty()
+    public async Task WhenNotesOfMetadataMatch_ThenTheyAreReturnedWithThePathOfTheirSubjectAndTheirProperty()
     {
         // Arrange
         var tool = await CreateToolAsync(
@@ -356,8 +356,11 @@ public sealed class HomeBlazeMarkdownSearchToolTests : IDisposable
         // Assert
         var matches = result.GetProperty("pages").EnumerateArray().ToArray();
         Assert.Equal(
-            ["/Storage/Docs/Pump.json", "/Storage/Docs/Pump.json/FileSize", "/Storage/Notes.md"],
+            ["/Storage/Docs/Pump.json", "/Storage/Docs/Pump.json", "/Storage/Notes.md"],
             matches.Select(match => match.GetProperty("path").GetString()));
+        Assert.Equal(
+            [null, "FileSize", null],
+            matches.Select(match => match.TryGetProperty("property", out var property) ? property.GetString() : null));
         Assert.Equal(["notes", "notes"], matches.Take(2).Select(match => match.GetProperty("kind").GetString()));
         Assert.False(matches[2].TryGetProperty("kind", out _));
         Assert.Equal("Check the freezer gasket.", matches[0].GetProperty("matches")[0].GetProperty("snippet").GetString());
