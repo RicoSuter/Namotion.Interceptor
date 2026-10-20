@@ -33,6 +33,6 @@ public static class MetadataStoreExtensions
 
         var storage = folder.FindMetadataStore() as FluentStorageContainer
             ?? throw new StorageRefusedException("The folder is in no storage.");
-        return storage.WriteOrderAsync(folder, [.. names], cancellationToken);
+        return storage.MetadataStore.WriteOrderAsync(folder, [.. names], cancellationToken);
     }
 }
