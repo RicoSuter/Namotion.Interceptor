@@ -156,7 +156,7 @@ It does not currently own:
 
 Every HomeBlaze instance contains the same building blocks. What makes a satellite different from a central instance is which plugins are loaded and which connectors are active. All building blocks above the core — connectors, agents, device subjects, domain logic, UI components — are delivered as plugins (NuGet packages).
 
-Detailed designs: [AI](design/ai.md), [History](design/history.md), [Messages](design/messages.md), [Methods](design/methods.md), [Plugins](design/plugins.md), [Security](design/security.md), [Observability](design/observability.md), [Storage](design/storage.md), [Deployment](design/deployment.md), [Scalability](design/scalability.md), [Resilience](design/resilience.md), [Upgrade and Migration](design/upgrade-and-migration.md), [System Testing](design/testing.md), [Audit](design/audit.md), [Alarms](design/alarms.md), [Versioning](design/versioning.md).
+Detailed designs: [AI](design/ai.md), [History](design/history.md), [Messages](design/messages.md), [Methods](design/methods.md), [Plugins](design/plugins.md), [Security](design/security.md), [Observability](design/observability.md), [Storage](design/storage.md), [Metadata](design/metadata.md), [Deployment](design/deployment.md), [Scalability](design/scalability.md), [Resilience](design/resilience.md), [Upgrade and Migration](design/upgrade-and-migration.md), [System Testing](design/testing.md), [Audit](design/audit.md), [Alarms](design/alarms.md), [Versioning](design/versioning.md).
 
 ### Level 2 — Knowledge Graph
 
@@ -195,7 +195,7 @@ The **Unified Namespace (UNS)** is the live state layer: all subject properties 
 | Time-Series Store | Property history, configurable retention | `get_property_history` MCP tool, plugin-based (see [History](design/history.md)) |
 | File Storage | **Subject files** (`.json` with `$type`) are deserialized into typed subjects; the file is the persistence format. **Documents** (Markdown, PDFs, images, manuals) become document subjects visible as-is in the graph. See [Storage](design/storage.md) | Subject files via configuration system, documents via `browse` or `search` + `invoke_query` (for example `ReadEvaluatedContent` of a Markdown page) |
 
-Subjects can also carry user-defined metadata — annotations, tags, and links to other subjects — stored as dynamic attributes on the registry. These are persisted in configuration files and reapplied on restart, allowing operators to enrich the knowledge graph without modifying subject code. See [Storage](design/storage.md) for details.
+Folders, subjects and properties can also carry user-defined metadata, such as titles, icons, order, notes, links, tags and comments, held by the registry and persisted in `.metadata.json` files separate from subject configuration. It is applied again on restart, allowing operators to enrich the knowledge graph without modifying subject code. Links connect them to other subjects, and metadata can be searched by tag, key or value; annotations are planned. See [Metadata](design/metadata.md) for details.
 
 **How each consumer accesses the knowledge graph:**
 
