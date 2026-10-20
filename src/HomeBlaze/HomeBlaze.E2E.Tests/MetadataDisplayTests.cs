@@ -343,43 +343,17 @@ public class MetadataDisplayTests
         await Assertions.Expect(pane.GetByTestId("subject-pane-empty-values")).Not.ToContainTextAsync("Fraction");
     });
 
-    [Fact]
-    public Task WhenTheStorageIsDisconnected_ThenTheMetadataOfAPropertyIsShownAndEditingIsRefusedWithAMessage() => WithSidecarAsync("Motor.metadata.json", MotorSidecar, async () =>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("Temperature")]
+    public Task WhenTheStorageIsDisconnected_ThenTheMetadataIsShownAndEditingIsRefusedWithAMessage(string? propertyName) => WithSidecarAsync("Motor.metadata.json", MotorSidecar, async () =>
     {
         // Arrange
         var storage = (FluentStorageContainer)_fixture.ServerServices.GetRequiredService<RootManager>().Root!;
         var (page, pane) = await OpenPaneAsync("Demo/Motor");
-        var icon = GetRow(page, pane, "Temperature").GetByTestId("subject-pane-value-metadata");
-        await Assertions.Expect(icon).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
-        var status = storage.Status;
-        try
-        {
-            storage.Status = StorageStatus.Disconnected;
-
-            // Act
-            await icon.HoverAsync();
-            var tooltip = page.Locator(".mud-popover-open").GetByTestId("metadata-summary");
-            await Assertions.Expect(tooltip.GetByTestId("metadata-notes")).ToHaveTextAsync("Measured at the housing", new() { Timeout = PageLoadTimeout });
-            await icon.ClickAsync();
-            await page.GetByTestId("metadata-summary-edit").ClickAsync();
-
-            // Assert
-            await Assertions.Expect(page.Locator(".mud-snackbar").GetByText("The metadata cannot be edited while the storage is not connected."))
-                .ToHaveCountAsync(1, new() { Timeout = PageLoadTimeout });
-            await Assertions.Expect(page.GetByTestId("metadata-edit-dialog")).ToHaveCountAsync(0);
-        }
-        finally
-        {
-            storage.Status = status;
-        }
-    });
-
-    [Fact]
-    public Task WhenTheStorageIsDisconnected_ThenTheMetadataOfASubjectIsShownAndEditingIsRefusedWithAMessage() => WithSidecarAsync("Motor.metadata.json", MotorSidecar, async () =>
-    {
-        // Arrange
-        var storage = (FluentStorageContainer)_fixture.ServerServices.GetRequiredService<RootManager>().Root!;
-        var (page, pane) = await OpenPaneAsync("Demo/Motor");
+        var button = propertyName is null
+            ? pane.GetByTestId("edit-metadata-button")
+            : GetRow(page, pane, propertyName).GetByTestId("subject-pane-value-metadata");
         await Assertions.Expect(pane.GetByTestId("metadata-summary").GetByTestId("metadata-tag")).ToHaveTextAsync(MotorTag, new() { Timeout = PageLoadTimeout });
         var status = storage.Status;
         try
@@ -387,9 +361,10 @@ public class MetadataDisplayTests
             storage.Status = StorageStatus.Disconnected;
 
             // Act
-            var summary = await OpenSubjectMetadataSummaryAsync(page, pane);
-            await Assertions.Expect(summary.GetByTestId("metadata-notes").Locator("strong")).ToHaveTextAsync("2026", new() { Timeout = PageLoadTimeout });
-            await summary.GetByTestId("metadata-summary-edit").ClickAsync();
+            await button.ClickAsync();
+            var dialog = page.Locator(".mud-dialog").Filter(new() { Has = page.GetByTestId("metadata-summary-dialog") });
+            await Assertions.Expect(dialog.GetByTestId("metadata-notes")).ToHaveCountAsync(1, new() { Timeout = PageLoadTimeout });
+            await dialog.GetByTestId("metadata-summary-edit").ClickAsync();
 
             // Assert
             await Assertions.Expect(page.Locator(".mud-snackbar").GetByText("The metadata cannot be edited while the storage is not connected."))

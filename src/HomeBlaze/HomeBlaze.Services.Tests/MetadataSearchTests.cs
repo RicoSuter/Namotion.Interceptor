@@ -76,30 +76,19 @@ public class MetadataSearchTests
     }
 
     [Fact]
-    public void WhenASubjectIsExcluded_ThenNoMatchIsFoundInOrBelowIt()
+    public void WhenASubjectIsExcluded_ThenNoMatchAndNoTagIsFoundInOrBelowIt()
     {
         // Arrange
         var root = CreateTree();
         var device = root.Children["Pump"];
+        bool IsExcluded(IInterceptorSubject subject) => ReferenceEquals(subject, device);
 
         // Act
-        var matches = MetadataSearch.Search(root, key: "tags", isExcluded: subject => ReferenceEquals(subject, device));
+        var matches = MetadataSearch.Search(root, key: "tags", isExcluded: IsExcluded);
+        var tags = MetadataSearch.GetTags(root, IsExcluded);
 
         // Assert
         Assert.Equal([new MetadataSearchMatch("", null)], matches);
-    }
-
-    [Fact]
-    public void WhenASubjectIsExcluded_ThenTheTagsInOrBelowItAreNotListed()
-    {
-        // Arrange
-        var root = CreateTree();
-        var device = root.Children["Pump"];
-
-        // Act
-        var tags = MetadataSearch.GetTags(root, subject => ReferenceEquals(subject, device));
-
-        // Assert
         Assert.Equal(["Root"], tags);
     }
 

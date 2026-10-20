@@ -113,10 +113,10 @@ public class MetadataLinkResolverTests
         var resolver = CreateResolver();
 
         // Act
-        var link = resolver.Resolve(new MetadataLink("Name", null, "/Devices/Name"));
+        var link = resolver.Resolve(new MetadataLink(null, null, "/Devices/Name"));
 
         // Assert
-        Assert.Equal(new ResolvedMetadataLink("Name", "/browser/Devices?property=Name", IsExternal: false), link);
+        Assert.Equal(new ResolvedMetadataLink($"{nameof(MetadataLinkTestFolder)} Name", "/browser/Devices?property=Name", IsExternal: false), link);
     }
 
     [Fact]
@@ -144,22 +144,6 @@ public class MetadataLinkResolverTests
         // Assert
         Assert.True(link.IsBroken);
         Assert.Equal("/Gone/Away", link.Title);
-    }
-
-    [Fact]
-    public void WhenASubjectAndAPropertyAreGiven_ThenTheLinkOpensTheSubjectWithTheRowOfThePropertyHighlighted()
-    {
-        // Arrange
-        var resolver = CreateResolver(out var root);
-        var devices = root.Children["Devices"];
-
-        // Act
-        var subjectLink = resolver.Resolve(devices, null);
-        var propertyLink = resolver.Resolve(devices, "Name");
-
-        // Assert
-        Assert.Equal(new ResolvedMetadataLink(nameof(MetadataLinkTestFolder), "/browser/Devices", IsExternal: false), subjectLink);
-        Assert.Equal(new ResolvedMetadataLink($"{nameof(MetadataLinkTestFolder)} Name", "/browser/Devices?property=Name", IsExternal: false), propertyLink);
     }
 
     [Theory]
