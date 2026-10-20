@@ -39,9 +39,10 @@ internal struct TransactionHandlerSet
     /// Adds the handlers of <paramref name="subjectContext"/> that are not registered on the transaction's context.
     /// </summary>
     /// <exception cref="InvalidOperationException">
-    /// Thrown by <see cref="SubjectTransaction.CanCaptureUnderLock"/> while a commit is in progress.
+    /// Thrown by <see cref="SubjectTransaction.CanCaptureUnderLock"/> while a commit is in progress and
+    /// <paramref name="subjectContext"/> adds handlers.
     /// </exception>
-    internal void Include(IInterceptorSubjectContext subjectContext, SubjectTransaction transaction, Lock transactionLock)
+    internal void Include(IInterceptorSubjectContext subjectContext, SubjectTransaction transaction)
     {
         var transactionContext = transaction.Context;
         if (ReferenceEquals(subjectContext, transactionContext) || ReferenceEquals(subjectContext, Volatile.Read(ref _lastIncludedContext)))
@@ -52,8 +53,7 @@ internal struct TransactionHandlerSet
         var subjectHandlers = ImmutableCollectionsMarshal.AsArray(subjectContext.GetServices<ITransactionHandler>()) ?? [];
         if (!ReferenceEquals(subjectHandlers, Volatile.Read(ref _lastIncludedHandlers)))
         {
-            if (!ContainsAll(Volatile.Read(ref _handlers), subjectHandlers) &&
-                !TryInclude(subjectHandlers, transactionContext.GetServices<ITransactionHandler>().AsSpan(), transaction, transactionLock))
+            if (!TryInclude(subjectHandlers, transactionContext.GetServices<ITransactionHandler>().AsSpan(), transaction))
             {
                 return;
             }
@@ -67,13 +67,12 @@ internal struct TransactionHandlerSet
     /// <summary>
     /// Adds the handlers of <paramref name="subjectHandlers"/> that are in neither the set nor
     /// <paramref name="transactionContextHandlers"/>, so a handler registered on the transaction's context after it
-    /// began stays out. Returns false when the transaction no longer captures.
+    /// began stays out. Returns false when there are additions and the transaction no longer captures.
     /// </summary>
     private bool TryInclude(
         ReadOnlySpan<ITransactionHandler> subjectHandlers,
         ReadOnlySpan<ITransactionHandler> transactionContextHandlers,
-        SubjectTransaction transaction,
-        Lock transactionLock)
+        SubjectTransaction transaction)
     {
         while (true)
         {
@@ -81,7 +80,13 @@ internal struct TransactionHandlerSet
             // published only when no concurrent inclusion replaced the handlers in between.
             var handlers = Volatile.Read(ref _handlers);
             var union = CreateUnion(handlers, subjectHandlers, transactionContextHandlers);
-            lock (transactionLock)
+            if (union is null)
+            {
+                // Inclusions only append, so every later set holds these handlers too.
+                return true;
+            }
+
+            lock (transaction.PendingChangesLock)
             {
                 if (!transaction.CanCaptureUnderLock())
                 {
@@ -90,11 +95,7 @@ internal struct TransactionHandlerSet
 
                 if (ReferenceEquals(_handlers, handlers))
                 {
-                    if (union is not null)
-                    {
-                        Volatile.Write(ref _handlers, union);
-                    }
-
+                    Volatile.Write(ref _handlers, union);
                     return true;
                 }
             }
@@ -148,19 +149,6 @@ internal struct TransactionHandlerSet
         return !Contains(handlers, handler) &&
             !Contains(transactionContextHandlers, handler) &&
             !Contains(subjectHandlers[..index], handler);
-    }
-
-    private static bool ContainsAll(ReadOnlySpan<ITransactionHandler> handlers, ReadOnlySpan<ITransactionHandler> candidates)
-    {
-        foreach (var candidate in candidates)
-        {
-            if (!Contains(handlers, candidate))
-            {
-                return false;
-            }
-        }
-
-        return true;
     }
 
     private static bool Contains(ReadOnlySpan<ITransactionHandler> handlers, ITransactionHandler handler)

@@ -150,6 +150,11 @@ public sealed class SubjectTransaction : IDisposable
     /// </summary>
     internal ImmutableArray<ITransactionHandler> Handlers => ImmutableCollectionsMarshal.AsImmutableArray(_handlerSet.Handlers);
 
+    /// <summary>
+    /// Gets the lock that guards the pending changes and the capture state.
+    /// </summary>
+    internal Lock PendingChangesLock => _pendingChangesLock;
+
     // Applies carry the commit write mark only when handlers checked the final set.
     private SubjectTransaction? MarkingTransaction => _handlerSet.Handlers.Length == 0 ? null : this;
 
@@ -165,7 +170,7 @@ public sealed class SubjectTransaction : IDisposable
     /// </exception>
     internal void IncludeHandlersOf(IInterceptorSubjectContext subjectContext)
     {
-        _handlerSet.Include(subjectContext, this, _pendingChangesLock);
+        _handlerSet.Include(subjectContext, this);
     }
 
     /// <summary>
