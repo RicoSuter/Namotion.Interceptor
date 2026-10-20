@@ -60,6 +60,21 @@ internal static class StorageMetadataValues
         }
     }
 
+    /// <summary>
+    /// Sets the own metadata of a folder or of the root of a storage from its <c>.metadata.json</c>, or none without one,
+    /// and gets the order of its children from it; null when it equals <paramref name="childOrder"/>, the order it has.
+    /// </summary>
+    public static ImmutableArray<string>? SetOwnMetadata(IInterceptorSubject container, ImmutableArray<string> childOrder, StorageMetadataFile? file)
+    {
+        if (container.TryGetRegisteredSubject() is { } registered)
+        {
+            Set(registered, null, file?.Own);
+        }
+
+        var order = file?.Order ?? [];
+        return order.SequenceEqual(childOrder) ? null : order;
+    }
+
     // The same keys with values that are equal as JSON; a file that is read again gives new instances of the entries
     // that did not change.
     private static bool HaveSameContent(ImmutableDictionary<string, JsonElement>? current, ImmutableDictionary<string, JsonElement>? values)
