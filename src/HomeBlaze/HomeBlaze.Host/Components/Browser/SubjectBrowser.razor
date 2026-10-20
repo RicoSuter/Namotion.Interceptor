@@ -1,5 +1,6 @@
 @using HomeBlaze.Storage.Abstractions
 @using Namotion.Interceptor.Registry.Attributes
+@using Namotion.Interceptor.Registry.Paths
 
 @inherits HomeBlazorComponentBase
 
@@ -360,8 +361,8 @@
         var parentPath = clickedPane.Path.TrimEnd('/');
         var path = index != null
             ? (isInlinePathsProperty
-                ? $"{parentPath}/{index}"
-                : $"{parentPath}/{propertyName}/{index}")
+                ? $"{parentPath}/{PathExtensions.FormatPathIndex(index)}"
+                : $"{parentPath}/{propertyName}/{PathExtensions.FormatPathIndex(index)}")
             : $"{parentPath}/{propertyName}";
 
         // Add the new subject pane
@@ -486,7 +487,7 @@
             if (isInlinePathsProperty && pane.Index != null)
             {
                 // Only add the key for [InlinePaths] properties
-                pathParts.Add(pane.Index.ToString()!);
+                pathParts.Add(PathExtensions.FormatPathIndex(pane.Index));
             }
             else
             {
@@ -499,7 +500,7 @@
                 // Add index/key if present (for collections/dictionaries)
                 if (pane.Index != null)
                 {
-                    pathParts.Add(pane.Index.ToString()!);
+                    pathParts.Add(PathExtensions.FormatPathIndex(pane.Index));
                 }
             }
         }
@@ -525,7 +526,7 @@
             if (isInlinePathsProp && pane.Index != null)
             {
                 // Only add the key for [InlinePaths] properties
-                breadcrumbParts.Add(pane.Index.ToString()!);
+                breadcrumbParts.Add(PathExtensions.FormatPathIndex(pane.Index));
             }
             else
             {
@@ -535,7 +536,7 @@
                 }
                 if (pane.Index != null)
                 {
-                    breadcrumbParts.Add(pane.Index.ToString()!);
+                    breadcrumbParts.Add(PathExtensions.FormatPathIndex(pane.Index));
                 }
             }
 

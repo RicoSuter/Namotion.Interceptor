@@ -2,6 +2,7 @@
 @using HomeBlaze.Abstractions.Metadata
 @using HomeBlaze.Components.Operations
 @using Namotion.Interceptor.Registry.Attributes
+@using Namotion.Interceptor.Registry.Paths
 
 @inject RootManager RootManager
 @inject SubjectPathResolver PathResolver
@@ -226,17 +227,18 @@
                     if (child.Subject.IsExcludedFrom(ExclusionTarget.UserInterface))
                         continue;
 
+                    var childKey = child.Index is { } index ? PathExtensions.FormatPathIndex(index) : "";
                     string childPath;
                     if (isInlinePathsProperty)
                     {
                         // InlinePaths: strip property name, use key directly
                         var lastSlash = parent.Path.LastIndexOf('/');
                         var basePath = lastSlash >= 0 ? parent.Path[..lastSlash] : "";
-                        childPath = basePath.Length > 0 ? $"{basePath}/{child.Index}" : child.Index?.ToString() ?? "";
+                        childPath = basePath.Length > 0 ? $"{basePath}/{childKey}" : childKey;
                     }
                     else
                     {
-                        childPath = $"{parent.Path}[{child.Index}]";
+                        childPath = $"{parent.Path}[{childKey}]";
                     }
                     var childDisplayName = $"[{child.Index}]";
 
@@ -288,9 +290,9 @@
                         if (child.Subject.IsExcludedFrom(ExclusionTarget.UserInterface))
                             continue;
 
-                        var childKey = child.Index?.ToString() ?? "";
+                        var childKey = child.Index is { } index ? PathExtensions.FormatPathIndex(index) : "";
                         var childPath = $"{basePath.TrimEnd('/')}/{childKey}";
-                        children.Add(CreateSubjectTreeItem(child.Subject, childKey, childPath));
+                        children.Add(CreateSubjectTreeItem(child.Subject, child.Index?.ToString() ?? "", childPath));
                     }
                     continue;
                 }

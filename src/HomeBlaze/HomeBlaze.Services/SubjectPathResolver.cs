@@ -5,6 +5,7 @@ using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Attributes;
+using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
@@ -279,11 +280,10 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
                 var inlinePathsPropertyName = InlinePathsAttribute.GetInlinePathsPropertyName(current.GetType());
                 if (inlinePathsPropertyName != null)
                 {
-                    var childrenProperty = registered?.TryGetProperty(inlinePathsPropertyName);
-                    var childrenValue = childrenProperty?.GetValue();
-                    if (childrenValue is not null)
+                    if (registered?.TryGetProperty(inlinePathsPropertyName) is { } childrenProperty &&
+                        childrenProperty.GetValue() is { } childrenValue)
                     {
-                        var childSubject = SubjectLookup.FindSubjectInDictionary(childrenValue, segment);
+                        var childSubject = SubjectPathResolverExtensions.FindChildByIndex(childrenProperty, childrenValue, segment);
                         if (childSubject is not null)
                         {
                             current = childSubject;
@@ -319,17 +319,7 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
             if (index == null)
                 return null;
 
-            IInterceptorSubject? found = null;
-
-            if (property.IsSubjectDictionary)
-            {
-                found = SubjectLookup.FindSubjectInDictionary(value, index);
-            }
-            else if (property.IsSubjectCollection && int.TryParse(index, out var idx))
-            {
-                found = SubjectLookup.FindSubjectInCollection(value, idx);
-            }
-
+            var found = SubjectPathResolverExtensions.FindChildByIndex(property, value, index);
             if (found == null)
                 return null;
 
@@ -415,9 +405,10 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
             if (parent.Index != null)
             {
                 // InlinePaths: just the key (dots are fine with / separator)
-                segment = isInlinePathsProperty ? parent.Index.ToString()! :
+                var index = PathExtensions.FormatPathIndex(parent.Index);
+                segment = isInlinePathsProperty ? index :
                     // Regular collection/dict: PropertyName[index]
-                    $"{parent.Property.Name}[{parent.Index}]";
+                    $"{parent.Property.Name}[{index}]";
             }
             else
             {
