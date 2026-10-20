@@ -24,8 +24,8 @@ public static class McpBuilderExtensions
 {
     /// <summary>
     /// Registers HomeBlaze-specific MCP tools including subject enrichment, type discovery,
-    /// and method invocation, and sets <see cref="HomeBlazeMcpInstructions.ServerInstructions"/> as the server
-    /// instructions unless the host already set them. Configuration is resolved lazily from the service provider.
+    /// and method invocation, and sets <see cref="HomeBlazeMcpInstructions.GetServerInstructions"/> for
+    /// <paramref name="isReadOnly"/> as the server instructions unless the host already set them. Configuration is resolved lazily from the service provider.
     /// </summary>
     /// <remarks>
     /// Tools of other packages are added with
@@ -38,7 +38,7 @@ public static class McpBuilderExtensions
         this IMcpServerBuilder builder,
         bool isReadOnly = true)
     {
-        builder.Services.Configure<McpServerOptions>(options => options.ServerInstructions ??= HomeBlazeMcpInstructions.ServerInstructions);
+        builder.Services.Configure<McpServerOptions>(options => options.ServerInstructions ??= HomeBlazeMcpInstructions.GetServerInstructions(isReadOnly));
         return builder.WithSubjectRegistryTools(
             HomeBlazeMcpConfigurationFactory.GetLoadedRoot,
             serviceProvider => HomeBlazeMcpConfigurationFactory.Create(
