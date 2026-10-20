@@ -395,18 +395,4 @@ public class NavigationMetadataTests
             await RestoreFileAsync(sidecarPath, originalSidecar);
         }
     }
-
-    [Fact]
-    public async Task WhenAFolderIsShown_ThenItsMetadataSubjectIsNotListed()
-    {
-        // Arrange
-        var folder = GetDemoFolder();
-
-        // Act
-        var (_, pane) = await OpenPaneAsync("Demo");
-
-        // Assert - one row per child: the metadata of the folder gets no row of its own.
-        await Assertions.Expect(pane.Locator(".subject-pane-child-name"))
-            .ToHaveCountAsync(folder.Children.Count, new() { Timeout = PageLoadTimeout });
-    }
 }

@@ -1,3 +1,4 @@
+using System.Text.Json;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Components.Abstractions.Pages;
 using Namotion.Interceptor;
@@ -56,10 +57,42 @@ public class SubjectMetadataExtensionsTests
         Assert.True(attribute.IsMetadata());
         Assert.False(name.IsMetadata());
     }
+
+    [Fact]
+    public void WhenTheStoreOfASubjectIsFound_ThenItIsTheNearestOneUpItsParentsElseTheSubjectItself()
+    {
+        // Arrange
+        var child = new MetadataTestSubject();
+        var inner = new MetadataTestStore { Child = child };
+        var outer = new MetadataTestStore(InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry()) { Inner = inner };
+
+        // Act
+        var storeOfChild = child.FindMetadataStore();
+        var storeOfInner = inner.FindMetadataStore();
+        var storeOfOuter = outer.FindMetadataStore();
+
+        // Assert
+        Assert.Same(inner, storeOfChild);
+        Assert.Same(outer, storeOfInner);
+        Assert.Same(outer, storeOfOuter);
+    }
 }
 
 [InterceptorSubject]
 public partial class MetadataTestSubject
 {
     public partial string? Name { get; set; }
+}
+
+[InterceptorSubject]
+public partial class MetadataTestStore : IMetadataStore
+{
+    public partial MetadataTestStore? Inner { get; set; }
+
+    public partial MetadataTestSubject? Child { get; set; }
+
+    public bool CanStoreMetadata(IInterceptorSubject subject) => true;
+
+    public Task SetMetadataAsync(IInterceptorSubject subject, string? propertyName, JsonElement values, CancellationToken cancellationToken)
+        => Task.CompletedTask;
 }

@@ -1,7 +1,6 @@
 using System.Collections.Immutable;
 using System.Text.Json;
 using HomeBlaze.Components.Abstractions.Pages;
-using HomeBlaze.Services;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Tracking;
@@ -77,35 +76,6 @@ public class MetadataStoreExtensionsTests
 
         // Act & Assert
         await Assert.ThrowsAsync<ArgumentException>(() => store.SetOrderAsync(["a.md"], CancellationToken.None));
-    }
-
-    [Fact]
-    public void WhenTheStoreOfASubjectIsFound_ThenItIsTheNearestOneUpItsParents()
-    {
-        // Arrange
-        var (store, folder) = CreateTree("a.md");
-
-        // Act
-        var storeOfChild = folder.Children["a.md"].FindMetadataStore();
-        var storeOfStore = store.FindMetadataStore();
-
-        // Assert
-        Assert.Same(store, storeOfChild);
-        Assert.Same(store, storeOfStore);
-    }
-
-    [Fact]
-    public void WhenTheShownNamesAreRead_ThenTheyFollowTheOrderOfTheContainer()
-    {
-        // Arrange
-        var (_, folder) = CreateTree("b.md", "Readme.md", "a.md");
-        folder.ChildOrder = ["a.md"];
-
-        // Act
-        var names = ChildOrdering.GetShownNames(folder);
-
-        // Assert
-        Assert.Equal(["a.md", "Readme.md", "b.md"], names);
     }
 }
 

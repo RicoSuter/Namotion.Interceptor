@@ -1,4 +1,9 @@
 using System.Collections.Immutable;
+using HomeBlaze.Components.Abstractions.Pages;
+using Namotion.Interceptor;
+using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Tracking;
 
 namespace HomeBlaze.Services.Tests;
 
@@ -77,5 +82,41 @@ public class ChildOrderingTests
 
         // Assert
         Assert.Equal(names.Reverse(), ordered);
+    }
+
+    [Fact]
+    public void WhenTheShownNamesAreRead_ThenTheyFollowTheOrderOfTheContainer()
+    {
+        // Arrange
+        var folder = new OrderingTestFolder(InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry())
+        {
+            Children = new Dictionary<string, IInterceptorSubject>
+            {
+                ["b.md"] = new OrderingTestFolder(),
+                ["Readme.md"] = new OrderingTestFolder(),
+                ["a.md"] = new OrderingTestFolder()
+            },
+            ChildOrder = ["a.md"]
+        };
+
+        // Act
+        var names = ChildOrdering.GetShownNames(folder);
+
+        // Assert
+        Assert.Equal(["a.md", "Readme.md", "b.md"], names);
+    }
+}
+
+[InterceptorSubject]
+public partial class OrderingTestFolder : IMetadataContainer
+{
+    public partial Dictionary<string, IInterceptorSubject> Children { get; set; }
+
+    public partial ImmutableArray<string> ChildOrder { get; set; }
+
+    public OrderingTestFolder()
+    {
+        Children = new Dictionary<string, IInterceptorSubject>();
+        ChildOrder = [];
     }
 }

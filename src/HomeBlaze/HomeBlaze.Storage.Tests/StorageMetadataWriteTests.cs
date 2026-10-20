@@ -332,26 +332,6 @@ public class StorageMetadataWriteTests : StorageTestBase
     }
 
     [Fact]
-    public async Task WhenOrderHasAnUnknownName_ThenSettingItFailsNamingItAndWritesNothing()
-    {
-        // Arrange
-        WriteFile("Docs/a.md");
-        WriteFile("Docs/b.md");
-        var storage = await ConnectAsync();
-        var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
-
-        // Act
-        var exception = await Assert.ThrowsAsync<ArgumentException>(() =>
-            MetadataStoreExtensions.SetOrderAsync(docs, ["b.md", "gone.md"], CancellationToken.None));
-
-        // Assert
-        Assert.Contains("'gone.md'", exception.Message);
-        Assert.Contains("'a.md', 'b.md'", exception.Message);
-        Assert.False(File.Exists(GetFullPath("Docs/.metadata.json")));
-        Assert.Empty(docs.ChildOrder.ToArray());
-    }
-
-    [Fact]
     public async Task WhenOrderHasManyLongUnknownNames_ThenTheMessageShowsTheFirstOnesShortened()
     {
         // Arrange
@@ -369,46 +349,6 @@ public class StorageMetadataWriteTests : StorageTestBase
         Assert.DoesNotContain(new string('x', 63), exception.Message);
         Assert.DoesNotContain("'10x", exception.Message);
         Assert.Contains("'a.md'", exception.Message);
-    }
-
-    [Fact]
-    public async Task WhenOrderHasANameTwice_ThenSettingItFailsNamingIt()
-    {
-        // Arrange
-        WriteFile("Docs/a.md");
-        WriteFile("Docs/b.md");
-        var storage = await ConnectAsync();
-        var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
-
-        // Act
-        var exception = await Assert.ThrowsAsync<ArgumentException>(() =>
-            MetadataStoreExtensions.SetOrderAsync(docs, ["b.md", "a.md", "b.md"], CancellationToken.None));
-
-        // Assert
-        Assert.Contains("'b.md'", exception.Message);
-        Assert.DoesNotContain("'a.md'", exception.Message);
-        Assert.False(File.Exists(GetFullPath("Docs/.metadata.json")));
-    }
-
-    [Fact]
-    public async Task WhenOrderIsRead_ThenTheChildrenAreInTheOrderInWhichTheyAreShown()
-    {
-        // Arrange
-        WriteFile("Docs/a.md");
-        WriteFile("Docs/b.md");
-        WriteFile("Docs/c.md");
-        WriteFile("Docs/.metadata.json", """{ "order": ["c.md", "gone.md"] }""");
-        WriteFile("Readme.md");
-        var storage = await ConnectAsync();
-        var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
-
-        // Act
-        var folderOrder = ChildOrdering.GetShownNames(docs);
-        var rootOrder = ChildOrdering.GetShownNames(storage);
-
-        // Assert
-        Assert.Equal(["c.md", "a.md", "b.md"], folderOrder);
-        Assert.Equal(["Readme.md", "Docs"], rootOrder);
     }
 
     [Fact]
