@@ -522,7 +522,7 @@ public partial class FluentStorageContainer :
             StorageMetadataValues.Set(registered, null, file?.Own);
         }
 
-        var childOrder = file?.Own.GetStringArray(MetadataKeys.Order) ?? [];
+        var childOrder = file?.Order ?? [];
         if (!childOrder.SequenceEqual(ChildOrder))
         {
             ChildOrder = childOrder;

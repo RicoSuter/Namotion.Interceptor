@@ -11,6 +11,23 @@ public class StorageMetadataFileTests
         => StorageMetadataFile.TryParse(Encoding.UTF8.GetBytes(json), out var file, out var error) ? file : throw error;
 
     [Fact]
+    public void WhenTheOrderIsReadTwice_ThenItIsReadFromTheFileOnce()
+    {
+        // Arrange
+        var file = Parse("""{ "order": ["b.md", 1, "a.md"] }""");
+
+        // Act
+        var first = file.Order;
+        var second = file.Order;
+
+        // Assert
+        Assert.Equal(["b.md", "a.md"], first.ToArray());
+        Assert.True(first == second);
+        Assert.Empty(Parse("""{ "title": "Docs" }""").Order);
+        Assert.Empty(StorageMetadataFile.Empty.Order);
+    }
+
+    [Fact]
     public void WhenAFileIsParsed_ThenItsOwnKeysAndItsEntriesAreRead()
     {
         // Arrange
