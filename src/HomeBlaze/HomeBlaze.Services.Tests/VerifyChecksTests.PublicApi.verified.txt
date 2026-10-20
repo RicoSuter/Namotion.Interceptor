@@ -136,6 +136,8 @@ namespace HomeBlaze.Services
     {
         public static string? ResolveScopedLink(this Namotion.Interceptor.IInterceptorSubject subject, string? link) { }
     }
+    [Namotion.Interceptor.Attributes.RunsAfter(new System.Type[] {
+            typeof(Namotion.Interceptor.Registry.SubjectRegistry)})]
     public class SubjectPathResolver : HomeBlaze.Abstractions.ISubjectPathResolver, Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler, Namotion.Interceptor.Tracking.Lifecycle.IPropertyLifecycleHandler
     {
         public SubjectPathResolver(System.Func<Namotion.Interceptor.IInterceptorSubject?> getRoot) { }

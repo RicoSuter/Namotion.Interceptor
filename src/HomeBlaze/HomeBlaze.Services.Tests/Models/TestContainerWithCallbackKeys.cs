@@ -10,6 +10,8 @@ public partial class TestContainerWithCallbackKeys
 {
     public partial Dictionary<CallbackKey, TestContainer> Items { get; set; }
 
+    public partial TestContainer? Child { get; set; }
+
     public TestContainerWithCallbackKeys()
     {
         Items = new Dictionary<CallbackKey, TestContainer>();

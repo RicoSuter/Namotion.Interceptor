@@ -2,6 +2,8 @@ using HomeBlaze.Abstractions;
 using HomeBlaze.Services.Tests.Models;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Interceptors;
+using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.Services.Tests;
 
@@ -132,6 +134,130 @@ public class SubjectPathResolverCacheTests : SubjectPathResolverTestBase
         // Assert
         Assert.Equal("/Items[a]", pathDuringDetach);
         Assert.Null(pathAfterDetach);
+    }
+
+    [Fact]
+    public void WhenSubjectIsAttachedWhileItsPathIsBuilt_ThenLaterGetPathsReturnsTheNewPath()
+    {
+        // Arrange
+        var key = new CallbackKey("a");
+        var child = new TestContainer(Context) { Name = "Child" };
+        var root = new TestContainerWithCallbackKeys(Context)
+        {
+            Items = new Dictionary<CallbackKey, TestContainer> { [key] = child }
+        };
+        RootManager.Root = root;
+        key.OnFormat = () => root.Child = child;
+
+        // Act
+        var pathsDuringAttach = Resolver.GetPaths(child, PathStyle.Canonical);
+        var pathsAfterAttach = Resolver.GetPaths(child, PathStyle.Canonical);
+
+        // Assert
+        Assert.Equal(["/Items[a]"], pathsDuringAttach);
+        Assert.Equal(["/Child", "/Items[a]"], pathsAfterAttach.Order());
+    }
+
+    [Fact]
+    public void WhenListIsReordered_ThenPathsAndResolutionFollowTheNewOrder()
+    {
+        // Arrange
+        var first = new TestContainer(Context) { Name = "First" };
+        var second = new TestContainer(Context) { Name = "Second" };
+        var root = new TestContainerWithItemList(Context) { Items = [first, second] };
+        RootManager.Root = root;
+        Assert.Equal("/Items[0]", Resolver.GetPath(first, PathStyle.Canonical));
+        Assert.Same(first, Resolver.ResolveSubject("/Items[0]", PathStyle.Canonical));
+        var versionBefore = Resolver.PathsVersion;
+
+        // Act
+        root.Items = [second, first];
+
+        // Assert
+        Assert.NotEqual(versionBefore, Resolver.PathsVersion);
+        Assert.Equal("/Items[1]", Resolver.GetPath(first, PathStyle.Canonical));
+        Assert.Same(second, Resolver.ResolveSubject("/Items[0]", PathStyle.Canonical));
+    }
+
+    [Fact]
+    public void WhenPathIsBuiltBeforeTheListIndicesAreRefreshed_ThenLaterGetPathReturnsTheNewIndex()
+    {
+        // Arrange
+        var retained = new TestContainer(Context) { Name = "Retained" };
+        var inserted = new TestContainer(Context) { Name = "Inserted" };
+        var root = new TestContainerWithItemList(Context) { Items = [retained] };
+        RootManager.Root = root;
+
+        // Runs after the resolver handled the attach and before the registry refreshes the index of the retained entry.
+        string? pathBeforeRefresh = null;
+        Context.AddService(new AttachHook(inserted, () => pathBeforeRefresh = Resolver.GetPath(retained, PathStyle.Canonical)));
+
+        // Act
+        root.Items = [inserted, retained];
+        var pathAfterRefresh = Resolver.GetPath(retained, PathStyle.Canonical);
+
+        // Assert
+        Assert.Equal("/Items[0]", pathBeforeRefresh);
+        Assert.Equal("/Items[1]", pathAfterRefresh);
+    }
+
+    [Fact]
+    public void WhenPropertyIsAddedAtRunTimeWithTheNameOfAnInlinePath_ThenResolveFollowsTheProperty()
+    {
+        // Arrange
+        var child = new TestContainerWithChildren(Context) { Name = "Child" };
+        var root = new TestContainerWithChildren(Context)
+        {
+            Children = new Dictionary<string, TestContainerWithChildren> { ["Shadowed"] = child }
+        };
+        RootManager.Root = root;
+        Assert.Same(child, Resolver.ResolveSubject("/Shadowed", PathStyle.Canonical));
+
+        // Act
+        root.TryGetRegisteredSubject()!.AddProperty("Shadowed", typeof(TestContainerWithChildren), _ => null, null);
+        var resolved = Resolver.ResolveSubject("/Shadowed", PathStyle.Canonical);
+
+        // Assert
+        Assert.Null(resolved);
+    }
+
+    [Fact]
+    public void WhenResolverIsAddedBeforeTheRegistry_ThenItsLifecycleHandlersRunAfterTheRegistry()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create();
+        context.AddService(new SubjectPathResolver(() => null));
+
+        // Act
+        context.WithRegistry();
+
+        // Assert
+        var lifecycleHandlers = context.GetServices<ILifecycleHandler>().ToList();
+        Assert.True(
+            lifecycleHandlers.FindIndex(handler => handler is SubjectRegistry) <
+            lifecycleHandlers.FindIndex(handler => handler is SubjectPathResolver));
+
+        var propertyLifecycleHandlers = context.GetServices<IPropertyLifecycleHandler>().ToList();
+        Assert.True(
+            propertyLifecycleHandlers.FindIndex(handler => handler is SubjectRegistry) <
+            propertyLifecycleHandlers.FindIndex(handler => handler is SubjectPathResolver));
+    }
+
+    /// <summary>
+    /// Runs an action once, when the subject is attached, after the lifecycle handlers that were added before it.
+    /// </summary>
+    private sealed class AttachHook(IInterceptorSubject subject, Action action) : ILifecycleHandler
+    {
+        private Action? _action = action;
+
+        public void HandleLifecycleChange(SubjectLifecycleChange change)
+        {
+            if (_action is { } pending && change.IsPropertyReferenceAdded && change.Subject == subject)
+            {
+                _action = null;
+                pending();
+            }
+        }
     }
 
     /// <summary>
