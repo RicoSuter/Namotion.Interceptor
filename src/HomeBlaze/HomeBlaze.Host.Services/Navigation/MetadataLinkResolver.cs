@@ -46,7 +46,6 @@ public sealed class MetadataLinkResolver
         // A file edited by hand can hold any address, such as javascript:, which must never be opened.
         if (link.Url is { } url)
         {
-            // A mailto address opens the mail client, which needs no tab of its own.
             var isAllowed = MetadataLink.IsAllowedAddress(url);
             return new ResolvedMetadataLink(link.Title ?? url, isAllowed ? url : null, isAllowed && MetadataLink.IsWebAddress(url));
         }
