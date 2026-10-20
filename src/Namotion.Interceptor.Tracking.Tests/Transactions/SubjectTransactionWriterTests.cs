@@ -284,11 +284,10 @@ public class SubjectTransactionWriterTests
     }
 
     [Theory]
-    [InlineData(TransactionFailureHandling.BestEffort, new[] { nameof(Person.LastName) })]
-    [InlineData(TransactionFailureHandling.Rollback, new[] { nameof(Person.LastName), nameof(Person.FirstName) })]
+    [InlineData(TransactionFailureHandling.BestEffort)]
+    [InlineData(TransactionFailureHandling.Rollback)]
     public async Task WhenCommitTimesOutWhileRevertingAfterLocalApply_ThenCommitFailsTerminally(
-        TransactionFailureHandling failureHandling,
-        string[] expectedFailedProperties)
+        TransactionFailureHandling failureHandling)
     {
         // Arrange
         var context = CreateContext(out var handler, new RevertUntilCancelledTransactionWriter());
@@ -307,10 +306,13 @@ public class SubjectTransactionWriterTests
             async () => await transaction.CommitAsync(CancellationToken.None));
 
         // Assert
-        Assert.Equal(expectedFailedProperties, exception.FailedChanges.Select(change => change.Property.Name));
+        Assert.Equal(
+            [nameof(Person.FirstName), nameof(Person.LastName)],
+            exception.FailedChanges.Select(change => change.Property.Name));
         Assert.Equal(2, exception.Errors.Count);
         Assert.Equal("apply failed", exception.Errors[0].Message);
         Assert.IsAssignableFrom<OperationCanceledException>(exception.Errors[1]);
+        Assert.Equal("Ann", person.FirstName);
         Assert.Equal("Lee", person.LastName);
         Assert.Contains("already been committed", retryException.Message);
     }

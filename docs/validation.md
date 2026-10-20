@@ -167,7 +167,7 @@ With source transactions, the [pre-apply check](tracking-transactions.md#transac
 
 In `Immediate` mode the setter still throws `ValidationException` for a write that is invalid against the values written so far, so write order matters at the setter. `Deferred` accepts invalid intermediate values, and code running in the transaction's flow reads them until a later write replaces them or the commit checks the final value.
 
-The values a commit applies are not validated again, and neither are the values a rollback restores. Writes made while a commit applies its values, for example from change handlers or a hook that changes the value, and recalculated derived properties are validated as usual, after any source write. If applying one committed value fails, for example a hook throws, the values applied after it are validated against the model as it is at that point, so a value that depends on a later value of the set may then be rejected.
+The values a commit applies are not validated again, and neither are the values a rollback restores. Writes made while a commit applies its values, for example from change handlers or a hook that changes the value, and recalculated derived properties are validated as usual, after any source write. If applying one committed value fails, for example a hook throws, the values applied after it are validated against the model as it is at that point, so a value that depends on a later value of the set may then be rejected. No value of the set lands then, in either failure handling mode: the applied values and the written sources are reverted, and every change is reported as failed.
 
 ### Writing Validators for Transactions
 

@@ -319,7 +319,9 @@ public class TransactionValidationTests
         // Assert
         // Reverse-order rollback restores MotorSpeed 150 while MaxAllowedSpeed is still 100.
         Assert.IsType<ValidationException>(Assert.Single(exception.Errors));
-        Assert.Same(failingMotor, Assert.Single(exception.FailedChanges).Property.Subject);
+        Assert.Equal(
+            [motor, motor, failingMotor],
+            exception.FailedChanges.Select(change => change.Property.Subject));
         Assert.Equal(200, motor.MaxAllowedSpeed);
         Assert.Equal(150, motor.MotorSpeed);
         Assert.Equal(0, failingMotor.MotorSpeed);
@@ -350,6 +352,47 @@ public class TransactionValidationTests
         Assert.IsType<ValidationException>(exception.Errors[1]);
         Assert.Equal(100, motor.MaxAllowedSpeed);
         Assert.Equal(0, motor.MotorSpeed);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenApplyOfLimitFailsInBestEffortAfterSpeedLanded_ThenNothingLands(bool withWriter)
+    {
+        // Arrange
+        var context = CreateContext();
+        var motor = new Motor(context);
+        var writer = new TestTransactionWriter();
+        if (withWriter)
+        {
+            context.AddService<ITransactionWriter>(writer);
+        }
+
+        // Act
+        SubjectTransactionException exception;
+        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
+        {
+            // The first write puts MotorSpeed before MaxAllowedSpeed in apply order.
+            motor.MotorSpeed = 50;
+            motor.MaxAllowedSpeed = 200;
+            motor.MotorSpeed = 150;
+            motor.ThrowOnLimitWrite = true;
+            exception = await Assert.ThrowsAsync<SubjectTransactionException>(
+                () => transaction.CommitAsync(CancellationToken.None).AsTask());
+        }
+
+        // Assert
+        Assert.Equal(0, motor.MotorSpeed);
+        Assert.Equal(100, motor.MaxAllowedSpeed);
+        Assert.Empty(exception.AppliedChanges);
+        Assert.Equal(
+            [nameof(Motor.MotorSpeed), nameof(Motor.MaxAllowedSpeed)],
+            exception.FailedChanges.Select(change => change.Property.Name));
+        Assert.IsType<InvalidOperationException>(Assert.Single(exception.Errors));
+        Assert.Contains("No changes have been applied", exception.Message);
+        Assert.Equal(
+            withWriter ? [nameof(Motor.MotorSpeed), nameof(Motor.MaxAllowedSpeed)] : [],
+            writer.Reverted.Select(change => change.Property.Name));
     }
 
     [Fact]

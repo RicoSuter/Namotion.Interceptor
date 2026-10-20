@@ -140,7 +140,7 @@ using var tx = await context.BeginTransactionAsync(TransactionFailureHandling.Ro
 |----------|------------|----------|
 | All succeed | All changes applied | All changes applied |
 | Source write fails | Successful applied, failed not applied | All reverted |
-| Local apply fails | Successful applied, failed sources rolled back | All reverted |
+| Local apply fails | Successful applied, failed sources rolled back; all reverted when transaction handlers checked the set | All reverted |
 | Consistency | Per-property (each stays in sync) | All-or-nothing |
 | Use when | Partial progress acceptable | Full atomicity required |
 
@@ -241,7 +241,7 @@ When only `WithTransactions()` is configured (no external sources):
 
 1. **Commit check**: registered transaction handlers check the final set (see [Transaction Handlers](#transaction-handlers))
 2. **Apply all changes** to the local model (calls property setters, triggers `OnChanging/OnChanged` methods)
-3. If any apply fails and `Rollback` mode: revert successful applies
+3. If any apply fails in `Rollback` mode, or after transaction handlers checked the set: revert successful applies
 4. Fire change notifications
 
 ### With Source Transactions
@@ -271,7 +271,7 @@ Registered transaction handlers check the final set before stage 1 (commit check
 | Failure Stage | BestEffort | Rollback |
 |---------------|------------|----------|
 | Source write fails | Successful sources written and applied | All sources reverted, nothing applied |
-| Local apply fails (source-bound or local) | Successful kept, failed sources reverted | All reverted |
+| Local apply fails (source-bound or local) | Successful kept, failed sources reverted; all reverted when transaction handlers checked the set | All reverted |
 | Pre-apply check rejects a change (between the stages) | All sources reverted, nothing applied | All sources reverted, nothing applied |
 
 Both modes ensure **per-property consistency**: if a property's local apply fails, its source write is reverted. The difference is whether successful properties are kept (BestEffort) or also reverted (Rollback).
@@ -360,9 +360,9 @@ The tables below list every flow and its end state per property. "Old" means the
 | Scenario | Mode | Local model ends as | Outcome |
 |----------|------|---------------------|---------|
 | All applies succeed | any | new | committed |
-| Some applies fail | BestEffort | applied keep new, failed keep old | terminal failure, reported per change |
-| Some applies fail, reverts succeed | Rollback | all old | terminal failure |
-| Some applies fail, a revert also fails | Rollback | mixed, despite Rollback | terminal failure, stuck properties are in `FailedChanges` |
+| Some applies fail | BestEffort without transaction handlers | applied keep new, failed keep old | terminal failure, reported per change |
+| Some applies fail, reverts succeed | Rollback, or BestEffort with transaction handlers | all old | terminal failure |
+| Some applies fail, a revert also fails | Rollback, or BestEffort with transaction handlers | mixed, despite Rollback | terminal failure, stuck properties are in `FailedChanges` |
 
 Commits with source writes (`WithSourceTransactions()` or a custom `ITransactionWriter`) involve two models that must agree: the external source and the local model. The next two tables split these flows by how they end.
 
@@ -374,8 +374,8 @@ Commits with source writes (`WithSourceTransactions()` or a custom `ITransaction
 | Conflict detected or optimistic lock not acquired (nothing written yet) | any | old | old | retryable failure |
 | A source write fails or times out, reverts succeed | Rollback | all old | all old | terminal failure |
 | A source write fails or times out | BestEffort | succeeded new, failed old | matches source | terminal failure |
-| A local apply fails, all reverts succeed | Rollback | all old | all old | terminal failure |
-| A local apply fails, its source revert succeeds | BestEffort | applied new, failed-apply old | matches source | terminal failure |
+| A local apply fails, all reverts succeed | Rollback, or BestEffort with transaction handlers | all old | all old | terminal failure |
+| A local apply fails, its source revert succeeds | BestEffort without transaction handlers | applied new, failed-apply old | matches source | terminal failure |
 | Pre-apply check rejects a change, reverts succeed | any | all old | all old | terminal failure |
 | Writer reports an error without failed changes (custom writers only), reverts succeed | Rollback | all old | all old | terminal failure |
 | Writer reports an error without failed changes (custom writers only) | BestEffort | new | new | terminal failure, error surfaced in `Errors` |
@@ -386,7 +386,7 @@ Commits with source writes (`WithSourceTransactions()` or a custom `ITransaction
 |----------|------|-------------|------------|---------|------------|
 | Commit timeout during a source revert before the local apply | any | partially reverted | old | retryable failure | transient, a successful retry re-pushes everything |
 | A source revert fails or throws, or a commit timeout interrupts it after the local apply started | any | new on the stuck source | old | terminal failure | source ahead of local |
-| A local revert fails after a failed apply | Rollback | old | new | terminal failure | local ahead of source |
+| A local revert fails after a failed apply | Rollback, or BestEffort with transaction handlers | old | new | terminal failure | local ahead of source |
 | Custom writer throws from `WriteToSourcesAsync` | any | unknown, never reverted | old | terminal failure | unknown and unreported |
 
 Three root causes account for every divergence:
@@ -414,7 +414,7 @@ public partial class GpioDevice
 ```
 
 When `OnChanging/OnChanged` throws:
-- **BestEffort mode**: Other successful changes are applied, failure reported. Transaction handlers may check the changes applied after the failed one again (see [Transaction Handlers](#transaction-handlers)).
+- **BestEffort mode**: Other successful changes are applied, failure reported. When transaction handlers checked the set, everything is reverted as in Rollback mode (see [Transaction Handlers](#transaction-handlers)).
 - **Rollback mode**: All previous stages are reverted (sources + successful local changes)
 
 ### Derived Properties
@@ -490,7 +490,7 @@ An `ITransactionHandler` is called for the writes a transaction captures and che
 
 **Writes during a check.** Handlers must not write properties. A write on the committing thread throws `InvalidOperationException`, including a write to a settable derived property. A write of a property's landed value is dropped by the equality check before it reaches the transaction, same as outside a transaction. When the transaction is used from several threads, a write from another thread, for example a child task, can call `OnCapturing` while `OnCommitting` runs before it is rejected, so handlers must tolerate concurrent calls.
 
-**Applies and rollbacks.** A handler that also intercepts writes can call `SubjectTransaction.TryConsumeCommitWrite` to recognize the apply of a value it already checked, or a rollback restoring one, and skip checking it again. Only the first handler to call it for a write recognizes it; another handler that intercepts the same write checks it again. It does not recognize the applies after the first failed apply of a commit, or any apply after the transaction was disposed during the commit. The remaining applies after a failed apply no longer land as the checked set, so a handler that intercepts writes checks them against the model as it is at that point, and a value that depends on later values of the set may then be rejected.
+**Applies and rollbacks.** A handler that also intercepts writes can call `SubjectTransaction.TryConsumeCommitWrite` to recognize the apply of a value it already checked, or a rollback restoring one, and skip checking it again. Only the first handler to call it for a write recognizes it; another handler that intercepts the same write checks it again. It does not recognize the applies after the first failed apply of a commit, or any apply after the transaction was disposed during the commit. The remaining applies after a failed apply no longer land as the checked set, so a handler that intercepts writes checks them against the model as it is at that point, and a value that depends on later values of the set may then be rejected. A failed apply invalidates the checked set, so in both failure handling modes the commit then reverts the applied values and every written source, and reports every change as failed.
 
 Writes outside transactions are not blocked by a commit, so a property a handler reads can change between its check and the local apply. The pre-apply check narrows that window to the synchronous apply itself; transactional writes cannot interleave, because every commit holds the context's transaction lock.
 
