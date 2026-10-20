@@ -62,7 +62,7 @@ internal static class StorageMetadataWriter
     /// value, sets <c>order</c> of anything but a folder or the root, has a known key with a value of another kind, has a key that
     /// cannot be read or a value that cannot be written, or exceeds a limit; or the file has two entries of the target,
     /// cannot be read as a pass reads it, has a path twice, or cannot be written back, such as with a string with a lone
-    /// surrogate. The message names the key or the file.
+    /// surrogate; or the path of the target cannot be read back. The message names the key, the file or the path.
     /// </exception>
     public static (byte[] Content, StorageMetadataFile File)? Merge(byte[]? content, StorageMetadataTarget target, JsonElement values)
     {
@@ -155,13 +155,14 @@ internal static class StorageMetadataWriter
             return (null, root);
         }
 
+        var key = MetadataPathKey.Normalize(target.Path!)
+            ?? throw Refuse($"The path {NameList.Format([target.Path!])} cannot be written to a metadata file, as it cannot be read back.");
         if (root[target.Section] is not JsonObject section)
         {
             section = new JsonObject();
             root[target.Section] = section;
         }
 
-        var key = MetadataPathKey.Normalize(target.Path!);
         var foundIndex = -1;
         for (var index = 0; index < section.Count; index++)
         {

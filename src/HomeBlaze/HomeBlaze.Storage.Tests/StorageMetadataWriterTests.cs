@@ -172,6 +172,16 @@ public class StorageMetadataWriterTests
         Assert.Contains("'Channels[0]', 'Channels/0'", exception.Message);
     }
 
+    [Theory]
+    [InlineData("Holder[0")]
+    [InlineData("Holder[0/Power")]
+    public void WhenThePathOfTheTargetCannotBeReadBack_ThenTheWriteIsRefusedNamingIt(string path)
+    {
+        // Act & Assert
+        var exception = Assert.Throws<StorageRefusedException>(() => Merge(null, NestedSubject(path), """{ "navTitle": "Pump" }"""));
+        Assert.Contains($"'{path}'", exception.Message);
+    }
+
     [Fact]
     public void WhenTheLastKeyOfAnEntryIsRemoved_ThenTheEntryAndItsEmptySectionAreRemoved()
     {
