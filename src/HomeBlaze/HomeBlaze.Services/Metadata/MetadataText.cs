@@ -1,7 +1,7 @@
 using System.Globalization;
 using System.Text;
 
-namespace HomeBlaze.Services;
+namespace HomeBlaze.Services.Metadata;
 
 /// <summary>
 /// The rules of the links and tags of metadata, which a write refuses to break and a read of a file edited by hand

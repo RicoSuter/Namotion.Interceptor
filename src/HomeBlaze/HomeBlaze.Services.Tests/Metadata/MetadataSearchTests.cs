@@ -1,10 +1,10 @@
 using HomeBlaze.Abstractions;
-using HomeBlaze.Services.Tests.Metadata;
+using HomeBlaze.Services.Metadata;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
 
-namespace HomeBlaze.Services.Tests;
+namespace HomeBlaze.Services.Tests.Metadata;
 
 public class MetadataSearchTests
 {

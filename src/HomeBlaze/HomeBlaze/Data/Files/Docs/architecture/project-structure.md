@@ -153,7 +153,7 @@ Storage.Abs.   Components.Abs.   Abstractions
 - **Method Discovery**: Find `[Operation]` and `[Query]` methods on subjects
 - **Method Invocation**: Execute operations with parameter conversion
 - **Method Properties**: `MethodPropertyInitializer` creates virtual properties for methods, enabling `[PropertyAttribute]` on operations (e.g., `IsEnabled`)
-- **Metadata**: Read the metadata of subjects and properties, resolve metadata paths and order children, in the namespace `HomeBlaze.Services.Metadata`
+- **Metadata**: Read and search the metadata of subjects and properties, resolve metadata paths and order children, in the namespace `HomeBlaze.Services.Metadata`
 
 **Dependencies**: `HomeBlaze.Abstractions`, `HomeBlaze.Storage.Abstractions`, `HomeBlaze.Components.Abstractions`
 
@@ -188,7 +188,7 @@ Storage.Abs.   Components.Abs.   Abstractions
 - **Virtual File System**: Folders and files as subjects
 - **File Types**: Generic, JSON, Markdown with frontmatter
 - **Change Detection**: reconcile passes that FileSystemWatcher events and a periodic timer trigger
-- **Metadata**: Metadata files of folders and JSON files, applied to the subjects and written through `IMetadataStore`, in the namespace `HomeBlaze.Storage.Metadata`
+- **Metadata**: Metadata files of folders and JSON files, applied to the subjects and written through `IMetadataStore`, and the checking and rendering of notes, in the namespace `HomeBlaze.Storage.Metadata`
 
 **Dependencies**: `HomeBlaze.Services`, `FluentStorage`, `YamlDotNet`
 

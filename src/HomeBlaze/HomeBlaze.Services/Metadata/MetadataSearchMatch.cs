@@ -1,6 +1,6 @@
 using System.Text.Json.Serialization;
 
-namespace HomeBlaze.Services;
+namespace HomeBlaze.Services.Metadata;
 
 /// <summary>A subject, or a property of it, whose metadata <see cref="MetadataSearch"/> found.</summary>
 /// <param name="Path">The path of the subject relative to the searched root, empty for the root itself.</param>

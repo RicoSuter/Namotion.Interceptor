@@ -1,12 +1,11 @@
 using System.Collections.Immutable;
 using System.Text.Json;
-using HomeBlaze.Services.Metadata;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
 
-namespace HomeBlaze.Services;
+namespace HomeBlaze.Services.Metadata;
 
 /// <summary>
 /// Searches the metadata of the subjects and properties below a subject. Each call walks the tree and keeps nothing.

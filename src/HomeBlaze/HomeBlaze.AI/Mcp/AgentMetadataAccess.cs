@@ -1,6 +1,5 @@
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.AI.Agents;
-using HomeBlaze.Services;
 using HomeBlaze.Services.Metadata;
 using HomeBlaze.Storage;
 using HomeBlaze.Storage.Abstractions.Metadata;

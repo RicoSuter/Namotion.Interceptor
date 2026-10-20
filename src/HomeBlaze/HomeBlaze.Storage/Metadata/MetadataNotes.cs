@@ -1,5 +1,5 @@
 using System.Text;
-using HomeBlaze.Services;
+using HomeBlaze.Services.Metadata;
 using HomeBlaze.Storage.Internal;
 using HomeBlaze.Storage.Pages;
 using Markdig;
@@ -10,7 +10,7 @@ using Markdig.Renderers.Html;
 using Markdig.Syntax;
 using Markdig.Syntax.Inlines;
 
-namespace HomeBlaze.Storage;
+namespace HomeBlaze.Storage.Metadata;
 
 /// <summary>
 /// The <c>notes</c> of metadata: Markdown under the rules that the write operations of pages apply to new content, no

@@ -4,6 +4,7 @@ using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.AI.Mcp;
 using HomeBlaze.AI.Tests.Agents;
 using HomeBlaze.Services;
+using HomeBlaze.Services.Metadata;
 using HomeBlaze.Storage;
 using HomeBlaze.Storage.Internal;
 using Microsoft.Extensions.DependencyInjection;

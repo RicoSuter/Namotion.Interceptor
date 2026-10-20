@@ -1,4 +1,6 @@
-namespace HomeBlaze.Storage.Tests;
+using HomeBlaze.Storage.Metadata;
+
+namespace HomeBlaze.Storage.Tests.Metadata;
 
 public class MetadataNotesTests
 {

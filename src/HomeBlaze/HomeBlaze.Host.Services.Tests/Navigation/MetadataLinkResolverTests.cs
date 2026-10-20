@@ -3,6 +3,7 @@ using HomeBlaze.Host.Services.Navigation;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Components;
 using HomeBlaze.Services.Lifecycle;
+using HomeBlaze.Services.Metadata;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry;

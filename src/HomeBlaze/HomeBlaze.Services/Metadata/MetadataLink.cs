@@ -1,4 +1,4 @@
-namespace HomeBlaze.Services;
+namespace HomeBlaze.Services.Metadata;
 
 /// <summary>
 /// A link in the <c>links</c> of metadata: to a web address or to the absolute path of a page, subject or property.

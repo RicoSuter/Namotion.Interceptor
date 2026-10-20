@@ -1,4 +1,6 @@
-namespace HomeBlaze.Services.Tests;
+using HomeBlaze.Services.Metadata;
+
+namespace HomeBlaze.Services.Tests.Metadata;
 
 public class MetadataLinkTests
 {
