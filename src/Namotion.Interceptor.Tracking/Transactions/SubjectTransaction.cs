@@ -756,28 +756,30 @@ public sealed class SubjectTransaction : IDisposable
 
         // Source failures leave local changes uncommitted, and written source changes must be reverted.
         // Errors without failed changes from custom writers must still be reported.
-        var rollBackSourceFailure = _failureHandling == TransactionFailureHandling.Rollback &&
-            (failedSource.Count > 0 || sourceErrors.Count > 0);
+        if (_failureHandling == TransactionFailureHandling.Rollback && (failedSource.Count > 0 || sourceErrors.Count > 0))
+        {
+            var revert = await RevertSourceWritesSafelyAsync(writer, written, revertState, propagateTimeout: true, cancellationToken).ConfigureAwait(false);
+
+            // The written changes that were reverted cleanly are not reported.
+            return CreateRollbackFailureException(
+                SubjectPropertyChangeOperations.Concat(
+                    failedSource,
+                    SubjectPropertyChangeOperations.ExcludeByProperty(changes.Span, failedSource, written),
+                    revert.Failed),
+                SubjectPropertyChangeOperations.Concat(sourceErrors, revert.Errors),
+                localRevertFailed: false);
+        }
 
         // What the handlers read can change while the sources are written (inbound updates, raw writes), so the
         // final set is checked again right before it lands. Its reads return the pending values of every checked
         // change, so a rejection invalidates the whole checked set in both failure handling modes.
-        var rejectionErrors = rollBackSourceFailure ? null : RunPreApplyCheck(failedSource);
-        if (rollBackSourceFailure || rejectionErrors is not null)
+        var rejectionErrors = RunPreApplyCheck(failedSource);
+        if (rejectionErrors is not null)
         {
-            var revert = await RevertSourceWritesSafelyAsync(writer, written, revertState, propagateTimeout: rejectionErrors is null, cancellationToken).ConfigureAwait(false);
-
-            // A rejection fails every checked change, which includes every written one, and lists a change again when
-            // its source revert failed. After a source failure, the written changes that were reverted cleanly are not
-            // reported.
-            var notApplied = SubjectPropertyChangeOperations.Concat(
-                rejectionErrors is null
-                    ? SubjectPropertyChangeOperations.ExcludeByProperty(changes.Span, failedSource, written)
-                    : SubjectPropertyChangeOperations.ExcludeByProperty(changes.Span, failedSource, []),
-                revert.Failed);
+            var revert = await RevertSourceWritesSafelyAsync(writer, written, revertState, propagateTimeout: false, cancellationToken).ConfigureAwait(false);
             return CreateRollbackFailureException(
-                SubjectPropertyChangeOperations.Concat(failedSource, notApplied),
-                SubjectPropertyChangeOperations.Concat(sourceErrors, rejectionErrors ?? [], revert.Errors),
+                GetCheckedSetFailedChanges(changes.Span, failedSource, [], revert.Failed),
+                SubjectPropertyChangeOperations.Concat(sourceErrors, rejectionErrors, revert.Errors),
                 localRevertFailed: false);
         }
 
@@ -830,14 +832,14 @@ public sealed class SubjectTransaction : IDisposable
                     localRevertFailed: revertFailed.Count > 0);
             }
 
-            // BestEffort without handlers: keep source == model for failed-apply properties by reverting only the source writes whose
-            // property failed to apply (matched by Property equality).
-            var toRevert = SubjectPropertyChangeOperations.IntersectByProperty(applyFailed, written);
+            // BestEffort without handlers: keep source == model for failed-apply properties by reverting only the source
+            // writes whose property failed to apply. A failed revert is one of those writes (a throwing writer fails
+            // all of them, and a writer reports only reverts it was asked for), so applyFailed already reports it.
+            var toRevert = SubjectPropertyChangeOperations.FilterByProperty(written, applyFailed, keepMatches: true);
             var bestEffortRevert = await RevertSourceWritesSafelyAsync(writer, toRevert, revertState, propagateTimeout: false, cancellationToken).ConfigureAwait(false);
             return CreateFailureException(
                 applied,
-                SubjectPropertyChangeOperations.Concat(
-                    failedSource, applyFailed, SubjectPropertyChangeOperations.ExceptReported(bestEffortRevert.Failed, applyFailed)),
+                SubjectPropertyChangeOperations.Concat(failedSource, applyFailed),
                 SubjectPropertyChangeOperations.Concat(sourceErrors, applyErrors, bestEffortRevert.Errors));
         }
 
@@ -845,10 +847,10 @@ public sealed class SubjectTransaction : IDisposable
     }
 
     /// <summary>
-    /// Returns the changes a failed apply reports after handlers checked them: every change, the source-write failures
-    /// first, because they were checked as a set and none of them commits once one fails, as after a pre-apply
-    /// rejection. The changes whose local revert failed follow, then those whose source revert failed, so a stuck
-    /// property appears a second time.
+    /// Returns the changes a pre-apply rejection or a failed apply reports after handlers checked them: every change,
+    /// the source-write failures first, because they were checked as a set and none of them commits once one fails.
+    /// The changes whose local revert failed follow, then those whose source revert failed, so a stuck property
+    /// appears a second time.
     /// </summary>
     private static IReadOnlyList<SubjectPropertyChange> GetCheckedSetFailedChanges(
         ReadOnlySpan<SubjectPropertyChange> changes,
@@ -860,7 +862,7 @@ public sealed class SubjectTransaction : IDisposable
             failedSource,
             SubjectPropertyChangeOperations.ExcludeByProperty(changes, failedSource, []),
             revertFailed,
-            SubjectPropertyChangeOperations.ExceptReported(sourceRevertFailed, revertFailed));
+            SubjectPropertyChangeOperations.FilterByProperty(sourceRevertFailed, revertFailed, keepMatches: false));
     }
 
     /// <summary>
@@ -880,7 +882,7 @@ public sealed class SubjectTransaction : IDisposable
             applyFailed,
             SubjectPropertyChangeOperations.ExcludeByProperty(changes, written, reported),
             revertFailed,
-            SubjectPropertyChangeOperations.ExceptReported(sourceRevertFailed, reported));
+            SubjectPropertyChangeOperations.FilterByProperty(sourceRevertFailed, reported, keepMatches: false));
     }
 
     private SubjectTransactionException? CreateFailureAfterSuccessfulLocalApply(

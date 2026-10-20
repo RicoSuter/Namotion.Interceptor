@@ -23,19 +23,28 @@ internal static class SubjectPropertyChangeOperations
     }
 
     /// <summary>
-    /// Returns the properties of <paramref name="changes"/>, or null when there are none.
+    /// Returns the properties of the changes in <paramref name="lists"/>, or null when there are none.
     /// </summary>
-    internal static HashSet<PropertyReference>? CreatePropertySet(IReadOnlyList<SubjectPropertyChange> changes)
+    internal static HashSet<PropertyReference>? CreatePropertySet(params ReadOnlySpan<IReadOnlyList<SubjectPropertyChange>> lists)
     {
-        if (changes.Count == 0)
+        var capacity = 0;
+        foreach (var changes in lists)
+        {
+            capacity += changes.Count;
+        }
+
+        if (capacity == 0)
         {
             return null;
         }
 
-        var properties = new HashSet<PropertyReference>(changes.Count, PropertyReference.Comparer);
-        foreach (var change in changes)
+        var properties = new HashSet<PropertyReference>(capacity, PropertyReference.Comparer);
+        foreach (var changes in lists)
         {
-            properties.Add(change.Property);
+            foreach (var change in changes)
+            {
+                properties.Add(change.Property);
+            }
         }
 
         return properties;
@@ -187,68 +196,30 @@ internal static class SubjectPropertyChangeOperations
     }
 
     /// <summary>
-    /// Returns the subset of <paramref name="written"/> whose property also appears in
-    /// <paramref name="failed"/> (matched by <see cref="SubjectPropertyChange.Property"/>).
+    /// Returns the changes in <paramref name="changes"/> whose property is in <paramref name="others"/> when
+    /// <paramref name="keepMatches"/> is true, or not in it otherwise (matched by
+    /// <see cref="SubjectPropertyChange.Property"/>).
     /// </summary>
-    internal static IReadOnlyList<SubjectPropertyChange> IntersectByProperty(
-        IReadOnlyList<SubjectPropertyChange> failed,
-        IReadOnlyList<SubjectPropertyChange> written)
+    internal static IReadOnlyList<SubjectPropertyChange> FilterByProperty(
+        IReadOnlyList<SubjectPropertyChange> changes,
+        IReadOnlyList<SubjectPropertyChange> others,
+        bool keepMatches)
     {
-        if (failed.Count == 0 || written.Count == 0)
+        if (changes.Count == 0)
         {
-            return [];
+            return changes;
         }
 
-        var failedProperties = new HashSet<PropertyReference>(failed.Count, PropertyReference.Comparer);
-        foreach (var change in failed)
+        var otherProperties = CreatePropertySet(others);
+        if (otherProperties is null)
         {
-            failedProperties.Add(change.Property);
-        }
-
-        List<SubjectPropertyChange>? result = null;
-        foreach (var change in written)
-        {
-            if (failedProperties.Contains(change.Property))
-            {
-                (result ??= new List<SubjectPropertyChange>(failed.Count)).Add(change);
-            }
-        }
-
-        return result ?? (IReadOnlyList<SubjectPropertyChange>)[];
-    }
-
-    /// <summary>
-    /// Returns the changes in <paramref name="changes"/> whose property is in neither
-    /// <paramref name="excludeFirst"/> nor <paramref name="excludeSecond"/> (matched by
-    /// <see cref="SubjectPropertyChange.Property"/>). Used to collect the local (no-source) changes that
-    /// were neither written to a source nor failed at a source.
-    /// </summary>
-    internal static IReadOnlyList<SubjectPropertyChange> ExcludeByProperty(
-        ReadOnlySpan<SubjectPropertyChange> changes,
-        IReadOnlyList<SubjectPropertyChange> excludeFirst,
-        IReadOnlyList<SubjectPropertyChange> excludeSecond)
-    {
-        if (excludeFirst.Count == 0 && excludeSecond.Count == 0)
-        {
-            return changes.ToArray();
-        }
-
-        var excluded = new HashSet<PropertyReference>(
-            excludeFirst.Count + excludeSecond.Count, PropertyReference.Comparer);
-
-        foreach (var change in excludeFirst)
-        {
-            excluded.Add(change.Property);
-        }
-        foreach (var change in excludeSecond)
-        {
-            excluded.Add(change.Property);
+            return keepMatches ? [] : changes;
         }
 
         List<SubjectPropertyChange>? result = null;
         foreach (var change in changes)
         {
-            if (!excluded.Contains(change.Property))
+            if (otherProperties.Contains(change.Property) == keepMatches)
             {
                 (result ??= []).Add(change);
             }
@@ -258,28 +229,25 @@ internal static class SubjectPropertyChangeOperations
     }
 
     /// <summary>
-    /// Returns the changes in <paramref name="changes"/> whose property is not in <paramref name="reported"/>
-    /// (matched by <see cref="SubjectPropertyChange.Property"/>), so a change is reported once.
+    /// Returns the changes in <paramref name="changes"/> whose property is in neither
+    /// <paramref name="excludeFirst"/> nor <paramref name="excludeSecond"/> (matched by
+    /// <see cref="SubjectPropertyChange.Property"/>), as a new list.
     /// </summary>
-    internal static IReadOnlyList<SubjectPropertyChange> ExceptReported(
-        IReadOnlyList<SubjectPropertyChange> changes,
-        IReadOnlyList<SubjectPropertyChange> reported)
+    internal static IReadOnlyList<SubjectPropertyChange> ExcludeByProperty(
+        ReadOnlySpan<SubjectPropertyChange> changes,
+        IReadOnlyList<SubjectPropertyChange> excludeFirst,
+        IReadOnlyList<SubjectPropertyChange> excludeSecond)
     {
-        if (changes.Count == 0 || reported.Count == 0)
+        var excluded = CreatePropertySet(excludeFirst, excludeSecond);
+        if (excluded is null)
         {
-            return changes;
-        }
-
-        var reportedProperties = new HashSet<PropertyReference>(reported.Count, PropertyReference.Comparer);
-        foreach (var change in reported)
-        {
-            reportedProperties.Add(change.Property);
+            return changes.ToArray();
         }
 
         List<SubjectPropertyChange>? result = null;
         foreach (var change in changes)
         {
-            if (!reportedProperties.Contains(change.Property))
+            if (!excluded.Contains(change.Property))
             {
                 (result ??= []).Add(change);
             }
