@@ -35,13 +35,6 @@ internal static class StorageMetadataWriter
         MetadataKeys.Order
     ];
 
-    // The keys of the file, its own included, and of an entry are matched without regard to case.
-    private static readonly JsonNodeOptions KeyOptions = new() { PropertyNameCaseInsensitive = true };
-
-    // The paths of a section and the keys inside a value are matched with regard to case. Set on every other object, as
-    // an object without options takes those of its parent.
-    private static readonly JsonNodeOptions CaseSensitiveOptions = new();
-
     private static readonly JsonWriterOptions FileOptions = new()
     {
         Indented = true,
@@ -53,10 +46,9 @@ internal static class StorageMetadataWriter
 
     /// <summary>
     /// Merges values into the entry of the target: a key with a value is set, a nested value replacing the old one as
-    /// a whole, a key with null is removed, and every other key stays. A key matches the key of the entry that differs
-    /// only in case, whose name stays. An entry of a subject or property is found in either notation of its path and
-    /// written with <see cref="StorageMetadataTarget.Path"/>. An entry without keys is removed, and so is a section
-    /// without entries.
+    /// a whole, a key with null is removed, and every other key stays. Keys are matched exactly. An entry of a subject or
+    /// property is found in either notation of its path and written with <see cref="StorageMetadataTarget.Path"/>. An
+    /// entry without keys is removed, and so is a section without entries.
     /// </summary>
     /// <param name="content">The content of the file, which <see cref="StorageMetadataFile.TryParse"/> accepts; null
     /// without a file.</param>
@@ -65,8 +57,8 @@ internal static class StorageMetadataWriter
     /// <returns>The content to write, indented and ending with a new line, and the file as a pass reads it; or null
     /// when the file holds no key any more and is deleted.</returns>
     /// <exception cref="StorageRefusedException">
-    /// values is no JSON object, gives a key twice without regard to case, has a key that starts with $, sets
-    /// <c>order</c> of anything but a folder or the root, has a known key with a value of another kind, has a key that
+    /// values is no JSON object, gives a key twice, has a key that starts with $, sets a known key in another case to a
+    /// value, sets <c>order</c> of anything but a folder or the root, has a known key with a value of another kind, has a key that
     /// cannot be read or a value that cannot be written, or exceeds a limit; or the file has two entries of the target,
     /// cannot be read as a pass reads it, has a path twice, or cannot be written back, such as with a string with a lone
     /// surrogate. The message names the key or the file.
@@ -78,7 +70,7 @@ internal static class StorageMetadataWriter
             throw Refuse("values must be a JSON object, for example { \"navTitle\": \"Pump\" }.");
         }
 
-        var root = new JsonObject(KeyOptions);
+        var root = new JsonObject();
         var sizeBefore = 0;
         if (content is not null)
         {
@@ -150,17 +142,8 @@ internal static class StorageMetadataWriter
             json = json[Encoding.UTF8.Preamble.Length..];
         }
 
-        var root = JsonNode.Parse(json, CaseSensitiveOptions, StorageMetadataFile.DocumentOptions) as JsonObject
+        return JsonNode.Parse(json, documentOptions: StorageMetadataFile.DocumentOptions) as JsonObject
             ?? throw new JsonException("A metadata file holds a JSON object.");
-        return WithKeysWithoutCase(root);
-    }
-
-    // The properties of the object, moved to one whose keys are matched without regard to case.
-    private static JsonObject WithKeysWithoutCase(JsonObject source)
-    {
-        var properties = source.ToArray();
-        source.Clear();
-        return new JsonObject(properties, KeyOptions);
     }
 
     // The section and the entry of the target in it, or no section and the file itself for its own keys.
@@ -173,7 +156,7 @@ internal static class StorageMetadataWriter
 
         if (root[target.Section] is not JsonObject section)
         {
-            section = new JsonObject(CaseSensitiveOptions);
+            section = new JsonObject();
             root[target.Section] = section;
         }
 
@@ -194,20 +177,26 @@ internal static class StorageMetadataWriter
 
         if (foundIndex < 0)
         {
-            var created = new JsonObject(KeyOptions);
+            var created = new JsonObject();
             section[target.Path!] = created;
             return (section, created);
         }
 
         // Written with the path of the registry in its place, whichever notation it was read in.
-        var found = WithKeysWithoutCase((JsonObject)section.GetAt(foundIndex).Value!);
-        section.SetAt(foundIndex, target.Path!, found);
+        var (foundPath, foundEntry) = section.GetAt(foundIndex);
+        var found = (JsonObject)foundEntry!;
+        if (foundPath != target.Path)
+        {
+            section.RemoveAt(foundIndex);
+            section.Insert(foundIndex, target.Path!, found);
+        }
+
         return (section, found);
     }
 
     private static void MergeValues(JsonObject entry, JsonElement values, bool isContainer)
     {
-        var givenKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var givenKeys = new HashSet<string>();
         foreach (var property in values.EnumerateObject())
         {
             string key;
@@ -227,7 +216,7 @@ internal static class StorageMetadataWriter
 
             if (!givenKeys.Add(key))
             {
-                throw Refuse($"{NameList.Format([key])} is given more than once, without regard to case.");
+                throw Refuse($"{NameList.Format([key])} is given more than once.");
             }
 
             // Before a null removes a key, so that a call with many keys is refused whatever their values.
@@ -241,7 +230,13 @@ internal static class StorageMetadataWriter
                 throw Refuse($"{NameList.Format([key])} is reserved: keys that start with $ are no metadata.");
             }
 
-            var knownKey = Array.Find(KnownKeys, candidate => string.Equals(candidate, key, StringComparison.OrdinalIgnoreCase));
+            var knownKey = Array.IndexOf(KnownKeys, key) >= 0 ? key : null;
+            if (knownKey is null && property.Value.ValueKind != JsonValueKind.Null &&
+                Array.Find(KnownKeys, candidate => string.Equals(candidate, key, StringComparison.OrdinalIgnoreCase)) is { } canonicalKey)
+            {
+                throw Refuse($"Keys match exactly, so {NameList.Format([key])} would not be read: use {NameList.Format([canonicalKey])}.");
+            }
+
             var isOrder = knownKey == MetadataKeys.Order;
             if (isOrder && !isContainer)
             {
@@ -281,8 +276,7 @@ internal static class StorageMetadataWriter
                 throw Refuse($"{NameList.Format([key])} cannot be added: the metadata already has {MaxKeyCount} keys.");
             }
 
-            // A key of the entry that differs only in case keeps its name; a new known key is written as HomeBlaze names it.
-            entry[knownKey ?? key] = value;
+            entry[key] = value;
         }
     }
 
@@ -291,7 +285,7 @@ internal static class StorageMetadataWriter
         => entry.Count(pair => pair.Value is not null && !pair.Key.StartsWith('$'));
 
     private static JsonNode? ToNode(JsonElement value)
-        => value.ValueKind == JsonValueKind.Null ? null : JsonNode.Parse(value.GetRawText(), CaseSensitiveOptions);
+        => value.ValueKind == JsonValueKind.Null ? null : JsonNode.Parse(value.GetRawText());
 
     // A blank string removes the key, so that a value of only spaces never shows.
     private static JsonNode? ToString(string key, JsonElement value)
@@ -336,7 +330,7 @@ internal static class StorageMetadataWriter
             throw Refuse($"{NameList.Format([key])} must be an array of names of children.");
         }
 
-        var order = new JsonArray(CaseSensitiveOptions);
+        var order = new JsonArray();
         foreach (var item in value.EnumerateArray())
         {
             order.Add(JsonValue.Create(GetString(key, item)));

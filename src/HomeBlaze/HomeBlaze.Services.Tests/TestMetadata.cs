@@ -11,7 +11,7 @@ public static class TestMetadata
 {
     public static ImmutableDictionary<string, JsonElement> Parse(string json)
         => JsonElement.Parse(json).EnumerateObject()
-            .ToImmutableDictionary(property => property.Name, property => property.Value, StringComparer.OrdinalIgnoreCase);
+            .ToImmutableDictionary(property => property.Name, property => property.Value);
 
     public static void Set(IInterceptorSubject subject, string json)
     {

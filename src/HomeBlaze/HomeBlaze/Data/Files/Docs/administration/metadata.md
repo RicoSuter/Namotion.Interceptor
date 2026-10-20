@@ -95,7 +95,7 @@ A field left empty removes its key, and the other keys are kept. Metadata never 
 
 ## File Format
 
-Keys are read without regard to upper or lower case, and the file may have comments and a trailing comma after its last value. A file with two keys that differ only in case cannot be read. File names are matched exactly: the file of a folder is `.metadata.json` and the file beside `X.json` is `X.metadata.json`, with `.metadata.json` in lower case. Keys that HomeBlaze does not know, such as `comment`, are kept when HomeBlaze writes the file. HomeBlaze writes the file indented and without comments, with characters such as `ü` as they are and characters outside the basic multilingual plane, such as emoji, as escapes like `\uD83D\uDE00`, and deletes it once no key has a value.
+Keys are matched exactly, case included, so `NavTitle` is a key of its own that HomeBlaze does not read as `navTitle`, and a save that sets a known key in another case is refused with the name of the known key. The file may have comments and a trailing comma after its last value. File names are matched exactly: the file of a folder is `.metadata.json` and the file beside `X.json` is `X.metadata.json`, with `.metadata.json` in lower case. Keys that HomeBlaze does not know, such as `comment`, are kept when HomeBlaze writes the file. HomeBlaze writes the file indented and without comments, with characters such as `ü` as they are and characters outside the basic multilingual plane, such as emoji, as escapes like `\uD83D\uDE00`, and deletes it once no key has a value.
 
 ### Subjects and Properties
 

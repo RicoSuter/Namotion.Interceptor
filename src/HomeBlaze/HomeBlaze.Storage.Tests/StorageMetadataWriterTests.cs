@@ -37,7 +37,7 @@ public class StorageMetadataWriterTests
 
     public static TheoryData<string, string> ValuesWithAControlCharacterInAKey() => new()
     {
-        { """{ "a\r\nb": 1, "A\r\nB": 2 }""", @"'A\u000D\u000AB'" },
+        { """{ "a\r\nb": 1, "a\r\nb": 2 }""", @"'a\u000D\u000Ab'" },
         { $$"""{ "a\r\nb": "{{new string('x', 257)}}" }""", @"'a\u000D\u000Ab'" }
     };
 
@@ -73,13 +73,23 @@ public class StorageMetadataWriterTests
     }
 
     [Fact]
-    public void WhenAMergedKeyDiffersOnlyInCase_ThenItReplacesTheValueOfTheKeyOfTheFile()
+    public void WhenAMergedKeyDiffersOnlyInCase_ThenItIsAnotherKey()
     {
         // Act
-        var written = Merge("""{ "NavTitle": "A", "Groups": 1 }""", Subject, """{ "navtitle": "B", "groups": 2, "ICON": "Water" }""");
+        var written = Merge("""{ "NavTitle": "A", "Groups": 1 }""", Subject, """{ "navTitle": "B", "groups": 2 }""");
 
         // Assert
-        Assert.Equal("{\n  \"NavTitle\": \"B\",\n  \"Groups\": 2,\n  \"icon\": \"Water\"\n}\n", written);
+        Assert.Equal("{\n  \"NavTitle\": \"A\",\n  \"Groups\": 1,\n  \"navTitle\": \"B\",\n  \"groups\": 2\n}\n", written);
+    }
+
+    [Fact]
+    public void WhenAKnownKeyInAnotherCaseIsRemoved_ThenOnlyThatKeyIsRemoved()
+    {
+        // Act
+        var written = Merge("""{ "NavTitle": "A", "navTitle": "B" }""", Subject, """{ "NavTitle": null }""");
+
+        // Assert
+        Assert.Equal("{\n  \"navTitle\": \"B\"\n}\n", written);
     }
 
     [Theory]
@@ -211,7 +221,8 @@ public class StorageMetadataWriterTests
 
     [Theory]
     [InlineData("""[]""", "JSON object")]
-    [InlineData("""{ "groups": 1, "Groups": 2 }""", "'Groups'")]
+    [InlineData("""{ "groups": 1, "groups": 2 }""", "'groups'")]
+    [InlineData("""{ "NavTitle": "Pump" }""", "'navTitle'")]
     [InlineData("""{ "title": 5 }""", "'title'")]
     [InlineData("""{ "navTitle": ["a"] }""", "'navTitle'")]
     [InlineData("""{ "note": "\ud800" }""", "'note'")]
@@ -306,9 +317,9 @@ public class StorageMetadataWriterTests
     }
 
     [Theory]
-    [InlineData("""{ "$subjects": { "Channels[0]": { "navTitle": "A" } }, "$Subjects": { "Channels[1]": { "navTitle": "B" } } }""", "Channels[0]")]
-    [InlineData("""{ "$subjects": { "Channels[0]": { "navTitle": "A", "NavTitle": "B" } } }""", "Channels[0]")]
-    [InlineData("""{ "$subjects": { "Channels[0]": { "navTitle": "A", "NavTitle": "B" } } }""", "Channels[1]")]
+    [InlineData("""{ "$subjects": { "Channels[0]": { "navTitle": "A" } }, "$subjects": { "Channels[1]": { "navTitle": "B" } } }""", "Channels[0]")]
+    [InlineData("""{ "$subjects": { "Channels[0]": { "navTitle": "A", "navTitle": "B" } } }""", "Channels[0]")]
+    [InlineData("""{ "$subjects": { "Channels[0]": { "navTitle": "A", "navTitle": "B" } } }""", "Channels[1]")]
     [InlineData("""{ "$subjects": { "Channels[0]": 5 } }""", "Channels[0]")]
     [InlineData("""{ "$subjects": 5 }""", "Channels[0]")]
     public void WhenAPassCannotReadTheFile_ThenTheMergeIsRefusedNamingTheFile(string file, string path)

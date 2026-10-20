@@ -375,7 +375,7 @@ public class StorageMetadataWriteTests : StorageTestBase
 
     [Theory]
     [InlineData("""{ "order": ["a.md", "x.md"] }""", "Names that are not children of the folder: 'x.md'. Its children: 'a.md', 'b.md'.")]
-    [InlineData("""{ "Order": ["a.md", "b.md", "a.md"] }""", "Names given more than once: 'a.md'.")]
+    [InlineData("""{ "order": ["a.md", "b.md", "a.md"] }""", "Names given more than once: 'a.md'.")]
     public async Task WhenOrderIsSetAsMetadataWithNamesThatAreNoChildrenOrRepeated_ThenItIsRefused(string values, string expectedMessage)
     {
         // Arrange

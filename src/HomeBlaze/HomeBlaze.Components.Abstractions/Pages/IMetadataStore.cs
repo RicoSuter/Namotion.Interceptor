@@ -28,7 +28,7 @@ public interface IMetadataStore
     /// <summary>
     /// Merges values, a JSON object, into the metadata of the subject, or of its property
     /// <paramref name="propertyName"/>, at the top level: a key with a value is set, a nested value replacing the old one
-    /// as a whole, a key with null is removed, and every other key stays. Keys are matched without regard to case. The
+    /// as a whole, a key with null is removed, and every other key stays. Keys are matched exactly. The
     /// registry holds the new metadata when the task completes.
     /// </summary>
     /// <param name="subject">The subject.</param>

@@ -60,8 +60,8 @@ internal static class StorageMetadataValues
         }
     }
 
-    // The same keys, in the same case, with values that are equal as JSON; a file that is read again gives new
-    // instances of the entries that did not change.
+    // The same keys with values that are equal as JSON; a file that is read again gives new instances of the entries
+    // that did not change.
     private static bool HaveSameContent(ImmutableDictionary<string, JsonElement>? current, ImmutableDictionary<string, JsonElement>? values)
     {
         if (ReferenceEquals(current, values))
@@ -76,8 +76,7 @@ internal static class StorageMetadataValues
 
         foreach (var (key, value) in current)
         {
-            if (!values.TryGetKey(key, out var actualKey) || !string.Equals(key, actualKey, StringComparison.Ordinal) ||
-                !JsonElement.DeepEquals(value, values[key]))
+            if (!values.TryGetValue(key, out var otherValue) || !JsonElement.DeepEquals(value, otherValue))
             {
                 return false;
             }

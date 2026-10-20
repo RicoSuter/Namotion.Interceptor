@@ -34,7 +34,7 @@ public class StorageMetadataFileTests
         const string json = """
             {
               // A comment and a trailing comma are allowed.
-              "NavTitle": "Shelly Pro 4PM",
+              "navTitle": "Shelly Pro 4PM",
               "icon": "ElectricalServices",
               "note": null,
               "$subjects": {
@@ -118,6 +118,19 @@ public class StorageMetadataFileTests
     }
 
     [Fact]
+    public void WhenKeysDifferOnlyInCase_ThenTheyAreDifferentKeysAndOnlyTheExactOnesAreKnown()
+    {
+        // Act
+        var file = Parse("""{ "navTitle": "Pump", "NavTitle": "Other", "$Subjects": { "Channel": { "navTitle": "Relay" } } }""");
+
+        // Assert
+        Assert.Equal("Pump", file.Own.GetString(MetadataKeys.NavigationTitle));
+        Assert.Equal("Other", file.Own.GetString("NavTitle"));
+        Assert.Equal(2, file.Own!.Count);
+        Assert.False(file.HasSubjects);
+    }
+
+    [Fact]
     public void WhenAnEntryHasNoKeys_ThenItIsLeftOut()
     {
         // Act
@@ -133,12 +146,12 @@ public class StorageMetadataFileTests
     [InlineData("[1]")]
     [InlineData("null")]
     [InlineData("")]
-    [InlineData("{ \"a\": 1, \"A\": 2 }")]
+    [InlineData("{ \"a\": 1, \"a\": 2 }")]
     [InlineData("{ \"\\ud800\": 1 }")]
     [InlineData("{ \"$subjects\": [] }")]
     [InlineData("{ \"$subjects\": { \"Channel\": 1 } }")]
     [InlineData("{ \"$properties\": { \"Channels[0\": { \"a\": 1 } } }")]
-    [InlineData("{ \"$properties\": { \"Power\": { \"a\": 1, \"A\": 2 } } }")]
+    [InlineData("{ \"$properties\": { \"Power\": { \"a\": 1, \"a\": 2 } } }")]
     public void WhenContentCannotBeRead_ThenItIsNoMetadata(string json)
     {
         // Act

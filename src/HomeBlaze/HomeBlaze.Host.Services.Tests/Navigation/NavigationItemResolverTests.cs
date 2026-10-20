@@ -307,7 +307,7 @@ public class NavigationItemResolverTests
         var shared = CreateFolder(new() { ["Readme.md"] = new NavigationTestPage(_context) });
         var topBarFolder = CreateFolder(new() { ["Shared"] = shared });
         var metadata = JsonElement.Parse("""{ "location": "AppBar" }""").EnumerateObject()
-            .ToImmutableDictionary(property => property.Name, property => property.Value, StringComparer.OrdinalIgnoreCase);
+            .ToImmutableDictionary(property => property.Name, property => property.Value);
         topBarFolder.TryGetRegisteredSubject()!.AddProperty(KnownAttributes.Metadata, metadata.GetType(), _ => metadata, null);
 
         var root = CreateFolder(new()

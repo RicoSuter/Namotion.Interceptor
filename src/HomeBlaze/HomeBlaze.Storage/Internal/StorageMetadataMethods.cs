@@ -10,7 +10,7 @@ internal static class StorageMetadataMethods
         "Sets metadata of a subject in this storage or of one of its properties. path is the path of the subject below this storage as browse shows it, " +
         "for example Devices/Shelly/Channels[0] (a leading / is ignored), and empty for the storage itself; property is the name of a property of that subject, or omitted for the subject. " +
         "values is a JSON object that is merged into the metadata: a key with a value is set, replacing a nested value as a whole, a key with null is removed, and " +
-        "every other key stays; keys match without regard to case. HomeBlaze reads title (of a folder), navTitle, icon (a MudBlazor icon name), location (NavBar or " +
+        "every other key stays; keys match exactly, case included. HomeBlaze reads title (of a folder), navTitle, icon (a MudBlazor icon name), location (NavBar or " +
         "AppBar) and alignment (Left or Right); any other key, such as comment, is stored as given. At most 64 keys, key names of up to 64 characters, strings of up " +
         "to 256 characters and values of up to 4 KB. The order of the children of a folder is set with SetOrder of the folder. Example: {\"navTitle\": \"Hall light\", \"icon\": null}.";
 

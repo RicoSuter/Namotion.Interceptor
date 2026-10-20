@@ -640,7 +640,7 @@ public partial class FluentStorageContainer :
     {
         foreach (var property in values.EnumerateObject())
         {
-            if (string.Equals(property.Name, MetadataKeys.Order, StringComparison.OrdinalIgnoreCase) &&
+            if (property.Name == MetadataKeys.Order &&
                 property.Value.ValueKind == JsonValueKind.Array)
             {
                 string[] names = [.. property.Value.EnumerateArray().Select(static item => item.GetString()!)];
