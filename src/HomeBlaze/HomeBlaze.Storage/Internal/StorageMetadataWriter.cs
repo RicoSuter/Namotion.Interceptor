@@ -59,10 +59,11 @@ internal static class StorageMetadataWriter
     /// when the file holds no key any more and is deleted.</returns>
     /// <exception cref="StorageRefusedException">
     /// values is no JSON object, gives a key twice, has a key that starts with $, sets a known key in another case to a
-    /// value, sets <c>order</c> of anything but a folder or the root, has a known key with a value of another kind, has a key that
-    /// cannot be read or a value that cannot be written, or exceeds a limit; or the file has two entries of the target,
-    /// cannot be read as a pass reads it, has a path twice, or cannot be written back, such as with a string with a lone
-    /// surrogate; or the path of the target cannot be read back. The message names the key, the file or the path.
+    /// value, sets <c>order</c> of anything but a folder or the root, has a known key with a value of another kind, has
+    /// a key that cannot be read or a value that cannot be written, or exceeds a limit; or the file has two entries of
+    /// the target, cannot be read as a pass reads it, has a path twice, or cannot be written back, such as with a string
+    /// with a lone surrogate; or the path of the target cannot be read back. The message names the key, the file or the
+    /// path.
     /// </exception>
     public static (byte[] Content, StorageMetadataFile File)? Merge(byte[]? content, StorageMetadataTarget target, JsonElement values)
     {
