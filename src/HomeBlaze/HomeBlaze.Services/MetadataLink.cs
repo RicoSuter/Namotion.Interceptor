@@ -12,6 +12,10 @@ public sealed record MetadataLink(string? Title, string? Url, string? Path)
     public static bool IsAllowedAddress(string url)
         => Uri.TryCreate(url, UriKind.Absolute, out var uri) && IsAllowedScheme(uri.Scheme);
 
+    /// <summary>Gets whether the text is an absolute http or https address, which opens in a new tab without opener and referrer.</summary>
+    public static bool IsWebAddress(string url)
+        => Uri.TryCreate(url, UriKind.Absolute, out var uri) && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
+
     /// <summary>Gets whether the scheme is http, https or mailto, without regard to case.</summary>
     public static bool IsAllowedScheme(string scheme)
         => scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) ||

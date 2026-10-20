@@ -72,6 +72,7 @@ namespace HomeBlaze.Services
         public string? Url { get; init; }
         public static bool IsAllowedAddress(string url) { }
         public static bool IsAllowedScheme(string scheme) { }
+        public static bool IsWebAddress(string url) { }
     }
     public static class MetadataPaths
     {

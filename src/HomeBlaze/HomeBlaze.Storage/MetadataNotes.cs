@@ -1,4 +1,5 @@
 using System.Text;
+using HomeBlaze.Services;
 using HomeBlaze.Storage.Internal;
 using HomeBlaze.Storage.Pages;
 using Markdig;
@@ -12,7 +13,7 @@ namespace HomeBlaze.Storage;
 
 /// <summary>
 /// The <c>notes</c> of metadata: Markdown under the rules that the write operations of pages apply to new content, no
-/// HTML, pictures, blocks or expressions, and links only to http, https or mailto addresses or to relative paths in this
+/// HTML, pictures, blocks or expressions, and links only to http, https or mailto addresses or to absolute paths in this
 /// application; and without any attributes, also no identifier or class, as notes are shown inside the page of the
 /// application.
 /// </summary>
@@ -30,7 +31,7 @@ public static class MetadataNotes
 
     private const string RulesMessage =
         "notes hold Markdown text without HTML, pictures, blocks, element attributes or {{ }} expressions, and links only to " +
-        "http, https or mailto addresses or to relative paths in this application.";
+        "http, https or mailto addresses or to absolute paths in this application, such as /pages/Docs/Setup.md.";
 
     /// <summary>Gets why the notes are refused, or null when they may be written.</summary>
     public static string? GetError(string notes)
@@ -48,7 +49,7 @@ public static class MetadataNotes
         try
         {
             MarkdownWriteRules.EnsureActiveContentUnchanged(string.Empty, notes, nameof(notes));
-            return HasLinkToOtherHost(notes) || HasAttributes(notes) ? RulesMessage : null;
+            return HasLinkNotAllowed(notes) || HasAttributes(notes) ? RulesMessage : null;
         }
         catch (ArgumentException)
         {
@@ -56,15 +57,20 @@ public static class MetadataNotes
         }
     }
 
-    // Browsers read a link that starts with two slashes or backslashes, ignoring whitespace and control characters, as
-    // one to another host.
-    private static bool HasLinkToOtherHost(string notes)
-        => MarkdownPageParser.Parse(notes).Document.Descendants().Any(static node => node switch
+    // A relative path or a fragment would resolve against the address of the application rather than that of the page
+    // that shows the notes. Browsers read a path that starts with two slashes or backslashes, ignoring whitespace and
+    // control characters, as one to another host.
+    private static bool HasLinkNotAllowed(string notes)
+        => Markdown.Parse(notes, Pipeline).Descendants().Any(static node => node switch
         {
-            LinkInline { Url: { } url } => IsToOtherHost(url),
-            LinkReferenceDefinition { Url: { } url } => IsToOtherHost(url),
+            LinkInline { Url: var url } => !IsAllowedLink(url),
+            LinkReferenceDefinition { Url: { } url } => !IsAllowedLink(url),
+            AutolinkInline { IsEmail: false, Url: var url } => !IsAllowedLink(url),
             _ => false
         });
+
+    private static bool IsAllowedLink(string? url)
+        => url is not null && (url.StartsWith('/') ? !IsToOtherHost(url) : MetadataLink.IsAllowedAddress(url));
 
     private static bool IsToOtherHost(string url)
         => url.Where(static character => !char.IsWhiteSpace(character) && !char.IsControl(character))
@@ -98,7 +104,8 @@ public static class MetadataNotes
     }
 
     /// <summary>
-    /// Converts the notes to HTML; null for notes that break the rules, such as after an edit of the file by hand,
+    /// Converts the notes to HTML, with a link to a web address that opens in a new tab without opener and referrer;
+    /// null for notes that break the rules, such as after an edit of the file by hand,
     /// which are to be shown as text instead.
     /// </summary>
     public static string? ToHtml(string notes)
@@ -110,7 +117,24 @@ public static class MetadataNotes
 
         try
         {
-            return Markdown.ToHtml(notes, Pipeline);
+            var document = Markdown.Parse(notes, Pipeline);
+            foreach (var node in document.Descendants())
+            {
+                var url = node switch
+                {
+                    LinkInline link => link.Url,
+                    AutolinkInline { IsEmail: false } autolink => autolink.Url,
+                    _ => null
+                };
+                if (url is not null && MetadataLink.IsWebAddress(url))
+                {
+                    var attributes = node.GetAttributes();
+                    attributes.AddPropertyIfNotExist("target", "_blank");
+                    attributes.AddPropertyIfNotExist("rel", "noopener noreferrer");
+                }
+            }
+
+            return document.ToHtml(Pipeline);
         }
         catch (ArgumentException)
         {

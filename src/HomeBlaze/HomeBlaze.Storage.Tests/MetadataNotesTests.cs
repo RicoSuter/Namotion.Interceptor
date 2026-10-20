@@ -21,6 +21,10 @@ public class MetadataNotesTests
     [InlineData(@"[home](/\example.com)")]
     [InlineData(@"[home](\\\\example.com)")]
     [InlineData("[home]\n\n[home]: //example.com")]
+    [InlineData("[Setup](Setup.md)")]
+    [InlineData("[Setup](../Docs/Setup.md)")]
+    [InlineData("[Calibration](#calibration)")]
+    [InlineData("[Setup]\n\n[Setup]: Setup.md")]
     [InlineData("Text {.mud-overlay}")]
     [InlineData("# Pump {#app}")]
     [InlineData("[Setup](/Docs/Setup.md){.mud-button}")]
@@ -53,5 +57,19 @@ public class MetadataNotesTests
 
         // Assert
         Assert.StartsWith("<h1>Pump</h1>\n", html);
+    }
+
+    [Theory]
+    [InlineData("[Manual](https://example.com/manual.pdf)", "<a href=\"https://example.com/manual.pdf\" target=\"_blank\" rel=\"noopener noreferrer\">Manual</a>")]
+    [InlineData("<http://example.com>", "<a href=\"http://example.com\" target=\"_blank\" rel=\"noopener noreferrer\">http://example.com</a>")]
+    [InlineData("[Mail](mailto:service@example.com)", "<a href=\"mailto:service@example.com\">Mail</a>")]
+    [InlineData("[Pump](/browser/Devices/Pump)", "<a href=\"/browser/Devices/Pump\">Pump</a>")]
+    public void WhenNotesHaveALink_ThenAWebAddressOpensInANewTabWithoutReferrer(string notes, string expectedLink)
+    {
+        // Act
+        var html = MetadataNotes.ToHtml(notes);
+
+        // Assert
+        Assert.Contains(expectedLink, html);
     }
 }
