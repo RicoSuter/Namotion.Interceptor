@@ -197,8 +197,21 @@ public class MetadataDictionaryExtensionsTests
         Assert.Equal([new MetadataLink(null, "https://example.com", null), new MetadataLink(null, null, "/Devices")], links.ToArray());
     }
 
+    [Fact]
+    public void WhenTheAddressOfALinkHasAControlOrFormatCharacter_ThenTheLinkIsNotRead()
+    {
+        // Arrange
+        var metadata = Metadata("""{ "links": [{ "url": "https://example.com/\u202Efdp.exe" }, { "path": "/Devices/\u200BPump" }, { "path": "/Devices" }] }""");
+
+        // Act
+        var links = metadata.GetLinks(MetadataKeys.Links);
+
+        // Assert
+        Assert.Equal([new MetadataLink(null, null, "/Devices")], links.ToArray());
+    }
+
     [Theory]
-    [InlineData("""{ "notes": " ", "links": [{ "url": 1 }, { "title": "Neither" }], "tags": [5, " ", "a\u200Bb"], "comment": "x" }""", false)]
+    [InlineData("""{ "notes": " ", "links": [{ "url": 1 }, { "title": "Neither" }, { "path": "/Pump\u202E" }], "tags": [5, " ", "a\u200Bb"], "comment": "x" }""", false)]
     [InlineData("""{ "notes": "Calibrated" }""", true)]
     [InlineData("""{ "links": [{ "path": "/Devices/Pump" }] }""", true)]
     [InlineData("""{ "tags": ["pump"] }""", true)]

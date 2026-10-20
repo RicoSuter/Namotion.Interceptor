@@ -342,7 +342,7 @@ internal static class StorageMetadataWriter
     }
 
     // An empty array removes the key. Each link is an object with an optional title and exactly one of an absolute
-    // http, https or mailto url and an absolute path, each member trimmed.
+    // http, https or mailto url and an absolute path, each member trimmed and without control or format characters.
     private static JsonNode? ToLinks(string key, JsonElement value)
     {
         if (value.ValueKind == JsonValueKind.Null)
@@ -402,9 +402,10 @@ internal static class StorageMetadataWriter
                 throw Refuse($"The {name} of an item of '{key}' is longer than {MaxStringLength} characters.");
             }
 
-            if (name == "title" && MetadataText.HasControlOrFormatCharacter(text))
+            // A link without title shows its url or path as text.
+            if (MetadataText.HasControlOrFormatCharacter(text))
             {
-                throw Refuse($"The title {NameList.Format([text])} of an item of '{key}' has control or format characters.");
+                throw Refuse($"The {name} {NameList.Format([text])} of an item of '{key}' has control or format characters.");
             }
 
             link[name] = JsonValue.Create(text);

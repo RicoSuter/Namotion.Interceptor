@@ -430,6 +430,8 @@ public class StorageMetadataWriterTests
     [InlineData("""{ "tags": ["floor\u200B2"] }""", "control or format characters")]
     [InlineData("""{ "links": [{ "title": "Man\u202Eual", "url": "https://example.com" }] }""", "control or format characters")]
     [InlineData("""{ "links": [{ "title": "Man\nual", "path": "/Devices" }] }""", "control or format characters")]
+    [InlineData("""{ "links": [{ "url": "https://example.com/\u202Efdp.exe" }] }""", "control or format characters")]
+    [InlineData("""{ "links": [{ "path": "/Devices/\u200BPump" }] }""", "control or format characters")]
     [InlineData("""{ "tags": [1] }""", "an array of at most 20 strings")]
     public void WhenNotesLinksOrTagsBreakTheirRules_ThenTheWriteIsRefused(string values, string expectedPart)
     {

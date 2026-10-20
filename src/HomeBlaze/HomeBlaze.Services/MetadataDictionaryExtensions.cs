@@ -88,7 +88,7 @@ public static class MetadataDictionaryExtensions
 
     /// <summary>
     /// Gets the links of the first 20 items of the key, leaving out an item that is no object with exactly one of a
-    /// <c>url</c> and a <c>path</c> string; empty without an array. The members are returned without whitespace around them,
+    /// <c>url</c> and a <c>path</c> string, or whose url or path has a control or format character; empty without an array. The members are returned without whitespace around them,
     /// a title with a control or format character as none, and the address of a link otherwise as it is held, see
     /// <see cref="MetadataLink.IsAllowedAddress"/>.
     /// </summary>
@@ -109,7 +109,8 @@ public static class MetadataDictionaryExtensions
 
             var url = GetMember(item, "url");
             var path = GetMember(item, "path");
-            if ((url is null) != (path is null))
+            // A link without title shows its url or path as text.
+            if ((url is null) != (path is null) && !MetadataText.HasControlOrFormatCharacter(url ?? path!))
             {
                 var title = GetMember(item, "title");
                 links.Add(new MetadataLink(title is not null && MetadataText.HasControlOrFormatCharacter(title) ? null : title, url, path));
