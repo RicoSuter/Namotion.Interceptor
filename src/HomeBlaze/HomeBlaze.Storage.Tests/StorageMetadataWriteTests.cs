@@ -351,6 +351,27 @@ public class StorageMetadataWriteTests : StorageTestBase
         Assert.Contains("'a.md'", exception.Message);
     }
 
+    [Theory]
+    [InlineData("""{ "order": ["a.md", "x.md"] }""", "Names that are not children of the folder: 'x.md'. Its children: 'a.md', 'b.md'.")]
+    [InlineData("""{ "Order": ["a.md", "b.md", "a.md"] }""", "Names given more than once: 'a.md'.")]
+    public async Task WhenOrderIsSetAsMetadataWithNamesThatAreNoChildrenOrRepeated_ThenItIsRefused(string values, string expectedMessage)
+    {
+        // Arrange
+        WriteFile("Docs/a.md");
+        WriteFile("Docs/b.md");
+        var storage = await ConnectAsync();
+        var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
+
+        // Act
+        var exception = await Assert.ThrowsAsync<StorageRefusedException>(() =>
+            storage.SetMetadataAsync(docs, null, Values(values), CancellationToken.None));
+
+        // Assert
+        Assert.Equal(expectedMessage, exception.Message);
+        Assert.False(File.Exists(GetFullPath("Docs/.metadata.json")));
+        Assert.Empty(docs.ChildOrder);
+    }
+
     [Fact]
     public async Task WhenSubjectIsDeleted_ThenItsMetadataFileIsDeleted()
     {

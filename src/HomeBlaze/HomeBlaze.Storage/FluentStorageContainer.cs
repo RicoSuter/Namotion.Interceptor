@@ -626,8 +626,30 @@ public partial class FluentStorageContainer :
             // Fresh from the storage, so that an edit that no pass has seen yet is kept.
             var content = await connection.Reconciler.ReadMetadataFileAsync(target.FilePath, token);
             var written = StorageMetadataWriter.Merge(content, target, copy);
+            if (target.IsContainer && GetOrderError(subject, copy) is { } orderError)
+            {
+                throw new StorageRefusedException(orderError);
+            }
+
             await WriteMetadataFileAsync(connection, target.FilePath, written, token);
         }, cancellationToken);
+    }
+
+    // Runs on the worker, after the writer accepted the values, so that their keys and names can be read. The names of
+    // an order are children of the folder, each given once, which also bounds the size of the order.
+    private static string? GetOrderError(IInterceptorSubject folder, JsonElement values)
+    {
+        foreach (var property in values.EnumerateObject())
+        {
+            if (string.Equals(property.Name, MetadataKeys.Order, StringComparison.OrdinalIgnoreCase) &&
+                property.Value.ValueKind == JsonValueKind.Array)
+            {
+                string[] names = [.. property.Value.EnumerateArray().Select(static item => item.GetString()!)];
+                return ChildOrderNames.GetError(names, ChildOrdering.GetShownNames(folder));
+            }
+        }
+
+        return null;
     }
 
     // Runs on the worker. The own keys of the file of this storage or of a folder of it, or the entry of a subject or

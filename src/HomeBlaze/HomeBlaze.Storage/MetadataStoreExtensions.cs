@@ -37,37 +37,19 @@ public static class MetadataStoreExtensions
         var store = folder as IMetadataStore ?? folder.FindMetadataStore()
             ?? throw new ArgumentException("The folder is in no storage.", nameof(folder));
 
-        var listedNames = new HashSet<string>(StringComparer.Ordinal);
-        var repeatedNames = new SortedSet<string>(StringComparer.Ordinal);
-        foreach (var name in names)
+        // Null arrives from an agent that sends a JSON null in the array.
+        if (names.Any(static name => name is null))
         {
-            // Null arrives from an agent that sends a JSON null in the array.
-            if (name is null)
-            {
-                throw new ArgumentException("A name is null.", nameof(names));
-            }
-
-            if (!listedNames.Add(name))
-            {
-                repeatedNames.Add(name);
-            }
-        }
-
-        if (repeatedNames.Count > 0)
-        {
-            throw new ArgumentException($"Names given more than once: {NameList.Format(repeatedNames)}.", nameof(names));
+            throw new ArgumentException("A name is null.", nameof(names));
         }
 
         var shownNames = ChildOrdering.GetShownNames(folder);
-        var childNames = new HashSet<string>(shownNames, StringComparer.Ordinal);
-        var unknownNames = names.Where(name => !childNames.Contains(name)).ToList();
-        if (unknownNames.Count > 0)
+        if (ChildOrderNames.GetError(names, shownNames) is { } error)
         {
-            throw new ArgumentException(
-                $"Names that are not children of the folder: {NameList.Format(unknownNames)}. Its children: {NameList.Format(childNames.Order(StringComparer.Ordinal))}.",
-                nameof(names));
+            throw new ArgumentException(error, nameof(names));
         }
 
+        var listedNames = new HashSet<string>(names, StringComparer.Ordinal);
         return store.SetMetadataAsync(folder, null, CreateOrder([.. names, .. shownNames.Where(name => !listedNames.Contains(name))]), cancellationToken);
     }
 
