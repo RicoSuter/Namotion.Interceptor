@@ -365,6 +365,17 @@ public class NavigationMetadataTests
     });
 
     [Fact]
+    public async Task WhenTheStorageRootIsShown_ThenItHasNoMetadataButton()
+    {
+        // Act
+        var (_, pane) = await OpenPaneAsync("");
+
+        // Assert
+        await Assertions.Expect(pane.GetByTestId("reorder-children-button")).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
+        await Assertions.Expect(pane.GetByTestId("edit-metadata-button")).ToHaveCountAsync(0);
+    }
+
+    [Fact]
     public async Task WhenAFolderWithMetadataIsShown_ThenEachChildHasOneRowAndTheMetadataIsNotListed()
     {
         // Arrange

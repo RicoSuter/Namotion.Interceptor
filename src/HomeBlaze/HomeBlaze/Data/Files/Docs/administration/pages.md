@@ -107,7 +107,7 @@ With a keyboard, press Tab to reach the arrows of a row, which show while they h
 
 ### Metadata of Folders, Subjects and Properties
 
-The **Metadata** button in the header of the browser opens a dialog for every item whose metadata a storage keeps: a folder, the root, a subject stored as `X.json` and every subject inside one, at any depth. It is not shown for pages and the subjects of their blocks, and it is disabled while the storage is not connected. For a folder it sets `title`, `navTitle` and `icon`; for a subject `navTitle`, `icon`, `location` and `alignment`:
+The **Metadata** button in the header of the browser opens a dialog for every item whose metadata a storage keeps: a folder, a subject stored as `X.json` and every subject inside one, at any depth, and a storage stored as a JSON file inside another storage. It is not shown for the root of the storage, whose `.metadata.json` is edited by hand or by agents, and not for pages and the subjects of their blocks, and it is disabled while the storage is not connected. For a folder it sets `title`, `navTitle` and `icon`; for a subject `navTitle`, `icon`, `location` and `alignment`:
 
 | Key | Description |
 |-----|-------------|

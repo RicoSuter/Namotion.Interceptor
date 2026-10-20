@@ -964,9 +964,13 @@
         await SubjectEditDialog.ShowAsync(DialogService, ComponentRegistry, Subject, $"Edit {title}");
     }
 
-    // The store that keeps the metadata of the shown subject, null when none does.
+    // The store that keeps the metadata of the shown subject, null when none does and for the storage root: a store
+    // without a store above it.
     private IMetadataStore? GetMetadataStore()
-        => Subject?.FindMetadataStore() is { } store && store.CanStoreMetadata(Subject) ? store : null;
+        => Subject?.FindMetadataStore() is { } store && store.CanStoreMetadata(Subject) &&
+           (!ReferenceEquals(store, Subject) || Subject.TryGetRegisteredSubject() is { Parents: [var parent, ..] } && parent.Property.Parent.Subject.FindMetadataStore() is not null)
+            ? store
+            : null;
 
     private async Task OpenMetadataDialogAsync()
     {

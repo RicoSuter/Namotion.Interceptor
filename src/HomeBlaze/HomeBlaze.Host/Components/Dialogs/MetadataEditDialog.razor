@@ -148,7 +148,7 @@
 
     /// <summary>
     /// Gets whether the owner is edited as a folder, with a title of its own, rather than as a subject. A storage is a
-    /// subject, also when it is the root.
+    /// subject.
     /// </summary>
     private static bool IsFolder(IInterceptorSubject owner)
         => owner is IMetadataContainer and not IConfigurable;
