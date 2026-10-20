@@ -196,4 +196,18 @@ public class MetadataDictionaryExtensionsTests
         // Assert
         Assert.Equal([new MetadataLink(null, "https://example.com", null), new MetadataLink(null, null, "/Devices")], links.ToArray());
     }
+
+    [Theory]
+    [InlineData("""{ "notes": " ", "links": [{ "url": 1 }, { "title": "Neither" }], "tags": [5, " ", "a\u200Bb"], "comment": "x" }""", false)]
+    [InlineData("""{ "notes": "Calibrated" }""", true)]
+    [InlineData("""{ "links": [{ "path": "/Devices/Pump" }] }""", true)]
+    [InlineData("""{ "tags": ["pump"] }""", true)]
+    public void WhenMetadataIsCheckedForNotesLinksOrTags_ThenOnlyThoseThatAreReadCount(string json, bool expected)
+    {
+        // Act
+        var hasNotesLinksOrTags = Metadata(json).HasNotesLinksOrTags();
+
+        // Assert
+        Assert.Equal(expected, hasNotesLinksOrTags);
+    }
 }

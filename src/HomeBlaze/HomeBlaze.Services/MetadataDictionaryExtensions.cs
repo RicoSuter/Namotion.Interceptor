@@ -80,6 +80,13 @@ public static class MetadataDictionaryExtensions
     }
 
     /// <summary>
+    /// Gets whether the metadata has notes, links or tags to show: notes that are not blank, or a link or a tag as
+    /// <see cref="GetLinks"/> and <see cref="GetTags"/> read them.
+    /// </summary>
+    public static bool HasNotesLinksOrTags(this IReadOnlyDictionary<string, JsonElement>? metadata)
+        => metadata.GetString(MetadataKeys.Notes) is not null || !metadata.GetLinks(MetadataKeys.Links).IsEmpty || !metadata.GetTags().IsEmpty;
+
+    /// <summary>
     /// Gets the links of the first 20 items of the key, leaving out an item that is no object with exactly one of a
     /// <c>url</c> and a <c>path</c> string; empty without an array. The members are returned without whitespace around them,
     /// a title with a control or format character as none, and the address of a link otherwise as it is held, see

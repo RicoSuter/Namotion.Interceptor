@@ -876,7 +876,7 @@
             @* With notes, links or tags the icon shows them in a tooltip, also without a store to edit them, such as on the
                storage root; without, it shows while the row is hovered, as the copy button does. The buttons stay enabled
                while the storage is disconnected, as a disabled button shows no tooltip. *@
-            @if (!prop.IsAttribute && HasSummary(propertyMetadata))
+            @if (!prop.IsAttribute && propertyMetadata.HasNotesLinksOrTags())
             {
                 <MudTooltip>
                     <ChildContent>
@@ -1037,17 +1037,6 @@
            (!ReferenceEquals(store, Subject) || Subject.TryGetRegisteredSubject() is { Parents: [var parent, ..] } && parent.Property.Parent.Subject.FindMetadataStore() is not null)
             ? store
             : null;
-
-    // Whether the metadata has notes, links or tags, which the summary shows. Reads the keys without allocating, as
-    // it runs for every row in every render.
-    private static bool HasSummary(ImmutableDictionary<string, JsonElement>? metadata)
-        => metadata is not null &&
-           (metadata.TryGetValue(MetadataKeys.Notes, out var notes) && notes.ValueKind == JsonValueKind.String ||
-            IsNonEmptyArray(metadata, MetadataKeys.Links) ||
-            IsNonEmptyArray(metadata, MetadataKeys.Tags));
-
-    private static bool IsNonEmptyArray(ImmutableDictionary<string, JsonElement> metadata, string key)
-        => metadata.TryGetValue(key, out var value) && value.ValueKind == JsonValueKind.Array && value.GetArrayLength() > 0;
 
     private async Task OpenPropertyMetadataDialogAsync(RegisteredSubjectProperty property, string displayName)
     {
