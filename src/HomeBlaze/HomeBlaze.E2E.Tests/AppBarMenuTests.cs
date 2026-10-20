@@ -125,10 +125,10 @@ public class AppBarMenuTests
         var page = await OpenAsync("pages/Dashboard.md");
 
         // Act
-        await page.OpenTimeZoneMenuAsync();
+        await page.ClickTimeZoneMenuEntryAsync();
 
         // Assert
-        await Assertions.Expect(page.GetByPlaceholder("Search timezone")).ToBeFocusedAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(page.TimeZoneSearch()).ToBeFocusedAsync(new() { Timeout = Timeout });
     }
 
     [Fact]
@@ -142,7 +142,7 @@ public class AppBarMenuTests
         await page.Keyboard.PressAsync("Escape");
 
         // Assert: the submenu closes and the app bar menu stays open.
-        await Assertions.Expect(page.GetByPlaceholder("Search timezone")).ToBeHiddenAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(page.TimeZoneSearch()).ToBeHiddenAsync(new() { Timeout = Timeout });
         await Assertions.Expect(page.DarkModeMenuEntry()).ToBeVisibleAsync();
     }
 
@@ -153,7 +153,7 @@ public class AppBarMenuTests
         var page = await OpenAsync("pages/Dashboard.md");
         await page.OpenTimeZoneMenuAsync();
         await page.Keyboard.TypeAsync("Ber");
-        await Assertions.Expect(page.GetByPlaceholder("Search timezone")).ToHaveValueAsync("Ber");
+        await Assertions.Expect(page.TimeZoneSearch()).ToHaveValueAsync("Ber");
         await Assertions.Expect(page.Locator(".mud-popover-open .mud-list-item").Filter(new() { HasTextString = "Europe/Berlin" }))
             .ToBeVisibleAsync(new() { Timeout = Timeout });
 
@@ -161,7 +161,7 @@ public class AppBarMenuTests
         await page.Keyboard.PressAsync("Escape");
 
         // Assert: the submenu closes and the app bar menu stays open.
-        await Assertions.Expect(page.GetByPlaceholder("Search timezone")).ToBeHiddenAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(page.TimeZoneSearch()).ToBeHiddenAsync(new() { Timeout = Timeout });
         await Assertions.Expect(page.DarkModeMenuEntry()).ToBeVisibleAsync();
     }
 

@@ -158,7 +158,7 @@ public class BrowserPreferencesTests
         // Arrange
         var page = await OpenAsync();
         await page.OpenTimeZoneMenuAsync();
-        await page.GetByPlaceholder("Search timezone").FillAsync("Berlin");
+        await page.TimeZoneSearch().FillAsync("Berlin");
         await page.Locator(".mud-popover-open .mud-list-item")
             .Filter(new() { HasTextRegex = new Regex(@"^Europe/Berlin \(") })
             .ClickAsync();
