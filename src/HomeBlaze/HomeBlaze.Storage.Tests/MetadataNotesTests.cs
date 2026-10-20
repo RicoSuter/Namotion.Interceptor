@@ -42,6 +42,16 @@ public class MetadataNotesTests
     [InlineData("[x](JAVASCRIPT:alert(1))")]
     [InlineData("[x](data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==)")]
     [InlineData("![x][r]\n\n[r]: https://example.com/pump.png")]
+    [InlineData("[x](/browser/../settings)")]
+    [InlineData("[x](/browser/..)")]
+    [InlineData("[x](/pages/./Docs/Setup.md)")]
+    [InlineData("[x](/pages/%2e%2e/settings)")]
+    [InlineData("[x](/pages/.%2E/settings)")]
+    [InlineData("[x](/pages/..%2fsettings)")]
+    [InlineData(@"[x](/pages/\.\./settings)")]
+    [InlineData(@"[x](/pages/Docs\..\..\settings)")]
+    [InlineData("[x](/pages/Docs%5c..%5csettings)")]
+    [InlineData("[x]\n\n[x]: /browser/../settings")]
     public void WhenNotesBreakTheRules_ThenTheyAreNotRenderedAsHtml(string notes)
     {
         // Act
@@ -104,6 +114,9 @@ public class MetadataNotesTests
     [InlineData("[Browser](/browser)")]
     [InlineData("[Pump](/browser/Devices/Pump)")]
     [InlineData("[Setup](/pages/Docs/Setup.md)")]
+    [InlineData("[Setup](/pages/Docs/Setup.v2.md)")]
+    [InlineData("[Setup](/pages/Docs/...md)")]
+    [InlineData("[Pump](/browser/Devices/Pump?property=Temperature)")]
     public void WhenNotesLinkToARouteOfTheApplication_ThenTheyAreAllowed(string notes)
     {
         // Act

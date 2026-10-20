@@ -15,9 +15,9 @@ namespace HomeBlaze.Storage;
 /// <summary>
 /// The <c>notes</c> of metadata: Markdown under the rules that the write operations of pages apply to new content, no
 /// HTML, pictures, blocks or expressions, and links only to http, https or mailto addresses or to the routes of this
-/// application, <c>/</c>, <c>/browser</c>, <c>/browser/...</c> and <c>/pages/...</c>; and without attributes, also no
-/// identifier or class, as notes are shown inside the page of the application. Braces that give none, such as
-/// <c>{low}</c>, and footnotes are text.
+/// application, <c>/</c>, <c>/browser</c>, <c>/browser/...</c> and <c>/pages/...</c>, without <c>.</c> or <c>..</c>
+/// segments; and without attributes, also no identifier or class, as notes are shown inside the page of the
+/// application. Braces that give none, such as <c>{low}</c>, and footnotes are text.
 /// </summary>
 public static class MetadataNotes
 {
@@ -102,9 +102,16 @@ public static class MetadataNotes
 
     private static bool IsAllowedLink(string url)
         => url is "/" or "/browser" ||
-           url.StartsWith("/browser/", StringComparison.Ordinal) ||
-           url.StartsWith("/pages/", StringComparison.Ordinal) ||
+           (url.StartsWith("/browser/", StringComparison.Ordinal) || url.StartsWith("/pages/", StringComparison.Ordinal)) && IsPlainRoute(url) ||
            MetadataLink.IsAllowedAddress(url);
+
+    // A dot segment or a backslash, which a browser reads as a slash, also percent-encoded, would lead out of the route.
+    private static bool IsPlainRoute(string url)
+    {
+        var end = url.AsSpan().IndexOfAny('?', '#');
+        var path = Uri.UnescapeDataString(end < 0 ? url : url[..end]);
+        return !url.Contains('\\') && !path.Contains('\\') && !path.Split('/').Any(static segment => segment is "." or "..");
+    }
 
     // Extensions set attributes as well, such as the classes of a task list, so attributes are given by the notes where
     // they differ from those without the attributes extension. Braces with only names, such as {low}, give no identifier,
