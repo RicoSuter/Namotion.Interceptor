@@ -64,9 +64,7 @@ icon: Dashboard
 
 ## Navigation Order and Metadata
 
-The order of pages, folders and subjects in the sidebar, the top bar and the browser, the titles and icons of folders, and the place of subjects in the top bar come from metadata, which [Metadata](metadata.md) describes. A page keeps its own title, icon, `location` and `alignment` in its frontmatter.
-
-`position:` in the frontmatter of a page is no longer read and has no effect. Order the pages with **Reorder** in the browser or in the `order` of their folder, see [Navigation Order](metadata.md#navigation-order).
+The order of pages, folders and subjects in the sidebar, the top bar and the browser, the titles and icons of folders, and the place of subjects in the top bar come from metadata, which [Metadata](metadata.md) describes. A page keeps its own title, icon, `location` and `alignment` in its frontmatter; its place among the other children of its folder is set with **Reorder** in the browser or in the `order` of the folder, see [Navigation Order](metadata.md#navigation-order).
 
 ---
 
