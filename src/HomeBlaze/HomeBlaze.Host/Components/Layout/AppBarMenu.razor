@@ -43,6 +43,10 @@
             <MudIcon Icon="@ToggleIcon(IsDarkMode)" Color="@(IsDarkMode ? Color.Success : Color.Default)"/>
         </span>
     </MudMenuItem>
+    @* An app started from the home screen has no address bar, so these two stand in for its reload button and address. *@
+    <MudDivider/>
+    <MudMenuItem Icon="@Icons.Material.Filled.Home" Href="/" data-testid="app-bar-menu-home">Home</MudMenuItem>
+    <MudMenuItem Icon="@Icons.Material.Filled.Refresh" OnClick="@Reload" data-testid="app-bar-menu-reload">Reload</MudMenuItem>
 </MudMenu>
 
 @code {
@@ -72,6 +76,8 @@
     }
 
     private bool IsActive(NavigationItem item) => MainLayout.IsActive(NavigationManager, item);
+
+    private void Reload() => NavigationManager.Refresh(forceReload: true);
 
     private void OnDeveloperModeChanged()
     {

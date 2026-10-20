@@ -51,7 +51,7 @@ public class AppBarMenuTests
         await Assertions.Expect(entries.First).ToHaveTextAsync("Menu Page", new() { Timeout = Timeout });
         await Assertions.Expect(entries.First).ToHaveAttributeAsync("href", MenuPageUrl);
         await Assertions.Expect(entries.First.Locator(".mud-menu-item-icon")).ToBeVisibleAsync();
-        await Assertions.Expect(page.Locator(".mud-popover-open .app-bar-menu-list > .mud-divider")).ToHaveCountAsync(1);
+        await Assertions.Expect(page.Locator($".mud-popover-open .app-bar-menu-list > a[href='{MenuPageUrl}'] + .mud-divider")).ToHaveCountAsync(1);
         await Assertions.Expect(page.GetByTestId("app-bar-menu-developer-mode")).ToBeVisibleAsync();
         await Assertions.Expect(page.TimeZoneMenuEntry()).ToContainTextAsync("Automatic (");
         await Assertions.Expect(page.DarkModeMenuEntry()).ToBeVisibleAsync();

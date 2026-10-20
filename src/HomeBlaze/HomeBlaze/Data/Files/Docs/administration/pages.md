@@ -64,7 +64,7 @@ position: 1
 
 ### The Top Bar Menu
 
-The ⋮ button at the right end of the top bar opens a menu with the developer mode, the time zone and the dark mode. A page with `location: AppBar` and `alignment: Menu` is an entry of that menu instead of an icon in the bar, above these three and separated from them by a line. Use it for pages that are opened now and then, so that the bar keeps room for the ones opened every day:
+The ⋮ button at the right end of the top bar opens a menu with the developer mode, the time zone and the dark mode, and below them Home and Reload, which go to the start page and load the open page again. They are there for HomeBlaze started from the home screen of a phone, which shows no address bar and no reload button. A page with `location: AppBar` and `alignment: Menu` is an entry of that menu instead of an icon in the bar, above the developer mode and separated from it by a line. Use it for pages that are opened now and then, so that the bar keeps room for the ones opened every day:
 
 ```yaml
 ---
