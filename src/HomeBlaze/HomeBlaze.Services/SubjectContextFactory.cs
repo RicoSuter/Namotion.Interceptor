@@ -1,4 +1,5 @@
 using HomeBlaze.Services.Lifecycle;
+using HomeBlaze.Services.Metadata;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Hosting;

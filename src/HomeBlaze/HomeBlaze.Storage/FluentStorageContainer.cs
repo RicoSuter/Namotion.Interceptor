@@ -7,15 +7,17 @@ using FluentStorage.Blobs;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Services;
+using HomeBlaze.Services.Metadata;
 using HomeBlaze.Storage.Abstractions;
+using HomeBlaze.Storage.Abstractions.Metadata;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
+using HomeBlaze.Storage.Metadata;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
-using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Attributes;
 using StoragePath = HomeBlaze.Storage.Internal.StoragePath;
 

@@ -118,7 +118,7 @@ namespace HomeBlaze.Storage
     [System.ComponentModel.Category("System")]
     [System.ComponentModel.Description("Mounts a storage location and loads the files in it as subjects")]
     [System.ComponentModel.DisplayName("Storage")]
-    public class FluentStorageContainer : Microsoft.Extensions.Hosting.BackgroundService, HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Storage.Abstractions.IConfigurationWriter, HomeBlaze.Storage.Abstractions.IMetadataContainer, HomeBlaze.Storage.Abstractions.IMetadataStore, HomeBlaze.Storage.Abstractions.IStorageContainer, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    public class FluentStorageContainer : Microsoft.Extensions.Hosting.BackgroundService, HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Storage.Abstractions.IConfigurationWriter, HomeBlaze.Storage.Abstractions.IStorageContainer, HomeBlaze.Storage.Abstractions.Metadata.IMetadataContainer, HomeBlaze.Storage.Abstractions.Metadata.IMetadataStore, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
         public const string SetMetadataMethodName = "SetMetadata";
         public FluentStorageContainer(HomeBlaze.Services.SubjectTypeRegistry typeRegistry, HomeBlaze.Services.ConfigurableSubjectSerializer serializer, System.IServiceProvider serviceProvider, Microsoft.Extensions.Logging.ILogger<HomeBlaze.Storage.FluentStorageContainer>? logger = null) { }
@@ -193,12 +193,8 @@ namespace HomeBlaze.Storage
         public static bool IsGranted { get; }
         public static System.IDisposable Enter(bool isGranted) { }
     }
-    public static class MetadataStoreExtensions
-    {
-        public static System.Threading.Tasks.Task SetOrderAsync(this Namotion.Interceptor.IInterceptorSubject folder, System.Collections.Generic.IReadOnlyList<string> names, System.Threading.CancellationToken cancellationToken) { }
-    }
     [Namotion.Interceptor.Attributes.InterceptorSubject]
-    public class VirtualFolder : HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Storage.Abstractions.IMetadataContainer, HomeBlaze.Storage.Abstractions.IStorageContainer, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    public class VirtualFolder : HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Storage.Abstractions.IStorageContainer, HomeBlaze.Storage.Abstractions.Metadata.IMetadataContainer, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
         public VirtualFolder(HomeBlaze.Storage.Abstractions.IStorageContainer storage, string relativePath) { }
         public System.Collections.Generic.IReadOnlyCollection<string> ChildNames { get; }
@@ -306,6 +302,13 @@ namespace HomeBlaze.Storage.Internal
         protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
         protected void RaisePropertyChanged(string propertyName) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+}
+namespace HomeBlaze.Storage.Metadata
+{
+    public static class MetadataStoreExtensions
+    {
+        public static System.Threading.Tasks.Task SetOrderAsync(this Namotion.Interceptor.IInterceptorSubject folder, System.Collections.Generic.IReadOnlyList<string> names, System.Threading.CancellationToken cancellationToken) { }
     }
 }
 namespace HomeBlaze.Storage.Pages

@@ -1,11 +1,12 @@
 using System.Text.Json;
-using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.AI.Agents;
 using HomeBlaze.Services;
+using HomeBlaze.Abstractions;
+using HomeBlaze.Services.Metadata;
 using HomeBlaze.Storage;
-using HomeBlaze.Storage.Abstractions;
+using HomeBlaze.Storage.Abstractions.Metadata;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
