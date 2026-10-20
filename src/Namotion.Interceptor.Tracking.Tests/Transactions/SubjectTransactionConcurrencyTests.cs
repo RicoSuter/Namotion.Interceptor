@@ -8,6 +8,7 @@ using System.Reactive.Linq;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Transactions;
 using Namotion.Interceptor.Tracking.Tests.Models;
+using static Namotion.Interceptor.Tracking.Tests.Transactions.TransactionTestContext;
 
 namespace Namotion.Interceptor.Tracking.Tests.Transactions;
 
@@ -44,22 +45,6 @@ internal sealed class DisposalCaptureGateValue(
 
 public class SubjectTransactionConcurrencyTests
 {
-    private static async Task RunWithoutAsyncLocalFlowAsync(Action action)
-    {
-        Task task;
-        var flowControl = ExecutionContext.SuppressFlow();
-        try
-        {
-            task = Task.Run(action);
-        }
-        finally
-        {
-            flowControl.Undo();
-        }
-
-        await task;
-    }
-
     private static IInterceptorSubjectContext CreateTransactionContext()
     {
         return InterceptorSubjectContext.Create()
@@ -136,7 +121,7 @@ public class SubjectTransactionConcurrencyTests
         // Assert: the write went straight to the model instead of into the pooled dictionary. Read it
         // from a flow with no ambient transaction so no pending value can mask the stored value.
         string? modelFirstName = null;
-        await RunWithoutAsyncLocalFlowAsync(() => modelFirstName = person.FirstName);
+        await RunOnThreadPoolWithoutFlowAsync(() => modelFirstName = person.FirstName);
         Assert.Equal("New", modelFirstName);
         Assert.DoesNotContain(openTransaction.GetPendingChanges(), change => change.Property.Name == nameof(Person.FirstName));
 
@@ -193,7 +178,7 @@ public class SubjectTransactionConcurrencyTests
         Assert.Equal("New", pendingChange.GetNewValue<string?>());
 
         string? modelFirstName = null;
-        await RunWithoutAsyncLocalFlowAsync(() => modelFirstName = person.FirstName);
+        await RunOnThreadPoolWithoutFlowAsync(() => modelFirstName = person.FirstName);
         Assert.Equal("Old", modelFirstName);
     }
 
@@ -232,7 +217,7 @@ public class SubjectTransactionConcurrencyTests
             new PropertyReference(person, nameof(Person.FirstName)), out _));
 
         string? modelFirstName = null;
-        await RunWithoutAsyncLocalFlowAsync(() => modelFirstName = person.FirstName);
+        await RunOnThreadPoolWithoutFlowAsync(() => modelFirstName = person.FirstName);
         Assert.Equal("Model", modelFirstName);
 
         // The open transaction still masks reads in its own flow.
@@ -397,7 +382,7 @@ public class SubjectTransactionConcurrencyTests
         Assert.Empty(parkedTransaction.GetPendingChanges());
 
         string? modelLastName = null;
-        await RunWithoutAsyncLocalFlowAsync(() => modelLastName = person.LastName);
+        await RunOnThreadPoolWithoutFlowAsync(() => modelLastName = person.LastName);
         Assert.Equal("Model", modelLastName);
     }
 
@@ -463,7 +448,7 @@ public class SubjectTransactionConcurrencyTests
 
             // Assert: observe the landed model outside any ambient transaction before replay is released.
             string? intermediateModelValue = null;
-            await RunWithoutAsyncLocalFlowAsync(() => intermediateModelValue = person.FirstName);
+            await RunOnThreadPoolWithoutFlowAsync(() => intermediateModelValue = person.FirstName);
             Assert.Equal("RawAfterDispose", intermediateModelValue);
         }
         finally
@@ -528,7 +513,7 @@ public class SubjectTransactionConcurrencyTests
             string? modelPlain = null;
             string? modelSideEffect = null;
             string? modelDerivedWithSetter = null;
-            await RunWithoutAsyncLocalFlowAsync(() =>
+            await RunOnThreadPoolWithoutFlowAsync(() =>
             {
                 modelPlain = subject.Plain;
                 modelSideEffect = subject.SideEffect;
@@ -604,7 +589,7 @@ public class SubjectTransactionConcurrencyTests
             string? modelPlain = null;
             string? modelSideEffect = null;
             string? modelDerivedWithSetter = null;
-            await RunWithoutAsyncLocalFlowAsync(() =>
+            await RunOnThreadPoolWithoutFlowAsync(() =>
             {
                 modelPlain = subject.Plain;
                 modelSideEffect = subject.SideEffect;

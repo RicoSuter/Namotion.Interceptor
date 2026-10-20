@@ -5,7 +5,7 @@ namespace Namotion.Interceptor.Tracking.Tests.Transactions;
 
 public class CommitWriteMarkerTests
 {
-    private static (IInterceptorSubjectContext Context, ITransactionHandler Handler, Person Person) CreateContext()
+    private static (IInterceptorSubjectContext Context, ITransactionHandler Handler, Person Person) CreateContextWithPerson()
     {
         var context = TransactionTestContext.CreateContext(out var handler);
         return (context, handler, new Person(context));
@@ -15,7 +15,7 @@ public class CommitWriteMarkerTests
     public async Task WhenPropertyValueAndHandlerMatch_ThenMarkIsConsumedOnce()
     {
         // Arrange
-        var (context, handler, person) = CreateContext();
+        var (context, handler, person) = CreateContextWithPerson();
         using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
         var property = new PropertyReference(person, nameof(Person.FirstName));
 
@@ -35,7 +35,7 @@ public class CommitWriteMarkerTests
     public async Task WhenValueDiffers_ThenMarkDoesNotMatchButIsConsumed()
     {
         // Arrange
-        var (context, handler, person) = CreateContext();
+        var (context, handler, person) = CreateContextWithPerson();
         using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
         var property = new PropertyReference(person, nameof(Person.FirstName));
 
@@ -55,7 +55,7 @@ public class CommitWriteMarkerTests
     public async Task WhenMarkedValueIsNull_ThenOnlyNullMatches()
     {
         // Arrange
-        var (context, handler, person) = CreateContext();
+        var (context, handler, person) = CreateContextWithPerson();
         using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
         var property = new PropertyReference(person, nameof(Person.FirstName));
 
@@ -81,7 +81,7 @@ public class CommitWriteMarkerTests
     public async Task WhenPropertyDiffers_ThenMarkDoesNotMatchAndStaysSet()
     {
         // Arrange
-        var (context, handler, person) = CreateContext();
+        var (context, handler, person) = CreateContextWithPerson();
         using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
         var markedProperty = new PropertyReference(person, nameof(Person.FirstName));
         var otherProperty = new PropertyReference(person, nameof(Person.LastName));
@@ -102,7 +102,7 @@ public class CommitWriteMarkerTests
     public async Task WhenHandlerIsNotPartOfTransaction_ThenMarkDoesNotMatchAndStaysSet()
     {
         // Arrange
-        var (context, handler, person) = CreateContext();
+        var (context, handler, person) = CreateContextWithPerson();
         using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
         var property = new PropertyReference(person, nameof(Person.FirstName));
 
@@ -122,7 +122,7 @@ public class CommitWriteMarkerTests
     public async Task WhenReferenceValueIsOnlyEqual_ThenMarkMatchesOnlyTheSameInstance()
     {
         // Arrange
-        var (context, handler, person) = CreateContext();
+        var (context, handler, person) = CreateContextWithPerson();
         using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
         var property = new PropertyReference(person, nameof(Person.FirstName));
         var checkedValue = new AlwaysEqual();
@@ -149,7 +149,7 @@ public class CommitWriteMarkerTests
     public async Task WhenValueIsNullableValueType_ThenEqualValueAndNullMatch()
     {
         // Arrange
-        var (context, handler, person) = CreateContext();
+        var (context, handler, person) = CreateContextWithPerson();
         using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
         var property = new PropertyReference(person, nameof(Person.FirstName));
 
@@ -189,7 +189,7 @@ public class CommitWriteMarkerTests
     public async Task WhenScopeIsDisposedWithoutConsumption_ThenNothingMatches()
     {
         // Arrange
-        var (context, handler, person) = CreateContext();
+        var (context, handler, person) = CreateContextWithPerson();
         using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
         var property = new PropertyReference(person, nameof(Person.FirstName));
         using (CommitWriteMarker.Set(transaction, property, "Bob"))
@@ -208,7 +208,7 @@ public class CommitWriteMarkerTests
     public async Task WhenNestedScopeIsDisposed_ThenOuterMarkIsRestored()
     {
         // Arrange
-        var (context, handler, person) = CreateContext();
+        var (context, handler, person) = CreateContextWithPerson();
         using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
         var outerProperty = new PropertyReference(person, nameof(Person.FirstName));
         var innerProperty = new PropertyReference(person, nameof(Person.LastName));

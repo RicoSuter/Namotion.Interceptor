@@ -653,7 +653,6 @@ public class SubjectTransactionHandlerTests
             }
         };
         var person = new Person(context) { FirstName = "Ann" };
-        var flowWithoutTransaction = ExecutionContext.Capture()!;
         using var transaction = await context.BeginTransactionAsync(
             TransactionFailureHandling.BestEffort, TransactionLocking.Optimistic);
         person.FirstName = "Bob";
@@ -663,7 +662,7 @@ public class SubjectTransactionHandlerTests
         // Act
         // Started inline so that it completes synchronously only if the failed commit released the lock.
         Task? competingCommit = null;
-        ExecutionContext.Run(flowWithoutTransaction, _ => competingCommit = CommitInOwnFlowAsync(context, person), null);
+        RunOutsideTransactionFlow(() => competingCommit = CommitInOwnFlowAsync(context, person));
 
         // Assert
         Assert.True(competingCommit!.IsCompletedSuccessfully);
@@ -778,11 +777,10 @@ public class SubjectTransactionHandlerTests
 
         // Keeps a transaction active in the process after the dispose, so the result does not depend on other tests.
         using var unrelatedTransaction = await BeginInOwnFlowAsync(CreateContext());
-        var flowWithoutTransaction = ExecutionContext.Capture()!;
 
         // Act
         using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-        writer.DuringWrite = () => ExecutionContext.Run(flowWithoutTransaction, _ => transaction.Dispose(), null);
+        writer.DuringWrite = () => RunOutsideTransactionFlow(transaction.Dispose);
         person.FirstName = "Bob";
         await transaction.CommitAsync(CancellationToken.None);
 

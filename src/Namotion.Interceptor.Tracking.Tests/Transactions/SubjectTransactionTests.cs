@@ -8,27 +8,12 @@ using System.Reactive.Linq;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Transactions;
 using Namotion.Interceptor.Tracking.Tests.Models;
+using static Namotion.Interceptor.Tracking.Tests.Transactions.TransactionTestContext;
 
 namespace Namotion.Interceptor.Tracking.Tests.Transactions;
 
 public class SubjectTransactionTests
 {
-    private static async Task RunWithoutAsyncLocalFlowAsync(Action action)
-    {
-        Task task;
-        var flowControl = ExecutionContext.SuppressFlow();
-        try
-        {
-            task = Task.Run(action);
-        }
-        finally
-        {
-            flowControl.Undo();
-        }
-
-        await task;
-    }
-
     private static IInterceptorSubjectContext CreateTransactionContext()
     {
         return InterceptorSubjectContext.Create()
@@ -208,7 +193,7 @@ public class SubjectTransactionTests
         {
             person.FirstName = "InTransaction";
 
-            await RunWithoutAsyncLocalFlowAsync(() => { person.FirstName = "ExternalChange"; });
+            await RunOnThreadPoolWithoutFlowAsync(() => { person.FirstName = "ExternalChange"; });
 
             // Act & Assert
             var ex = await Assert.ThrowsAsync<SubjectTransactionConflictException>(
@@ -236,7 +221,7 @@ public class SubjectTransactionTests
         {
             person.FirstName = "InTransaction";
 
-            await RunWithoutAsyncLocalFlowAsync(() => { person.FirstName = "ExternalChange"; });
+            await RunOnThreadPoolWithoutFlowAsync(() => { person.FirstName = "ExternalChange"; });
 
             // Act
             await transaction.CommitAsync(CancellationToken.None);
@@ -280,8 +265,8 @@ public class SubjectTransactionTests
         // Act
         person.FirstName = "landed-after-empty-commit";
         string? landedValue = null;
-        await RunWithoutAsyncLocalFlowAsync(() => landedValue = person.FirstName);
-        await RunWithoutAsyncLocalFlowAsync(() => person.FirstName = "external-after-empty-commit");
+        await RunOnThreadPoolWithoutFlowAsync(() => landedValue = person.FirstName);
+        await RunOnThreadPoolWithoutFlowAsync(() => person.FirstName = "external-after-empty-commit");
 
         // Assert
         Assert.Equal("landed-after-empty-commit", landedValue);
@@ -302,8 +287,8 @@ public class SubjectTransactionTests
         // Act
         person.LastName = "landed-after-commit";
         string? landedValue = null;
-        await RunWithoutAsyncLocalFlowAsync(() => landedValue = person.LastName);
-        await RunWithoutAsyncLocalFlowAsync(() => person.LastName = "external-after-commit");
+        await RunOnThreadPoolWithoutFlowAsync(() => landedValue = person.LastName);
+        await RunOnThreadPoolWithoutFlowAsync(() => person.LastName = "external-after-commit");
 
         // Assert
         Assert.Equal("committed", person.FirstName);
@@ -328,8 +313,8 @@ public class SubjectTransactionTests
         // Act
         subject.SideEffect = "landed-after-terminal-failure";
         string? landedValue = null;
-        await RunWithoutAsyncLocalFlowAsync(() => landedValue = subject.SideEffect);
-        await RunWithoutAsyncLocalFlowAsync(() => subject.SideEffect = "external-after-terminal-failure");
+        await RunOnThreadPoolWithoutFlowAsync(() => landedValue = subject.SideEffect);
+        await RunOnThreadPoolWithoutFlowAsync(() => subject.SideEffect = "external-after-terminal-failure");
 
         // Assert
         Assert.Equal("applied", subject.Plain);
@@ -406,7 +391,7 @@ public class SubjectTransactionTests
             TransactionLocking.Optimistic,
             conflictBehavior: TransactionConflictBehavior.FailOnConflict);
         person.FirstName = "pending";
-        await RunWithoutAsyncLocalFlowAsync(() => person.FirstName = "external");
+        await RunOnThreadPoolWithoutFlowAsync(() => person.FirstName = "external");
         await Assert.ThrowsAsync<SubjectTransactionConflictException>(
             () => transaction.CommitAsync(CancellationToken.None).AsTask());
 
@@ -419,10 +404,10 @@ public class SubjectTransactionTests
             change => change.Property.Name == nameof(Person.LastName));
 
         string? modelLastName = null;
-        await RunWithoutAsyncLocalFlowAsync(() => modelLastName = person.LastName);
+        await RunOnThreadPoolWithoutFlowAsync(() => modelLastName = person.LastName);
         Assert.Null(modelLastName);
 
-        await RunWithoutAsyncLocalFlowAsync(() => person.FirstName = "original");
+        await RunOnThreadPoolWithoutFlowAsync(() => person.FirstName = "original");
         await transaction.CommitAsync(CancellationToken.None);
         Assert.Equal("pending", person.FirstName);
         Assert.Equal("captured-after-conflict", person.LastName);
@@ -718,7 +703,7 @@ public class SubjectTransactionTests
             person.FirstName = "InTx1";
             person.LastName = "InTx2";
 
-            await RunWithoutAsyncLocalFlowAsync(() =>
+            await RunOnThreadPoolWithoutFlowAsync(() =>
             {
                 person.FirstName = "External1";
                 person.LastName = "External2";
@@ -859,7 +844,7 @@ public class SubjectTransactionTests
 
         person.FirstName = "First";
         person.FirstName = "Original";
-        await RunWithoutAsyncLocalFlowAsync(() => person.FirstName = "External");
+        await RunOnThreadPoolWithoutFlowAsync(() => person.FirstName = "External");
         person.FirstName = "Second";
 
         // Act & Assert
@@ -869,7 +854,7 @@ public class SubjectTransactionTests
         Assert.Equal(nameof(Person.FirstName), Assert.Single(exception.ConflictingProperties).Name);
 
         string? landedValue = null;
-        await RunWithoutAsyncLocalFlowAsync(() => landedValue = person.FirstName);
+        await RunOnThreadPoolWithoutFlowAsync(() => landedValue = person.FirstName);
         Assert.Equal("External", landedValue);
     }
 }

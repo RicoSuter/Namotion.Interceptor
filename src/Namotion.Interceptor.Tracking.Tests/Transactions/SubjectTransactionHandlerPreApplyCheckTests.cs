@@ -42,8 +42,7 @@ public class SubjectTransactionHandlerPreApplyCheckTests
         var person = new Person(context) { FirstName = "Ann", LastName = "Lee" };
         var lastNamesSeen = new List<string?>();
         handler.OnCommittingAction = (_, _) => lastNamesSeen.Add(person.LastName);
-        var flowWithoutTransaction = ExecutionContext.Capture()!;
-        writer.DuringWrite = () => ExecutionContext.Run(flowWithoutTransaction, _ => person.LastName = "Kim", null);
+        writer.DuringWrite = () => RunOutsideTransactionFlow(() => person.LastName = "Kim");
 
         // Act
         using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
@@ -89,22 +88,16 @@ public class SubjectTransactionHandlerPreApplyCheckTests
     [Theory]
     [InlineData(TransactionFailureHandling.BestEffort)]
     [InlineData(TransactionFailureHandling.Rollback)]
-    public async Task WhenPreApplyCheckRejectsChange_ThenNoCheckedChangeLandsAndTransactionIsTerminal(TransactionFailureHandling failureHandling)
+    public async Task WhenPreApplyCheckRejectsChange_ThenNoApplyRunsAndTransactionIsTerminal(TransactionFailureHandling failureHandling)
     {
         // Arrange
-        var calls = 0;
         var writer = new CountingTransactionWriter();
         var context = CreateContext(out var handler, writer);
-        handler.OnCommittingAction = (_, changes) =>
-        {
-            if (++calls == 2)
-            {
-                var lastName = changes.Single(change => change.Property.Name == nameof(Person.LastName));
-                throw new SubjectTransactionException(
-                    "invalid", [], [lastName], [new InvalidOperationException("invalid last name")]);
-            }
-        };
+        handler.RejectPreApplyCheck(nameof(Person.LastName), "invalid last name");
+        var probe = new CommitWriteProbe(handler);
+        context.AddService(probe);
         var person = new Person(context) { FirstName = "Ann", LastName = "Lee" };
+        probe.Writes.Clear();
 
         // Act
         using var transaction = await context.BeginTransactionAsync(failureHandling);
@@ -115,6 +108,7 @@ public class SubjectTransactionHandlerPreApplyCheckTests
         // Assert
         Assert.Equal("Ann", person.FirstName);
         Assert.Equal("Lee", person.LastName);
+        Assert.Empty(probe.Writes);
         Assert.Empty(exception.AppliedChanges);
         Assert.Equal(
             [nameof(Person.FirstName), nameof(Person.LastName)],
@@ -127,45 +121,6 @@ public class SubjectTransactionHandlerPreApplyCheckTests
         var retryException = await Assert.ThrowsAsync<InvalidOperationException>(
             async () => await transaction.CommitAsync(CancellationToken.None));
         Assert.Contains("already been committed", retryException.Message);
-    }
-
-    [Fact]
-    public async Task WhenPreApplyCheckRejectsChangeInBestEffort_ThenNoApplyRunsAndEachWrittenSourceIsRevertedOnce()
-    {
-        // Arrange
-        var calls = 0;
-        var writer = new CountingTransactionWriter();
-        var context = CreateContext(out var handler, writer);
-        handler.OnCommittingAction = (_, changes) =>
-        {
-            if (++calls == 2)
-            {
-                var firstName = changes.Single(change => change.Property.Name == nameof(Person.FirstName));
-                throw new SubjectTransactionException(
-                    "invalid", [], [firstName], [new InvalidOperationException("invalid first name")]);
-            }
-        };
-        var probe = new CommitWriteProbe(handler);
-        context.AddService(probe);
-        var person = new Person(context) { FirstName = "Ann", LastName = "Lee" };
-        probe.Writes.Clear();
-
-        // Act
-        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-        person.FirstName = "Bob";
-        person.LastName = "Kim";
-        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None).AsTask());
-
-        // Assert
-        Assert.Equal("Ann", person.FirstName);
-        Assert.Equal("Lee", person.LastName);
-        Assert.Empty(probe.Writes);
-        Assert.Equal(
-            [nameof(Person.FirstName), nameof(Person.LastName)],
-            exception.FailedChanges.Select(change => change.Property.Name).Order());
-        Assert.Equal(
-            [nameof(Person.FirstName), nameof(Person.LastName)],
-            writer.Reverted.Select(change => change.Property.Name).Order());
     }
 
     [Fact]
@@ -235,11 +190,10 @@ public class SubjectTransactionHandlerPreApplyCheckTests
         var writer = new CountingTransactionWriter();
         var context = CreateContext(out var handler, writer);
         var person = new Person(context) { FirstName = "Ann" };
-        var flowWithoutTransaction = ExecutionContext.Capture()!;
 
         // Act
         using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-        writer.DuringWrite = () => ExecutionContext.Run(flowWithoutTransaction, _ => transaction.Dispose(), null);
+        writer.DuringWrite = () => RunOutsideTransactionFlow(transaction.Dispose);
         person.FirstName = "Bob";
         await transaction.CommitAsync(CancellationToken.None);
 
@@ -256,12 +210,11 @@ public class SubjectTransactionHandlerPreApplyCheckTests
         var writer = new CountingTransactionWriter();
         var context = CreateContext(out var handler, writer);
         var person = new Person(context) { FirstName = "Ann" };
-        var flowWithoutTransaction = ExecutionContext.Capture()!;
         handler.OnCommittingAction = (committingTransaction, _) =>
         {
             if (++calls == 2)
             {
-                ExecutionContext.Run(flowWithoutTransaction, _ => committingTransaction.Dispose(), null);
+                RunOutsideTransactionFlow(committingTransaction.Dispose);
                 throw new InvalidOperationException("rejected");
             }
         };
@@ -282,18 +235,9 @@ public class SubjectTransactionHandlerPreApplyCheckTests
     public async Task WhenPreApplyCheckRejectsChangeWithRollback_ThenChangeWithoutSourceIsReportedAsNotApplied()
     {
         // Arrange
-        var calls = 0;
         var writer = new CountingTransactionWriter { UnwrittenPropertyNames = { nameof(Person.LastName) } };
         var context = CreateContext(out var handler, writer);
-        handler.OnCommittingAction = (_, changes) =>
-        {
-            if (++calls == 2)
-            {
-                var firstName = changes.Single(change => change.Property.Name == nameof(Person.FirstName));
-                throw new SubjectTransactionException(
-                    "invalid", [], [firstName], [new InvalidOperationException("invalid first name")]);
-            }
-        };
+        handler.RejectPreApplyCheck(nameof(Person.FirstName), "invalid first name");
         var person = new Person(context) { FirstName = "Ann", LastName = "Lee" };
 
         // Act
@@ -317,16 +261,9 @@ public class SubjectTransactionHandlerPreApplyCheckTests
     public async Task WhenPreApplyCheckThrowsOperationCanceled_ThenCommitFailsTerminally()
     {
         // Arrange
-        var calls = 0;
         var writer = new CountingTransactionWriter();
         var context = CreateContext(out var handler, writer);
-        handler.OnCommittingAction = (_, _) =>
-        {
-            if (++calls == 2)
-            {
-                throw new OperationCanceledException();
-            }
-        };
+        handler.RejectPreApplyCheck(new OperationCanceledException());
         var person = new Person(context) { FirstName = "Ann" };
 
         // Act
@@ -418,16 +355,9 @@ public class SubjectTransactionHandlerPreApplyCheckTests
     {
         // Arrange
         var source = new object();
-        var calls = 0;
         var writer = new CountingTransactionWriter { ConfirmingSource = source };
         var context = CreateContext(out var handler, writer);
-        handler.OnCommittingAction = (_, _) =>
-        {
-            if (++calls == 2)
-            {
-                throw new InvalidOperationException("rejected");
-            }
-        };
+        handler.RejectPreApplyCheck(new InvalidOperationException("rejected"));
         var person = new Person(context) { FirstName = "Ann" };
 
         // Act

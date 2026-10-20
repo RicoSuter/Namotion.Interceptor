@@ -14,22 +14,6 @@ namespace Namotion.Interceptor.Tracking.Tests.Transactions;
 
 public class SubjectTransactionWriterTests
 {
-    private static async Task RunWithoutAsyncLocalFlowAsync(Action action)
-    {
-        Task task;
-        var flowControl = ExecutionContext.SuppressFlow();
-        try
-        {
-            task = Task.Run(action);
-        }
-        finally
-        {
-            flowControl.Undo();
-        }
-
-        await task;
-    }
-
     [Theory]
     [InlineData(TransactionLocking.Exclusive, TransactionFailureHandling.Rollback)]
     [InlineData(TransactionLocking.Exclusive, TransactionFailureHandling.BestEffort)]
@@ -220,7 +204,7 @@ public class SubjectTransactionWriterTests
                    conflictBehavior: TransactionConflictBehavior.FailOnConflict))
         {
             subject.Plain = "transaction";
-            await RunWithoutAsyncLocalFlowAsync(() => subject.Plain = "external");
+            await RunOnThreadPoolWithoutFlowAsync(() => subject.Plain = "external");
             changes.Clear();
 
             await Assert.ThrowsAsync<SubjectTransactionConflictException>(
@@ -325,17 +309,9 @@ public class SubjectTransactionWriterTests
         TransactionFailureHandling failureHandling)
     {
         // Arrange
-        var committingCalls = 0;
         var context = CreateContext(out var handler, new RevertUntilCancelledTransactionWriter());
-        handler.OnCommittingAction = (_, _) =>
-        {
-            if (++committingCalls == 2)
-            {
-                throw new InvalidOperationException("rejected");
-            }
-        };
+        handler.RejectPreApplyCheck(new InvalidOperationException("rejected"));
         var person = new Person(context) { FirstName = "Ann", LastName = "Lee" };
-        var flowWithoutTransaction = ExecutionContext.Capture()!;
         using var transaction = await context.BeginTransactionAsync(
             failureHandling, commitTimeout: TimeSpan.FromMilliseconds(50));
         person.FirstName = "Bob";
@@ -346,11 +322,11 @@ public class SubjectTransactionWriterTests
             () => transaction.CommitAsync(CancellationToken.None).AsTask());
         string? landedFirstName = null;
         string? landedLastName = null;
-        ExecutionContext.Run(flowWithoutTransaction, _ =>
+        RunOutsideTransactionFlow(() =>
         {
             landedFirstName = person.FirstName;
             landedLastName = person.LastName;
-        }, null);
+        });
         var retryException = await Assert.ThrowsAsync<InvalidOperationException>(
             async () => await transaction.CommitAsync(CancellationToken.None));
 
@@ -364,7 +340,7 @@ public class SubjectTransactionWriterTests
         Assert.IsAssignableFrom<OperationCanceledException>(exception.Errors[1]);
         Assert.Equal("Ann", landedFirstName);
         Assert.Equal("Lee", landedLastName);
-        Assert.Equal(2, committingCalls);
+        Assert.Equal(2, handler.CommittingCalls);
         Assert.Contains("already been committed", retryException.Message);
     }
 
@@ -376,7 +352,6 @@ public class SubjectTransactionWriterTests
         var writer = new RevertUntilCancelledTransactionWriter(failFirstWriteOf: nameof(Person.LastName));
         context.AddService<ITransactionWriter>(writer);
         var person = new Person(context) { FirstName = "Ann", LastName = "Lee" };
-        var flowWithoutTransaction = ExecutionContext.Capture()!;
         using var transaction = await context.BeginTransactionAsync(
             TransactionFailureHandling.Rollback, commitTimeout: TimeSpan.FromMilliseconds(50));
         person.FirstName = "Bob";
@@ -386,7 +361,7 @@ public class SubjectTransactionWriterTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => transaction.CommitAsync(CancellationToken.None).AsTask());
         string? landedFirstName = null;
-        ExecutionContext.Run(flowWithoutTransaction, _ => landedFirstName = person.FirstName, null);
+        RunOutsideTransactionFlow(() => landedFirstName = person.FirstName);
         await transaction.CommitAsync(CancellationToken.None);
 
         // Assert
@@ -577,10 +552,10 @@ public class SubjectTransactionWriterTests
         person.FirstName = "Ann";
         person.LastName = "Smith";
 
-        await RunWithoutAsyncLocalFlowAsync(() => person.LastName = "External");
+        await RunOnThreadPoolWithoutFlowAsync(() => person.LastName = "External");
         await Assert.ThrowsAsync<SubjectTransactionConflictException>(
             () => transaction.CommitAsync(CancellationToken.None).AsTask());
-        await RunWithoutAsyncLocalFlowAsync(() => person.LastName = null);
+        await RunOnThreadPoolWithoutFlowAsync(() => person.LastName = null);
         changes.Clear();
 
         // Act

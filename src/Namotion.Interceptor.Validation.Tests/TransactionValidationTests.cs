@@ -234,7 +234,7 @@ public class TransactionValidationTests
             .WithService<IPropertyValidator>(() => validator);
         subjectContext.AddFallbackContext(transactionContext);
         var motor = new Motor(subjectContext);
-        validator.ValidatedProperties.Clear();
+        validator.Calls.Clear();
 
         // Act
         using var transaction = await transactionContext.BeginTransactionAsync(
@@ -246,7 +246,7 @@ public class TransactionValidationTests
         // Assert
         Assert.Equal(150, motor.MotorSpeed);
         Assert.Equal(200, motor.MaxAllowedSpeed);
-        Assert.Equal([nameof(Motor.MotorSpeed), nameof(Motor.MaxAllowedSpeed)], validator.ValidatedProperties);
+        Assert.Equal([nameof(Motor.MotorSpeed), nameof(Motor.MaxAllowedSpeed)], validator.Calls.Select(call => call.Property));
     }
 
     [Fact]
@@ -567,7 +567,7 @@ public class TransactionValidationTests
         TransactionValidationMode validationMode, bool withWriter, Type[] expectedTypeArguments)
     {
         // Arrange
-        var validator = new CallRecordingValidator();
+        var validator = new RecordingValidator();
         var context = InterceptorSubjectContext
             .Create()
             .WithFullPropertyTracking()
@@ -652,7 +652,7 @@ public class TransactionValidationTests
             .WithService<IPropertyValidator>(() => validator);
         var holder = new MotorHolder(context);
         var motor = new Motor { MotorSpeed = 500 };
-        validator.ValidatedProperties.Clear();
+        validator.Calls.Clear();
 
         // Act
         using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback))
@@ -665,7 +665,7 @@ public class TransactionValidationTests
         Assert.Same(motor, holder.Motor);
         Assert.Equal(500, motor.MotorSpeed);
         // Only the captured reference write is validated, at capture and in the commit check.
-        Assert.Equal([nameof(MotorHolder.Motor), nameof(MotorHolder.Motor)], validator.ValidatedProperties);
+        Assert.Equal([nameof(MotorHolder.Motor), nameof(MotorHolder.Motor)], validator.Calls.Select(call => call.Property));
 
         // The attached motor now uses the context, so a later write is validated.
         Assert.Throws<ValidationException>(() => motor.MotorSpeed = 600);
@@ -699,30 +699,17 @@ public class TransactionValidationTests
     }
 
     /// <summary>
-    /// Records the name of every property it validates and delegates the validation.
+    /// Records the property, type argument and value of every call and delegates the validation to
+    /// <paramref name="inner"/>, or accepts every value without one.
     /// </summary>
-    private sealed class RecordingValidator(IPropertyValidator inner) : IPropertyValidator
-    {
-        public List<string> ValidatedProperties { get; } = [];
-
-        public IEnumerable<ValidationResult> Validate<TProperty>(in PropertyValidationContext<TProperty> context)
-        {
-            ValidatedProperties.Add(context.Property.Name);
-            return inner.Validate(in context);
-        }
-    }
-
-    /// <summary>
-    /// Records the property, type argument and value of every call and accepts every value.
-    /// </summary>
-    private sealed class CallRecordingValidator : IPropertyValidator
+    private sealed class RecordingValidator(IPropertyValidator? inner = null) : IPropertyValidator
     {
         public List<(string Property, Type TypeArgument, object? Value)> Calls { get; } = [];
 
         public IEnumerable<ValidationResult> Validate<TProperty>(in PropertyValidationContext<TProperty> context)
         {
             Calls.Add((context.Property.Name, typeof(TProperty), context.Value));
-            return [];
+            return inner?.Validate(in context) ?? [];
         }
     }
 
