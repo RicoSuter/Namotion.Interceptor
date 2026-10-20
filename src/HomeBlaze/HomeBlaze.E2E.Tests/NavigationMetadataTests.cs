@@ -365,6 +365,81 @@ public class NavigationMetadataTests
     });
 
     [Fact]
+    public async Task WhenAFolderWithMetadataIsShown_ThenEachChildHasOneRowAndTheMetadataIsNotListed()
+    {
+        // Arrange
+        var folder = GetDemoFolder();
+        Assert.NotNull(folder.GetMetadata());
+
+        // Act
+        var (_, pane) = await OpenPaneAsync("Demo");
+
+        // Assert
+        await Assertions.Expect(pane.Locator(".subject-pane-child-name"))
+            .ToHaveCountAsync(folder.Children.Count, new() { Timeout = PageLoadTimeout });
+        await Assertions.Expect(pane).Not.ToContainTextAsync("HomeBlaze:Metadata");
+    }
+
+    [Fact]
+    public async Task WhenAnAgentWritesTheFirstMetadataOfAFolderWhileItsPaneIsOpen_ThenThePaneShowsIt()
+    {
+        // Arrange
+        var root = (FluentStorageContainer)_fixture.ServerServices.GetRequiredService<RootManager>().Root!;
+        var folder = (VirtualFolder)root.Children["Agents"];
+        var metadataPath = _fixture.GetPagePath(Path.Combine("Agents", ".metadata.json"));
+        Assert.False(File.Exists(metadataPath), "The folder has metadata already.");
+        Assert.Null(folder.GetMetadata());
+        try
+        {
+            var (_, pane) = await OpenPaneAsync("Agents");
+            await Assertions.Expect(pane.Locator("h1")).ToContainTextAsync("Agents", new() { Timeout = PageLoadTimeout });
+
+            // Act - the method that agents call.
+            await root.SetMetadataAsync("Agents", null, JsonElement.Parse("""{ "title": "Assistants" }"""), CancellationToken.None);
+
+            // Assert - without a reload.
+            await Assertions.Expect(pane.Locator("h1")).ToContainTextAsync("Assistants", new() { Timeout = PageLoadTimeout });
+            Assert.Equal("Assistants", folder.Title);
+        }
+        finally
+        {
+            await RestoreFileAsync(metadataPath, null);
+        }
+    }
+
+    [Fact]
+    public async Task WhenASubjectInsideAStoredSubjectGetsANavigationTitle_ThenTheFileBesideTheStoredSubjectHasItsEntry()
+    {
+        // Arrange
+        var sidecarPath = _fixture.GetDemoPagePath("Layout.metadata.json");
+        var originalSidecar = File.Exists(sidecarPath) ? await File.ReadAllTextAsync(sidecarPath) : null;
+        try
+        {
+            var (page, pane) = await OpenPaneAsync("Demo/Layout/Cells/0");
+            await pane.GetByTestId("edit-metadata-button").ClickAsync();
+
+            // MudDialog puts its test id on its content, which does not hold the actions.
+            var dialog = page.Locator(".mud-dialog").Filter(new() { Has = page.GetByTestId("metadata-edit-dialog") });
+            await dialog.GetByTestId("metadata-navigation-title").FillAsync("First cell");
+
+            // Act
+            await dialog.GetByTestId("metadata-save").ClickAsync();
+            await Assertions.Expect(dialog).ToHaveCountAsync(0, new() { Timeout = PageLoadTimeout });
+
+            // Assert
+            var cell = ((HomeBlaze.Components.GridLayout)GetDemoFolder().Children["Layout"]).Cells[0];
+            Assert.Equal("First cell", cell.GetNavigationTitle());
+            using var sidecar = JsonDocument.Parse(await File.ReadAllTextAsync(sidecarPath));
+            Assert.Equal("First cell", sidecar.RootElement
+                .GetProperty("$subjects").GetProperty("Cells[0]").GetProperty("navTitle").GetString());
+        }
+        finally
+        {
+            await RestoreFileAsync(sidecarPath, originalSidecar);
+        }
+    }
+
+    [Fact]
     public async Task WhenAPropertyHasMetadata_ThenItsRowGetsNoDetails()
     {
         // Arrange
