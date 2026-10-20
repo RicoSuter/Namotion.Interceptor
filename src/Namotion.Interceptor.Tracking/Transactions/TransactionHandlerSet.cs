@@ -2,13 +2,12 @@ using System.Runtime.InteropServices;
 
 namespace Namotion.Interceptor.Tracking.Transactions;
 
-// A mutable struct embedded in the transaction to save an allocation per transaction. It must only be used through
-// the transaction's field: a copy, or a readonly field, would publish inclusions to the copy.
-
 /// <summary>
 /// The transaction handlers that take part in a transaction: those of the transaction's context, resolved when it
 /// begins, followed by those added from the contexts of written subjects. Handlers match by equality.
 /// </summary>
+// A mutable struct embedded in the transaction to save an allocation per transaction. It must only be used through
+// the transaction's field: a copy, or a readonly field, would publish inclusions to the copy.
 internal struct TransactionHandlerSet
 {
     // Replaced under the transaction lock only while the transaction captures, so the handlers that checked a commit

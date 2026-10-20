@@ -193,7 +193,8 @@ public sealed class SubjectTransaction : IDisposable
     }
 
     /// <summary>
-    /// Gets the number of pending changes that are not cancelled. Must be called under <see cref="_pendingChangesLock"/>.
+    /// Gets the number of pending changes that are not cancelled. Must be called under
+    /// <see cref="_pendingChangesLock"/>.
     /// </summary>
     private int GetLiveChangeCount()
     {
@@ -418,6 +419,8 @@ public sealed class SubjectTransaction : IDisposable
         return true;
     }
 
+    [System.Diagnostics.CodeAnalysis.DoesNotReturn]
+    [MethodImpl(MethodImplOptions.NoInlining)]
     internal static void ThrowWriteDuringHandlerCheck()
     {
         throw new InvalidOperationException(
@@ -1006,7 +1009,6 @@ public sealed class SubjectTransaction : IDisposable
             {
                 pendingChangesToReturn = _pendingChanges;
                 _pendingChanges = null;
-                _cancelledChanges = null;
             }
         }
 
@@ -1092,7 +1094,9 @@ public sealed class SubjectTransaction : IDisposable
     /// Calls the handlers with the snapshot before anything is written. A handler exception propagates unchanged; the
     /// caller's <see cref="EndCommit"/> then keeps the pending changes for a retry.
     /// </summary>
-    /// <exception cref="ObjectDisposedException">Thrown when the transaction was disposed while the handlers ran.</exception>
+    /// <exception cref="ObjectDisposedException">
+    /// Thrown when the transaction was disposed while the handlers ran.
+    /// </exception>
     private void RunCommitCheck(ReadOnlySpan<SubjectPropertyChange> changes)
     {
         if (_handlerSet.Handlers.Length == 0)

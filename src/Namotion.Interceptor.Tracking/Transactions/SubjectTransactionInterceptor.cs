@@ -196,7 +196,7 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
         ChangeOrigin origin)
     {
         var handlers = transaction.Handlers;
-        if (!handlers.IsDefaultOrEmpty)
+        if (!handlers.IsEmpty)
         {
             InvokeCapturingHandlersCore(handlers, transaction, property, newValue, origin);
         }
@@ -216,6 +216,7 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
         }
     }
 
+    [System.Diagnostics.CodeAnalysis.DoesNotReturn]
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void ThrowTransactionContextMismatch(PropertyReference property)
     {
