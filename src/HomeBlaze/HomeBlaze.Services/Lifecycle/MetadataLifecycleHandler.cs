@@ -18,9 +18,10 @@ public sealed class MetadataLifecycleHandler : ILifecycleHandler, IPropertyLifec
 {
     // The properties of the subject that attached last on this thread, after it was applied. The lifecycle attaches
     // each property that a subject has when it attaches after the subject itself, and those were applied with it. A
-    // property that is added later replaces the properties of its subject, so it never matches.
+    // property that is added later replaces the properties of its subject, so it never matches. Weak, so that the
+    // subject that attached last is not kept.
     [ThreadStatic]
-    private static IReadOnlyDictionary<string, SubjectPropertyMetadata>? _appliedProperties;
+    private static WeakReference<IReadOnlyDictionary<string, SubjectPropertyMetadata>>? _appliedProperties;
 
     /// <inheritdoc />
     public void HandleLifecycleChange(SubjectLifecycleChange change)
@@ -28,7 +29,8 @@ public sealed class MetadataLifecycleHandler : ILifecycleHandler, IPropertyLifec
         if (change.IsContextAttach)
         {
             Apply(change.Subject, null);
-            _appliedProperties = change.Subject.Properties;
+            var properties = change.Subject.Properties;
+            (_appliedProperties ??= new WeakReference<IReadOnlyDictionary<string, SubjectPropertyMetadata>>(properties)).SetTarget(properties);
         }
     }
 
@@ -41,7 +43,7 @@ public sealed class MetadataLifecycleHandler : ILifecycleHandler, IPropertyLifec
         var propertyName = change.Property.Name;
         if (metadata.IsDynamic && metadata.Type != typeof(MethodMetadata) &&
             propertyName != KnownAttributes.Metadata && !propertyName.Contains('@') &&
-            !ReferenceEquals(change.Subject.Properties, _appliedProperties))
+            !IsAppliedWithSubject(change.Subject))
         {
             Apply(change.Subject, propertyName);
         }
@@ -51,6 +53,9 @@ public sealed class MetadataLifecycleHandler : ILifecycleHandler, IPropertyLifec
     public void DetachProperty(SubjectPropertyLifecycleChange change)
     {
     }
+
+    private static bool IsAppliedWithSubject(IInterceptorSubject subject)
+        => _appliedProperties is not null && _appliedProperties.TryGetTarget(out var applied) && ReferenceEquals(subject.Properties, applied);
 
     private static void Apply(IInterceptorSubject subject, string? propertyName)
     {
