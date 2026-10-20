@@ -21,12 +21,14 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
     private readonly DirectoryInfo _directory = Directory.CreateTempSubdirectory("homeblaze-metadata-tools-");
     private readonly List<FluentStorageContainer> _storages = [];
 
-    [Fact]
-    public async Task WhenMetadataIsSetThroughTheStorage_ThenBrowseAndGetPropertyShowIt()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenMetadataIsSetThroughTheStorage_ThenBrowseAndGetPropertyShowIt(bool forAgents)
     {
         // Arrange
         WriteFile("Docs/Pump.json", """{ "speed": 1 }""");
-        var (tools, _) = await CreateToolsAsync();
+        var (tools, _) = await CreateToolsAsync(forAgents);
 
         // Act
         var subjectResult = await CallAsync(tools["invoke_operation"], new
@@ -185,15 +187,17 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
         // Act
         var storageMethodsForPeople = storage.TryGetRegisteredSubject()!.GetAllMethods(ExclusionTarget.UserInterface);
         var storageMethodsForAgents = storage.TryGetRegisteredSubject()!.GetAllMethods(ExclusionTarget.Agents);
+        var folderMethodsForPeople = folder.TryGetRegisteredSubject()!.GetAllMethods(ExclusionTarget.UserInterface);
         var folderMethodsForAgents = folder.TryGetRegisteredSubject()!.GetAllMethods(ExclusionTarget.Agents);
 
         // Assert
         Assert.DoesNotContain(storageMethodsForPeople, method => method.Title is "Set Metadata" or "Get Order" or "Set Order");
+        Assert.DoesNotContain(folderMethodsForPeople, method => method.Title is "Get Order" or "Set Order");
         Assert.Contains(storageMethodsForAgents, method => method.Title == "Set Metadata");
         Assert.Contains(folderMethodsForAgents, method => method.Title == "Set Order");
     }
 
-    private async Task<(Dictionary<string, McpToolInfo> Tools, FluentStorageContainer Storage)> CreateToolsAsync()
+    private async Task<(Dictionary<string, McpToolInfo> Tools, FluentStorageContainer Storage)> CreateToolsAsync(bool forAgents = false)
     {
         var typeProvider = new TypeProvider();
         typeProvider.AddAssembly(typeof(FluentStorageContainer).Assembly);
@@ -221,7 +225,7 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
 
         root = new AgentTestRoot(context) { Children = new Dictionary<string, IInterceptorSubject> { ["Storage"] = storage } };
         await storage.ConnectAsync(CancellationToken.None);
-        var configuration = HomeBlazeMcpConfigurationFactory.Create(serviceProvider, () => root, isReadOnly: false, forAgents: false);
+        var configuration = HomeBlazeMcpConfigurationFactory.Create(serviceProvider, () => root, isReadOnly: false, forAgents);
         return (new McpToolFactory(root, configuration).CreateTools().ToDictionary(tool => tool.Name), storage);
     }
 

@@ -60,6 +60,49 @@ public class AgentOperationAccessTests
     }
 
     [Fact]
+    public async Task WhenAnAgentSetsTheMetadataOfAPropertyOfAnAgent_ThenItIsRefused()
+    {
+        // Arrange
+        var (root, agent, services) = CreateGraph();
+        var storage = CreateStorage(services);
+        root.Children = new Dictionary<string, IInterceptorSubject> { ["Storage"] = storage };
+        storage.Children = new Dictionary<string, IInterceptorSubject> { ["Agent"] = agent };
+        var invokeOperation = CreateTools(services, root, forAgents: true)["invoke_operation"];
+
+        // Act
+        var result = JsonSerializer.SerializeToElement(await invokeOperation.Handler(
+            JsonSerializer.SerializeToElement(new
+            {
+                path = "/Storage", method = "SetMetadata", parameters = new { path = "Agent", property = "Instructions", values = new { comment = "x" } }
+            }),
+            CancellationToken.None));
+
+        // Assert
+        Assert.Equal("Agents cannot change the metadata of agents.", result.GetProperty("error").GetString());
+    }
+
+    [Fact]
+    public async Task WhenAnAgentSetsTheMetadataOfASubjectInsideAnAgent_ThenItIsRefused()
+    {
+        // Arrange
+        var (root, agent, services) = CreateGraph();
+        var storage = CreateStorage(services);
+        root.Children = new Dictionary<string, IInterceptorSubject> { ["Storage"] = storage };
+        storage.Children = new Dictionary<string, IInterceptorSubject> { ["Agent"] = agent };
+        var inner = new AgentTestRoot();
+        agent.TryGetRegisteredSubject()!.AddProperty("Inner", typeof(AgentTestRoot), _ => inner, null);
+        var invokeOperation = CreateTools(services, root, forAgents: true)["invoke_operation"];
+
+        // Act
+        var result = JsonSerializer.SerializeToElement(await invokeOperation.Handler(
+            JsonSerializer.SerializeToElement(new { path = "/Storage", method = "SetMetadata", parameters = new { path = "Agent/Inner", values = new { navTitle = "x" } } }),
+            CancellationToken.None));
+
+        // Assert
+        Assert.Equal("Agents cannot change the metadata of agents.", result.GetProperty("error").GetString());
+    }
+
+    [Fact]
     public async Task WhenAnExternalClientSetsTheMetadataOfAnAgent_ThenTheStorageDecides()
     {
         // Arrange

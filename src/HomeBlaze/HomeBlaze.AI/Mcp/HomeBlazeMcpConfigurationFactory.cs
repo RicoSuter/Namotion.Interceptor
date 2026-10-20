@@ -37,8 +37,7 @@ internal static class HomeBlazeMcpConfigurationFactory
     /// <param name="isReadOnly">Whether set_property and operations are blocked.</param>
     /// <param name="forAgents">
     /// Whether the tools serve the built-in agents; invoke_operation and the Markdown tools then refuse every
-    /// operation of an agent (<see cref="LlmAgentBase"/>), SetMetadata of a storage for an agent or a subject inside one,
-    /// and SetOrder of a folder inside an agent.
+    /// operation of an agent (<see cref="LlmAgentBase"/>) and SetMetadata of a storage for an agent or a subject inside one.
     /// </param>
     public static McpServerConfiguration Create(
         IServiceProvider serviceProvider,
@@ -104,18 +103,17 @@ internal static class HomeBlazeMcpConfigurationFactory
             return "Agents cannot run operations of agents.";
         }
 
-        // SetMetadata of a storage whose path leads to an agent or to a subject inside one, and SetOrder of a folder inside one.
-        var target = method.PropertyName switch
+        // SetMetadata of a storage whose path leads to an agent or to a subject inside one. The arguments are the input
+        // parameters in declaration order, and path is the first input parameter of SetMetadata.
+        if (method.PropertyName == "SetMetadata" &&
+            subject.Subject is FluentStorageContainer storage &&
+            arguments is [string path, ..] &&
+            MetadataPaths.TryResolveSubject(storage, path)?.TryGetFirstParentOrSelf<LlmAgentBase>() is not null)
         {
-            "SetMetadata" when subject.Subject is FluentStorageContainer storage && arguments is [string path, ..]
-                => MetadataPaths.TryResolveSubject(storage, path),
-            "SetOrder" => subject.Subject,
-            _ => null
-        };
+            return "Agents cannot change the metadata of agents.";
+        }
 
-        return target?.TryGetFirstParentOrSelf<LlmAgentBase>() is not null
-            ? "Agents cannot change the metadata of agents."
-            : null;
+        return null;
     }
 
     /// <summary>
