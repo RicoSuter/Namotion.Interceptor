@@ -120,6 +120,7 @@ namespace HomeBlaze.Storage
     [System.ComponentModel.DisplayName("Storage")]
     public class FluentStorageContainer : Microsoft.Extensions.Hosting.BackgroundService, HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Components.Abstractions.Pages.IMetadataContainer, HomeBlaze.Components.Abstractions.Pages.IMetadataStore, HomeBlaze.Storage.Abstractions.IConfigurationWriter, HomeBlaze.Storage.Abstractions.IStorageContainer, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
+        public const string SetMetadataMethodName = "SetMetadata";
         public FluentStorageContainer(HomeBlaze.Services.SubjectTypeRegistry typeRegistry, HomeBlaze.Services.ConfigurableSubjectSerializer serializer, System.IServiceProvider serviceProvider, Microsoft.Extensions.Logging.ILogger<HomeBlaze.Storage.FluentStorageContainer>? logger = null) { }
         public System.Collections.Generic.IReadOnlyCollection<string> ChildNames { get; }
         public System.Collections.Immutable.ImmutableArray<string> ChildOrder { get; }
@@ -184,6 +185,8 @@ namespace HomeBlaze.Storage
         public System.Threading.Tasks.Task WriteBlobAsync(string path, System.IO.Stream content, System.Threading.CancellationToken cancellationToken) { }
         public System.Threading.Tasks.Task WriteBlobAsync(string path, System.ReadOnlyMemory<byte> content, System.Threading.CancellationToken cancellationToken) { }
         public System.Threading.Tasks.Task<bool> WriteConfigurationAsync(Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken) { }
+        public static string GetNoPropertyMessage(string propertyName) { }
+        public static string GetNoSubjectMessage(string path) { }
     }
     public static class MarkdownPageLayoutPermission
     {

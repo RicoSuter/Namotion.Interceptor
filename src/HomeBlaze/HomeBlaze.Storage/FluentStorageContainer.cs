@@ -686,7 +686,7 @@ public partial class FluentStorageContainer :
 
         if (propertyName is not null && (propertyName == KnownAttributes.Metadata || registered.TryGetProperty(propertyName) is not { IsAttribute: false }))
         {
-            throw new StorageRefusedException($"The subject has no property {NameList.Format([propertyName])}.");
+            throw new StorageRefusedException(GetNoPropertyMessage(propertyName));
         }
 
         // A path in a metadata file cannot hold them, so the entry would not apply or would be that of another property.
@@ -959,6 +959,24 @@ public partial class FluentStorageContainer :
     }
 
     /// <summary>
+    /// The name of the method with which agents set metadata,
+    /// <see cref="SetMetadataAsync(string, string?, JsonElement, CancellationToken)"/>.
+    /// </summary>
+    public const string SetMetadataMethodName = "SetMetadata";
+
+    /// <summary>
+    /// Gets the message with which <see cref="SetMetadataAsync(string, string?, JsonElement, CancellationToken)"/>
+    /// refuses a path at which it finds no subject, so that a caller that hides a subject refuses it alike.
+    /// </summary>
+    public static string GetNoSubjectMessage(string path) => $"No subject at {NameList.Format([path])} in this storage.";
+
+    /// <summary>
+    /// Gets the message with which a metadata write refuses a property that the subject does not have, so that a
+    /// caller that hides a property refuses it alike.
+    /// </summary>
+    public static string GetNoPropertyMessage(string propertyName) => $"The subject has no property {NameList.Format([propertyName])}.";
+
+    /// <summary>
     /// Sets metadata of a subject in this storage, or of one of its properties, for agents: see
     /// <see cref="SetMetadataAsync(IInterceptorSubject, string?, JsonElement, CancellationToken)"/>. A subject that a
     /// storage inside this one holds is written by that storage.
@@ -983,7 +1001,7 @@ public partial class FluentStorageContainer :
             }
 
             var subject = MetadataPaths.TryResolveSubject(this, path)
-                ?? throw new ArgumentException($"No subject at {NameList.Format([path])} in this storage.", nameof(path));
+                ?? throw new ArgumentException(GetNoSubjectMessage(path));
             var store = subject.FindMetadataStore()
                 ?? throw new ArgumentException("The subject is in no storage.", nameof(path));
             return store.SetMetadataAsync(subject, property, values, cancellationToken);

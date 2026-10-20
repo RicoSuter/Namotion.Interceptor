@@ -2,6 +2,7 @@ using System.Text.Json;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.AI.Agents;
 using HomeBlaze.AI.Mcp;
+using HomeBlaze.AI.Tests.Mcp;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Lifecycle;
 using HomeBlaze.Storage;
@@ -103,6 +104,79 @@ public class AgentOperationAccessTests
     }
 
     [Fact]
+    public async Task WhenAnAgentSetsTheMetadataOfASubjectThatAnAgentHoldsAsAnotherParent_ThenItIsRefused()
+    {
+        // Arrange
+        var (root, agent, services) = CreateGraph();
+        var storage = CreateStorage(services);
+        root.Children = new Dictionary<string, IInterceptorSubject> { ["Storage"] = storage, ["Agent"] = agent };
+        var shared = new AgentTestRoot();
+        storage.Children = new Dictionary<string, IInterceptorSubject> { ["Shared"] = shared };
+        agent.TryGetRegisteredSubject()!.AddProperty("Shared", typeof(AgentTestRoot), _ => shared, null);
+        var invokeOperation = CreateTools(services, root, forAgents: true)["invoke_operation"];
+
+        // Act
+        var result = JsonSerializer.SerializeToElement(await invokeOperation.Handler(
+            JsonSerializer.SerializeToElement(new { path = "/Storage", method = "SetMetadata", parameters = new { path = "Shared", values = new { navTitle = "x" } } }),
+            CancellationToken.None));
+
+        // Assert
+        Assert.NotSame(agent, shared.TryGetRegisteredSubject()!.Parents[0].Property.Subject);
+        Assert.Equal("Agents cannot change the metadata of agents.", result.GetProperty("error").GetString());
+    }
+
+    [Theory]
+    [InlineData("Hidden")]
+    [InlineData("Hidden/Inner")]
+    [InlineData("Missing")]
+    public async Task WhenAnAgentSetsTheMetadataOfASubjectHiddenFromAgents_ThenItIsRefusedAsAMissingOne(string path)
+    {
+        // Arrange
+        var (root, _, services) = CreateGraph(typeof(AgentExcludedThing));
+        var storage = CreateStorage(services);
+        root.Children = new Dictionary<string, IInterceptorSubject> { ["Storage"] = storage };
+        var hidden = new AgentExcludedThing();
+        storage.Children = new Dictionary<string, IInterceptorSubject> { ["Hidden"] = hidden };
+        var inner = new AgentTestRoot();
+        hidden.TryGetRegisteredSubject()!.AddProperty("Inner", typeof(AgentTestRoot), _ => inner, null);
+        var invokeOperation = CreateTools(services, root, forAgents: true)["invoke_operation"];
+
+        // Act
+        var result = JsonSerializer.SerializeToElement(await invokeOperation.Handler(
+            JsonSerializer.SerializeToElement(new { path = "/Storage", method = "SetMetadata", parameters = new { path, values = new { navTitle = "x" } } }),
+            CancellationToken.None));
+
+        // Assert
+        Assert.Equal($"No subject at '{path}' in this storage.", result.GetProperty("error").GetString());
+    }
+
+    [Theory]
+    [InlineData("Secret")]
+    [InlineData("Missing")]
+    public async Task WhenAnAgentSetsTheMetadataOfAPropertyHiddenFromAgents_ThenItIsRefusedAsAMissingOne(string property)
+    {
+        // Arrange
+        var (root, _, services) = CreateGraph();
+        var storage = CreateStorage(services);
+        root.Children = new Dictionary<string, IInterceptorSubject> { ["Storage"] = storage };
+        var room = new AgentTestRoot();
+        storage.Children = new Dictionary<string, IInterceptorSubject> { ["Room"] = room };
+        room.TryGetRegisteredSubject()!.AddProperty("Secret", typeof(int), _ => 1, null);
+        var invokeOperation = CreateTools(services, root, forAgents: true)["invoke_operation"];
+
+        // Act
+        var result = JsonSerializer.SerializeToElement(await invokeOperation.Handler(
+            JsonSerializer.SerializeToElement(new
+            {
+                path = "/Storage", method = "SetMetadata", parameters = new { path = "Room", property, values = new { comment = "x" } }
+            }),
+            CancellationToken.None));
+
+        // Assert
+        Assert.Equal($"The subject has no property '{property}'.", result.GetProperty("error").GetString());
+    }
+
+    [Fact]
     public async Task WhenAnExternalClientSetsTheMetadataOfAnAgent_ThenTheStorageDecides()
     {
         // Arrange
@@ -136,7 +210,7 @@ public class AgentOperationAccessTests
         Assert.True(result.GetProperty("success").GetBoolean());
     }
 
-    private static (AgentTestRoot Root, FakeAgent Agent, IServiceProvider Services) CreateGraph()
+    private static (AgentTestRoot Root, FakeAgent Agent, IServiceProvider Services) CreateGraph(params Type[] types)
     {
         var context = InterceptorSubjectContext.Create()
             .WithFullPropertyTracking()
@@ -154,8 +228,10 @@ public class AgentOperationAccessTests
         var agent = new FakeAgent(agentServices);
         root.Children = new Dictionary<string, IInterceptorSubject> { ["Agent"] = agent };
 
+        var typeProvider = new TypeProvider();
+        typeProvider.AddTypes(types);
         var services = new ServiceCollection()
-            .AddSingleton(new SubjectTypeRegistry(new TypeProvider()))
+            .AddSingleton(new SubjectTypeRegistry(typeProvider))
             .AddSingleton<ILoggerFactory>(NullLoggerFactory.Instance)
             .BuildServiceProvider();
         return (root, agent, services);
