@@ -502,6 +502,37 @@ public class SubjectBrowserLayoutTests
         }
     }
 
+    [Fact]
+    public async Task WhenTheCopyButtonWasClickedAndThePointerLeavesTheRow_ThenTheButtonHidesUntilTheKeyboardFocusesIt()
+    {
+        // Arrange
+        var (name, subject) = await _fixture.AddPlainSubjectToRootAsync();
+        try
+        {
+            subject.LinkedPath = "/Missing/First";
+            var page = await OpenAsync($"browser/{name}", 1280, 720, paneCount: 2,
+                new() { Permissions = ["clipboard-read", "clipboard-write"] });
+            var row = ValueRow(LastPane(page), "LinkedPath");
+            var copy = row.Locator("[data-testid='subject-pane-value-copy']");
+            await row.HoverAsync();
+            await copy.ClickAsync();
+
+            // Act - the button keeps the focus of the click.
+            await page.Mouse.MoveAsync(0, 0);
+
+            // Assert
+            await Assertions.Expect(copy).ToHaveCSSAsync("opacity", "0", new() { Timeout = PageLoadTimeout });
+            await page.Keyboard.PressAsync("Shift+Tab");
+            await page.Keyboard.PressAsync("Tab");
+            await Assertions.Expect(copy).ToBeFocusedAsync();
+            await Assertions.Expect(copy).ToHaveCSSAsync("opacity", "1");
+        }
+        finally
+        {
+            _fixture.RemoveSubjectFromRoot(name, subject);
+        }
+    }
+
     [Theory]
     [InlineData(1280, 720, false)]
     [InlineData(390, 844, true)] // A phone: narrower than the sm breakpoint of MudBlazor.

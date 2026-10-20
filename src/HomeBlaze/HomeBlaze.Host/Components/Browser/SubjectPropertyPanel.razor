@@ -259,8 +259,9 @@
 <style>
     /* MudBlazor has no parameter or class for the rules below. */
 
-    /* The copy button of a value shows while its row is hovered or focused, and always on a device without hover.
-       Transparent rather than hidden, so that it stays in the tab order. */
+    /* The copy button of a value shows while its row is hovered or focused by the keyboard, and always on a device
+       without hover. Transparent rather than hidden, so that it stays in the tab order. Not on any focus, as a button
+       keeps the focus of a click, and gets it back when a dialog that it opened closes. */
     .subject-pane-copy {
         opacity: 0;
     }
@@ -271,7 +272,7 @@
     }
 
     .subject-pane-row:hover .subject-pane-copy,
-    .subject-pane-row:focus-within .subject-pane-copy {
+    .subject-pane-row:has(:focus-visible) .subject-pane-copy {
         opacity: 1;
     }
 
