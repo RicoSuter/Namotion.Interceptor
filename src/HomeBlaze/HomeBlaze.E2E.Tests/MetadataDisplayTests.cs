@@ -424,4 +424,47 @@ public class MetadataDisplayTests
             """[{"title":"Manual","url":"https://example.com/motor.pdf","kind":"pdf"},{"url":"javascript:alert(1)"}]""",
             JsonSerializer.Serialize(sidecar.RootElement.GetProperty("links")));
     });
+
+    private const string TagInUseSidecar = """{ "$properties": { "Temperature": { "tags": ["e2e-heat-pump"] } } }""";
+
+    [Fact]
+    public Task WhenTypedTextIsPartOfATagInUseAndEnterIsPressed_ThenTheTypedTagIsAdded() => WithSidecarAsync("Motor.metadata.json", TagInUseSidecar, async () =>
+    {
+        // Arrange
+        var (page, pane) = await OpenPaneAsync("Demo/Motor");
+        await pane.GetByTestId("edit-metadata-button").ClickAsync();
+
+        // MudDialog puts its test id on its content, which does not hold the actions.
+        var dialog = page.Locator(".mud-dialog").Filter(new() { Has = page.GetByTestId("metadata-edit-dialog") });
+        var tagInput = dialog.GetByTestId("metadata-tag-input");
+        await tagInput.PressSequentiallyAsync("pump");
+        await Assertions.Expect(page.Locator(".mud-popover-open").GetByText("e2e-heat-pump")).ToHaveCountAsync(1, new() { Timeout = PageLoadTimeout });
+
+        // Act
+        await tagInput.PressAsync("Enter");
+
+        // Assert
+        await Assertions.Expect(dialog.GetByTestId("metadata-tag-chip")).ToHaveTextAsync(["pump"], new() { Timeout = PageLoadTimeout });
+    });
+
+    [Fact]
+    public Task WhenATagSuggestionIsPicked_ThenTheTagInUseIsAdded() => WithSidecarAsync("Motor.metadata.json", TagInUseSidecar, async () =>
+    {
+        // Arrange
+        var (page, pane) = await OpenPaneAsync("Demo/Motor");
+        await pane.GetByTestId("edit-metadata-button").ClickAsync();
+
+        // MudDialog puts its test id on its content, which does not hold the actions.
+        var dialog = page.Locator(".mud-dialog").Filter(new() { Has = page.GetByTestId("metadata-edit-dialog") });
+        var tagInput = dialog.GetByTestId("metadata-tag-input");
+        await tagInput.PressSequentiallyAsync("heat");
+        var suggestion = page.Locator(".mud-popover-open .mud-list-item").Filter(new() { HasText = "e2e-heat-pump" });
+
+        // Act
+        await suggestion.ClickAsync(new() { Timeout = PageLoadTimeout });
+
+        // Assert
+        await Assertions.Expect(dialog.GetByTestId("metadata-tag-chip")).ToHaveTextAsync(["e2e-heat-pump"], new() { Timeout = PageLoadTimeout });
+        await Assertions.Expect(tagInput).ToHaveValueAsync("");
+    });
 }

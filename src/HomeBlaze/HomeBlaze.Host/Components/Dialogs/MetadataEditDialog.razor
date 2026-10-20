@@ -195,11 +195,17 @@
     private Task OnTagKeyUpAsync(KeyboardEventArgs args)
         => args.Key is "Enter" or "NumpadEnter" ? AddTagAndClearInputAsync(_tagText) : Task.CompletedTask;
 
-    // The tags in use that contain the text, so that the same tag is written the same way.
+    // The tags in use that contain the text, so that the same tag is written the same way, after the text itself unless
+    // it is one of them: Enter picks the first suggestion, which is then what was typed.
     private Task<IEnumerable<string>> SearchTagsAsync(string? text, CancellationToken cancellationToken)
-        => Task.FromResult(string.IsNullOrWhiteSpace(text)
-            ? _tagsInUse.AsEnumerable()
-            : _tagsInUse.Where(tag => tag.Contains(text.Trim(), StringComparison.OrdinalIgnoreCase)));
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return Task.FromResult(_tagsInUse.AsEnumerable());
+
+        var typed = text.Trim();
+        var matches = _tagsInUse.Where(tag => tag.Contains(typed, StringComparison.OrdinalIgnoreCase));
+        return Task.FromResult(_tagsInUse.Contains(typed, StringComparer.OrdinalIgnoreCase) ? matches : matches.Prepend(typed));
+    }
 
     private void Cancel() => MudDialog?.Cancel();
 
