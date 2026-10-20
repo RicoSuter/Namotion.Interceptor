@@ -68,32 +68,6 @@ public sealed class HistoryChartQueryReuseTests : IDisposable
         AssertSameBars(full, reused);
     }
 
-    [Theory]
-    [MemberData(nameof(StoreKinds))]
-    public async Task WhenTheDayChangesBetweenRefreshes_ThenTheEndedDayIsQueriedOnceMoreAndTheWindowMoves(string storeKind)
-    {
-        // Arrange
-        var (store, recorder, flush) = CreateStore(storeKind);
-        var recording = new QueryRecordingStore(store);
-        RecordCounters(recorder, Day(0), Day(4).AddMinutes(-30));
-        _now = Day(4).AddMinutes(-30);
-        await flush();
-        var previous = await HistoryChartQuery.QueryAsync([recording], Requests, Day(1), _now, Bucket, CancellationToken.None);
-        RecordCounters(recorder, Day(4).AddMinutes(-30), Day(4).AddMinutes(30));
-        _now = Day(4).AddMinutes(30);
-        await flush();
-        recording.Clear();
-
-        // Act
-        var reused = await HistoryChartQuery.QueryAsync([recording], Requests, Day(2), _now, Bucket, previous, CancellationToken.None);
-        var full = await HistoryChartQuery.QueryAsync([store], Requests, Day(2), _now, Bucket, CancellationToken.None);
-
-        // Assert
-        Assert.All(recording.ReceivedQueries, query => Assert.Equal(Day(3), query.From));
-        Assert.Equal([Day(2), Day(3), Day(4)], reused.Series[0].Points.Select(point => point.Timestamp));
-        AssertSameBars(full, reused);
-    }
-
     [Fact]
     public async Task WhenAReadingIsFlushedAfterThePreviousQuery_ThenItsDayIsQueriedAgain()
     {
@@ -122,34 +96,125 @@ public sealed class HistoryChartQueryReuseTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenAStoreServingAnEndedDayHasNotFlushed_ThenThatDayIsQueriedAgainAlthoughAnotherStoreCoversUpToNow()
+    {
+        // Arrange - the memory store covers only the last minute, so the persistent store serves day 3, whose last
+        // reading it still holds pending when the previous query runs.
+        _now = Day(0);
+        var inMemory = new InMemoryHistoryStore(
+            priority: 100, maxPointsPerProperty: 100_000, TimeSpan.FromMinutes(1), maxJsonSize: 8192, () => _now);
+        var sqlite = new SqliteHistoryStore(
+            priority: 50, _directory, PartitionInterval.Weekly, TimeSpan.FromDays(3650), maxJsonSize: 8192, () => _now);
+        _disposables.Add(sqlite);
+        var recording = new QueryRecordingStore(sqlite);
+        IHistoryStore[] stores = [inMemory, recording];
+        RecordCounters(inMemory, Day(0), Day(4).AddMinutes(-15));
+        RecordCounters(sqlite, Day(0), Day(4).AddMinutes(-15));
+        _now = Day(4).AddMinutes(-15);
+        await sqlite.FlushAsync(CancellationToken.None);
+        RecordCounters(inMemory, Day(4).AddMinutes(-15), Day(4).AddMinutes(30));
+        RecordCounters(sqlite, Day(4).AddMinutes(-15), Day(4).AddMinutes(30));
+        _now = Day(4).AddMinutes(20);
+        var previous = await HistoryChartQuery.QueryAsync(stores, Requests, Day(1), _now, Bucket, CancellationToken.None);
+        _now = Day(4).AddMinutes(30);
+        await sqlite.FlushAsync(CancellationToken.None);
+        recording.Clear();
+
+        // Act
+        var reused = await HistoryChartQuery.QueryAsync(stores, Requests, Day(1), _now, Bucket, previous, CancellationToken.None);
+        var full = await HistoryChartQuery.QueryAsync([inMemory, sqlite], Requests, Day(1), _now, Bucket, CancellationToken.None);
+
+        // Assert
+        Assert.All(recording.ReceivedQueries, query => Assert.Equal(Day(3), query.From));
+        AssertSameBars(full, reused);
+    }
+
+    [Theory]
+    [MemberData(nameof(StoreKinds))]
+    public async Task WhenAReadingArrivesLateWithAnEarlierTimestamp_ThenItsDayIsQueriedAgain(string storeKind)
+    {
+        // Arrange - a reading of 23:59 on day 3 reaches the store only after the query at 00:02 of day 4.
+        var (store, recorder, flush) = CreateStore(storeKind);
+        var recording = new QueryRecordingStore(store);
+        RecordCounters(recorder, Day(0), Day(4).AddMinutes(1));
+        _now = Day(4).AddMinutes(2);
+        await flush();
+        var previous = await HistoryChartQuery.QueryAsync([recording], Requests, Day(1), _now, Bucket, CancellationToken.None);
+        RecordReading(recorder, Day(4).AddMinutes(-1));
+        RecordCounters(recorder, Day(4).AddMinutes(15), Day(4).AddMinutes(30));
+        _now = Day(4).AddMinutes(30);
+        await flush();
+        recording.Clear();
+
+        // Act
+        var reused = await HistoryChartQuery.QueryAsync([recording], Requests, Day(1), _now, Bucket, previous, CancellationToken.None);
+        var full = await HistoryChartQuery.QueryAsync([store], Requests, Day(1), _now, Bucket, CancellationToken.None);
+
+        // Assert
+        Assert.All(recording.ReceivedQueries, query => Assert.Equal(Day(3), query.From));
+        AssertSameBars(full, reused);
+    }
+
+    [Fact]
+    public async Task WhenNothingChanged_ThenTheLinesAreQueriedFromTheNewestDay()
+    {
+        // Arrange
+        var store = CreateTestStore();
+        var previous = await QueryFirstAsync(store);
+
+        // Act
+        var refreshed = await RefreshAsync(store, previous);
+
+        // Assert
+        Assert.All(refreshed, query => Assert.Equal(Day(3), query.From));
+    }
+
+    [Fact]
+    public async Task WhenTheNewestDayChanges_ThenEverythingIsQueried()
+    {
+        // Arrange - the window moves with the day, by one day.
+        var store = CreateTestStore();
+        var previous = await HistoryChartQuery.QueryAsync([store], Requests, Day(1), Day(4).AddMinutes(-30), Bucket, CancellationToken.None);
+        var count = store.ReceivedQueries.Count;
+
+        // Act
+        await HistoryChartQuery.QueryAsync([store], Requests, Day(2), Day(4).AddMinutes(30), Bucket, previous, CancellationToken.None);
+
+        // Assert
+        var refreshed = store.ReceivedQueries.Skip(count).ToArray();
+        Assert.NotEmpty(refreshed);
+        Assert.All(refreshed, query => Assert.Equal(Day(2), query.From));
+    }
+
+    [Fact]
     public async Task WhenTheSeriesChange_ThenEverythingIsQueried()
     {
         // Arrange
         var store = CreateTestStore();
-        var previous = await HistoryChartQuery.QueryAsync([store], Requests, Day(1), Day(3), Bucket, CancellationToken.None);
-        HistoryChartSeriesRequest[] requests = [Requests[0]];
+        var previous = await QueryFirstAsync(store);
 
         // Act
-        await HistoryChartQuery.QueryAsync([store], requests, Day(1), Day(3).AddHours(1), Bucket, previous, CancellationToken.None);
+        var refreshed = await RefreshAsync(store, previous, requests: [Requests[0]]);
 
         // Assert
-        Assert.Equal(Day(1), store.ReceivedQueries[^1].From);
+        Assert.All(refreshed, query => Assert.Equal(Day(1), query.From));
     }
 
     [Fact]
     public async Task WhenTheTimeZoneChanges_ThenEverythingIsQueried()
     {
-        // Arrange
+        // Arrange - the window of the other zone starts after that of the previous query.
         var store = CreateTestStore();
-        var previous = await HistoryChartQuery.QueryAsync([store], Requests, Day(1), Day(3), Bucket, CancellationToken.None);
+        var previous = await QueryFirstAsync(store);
         var bucket = HistoryBucket.Calendar(HistoryCalendarUnit.Day, TimeZoneInfo.Utc);
-        var from = BucketAlignment.Start(Day(1), bucket);
+        var from = new DateTimeOffset(2026, 6, 2, 0, 0, 0, TimeSpan.Zero);
 
         // Act
-        await HistoryChartQuery.QueryAsync([store], Requests, from, Day(3).AddHours(1), bucket, previous, CancellationToken.None);
+        var refreshed = await RefreshAsync(store, previous, from: from, bucket: bucket);
 
         // Assert
-        Assert.All(store.ReceivedQueries.Skip(Requests.Length), query => Assert.Equal(from, query.From));
+        Assert.True(from > previous.Data.From);
+        Assert.All(refreshed, query => Assert.Equal(from, query.From));
     }
 
     [Fact]
@@ -157,14 +222,14 @@ public sealed class HistoryChartQueryReuseTests : IDisposable
     {
         // Arrange
         var store = CreateTestStore();
-        var previous = await HistoryChartQuery.QueryAsync([store], Requests, Day(1), Day(3), Bucket, CancellationToken.None);
+        var previous = await QueryFirstAsync(store);
         store.CoverageRanges = [new HistoryCoverage(Day(1).AddHours(6), Day(10))];
 
         // Act
-        await HistoryChartQuery.QueryAsync([store], Requests, Day(1), Day(3).AddHours(1), Bucket, previous, CancellationToken.None);
+        var refreshed = await RefreshAsync(store, previous);
 
         // Assert
-        Assert.All(store.ReceivedQueries.Skip(Requests.Length), query => Assert.Equal(Day(1), query.From));
+        Assert.All(refreshed, query => Assert.Equal(Day(1), query.From));
     }
 
     [Fact]
@@ -172,14 +237,13 @@ public sealed class HistoryChartQueryReuseTests : IDisposable
     {
         // Arrange
         var store = CreateTestStore();
-        var previous = await HistoryChartQuery.QueryAsync([store], Requests, Day(1), Day(3), Bucket, CancellationToken.None);
-        var added = CreateTestStore();
+        var previous = await QueryFirstAsync(store);
 
         // Act
-        await HistoryChartQuery.QueryAsync([store, added], Requests, Day(1), Day(3).AddHours(1), Bucket, previous, CancellationToken.None);
+        var refreshed = await RefreshAsync(store, previous, stores: [store, CreateTestStore()]);
 
         // Assert
-        Assert.All(store.ReceivedQueries.Skip(Requests.Length), query => Assert.Equal(Day(1), query.From));
+        Assert.All(refreshed, query => Assert.Equal(Day(1), query.From));
     }
 
     [Fact]
@@ -187,28 +251,28 @@ public sealed class HistoryChartQueryReuseTests : IDisposable
     {
         // Arrange
         var store = CreateTestStore();
-        var previous = await HistoryChartQuery.QueryAsync([store], Requests, Day(1), Day(3), Bucket, CancellationToken.None);
+        var previous = await QueryFirstAsync(store);
 
         // Act
-        await HistoryChartQuery.QueryAsync([store], Requests, Day(0), Day(3).AddHours(1), Bucket, previous, CancellationToken.None);
+        var refreshed = await RefreshAsync(store, previous, from: Day(0));
 
         // Assert
-        Assert.All(store.ReceivedQueries.Skip(Requests.Length), query => Assert.Equal(Day(0), query.From));
+        Assert.All(refreshed, query => Assert.Equal(Day(0), query.From));
     }
 
     [Fact]
-    public async Task WhenAPreviousSeriesWasTruncated_ThenEverythingIsQueried()
+    public async Task WhenAPreviousLineWasTruncated_ThenEverythingIsQueried()
     {
         // Arrange
         var store = CreateTestStore();
         store.IsTruncated = true;
-        var previous = await HistoryChartQuery.QueryAsync([store], Requests, Day(1), Day(3), Bucket, CancellationToken.None);
+        var previous = await QueryFirstAsync(store);
 
         // Act
-        await HistoryChartQuery.QueryAsync([store], Requests, Day(1), Day(3).AddHours(1), Bucket, previous, CancellationToken.None);
+        var refreshed = await RefreshAsync(store, previous);
 
         // Assert
-        Assert.All(store.ReceivedQueries.Skip(Requests.Length), query => Assert.Equal(Day(1), query.From));
+        Assert.All(refreshed, query => Assert.Equal(Day(1), query.From));
     }
 
     [Fact]
@@ -218,13 +282,13 @@ public sealed class HistoryChartQueryReuseTests : IDisposable
         var store = CreateTestStore();
         HistoryChartSeriesRequest[] requests =
             [new(Imported, "Imported", typeof(double), IsBand: false, HistoryAggregations.Maximum)];
-        var previous = await HistoryChartQuery.QueryAsync([store], requests, Day(1), Day(3), Bucket, CancellationToken.None);
+        var previous = await QueryFirstAsync(store, requests);
 
         // Act
-        await HistoryChartQuery.QueryAsync([store], requests, Day(1), Day(3).AddHours(1), Bucket, previous, CancellationToken.None);
+        var refreshed = await RefreshAsync(store, previous, requests: requests);
 
         // Assert
-        Assert.Equal(Day(1), store.ReceivedQueries[^1].From);
+        Assert.All(refreshed, query => Assert.Equal(Day(1), query.From));
     }
 
     [Fact]
@@ -237,32 +301,57 @@ public sealed class HistoryChartQueryReuseTests : IDisposable
             Requests[0],
             new("/meter/Status", "Status", typeof(bool), IsBand: true, HistoryAggregations.Last)
         ];
-        var previous = await HistoryChartQuery.QueryAsync([store], requests, Day(1), Day(3), Bucket, CancellationToken.None);
+        var previous = await QueryFirstAsync(store, requests);
 
         // Act
-        await HistoryChartQuery.QueryAsync([store], requests, Day(1), Day(3).AddHours(1), Bucket, previous, CancellationToken.None);
+        var refreshed = await RefreshAsync(store, previous, requests: requests);
 
         // Assert
-        var refreshed = store.ReceivedQueries.Skip(requests.Length).ToDictionary(query => query.PropertyPath, query => query.From);
-        Assert.Equal(Day(3), refreshed[Imported]);
-        Assert.Equal(Day(1), refreshed["/meter/Status"]);
+        var queryFrom = refreshed.ToDictionary(query => query.PropertyPath, query => query.From);
+        Assert.Equal(Day(3), queryFrom[Imported]);
+        Assert.Equal(Day(1), queryFrom["/meter/Status"]);
+    }
+
+    // The first query of a test store, which ends at 01:00 of day 3.
+    private static Task<HistoryChartResult> QueryFirstAsync(
+        TestHistoryStore store, IReadOnlyList<HistoryChartSeriesRequest>? requests = null) =>
+        HistoryChartQuery.QueryAsync([store], requests ?? Requests, Day(1), Day(3).AddHours(1), Bucket, CancellationToken.None);
+
+    // The queries a test store gets for a refresh an hour after the first query.
+    private static async Task<HistoryQuery[]> RefreshAsync(
+        TestHistoryStore store,
+        HistoryChartResult previous,
+        IReadOnlyList<HistoryChartSeriesRequest>? requests = null,
+        DateTimeOffset? from = null,
+        HistoryBucket? bucket = null,
+        IReadOnlyList<IHistoryStore>? stores = null)
+    {
+        var count = store.ReceivedQueries.Count;
+        await HistoryChartQuery.QueryAsync(
+            stores ?? [store], requests ?? Requests, from ?? Day(1), Day(3).AddHours(2), bucket ?? Bucket, previous, CancellationToken.None);
+        var refreshed = store.ReceivedQueries.Skip(count).ToArray();
+        Assert.NotEmpty(refreshed);
+        return refreshed;
     }
 
     private static DateTimeOffset Day(int day) => BucketAlignment.LocalTimeToInstant(new DateTime(2026, 6, 1).AddDays(day), Zone);
 
-    // Readings every 15 minutes in [from, to): the import counter restarts at noon of day 2.
+    // Readings every 15 minutes in [from, to).
     private static void RecordCounters(IHistoryRecorder recorder, DateTimeOffset from, DateTimeOffset to)
     {
-        var restart = Day(2).AddHours(12);
         for (var timestamp = from; timestamp < to; timestamp = timestamp.AddMinutes(15))
         {
-            var quarters = (timestamp - Day(0)).Ticks / TimeSpan.FromMinutes(15).Ticks;
-            var imported = timestamp < restart
-                ? 1_000 + quarters * 0.25
-                : (timestamp - restart).Ticks / TimeSpan.FromMinutes(15).Ticks * 0.25;
-            recorder.TryRecord(Imported, timestamp, imported, typeof(double));
-            recorder.TryRecord(Exported, timestamp, 500 + quarters * 0.1, typeof(double));
+            RecordReading(recorder, timestamp);
         }
+    }
+
+    // The import counter grows by 1 an hour and restarts at noon of day 2, the export counter grows by 0.4 an hour.
+    private static void RecordReading(IHistoryRecorder recorder, DateTimeOffset timestamp)
+    {
+        var restart = Day(2).AddHours(12);
+        var imported = timestamp < restart ? 1_000 + (timestamp - Day(0)).TotalHours : (timestamp - restart).TotalHours;
+        recorder.TryRecord(Imported, timestamp, imported, typeof(double));
+        recorder.TryRecord(Exported, timestamp, 500 + (timestamp - Day(0)).TotalHours * 0.4, typeof(double));
     }
 
     private (IHistoryStore Store, IHistoryRecorder Recorder, Func<Task> Flush) CreateStore(string storeKind)

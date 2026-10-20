@@ -40,7 +40,7 @@
                 @* The view shows the legend of the lines below them and each band series in the header of its band. Until
                    the data arrives it reserves the room of the lines and bands the query will return, also while prerendering. *@
                 var linesTarget = CanShowHistory(_firstLine) ? _firstLine : -1;
-                <HistoryChartView Data="_data" Placeholder="_placeholder" MaxHeight="_resolvedHeight" ShowAxes="!chart.Compact"
+                <HistoryChartView Data="_result?.Data" Placeholder="_placeholder" MaxHeight="_resolvedHeight" ShowAxes="!chart.Compact"
                                   LineLegend="_lineLegend" BandHeader="_bandHeader"
                                   LinesClicked="@(linesTarget >= 0 ? _showHistory[linesTarget] : default)"
                                   SeriesClicked="@(linesTarget >= 0 ? _seriesClicked : default)"
@@ -79,9 +79,7 @@
 
     private HistoryChartRefresh? _refresh;
     private CancellationTokenSource? _queryCancellation;
-    private HistoryChartData? _data;
-
-    // The result of the last query, whose ended bars a refresh of a bar chart keeps, see HistoryChartQuery.QueryAsync.
+    // The result of the last query: what the chart draws, and the ended bars a refresh of a bar chart keeps.
     private HistoryChartResult? _result;
     private bool? _hasStores;
     private string? _queryError;
@@ -201,7 +199,7 @@
         {
             RenderLegendEntry(__builder, _bandSeries[band], isBand: true);
         }
-        else if (_data is { } data)
+        else if (_result?.Data is { } data)
         {
             <MudText Typo="Typo.caption">@data.Bands[band].Label</MudText>
         }
@@ -381,7 +379,7 @@
             SetSeries(series);
         }
 
-        if (_data is null)
+        if (_result is null)
         {
             PlanLayout();
         }
@@ -589,7 +587,6 @@
                     queryNotes[index], result.Series[request].IsTruncated, requests[request].IsBand || bucket is null);
             }
 
-            _data = result.Data;
             _result = result;
             SetBands(series, bandSeries.ToArray(), hasBand, queryNotes, lineSeries.ToArray());
             _bucket = bucket;
