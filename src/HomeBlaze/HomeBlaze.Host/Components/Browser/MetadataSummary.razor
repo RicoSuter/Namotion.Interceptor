@@ -54,6 +54,9 @@
     /// <summary>Called with the tag of a tag chip that is clicked; without it, tag chips cannot be clicked.</summary>
     [Parameter] public EventCallback<string> OnTagClick { get; set; }
 
+    /// <summary>Whether only the tags are shown, without the notes and links.</summary>
+    [Parameter] public bool ShowTagsOnly { get; set; }
+
     [Parameter] public string Class { get; set; } = "px-4 py-2";
 
     private ImmutableDictionary<string, JsonElement>? _readMetadata;
@@ -69,12 +72,15 @@
             return;
 
         _readMetadata = Metadata;
+        _tags = Metadata.GetTags();
+        if (ShowTagsOnly)
+            return;
+
         _notes = Metadata.GetString(MetadataKeys.Notes);
         _notesHtml = _notes is null ? null : MetadataNotes.ToHtml(_notes);
         if (_notes is not null && _notesHtml is null)
             _notes = MetadataNotes.ToText(_notes);
 
         _links = Metadata.GetLinks(MetadataKeys.Links);
-        _tags = Metadata.GetTags();
     }
 }

@@ -48,6 +48,17 @@ public class MetadataDisplayTests
         _fixture = fixture;
     }
 
+    // The dialog that the Metadata button of a pane opens for a subject with notes, links or tags.
+    private static async Task<ILocator> OpenSubjectMetadataSummaryAsync(IPage page, ILocator pane)
+    {
+        await pane.GetByTestId("edit-metadata-button").ClickAsync();
+
+        // MudDialog puts its test id on its content, which does not hold the actions.
+        var dialog = page.Locator(".mud-dialog").Filter(new() { Has = page.GetByTestId("metadata-summary-dialog") });
+        await Assertions.Expect(dialog).ToHaveCountAsync(1, new() { Timeout = PageLoadTimeout });
+        return dialog;
+    }
+
     private async Task<(IPage Page, ILocator Pane)> OpenPaneAsync(string subjectPath)
     {
         var page = await _fixture.CreatePageAsync();
@@ -118,15 +129,22 @@ public class MetadataDisplayTests
     }
 
     [Fact]
-    public Task WhenASubjectHasNotesLinksAndTags_ThenThePaneShowsThem() => WithSidecarAsync("Motor.metadata.json", MotorSidecar, async () =>
+    public Task WhenASubjectHasNotesLinksAndTags_ThenThePaneShowsItsTagsAndItsMetadataButtonShowsThemAll() => WithSidecarAsync("Motor.metadata.json", MotorSidecar, async () =>
     {
+        // Arrange
+        var (page, pane) = await OpenPaneAsync("Demo/Motor");
+        var paneSummary = pane.GetByTestId("metadata-summary");
+        await Assertions.Expect(paneSummary.GetByTestId("metadata-tag")).ToHaveTextAsync(MotorTag, new() { Timeout = PageLoadTimeout });
+        await Assertions.Expect(paneSummary.GetByTestId("metadata-notes")).ToHaveCountAsync(0);
+        await Assertions.Expect(paneSummary.GetByTestId("metadata-link")).ToHaveCountAsync(0);
+
         // Act
-        var (_, pane) = await OpenPaneAsync("Demo/Motor");
+        var summary = await OpenSubjectMetadataSummaryAsync(page, pane);
 
         // Assert
-        var summary = pane.GetByTestId("metadata-summary");
         await Assertions.Expect(summary.GetByTestId("metadata-notes").Locator("strong")).ToHaveTextAsync("2026", new() { Timeout = PageLoadTimeout });
         await Assertions.Expect(summary.GetByTestId("metadata-tag")).ToHaveTextAsync(MotorTag);
+        await Assertions.Expect(summary.GetByTestId("metadata-summary-edit")).ToHaveCountAsync(1);
 
         var links = summary.GetByTestId("metadata-link");
         await Assertions.Expect(links).ToHaveTextAsync(["Manual", "Inline page", "History values", "Temperature", "/Demo/Gone", "Script"]);
@@ -158,10 +176,11 @@ public class MetadataDisplayTests
         "Motor.metadata.json", """{ "notes": "Raw <b>bold</b> text" }""", async () =>
     {
         // Act
-        var (_, pane) = await OpenPaneAsync("Demo/Motor");
+        var (page, pane) = await OpenPaneAsync("Demo/Motor");
+        var summary = await OpenSubjectMetadataSummaryAsync(page, pane);
 
         // Assert
-        var notes = pane.GetByTestId("metadata-summary").GetByTestId("metadata-notes");
+        var notes = summary.GetByTestId("metadata-notes");
         await Assertions.Expect(notes).ToHaveTextAsync("Raw <b>bold</b> text", new() { Timeout = PageLoadTimeout });
         await Assertions.Expect(notes.Locator("b")).ToHaveCountAsync(0);
     });
@@ -173,13 +192,15 @@ public class MetadataDisplayTests
         var motor = ((VirtualFolder)((FluentStorageContainer)_fixture.ServerServices.GetRequiredService<RootManager>().Root!).Children["Demo"]).Children["Motor"];
         Assert.NotNull(motor.TryGetRegisteredSubject()!.TryGetProperty("Temperature")!.GetValue());
         var (page, pane) = await OpenPaneAsync("Demo/Motor");
-        var link = pane.GetByTestId("metadata-summary").GetByTestId("metadata-link").Filter(new() { HasText = "Temperature" });
+        var summary = await OpenSubjectMetadataSummaryAsync(page, pane);
+        var link = summary.GetByTestId("metadata-link").Filter(new() { HasText = "Temperature" });
 
         // Act
         await link.ClickAsync();
 
         // Assert
         await page.WaitForURLAsync("**/browser/Demo/Motor?property=Temperature", new() { Timeout = PageLoadTimeout });
+        await Assertions.Expect(summary).ToHaveCountAsync(0, new() { Timeout = PageLoadTimeout });
         var highlighted = page.Locator("[data-testid='subject-pane-value'][data-highlighted='true']");
         await Assertions.Expect(highlighted).ToHaveCountAsync(1, new() { Timeout = PageLoadTimeout });
         await Assertions.Expect(highlighted.GetByTestId("subject-pane-value-name")).ToHaveTextAsync("Temperature");
@@ -354,6 +375,34 @@ public class MetadataDisplayTests
     });
 
     [Fact]
+    public Task WhenTheStorageIsDisconnected_ThenTheMetadataOfASubjectIsShownAndEditingIsRefusedWithAMessage() => WithSidecarAsync("Motor.metadata.json", MotorSidecar, async () =>
+    {
+        // Arrange
+        var storage = (FluentStorageContainer)_fixture.ServerServices.GetRequiredService<RootManager>().Root!;
+        var (page, pane) = await OpenPaneAsync("Demo/Motor");
+        await Assertions.Expect(pane.GetByTestId("metadata-summary").GetByTestId("metadata-tag")).ToHaveTextAsync(MotorTag, new() { Timeout = PageLoadTimeout });
+        var status = storage.Status;
+        try
+        {
+            storage.Status = StorageStatus.Disconnected;
+
+            // Act
+            var summary = await OpenSubjectMetadataSummaryAsync(page, pane);
+            await Assertions.Expect(summary.GetByTestId("metadata-notes").Locator("strong")).ToHaveTextAsync("2026", new() { Timeout = PageLoadTimeout });
+            await summary.GetByTestId("metadata-summary-edit").ClickAsync();
+
+            // Assert
+            await Assertions.Expect(page.Locator(".mud-snackbar").GetByText("The metadata cannot be edited while the storage is not connected."))
+                .ToHaveCountAsync(1, new() { Timeout = PageLoadTimeout });
+            await Assertions.Expect(page.GetByTestId("metadata-edit-dialog")).ToHaveCountAsync(0);
+        }
+        finally
+        {
+            storage.Status = status;
+        }
+    });
+
+    [Fact]
     public async Task WhenAPropertyOfTheStorageRootHasNotes_ThenItsIconShowsThemWithoutEditing()
     {
         // Arrange - the storage root keeps no metadata of its properties, so the notes are set as metadata written by hand would be.
@@ -413,9 +462,10 @@ public class MetadataDisplayTests
         }
         """, async () =>
     {
-        // Arrange
+        // Arrange - the notes and links show in a dialog first, whose Edit button opens the editor.
         var (page, pane) = await OpenPaneAsync("Demo/Motor");
-        await pane.GetByTestId("edit-metadata-button").ClickAsync();
+        var summary = await OpenSubjectMetadataSummaryAsync(page, pane);
+        await summary.GetByTestId("metadata-summary-edit").ClickAsync();
 
         // MudDialog puts its test id on its content, which does not hold the actions.
         var dialog = page.Locator(".mud-dialog").Filter(new() { Has = page.GetByTestId("metadata-edit-dialog") });
@@ -516,13 +566,14 @@ public class MetadataDisplayTests
 
     [Fact]
     public Task WhenTheTitleOfTheTargetOfALinkChanges_ThenTheLinkShowsTheNewTitle() => WithSidecarAsync(
-        "Motor.metadata.json", """{ "links": [{ "path": "/Demo/Motor" }] }""", async () =>
+        "Motor.metadata.json", """{ "$properties": { "Temperature": { "links": [{ "path": "/Demo/Motor" }] } } }""", async () =>
     {
         // Arrange
         var motor = (HomeBlaze.Samples.Motor)((VirtualFolder)((FluentStorageContainer)_fixture.ServerServices.GetRequiredService<RootManager>().Root!).Children["Demo"]).Children["Motor"];
         var name = motor.Name;
-        var (_, pane) = await OpenPaneAsync("Demo/Motor");
-        var link = pane.GetByTestId("metadata-summary").GetByTestId("metadata-link");
+        var (page, pane) = await OpenPaneAsync("Demo/Motor");
+        await GetRow(page, pane, "Temperature").GetByTestId("subject-pane-value-metadata").HoverAsync();
+        var link = page.Locator(".mud-popover-open").GetByTestId("metadata-summary").GetByTestId("metadata-link");
         await Assertions.Expect(link).ToHaveTextAsync(name, new() { Timeout = PageLoadTimeout });
         try
         {

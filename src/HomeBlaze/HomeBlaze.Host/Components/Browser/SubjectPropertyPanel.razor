@@ -35,6 +35,9 @@
                     // A folder left with fewer than two children leaves the mode rather than return to it later.
                     StopReordering();
                 }
+
+                var subjectMetadata = Subject.GetMetadata();
+                var hasNotesLinksOrTags = subjectMetadata.HasNotesLinksOrTags();
             }
             <MudListSubheader Class="d-flex align-center gap-1" Style="flex-shrink: 0;">
                 @{
@@ -42,6 +45,7 @@
                     var canDelete = Subject is IStorageFile or IConfigurable;
                     var metadataStore = GetMetadataStore();
                     _metadataStore = metadataStore;
+                    var showsMetadataButton = metadataStore is not null || hasNotesLinksOrTags;
                 }
 
                 @* Stays an h1: the page focuses the first h1 after navigation. *@
@@ -61,15 +65,17 @@
                                        data-testid="edit-subject-button" />
                     </MudTooltip>
                 }
-                @if (metadataStore is not null)
+                @* With notes, links or tags it shows them in a dialog, also while the storage is not connected and without a
+                   store to edit them, as the icon of a property row does; the pane shows only the tags, as notes can be long. *@
+                @if (showsMetadataButton)
                 {
                     <MudTooltip Text="Metadata">
-                        <MudIconButton OnClick="@OpenMetadataDialogAsync"
+                        <MudIconButton OnClick="@(() => OpenMetadataAsync(subjectMetadata, hasNotesLinksOrTags))"
                                        Icon="@Icons.Material.Filled.Label"
-                                       Color="@(HasOwnMetadata() ? Color.Primary : Color.Default)"
+                                       Color="@(subjectMetadata is { Count: > 0 } ? Color.Primary : Color.Default)"
                                        Variant="Variant.Text"
                                        Size="Size.Small"
-                                       Disabled="@(!IsConnected(metadataStore))"
+                                       Disabled="@(!hasNotesLinksOrTags && !IsConnected(metadataStore!))"
                                        aria-label="Metadata"
                                        data-testid="edit-metadata-button" />
                     </MudTooltip>
@@ -101,7 +107,7 @@
                 }
                 @if (CanClose)
                 {
-                    @if (canEdit || canDelete || metadataStore is not null || reorderContainer is not null)
+                    @if (canEdit || canDelete || showsMetadataButton || reorderContainer is not null)
                     {
                         <MudDivider Vertical="true" FlexItem="true" Class="mx-1 my-1" />
                     }
@@ -120,7 +126,7 @@
                 }
             </MudListSubheader>
 
-            <MetadataSummary Metadata="@Subject.GetMetadata()" OnTagClick="@OpenTagFilterAsync" />
+            <MetadataSummary Metadata="@subjectMetadata" OnTagClick="@OpenTagFilterAsync" ShowTagsOnly="true" />
 
             @* Each block gets the gap above it from GetGapClass, by the block before it. *@
             <div data-testid="subject-pane-content" style="flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;">
@@ -1026,11 +1032,27 @@
             ? store
             : null;
 
-    // Whether the shown subject itself holds metadata, which colors its button the same as the filled icon of a
-    // property with notes, links or tags.
-    private bool HasOwnMetadata() => Subject?.GetMetadata() is { Count: > 0 };
+    private Task OpenPropertyMetadataDialogAsync(RegisteredSubjectProperty property, string displayName)
+        => OpenMetadataEditorAsync($"Metadata of {displayName}", property.Name);
 
-    private async Task OpenPropertyMetadataDialogAsync(RegisteredSubjectProperty property, string displayName)
+    private Task OpenPropertyMetadataSummaryAsync(
+        RegisteredSubjectProperty property, string displayName, ImmutableDictionary<string, JsonElement>? metadata)
+        => MetadataSummaryDialog.ShowAsync(DialogService, $"Metadata of {displayName}", metadata,
+            _metadataStore is not null ? () => OpenPropertyMetadataDialogAsync(property, displayName) : null);
+
+    private Task OpenTagFilterAsync(string tag) => MetadataTagFilterDialog.ShowAsync(DialogService, tag);
+
+    private Task OpenMetadataAsync(ImmutableDictionary<string, JsonElement>? metadata, bool hasNotesLinksOrTags)
+    {
+        var title = $"Metadata of {GetSubjectTitle()}";
+        return hasNotesLinksOrTags
+            ? MetadataSummaryDialog.ShowAsync(DialogService, title, metadata,
+                _metadataStore is not null ? () => OpenMetadataEditorAsync(title, null) : null)
+            : OpenMetadataEditorAsync(title, null);
+    }
+
+    // Edits the metadata of the shown subject, or of its property with the given name.
+    private async Task OpenMetadataEditorAsync(string title, string? propertyName)
     {
         if (Subject is null || GetMetadataStore() is not { } store)
             return;
@@ -1041,22 +1063,7 @@
             return;
         }
 
-        await MetadataEditDialog.ShowAsync(DialogService, Subject, $"Metadata of {displayName}", property.Name);
-    }
-
-    private Task OpenPropertyMetadataSummaryAsync(
-        RegisteredSubjectProperty property, string displayName, ImmutableDictionary<string, JsonElement>? metadata)
-        => MetadataSummaryDialog.ShowAsync(DialogService, $"Metadata of {displayName}", metadata,
-            _metadataStore is not null ? () => OpenPropertyMetadataDialogAsync(property, displayName) : null);
-
-    private Task OpenTagFilterAsync(string tag) => MetadataTagFilterDialog.ShowAsync(DialogService, tag);
-
-    private async Task OpenMetadataDialogAsync()
-    {
-        if (Subject is null || GetMetadataStore() is null)
-            return;
-
-        await MetadataEditDialog.ShowAsync(DialogService, Subject, $"Metadata of {GetSubjectTitle()}");
+        await MetadataEditDialog.ShowAsync(DialogService, Subject, title, propertyName);
     }
 
     private bool CanShowHistory(RegisteredSubjectProperty property)
