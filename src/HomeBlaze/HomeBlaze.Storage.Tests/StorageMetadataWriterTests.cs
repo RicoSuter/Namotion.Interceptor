@@ -305,6 +305,38 @@ public class StorageMetadataWriterTests
         Assert.Contains("'.metadata.json' could not be read", exception.Message);
     }
 
+    [Theory]
+    [InlineData("""{ "$subjects": { "Channels[0]": { "navTitle": "A" } }, "$Subjects": { "Channels[1]": { "navTitle": "B" } } }""", "Channels[0]")]
+    [InlineData("""{ "$subjects": { "Channels[0]": { "navTitle": "A", "NavTitle": "B" } } }""", "Channels[0]")]
+    [InlineData("""{ "$subjects": { "Channels[0]": { "navTitle": "A", "NavTitle": "B" } } }""", "Channels[1]")]
+    [InlineData("""{ "$subjects": { "Channels[0]": 5 } }""", "Channels[0]")]
+    [InlineData("""{ "$subjects": 5 }""", "Channels[0]")]
+    public void WhenAPassCannotReadTheFile_ThenTheMergeIsRefusedNamingTheFile(string file, string path)
+    {
+        // Act
+        var exception = Record.Exception(() => Merge(file, NestedSubject(path), """{ "navTitle": "C" }"""));
+        var isRead = StorageMetadataFile.TryParse(Encoding.UTF8.GetBytes(file), out _, out _);
+
+        // Assert
+        var refusal = Assert.IsType<StorageRefusedException>(exception);
+        Assert.Contains("'Shelly.metadata.json' could not be read", refusal.Message);
+        Assert.False(isRead);
+    }
+
+    [Fact]
+    public void WhenTheFileHasThePathOfAnEntryTwice_ThenTheMergeIsRefused()
+    {
+        // Arrange
+        const string file = """{ "$subjects": { "Channels[0]": { "navTitle": "A" }, "Channels[0]": { "navTitle": "B" } } }""";
+
+        // Act
+        var exception = Record.Exception(() => Merge(file, NestedSubject("Channels[1]"), """{ "navTitle": "C" }"""));
+
+        // Assert
+        var refusal = Assert.IsType<StorageRefusedException>(exception);
+        Assert.Contains("'Shelly.metadata.json' could not be read", refusal.Message);
+    }
+
     [Fact]
     public void WhenValuesAreMerged_ThenTheFileIsReturnedAsAPassReadsIt()
     {

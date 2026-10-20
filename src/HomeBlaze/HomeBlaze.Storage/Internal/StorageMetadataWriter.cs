@@ -67,7 +67,8 @@ internal static class StorageMetadataWriter
     /// values is no JSON object, gives a key twice without regard to case, has a key that starts with $, sets
     /// <c>order</c> of anything but a folder or the root, has a known key with a value of another kind, has a key that
     /// cannot be read or a value that cannot be written, or exceeds a limit; or the file has two entries of the target,
-    /// or cannot be written back, such as with a string with a lone surrogate. The message names the key or the file.
+    /// cannot be read as a pass reads it, has a path twice, or cannot be written back, such as with a string with a lone
+    /// surrogate. The message names the key or the file.
     /// </exception>
     public static (byte[] Content, StorageMetadataFile File)? Merge(byte[]? content, StorageMetadataTarget target, JsonElement values)
     {
@@ -80,6 +81,12 @@ internal static class StorageMetadataWriter
         var sizeBefore = 0;
         if (content is not null)
         {
+            // Read as a pass reads it first, so that a file that a pass cannot read is never written.
+            if (!StorageMetadataFile.TryParse(content, out _, out _))
+            {
+                throw CreateUnreadableException(target.FilePath);
+            }
+
             try
             {
                 root = Parse(content);
@@ -91,7 +98,18 @@ internal static class StorageMetadataWriter
             }
         }
 
-        var (section, entry) = GetEntry(root, target);
+        JsonObject? section;
+        JsonObject entry;
+        try
+        {
+            (section, entry) = GetEntry(root, target);
+        }
+        catch (ArgumentException)
+        {
+            // A section with a path twice in exactly the same notation, which a pass reads as one entry.
+            throw CreateUnreadableException(target.FilePath);
+        }
+
         MergeValues(entry, values, isContainer: target is { Section: null, IsContainer: true });
 
         if (section is not null && CountKeys(entry) == 0)
