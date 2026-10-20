@@ -193,6 +193,12 @@ namespace HomeBlaze.Storage
         public static bool IsGranted { get; }
         public static System.IDisposable Enter(bool isGranted) { }
     }
+    public static class MetadataNotes
+    {
+        public const int MaxSize = 4096;
+        public static string? GetError(string notes) { }
+        public static string? ToHtml(string notes) { }
+    }
     public static class MetadataStoreExtensions
     {
         public static System.Threading.Tasks.Task SetOrderAsync(this Namotion.Interceptor.IInterceptorSubject folder, System.Collections.Generic.IReadOnlyList<string> names, System.Threading.CancellationToken cancellationToken) { }

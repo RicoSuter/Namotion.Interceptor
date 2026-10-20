@@ -30,7 +30,7 @@ public class StorageMetadataWriterTests
     {
         { "{}", $$"""{ "{{new string('k', 65)}}": 1 }""", "64 characters" },
         { "{}", $$"""{ "note": "{{new string('a', 257)}}" }""", "'note'" },
-        { "{}", $$"""{ "notes": {{LongStrings(21)}} }""", "'notes'" },
+        { "{}", $$"""{ "remarks": {{LongStrings(21)}} }""", "'remarks'" },
         { "{}", JsonObject(Enumerable.Range(0, 65).Select(index => $"\"key{index}\": null")), "64 keys" },
         { JsonObject(Enumerable.Range(0, 64).Select(index => $"\"key{index}\": {index}")), """{ "extra": 1 }""", "'extra'" }
     };
@@ -345,6 +345,75 @@ public class StorageMetadataWriterTests
 
         // Assert
         Assert.Equal("Hall light", written!.Value.File.FindSubject("Channels/0")!["navTitle"].GetString());
+    }
+
+    [Fact]
+    public void WhenNotesLinksAndTagsAreWritten_ThenTheyAreStoredAsGiven()
+    {
+        // Act
+        var written = Merge(null, Subject, """
+            {
+              "notes": "Calibrated **2026**, see [the manual](https://example.com/manual.pdf).",
+              "links": [{ "Title": "Manual", "URL": "https://example.com/manual.pdf" }, { "path": "/Devices/Pump/Temperature" }],
+              "tags": [" floor-2 ", "Pumps"]
+            }
+            """);
+
+        // Assert
+        Assert.Equal(
+            "{\n  \"notes\": \"Calibrated **2026**, see [the manual](https://example.com/manual.pdf).\",\n  \"links\": [\n    {\n      \"title\": \"Manual\",\n      \"url\": \"https://example.com/manual.pdf\"\n    },\n    {\n      \"path\": \"/Devices/Pump/Temperature\"\n    }\n  ],\n  \"tags\": [\n    \"floor-2\",\n    \"Pumps\"\n  ]\n}\n",
+            written);
+    }
+
+    [Fact]
+    public void WhenNotesAreLongerThanAStringMayBe_ThenTheyAreStillWritten()
+    {
+        // Act
+        var written = Merge(null, Subject, $$"""{ "notes": "{{new string('a', 4000)}}" }""");
+
+        // Assert
+        Assert.Contains(new string('a', 4000), written);
+    }
+
+    [Theory]
+    [InlineData("""{ "notes": "<b>bold</b>" }""", "notes hold Markdown")]
+    [InlineData("""{ "notes": "![pump](https://example.com/pump.png)" }""", "notes hold Markdown")]
+    [InlineData("""{ "notes": "[run](javascript:alert(1))" }""", "notes hold Markdown")]
+    [InlineData("""{ "notes": "{{ Temperature }}" }""", "notes hold Markdown")]
+    [InlineData("""{ "notes": "::: Card\n:::" }""", "notes hold Markdown")]
+    [InlineData("""{ "notes": 1 }""", "'notes'")]
+    [InlineData("""{ "links": [{ "title": "Manual" }] }""", "exactly one of a url and a path")]
+    [InlineData("""{ "links": [{ "url": "https://example.com", "path": "/Devices" }] }""", "exactly one of a url and a path")]
+    [InlineData("""{ "links": [{ "url": "ftp://example.com/manual.pdf" }] }""", "no absolute http, https or mailto address")]
+    [InlineData("""{ "links": [{ "url": "javascript:alert(1)" }] }""", "no absolute http, https or mailto address")]
+    [InlineData("""{ "links": [{ "url": "data:text/html,x" }] }""", "no absolute http, https or mailto address")]
+    [InlineData("""{ "links": [{ "url": "manual.pdf" }] }""", "no absolute http, https or mailto address")]
+    [InlineData("""{ "links": [{ "path": "Devices/Pump" }] }""", "no absolute path")]
+    [InlineData("""{ "links": [{ "path": "/Devices", "target": "_blank" }] }""", "'target'")]
+    [InlineData("""{ "links": [{ "url": "https://example.com", "URL": "https://example.org" }] }""", "'url' more than once")]
+    [InlineData("""{ "links": ["https://example.com"] }""", "an object")]
+    [InlineData("""{ "links": "https://example.com" }""", "an array")]
+    [InlineData("""{ "tags": ["floor-2", "Floor-2"] }""", "'Floor-2'")]
+    [InlineData("""{ "tags": [" "] }""", "1 to 64 characters")]
+    [InlineData("""{ "tags": [1] }""", "an array of at most 20 strings")]
+    public void WhenNotesLinksOrTagsBreakTheirRules_ThenTheWriteIsRefused(string values, string expectedPart)
+    {
+        // Act & Assert
+        var exception = Assert.Throws<StorageRefusedException>(() => Merge(null, Subject, values));
+        Assert.Contains(expectedPart, exception.Message);
+    }
+
+    [Theory]
+    [InlineData("links")]
+    [InlineData("tags")]
+    public void WhenThereAreMoreThanTwentyLinksOrTags_ThenTheWriteIsRefused(string key)
+    {
+        // Arrange
+        var items = Enumerable.Range(0, 21).Select(index => key == "links" ? $$"""{ "path": "/Devices/{{index}}" }""" : $"\"tag{index}\"");
+
+        // Act & Assert
+        var exception = Assert.Throws<StorageRefusedException>(() => Merge(null, Subject, $$"""{ "{{key}}": [{{string.Join(", ", items)}}] }"""));
+        Assert.Contains("at most 20", exception.Message);
     }
 
     // Names of children that make a file of more than 512 KB.

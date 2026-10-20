@@ -54,6 +54,52 @@ public static class MetadataDictionaryExtensions
         return items.DrainToImmutable();
     }
 
+    /// <summary>
+    /// Gets the links of the key, leaving out an item that is no object with exactly one of a <c>url</c> and a
+    /// <c>path</c> string; empty without an array. The address of a link is returned as it is held, see
+    /// <see cref="MetadataLink.IsWebAddress"/>.
+    /// </summary>
+    public static ImmutableArray<MetadataLink> GetLinks(this IReadOnlyDictionary<string, JsonElement>? metadata, string key)
+    {
+        if (metadata is null || !metadata.TryGetValue(key, out var value) || value.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        var links = ImmutableArray.CreateBuilder<MetadataLink>();
+        foreach (var item in value.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            var url = GetMember(item, "url");
+            var path = GetMember(item, "path");
+            if ((url is null) != (path is null))
+            {
+                links.Add(new MetadataLink(GetMember(item, "title"), url, path));
+            }
+        }
+
+        return links.DrainToImmutable();
+    }
+
+    // The string of a member, by its name without regard to case; null when it is not set, no string or blank.
+    private static string? GetMember(JsonElement item, string name)
+    {
+        foreach (var member in item.EnumerateObject())
+        {
+            if (string.Equals(member.Name, name, StringComparison.OrdinalIgnoreCase) && member.Value.ValueKind == JsonValueKind.String)
+            {
+                var text = GetText(member.Value);
+                return string.IsNullOrWhiteSpace(text) ? null : text;
+            }
+        }
+
+        return null;
+    }
+
     // Enum.TryParse also reads numbers, lists of names and names with spaces around them.
     private static bool IsName(string text)
     {

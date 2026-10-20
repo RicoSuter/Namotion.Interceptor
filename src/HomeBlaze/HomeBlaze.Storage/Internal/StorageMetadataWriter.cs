@@ -29,11 +29,19 @@ internal static class StorageMetadataWriter
     /// <summary>The largest file, which a write that does not make the file larger may exceed.</summary>
     public const int MaxFileSize = 512 * 1024;
 
+    /// <summary>The most links and tags.</summary>
+    public const int MaxItemCount = 20;
+
+    /// <summary>The longest tag.</summary>
+    public const int MaxTagLength = 64;
+
     private static readonly string[] KnownKeys =
     [
         MetadataKeys.Title, MetadataKeys.NavigationTitle, MetadataKeys.Icon, MetadataKeys.Location, MetadataKeys.Alignment,
-        MetadataKeys.Order
+        MetadataKeys.Order, MetadataKeys.Notes, MetadataKeys.Links, MetadataKeys.Tags
     ];
+
+    private static readonly string[] LinkMembers = ["title", "url", "path"];
 
     // The keys of the file, its own included, and of an entry are matched without regard to case.
     private static readonly JsonNodeOptions KeyOptions = new() { PropertyNameCaseInsensitive = true };
@@ -253,6 +261,9 @@ internal static class StorageMetadataWriter
                 MetadataKeys.Order => ToOrder(key, property.Value),
                 MetadataKeys.Location => ToName<NavigationLocation>(knownKey, property.Value),
                 MetadataKeys.Alignment => ToName<AppBarAlignment>(knownKey, property.Value),
+                MetadataKeys.Notes => ToNotes(knownKey, property.Value),
+                MetadataKeys.Links => ToLinks(knownKey, property.Value),
+                MetadataKeys.Tags => ToTags(knownKey, property.Value),
                 null => ToNode(property.Value),
                 _ => ToString(knownKey, property.Value)
             };
@@ -265,13 +276,14 @@ internal static class StorageMetadataWriter
 
             var size = GetSize(key, value);
 
-            // The order of a folder is limited by the file only, as it names every child.
-            if (!isOrder && property.Value.ValueKind == JsonValueKind.String && GetString(key, property.Value) is { Length: > MaxStringLength })
+            // The order of a folder is limited by the file only, as it names every child, and notes by their own limit.
+            var hasOwnLimit = isOrder || knownKey == MetadataKeys.Notes;
+            if (!hasOwnLimit && property.Value.ValueKind == JsonValueKind.String && GetString(key, property.Value) is { Length: > MaxStringLength })
             {
                 throw Refuse($"The value of {NameList.Format([key])} is longer than {MaxStringLength} characters.");
             }
 
-            if (!isOrder && size > MaxValueSize)
+            if (!hasOwnLimit && size > MaxValueSize)
             {
                 throw Refuse($"The value of {NameList.Format([key])} is larger than {MaxValueSize / 1024} KB.");
             }
@@ -321,6 +333,125 @@ internal static class StorageMetadataWriter
         return MetadataDictionaryExtensions.ParseEnumName<TEnum>(node.GetValue<string>()) is { } name
             ? JsonValue.Create(name.ToString())
             : throw Refuse($"'{key}' must be one of {string.Join(", ", Enum.GetNames<TEnum>())}.");
+    }
+
+    // A blank text removes the key.
+    private static JsonNode? ToNotes(string key, JsonElement value)
+    {
+        if (ToString(key, value) is not { } node)
+        {
+            return null;
+        }
+
+        return MetadataNotes.GetError(node.GetValue<string>()) is { } error ? throw Refuse(error) : node;
+    }
+
+    // An empty array removes the key. Each link is an object with an optional title and exactly one of an absolute
+    // http, https or mailto url and an absolute path.
+    private static JsonNode? ToLinks(string key, JsonElement value)
+    {
+        if (value.ValueKind == JsonValueKind.Null)
+        {
+            return null;
+        }
+
+        if (value.ValueKind != JsonValueKind.Array || value.GetArrayLength() > MaxItemCount)
+        {
+            throw Refuse($"'{key}' must be an array of at most {MaxItemCount} links, for example [{{ \"title\": \"Manual\", \"url\": \"https://example.com/manual.pdf\" }}].");
+        }
+
+        var links = new JsonArray(CaseSensitiveOptions);
+        foreach (var item in value.EnumerateArray())
+        {
+            links.Add(ToLink(key, item));
+        }
+
+        return links.Count > 0 ? links : null;
+    }
+
+    private static JsonObject ToLink(string key, JsonElement item)
+    {
+        if (item.ValueKind != JsonValueKind.Object)
+        {
+            throw Refuse($"Each item of '{key}' must be an object with a title and a url or a path.");
+        }
+
+        var link = new JsonObject(CaseSensitiveOptions);
+        foreach (var member in item.EnumerateObject())
+        {
+            var name = Array.Find(LinkMembers, candidate => string.Equals(candidate, member.Name, StringComparison.OrdinalIgnoreCase))
+                ?? throw Refuse($"An item of '{key}' has {NameList.Format([member.Name])}; a link has only a title and a url or a path.");
+            if (link.ContainsKey(name))
+            {
+                throw Refuse($"An item of '{key}' gives {NameList.Format([name])} more than once, without regard to case.");
+            }
+
+            if (ToString(key, member.Value) is not { } text)
+            {
+                continue;
+            }
+
+            if (text.GetValue<string>().Length > MaxStringLength)
+            {
+                throw Refuse($"The {name} of an item of '{key}' is longer than {MaxStringLength} characters.");
+            }
+
+            link[name] = text;
+        }
+
+        var url = (string?)link["url"];
+        var path = (string?)link["path"];
+        if ((url is null) == (path is null))
+        {
+            throw Refuse($"Each item of '{key}' has exactly one of a url and a path.");
+        }
+
+        if (url is not null && !MetadataLink.IsWebAddress(url))
+        {
+            throw Refuse($"The url {NameList.Format([url])} of '{key}' is no absolute http, https or mailto address.");
+        }
+
+        if (path is not null && !path.StartsWith('/'))
+        {
+            throw Refuse($"The path {NameList.Format([path])} of '{key}' is no absolute path, such as /Devices/Pump.");
+        }
+
+        return link;
+    }
+
+    // An empty array removes the key. Tags are trimmed.
+    private static JsonNode? ToTags(string key, JsonElement value)
+    {
+        if (value.ValueKind == JsonValueKind.Null)
+        {
+            return null;
+        }
+
+        if (value.ValueKind != JsonValueKind.Array || value.GetArrayLength() > MaxItemCount ||
+            value.EnumerateArray().Any(static item => item.ValueKind != JsonValueKind.String))
+        {
+            throw Refuse($"'{key}' must be an array of at most {MaxItemCount} strings.");
+        }
+
+        var tags = new JsonArray(CaseSensitiveOptions);
+        var givenTags = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var item in value.EnumerateArray())
+        {
+            var tag = GetString(key, item)!.Trim();
+            if (tag.Length == 0 || tag.Length > MaxTagLength)
+            {
+                throw Refuse($"Each tag of '{key}' has 1 to {MaxTagLength} characters.");
+            }
+
+            if (!givenTags.Add(tag))
+            {
+                throw Refuse($"The tag {NameList.Format([tag])} is given more than once, without regard to case.");
+            }
+
+            tags.Add(JsonValue.Create(tag));
+        }
+
+        return tags.Count > 0 ? tags : null;
     }
 
     // An empty order removes the key.

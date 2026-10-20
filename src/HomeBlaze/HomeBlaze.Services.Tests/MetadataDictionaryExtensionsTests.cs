@@ -82,4 +82,43 @@ public class MetadataDictionaryExtensionsTests
         Assert.Null(title);
         Assert.Empty(order.ToArray());
     }
+
+    [Fact]
+    public void WhenLinksAreRead_ThenOnlyLinksWithExactlyOneTargetAreReturned()
+    {
+        // Arrange
+        var metadata = Metadata("""
+            {
+              "links": [
+                { "title": "Manual", "url": "https://example.com/manual.pdf" },
+                { "PATH": "/Devices/Pump" },
+                { "title": "Neither" },
+                { "url": "https://example.com", "path": "/Devices" },
+                "https://example.com"
+              ]
+            }
+            """);
+
+        // Act
+        var links = metadata.GetLinks(MetadataKeys.Links);
+
+        // Assert
+        Assert.Equal(
+            [new MetadataLink("Manual", "https://example.com/manual.pdf", null), new MetadataLink(null, null, "/Devices/Pump")],
+            links.ToArray());
+    }
+
+    [Fact]
+    public void WhenALinkWasEditedByHandToAnAddressThatIsNoWebAddress_ThenItIsReadAsNoWebAddress()
+    {
+        // Arrange
+        var metadata = Metadata("""{ "links": [{ "title": "Run", "url": "javascript:alert(1)" }] }""");
+
+        // Act
+        var link = Assert.Single(metadata.GetLinks(MetadataKeys.Links));
+
+        // Assert
+        Assert.Equal("javascript:alert(1)", link.Url);
+        Assert.False(MetadataLink.IsWebAddress(link.Url!));
+    }
 }

@@ -57,10 +57,19 @@ namespace HomeBlaze.Services
     {
         public static TEnum? GetEnum<TEnum>(this System.Collections.Generic.IReadOnlyDictionary<string, System.Text.Json.JsonElement>? metadata, string key)
             where TEnum :  struct, System.Enum { }
+        public static System.Collections.Immutable.ImmutableArray<HomeBlaze.Services.MetadataLink> GetLinks(this System.Collections.Generic.IReadOnlyDictionary<string, System.Text.Json.JsonElement>? metadata, string key) { }
         public static string? GetString(this System.Collections.Generic.IReadOnlyDictionary<string, System.Text.Json.JsonElement>? metadata, string key) { }
         public static System.Collections.Immutable.ImmutableArray<string> GetStringArray(this System.Collections.Generic.IReadOnlyDictionary<string, System.Text.Json.JsonElement>? metadata, string key) { }
         public static TEnum? ParseEnumName<TEnum>(string text)
             where TEnum :  struct, System.Enum { }
+    }
+    public sealed class MetadataLink : System.IEquatable<HomeBlaze.Services.MetadataLink>
+    {
+        public MetadataLink(string? Title, string? Url, string? Path) { }
+        public string? Path { get; init; }
+        public string? Title { get; init; }
+        public string? Url { get; init; }
+        public static bool IsWebAddress(string url) { }
     }
     public static class MetadataPaths
     {
