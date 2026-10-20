@@ -64,11 +64,9 @@ public sealed class SubjectTransaction : IDisposable
     private bool _disposeRequestedDuringCommit;
 
     // Written only by the committing thread as it enters and leaves a commit scope, and read only after
-    // IsInCommitScope matched on that same thread, so it needs no synchronization.
+    // IsInCommitScope matched on that same thread, so they need no synchronization. The excluded properties are those
+    // whose source write failed, set only during the pre-apply check.
     private bool _isCheckingCommit;
-
-    // The properties whose source write failed, set only during the pre-apply check. Read only by the committing
-    // thread inside its check scope, so it needs no lock.
     private HashSet<PropertyReference>? _checkExcludedProperties;
 
     /// <summary>
@@ -1109,20 +1107,10 @@ public sealed class SubjectTransaction : IDisposable
     /// </summary>
     private void RunCommitHandlers(ReadOnlySpan<SubjectPropertyChange> changes, HashSet<PropertyReference>? excludedProperties)
     {
-        _checkExcludedProperties = excludedProperties;
-        try
+        using var scope = EnterCommitCheck(excludedProperties);
+        foreach (var handler in _handlerSet.Handlers)
         {
-            using (EnterCommitCheck())
-            {
-                foreach (var handler in _handlerSet.Handlers)
-                {
-                    handler.OnCommitting(this, changes);
-                }
-            }
-        }
-        finally
-        {
-            _checkExcludedProperties = null;
+            handler.OnCommitting(this, changes);
         }
     }
 
@@ -1203,14 +1191,15 @@ public sealed class SubjectTransaction : IDisposable
             : new CancellationTokenSource(_commitTimeout);
     }
 
-    private CommitScope EnterCommitModelAccess() => new(this, isCheck: false);
+    private CommitScope EnterCommitModelAccess() => new(this, isCheck: false, checkExcludedProperties: null);
 
-    private CommitScope EnterCommitCheck() => new(this, isCheck: true);
+    private CommitScope EnterCommitCheck(HashSet<PropertyReference>? excludedProperties) => new(this, isCheck: true, excludedProperties);
 
     /// <summary>
     /// Authorizes synchronous commit-owned work of the transaction on this thread: a handler check when
-    /// <c>isCheck</c> is true, model access otherwise. The previous identity is restored on disposal, so a scope of
-    /// another transaction can nest. Callers must dispose the scope before awaiting external code.
+    /// <c>isCheck</c> is true, whose reads skip the pending values of <c>checkExcludedProperties</c>, and model access
+    /// otherwise. The previous identity is restored on disposal, so a scope of another transaction can nest. Callers
+    /// must dispose the scope before awaiting external code.
     /// </summary>
     private readonly struct CommitScope : IDisposable
     {
@@ -1218,14 +1207,15 @@ public sealed class SubjectTransaction : IDisposable
         private readonly SubjectTransaction? _previousTransaction;
 
         [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S3010", Justification = "This scope deliberately installs the current thread's commit identity and restores the previous identity on disposal, including nested scopes.")]
-        public CommitScope(SubjectTransaction transaction, bool isCheck)
+        public CommitScope(SubjectTransaction transaction, bool isCheck, HashSet<PropertyReference>? checkExcludedProperties)
         {
-            // Dispose resets the check flag instead of restoring it, which holds only while the scopes of one
+            // Dispose resets the check state instead of restoring it, which holds only while the scopes of one
             // transaction run one after another.
             Debug.Assert(!ReferenceEquals(_commitScopeTransaction, transaction), "Commit scopes of one transaction must not nest.");
             _transaction = transaction;
             _previousTransaction = _commitScopeTransaction;
             transaction._isCheckingCommit = isCheck;
+            transaction._checkExcludedProperties = checkExcludedProperties;
             _commitScopeTransaction = transaction;
         }
 
@@ -1233,6 +1223,7 @@ public sealed class SubjectTransaction : IDisposable
         {
             _commitScopeTransaction = _previousTransaction;
             _transaction._isCheckingCommit = false;
+            _transaction._checkExcludedProperties = null;
         }
     }
 
