@@ -351,6 +351,44 @@ public class SubjectTransactionHandlerTests
         Assert.Equal("Bob", person.FirstName);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenAnotherThreadWritesLandedValueOfPendingPropertyDuringCommit_ThenWriteThrows(bool duringSourceWrite)
+    {
+        // Arrange
+        var writer = new CountingTransactionWriter();
+        var context = CreateContext(out var handler, duringSourceWrite ? writer : null);
+        var person = new Person(context) { FirstName = "Ann" };
+        Exception? writeError = null;
+        void WriteBackFromAnotherThread()
+        {
+            // A started thread inherits the execution context, so it carries the transaction.
+            var thread = new Thread(() => writeError = Record.Exception(() => person.FirstName = "Ann"));
+            thread.Start();
+            thread.Join();
+        }
+
+        if (duringSourceWrite)
+        {
+            writer.DuringWrite = WriteBackFromAnotherThread;
+        }
+        else
+        {
+            handler.OnCommittingAction = (_, _) => WriteBackFromAnotherThread();
+        }
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "Bob";
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        var exception = Assert.IsType<InvalidOperationException>(writeError);
+        Assert.Contains("commit is in progress", exception.Message);
+        Assert.Equal("Bob", person.FirstName);
+    }
+
     [Fact]
     public async Task WhenDisposedDuringOnCommitting_ThenLockIsReleasedOnlyAfterCommitEnds()
     {

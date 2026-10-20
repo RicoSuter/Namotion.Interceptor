@@ -326,13 +326,21 @@ public sealed class SubjectTransaction : IDisposable
     }
 
     /// <summary>
-    /// Returns true when the current flow's transaction is capturing and already holds a pending change for
-    /// <paramref name="property"/>.
+    /// Returns true when the current flow's transaction holds a pending change for <paramref name="property"/> and is
+    /// capturing, or is committing outside this thread's commit scope.
     /// </summary>
     internal static bool HasPendingChangeInCurrentTransaction(PropertyReference property)
     {
         var transaction = CurrentTransaction.Value;
-        if (transaction is null || transaction.IsDisposed || transaction._isCommitted || transaction._isCommitting)
+        if (transaction is null || transaction.IsDisposed || transaction._isCommitted)
+        {
+            return false;
+        }
+
+        // The commit's own applies and rollbacks rely on the equality drop. A write back from another thread or the
+        // writer's flow must reach the transaction interceptor, which rejects it while the commit runs, so the
+        // cancel it intends is not lost silently.
+        if (transaction._isCommitting && transaction.IsInCommitScope)
         {
             return false;
         }
