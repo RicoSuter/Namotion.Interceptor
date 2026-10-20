@@ -119,18 +119,50 @@ public class AppBarMenuTests
     }
 
     [Fact]
-    public async Task WhenEscapeIsPressedInTheSearchOfTheTimeZone_ThenTheSubmenuCloses()
+    public async Task WhenTheTimeZoneSubmenuOpens_ThenItsSearchHasTheFocus()
+    {
+        // Arrange
+        var page = await OpenAsync("pages/Dashboard.md");
+
+        // Act
+        await page.OpenTimeZoneMenuAsync();
+
+        // Assert
+        await Assertions.Expect(page.GetByPlaceholder("Search timezone")).ToBeFocusedAsync(new() { Timeout = Timeout });
+    }
+
+    [Fact]
+    public async Task WhenEscapeIsPressedRightAfterTheTimeZoneSubmenuOpens_ThenItCloses()
     {
         // Arrange
         var page = await OpenAsync("pages/Dashboard.md");
         await page.OpenTimeZoneMenuAsync();
-        await page.GetByPlaceholder("Search timezone").FillAsync("Ber");
 
         // Act
-        await page.GetByPlaceholder("Search timezone").PressAsync("Escape");
+        await page.Keyboard.PressAsync("Escape");
 
-        // Assert
+        // Assert: the submenu closes and the app bar menu stays open.
         await Assertions.Expect(page.GetByPlaceholder("Search timezone")).ToBeHiddenAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(page.DarkModeMenuEntry()).ToBeVisibleAsync();
+    }
+
+    [Fact]
+    public async Task WhenEscapeIsPressedAfterASearchOfTheTimeZone_ThenTheSubmenuCloses()
+    {
+        // Arrange
+        var page = await OpenAsync("pages/Dashboard.md");
+        await page.OpenTimeZoneMenuAsync();
+        await page.Keyboard.TypeAsync("Ber");
+        await Assertions.Expect(page.GetByPlaceholder("Search timezone")).ToHaveValueAsync("Ber");
+        await Assertions.Expect(page.Locator(".mud-popover-open .mud-list-item").Filter(new() { HasTextString = "Europe/Berlin" }))
+            .ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Act
+        await page.Keyboard.PressAsync("Escape");
+
+        // Assert: the submenu closes and the app bar menu stays open.
+        await Assertions.Expect(page.GetByPlaceholder("Search timezone")).ToBeHiddenAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(page.DarkModeMenuEntry()).ToBeVisibleAsync();
     }
 
     private async Task<IPage> OpenAsync(string path)

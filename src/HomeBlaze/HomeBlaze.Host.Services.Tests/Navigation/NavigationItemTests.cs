@@ -15,7 +15,11 @@ public class NavigationItemTests
     [InlineData("pages/My%20Page.md?edit=true#section", true)]
     [InlineData("pages/Other.md", false)]
     [InlineData("pages/My%20Page.md/child", false)]
-    public void WhenTheUrlIsCompared_ThenItsEscapingQueryAndFragmentDoNotMatter(string baseRelativeUrl, bool expected)
+    [InlineData("pages/My Page.md.bak", false)]
+    [InlineData("pages/My Page", false)]
+    [InlineData("", false)]
+    [InlineData("?x", false)]
+    public void WhenTheUrlIsCompared_ThenOnlyThePageItselfMatches(string baseRelativeUrl, bool expected)
     {
         // Arrange
         var item = new NavigationItem

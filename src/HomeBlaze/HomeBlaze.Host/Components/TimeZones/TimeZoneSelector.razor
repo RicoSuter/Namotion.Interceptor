@@ -22,10 +22,11 @@
         </span>
     </ActivatorContent>
     <ChildContent>
-    @* The submenu has no menu items of its own, so MudMenu does not close it on Escape. *@
+    @* The submenu has no menu items of its own, so MudMenu does not close it on Escape. The search field takes the
+       focus from the list wrapper that MudMenu focuses on opening, so that a key reaches this handler at once. *@
     <div style="min-width: min(320px, calc(100vw - 32px));" @onkeydown="OnKeyDownAsync">
         <div style="position: sticky; top: 0; z-index: 1; background-color: var(--mud-palette-surface);">
-            <MudTextField @bind-Value="_search" Placeholder="Search timezone" Immediate="true"
+            <MudTextField @bind-Value="_search" Placeholder="Search timezone" Immediate="true" AutoFocus="true"
                           Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
                           Class="px-3 py-2" />
         </div>
@@ -60,6 +61,7 @@
     private static readonly IReadOnlyList<TimeZoneOption> Zones = TimeZoneCatalog.GetZones();
     private MudMenu? _menu;
     private string _search = string.Empty;
+    private bool _skipRender;
 
     private string CurrentLabel => GetCurrentLabel(TimeZone);
 
@@ -156,13 +158,29 @@
         }
     }
 
+    // Every other key changes nothing here, and a render would rebuild the whole list of zones once more per key.
+    // The input event of the search field renders on its own.
+    protected override bool ShouldRender()
+    {
+        if (_skipRender)
+        {
+            _skipRender = false;
+            return false;
+        }
+
+        return true;
+    }
+
     private async Task OnKeyDownAsync(KeyboardEventArgs e)
     {
-        if (e.Key == "Escape" && _menu is not null)
+        if (e.Key != "Escape" || _menu is null)
         {
-            _search = string.Empty;
-            await _menu.CloseMenuAsync();
+            _skipRender = true;
+            return;
         }
+
+        _search = string.Empty;
+        await _menu.CloseMenuAsync();
     }
 
     private async Task CloseMenuAsync()
