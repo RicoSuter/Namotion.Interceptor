@@ -26,17 +26,21 @@
         {
             @* Apart from the notes only by the margin of the chips. *@
             <div class="@(_notes is not null ? "d-flex flex-wrap gap-1 mt-1" : "d-flex flex-wrap gap-1")">
-                @* Resolved in every render, which reads the titles of the targets, so that a change of one renders the
-                   summary again; reading PathsVersion does so when a subject is attached or detached, which can mend
-                   or break a link. *@
-                @{ _ = PathResolver.PathsVersion; }
-                @foreach (var link in _links.Select(LinkResolver.Resolve))
+                @if (_links.Length > 0)
                 {
-                    @* A link that opens in a new tab shows so by its icon. *@
-                    <MudChip T="string" Size="Size.Small" Color="@(link.IsBroken ? Color.Error : Color.Default)" Variant="Variant.Outlined"
-                             Icon="@(link.IsBroken ? Icons.Material.Filled.LinkOff : link.IsExternal ? Icons.Material.Filled.OpenInNew : Icons.Material.Filled.Link)"
-                             title="@(link.IsBroken ? "Broken link" : null)" Href="@link.Href" Target="@(link.IsExternal ? "_blank" : null)"
-                             Rel="@(link.IsExternal ? "noopener noreferrer" : null)" data-testid="metadata-link">@link.Title</MudChip>
+                    @* Resolved in every render, which reads the titles of the targets, so that a change of one renders the
+                       summary again; reading PathsVersion does so when a subject is attached or detached, which can mend
+                       or break a link. *@
+                    _ = PathResolver.PathsVersion;
+                    @foreach (var metadataLink in _links)
+                    {
+                        var link = LinkResolver.Resolve(metadataLink);
+                        @* A link that opens in a new tab shows so by its icon. *@
+                        <MudChip T="string" Size="Size.Small" Color="@(link.IsBroken ? Color.Error : Color.Default)" Variant="Variant.Outlined"
+                                 Icon="@(link.IsBroken ? Icons.Material.Filled.LinkOff : link.IsExternal ? Icons.Material.Filled.OpenInNew : Icons.Material.Filled.Link)"
+                                 title="@(link.IsBroken ? "Broken link" : null)" Href="@link.Href" Target="@(link.IsExternal ? "_blank" : null)"
+                                 Rel="@(link.IsExternal ? "noopener noreferrer" : null)" data-testid="metadata-link">@link.Title</MudChip>
+                    }
                 }
                 @foreach (var tag in _tags)
                 {
