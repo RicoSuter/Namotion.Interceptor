@@ -348,12 +348,15 @@ public sealed class HomeBlazeMarkdownSearchToolTests : IDisposable
     public async Task WhenNotesOfMetadataMatch_ThenTheyAreReturnedWithThePathOfTheirSubjectAndTheirProperty()
     {
         // Arrange
-        var tool = await CreateToolAsync(
+        var (root, services) = await CreateGraphAsync(
+        [
             ("Docs/Pump.json", """{ "speed": 1 }"""),
-            ("Docs/Pump.metadata.json", """{ "notes": "Check the freezer gasket.", "$properties": { "FileSize": { "notes": "Grows with the freezer log." } } }"""));
+            ("Docs/Pump.metadata.json", """{ "notes": "Check the freezer gasket.", "$properties": { "FileSize": { "notes": "Grows with the freezer log." } } }""")
+        ]);
+        var tools = CreateTools(services, root, forAgents: true);
 
         // Act
-        var result = await CallAsync(tool, new { query = "freezer" });
+        var result = await CallAsync(tools[HomeBlazeMarkdownSearchToolProvider.SearchMarkdownToolName], new { query = "freezer" });
 
         // Assert
         var matches = result.GetProperty("pages").EnumerateArray().ToArray();
@@ -367,6 +370,14 @@ public sealed class HomeBlazeMarkdownSearchToolTests : IDisposable
         Assert.False(matches[2].TryGetProperty("kind", out _));
         Assert.Equal("Check the freezer gasket.", matches[0].GetProperty("matches")[0].GetProperty("snippet").GetString());
         Assert.Equal(1, matches[1].GetProperty("matches")[0].GetProperty("line").GetInt32());
+        Assert.Equal(
+            ["/Storage/Docs/Pump.json/HomeBlaze:Metadata", "/Storage/Docs/Pump.json/FileSize@HomeBlaze:Metadata"],
+            matches.Take(2).Select(match => match.GetProperty("read").GetString()));
+        Assert.False(matches[2].TryGetProperty("read", out _));
+        var subjectNotes = await CallAsync(tools["get_property"], new { path = matches[0].GetProperty("read").GetString() });
+        var propertyNotes = await CallAsync(tools["get_property"], new { path = matches[1].GetProperty("read").GetString() });
+        Assert.Equal("Check the freezer gasket.", subjectNotes.GetProperty("value").GetProperty("notes").GetString());
+        Assert.Equal("Grows with the freezer log.", propertyNotes.GetProperty("value").GetProperty("notes").GetString());
     }
 
     [Fact]
@@ -441,7 +452,7 @@ public sealed class HomeBlazeMarkdownSearchToolTests : IDisposable
     }
 
     [Fact]
-    public async Task WhenTheRootHasNotes_ThenTheyAreFoundAtTheRootAndTheDescriptionSaysHowToReadThem()
+    public async Task WhenTheRootHasNotes_ThenTheyAreFoundAtTheRootWithThePathToReadThem()
     {
         // Arrange
         var (root, services) = await CreateGraphAsync([]);
@@ -453,8 +464,9 @@ public sealed class HomeBlazeMarkdownSearchToolTests : IDisposable
         var result = await CallAsync(tool, new { query = "house" });
 
         // Assert
-        Assert.Equal("/", GetSinglePage(result).GetProperty("path").GetString());
-        Assert.Contains("/HomeBlaze:Metadata for the root", tool.Description);
+        var page = GetSinglePage(result);
+        Assert.Equal("/", page.GetProperty("path").GetString());
+        Assert.Equal("/HomeBlaze:Metadata", page.GetProperty("read").GetString());
     }
 
     [Fact]
@@ -473,10 +485,13 @@ public sealed class HomeBlazeMarkdownSearchToolTests : IDisposable
         return CreateTool(services, root, forAgents: true);
     }
 
-    private static McpToolInfo CreateTool(IServiceProvider services, AgentTestRoot root, bool forAgents)
+    private static McpToolInfo CreateTool(IServiceProvider services, AgentTestRoot root, bool forAgents) =>
+        CreateTools(services, root, forAgents)[HomeBlazeMarkdownSearchToolProvider.SearchMarkdownToolName];
+
+    private static Dictionary<string, McpToolInfo> CreateTools(IServiceProvider services, AgentTestRoot root, bool forAgents)
     {
         var configuration = HomeBlazeMcpConfigurationFactory.Create(services, () => root, isReadOnly: true, forAgents);
-        return new McpToolFactory(root, configuration).CreateTools().Single(tool => tool.Name == HomeBlazeMarkdownSearchToolProvider.SearchMarkdownToolName);
+        return new McpToolFactory(root, configuration).CreateTools().ToDictionary(tool => tool.Name);
     }
 
     private async Task<(AgentTestRoot Root, IServiceProvider Services)> CreateGraphAsync((string Path, string Content)[] additionalFiles)

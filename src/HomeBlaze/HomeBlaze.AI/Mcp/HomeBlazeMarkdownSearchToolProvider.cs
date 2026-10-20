@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using HomeBlaze.Abstractions;
 using HomeBlaze.Storage.Files;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Mcp;
@@ -38,12 +39,11 @@ public class HomeBlazeMarkdownSearchToolProvider : IMcpToolProvider
         $"Searches the Markdown source as {HomeBlazeMcpToolProvider.InvokeQueryToolName} method ReadRawContent returns it, with " +
         "{{ path }} expressions unevaluated and secret values hidden (***). Returns the matching pages and notes in path order, " +
         $"each with its title, the number of matching lines and the line number and a snippet of up to {MaxMatchesPerPage} of " +
-        "them; notes have kind notes and the path of their subject, and the notes of a property also property, its name. " +
+        "them; notes have kind notes, the path of their subject, for the notes of a property property, its name, and read, " +
+        "the path that get_property reads them with. " +
         $"truncated is true when more match than max_pages or the search stopped at its limit of {MaxSearchedPages} " +
         $"pages and notes or {SearchTimeout.TotalSeconds:0} seconds; narrow it with path. Read a found page with " +
-        $"{HomeBlazeMcpToolProvider.InvokeQueryToolName} method ReadEvaluatedContent or ReadRawContent, and found notes with " +
-        "get_property of <path>/HomeBlaze:Metadata for a subject or <path>/<property>@HomeBlaze:Metadata for a property, with " +
-        "one slash at the root path /, such as /HomeBlaze:Metadata for the root.";
+        $"{HomeBlazeMcpToolProvider.InvokeQueryToolName} method ReadEvaluatedContent or ReadRawContent.";
 
     private static readonly JsonElement Schema = JsonSerializer.SerializeToElement(new
     {
@@ -201,8 +201,8 @@ public class HomeBlazeMarkdownSearchToolProvider : IMcpToolProvider
                 pages.Add(source switch
                 {
                     { File: not null } => new { path, title = source.Title, match_count = scan.MatchCount, matches = scan.Matches },
-                    { Property: { } property } => new { path, property, title = source.Title, kind = "notes", match_count = scan.MatchCount, matches = scan.Matches },
-                    _ => (object)new { path, title = source.Title, kind = "notes", match_count = scan.MatchCount, matches = scan.Matches }
+                    { Property: { } property } => new { path, property, title = source.Title, kind = "notes", read = GetMetadataPath(path, property), match_count = scan.MatchCount, matches = scan.Matches },
+                    _ => (object)new { path, title = source.Title, kind = "notes", read = GetMetadataPath(path, null), match_count = scan.MatchCount, matches = scan.Matches }
                 });
             }
 
@@ -214,6 +214,15 @@ public class HomeBlazeMarkdownSearchToolProvider : IMcpToolProvider
         }
 
         return new { pages, truncated, pages_searched = pagesSearched };
+    }
+
+    // The path of the metadata of a subject, or of its property, with one slash after the root path /.
+    private static string GetMetadataPath(string path, string? property)
+    {
+        var separator = path.EndsWith('/') ? "" : "/";
+        return property is null
+            ? string.Concat(path, separator, KnownAttributes.Metadata)
+            : string.Concat(path, separator, property, "@" + KnownAttributes.Metadata);
     }
 
     private static PageScan ScanPage(string content, ContentQuery query, long deadline, bool stopAtFirstMatch)
