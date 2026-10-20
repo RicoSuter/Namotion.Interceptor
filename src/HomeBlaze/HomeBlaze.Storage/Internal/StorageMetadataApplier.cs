@@ -77,18 +77,18 @@ internal sealed class StorageMetadataApplier
     /// </summary>
     public void Apply(IInterceptorSubject storedSubject, StorageMetadataFile file)
     {
+        // Without entries in this file and in the one applied before, nothing inside the stored subject has metadata.
+        var hasEntries = HasEntries(file) || (_files.TryGetValue(storedSubject, out var previous) && HasEntries(previous));
+
+        // Published before the registration is read and the values are set: a subject that attaches meanwhile reads the
+        // file under the SyncRoot of the subject, which setting its values takes as well, so either it reads this file
+        // or its values are set after it.
+        _files.AddOrUpdate(storedSubject, file);
         if (storedSubject.TryGetRegisteredSubject() is not { } stored)
         {
             return;
         }
 
-        // Without entries in this file and in the one applied before, nothing inside the stored subject has metadata.
-        var hasEntries = HasEntries(file) || (_files.TryGetValue(storedSubject, out var previous) && HasEntries(previous));
-
-        // Published before the values are set: a subject that attaches meanwhile reads the file under the SyncRoot of
-        // the subject, which setting its values takes as well, so either it reads this file or its values are set
-        // after it.
-        _files.AddOrUpdate(storedSubject, file);
         if (!hasEntries)
         {
             StorageMetadataValues.Set(stored, null, file.Own);
