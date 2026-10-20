@@ -44,7 +44,7 @@ public interface ITransactionHandler
     /// Throwing in the commit check aborts the commit without writing anything and leaves the transaction retryable
     /// unless it was disposed; the exception propagates unchanged. Throwing in the pre-apply check lands none of the passed changes in either
     /// failure handling mode: their source writes are reverted, every passed change is reported as failed, and the
-    /// transaction is terminal unless the commit timeout interrupts the revert of the source writes.
+    /// transaction is terminal.
     /// </remarks>
     /// <param name="transaction">The committing transaction.</param>
     /// <param name="changes">

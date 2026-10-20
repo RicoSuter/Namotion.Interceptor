@@ -317,8 +317,11 @@ public class SubjectTransactionWriterTests
         Assert.Contains("already been committed", retryException.Message);
     }
 
-    [Fact]
-    public async Task WhenCommitTimesOutWhileRevertingRejectedSetInBestEffort_ThenModelIsUntouchedAndRetryCommits()
+    [Theory]
+    [InlineData(TransactionFailureHandling.BestEffort)]
+    [InlineData(TransactionFailureHandling.Rollback)]
+    public async Task WhenCommitTimesOutWhileRevertingRejectedSet_ThenCommitFailsTerminallyAndModelIsUntouched(
+        TransactionFailureHandling failureHandling)
     {
         // Arrange
         var committingCalls = 0;
@@ -330,11 +333,52 @@ public class SubjectTransactionWriterTests
                 throw new InvalidOperationException("rejected");
             }
         };
-        var person = new Person(context) { FirstName = "Ann" };
+        var person = new Person(context) { FirstName = "Ann", LastName = "Lee" };
         var flowWithoutTransaction = ExecutionContext.Capture()!;
         using var transaction = await context.BeginTransactionAsync(
-            TransactionFailureHandling.BestEffort, commitTimeout: TimeSpan.FromMilliseconds(50));
+            failureHandling, commitTimeout: TimeSpan.FromMilliseconds(50));
         person.FirstName = "Bob";
+        person.LastName = "Kim";
+
+        // Act
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+        string? landedFirstName = null;
+        string? landedLastName = null;
+        ExecutionContext.Run(flowWithoutTransaction, _ =>
+        {
+            landedFirstName = person.FirstName;
+            landedLastName = person.LastName;
+        }, null);
+        var retryException = await Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await transaction.CommitAsync(CancellationToken.None));
+
+        // Assert
+        Assert.Equal(
+            [nameof(Person.FirstName), nameof(Person.LastName)],
+            exception.FailedChanges.Select(change => change.Property.Name));
+        Assert.Equal(2, exception.Errors.Count);
+        Assert.Equal("rejected", exception.Errors[0].Message);
+        Assert.IsAssignableFrom<OperationCanceledException>(exception.Errors[1]);
+        Assert.Equal("Ann", landedFirstName);
+        Assert.Equal("Lee", landedLastName);
+        Assert.Equal(2, committingCalls);
+        Assert.Contains("already been committed", retryException.Message);
+    }
+
+    [Fact]
+    public async Task WhenCommitTimesOutWhileRevertingAfterSourceFailureInRollback_ThenModelIsUntouchedAndRetryCommits()
+    {
+        // Arrange
+        var context = CreateContext();
+        context.AddService<ITransactionWriter>(
+            new RevertUntilCancelledTransactionWriter(failFirstWriteOf: nameof(Person.LastName)));
+        var person = new Person(context) { FirstName = "Ann", LastName = "Lee" };
+        var flowWithoutTransaction = ExecutionContext.Capture()!;
+        using var transaction = await context.BeginTransactionAsync(
+            TransactionFailureHandling.Rollback, commitTimeout: TimeSpan.FromMilliseconds(50));
+        person.FirstName = "Bob";
+        person.LastName = "Kim";
 
         // Act
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
@@ -345,21 +389,30 @@ public class SubjectTransactionWriterTests
 
         // Assert
         Assert.Equal("Ann", landedFirstName);
-        Assert.Equal(4, committingCalls);
         Assert.Equal("Bob", person.FirstName);
+        Assert.Equal("Kim", person.LastName);
     }
 
     /// <summary>
-    /// Accepts every write and completes a revert only when the commit timeout cancels it.
+    /// Accepts every write, except the first write of <c>failFirstWriteOf</c>, and completes a revert only when the
+    /// commit timeout cancels it.
     /// </summary>
-    private sealed class RevertUntilCancelledTransactionWriter : ITransactionWriter
+    private sealed class RevertUntilCancelledTransactionWriter(string? failFirstWriteOf = null) : ITransactionWriter
     {
+        private bool _hasWritten;
+
         public ValueTask<SourceWriteResult> WriteToSourcesAsync(
             Memory<SubjectPropertyChange> changes,
             TransactionRequirement requirement,
             CancellationToken cancellationToken)
         {
-            return new(new SourceWriteResult(changes.ToArray(), [], [], RevertState: null));
+            var failedPropertyName = _hasWritten ? null : failFirstWriteOf;
+            _hasWritten = true;
+            var all = changes.ToArray();
+            var failed = all.Where(change => change.Property.Name == failedPropertyName).ToArray();
+            var written = all.Where(change => change.Property.Name != failedPropertyName).ToArray();
+            Exception[] errors = failed.Length > 0 ? [new InvalidOperationException("source write failed")] : [];
+            return new(new SourceWriteResult(written, failed, errors, RevertState: null));
         }
 
         public async ValueTask<SourceRevertResult> RevertSourceWritesAsync(

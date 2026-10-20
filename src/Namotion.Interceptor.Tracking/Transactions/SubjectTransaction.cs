@@ -733,7 +733,7 @@ public sealed class SubjectTransaction : IDisposable
         var rejectionErrors = rollBackSourceFailure ? null : RunPreApplyCheck(changes.Span, failedSource);
         if (rollBackSourceFailure || rejectionErrors is not null)
         {
-            var revert = await RevertSourceWritesSafelyAsync(writer, written, revertState, afterLocalApply: false, cancellationToken).ConfigureAwait(false);
+            var revert = await RevertSourceWritesSafelyAsync(writer, written, revertState, propagateTimeout: rejectionErrors is null, cancellationToken).ConfigureAwait(false);
 
             // A rejection fails every checked change, which includes every written one. After a source failure, the
             // written changes that were reverted cleanly are not reported.
@@ -784,7 +784,7 @@ public sealed class SubjectTransaction : IDisposable
             if (RollsBackOnApplyFailure)
             {
                 // All-or-nothing: revert local applies, then the source writes.
-                var sourceRevert = await RevertSourceWritesSafelyAsync(writer, written, revertState, afterLocalApply: true, cancellationToken).ConfigureAwait(false);
+                var sourceRevert = await RevertSourceWritesSafelyAsync(writer, written, revertState, propagateTimeout: false, cancellationToken).ConfigureAwait(false);
                 return CreateRollbackFailureException(
                     MarkingTransaction is null
                         ? GetRolledBackFailedChanges(changes.Span, written, applyFailed, revertFailed, sourceRevert.Failed)
@@ -795,7 +795,7 @@ public sealed class SubjectTransaction : IDisposable
             // BestEffort without handlers: keep source == model for failed-apply properties by reverting only the source writes whose
             // property failed to apply (matched by Property equality).
             var toRevert = SubjectPropertyChangeOperations.IntersectByProperty(applyFailed, written);
-            var bestEffortRevert = await RevertSourceWritesSafelyAsync(writer, toRevert, revertState, afterLocalApply: true, cancellationToken).ConfigureAwait(false);
+            var bestEffortRevert = await RevertSourceWritesSafelyAsync(writer, toRevert, revertState, propagateTimeout: false, cancellationToken).ConfigureAwait(false);
             return CreateFailureException(
                 applied,
                 SubjectPropertyChangeOperations.Concat(
@@ -895,21 +895,22 @@ public sealed class SubjectTransaction : IDisposable
     /// into "every requested revert failed" so the commit stays on the reported-failure path and becomes
     /// terminal; a propagating throw would leave the transaction retryable, and a retry would re-push
     /// to sources that already accepted writes. Only the commit timeout propagates, and only when
-    /// <paramref name="afterLocalApply"/> is false: once the local model changed, a retry would replay the
-    /// snapshot onto it, so the timeout is reported as a failed revert too.
+    /// <paramref name="propagateTimeout"/> is true, for the revert after a source write failure. After a pre-apply
+    /// rejection a retry would lose the rejection, and once the local model changed it would replay the snapshot onto
+    /// it, so the timeout is reported as a failed revert there too.
     /// </summary>
     private static async ValueTask<SourceRevertResult> RevertSourceWritesSafelyAsync(
         ITransactionWriter writer,
         IReadOnlyList<SubjectPropertyChange> written,
         object? revertState,
-        bool afterLocalApply,
+        bool propagateTimeout,
         CancellationToken cancellationToken)
     {
         try
         {
             return await writer.RevertSourceWritesAsync(written, revertState, cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception exception) when (afterLocalApply || !IsCommitCancellation(exception, cancellationToken))
+        catch (Exception exception) when (!propagateTimeout || !IsCommitCancellation(exception, cancellationToken))
         {
             return new SourceRevertResult(written, [exception]);
         }
