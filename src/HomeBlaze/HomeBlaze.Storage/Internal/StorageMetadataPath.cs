@@ -17,10 +17,12 @@ internal static class StorageMetadataPath
         => path.EndsWith(Suffix, StringComparison.Ordinal);
 
     /// <summary>
-    /// Whether a subject at the path would share its file with a metadata file on a file system that ignores case.
+    /// Whether a subject at the path would share its file with a metadata file on a file system that ignores case, or
+    /// its metadata file with its folder, as <c>.json</c> has no name before the extension.
     /// </summary>
     public static bool IsReservedSubjectPath(string path)
-        => path.EndsWith(Suffix, StringComparison.OrdinalIgnoreCase);
+        => path.EndsWith(Suffix, StringComparison.OrdinalIgnoreCase) ||
+           Path.GetFileName(path.AsSpan()).Equals(FileExtensions.Json, StringComparison.OrdinalIgnoreCase);
 
     public static string GetFolderFilePath(string folder)
         => folder.Length == 0 ? FolderFileName : $"{folder}/{FolderFileName}";

@@ -46,4 +46,36 @@ public class StorageMetadataPathTests
         // Assert
         Assert.Equal(expected, path);
     }
+
+    [Theory]
+    [InlineData("Motor.metadata.json", true)]
+    [InlineData("Docs/Motor.Metadata.JSON", true)]
+    [InlineData(".json", true)]
+    [InlineData("Docs/.JSON", true)]
+    [InlineData("Docs/Motor.json", false)]
+    [InlineData("Docs/a.json", false)]
+    public void WhenSubjectPathIsChecked_ThenNamesOfMetadataFilesAndAnEmptyNameAreReserved(string path, bool expected)
+    {
+        // Act
+        var isReserved = StorageMetadataPath.IsReservedSubjectPath(path);
+
+        // Assert
+        Assert.Equal(expected, isReserved);
+    }
+
+    [Theory]
+    [InlineData(".json", false)]
+    [InlineData("Docs/.json", false)]
+    [InlineData("Docs/Motor.json", true)]
+    public void WhenTheNameOfAJsonFileIsEmpty_ThenItHasNoSidecarAsThatWouldBeTheFileOfItsFolder(string path, bool expected)
+    {
+        // Arrange
+        var entry = new StorageEntry { Path = path, IsFolder = false };
+
+        // Act
+        var hasSidecar = entry.HasSidecar;
+
+        // Assert
+        Assert.Equal(expected, hasSidecar);
+    }
 }
