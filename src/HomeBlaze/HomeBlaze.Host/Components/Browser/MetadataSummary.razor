@@ -89,6 +89,9 @@
         _readMetadata = Metadata;
         _notes = Metadata.GetString(MetadataKeys.Notes);
         _notesHtml = _notes is null ? null : MetadataNotes.ToHtml(_notes);
+        if (_notes is not null && _notesHtml is null)
+            _notes = MetadataNotes.ToText(_notes);
+
         _links = Metadata.GetLinks(MetadataKeys.Links);
         _tags = Metadata.GetTags();
         _resolvedPathsVersion = -1;

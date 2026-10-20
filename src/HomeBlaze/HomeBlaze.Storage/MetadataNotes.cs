@@ -142,4 +142,32 @@ public static class MetadataNotes
             return null;
         }
     }
+
+    /// <summary>
+    /// Gets the notes to show as text, as notes that <see cref="ToHtml"/> does not convert are: the first
+    /// <see cref="MaxSize"/> bytes of UTF-8 of them, ending at a whole character.
+    /// </summary>
+    public static string ToText(string notes)
+    {
+        if (Encoding.UTF8.GetByteCount(notes) <= MaxSize)
+        {
+            return notes;
+        }
+
+        var length = 0;
+        var size = 0;
+        while (length < notes.Length)
+        {
+            var count = char.IsSurrogatePair(notes, length) ? 2 : 1;
+            size += Encoding.UTF8.GetByteCount(notes.AsSpan(length, count));
+            if (size > MaxSize)
+            {
+                break;
+            }
+
+            length += count;
+        }
+
+        return notes[..length];
+    }
 }

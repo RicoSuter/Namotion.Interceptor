@@ -202,6 +202,7 @@ namespace HomeBlaze.Storage
         public const int MaxSize = 4096;
         public static string? GetError(string notes) { }
         public static string? ToHtml(string notes) { }
+        public static string ToText(string notes) { }
     }
     public static class MetadataStoreExtensions
     {

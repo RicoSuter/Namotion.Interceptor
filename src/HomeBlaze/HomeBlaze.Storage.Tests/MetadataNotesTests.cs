@@ -72,4 +72,21 @@ public class MetadataNotesTests
         // Assert
         Assert.Contains(expectedLink, html);
     }
+
+    [Theory]
+    [InlineData("\u20AC", 2000, 1365)]
+    [InlineData("\U0001F600", 2000, 2048)]
+    [InlineData("a", 100, 100)]
+    public void WhenNotesAreShownAsText_ThenTheyAreCutToTheLimitAtAWholeCharacter(string character, int count, int expectedLength)
+    {
+        // Arrange
+        var notes = string.Concat(Enumerable.Repeat(character, count));
+
+        // Act
+        var text = MetadataNotes.ToText(notes);
+
+        // Assert
+        Assert.Equal(expectedLength, text.Length);
+        Assert.Equal(notes[..expectedLength], text);
+    }
 }
