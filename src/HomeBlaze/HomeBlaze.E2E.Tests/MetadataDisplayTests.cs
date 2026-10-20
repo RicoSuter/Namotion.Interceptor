@@ -1,7 +1,10 @@
+using System.Collections.Immutable;
 using System.Text.Json;
+using HomeBlaze.Abstractions;
 using HomeBlaze.E2E.Tests.Infrastructure;
 using HomeBlaze.Services;
 using HomeBlaze.Storage;
+using HomeBlaze.Storage.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Playwright;
 using Namotion.Interceptor.Registry;
@@ -307,5 +310,84 @@ public class MetadataDisplayTests
         var row = GetRow(page, pane, "Fraction");
         await Assertions.Expect(row.GetByTestId("subject-pane-value-metadata")).ToHaveCountAsync(1, new() { Timeout = PageLoadTimeout });
         await Assertions.Expect(pane.GetByTestId("subject-pane-empty-values")).Not.ToContainTextAsync("Fraction");
+    });
+
+    [Fact]
+    public Task WhenTheStorageIsDisconnected_ThenTheMetadataOfAPropertyIsShownAndEditingIsRefusedWithAMessage() => WithSidecarAsync("Motor.metadata.json", MotorSidecar, async () =>
+    {
+        // Arrange
+        var storage = (FluentStorageContainer)_fixture.ServerServices.GetRequiredService<RootManager>().Root!;
+        var (page, pane) = await OpenPaneAsync("Demo/Motor");
+        var icon = GetRow(page, pane, "Temperature").GetByTestId("subject-pane-value-metadata");
+        await Assertions.Expect(icon).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
+        var status = storage.Status;
+        try
+        {
+            storage.Status = StorageStatus.Disconnected;
+
+            // Act
+            await icon.HoverAsync();
+            var tooltip = page.Locator(".mud-popover-open").GetByTestId("metadata-summary");
+            await Assertions.Expect(tooltip.GetByTestId("metadata-notes")).ToHaveTextAsync("Measured at the housing", new() { Timeout = PageLoadTimeout });
+            await icon.ClickAsync();
+
+            // Assert
+            await Assertions.Expect(page.Locator(".mud-snackbar").GetByText("The metadata cannot be edited while the storage is not connected."))
+                .ToHaveCountAsync(1, new() { Timeout = PageLoadTimeout });
+            await Assertions.Expect(page.GetByTestId("metadata-edit-dialog")).ToHaveCountAsync(0);
+        }
+        finally
+        {
+            storage.Status = status;
+        }
+    });
+
+    [Fact]
+    public async Task WhenAPropertyOfTheStorageRootHasNotes_ThenItsRowShowsThemWithoutEditing()
+    {
+        // Arrange - the storage root keeps no metadata of its properties, so the notes are set as metadata written by hand would be.
+        var storage = (FluentStorageContainer)_fixture.ServerServices.GetRequiredService<RootManager>().Root!;
+        var property = storage.TryGetRegisteredSubject()!.TryGetProperty(nameof(FluentStorageContainer.Status))!;
+        ImmutableDictionary<string, JsonElement>? metadata = ImmutableDictionary<string, JsonElement>.Empty
+            .Add("notes", JsonElement.Parse("\"Written by hand\""));
+        property.AddAttribute(KnownAttributes.Metadata, typeof(ImmutableDictionary<string, JsonElement>), _ => metadata, null);
+        try
+        {
+            // Act
+            var (page, pane) = await OpenPaneAsync("");
+            var icon = GetRow(page, pane, "Status").GetByTestId("subject-pane-value-metadata");
+            await icon.HoverAsync();
+
+            // Assert
+            var tooltip = page.Locator(".mud-popover-open").GetByTestId("metadata-summary");
+            await Assertions.Expect(tooltip.GetByTestId("metadata-notes")).ToHaveTextAsync("Written by hand", new() { Timeout = PageLoadTimeout });
+            await Assertions.Expect(pane.Locator("button[data-testid='subject-pane-value-metadata']")).ToHaveCountAsync(0);
+        }
+        finally
+        {
+            metadata = null;
+        }
+    }
+
+    [Fact]
+    public Task WhenNotesAreSaved_ThenTheyAreWrittenAsTyped() => WithSidecarAsync("Motor.metadata.json", "{}", async () =>
+    {
+        // Arrange
+        const string notes = "    indented code\n\nLast line  ";
+        var (page, pane) = await OpenPaneAsync("Demo/Motor");
+        await pane.GetByTestId("edit-metadata-button").ClickAsync();
+
+        // MudDialog puts its test id on its content, which does not hold the actions.
+        var dialog = page.Locator(".mud-dialog").Filter(new() { Has = page.GetByTestId("metadata-edit-dialog") });
+        await dialog.GetByTestId("metadata-notes-input").FillAsync(notes);
+
+        // Act
+        await dialog.GetByTestId("metadata-save").ClickAsync();
+
+        // Assert
+        await Assertions.Expect(dialog).ToHaveCountAsync(0, new() { Timeout = PageLoadTimeout });
+        var text = await _fixture.WaitForDemoPageTextAsync("Motor.metadata.json", text => text.Contains("indented code"), "The notes were not written");
+        using var sidecar = JsonDocument.Parse(text);
+        Assert.Equal(notes, sidecar.RootElement.GetProperty("notes").GetString());
     });
 }

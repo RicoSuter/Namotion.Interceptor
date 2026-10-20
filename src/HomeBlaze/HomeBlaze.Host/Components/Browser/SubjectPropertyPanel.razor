@@ -873,38 +873,47 @@
                                data-copy-value="@displayValue"
                                data-testid="subject-pane-value-copy" />
             }
-            @if (_metadataStore is not null && !prop.IsAttribute)
+            @* With notes, links or tags the icon shows them in a tooltip, also without a store to edit them, such as on the
+               storage root; without, it shows while the row is hovered, as the copy button does. The buttons stay enabled
+               while the storage is disconnected, as a disabled button shows no tooltip. *@
+            @if (!prop.IsAttribute && HasSummary(propertyMetadata))
             {
-                @* With notes, links or tags the icon shows them in a tooltip; without, it shows while the row is hovered, as the copy button does. *@
-                @if (HasSummary(propertyMetadata))
-                {
-                    <MudTooltip>
-                        <ChildContent>
+                <MudTooltip>
+                    <ChildContent>
+                        @if (_metadataStore is not null)
+                        {
                             <MudIconButton Icon="@Icons.Material.Filled.StickyNote2"
                                            Size="Size.Small"
                                            Color="Color.Primary"
                                            Class="pa-0 ml-2"
                                            aria-label="@($"Metadata of {displayName}")"
-                                           Disabled="@(!IsConnected(_metadataStore))"
                                            OnClick="@(() => OpenPropertyMetadataDialogAsync(prop, displayName))"
                                            data-testid="subject-pane-value-metadata" />
-                        </ChildContent>
-                        <TooltipContent>
-                            <MetadataSummary Metadata="@propertyMetadata" Class="py-1" />
-                        </TooltipContent>
-                    </MudTooltip>
-                }
-                else
-                {
-                    <MudIconButton Icon="@Icons.Material.Outlined.StickyNote2"
-                                   Size="Size.Small"
-                                   Class="pa-0 ml-2 subject-pane-copy"
-                                   title="Metadata"
-                                   aria-label="@($"Metadata of {displayName}")"
-                                   Disabled="@(!IsConnected(_metadataStore))"
-                                   OnClick="@(() => OpenPropertyMetadataDialogAsync(prop, displayName))"
-                                   data-testid="subject-pane-value-metadata" />
-                }
+                        }
+                        else
+                        {
+                            <MudIcon Icon="@Icons.Material.Filled.StickyNote2"
+                                     Size="Size.Small"
+                                     Color="Color.Primary"
+                                     Class="ml-2"
+                                     aria-label="@($"Metadata of {displayName}")"
+                                     data-testid="subject-pane-value-metadata" />
+                        }
+                    </ChildContent>
+                    <TooltipContent>
+                        <MetadataSummary Metadata="@propertyMetadata" Class="py-1" />
+                    </TooltipContent>
+                </MudTooltip>
+            }
+            else if (!prop.IsAttribute && _metadataStore is not null)
+            {
+                <MudIconButton Icon="@Icons.Material.Outlined.StickyNote2"
+                               Size="Size.Small"
+                               Class="pa-0 ml-2 subject-pane-copy"
+                               title="Metadata"
+                               aria-label="@($"Metadata of {displayName}")"
+                               OnClick="@(() => OpenPropertyMetadataDialogAsync(prop, displayName))"
+                               data-testid="subject-pane-value-metadata" />
             }
         </div>
 
@@ -1042,8 +1051,14 @@
 
     private async Task OpenPropertyMetadataDialogAsync(RegisteredSubjectProperty property, string displayName)
     {
-        if (Subject is null || GetMetadataStore() is null)
+        if (Subject is null || GetMetadataStore() is not { } store)
             return;
+
+        if (!IsConnected(store))
+        {
+            Snackbar.Add("The metadata cannot be edited while the storage is not connected.", Severity.Warning);
+            return;
+        }
 
         await MetadataEditDialog.ShowAsync(DialogService, Subject, $"Metadata of {displayName}", property.Name);
     }

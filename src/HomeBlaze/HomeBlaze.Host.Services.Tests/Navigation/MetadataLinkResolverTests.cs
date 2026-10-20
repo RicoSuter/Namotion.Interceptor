@@ -43,6 +43,19 @@ public class MetadataLinkResolverTests
         Assert.Equal(new ResolvedMetadataLink("https://example.com/pump.pdf", "https://example.com/pump.pdf", IsExternal: true), link);
     }
 
+    [Fact]
+    public void WhenALinkHasAMailtoUrl_ThenItOpensInPlaceRatherThanInANewTab()
+    {
+        // Arrange
+        var resolver = CreateResolver();
+
+        // Act
+        var link = resolver.Resolve(new MetadataLink(null, "mailto:service@example.com", null));
+
+        // Assert
+        Assert.Equal(new ResolvedMetadataLink("mailto:service@example.com", "mailto:service@example.com", IsExternal: false), link);
+    }
+
     [Theory]
     [InlineData("javascript:alert(1)")]
     [InlineData("file:///etc/passwd")]

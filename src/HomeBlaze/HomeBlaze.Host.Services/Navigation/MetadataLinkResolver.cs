@@ -13,7 +13,7 @@ namespace HomeBlaze.Host.Services.Navigation;
 /// </summary>
 /// <param name="Title">The title to show.</param>
 /// <param name="Href">The address to open; null for a broken link.</param>
-/// <param name="IsExternal">Whether the address is a web address, to be opened in a new tab without opener and referrer.</param>
+/// <param name="IsExternal">Whether the address is an http or https address, to be opened in a new tab without opener and referrer.</param>
 public sealed record ResolvedMetadataLink(string Title, string? Href, bool IsExternal)
 {
     /// <summary>Gets whether the link leads to nothing that may be opened.</summary>
@@ -21,7 +21,7 @@ public sealed record ResolvedMetadataLink(string Title, string? Href, bool IsExt
 }
 
 /// <summary>
-/// Resolves the links of metadata: a web address opens in a new tab, a path to a page opens the page, a path to a
+/// Resolves the links of metadata: a web address opens in a new tab, a mailto address in place, a path to a page opens the page, a path to a
 /// subject opens it in the browser, and a path to a property opens its subject in the browser with the row of the
 /// property highlighted. A path that leads to nothing, and an address that <see cref="MetadataLink.IsAllowedAddress"/>
 /// rejects, is a broken link.
@@ -47,7 +47,11 @@ public sealed class MetadataLinkResolver
         if (link.Url is { } url)
         {
             var isAllowed = MetadataLink.IsAllowedAddress(url);
-            return new ResolvedMetadataLink(link.Title ?? url, isAllowed ? url : null, isAllowed);
+
+            // A mailto address opens the mail client, which needs no tab of its own.
+            var isWebAddress = isAllowed &&
+                (url.StartsWith("http:", StringComparison.OrdinalIgnoreCase) || url.StartsWith("https:", StringComparison.OrdinalIgnoreCase));
+            return new ResolvedMetadataLink(link.Title ?? url, isAllowed ? url : null, isWebAddress);
         }
 
         var path = link.Path ?? string.Empty;

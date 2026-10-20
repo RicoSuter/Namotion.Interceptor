@@ -74,4 +74,32 @@ public class MetadataSearchTests
         // Assert
         Assert.Equal(["floor-1", "floor-2", "Pumps", "Root"], tags);
     }
+
+    [Fact]
+    public void WhenASubjectIsExcluded_ThenNoMatchIsFoundInOrBelowIt()
+    {
+        // Arrange
+        var root = CreateTree();
+        var device = root.Children["Pump"];
+
+        // Act
+        var matches = MetadataSearch.Search(root, key: "tags", isExcluded: subject => ReferenceEquals(subject, device));
+
+        // Assert
+        Assert.Equal([new MetadataSearchMatch("", null)], matches);
+    }
+
+    [Fact]
+    public void WhenASubjectIsExcluded_ThenTheTagsInOrBelowItAreNotListed()
+    {
+        // Arrange
+        var root = CreateTree();
+        var device = root.Children["Pump"];
+
+        // Act
+        var tags = MetadataSearch.GetTags(root, subject => ReferenceEquals(subject, device));
+
+        // Assert
+        Assert.Equal(["Root"], tags);
+    }
 }

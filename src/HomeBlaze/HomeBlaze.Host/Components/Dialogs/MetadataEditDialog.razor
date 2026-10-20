@@ -1,3 +1,4 @@
+@using HomeBlaze.Abstractions.Attributes
 @using HomeBlaze.Components.Abstractions.Pages
 @using System.Text.Json
 @using System.Text.Json.Nodes
@@ -65,7 +66,7 @@
         <MudText Typo="Typo.subtitle2" Class="mt-4">Links</MudText>
         @foreach (var link in _links)
         {
-            <div class="d-flex align-center gap-2" data-testid="metadata-link-row">
+            <div @key="link" class="d-flex align-center gap-2" data-testid="metadata-link-row">
                 <MudTextField @bind-Value="link.Title" Label="Title" Clearable="true" Class="flex-grow-1" data-testid="metadata-link-title" />
                 <SubjectPathField @bind-Value="link.Address" Label="URL or path" Placeholder="https://… or /Devices/Pump" Class="flex-grow-1" />
                 <MudIconButton Icon="@Icons.Material.Filled.Delete" aria-label="Remove link" OnClick="@(() => _links.Remove(link))"
@@ -88,7 +89,7 @@
         <div class="d-flex flex-wrap gap-1 mt-1">
             @foreach (var tag in _tags)
             {
-                <MudChip T="string" Size="Size.Small" OnClose="@(() => _tags.Remove(tag))" data-testid="metadata-tag-chip">@tag</MudChip>
+                <MudChip @key="tag" T="string" Size="Size.Small" OnClose="@(() => _tags.Remove(tag))" data-testid="metadata-tag-chip">@tag</MudChip>
             }
         </div>
     </DialogContent>
@@ -136,10 +137,11 @@
             _links.Add(new LinkInput { Title = link.Title, Address = link.Url ?? link.Path });
         }
 
-        _tags.AddRange(metadata.GetStringArray(MetadataKeys.Tags));
+        // Each once, as a chip is keyed by its tag; a file written by hand may repeat one.
+        _tags.AddRange(metadata.GetStringArray(MetadataKeys.Tags).Distinct(StringComparer.OrdinalIgnoreCase));
 
         // Once per dialog, as finding them walks the whole tree.
-        _tagsInUse = RootManager.Root is { } root ? MetadataSearch.GetTags(root) : [];
+        _tagsInUse = RootManager.Root is { } root ? MetadataSearch.GetTags(root, static subject => subject.IsExcludedFrom(ExclusionTarget.UserInterface)) : [];
         if (PropertyName is not null)
             return;
 
@@ -232,7 +234,8 @@
                 }
             }
 
-            values[MetadataKeys.Notes] = GetValue(_notes);
+            // Kept as written, as surrounding whitespace can be part of the Markdown.
+            values[MetadataKeys.Notes] = string.IsNullOrWhiteSpace(_notes) ? null : _notes;
             values[MetadataKeys.Links] = CreateLinks();
             values[MetadataKeys.Tags] = _tags.Count > 0 ? new JsonArray([.. _tags.Select(tag => JsonValue.Create(tag))]) : null;
 

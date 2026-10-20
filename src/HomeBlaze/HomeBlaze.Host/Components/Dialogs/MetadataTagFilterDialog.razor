@@ -1,3 +1,4 @@
+@using HomeBlaze.Abstractions.Attributes
 @inject MetadataLinkResolver LinkResolver
 @inject RootManager RootManager
 
@@ -38,7 +39,7 @@
             return;
 
         // Once per dialog, as the search walks the whole tree.
-        foreach (var match in MetadataSearch.Search(root, tag: Tag))
+        foreach (var match in MetadataSearch.Search(root, tag: Tag, isExcluded: static subject => subject.IsExcludedFrom(ExclusionTarget.UserInterface)))
         {
             // Written as the path of a link, the name of a property after the path of its subject.
             var subjectPath = $"/{match.Path}";

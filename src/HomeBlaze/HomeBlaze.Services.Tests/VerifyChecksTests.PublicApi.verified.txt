@@ -83,8 +83,8 @@ namespace HomeBlaze.Services
                 "PropertyName",
                 "Metadata"})]
         public static System.Collections.Generic.IEnumerable<System.ValueTuple<string?, System.Collections.Immutable.ImmutableDictionary<string, System.Text.Json.JsonElement>>> GetEntries(Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject) { }
-        public static System.Collections.Generic.IReadOnlyList<string> GetTags(Namotion.Interceptor.IInterceptorSubject root) { }
-        public static System.Collections.Generic.IReadOnlyList<HomeBlaze.Services.MetadataSearchMatch> Search(Namotion.Interceptor.IInterceptorSubject root, string? tag = null, string? key = null, string? value = null, string? path = null) { }
+        public static System.Collections.Generic.IReadOnlyList<string> GetTags(Namotion.Interceptor.IInterceptorSubject root, System.Func<Namotion.Interceptor.IInterceptorSubject, bool>? isExcluded = null) { }
+        public static System.Collections.Generic.IReadOnlyList<HomeBlaze.Services.MetadataSearchMatch> Search(Namotion.Interceptor.IInterceptorSubject root, string? tag = null, string? key = null, string? value = null, string? path = null, System.Func<Namotion.Interceptor.IInterceptorSubject, bool>? isExcluded = null) { }
     }
     public sealed class MetadataSearchMatch : System.IEquatable<HomeBlaze.Services.MetadataSearchMatch>
     {

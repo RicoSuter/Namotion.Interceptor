@@ -20,10 +20,12 @@ public static class MetadataSearch
     /// equals a string value, or a string in an array, of the key when one is given, else of any key. Keys, tags and
     /// values match without regard to case. <paramref name="path"/> and the paths of the matches are relative to
     /// <paramref name="root"/>, as <see cref="MetadataPaths"/> resolves them. The matches are ordered by path and then
-    /// property, ordinal; none are found when no subject is at <paramref name="path"/>.
+    /// property, ordinal; none are found when no subject is at <paramref name="path"/>. A subject for which
+    /// <paramref name="isExcluded"/> returns true, and every subject below it, is skipped.
     /// </summary>
     public static IReadOnlyList<MetadataSearchMatch> Search(
-        IInterceptorSubject root, string? tag = null, string? key = null, string? value = null, string? path = null)
+        IInterceptorSubject root, string? tag = null, string? key = null, string? value = null, string? path = null,
+        Func<IInterceptorSubject, bool>? isExcluded = null)
     {
         var start = path is null ? root : MetadataPaths.TryResolveSubject(root, path);
         if (start is null)
@@ -32,7 +34,7 @@ public static class MetadataSearch
         }
 
         var matches = new List<MetadataSearchMatch>();
-        foreach (var subject in Walk(start))
+        foreach (var subject in Walk(start, isExcluded))
         {
             string? subjectPath = null;
             foreach (var (propertyName, metadata) in GetEntries(subject))
@@ -52,9 +54,12 @@ public static class MetadataSearch
         return matches;
     }
 
-    /// <summary>Gets every tag below <paramref name="root"/>, each once without regard to case, in order.</summary>
-    public static IReadOnlyList<string> GetTags(IInterceptorSubject root)
-        => Walk(root)
+    /// <summary>
+    /// Gets every tag below <paramref name="root"/>, each once without regard to case, in order. A subject for which
+    /// <paramref name="isExcluded"/> returns true, and every subject below it, is skipped.
+    /// </summary>
+    public static IReadOnlyList<string> GetTags(IInterceptorSubject root, Func<IInterceptorSubject, bool>? isExcluded = null)
+        => Walk(root, isExcluded)
             .SelectMany(GetEntries)
             .SelectMany(static entry => entry.Metadata.GetStringArray(MetadataKeys.Tags))
             .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -105,15 +110,15 @@ public static class MetadataSearch
         return null;
     }
 
-    // The subject and every subject below it, each once.
-    private static IEnumerable<RegisteredSubject> Walk(IInterceptorSubject start)
+    // The subject and every subject below it, each once, without the excluded ones and those below them.
+    private static IEnumerable<RegisteredSubject> Walk(IInterceptorSubject start, Func<IInterceptorSubject, bool>? isExcluded)
     {
         var visited = new HashSet<IInterceptorSubject>(ReferenceEqualityComparer.Instance);
         var pending = new Stack<IInterceptorSubject>();
         pending.Push(start);
         while (pending.TryPop(out var subject))
         {
-            if (!visited.Add(subject) || subject.TryGetRegisteredSubject() is not { } registered)
+            if (!visited.Add(subject) || isExcluded?.Invoke(subject) == true || subject.TryGetRegisteredSubject() is not { } registered)
             {
                 continue;
             }
