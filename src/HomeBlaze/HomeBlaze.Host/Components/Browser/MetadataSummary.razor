@@ -82,6 +82,6 @@
         if (_notes is not null && _notesHtml is null)
             _notes = MetadataNotes.ToText(_notes);
 
-        _links = Metadata.GetLinks(MetadataKeys.Links);
+        _links = Metadata.GetLinks();
     }
 }

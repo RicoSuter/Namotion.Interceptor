@@ -101,7 +101,7 @@ public class MetadataDictionaryExtensionsTests
             """);
 
         // Act
-        var links = metadata.GetLinks(MetadataKeys.Links);
+        var links = metadata.GetLinks();
 
         // Assert
         Assert.Equal(
@@ -116,7 +116,7 @@ public class MetadataDictionaryExtensionsTests
         var metadata = Metadata("""{ "links": [{ "title": "Run", "url": "javascript:alert(1)" }] }""");
 
         // Act
-        var link = Assert.Single(metadata.GetLinks(MetadataKeys.Links));
+        var link = Assert.Single(metadata.GetLinks());
 
         // Assert
         Assert.Equal("javascript:alert(1)", link.Url);
@@ -131,7 +131,7 @@ public class MetadataDictionaryExtensionsTests
         var metadata = Metadata($$"""{ "links": [{{string.Join(", ", items)}}] }""");
 
         // Act
-        var links = metadata.GetLinks(MetadataKeys.Links);
+        var links = metadata.GetLinks();
 
         // Assert
         Assert.Equal(20, links.Length);
@@ -177,7 +177,7 @@ public class MetadataDictionaryExtensionsTests
         var metadata = Metadata("""{ "links": [{ "title": " Manual ", "url": " https://example.com/manual.pdf" }, { "path": "\t/Devices/Pump " }] }""");
 
         // Act
-        var links = metadata.GetLinks(MetadataKeys.Links);
+        var links = metadata.GetLinks();
 
         // Assert
         Assert.Equal(
@@ -192,7 +192,7 @@ public class MetadataDictionaryExtensionsTests
         var metadata = Metadata("""{ "links": [{ "title": "Manual\u202Efdp.exe", "url": "https://example.com" }, { "title": "A\u0007", "path": "/Devices" }] }""");
 
         // Act
-        var links = metadata.GetLinks(MetadataKeys.Links);
+        var links = metadata.GetLinks();
 
         // Assert
         Assert.Equal([new MetadataLink(null, "https://example.com", null), new MetadataLink(null, null, "/Devices")], links.ToArray());
@@ -205,7 +205,7 @@ public class MetadataDictionaryExtensionsTests
         var metadata = Metadata("""{ "links": [{ "url": "https://example.com/\u202Efdp.exe" }, { "path": "/Devices/\u200BPump" }, { "path": "/Devices" }] }""");
 
         // Act
-        var links = metadata.GetLinks(MetadataKeys.Links);
+        var links = metadata.GetLinks();
 
         // Assert
         Assert.Equal([new MetadataLink(null, null, "/Devices")], links.ToArray());
@@ -218,7 +218,7 @@ public class MetadataDictionaryExtensionsTests
         var metadata = Metadata("""{ "links": [{ "\uD800": "x", "\u0055rl": "https://example.com" }] }""");
 
         // Act
-        var links = metadata.GetLinks(MetadataKeys.Links);
+        var links = metadata.GetLinks();
 
         // Assert
         Assert.Equal([new MetadataLink(null, "https://example.com", null)], links.ToArray());
@@ -261,9 +261,9 @@ public class MetadataDictionaryExtensionsTests
         // Act & Assert
         Assert.Equal(notes.GetString(MetadataKeys.Notes) is not null, notes.HasNotesLinksOrTags());
         Assert.Equal(tags.GetTags().Length > 0, tags.HasNotesLinksOrTags());
-        Assert.Equal(urls.GetLinks(MetadataKeys.Links).Length > 0, urls.HasNotesLinksOrTags());
-        Assert.Equal(paths.GetLinks(MetadataKeys.Links).Length > 0, paths.HasNotesLinksOrTags());
-        Assert.Equal(urlsAndPaths.GetLinks(MetadataKeys.Links).Length > 0, urlsAndPaths.HasNotesLinksOrTags());
+        Assert.Equal(urls.GetLinks().Length > 0, urls.HasNotesLinksOrTags());
+        Assert.Equal(paths.GetLinks().Length > 0, paths.HasNotesLinksOrTags());
+        Assert.Equal(urlsAndPaths.GetLinks().Length > 0, urlsAndPaths.HasNotesLinksOrTags());
     }
 
     [Theory]
@@ -290,7 +290,7 @@ public class MetadataDictionaryExtensionsTests
         Assert.False(hasNotesLinksOrTags);
         Assert.Null(metadata.GetString(MetadataKeys.Notes));
         Assert.Empty(metadata.GetTags());
-        Assert.Empty(metadata.GetLinks(MetadataKeys.Links));
+        Assert.Empty(metadata.GetLinks());
     }
 
     [Fact]

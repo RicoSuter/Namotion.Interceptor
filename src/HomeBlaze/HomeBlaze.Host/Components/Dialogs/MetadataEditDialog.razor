@@ -141,7 +141,7 @@
             : Owner.TryGetRegisteredSubject()?.TryGetProperty(PropertyName)?.GetMetadata();
 
         _notes = metadata.GetString(MetadataKeys.Notes);
-        foreach (var link in metadata.GetLinks(MetadataKeys.Links))
+        foreach (var link in metadata.GetLinks())
         {
             _links.Add(new LinkInput { Title = link.Title, Address = link.Url ?? link.Path });
         }

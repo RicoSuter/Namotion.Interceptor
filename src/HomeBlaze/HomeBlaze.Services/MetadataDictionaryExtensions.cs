@@ -233,7 +233,11 @@ public static class MetadataDictionaryExtensions
 
     // The item as a tag, trimmed; null when it is no string or breaks the rules of a tag.
     private static string? GetTag(JsonElement item)
-        => item.ValueKind == JsonValueKind.String && GetText(item)?.Trim() is { } tag && MetadataText.IsAllowedTag(tag) ? tag : null;
+        => item.ValueKind == JsonValueKind.String &&
+           GetText(item)?.Trim() is { Length: > 0 and <= MetadataText.MaxTagLength } tag &&
+           !MetadataText.HasControlOrFormatCharacter(tag)
+            ? tag
+            : null;
 
     // The url and the path of the item as a link: an object with exactly one of them, without a control or format
     // character, as a link without title shows it as text.
@@ -252,14 +256,14 @@ public static class MetadataDictionaryExtensions
     }
 
     /// <summary>
-    /// Gets the links of the first 20 items of the key, leaving out an item that is no object with exactly one of a
+    /// Gets the links of the first 20 items of <c>links</c>, leaving out an item that is no object with exactly one of a
     /// <c>url</c> and a <c>path</c> string, or whose url or path has a control or format character; empty without an
     /// array. The members are returned without whitespace around them, a title with a control or format character as
     /// none, and the address of a link otherwise as it is held, see <see cref="MetadataLink.IsAllowedAddress"/>.
     /// </summary>
-    public static ImmutableArray<MetadataLink> GetLinks(this IReadOnlyDictionary<string, JsonElement>? metadata, string key)
+    public static ImmutableArray<MetadataLink> GetLinks(this IReadOnlyDictionary<string, JsonElement>? metadata)
     {
-        if (metadata is null || !metadata.TryGetValue(key, out var value) || value.ValueKind != JsonValueKind.Array)
+        if (metadata is null || !metadata.TryGetValue(MetadataKeys.Links, out var value) || value.ValueKind != JsonValueKind.Array)
         {
             return [];
         }

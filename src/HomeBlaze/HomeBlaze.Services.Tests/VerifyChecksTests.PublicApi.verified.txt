@@ -57,7 +57,7 @@ namespace HomeBlaze.Services
     {
         public static TEnum? GetEnum<TEnum>(this System.Collections.Generic.IReadOnlyDictionary<string, System.Text.Json.JsonElement>? metadata, string key)
             where TEnum :  struct, System.Enum { }
-        public static System.Collections.Immutable.ImmutableArray<HomeBlaze.Services.MetadataLink> GetLinks(this System.Collections.Generic.IReadOnlyDictionary<string, System.Text.Json.JsonElement>? metadata, string key) { }
+        public static System.Collections.Immutable.ImmutableArray<HomeBlaze.Services.MetadataLink> GetLinks(this System.Collections.Generic.IReadOnlyDictionary<string, System.Text.Json.JsonElement>? metadata) { }
         public static string? GetString(this System.Collections.Generic.IReadOnlyDictionary<string, System.Text.Json.JsonElement>? metadata, string key) { }
         public static System.Collections.Immutable.ImmutableArray<string> GetStringArray(this System.Collections.Generic.IReadOnlyDictionary<string, System.Text.Json.JsonElement>? metadata, string key) { }
         public static System.Collections.Immutable.ImmutableArray<string> GetTags(this System.Collections.Generic.IReadOnlyDictionary<string, System.Text.Json.JsonElement>? metadata) { }
