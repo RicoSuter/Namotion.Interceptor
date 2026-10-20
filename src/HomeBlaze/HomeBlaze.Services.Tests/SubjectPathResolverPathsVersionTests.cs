@@ -56,6 +56,23 @@ public class SubjectPathResolverPathsVersionTests : SubjectPathResolverTestBase
     }
 
     [Fact]
+    public void WhenDictionaryIsReassignedWithTheSameEntries_ThenPathsVersionStaysTheSame()
+    {
+        // Arrange
+        var device = new TestContainer(Context) { Name = "Device" };
+        var root = new TestContainer(Context) { Name = "Root" };
+        root.Children = new Dictionary<string, TestContainer> { ["device"] = device };
+        RootManager.Root = root;
+        var before = Resolver.PathsVersion;
+
+        // Act
+        root.Children = new Dictionary<string, TestContainer> { ["device"] = device };
+
+        // Assert
+        Assert.Equal(before, Resolver.PathsVersion);
+    }
+
+    [Fact]
     public void WhenValueOfAPropertyChanges_ThenPathsVersionStaysTheSame()
     {
         // Arrange

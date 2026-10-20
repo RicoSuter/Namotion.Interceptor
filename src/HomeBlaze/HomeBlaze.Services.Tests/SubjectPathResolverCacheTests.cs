@@ -166,14 +166,16 @@ public class SubjectPathResolverCacheTests : SubjectPathResolverTestBase
         var second = new TestContainer(Context) { Name = "Second" };
         var root = new TestContainerWithItemList(Context) { Items = [first, second] };
         RootManager.Root = root;
-        Assert.Equal("/Items[0]", Resolver.GetPath(first, PathStyle.Canonical));
-        Assert.Same(first, Resolver.ResolveSubject("/Items[0]", PathStyle.Canonical));
+        var pathBefore = Resolver.GetPath(first, PathStyle.Canonical);
+        var resolvedBefore = Resolver.ResolveSubject("/Items[0]", PathStyle.Canonical);
         var versionBefore = Resolver.PathsVersion;
 
         // Act
         root.Items = [second, first];
 
         // Assert
+        Assert.Equal("/Items[0]", pathBefore);
+        Assert.Same(first, resolvedBefore);
         Assert.NotEqual(versionBefore, Resolver.PathsVersion);
         Assert.Equal("/Items[1]", Resolver.GetPath(first, PathStyle.Canonical));
         Assert.Same(second, Resolver.ResolveSubject("/Items[0]", PathStyle.Canonical));
@@ -211,14 +213,15 @@ public class SubjectPathResolverCacheTests : SubjectPathResolverTestBase
             Children = new Dictionary<string, TestContainerWithChildren> { ["Shadowed"] = child }
         };
         RootManager.Root = root;
-        Assert.Same(child, Resolver.ResolveSubject("/Shadowed", PathStyle.Canonical));
+        var resolvedBefore = Resolver.ResolveSubject("/Shadowed", PathStyle.Canonical);
 
         // Act
         root.TryGetRegisteredSubject()!.AddProperty("Shadowed", typeof(TestContainerWithChildren), _ => null, null);
-        var resolved = Resolver.ResolveSubject("/Shadowed", PathStyle.Canonical);
+        var resolvedAfter = Resolver.ResolveSubject("/Shadowed", PathStyle.Canonical);
 
         // Assert
-        Assert.Null(resolved);
+        Assert.Same(child, resolvedBefore);
+        Assert.Null(resolvedAfter);
     }
 
     [Fact]
