@@ -16,12 +16,19 @@ namespace HomeBlaze.Services.Lifecycle;
 [RunsAfter(typeof(MethodPropertyInitializer))]
 public sealed class MetadataLifecycleHandler : ILifecycleHandler, IPropertyLifecycleHandler
 {
+    // The properties of the subject that attached last on this thread, after it was applied. The lifecycle attaches
+    // each property that a subject has when it attaches after the subject itself, and those were applied with it. A
+    // property that is added later replaces the properties of its subject, so it never matches.
+    [ThreadStatic]
+    private static IReadOnlyDictionary<string, SubjectPropertyMetadata>? _appliedProperties;
+
     /// <inheritdoc />
     public void HandleLifecycleChange(SubjectLifecycleChange change)
     {
         if (change.IsContextAttach)
         {
             Apply(change.Subject, null);
+            _appliedProperties = change.Subject.Properties;
         }
     }
 
@@ -33,7 +40,8 @@ public sealed class MetadataLifecycleHandler : ILifecycleHandler, IPropertyLifec
         var metadata = change.Property.Metadata;
         var propertyName = change.Property.Name;
         if (metadata.IsDynamic && metadata.Type != typeof(MethodMetadata) &&
-            propertyName != KnownAttributes.Metadata && !propertyName.Contains('@'))
+            propertyName != KnownAttributes.Metadata && !propertyName.Contains('@') &&
+            !ReferenceEquals(change.Subject.Properties, _appliedProperties))
         {
             Apply(change.Subject, propertyName);
         }

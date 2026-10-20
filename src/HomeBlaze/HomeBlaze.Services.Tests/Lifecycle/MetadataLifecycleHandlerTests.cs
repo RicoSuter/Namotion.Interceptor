@@ -36,6 +36,25 @@ public class MetadataLifecycleHandlerTests
     }
 
     [Fact]
+    public void WhenASubjectWithDynamicPropertiesAttachesAgain_ThenTheStoreAppliesItOnceAndAPropertyAddedAfterItself()
+    {
+        // Arrange
+        var store = CreateStore();
+        var child = new LifecycleTestChild();
+        store.Child = child;
+        child.TryGetRegisteredSubject()!.AddProperty("Extra", typeof(int), _ => 1, null);
+        store.Child = null;
+        store.Applied.Clear();
+
+        // Act
+        store.Child = child;
+        child.TryGetRegisteredSubject()!.AddProperty("Later", typeof(int), _ => 2, null);
+
+        // Assert
+        Assert.Equal([(child, null), (child, "Later")], store.Applied);
+    }
+
+    [Fact]
     public void WhenAPropertyIsAddedToAnAttachedSubject_ThenTheStoreAppliesItButNotMetadataOrAnAttribute()
     {
         // Arrange
