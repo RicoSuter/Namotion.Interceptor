@@ -24,9 +24,8 @@ internal static class AgentMetadataAccess
     private const int MaxSearchMetadataMatches = 100;
 
     /// <summary>
-    /// Gets the first 100 matches of SearchMetadata of a storage without those of a subject or property that the tools
-    /// do not show, and for agents also without those that <see cref="GetSetMetadataError"/> refuses; any other result is
-    /// returned unchanged.
+    /// Gets the first 100 matches of SearchMetadata of a storage without those that <see cref="GetError"/> refuses; any
+    /// other result is returned unchanged.
     /// </summary>
     public static object? FilterSearchMetadataResult(
         RegisteredSubject subject, MethodMetadata method, object? result, bool forAgents, PathProviderBase pathProvider, Type[] excludeTypes)
@@ -45,16 +44,12 @@ internal static class AgentMetadataAccess
     }
 
     /// <summary>
-    /// Gets why an agent may not set the metadata at <paramref name="path"/> of the storage, or null when it may. The target
-    /// is resolved as the tools resolve a path, so that a subject or property hidden from agents is refused as a missing
-    /// one, and an agent and a subject that an agent holds through any parent are refused.
+    /// Gets why the metadata at <paramref name="path"/> of the storage is not shown by the tools, or for agents why an agent
+    /// may not set it, or null when it is shown or may be set. The target is resolved as the tools resolve a path, so that
+    /// a subject or property hidden from them is refused as a missing one; for agents, an agent and a subject that an
+    /// agent holds through any parent are refused as well.
     /// </summary>
-    public static string? GetSetMetadataError(
-        RegisteredSubject storage, string path, string? propertyName, PathProviderBase pathProvider, Type[] excludeTypes)
-        => GetError(storage, path, propertyName, pathProvider, excludeTypes, forAgents: true);
-
-    // The checks of GetSetMetadataError; without forAgents, only those of what the tools show.
-    private static string? GetError(
+    public static string? GetError(
         RegisteredSubject storage, string path, string? propertyName, PathProviderBase pathProvider, Type[] excludeTypes, bool forAgents)
     {
         if (TryGetVisibleTarget(storage, path, pathProvider, excludeTypes) is not { } target)

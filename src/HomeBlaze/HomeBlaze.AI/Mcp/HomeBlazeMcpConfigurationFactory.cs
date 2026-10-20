@@ -113,7 +113,7 @@ internal static class HomeBlazeMcpConfigurationFactory
             subject.Subject is FluentStorageContainer &&
             arguments is [string path, var property, JsonElement { ValueKind: JsonValueKind.Object }, ..])
         {
-            return AgentMetadataAccess.GetSetMetadataError(subject, path, property as string, pathProvider, excludeTypes);
+            return AgentMetadataAccess.GetError(subject, path, property as string, pathProvider, excludeTypes, forAgents: true);
         }
 
         return null;
