@@ -295,6 +295,24 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
         Assert.Equal("Docs/Pump099.json|", matches[^1]);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenSearchMetadataReturnsAResultOfAnotherShape_ThenNoMatchIsReturned(bool forAgents)
+    {
+        // Arrange
+        var (_, storage) = await CreateToolsAsync(forAgents);
+        var subject = storage.TryGetRegisteredSubject()!;
+        var method = subject.TryGetProperty(nameof(FluentStorageContainer.SearchMetadata))!.TryGetMethodMetadata()!;
+
+        // Act
+        var result = AgentMetadataAccess.FilterSearchMetadataResult(
+            subject, method, new[] { "Docs/Hidden.json" }, forAgents, new StateAttributePathProvider(), []);
+
+        // Assert
+        Assert.Empty(Assert.IsType<MetadataSearchMatch[]>(result));
+    }
+
     private static string[] GetMatches(JsonElement result)
         => [.. result.GetProperty("result").EnumerateArray().Select(match =>
             $"{match.GetProperty("path").GetString()}|{(match.TryGetProperty("property", out var property) ? property.GetString() : null)}")];

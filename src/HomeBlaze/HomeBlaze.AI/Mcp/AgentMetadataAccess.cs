@@ -25,17 +25,20 @@ internal static class AgentMetadataAccess
     private const int MaxSearchMetadataMatches = 100;
 
     /// <summary>
-    /// Gets the first 100 matches of SearchMetadata of a storage without those that <see cref="GetError"/> refuses; any
-    /// other result is returned unchanged.
+    /// Gets the first 100 matches of SearchMetadata of a storage without those that <see cref="GetError"/> refuses, and no
+    /// match for a result of SearchMetadata of a storage that is no array of matches; any other result is returned unchanged.
     /// </summary>
     public static object? FilterSearchMetadataResult(
         RegisteredSubject subject, MethodMetadata method, object? result, bool forAgents, PathProviderBase pathProvider, Type[] excludeTypes)
     {
-        if (method.PropertyName != nameof(FluentStorageContainer.SearchMetadata) ||
-            subject.Subject is not IMetadataStore ||
-            result is not MetadataSearchMatch[] matches)
+        if (method.PropertyName != nameof(FluentStorageContainer.SearchMetadata) || subject.Subject is not IMetadataStore)
         {
             return result;
+        }
+
+        if (result is not MetadataSearchMatch[] matches)
+        {
+            return Array.Empty<MetadataSearchMatch>();
         }
 
         return matches
