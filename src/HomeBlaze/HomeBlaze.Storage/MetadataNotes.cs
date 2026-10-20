@@ -34,48 +34,74 @@ public static class MetadataNotes
     /// <summary>Gets why the notes are refused, naming the rule they break, or null when they may be written.</summary>
     public static string? GetError(string notes)
     {
-        if (Encoding.UTF8.GetByteCount(notes) > MaxSize)
-        {
-            return $"notes are larger than {MaxSize / 1024} KB.";
-        }
+        Parse(notes, out var error);
+        return error;
+    }
 
-        if (notes.Contains("{{", StringComparison.Ordinal))
+    // The notes parsed, or null with the rule they break.
+    private static MarkdownDocument? Parse(string notes, out string? error)
+    {
+        error = GetSourceError(notes);
+        if (error is not null)
         {
-            return "notes may not hold {{ }} expressions.";
+            return null;
         }
 
         try
         {
             var document = Markdown.Parse(notes, Pipeline);
-            if (document.Descendants().Any(static node => node is HtmlBlock or HtmlInline))
-            {
-                return "notes may not hold HTML.";
-            }
-
-            if (document.Descendants<LinkInline>().Any(static link => link.IsImage))
-            {
-                return "notes may not hold pictures.";
-            }
-
-            if (GetLinkNotAllowed(document) is { } url)
-            {
-                return $"notes may not link to '{url}': links lead only to http, https or mailto addresses or to the routes " +
-                    "of this application, /, /browser/... and /pages/..., such as /pages/Docs/Setup.md.";
-            }
-
-            if (HasAttributes(notes, document))
-            {
-                return "notes may not give attributes, such as {#id}, {.class} or {key=value}.";
-            }
-
-            MarkdownWriteRules.EnsureNoActiveContent(notes, Pipeline, nameof(notes));
-            return null;
+            error = GetDocumentError(notes, document);
+            return error is null ? document : null;
         }
         catch (ArgumentException)
         {
             // Thrown for a block or other active content of pages, and for Markdown nested beyond the depth limit of Markdig.
-            return "notes may not hold blocks, math, diagrams, abbreviations or Markdown nested too deep.";
+            error = "notes may not hold blocks, math, diagrams, abbreviations or Markdown nested too deep.";
+            return null;
         }
+        catch (Exception)
+        {
+            // Any other failure of Markdig, as notes that cannot be parsed are shown as text rather than end the circuit.
+            error = "notes cannot be read as Markdown.";
+            return null;
+        }
+    }
+
+    private static string? GetSourceError(string notes)
+    {
+        if (Encoding.UTF8.GetByteCount(notes) > MaxSize)
+        {
+            return $"notes are larger than {MaxSize / 1024} KB.";
+        }
+
+        return notes.Contains("{{", StringComparison.Ordinal) ? "notes may not hold {{ }} expressions." : null;
+    }
+
+    private static string? GetDocumentError(string notes, MarkdownDocument document)
+    {
+        if (document.Descendants().Any(static node => node is HtmlBlock or HtmlInline))
+        {
+            return "notes may not hold HTML.";
+        }
+
+        if (document.Descendants<LinkInline>().Any(static link => link.IsImage))
+        {
+            return "notes may not hold pictures.";
+        }
+
+        if (GetLinkNotAllowed(document) is { } url)
+        {
+            return $"notes may not link to '{url}': links lead only to http, https or mailto addresses or to the routes " +
+                "of this application, /, /browser/... and /pages/..., such as /pages/Docs/Setup.md.";
+        }
+
+        if (HasAttributes(notes, document))
+        {
+            return "notes may not give attributes, such as {#id}, {.class} or {key=value}.";
+        }
+
+        MarkdownWriteRules.EnsureNoActiveContent(notes, Pipeline, nameof(notes));
+        return null;
     }
 
     // A relative path or a fragment would resolve against the address of the application rather than that of the page
@@ -150,37 +176,28 @@ public static class MetadataNotes
     /// </summary>
     public static string? ToHtml(string notes)
     {
-        if (GetError(notes) is not null)
+        if (Parse(notes, out _) is not { } document)
         {
             return null;
         }
 
-        try
+        foreach (var node in document.Descendants())
         {
-            var document = Markdown.Parse(notes, Pipeline);
-            foreach (var node in document.Descendants())
+            var url = node switch
             {
-                var url = node switch
-                {
-                    LinkInline link => link.Url,
-                    AutolinkInline { IsEmail: false } autolink => autolink.Url,
-                    _ => null
-                };
-                if (url is not null && MetadataLink.IsWebAddress(url))
-                {
-                    var attributes = node.GetAttributes();
-                    attributes.AddPropertyIfNotExist("target", "_blank");
-                    attributes.AddPropertyIfNotExist("rel", "noopener noreferrer");
-                }
+                LinkInline link => link.Url,
+                AutolinkInline { IsEmail: false } autolink => autolink.Url,
+                _ => null
+            };
+            if (url is not null && MetadataLink.IsWebAddress(url))
+            {
+                var attributes = node.GetAttributes();
+                attributes.AddPropertyIfNotExist("target", "_blank");
+                attributes.AddPropertyIfNotExist("rel", "noopener noreferrer");
             }
+        }
 
-            return document.ToHtml(Pipeline);
-        }
-        catch (ArgumentException)
-        {
-            // Thrown for Markdown nested beyond the depth limit of Markdig.
-            return null;
-        }
+        return document.ToHtml(Pipeline);
     }
 
     /// <summary>

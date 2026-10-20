@@ -87,6 +87,23 @@ public class MetadataNotesTests
         Assert.Equal("<p>&lt;script&gt;alert(1)&lt;/script&gt;</p>\n", html);
     }
 
+    [Theory]
+    [InlineData(">")]
+    [InlineData("[")]
+    public void WhenNotesAreNestedTooDeep_ThenTheyAreRefusedWithoutAnException(string level)
+    {
+        // Arrange
+        var notes = string.Concat(Enumerable.Repeat(level, MetadataNotes.MaxSize / level.Length));
+
+        // Act
+        var error = MetadataNotes.GetError(notes);
+        var html = MetadataNotes.ToHtml(notes);
+
+        // Assert
+        Assert.NotNull(error);
+        Assert.Null(html);
+    }
+
     [Fact]
     public void WhenNotesHaveAFootnote_ThenItIsRenderedAsText()
     {
