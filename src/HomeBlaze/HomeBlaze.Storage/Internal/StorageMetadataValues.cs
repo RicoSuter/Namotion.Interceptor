@@ -21,8 +21,8 @@ internal static class StorageMetadataValues
     /// <summary>
     /// Sets the metadata of the subject, or of its property <paramref name="propertyName"/>. The property or attribute
     /// is added on the first value that is not null and stays, as the registry cannot remove a property, so null is set
-    /// to remove the metadata. The same dictionary again changes nothing, and so does a registration that is no longer
-    /// the current one of the subject.
+    /// to remove the metadata. A dictionary with the same keys and values changes nothing, and so does a registration
+    /// that is no longer the current one of the subject.
     /// </summary>
     /// <remarks>
     /// Holds the <see cref="IInterceptorSubject.SyncRoot"/> of the subject, which adding a property takes as well, as
@@ -46,7 +46,7 @@ internal static class StorageMetadataValues
             if (subject.Subject.Data.TryGetValue((name, ValueKey), out var data))
             {
                 var value = (StrongBox<ImmutableDictionary<string, JsonElement>?>)data!;
-                if (!ReferenceEquals(value.Value, values) && subject.TryGetProperty(name) is { } property)
+                if (!HaveSameContent(value.Value, values) && subject.TryGetProperty(name) is { } property)
                 {
                     property.Reference.SetPropertyValueWithInterception(
                         values, value.Value, (_, newValue) => value.Value = (ImmutableDictionary<string, JsonElement>?)newValue);
@@ -58,6 +58,32 @@ internal static class StorageMetadataValues
                 Add(subject, name, propertyName, values);
             }
         }
+    }
+
+    // The same keys, in the same case, with values that are equal as JSON; a file that is read again gives new
+    // instances of the entries that did not change.
+    private static bool HaveSameContent(ImmutableDictionary<string, JsonElement>? current, ImmutableDictionary<string, JsonElement>? values)
+    {
+        if (ReferenceEquals(current, values))
+        {
+            return true;
+        }
+
+        if (current is null || values is null || current.Count != values.Count)
+        {
+            return false;
+        }
+
+        foreach (var (key, value) in current)
+        {
+            if (!values.TryGetKey(key, out var actualKey) || !string.Equals(key, actualKey, StringComparison.Ordinal) ||
+                !JsonElement.DeepEquals(value, values[key]))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static void Add(RegisteredSubject subject, string name, string? propertyName, ImmutableDictionary<string, JsonElement> values)

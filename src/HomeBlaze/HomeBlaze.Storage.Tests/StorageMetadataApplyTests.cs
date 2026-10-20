@@ -120,6 +120,28 @@ public class StorageMetadataApplyTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenAnotherEntryIsWritten_ThenAnUnchangedEntryKeepsItsInstance()
+    {
+        // Arrange
+        WriteFile("Shelly.json", MetadataTestDevice.Serialize());
+        WriteFile("Shelly.metadata.json", """{ "navTitle": "Shelly", "$subjects": { "Channels[0]": { "navTitle": "Hall light", "area": { "floor": 1 } } }, "$properties": { "Firmware": { "comment": "old" } } }""");
+        var storage = await ConnectAsync();
+        var device = Assert.IsType<MetadataTestDevice>(storage.Children["Shelly"]);
+        var own = device.GetMetadata();
+        var channel = device.Channels[0].GetMetadata();
+        var firmware = GetProperty(device, nameof(MetadataTestDevice.Firmware)).GetMetadata();
+
+        // Act
+        await storage.SetMetadataAsync(device.Channels[1], null, Values("""{ "navTitle": "Stairs" }"""), CancellationToken.None);
+
+        // Assert
+        Assert.Equal("Stairs", device.Channels[1].GetMetadata().GetString(MetadataKeys.NavigationTitle));
+        Assert.Same(own, device.GetMetadata());
+        Assert.Same(channel, device.Channels[0].GetMetadata());
+        Assert.Same(firmware, GetProperty(device, nameof(MetadataTestDevice.Firmware)).GetMetadata());
+    }
+
+    [Fact]
     public async Task WhenAnEntryWasWrittenInTheRouteNotation_ThenAWriteMergesItAndWritesThePathOfTheRegistry()
     {
         // Arrange
