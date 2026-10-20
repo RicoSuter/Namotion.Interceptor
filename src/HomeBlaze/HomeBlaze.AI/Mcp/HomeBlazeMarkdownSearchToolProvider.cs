@@ -59,8 +59,8 @@ public class HomeBlazeMarkdownSearchToolProvider : IMcpToolProvider
     });
 
     private readonly Func<IInterceptorSubject> _rootSubjectProvider;
-    private readonly PathProviderBase _pathProvider;
     private readonly string _pathPrefix;
+    private readonly MarkdownSearchSourceFinder _sourceFinder;
 
     /// <param name="rootSubjectProvider">Resolves the root subject when the tool runs.</param>
     /// <param name="pathProvider">Builds the paths of the pages, as the other tools resolve them.</param>
@@ -68,8 +68,8 @@ public class HomeBlazeMarkdownSearchToolProvider : IMcpToolProvider
     internal HomeBlazeMarkdownSearchToolProvider(Func<IInterceptorSubject> rootSubjectProvider, PathProviderBase pathProvider, string pathPrefix)
     {
         _rootSubjectProvider = rootSubjectProvider;
-        _pathProvider = pathProvider;
         _pathPrefix = pathPrefix;
+        _sourceFinder = new MarkdownSearchSourceFinder(pathProvider, pathPrefix);
     }
 
     public IEnumerable<McpToolInfo> GetTools()
@@ -113,7 +113,7 @@ public class HomeBlazeMarkdownSearchToolProvider : IMcpToolProvider
             return new { error = "Subject registry is not available." };
         }
 
-        var sources = FindSources(registry, rootSubject, pathPrefix);
+        var sources = _sourceFinder.Find(registry, rootSubject, pathPrefix);
         return SearchSources(sources, query, GetMaxPages(input), cancellationToken);
     }
 
@@ -150,7 +150,7 @@ public class HomeBlazeMarkdownSearchToolProvider : IMcpToolProvider
             : DefaultMaxPages;
 
     private static object SearchSources(
-        List<SearchSource> sources, ContentQuery query, int maxPages, CancellationToken cancellationToken)
+        List<MarkdownSearchSource> sources, ContentQuery query, int maxPages, CancellationToken cancellationToken)
     {
         var truncated = sources.Count > MaxSearchedPages;
         var deadline = Stopwatch.GetTimestamp() + (long)(SearchTimeout.TotalSeconds * Stopwatch.Frequency);
@@ -275,57 +275,6 @@ public class HomeBlazeMarkdownSearchToolProvider : IMcpToolProvider
         return string.Concat(start > 0 ? "…" : "", line[start..end].Trim(), end < line.Length ? "…" : "");
     }
 
-    // The Markdown files and the notes of metadata in or under the prefix, in path order so that results and truncation are
-    // stable.
-    private List<SearchSource> FindSources(ISubjectRegistry registry, IInterceptorSubject rootSubject, string? pathPrefix)
-    {
-        var sources = new List<SearchSource>();
-        foreach (var (_, registered) in registry.KnownSubjects)
-        {
-            var subject = registered.Subject;
-            var path = ReferenceEquals(subject, rootSubject) ? _pathPrefix : TryGetPath(registered, rootSubject);
-            if (path is null)
-            {
-                continue;
-            }
-
-            if (subject is MarkdownFile file)
-            {
-                Add(new SearchSource(path, file.Title, file, null));
-            }
-
-            foreach (var (notesPath, title, notes) in MetadataNotesReader.GetNotes(registered, path, _pathProvider))
-            {
-                Add(new SearchSource(notesPath, title, null, notes));
-            }
-        }
-
-        sources.Sort((left, right) => string.CompareOrdinal(left.Path, right.Path));
-        return sources;
-
-        void Add(SearchSource source)
-        {
-            if (pathPrefix is null || IsInOrUnder(source.Path, pathPrefix))
-            {
-                sources.Add(source);
-            }
-        }
-    }
-
-    // The path as browse and search show it: the path through the first parent, after the path prefix.
-    private string? TryGetPath(RegisteredSubject subject, IInterceptorSubject rootSubject)
-    {
-        var parents = subject.Parents;
-        if (parents.Length == 0)
-        {
-            return null;
-        }
-
-        var parent = parents[0];
-        var path = parent.Property.TryGetPath(_pathProvider, rootSubject, parent.Index);
-        return path is null ? null : _pathPrefix + path;
-    }
-
     // A missing or null path searches all pages; any other value that is not a string is refused, as by the other tools.
     private bool TryGetPathPrefix(JsonElement input, out string? pathPrefix)
     {
@@ -351,24 +300,12 @@ public class HomeBlazeMarkdownSearchToolProvider : IMcpToolProvider
         return string.IsNullOrEmpty(trimmed) ? null : _pathPrefix + trimmed;
     }
 
-    // Whole segments only, so /Docs does not match /DocsArchive/Page.md.
-    private static bool IsInOrUnder(string path, string pathPrefix) =>
-        path.StartsWith(pathPrefix, StringComparison.OrdinalIgnoreCase) &&
-        (path.Length == pathPrefix.Length || path[pathPrefix.Length] == '/');
-
     private static bool GetBoolean(JsonElement input, string name, bool defaultValue) =>
         input.TryGetProperty(name, out var element) && element.ValueKind is JsonValueKind.True or JsonValueKind.False
             ? element.GetBoolean()
             : defaultValue;
 
     private readonly record struct PageScan(int MatchCount, List<object>? Matches, bool IsTimedOut);
-
-    // A page, or the notes of the metadata of a subject or property.
-    private readonly record struct SearchSource(string Path, string? Title, MarkdownFile? File, string? Notes)
-    {
-        // The view of a page with secret values hidden, null while the page was not parsed yet; or the notes.
-        public string? ReadContent() => File is not null ? File.ReadRawContent() : Notes;
-    }
 
     private readonly record struct ContentQuery(string Text, Regex? Regex, StringComparison Comparison)
     {
