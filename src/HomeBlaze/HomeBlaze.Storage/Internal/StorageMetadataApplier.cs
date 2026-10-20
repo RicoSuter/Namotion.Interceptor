@@ -31,17 +31,12 @@ internal sealed class StorageMetadataApplier
     }
 
     /// <summary>
-    /// Gets whether the storage keeps the metadata of the subject: the storage itself unless another storage holds it,
-    /// a folder of it, a stored subject of it, and a subject inside one. Thread-safe.
+    /// Gets whether the storage keeps the metadata of the subject: the storage itself, a folder of it, a stored subject
+    /// of it, and a subject inside one. Thread-safe.
     /// </summary>
     public bool CanStoreMetadata(IInterceptorSubject subject)
     {
-        if (ReferenceEquals(subject, _storage))
-        {
-            return ReferenceEquals(subject.FindMetadataStore(), _storage);
-        }
-
-        if (subject is VirtualFolder folder && ReferenceEquals(folder.Storage, _storage))
+        if (ReferenceEquals(subject, _storage) || (subject is VirtualFolder folder && ReferenceEquals(folder.Storage, _storage)))
         {
             return true;
         }

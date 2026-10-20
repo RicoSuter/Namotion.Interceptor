@@ -1,6 +1,7 @@
 using System.Text;
 using FluentStorage.Blobs;
 using HomeBlaze.Abstractions;
+using HomeBlaze.Components.Abstractions.Pages;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Files;
@@ -330,7 +331,8 @@ internal sealed class StorageReconciler
             {
                 folder.ApplyMetadata(FindMetadata(StorageMetadataPath.GetFolderFilePath(entry.Path)));
             }
-            else if (entry.HasSidecar)
+            // A storage that this one holds keeps its metadata in its own root file.
+            else if (entry.HasSidecar && entry.Subject is not IMetadataStore)
             {
                 var file = FindMetadata(StorageMetadataPath.GetSubjectFilePath(entry.Path)) ?? StorageMetadataFile.Empty;
                 if (!ReferenceEquals(entry.AppliedMetadata, file))

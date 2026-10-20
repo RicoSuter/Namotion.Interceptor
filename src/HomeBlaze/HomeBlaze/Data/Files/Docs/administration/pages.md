@@ -157,7 +157,7 @@ A path names the properties on the way, separated by `/`, with the index of a co
 
 Items of a collection are matched by their index, so when the items of a collection change places, the metadata stays at its index and belongs to another item until the file is applied again. A subject that moves keeps the metadata of its previous place when it moves out of every storage or into a stored subject whose file was not applied, and when it is added to its new place before it is removed from the old one.
 
-A storage that is stored as a JSON file inside another storage keeps its metadata in the sidecar beside that file, and its own `.metadata.json` keeps only its `order`.
+A storage that is stored as a JSON file inside another storage keeps all its metadata, its `order` included, in the `.metadata.json` in its own root. A sidecar beside its file in the other storage is not read.
 
 Metadata is read and saved under these limits: at most 64 keys per entry, key names of up to 64 characters, strings of up to 256 characters and values of up to 4 KB, except for the `order` of a folder, and a file of up to 512 KB, which a save that does not make it larger may exceed. An entry without keys is removed, and a file without keys is deleted.
 

@@ -32,13 +32,17 @@ public static class SubjectMetadataExtensions
             : property.Name == KnownAttributes.Metadata;
 
     /// <summary>
-    /// Gets the store that keeps the metadata of the subject: the nearest <see cref="IMetadataStore"/> up the first
-    /// parent of each subject, as the registry writes the path of the subject, else the subject itself when it is a
-    /// store, such as the root storage; null without one. A storage that is held by another one has its metadata in
-    /// that one.
+    /// Gets the store that keeps the metadata of the subject: the subject itself when it is a
+    /// <see cref="IMetadataStore"/>, else the nearest one up the first parent of each subject, as the registry writes
+    /// the path of the subject; null without one.
     /// </summary>
     public static IMetadataStore? FindMetadataStore(this IInterceptorSubject subject)
     {
+        if (subject is IMetadataStore own)
+        {
+            return own;
+        }
+
         var current = subject.TryGetRegisteredSubject();
         for (var depth = 0; depth < MaxDepth && current is { Parents: [var parent, ..] }; depth++)
         {
@@ -49,6 +53,6 @@ public static class SubjectMetadataExtensions
             }
         }
 
-        return subject as IMetadataStore;
+        return null;
     }
 }

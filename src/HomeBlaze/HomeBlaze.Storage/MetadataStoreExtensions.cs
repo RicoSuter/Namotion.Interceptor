@@ -33,8 +33,7 @@ public static class MetadataStoreExtensions
             throw new ArgumentException("Only a folder or the root of a storage has an order.", nameof(folder));
         }
 
-        // A storage keeps its own order, also when another storage holds it.
-        var store = folder as IMetadataStore ?? folder.FindMetadataStore()
+        var store = folder.FindMetadataStore()
             ?? throw new ArgumentException("The folder is in no storage.", nameof(folder));
 
         // Null arrives from an agent that sends a JSON null in the array.

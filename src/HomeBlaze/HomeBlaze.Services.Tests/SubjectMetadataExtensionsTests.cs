@@ -59,7 +59,7 @@ public class SubjectMetadataExtensionsTests
     }
 
     [Fact]
-    public void WhenTheStoreOfASubjectIsFound_ThenItIsTheNearestOneUpItsParentsElseTheSubjectItself()
+    public void WhenTheStoreOfASubjectIsFound_ThenItIsTheSubjectItselfWhenItIsOneElseTheNearestOneUpItsParents()
     {
         // Arrange
         var child = new MetadataTestSubject();
@@ -73,7 +73,7 @@ public class SubjectMetadataExtensionsTests
 
         // Assert
         Assert.Same(inner, storeOfChild);
-        Assert.Same(outer, storeOfInner);
+        Assert.Same(inner, storeOfInner);
         Assert.Same(outer, storeOfOuter);
     }
 }

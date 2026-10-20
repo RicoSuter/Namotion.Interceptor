@@ -73,9 +73,6 @@ public partial class FluentStorageContainer :
     /// <summary>The clock for timeouts and timers. Read when the storage connects.</summary>
     internal TimeProvider TimeProvider { get; set; } = TimeProvider.System;
 
-    // False for a storage that another storage holds, which keeps the metadata of this one.
-    private bool IsOwnMetadataStore => ReferenceEquals(((IInterceptorSubject)this).FindMetadataStore(), this);
-
     /// <summary>Applies the metadata files of the subjects of this storage.</summary>
     internal StorageMetadataApplier MetadataApplier { get; }
 
@@ -512,12 +509,11 @@ public partial class FluentStorageContainer :
 
     /// <summary>
     /// Takes the metadata and the order from the <c>.metadata.json</c> in the root of the storage, or none without one.
-    /// A storage that another storage holds as a JSON file has its metadata in the file beside that one, so its own file
-    /// gives only its order. Called on the worker.
+    /// Called on the worker.
     /// </summary>
     internal void ApplyMetadata(StorageMetadataFile? file)
     {
-        if (IsOwnMetadataStore && this.TryGetRegisteredSubject() is { } registered)
+        if (this.TryGetRegisteredSubject() is { } registered)
         {
             StorageMetadataValues.Set(registered, null, file?.Own);
         }
@@ -616,7 +612,6 @@ public partial class FluentStorageContainer :
     /// <remarks>
     /// Keeps the metadata of this storage and of its folders in their <c>.metadata.json</c>, and that of a subject
     /// stored as <c>X.json</c>, of the subjects inside it and of their properties in <c>X.metadata.json</c> beside it.
-    /// A storage that another storage holds keeps only its own order; the other one keeps the rest of its metadata.
     /// </remarks>
     public async Task SetMetadataAsync(IInterceptorSubject subject, string? propertyName, JsonElement values, CancellationToken cancellationToken)
     {
@@ -630,38 +625,30 @@ public partial class FluentStorageContainer :
             // Fresh from the storage, so that an edit that no pass has seen yet is kept.
             var content = await connection.Reconciler.ReadMetadataFileAsync(target.FilePath, token);
             var written = StorageMetadataWriter.Merge(content, target, copy);
-            if (target.IsContainer && GetContainerValuesError(subject, copy) is { } error)
+            if (target.IsContainer && GetOrderError(subject, copy) is { } orderError)
             {
-                throw new StorageRefusedException(error);
+                throw new StorageRefusedException(orderError);
             }
 
             await WriteMetadataFileAsync(connection, target.FilePath, written, token);
         }, cancellationToken);
     }
 
-    // Runs on the worker, after the writer accepted the values, so that their keys and names can be read. A storage that
-    // another storage holds keeps only its order here. The names of an order are children of the folder, each given
-    // once, which also bounds the size of the order.
-    private string? GetContainerValuesError(IInterceptorSubject folder, JsonElement values)
+    // Runs on the worker, after the writer accepted the values, so that their keys and names can be read. The names of
+    // an order are children of the folder, each given once, which also bounds the size of the order.
+    private static string? GetOrderError(IInterceptorSubject folder, JsonElement values)
     {
-        string? orderError = null;
         foreach (var property in values.EnumerateObject())
         {
-            if (!string.Equals(property.Name, MetadataKeys.Order, StringComparison.OrdinalIgnoreCase))
-            {
-                if (ReferenceEquals(folder, this) && !IsOwnMetadataStore)
-                {
-                    return "This storage is held by another storage, which keeps its metadata in the file beside the file of this storage; its own .metadata.json keeps only its order.";
-                }
-            }
-            else if (property.Value.ValueKind == JsonValueKind.Array)
+            if (string.Equals(property.Name, MetadataKeys.Order, StringComparison.OrdinalIgnoreCase) &&
+                property.Value.ValueKind == JsonValueKind.Array)
             {
                 string[] names = [.. property.Value.EnumerateArray().Select(static item => item.GetString()!)];
-                orderError = ChildOrderNames.GetError(names, ChildOrdering.GetShownNames(folder));
+                return ChildOrderNames.GetError(names, ChildOrdering.GetShownNames(folder));
             }
         }
 
-        return orderError;
+        return null;
     }
 
     // Runs on the worker. The own keys of the file of this storage or of a folder of it, or the entry of a subject or
@@ -678,7 +665,7 @@ public partial class FluentStorageContainer :
         if (subject.TryGetRegisteredSubject() is not { } registered ||
             !MetadataApplier.TryFindStoredSubject(registered, out var storedSubject) ||
             !connection.Index.TryGetEntry(storedSubject.Subject, out var entry) ||
-            entry is not { IsPlaced: true, HasSidecar: true })
+            entry is not { IsPlaced: true, HasSidecar: true, Subject: not IMetadataStore })
         {
             throw new StorageRefusedException(
                 "Only a storage, its folders, the subjects of its JSON files and the subjects and properties inside them have metadata.");

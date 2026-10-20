@@ -54,7 +54,7 @@ public sealed class MetadataLifecycleHandler : ILifecycleHandler, IPropertyLifec
 
     private static void Apply(IInterceptorSubject subject, string? propertyName)
     {
-        // A store keeps the metadata of the subjects below it, not its own.
+        // A store applies its own metadata from its own file.
         if (subject.FindMetadataStore() is { } store && !ReferenceEquals(store, subject))
         {
             store.ApplyStoredMetadata(subject, propertyName);

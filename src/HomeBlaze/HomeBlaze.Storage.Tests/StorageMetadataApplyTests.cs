@@ -313,13 +313,13 @@ public class StorageMetadataApplyTests : StorageTestBase
         WriteFile("Motor.metadata.json", """{ "navTitle": "Pump" }""");
         var storage = await ConnectAsync();
         var oldMotor = storage.Children["Motor"];
-        WriteFile("Motor.json", SerializeStorage(CreateTemporaryDirectory().FullName));
+        WriteFile("Motor.json", MetadataTestDevice.Serialize());
 
         // Act
         await storage.ReconcileAsync(Named("Motor.json"));
 
         // Assert
-        var replaced = Assert.IsType<FluentStorageContainer>(storage.Children["Motor"]);
+        var replaced = Assert.IsType<MetadataTestDevice>(storage.Children["Motor"]);
         Assert.Equal("Pump", replaced.GetMetadata().GetString(MetadataKeys.NavigationTitle));
         await Assert.ThrowsAsync<StorageRefusedException>(() =>
             storage.SetMetadataAsync(oldMotor, null, Values("""{ "navTitle": "Old" }"""), CancellationToken.None));
@@ -349,7 +349,7 @@ public class StorageMetadataApplyTests : StorageTestBase
     }
 
     [Fact]
-    public async Task WhenAStorageIsTheJsonFileOfAnotherOne_ThenItsMetadataIsTheFileBesideItAndItsOrderIsItsOwn()
+    public async Task WhenAStorageIsTheJsonFileOfAnotherOne_ThenItKeepsAllItsMetadataInItsOwnRootFile()
     {
         // Arrange
         var nestedDirectory = CreateTemporaryDirectory();
@@ -364,69 +364,20 @@ public class StorageMetadataApplyTests : StorageTestBase
             // Act
             await nested.FindMetadataStore()!.SetMetadataAsync(nested, null, Values("""{ "navTitle": "Archive" }"""), CancellationToken.None);
             await MetadataStoreExtensions.SetOrderAsync(nested, ["b.md"], CancellationToken.None);
+            WriteFile("Nested.metadata.json", """{ "navTitle": "Changed" }""");
+            await storage.ReconcileAsync(Named("Nested.metadata.json"));
 
             // Assert
-            Assert.Same(storage, nested.FindMetadataStore());
+            Assert.Same(nested, nested.FindMetadataStore());
+            Assert.False(storage.CanStoreMetadata(nested));
+            await Assert.ThrowsAsync<StorageRefusedException>(() =>
+                storage.SetMetadataAsync(nested, null, Values("""{ "navTitle": "Other" }"""), CancellationToken.None));
             Assert.Equal("Archive", nested.GetMetadata().GetString(MetadataKeys.NavigationTitle));
-            Assert.Equal("Archive", ReadMetadataFile("Nested.metadata.json").Own.GetString(MetadataKeys.NavigationTitle));
             Assert.Equal(["b.md", "a.md"], nested.ChildOrder.ToArray());
-            Assert.True(File.Exists(Path.Combine(nestedDirectory.FullName, ".metadata.json")));
+            var ownFile = File.ReadAllText(Path.Combine(nestedDirectory.FullName, ".metadata.json"));
+            Assert.Contains("\"Archive\"", ownFile);
+            Assert.Contains("\"b.md\"", ownFile);
             Assert.False(File.Exists(GetFullPath(".metadata.json")));
-        }
-        finally
-        {
-            nested.Dispose();
-        }
-    }
-
-    [Fact]
-    public async Task WhenAStorageThatAnotherOneHoldsWritesItsOwnMetadata_ThenOnlyItsOrderIsAccepted()
-    {
-        // Arrange
-        var nestedDirectory = CreateTemporaryDirectory();
-        File.WriteAllText(Path.Combine(nestedDirectory.FullName, "a.md"), "a");
-        WriteFile("Nested.json", SerializeStorage(nestedDirectory.FullName));
-        var storage = await ConnectAsync();
-        var nested = Assert.IsType<FluentStorageContainer>(storage.Children["Nested"]);
-        await nested.ConnectAsync(CancellationToken.None);
-        try
-        {
-            // Act
-            var exception = await Assert.ThrowsAsync<StorageRefusedException>(() =>
-                nested.SetMetadataAsync(nested, null, Values("""{ "navTitle": "Archive", "order": ["a.md"] }"""), CancellationToken.None));
-            await nested.SetMetadataAsync(nested, null, Values("""{ "order": ["a.md"] }"""), CancellationToken.None);
-
-            // Assert
-            Assert.False(nested.CanStoreMetadata(nested));
-            Assert.True(storage.CanStoreMetadata(nested));
-            Assert.Contains("only its order", exception.Message);
-            Assert.Null(nested.GetMetadata());
-            Assert.Equal(["a.md"], nested.ChildOrder.ToArray());
-            Assert.DoesNotContain("navTitle", File.ReadAllText(Path.Combine(nestedDirectory.FullName, ".metadata.json")));
-        }
-        finally
-        {
-            nested.Dispose();
-        }
-    }
-
-    [Fact]
-    public async Task WhenAStorageThatAnotherOneHoldsWritesItsOrderInAnotherCase_ThenItIsAccepted()
-    {
-        // Arrange
-        var nestedDirectory = CreateTemporaryDirectory();
-        File.WriteAllText(Path.Combine(nestedDirectory.FullName, "a.md"), "a");
-        WriteFile("Nested.json", SerializeStorage(nestedDirectory.FullName));
-        var storage = await ConnectAsync();
-        var nested = Assert.IsType<FluentStorageContainer>(storage.Children["Nested"]);
-        await nested.ConnectAsync(CancellationToken.None);
-        try
-        {
-            // Act
-            await nested.SetMetadataAsync(nested, null, Values("""{ "Order": ["a.md"] }"""), CancellationToken.None);
-
-            // Assert
-            Assert.Equal(["a.md"], nested.ChildOrder.ToArray());
         }
         finally
         {
