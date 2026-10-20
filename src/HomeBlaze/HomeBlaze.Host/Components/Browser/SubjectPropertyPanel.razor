@@ -1,3 +1,5 @@
+@using System.Collections.Immutable
+@using System.Text.Json
 @using HomeBlaze.Abstractions.Attributes
 @using HomeBlaze.Abstractions.Metadata
 @using HomeBlaze.History.Abstractions
@@ -39,6 +41,7 @@
                     var canEdit = CanEdit();
                     var canDelete = Subject is IStorageFile or IConfigurable;
                     var metadataStore = GetMetadataStore();
+                    _metadataStore = metadataStore;
                 }
 
                 @* Stays an h1: the page focuses the first h1 after navigation. *@
@@ -115,6 +118,8 @@
                     </MudTooltip>
                 }
             </MudListSubheader>
+
+            <MetadataSummary Metadata="@Subject.GetMetadata()" OnTagClick="@OpenTagFilterAsync" />
 
             @* Each block gets the gap above it from GetGapClass, by the block before it. *@
             <div data-testid="subject-pane-content" style="flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;">
@@ -257,6 +262,11 @@
        Transparent rather than hidden, so that it stays in the tab order. */
     .subject-pane-copy {
         opacity: 0;
+    }
+
+    /* The row of the property that a link leads to. */
+    .subject-pane-row-highlighted {
+        background-color: var(--mud-palette-primary-hover);
     }
 
     .subject-pane-row:hover .subject-pane-copy,
@@ -487,6 +497,13 @@
 
     [Parameter]
     public EventCallback OnDelete { get; set; }
+
+    /// <summary>The name of the property whose row is highlighted, such as the target of a link.</summary>
+    [Parameter]
+    public string? HighlightedProperty { get; set; }
+
+    // The store of the shown subject in the render that runs, which the rows of its properties use.
+    private IMetadataStore? _metadataStore;
 
     public async ValueTask DisposeAsync()
     {
@@ -774,6 +791,13 @@
 
         // A detail without an arrow starts where the name of one with an arrow starts.
         var rowClass = depth > 0 && !hasAttributes ? "subject-pane-row d-flex align-start py-1 pl-6" : "subject-pane-row d-flex align-start py-1";
+        var isHighlighted = depth == 0 && prop.Name == HighlightedProperty;
+        if (isHighlighted)
+        {
+            rowClass += " subject-pane-row-highlighted";
+        }
+
+        var propertyMetadata = prop.IsAttribute ? null : prop.GetMetadata();
 
         RenderFragment nameAndValue =
             @<text>
@@ -795,7 +819,7 @@
                 </MudText>
             </text>;
 
-        <div class="@rowClass" data-testid="subject-pane-value">
+        <div class="@rowClass" data-testid="subject-pane-value" data-highlighted="@(isHighlighted ? "true" : null)">
             @* Outside the link, so that a click on the arrow does not open the history. *@
             @if (hasAttributes)
             {
@@ -848,6 +872,39 @@
                                aria-label="@($"Copy {displayName}")"
                                data-copy-value="@displayValue"
                                data-testid="subject-pane-value-copy" />
+            }
+            @if (_metadataStore is not null && !prop.IsAttribute)
+            {
+                @* With notes, links or tags the icon shows them in a tooltip; without, it shows while the row is hovered, as the copy button does. *@
+                @if (HasSummary(propertyMetadata))
+                {
+                    <MudTooltip>
+                        <ChildContent>
+                            <MudIconButton Icon="@Icons.Material.Filled.StickyNote2"
+                                           Size="Size.Small"
+                                           Color="Color.Primary"
+                                           Class="pa-0 ml-2"
+                                           aria-label="@($"Metadata of {displayName}")"
+                                           Disabled="@(!IsConnected(_metadataStore))"
+                                           OnClick="@(() => OpenPropertyMetadataDialogAsync(prop, displayName))"
+                                           data-testid="subject-pane-value-metadata" />
+                        </ChildContent>
+                        <TooltipContent>
+                            <MetadataSummary Metadata="@propertyMetadata" Class="py-1" />
+                        </TooltipContent>
+                    </MudTooltip>
+                }
+                else
+                {
+                    <MudIconButton Icon="@Icons.Material.Outlined.StickyNote2"
+                                   Size="Size.Small"
+                                   Class="pa-0 ml-2 subject-pane-copy"
+                                   title="Metadata"
+                                   aria-label="@($"Metadata of {displayName}")"
+                                   Disabled="@(!IsConnected(_metadataStore))"
+                                   OnClick="@(() => OpenPropertyMetadataDialogAsync(prop, displayName))"
+                                   data-testid="subject-pane-value-metadata" />
+                }
             }
         </div>
 
@@ -972,6 +1029,27 @@
             ? store
             : null;
 
+    // Whether the metadata has notes, links or tags, which the summary shows. Reads the keys without allocating, as
+    // it runs for every row in every render.
+    private static bool HasSummary(ImmutableDictionary<string, JsonElement>? metadata)
+        => metadata is not null &&
+           (metadata.TryGetValue(MetadataKeys.Notes, out var notes) && notes.ValueKind == JsonValueKind.String ||
+            IsNonEmptyArray(metadata, MetadataKeys.Links) ||
+            IsNonEmptyArray(metadata, MetadataKeys.Tags));
+
+    private static bool IsNonEmptyArray(ImmutableDictionary<string, JsonElement> metadata, string key)
+        => metadata.TryGetValue(key, out var value) && value.ValueKind == JsonValueKind.Array && value.GetArrayLength() > 0;
+
+    private async Task OpenPropertyMetadataDialogAsync(RegisteredSubjectProperty property, string displayName)
+    {
+        if (Subject is null || GetMetadataStore() is null)
+            return;
+
+        await MetadataEditDialog.ShowAsync(DialogService, Subject, $"Metadata of {displayName}", property.Name);
+    }
+
+    private Task OpenTagFilterAsync(string tag) => MetadataTagFilterDialog.ShowAsync(DialogService, tag);
+
     private async Task OpenMetadataDialogAsync()
     {
         if (Subject is null || GetMetadataStore() is null)
@@ -1043,9 +1121,10 @@
             @foreach (var property in values)
             {
                 // Read here also for a value that gets no row: the render records the read, so the pane is
-                // rendered again once the value is set.
+                // rendered again once the value is set. A property with metadata, or that a link leads to, gets its
+                // row also without a value, for its metadata icon and its highlight.
                 var value = property.GetValue();
-                if (value is null && !HasDetails(property))
+                if (value is null && !HasDetails(property) && property.Name != HighlightedProperty && property.GetMetadata() is null)
                 {
                     emptyValues ??= [];
                     emptyValues.Add(property);

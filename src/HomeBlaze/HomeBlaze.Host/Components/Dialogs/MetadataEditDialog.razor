@@ -1,55 +1,95 @@
 @using HomeBlaze.Components.Abstractions.Pages
 @using System.Text.Json
 @using System.Text.Json.Nodes
+@using HomeBlaze.Components.Inputs
 
 @inject ISnackbar Snackbar
+@inject RootManager RootManager
 
 <MudDialog data-testid="metadata-edit-dialog">
     <DialogContent>
-        @if (_isFolder)
+        @if (PropertyName is null)
         {
-            <MudTextField @bind-Value="_title"
-                          Label="Title"
-                          Placeholder="@_titlePlaceholder"
+            @if (_isFolder)
+            {
+                <MudTextField @bind-Value="_title"
+                              Label="Title"
+                              Placeholder="@_titlePlaceholder"
+                              Clearable="true"
+                              data-testid="metadata-title" />
+            }
+            <MudTextField @bind-Value="_navigationTitle"
+                          Label="Navigation title"
+                          Placeholder="@_navigationTitlePlaceholder"
                           Clearable="true"
-                          data-testid="metadata-title" />
+                          data-testid="metadata-navigation-title" />
+            <MudTextField @bind-Value="_icon"
+                          Label="Icon"
+                          Placeholder="@_iconPlaceholder"
+                          Clearable="true"
+                          DebounceInterval="300"
+                          Adornment="Adornment.End"
+                          AdornmentIcon="@SubjectIconExtensions.ResolveMudBlazorIcon(GetValue(_icon) ?? _iconPlaceholder)"
+                          HelperText="A MudBlazor icon name, such as Dashboard or Settings"
+                          data-testid="metadata-icon" />
+            @if (!_isFolder)
+            {
+                <MudSelect T="NavigationLocation?"
+                           @bind-Value="_location"
+                           Label="Location"
+                           Placeholder="Sidebar"
+                           Clearable="true"
+                           data-testid="metadata-location">
+                    <MudSelectItem T="NavigationLocation?" Value="@((NavigationLocation?)NavigationLocation.NavBar)">Sidebar</MudSelectItem>
+                    <MudSelectItem T="NavigationLocation?" Value="@((NavigationLocation?)NavigationLocation.AppBar)">Top bar</MudSelectItem>
+                </MudSelect>
+                <MudSelect T="AppBarAlignment?"
+                           @bind-Value="_alignment"
+                           Label="Alignment"
+                           Placeholder="Left"
+                           Clearable="true"
+                           Disabled="@(_location != NavigationLocation.AppBar)"
+                           data-testid="metadata-alignment">
+                    <MudSelectItem T="AppBarAlignment?" Value="@((AppBarAlignment?)AppBarAlignment.Left)">Left</MudSelectItem>
+                    <MudSelectItem T="AppBarAlignment?" Value="@((AppBarAlignment?)AppBarAlignment.Right)">Right</MudSelectItem>
+                </MudSelect>
+            }
         }
-        <MudTextField @bind-Value="_navigationTitle"
-                      Label="Navigation title"
-                      Placeholder="@_navigationTitlePlaceholder"
-                      Clearable="true"
-                      data-testid="metadata-navigation-title" />
-        <MudTextField @bind-Value="_icon"
-                      Label="Icon"
-                      Placeholder="@_iconPlaceholder"
-                      Clearable="true"
-                      DebounceInterval="300"
-                      Adornment="Adornment.End"
-                      AdornmentIcon="@SubjectIconExtensions.ResolveMudBlazorIcon(GetValue(_icon) ?? _iconPlaceholder)"
-                      HelperText="A MudBlazor icon name, such as Dashboard or Settings"
-                      data-testid="metadata-icon" />
-        @if (!_isFolder)
+        <MudTextField @bind-Value="_notes"
+                      Label="Notes"
+                      Lines="4"
+                      Sizing="InputSizing.Auto"
+                      MaxLines="12"
+                      HelperText="Markdown, without HTML, pictures or blocks"
+                      data-testid="metadata-notes-input" />
+        <MudText Typo="Typo.subtitle2" Class="mt-4">Links</MudText>
+        @foreach (var link in _links)
         {
-            <MudSelect T="NavigationLocation?"
-                       @bind-Value="_location"
-                       Label="Location"
-                       Placeholder="Sidebar"
-                       Clearable="true"
-                       data-testid="metadata-location">
-                <MudSelectItem T="NavigationLocation?" Value="@((NavigationLocation?)NavigationLocation.NavBar)">Sidebar</MudSelectItem>
-                <MudSelectItem T="NavigationLocation?" Value="@((NavigationLocation?)NavigationLocation.AppBar)">Top bar</MudSelectItem>
-            </MudSelect>
-            <MudSelect T="AppBarAlignment?"
-                       @bind-Value="_alignment"
-                       Label="Alignment"
-                       Placeholder="Left"
-                       Clearable="true"
-                       Disabled="@(_location != NavigationLocation.AppBar)"
-                       data-testid="metadata-alignment">
-                <MudSelectItem T="AppBarAlignment?" Value="@((AppBarAlignment?)AppBarAlignment.Left)">Left</MudSelectItem>
-                <MudSelectItem T="AppBarAlignment?" Value="@((AppBarAlignment?)AppBarAlignment.Right)">Right</MudSelectItem>
-            </MudSelect>
+            <div class="d-flex align-center gap-2" data-testid="metadata-link-row">
+                <MudTextField @bind-Value="link.Title" Label="Title" Clearable="true" Class="flex-grow-1" data-testid="metadata-link-title" />
+                <SubjectPathField @bind-Value="link.Address" Label="URL or path" Placeholder="https://… or /Devices/Pump" Class="flex-grow-1" />
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" aria-label="Remove link" OnClick="@(() => _links.Remove(link))"
+                               data-testid="metadata-remove-link" />
+            </div>
         }
+        <MudButton StartIcon="@Icons.Material.Filled.AddLink" Variant="Variant.Text" OnClick="@(() => _links.Add(new LinkInput()))"
+                   data-testid="metadata-add-link">Add link</MudButton>
+        <MudAutocomplete T="string"
+                         Label="Add tag"
+                         Value="@_tagText"
+                         ValueChanged="AddTag"
+                         TextChanged="@(text => _tagText = text)"
+                         SearchFunc="SearchTagsAsync"
+                         CoerceValue="true"
+                         ResetValueOnEmptyText="true"
+                         Class="mt-4"
+                         data-testid="metadata-tag-input" />
+        <div class="d-flex flex-wrap gap-1 mt-1">
+            @foreach (var tag in _tags)
+            {
+                <MudChip T="string" Size="Size.Small" OnClose="@(() => _tags.Remove(tag))" data-testid="metadata-tag-chip">@tag</MudChip>
+            }
+        </div>
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="Cancel">Cancel</MudButton>
@@ -60,8 +100,11 @@
 @code {
     [CascadingParameter] private IMudDialogInstance? MudDialog { get; set; }
 
-    /// <summary>The folder or the subject whose metadata is edited. A storage is edited as a subject.</summary>
+    /// <summary>The folder or the subject whose metadata, or that of whose property, is edited. A storage is edited as a subject.</summary>
     [Parameter, EditorRequired] public IInterceptorSubject Owner { get; set; } = default!;
+
+    /// <summary>The name of the property of the owner whose metadata is edited, or null for the owner itself.</summary>
+    [Parameter] public string? PropertyName { get; set; }
 
     private bool _isFolder;
     private string? _titlePlaceholder;
@@ -72,14 +115,34 @@
     private string? _icon;
     private NavigationLocation? _location;
     private AppBarAlignment? _alignment;
+    private string? _notes;
+    private readonly List<LinkInput> _links = [];
+    private readonly List<string> _tags = [];
+    private IReadOnlyList<string> _tagsInUse = [];
+    private string? _tagText;
     private bool _isSaving;
 
     protected override void OnInitialized()
     {
+        var metadata = PropertyName is null
+            ? Owner.GetMetadata()
+            : Owner.TryGetRegisteredSubject()?.TryGetProperty(PropertyName)?.GetMetadata();
+
+        _notes = metadata.GetString(MetadataKeys.Notes);
+        foreach (var link in metadata.GetLinks(MetadataKeys.Links))
+        {
+            _links.Add(new LinkInput { Title = link.Title, Address = link.Url ?? link.Path });
+        }
+
+        _tags.AddRange(metadata.GetStringArray(MetadataKeys.Tags));
+
+        // Once per dialog, as finding them walks the whole tree.
+        _tagsInUse = RootManager.Root is { } root ? MetadataSearch.GetTags(root) : [];
+        if (PropertyName is not null)
+            return;
+
         _isFolder = IsFolder(Owner);
         _navigationTitlePlaceholder = Owner.GetTitle();
-
-        var metadata = Owner.GetMetadata();
         _navigationTitle = metadata.GetString(MetadataKeys.NavigationTitle);
         _icon = metadata.GetString(MetadataKeys.Icon);
         if (_isFolder)
@@ -98,6 +161,21 @@
         }
     }
 
+    private void AddTag(string? tag)
+    {
+        var text = GetValue(tag);
+        if (text is not null && !_tags.Contains(text, StringComparer.OrdinalIgnoreCase))
+            _tags.Add(text);
+
+        _tagText = null;
+    }
+
+    // The tags in use that contain the text, so that the same tag is written the same way.
+    private Task<IEnumerable<string>> SearchTagsAsync(string? text, CancellationToken cancellationToken)
+        => Task.FromResult(string.IsNullOrWhiteSpace(text)
+            ? _tagsInUse.AsEnumerable()
+            : _tagsInUse.Where(tag => tag.Contains(text.Trim(), StringComparison.OrdinalIgnoreCase)));
+
     private void Cancel() => MudDialog?.Cancel();
 
     private async Task SaveAsync()
@@ -111,26 +189,35 @@
             return;
         }
 
+        // A tag that was typed and not added yet is kept.
+        AddTag(_tagText);
+
         _isSaving = true;
         try
         {
             // Every field the dialog shows, so that a field left empty removes its key and the other keys stay.
-            var values = new JsonObject
+            var values = new JsonObject();
+            if (PropertyName is null)
             {
-                [MetadataKeys.NavigationTitle] = GetValue(_navigationTitle),
-                [MetadataKeys.Icon] = GetValue(_icon)
-            };
-            if (_isFolder)
-            {
-                values.Insert(0, MetadataKeys.Title, GetValue(_title));
-            }
-            else
-            {
-                values[MetadataKeys.Location] = _location?.ToString();
-                values[MetadataKeys.Alignment] = _location == NavigationLocation.AppBar ? _alignment?.ToString() : null;
+                if (_isFolder)
+                {
+                    values[MetadataKeys.Title] = GetValue(_title);
+                }
+
+                values[MetadataKeys.NavigationTitle] = GetValue(_navigationTitle);
+                values[MetadataKeys.Icon] = GetValue(_icon);
+                if (!_isFolder)
+                {
+                    values[MetadataKeys.Location] = _location?.ToString();
+                    values[MetadataKeys.Alignment] = _location == NavigationLocation.AppBar ? _alignment?.ToString() : null;
+                }
             }
 
-            await store.SetMetadataAsync(Owner, null, JsonElement.Parse(values.ToJsonString()), CancellationToken.None);
+            values[MetadataKeys.Notes] = GetValue(_notes);
+            values[MetadataKeys.Links] = CreateLinks();
+            values[MetadataKeys.Tags] = _tags.Count > 0 ? new JsonArray([.. _tags.Select(tag => JsonValue.Create(tag))]) : null;
+
+            await store.SetMetadataAsync(Owner, PropertyName, JsonElement.Parse(values.ToJsonString()), CancellationToken.None);
             MudDialog?.Close(DialogResult.Ok(true));
         }
         catch (Exception exception)
@@ -141,6 +228,26 @@
         {
             _isSaving = false;
         }
+    }
+
+    // An address that starts with a slash is a path, any other a web address. Rows without an address are left out.
+    private JsonArray? CreateLinks()
+    {
+        var links = new JsonArray();
+        foreach (var link in _links)
+        {
+            if (GetValue(link.Address) is not { } address)
+                continue;
+
+            var item = new JsonObject();
+            if (GetValue(link.Title) is { } title)
+                item["title"] = title;
+
+            item[address.StartsWith('/') ? "path" : "url"] = address;
+            links.Add(item);
+        }
+
+        return links.Count > 0 ? links : null;
     }
 
     private static string? GetValue(string? value)
@@ -154,11 +261,16 @@
         => owner is IMetadataContainer and not IConfigurable;
 
     /// <summary>
-    /// Shows the dialog for the metadata of a folder or of a subject that a store keeps the metadata of.
+    /// Shows the dialog for the metadata of a folder or of a subject that a store keeps the metadata of, or of a
+    /// property of it.
     /// </summary>
-    public static Task<IDialogReference> ShowAsync(IDialogService dialogService, IInterceptorSubject owner, string title)
+    public static Task<IDialogReference> ShowAsync(IDialogService dialogService, IInterceptorSubject owner, string title, string? propertyName = null)
     {
-        var parameters = new DialogParameters<MetadataEditDialog> { { x => x.Owner, owner } };
+        var parameters = new DialogParameters<MetadataEditDialog>
+        {
+            { x => x.Owner, owner },
+            { x => x.PropertyName, propertyName }
+        };
 
         var options = new DialogOptions
         {
@@ -168,5 +280,12 @@
         };
 
         return dialogService.ShowAsync<MetadataEditDialog>(title, parameters, options);
+    }
+
+    private sealed class LinkInput
+    {
+        public string? Title { get; set; }
+
+        public string? Address { get; set; }
     }
 }

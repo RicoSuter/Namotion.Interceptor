@@ -1,0 +1,108 @@
+@using System.Collections.Immutable
+@using System.Text.Json
+@using HomeBlaze.Components.Abstractions.Pages
+@using HomeBlaze.Storage
+
+@inject MetadataLinkResolver LinkResolver
+@inject SubjectPathResolver PathResolver
+
+@if (_notes is not null || _links.Length > 0 || _tags.Length > 0)
+{
+    <div class="@Class" data-testid="metadata-summary">
+        @if (_notes is not null)
+        {
+            @if (_notesHtml is not null)
+            {
+                @* Only the HTML of MetadataNotes.ToHtml, which renders notes that pass the rules of pages. *@
+                <div class="metadata-notes" data-testid="metadata-notes">@((MarkupString)_notesHtml)</div>
+            }
+            else
+            {
+                @* Notes that break the rules, such as after an edit of the file by hand, are shown as text. *@
+                <div class="metadata-notes" style="white-space: pre-wrap;" data-testid="metadata-notes">@_notes</div>
+            }
+        }
+        @if (_links.Length > 0 || _tags.Length > 0)
+        {
+            <div class="d-flex flex-wrap gap-1 mt-1">
+                @foreach (var link in GetResolvedLinks())
+                {
+                    @if (link.IsBroken)
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Outlined"
+                                 Icon="@Icons.Material.Filled.LinkOff" title="Broken link" data-testid="metadata-link">@link.Title</MudChip>
+                    }
+                    else
+                    {
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Icon="@Icons.Material.Filled.Link"
+                                 Href="@link.Href" Target="@(link.IsExternal ? "_blank" : null)"
+                                 Rel="@(link.IsExternal ? "noopener noreferrer" : null)" data-testid="metadata-link">@link.Title</MudChip>
+                    }
+                }
+                @foreach (var tag in _tags)
+                {
+                    @if (OnTagClick.HasDelegate)
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Text" Icon="@Icons.Material.Filled.Tag"
+                                 OnClick="@(() => OnTagClick.InvokeAsync(tag))" data-testid="metadata-tag">@tag</MudChip>
+                    }
+                    else
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Text" Icon="@Icons.Material.Filled.Tag"
+                                 data-testid="metadata-tag">@tag</MudChip>
+                    }
+                }
+            </div>
+        }
+    </div>
+}
+
+@code {
+    /// <summary>The metadata whose notes, links and tags are shown.</summary>
+    [Parameter] public ImmutableDictionary<string, JsonElement>? Metadata { get; set; }
+
+    /// <summary>Called with the tag of a tag chip that is clicked; without it, tag chips cannot be clicked.</summary>
+    [Parameter] public EventCallback<string> OnTagClick { get; set; }
+
+    [Parameter] public string Class { get; set; } = "px-4 py-2";
+
+    private bool _isRead;
+    private ImmutableDictionary<string, JsonElement>? _readMetadata;
+    private string? _notes;
+    private string? _notesHtml;
+    private ImmutableArray<MetadataLink> _links = [];
+    private ImmutableArray<string> _tags = [];
+
+    // The links as resolved for the metadata and the paths version they were resolved at.
+    private ImmutableArray<ResolvedMetadataLink> _resolvedLinks = [];
+    private long _resolvedPathsVersion = -1;
+
+    protected override void OnParametersSet()
+    {
+        // Once per value, as the parent renders on every change of its subject and the notes are parsed here.
+        if (_isRead && ReferenceEquals(_readMetadata, Metadata))
+            return;
+
+        _isRead = true;
+        _readMetadata = Metadata;
+        _notes = Metadata.GetString(MetadataKeys.Notes);
+        _notesHtml = _notes is null ? null : MetadataNotes.ToHtml(_notes);
+        _links = Metadata.GetLinks(MetadataKeys.Links);
+        _tags = Metadata.GetStringArray(MetadataKeys.Tags);
+        _resolvedPathsVersion = -1;
+    }
+
+    // Resolved again when a subject is attached or detached, which can mend or break a link. Read in the render, so
+    // that such a change renders the summary again.
+    private ImmutableArray<ResolvedMetadataLink> GetResolvedLinks()
+    {
+        var pathsVersion = PathResolver.PathsVersion;
+        if (pathsVersion != _resolvedPathsVersion)
+        {
+            _resolvedLinks = [.. _links.Select(LinkResolver.Resolve)];
+            _resolvedPathsVersion = pathsVersion;
+        }
+
+        return _resolvedLinks;
+    }
+}
