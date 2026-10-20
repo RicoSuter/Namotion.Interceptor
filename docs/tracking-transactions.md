@@ -131,7 +131,7 @@ using var tx = await context.BeginTransactionAsync(TransactionFailureHandling.Ro
 
 | Value | Description |
 |-------|-------------|
-| `BestEffort` | Apply successful changes, rollback failed ones to keep each property in sync with its source. |
+| `BestEffort` | Apply successful changes, rollback failed ones to keep each property in sync with its source. When transaction handlers checked the set, a failed local apply reverts everything, as in `Rollback`. |
 | `Rollback` | All-or-nothing across all properties - any failure reverts everything. |
 
 **Behavior comparison:**
@@ -179,20 +179,13 @@ Conflict detection is best-effort and not atomic with respect to non-transaction
 
 ### Validation Mode
 
-Controls when transaction handlers, such as property validation, validate the written values.
+Controls when transaction handlers, such as property validation, validate the written values: `Immediate` (default) validates each write and the final set at commit, `Deferred` only the final set at commit. See [Validation in transactions](validation.md#transactions).
 
 ```csharp
 using var tx = await context.BeginTransactionAsync(
     TransactionFailureHandling.Rollback,
     validationMode: TransactionValidationMode.Deferred);
 ```
-
-| Value | Description |
-|-------|-------------|
-| `Immediate` | Each write is validated when it is written, and the final set of values again at commit. (default) |
-| `Deferred` | Only the final set of values is validated, at commit. Write order and intermediate values do not matter. |
-
-The mode only matters to a registered transaction handler, such as property validation; see [Transaction Handlers](#transaction-handlers) for when handlers run and [Validation in transactions](validation.md#transactions) for how validation uses the mode.
 
 ### Requirements
 
@@ -240,9 +233,10 @@ When `CommitAsync()` is called, changes are processed in stages. The exact flow 
 When only `WithTransactions()` is configured (no external sources):
 
 1. **Commit check**: registered transaction handlers check the final set (see [Transaction Handlers](#transaction-handlers))
-2. **Apply all changes** to the local model (calls property setters, triggers `OnChanging/OnChanged` methods)
-3. If any apply fails in `Rollback` mode, or after transaction handlers checked the set: revert successful applies
-4. Fire change notifications
+2. **Conflict detection**: with `FailOnConflict`, a changed old value aborts the commit before anything is written (see [Conflict Behavior](#conflict-behavior))
+3. **Apply all changes** to the local model (calls property setters, triggers `OnChanging/OnChanged` methods)
+4. If any apply fails in `Rollback` mode, or after transaction handlers checked the set: revert successful applies
+5. Fire change notifications
 
 ### With Source Transactions
 
@@ -264,7 +258,7 @@ Stage 2 applies source-bound changes marked with a `Confirmed` origin carrying t
 
 Stage 1 is performed by an `ITransactionWriter`; the built-in `SourceTransactionWriter` is registered by `WithSourceTransactions()`. Replacing it is an advanced scenario, see [Implementing a Custom Transaction Writer](#implementing-a-custom-transaction-writer).
 
-Registered transaction handlers check the final set before stage 1 (commit check) and the changes that will be applied between the stages (pre-apply check), see [Transaction Handlers](#transaction-handlers).
+Before stage 1, registered transaction handlers check the final set (commit check) and then conflicts are detected, so a rejection or conflict aborts the commit before anything is written. Between the stages, the handlers check the changes that will be applied (pre-apply check), see [Transaction Handlers](#transaction-handlers).
 
 **Rollback behavior on failure:**
 
@@ -274,7 +268,7 @@ Registered transaction handlers check the final set before stage 1 (commit check
 | Local apply fails (source-bound or local) | Successful kept, failed sources reverted; all reverted when transaction handlers checked the set | All reverted |
 | Pre-apply check rejects a change (between the stages) | All sources reverted, nothing applied | All sources reverted, nothing applied |
 
-Both modes ensure **per-property consistency**: if a property's local apply fails, its source write is reverted. The difference is whether successful properties are kept (BestEffort) or also reverted (Rollback).
+Both modes ensure **per-property consistency**: if a property's local apply fails, its source write is reverted. The difference is whether successful properties are kept (BestEffort) or also reverted (Rollback). When transaction handlers checked the set, a failed local apply reverts them in both modes, see [Transaction Handlers](#transaction-handlers).
 
 Revert operations call setters with old values, which also trigger `OnChanging/OnChanged` methods.
 
@@ -391,7 +385,7 @@ Commits with source writes (`WithSourceTransactions()` or a custom `ITransaction
 
 Three root causes account for every divergence:
 
-1. **A compensating write failed.** Reverts are inverse writes, not an undo. A source that just failed or timed out is asked to accept another write, so this is the most likely divergence in practice. It is always terminal and always reported through `FailedChanges` and `Errors`, so the caller knows exactly which properties are stuck.
+1. **A compensating write failed.** Reverts are inverse writes, not an undo. A source that just failed or timed out is asked to accept another write, so this is the most likely divergence in practice. It is always terminal and always reported through `FailedChanges` and `Errors`. `FailedChanges` can also hold properties that ended consistent, for example the local changes a `Rollback` commit with source writes rolled back cleanly; the diverged table above says when a stuck property is listed a second time to tell it apart.
 2. **The writer threw instead of reporting.** Only a custom `ITransactionWriter` can cause this (the built-in writer always reports). The transaction has no written set and no revert state, so it cannot compensate and cannot tell which sources were touched. See [SubjectTransactionException](#subjecttransactionexception).
 3. **The inherent in-flight window.** Sources are written before the local model is applied, so even a fully successful commit has a moment where a source holds the new value and the local model does not, and during Rollback compensation a source briefly holds a value that is then taken back. Transactions provide quiescent consistency (both sides agree once the commit settles), not isolation from external observers of the source.
 
@@ -414,7 +408,7 @@ public partial class GpioDevice
 ```
 
 When `OnChanging/OnChanged` throws:
-- **BestEffort mode**: Other successful changes are applied, failure reported. When transaction handlers checked the set, everything is reverted as in Rollback mode (see [Transaction Handlers](#transaction-handlers)).
+- **BestEffort mode**: Other successful changes are applied and the failure is reported, unless transaction handlers checked the set (see [Transaction Handlers](#transaction-handlers)).
 - **Rollback mode**: All previous stages are reverted (sources + successful local changes)
 
 ### Derived Properties
@@ -477,20 +471,20 @@ public partial class Motor
 
 An `ITransactionHandler` is called for the writes a transaction captures and checks the final set at commit; property validation is one.
 
-**Resolution.** A handler takes part when it is registered on the context the transaction begins on, or on the context of a subject written in it, for example a subject's own context that reaches the transaction's context through a fallback. Handlers of the transaction's context are resolved when the transaction begins, and handlers of a subject's context when the subject is written; a handler registered on the transaction's context after the transaction began does not take part. Once resolved, a handler takes part in the rest of the transaction: `OnCapturing` is called for later writes to any subject, and `OnCommitting` receives the whole final set. A handler that cares only about some subjects filters by `property.Subject` (`change.Property.Subject` in `OnCommitting`). Handlers are called in the order they were resolved, each context's in its service order. Handlers are matched by `Equals`: a handler equal to one that already takes part is not added again. `ValidationInterceptor` compares equal to any instance of its type, so validation registered on several contexts of a fallback chain runs once.
+**Resolution.** A handler takes part when it is registered on the context the transaction begins on, or on the context of a subject written in it, for example a subject's own context that reaches the transaction's context through a fallback. Handlers of the transaction's context are resolved when the transaction begins, and handlers of a subject's context when a subject of it is first written. A handler registered later does not take part when registered on the transaction's context, and is not guaranteed to when registered on a subject context that was already included. Once resolved, a handler takes part in the rest of the transaction: `OnCapturing` is called for later writes to any subject, and `OnCommitting` receives the whole final set. A handler that cares only about some subjects filters by `property.Subject` (`change.Property.Subject` in `OnCommitting`). Handlers are called in the order they were resolved, each context's in its service order. Handlers are matched by `Equals`: a handler equal to one that already takes part is not added again. `ValidationInterceptor` compares equal to any instance of its type, so validation registered on several contexts of a fallback chain runs once.
 
 **Capture.** `OnCapturing` is called for every write the transaction is about to capture or cancel, before it is captured. Throwing rejects the write at the setter.
 
 **Checks.** `OnCommitting` is called in up to two checks. Both run on the committing thread while the transaction is committing:
 
 - **Commit check:** called with the final set of changes in insertion order, before conflict detection and before any source write or local apply. Throwing aborts the commit: the exception propagates unchanged, nothing was written, and the transaction stays retryable with its pending changes, unless it was disposed.
-- **Pre-apply check:** only with source transactions (an `ITransactionWriter`), called after the source writes, right before the local apply, with only the changes that will be applied and their captured origins. It runs because inbound updates can change what a handler reads while the sources are written. It is skipped when nothing will be applied, when the transaction was disposed, and in `Rollback` mode after a source write failure, which reverts every source anyway. Throwing rejects every checked change in both failure handling modes, because the other changes were checked against the rejected values: every written source is reverted, nothing from the checked set lands, and every change is reported as failed in a `SubjectTransactionException`. The transaction is terminal, also when the commit timeout interrupts the source revert, which is reported as a failed revert.
+- **Pre-apply check:** only with source transactions (an `ITransactionWriter`), called after the source writes, right before the local apply, with only the changes that will be applied and their captured origins. It runs because inbound updates can change what a handler reads while the sources are written. It is skipped when nothing will be applied, when the transaction was disposed, and in `Rollback` mode after a source write failure, which reverts every source anyway. Throwing rejects every checked change in both failure handling modes, because the other changes were checked against the rejected values: every written source is reverted, nothing from the checked set lands, and every change is reported as failed in a `SubjectTransactionException`. Its `Errors` hold the errors of a thrown `SubjectTransactionException` that has any, otherwise the thrown exception itself, after any source write errors and before any revert errors. The transaction is terminal, also when the commit timeout interrupts the source revert, which is reported as a failed revert.
 
-**Reads during a check.** On the committing thread, a read returns the checked value: the pending value of a changed property, and the landed value otherwise. A cancelled change (a write back to the landed value) reads the landed value, and in the pre-apply check so does a property whose source write failed. Reads and writes from other threads that carry the transaction throw `InvalidOperationException` because a commit is in progress, including a write back to the landed value of a pending property, so handlers must read synchronously on the calling thread.
+**Reads during a check.** On the committing thread, a read returns the checked value: the pending value of a changed property, and the landed value otherwise. A cancelled change (a write back to the landed value) reads the landed value, and in the pre-apply check so does a property whose source write failed. Reads and writes from other threads that carry the transaction throw `InvalidOperationException` because a commit is in progress, including a write back to the landed value of a pending property, so handlers must read synchronously on the calling thread. A write of the landed value of a property without a pending change is dropped by the equality check as unchanged instead.
 
-**Writes during a check.** Handlers must not write properties. A write on the committing thread throws `InvalidOperationException`, including a write to a settable derived property. A write of a property's landed value on the committing thread is dropped by the equality check before it reaches the transaction, same as outside a transaction. When the transaction is used from several threads, a write from another thread, for example a child task, can call `OnCapturing` while `OnCommitting` runs before it is rejected, so handlers must tolerate concurrent calls.
+**Writes during a check.** Handlers must not write properties. A write on the committing thread throws `InvalidOperationException`, including a write to a settable derived property. A write of a property's landed value on the committing thread is dropped by the equality check before it reaches the transaction, same as outside a transaction. When the transaction is used from several threads, a write from another thread, for example a child task, can call `OnCapturing` while `OnCommitting` runs before it is rejected, so handlers must tolerate concurrent calls. A write to a subject whose context does not route through the transaction interceptor is not intercepted and lands immediately, even during a check.
 
-**Applies and rollbacks.** A handler that also intercepts writes can call `SubjectTransaction.TryConsumeCommitWrite` to recognize the apply of a value it already checked, or a rollback restoring one, and skip checking it again. Only the first handler to call it for a write recognizes it; another handler that intercepts the same write checks it again. It does not recognize any apply after the transaction was disposed during the commit. A failed apply invalidates the checked set, so in both failure handling modes the commit applies no further changes, reverts the applied values and every written source, and reports every change as failed in `FailedChanges`, followed again by each change whose local or source revert failed. A pre-apply rejection reports the same way.
+**Applies and rollbacks.** A handler that also intercepts writes can call `SubjectTransaction.TryConsumeCommitWrite` to recognize the apply of a value it already checked, or a rollback restoring one, and skip checking it again. Reference-type values match by identity and value-type values by equality, so a struct with a loose `Equals` can pass an equal, unchecked value as the checked one. Only the first handler to call it for a write recognizes it; another handler that intercepts the same write checks it again. It does not recognize any apply after the transaction was disposed during the commit. A failed apply invalidates the checked set, so in both failure handling modes the commit applies no further changes, reverts the applied values and every written source, and reports every change as failed in `FailedChanges`, followed again by each change whose local revert failed, in reverse apply order, and then each whose source revert failed. A pre-apply rejection reports the same way.
 
 Writes outside transactions are not blocked by a commit, so a property a handler reads can change between its check and the local apply. The pre-apply check narrows that window to the synchronous apply itself; transactional writes cannot interleave, because every commit holds the context's transaction lock.
 
@@ -593,7 +587,7 @@ TransactionAwaitable BeginTransactionAsync(
 ### Enums
 
 **TransactionFailureHandling:**
-- `BestEffort` - Apply successful changes, rollback failed ones (per-property consistency)
+- `BestEffort` - Apply successful changes, rollback failed ones (per-property consistency); a failed local apply reverts everything when transaction handlers checked the set
 - `Rollback` - All-or-nothing across all properties
 
 **TransactionLocking:**

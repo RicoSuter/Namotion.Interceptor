@@ -15,8 +15,8 @@ public enum TransactionValidationMode
 
     /// <summary>
     /// Writes are not validated when written. The final set of values is validated at commit, before any source
-    /// write or local apply, with reads returning the transaction's values. Write order and intermediate values do
-    /// not matter.
+    /// write or local apply, with reads returning the transaction's values. The commit check does not depend on
+    /// write order or intermediate values.
     /// </summary>
     Deferred
 }
