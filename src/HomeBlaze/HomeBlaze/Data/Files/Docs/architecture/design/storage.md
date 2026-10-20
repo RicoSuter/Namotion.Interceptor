@@ -271,7 +271,7 @@ A storage container stores one subject per JSON file, so a subject nested in tha
 
 ## Dynamic Metadata and Annotations [Partially Implemented]
 
-Metadata of subjects and properties is implemented: it is stored in `X.metadata.json` beside a subject file, also for the subjects and properties inside that subject, and held by the registry in `HomeBlaze:Metadata`, and a metadata file keeps the keys HomeBlaze does not know. Tags, areas and other annotations below are still planned.
+Metadata of subjects and properties is implemented: it is stored in `X.metadata.json` beside a subject file, also for the subjects and properties inside that subject, and held by the registry in `HomeBlaze:Metadata`, and a metadata file keeps the keys HomeBlaze does not know. Notes, links and tags are implemented, with their display and editing in the browser, and `MetadataSearch`, which walks the tree on each search, finds metadata for `SearchMetadata` of a storage, the tag filter and the suggested tags; see [Notes, Links and Tags](../../administration/pages.md#notes-links-and-tags). Areas and the other annotations below are still planned.
 
 User-created metadata (annotations, tags, links between subjects) are stored as dynamic attributes on the registry. These are persisted in their own JSON files, separate from subject configuration, so they survive restarts and can be reapplied to subjects as they are instantiated.
 

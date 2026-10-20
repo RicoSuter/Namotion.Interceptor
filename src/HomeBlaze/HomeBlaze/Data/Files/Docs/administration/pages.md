@@ -107,7 +107,7 @@ With a keyboard, press Tab to reach the arrows of a row, which show while they h
 
 ### Metadata of Folders, Subjects and Properties
 
-The **Metadata** button in the header of the browser opens a dialog for every item whose metadata a storage keeps: a folder, a subject stored as `X.json` and every subject inside one, at any depth, and a storage stored as a JSON file inside another storage. It is not shown for the root of the storage, whose `.metadata.json` is edited by hand or by agents, and not for pages and the subjects of their blocks, and it is disabled while the storage is not connected. For a folder it sets `title`, `navTitle` and `icon`; for a subject `navTitle`, `icon`, `location` and `alignment`:
+The **Metadata** button in the header of the browser opens a dialog for every item whose metadata a storage keeps: a folder, a subject stored as `X.json` and every subject inside one, at any depth, and a storage stored as a JSON file inside another storage. It is not shown for the root of the storage, whose `.metadata.json` is edited by hand or by agents, and not for pages and the subjects of their blocks, and it is disabled while the storage is not connected. For a folder it sets `title`, `navTitle` and `icon`; for a subject `navTitle`, `icon`, `location` and `alignment`; for both the [notes, links and tags](#notes-links-and-tags):
 
 | Key | Description |
 |-----|-------------|
@@ -117,6 +117,27 @@ The **Metadata** button in the header of the browser opens a dialog for every it
 | `alignment` | `Left` or `Right` in the top bar |
 
 A field left empty removes its key, and the other keys are kept. Metadata never changes the title or the icon of the subject itself. A subject that is a page itself decides its place in navigation, so it does not use `location` and `alignment`. Pages keep their metadata in their frontmatter, which the dialog does not change.
+
+#### Notes, Links and Tags
+
+Every folder, subject and property can have notes, links and tags. The pane shows those of its folder or subject below its header. The row of a property with notes, links or tags shows an icon with them in a tooltip, also when the property has no value; on the row of a property without them, the icon shows while the row is hovered. A click on the icon opens the **Metadata** dialog for that property, which edits its notes, links and tags. While the storage is not connected, the tooltip still shows them, and a click shows a message instead of the dialog. A property whose metadata no storage keeps, such as one of the root of the storage, shows its icon and tooltip when it has notes, links or tags, and cannot be edited in the browser.
+
+| Key | Description |
+|-----|-------------|
+| `notes` | Markdown of up to 4 KB in UTF-8, shown formatted. It may not hold HTML, pictures, blocks, element attributes or `{{ }}` expressions, and its links only lead to http, https or mailto addresses or to relative paths in HomeBlaze, not to a path that starts with `//` or `\\`. Notes that break these rules, for example after an edit by hand, are shown as text. The dialog stores notes as typed, and blank notes remove the key |
+| `links` | Up to 20 links, each with an optional `title` and either a `url`, an http, https or mailto address, or a `path`, the absolute path of a page, subject or property, such as `/Devices/Pump/Temperature`. In the dialog, an address that starts with `/` is a path, which the path picker helps to find. An http or https link opens in a new tab and a mailto link in place. A link to a page opens the page, to a subject the subject in the browser, and to a property its subject with the row of the property highlighted. A path that leads to nothing, and an address other than http, https or mailto, for example after an edit by hand, shows as a broken link that cannot be opened. Without a title, a link shows what it leads to |
+| `tags` | Up to 20 tags of 1 to 64 characters without control characters, each given once without regard to case. The dialog suggests the tags in use, and Enter adds a typed tag. A click on a tag in the pane lists everything that has it, without the subjects that the browser does not list, those excluded from user interfaces, and what is below them |
+
+```json
+{
+  "notes": "Calibrated **2026**, see the [manual](https://example.com/pump.pdf).",
+  "links": [
+    { "title": "Manual", "url": "https://example.com/pump.pdf" },
+    { "title": "Flow temperature", "path": "/Devices/HeatPump/FlowTemperature" }
+  ],
+  "tags": ["floor-2", "heating"]
+}
+```
 
 The metadata of a subject stored as `X.json`, of every subject inside it and of their properties is kept in `X.metadata.json` beside it, also when `X.json` loads as a plain JSON file. The keys at the top describe the subject of `X.json` itself, so a simple file looks like the file of a folder:
 
@@ -172,12 +193,15 @@ Agents read metadata with the MCP tools: `browse` and `search` show the metadata
 | `SetMetadata` | a storage, such as the root `/` | Takes `path`, the path of a subject relative to the storage, such as `Devices/Shelly/Channels[0]` (empty for the storage itself, a leading `/` ignored), an optional `property`, the name of one of its properties, and `values`, a JSON object that is merged into the metadata: a key with a value is set, a nested value replacing the old one as a whole, a key with `null` is removed, and every other key stays |
 | `GetOrder` | a folder, a storage | Returns the names of the children in the order in which they are shown. These names, like those that the message of a refused order lists, are names of children and not secret, so they include children that are hidden from agents |
 | `SetOrder` | a folder, a storage | Takes `names` and stores them first, in that order, then the other children in the order in which they are shown. A name that is not a child, or that is given twice, is refused |
+| `SearchMetadata` | a storage | Takes `tag`, `key`, `value` and `path`, each optional, and returns the subjects and properties whose metadata matches all that are given: a tag in `tags`; a key that is set, such as `notes`; a value that equals the whole of a string, or of a string in an array, of `key` when it is given, else of any key, and never a number or a boolean; and a `path` relative to the storage at or below which they are. Keys, tags and values match without regard to case. Each match has `path`, the path of its subject relative to the storage, and `property`, omitted for a subject, as `SetMetadata` takes them. The matches are sorted by path and then property, at most the first 100, and never one that `SetMetadata` would refuse the agent, such as one hidden from agents |
 
-`SetMetadata` checks the keys HomeBlaze knows: `title`, `navTitle` and `icon` take a string, and a blank string removes the key; `location` takes the name `NavBar` or `AppBar` and `alignment` the name `Left` or `Right`; `order`, which only a folder or a storage has, takes an array of names, which `SetOrder` checks against the children. Other keys are stored as given, within the limits above. A refused call returns its reason to the agent, such as a file that could not be read or a storage that is not connected. Agents cannot change the metadata of an agent or of a subject inside one.
+`SetMetadata` checks the keys HomeBlaze knows: `title`, `navTitle` and `icon` take a string, and a blank string removes the key; `location` takes the name `NavBar` or `AppBar` and `alignment` the name `Left` or `Right`; `notes`, `links` and `tags` follow the rules of [Notes, Links and Tags](#notes-links-and-tags), and an empty array or a blank string removes the key; `order`, which only a folder or a storage has, takes an array of names, which `SetOrder` checks against the children. Other keys are stored as given, within the limits above. A refused call returns its reason to the agent, such as a file that could not be read or a storage that is not connected. Agents cannot change the metadata of an agent or of a subject inside one.
 
 ```json
 { "navTitle": "Hall light", "icon": null }
 ```
+
+To find text inside notes, agents use `search_markdown`, which also searches the notes of metadata and marks each such match with `kind: notes`, the path of its subject and, for the notes of a property, `property`, the name of the property. It does not search the notes of subjects of a type excluded from agents, nor of what is below them.
 
 ---
 
