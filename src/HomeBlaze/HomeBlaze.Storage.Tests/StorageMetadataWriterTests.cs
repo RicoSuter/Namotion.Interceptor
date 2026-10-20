@@ -63,13 +63,13 @@ public class StorageMetadataWriterTests
     }
 
     [Fact]
-    public void WhenAValueHoldsCharactersOutsideTheBasicPlane_ThenTheyAreWrittenAsTheyAre()
+    public void WhenAValueHoldsCharactersOutsideTheBasicPlane_ThenTheyAreWrittenAsEscapes()
     {
         // Act
         var written = Merge("""{ "title": "Pump 😀" }""", Folder, """{ "note": "say \"hi\" \\ 🌱\t" }""");
 
         // Assert
-        Assert.Equal("{\n  \"title\": \"Pump 😀\",\n  \"note\": \"say \\\"hi\\\" \\\\ 🌱\\t\"\n}\n", written);
+        Assert.Equal("{\n  \"title\": \"Pump \\uD83D\\uDE00\",\n  \"note\": \"say \\\"hi\\\" \\\\ \\uD83C\\uDF31\\t\"\n}\n", written);
     }
 
     [Fact]

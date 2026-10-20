@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using HomeBlaze.Components.Abstractions.Pages;
@@ -45,10 +46,10 @@ internal static class StorageMetadataWriter
     {
         Indented = true,
         NewLine = "\n",
-        Encoder = MinimalJsonEncoder.Instance
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
     };
 
-    private static readonly JsonWriterOptions CompactOptions = new() { Encoder = MinimalJsonEncoder.Instance };
+    private static readonly JsonWriterOptions CompactOptions = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 
     /// <summary>
     /// Merges values into the entry of the target: a key with a value is set, a nested value replacing the old one as
@@ -374,7 +375,7 @@ internal static class StorageMetadataWriter
         return buffer.WrittenCount;
     }
 
-    // Indented, ending with a new line, with non-ASCII characters as they are and without the keys whose value is null.
+    // Indented, ending with a new line, with the characters of the basic plane as they are and without the keys whose value is null.
     private static byte[] Serialize(JsonObject root)
     {
         var buffer = new ArrayBufferWriter<byte>();
