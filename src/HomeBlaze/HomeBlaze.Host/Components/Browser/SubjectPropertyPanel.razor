@@ -802,7 +802,8 @@
                 <MudIconButton Icon="@(isExpanded ? Icons.Material.Filled.ArrowDropDown : Icons.Material.Filled.ArrowRight)"
                                Size="Size.Small"
                                Class="pa-0 mr-1"
-                               OnClick="@(() => TogglePropertyExpanded(prop.Name))" />
+                               OnClick="@(() => TogglePropertyExpanded(prop.Name))"
+                               data-testid="subject-pane-value-expand" />
             }
             @if (CanShowHistory(prop))
             {
@@ -899,7 +900,7 @@
 
     // An attribute that the row of its property shows when expanded, which gives the row its arrow.
     private static bool IsDetail(RegisteredSubjectProperty attribute) =>
-        attribute.AttributeMetadata.AttributeName is not (KnownAttributes.State or KnownAttributes.Configuration);
+        attribute.AttributeMetadata.AttributeName is not (KnownAttributes.State or KnownAttributes.Configuration or KnownAttributes.Metadata);
 
     private static bool HasDetails(RegisteredSubjectProperty property) =>
         Array.Exists(property.Attributes, IsDetail);

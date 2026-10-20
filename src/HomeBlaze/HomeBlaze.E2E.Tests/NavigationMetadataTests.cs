@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Text.RegularExpressions;
 using HomeBlaze.E2E.Tests.Infrastructure;
 using HomeBlaze.Services;
 using HomeBlaze.Storage;
@@ -361,6 +363,34 @@ public class NavigationMetadataTests
             .ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
         Assert.Equal("Demonstration", folder.Title);
     });
+
+    [Fact]
+    public async Task WhenAPropertyHasMetadata_ThenItsRowGetsNoDetails()
+    {
+        // Arrange
+        var motor = GetDemoFolder().Children["Motor"];
+        var sidecarPath = _fixture.GetDemoPagePath("Motor.metadata.json");
+        var originalSidecar = File.Exists(sidecarPath) ? await File.ReadAllTextAsync(sidecarPath) : null;
+        try
+        {
+            await motor.FindMetadataStore()!.SetMetadataAsync(
+                motor, "Status", JsonElement.Parse("""{ "comment": "Reported by the controller" }"""), CancellationToken.None);
+
+            // Act
+            var (page, pane) = await OpenPaneAsync("Demo/Motor");
+
+            // Assert
+            var statusRow = pane.GetByTestId("subject-pane-value")
+                .Filter(new() { Has = page.GetByTestId("subject-pane-value-name").Filter(new() { HasTextRegex = new Regex("^Status$") }) });
+            await Assertions.Expect(statusRow).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
+            await Assertions.Expect(statusRow.GetByTestId("subject-pane-value-expand")).ToHaveCountAsync(0);
+            await Assertions.Expect(pane).Not.ToContainTextAsync("ImmutableDictionary");
+        }
+        finally
+        {
+            await RestoreFileAsync(sidecarPath, originalSidecar);
+        }
+    }
 
     [Fact]
     public async Task WhenSubjectInFolderIsMovedToTheTopBar_ThenTheTopBarShowsIt()
