@@ -69,8 +69,7 @@ public static class MetadataDictionaryExtensions
         var tags = ImmutableArray.CreateBuilder<string>();
         foreach (var item in value.EnumerateArray().Take(MetadataText.MaxItemCount))
         {
-            if (item.ValueKind == JsonValueKind.String && GetText(item)?.Trim() is { } tag && MetadataText.IsAllowedTag(tag) &&
-                !tags.Contains(tag, StringComparer.OrdinalIgnoreCase))
+            if (GetTag(item) is { } tag && !tags.Contains(tag, StringComparer.OrdinalIgnoreCase))
             {
                 tags.Add(tag);
             }
@@ -84,13 +83,62 @@ public static class MetadataDictionaryExtensions
     /// <see cref="GetLinks"/> and <see cref="GetTags"/> read them.
     /// </summary>
     public static bool HasNotesLinksOrTags(this IReadOnlyDictionary<string, JsonElement>? metadata)
-        => metadata.GetString(MetadataKeys.Notes) is not null || !metadata.GetLinks(MetadataKeys.Links).IsEmpty || !metadata.GetTags().IsEmpty;
+        => metadata is not null &&
+           (HasItem(metadata, MetadataKeys.Tags, static item => GetTag(item) is not null) ||
+            HasItem(metadata, MetadataKeys.Links, static item => TryGetTarget(item, out _, out _)) ||
+            metadata.GetString(MetadataKeys.Notes) is not null);
+
+    // Whether one of the first 20 items of the array of the key is one, without the arrays of GetLinks and GetTags, as the
+    // rows of the browser check every render.
+    private static bool HasItem(IReadOnlyDictionary<string, JsonElement> metadata, string key, Func<JsonElement, bool> isItem)
+    {
+        if (!metadata.TryGetValue(key, out var value) || value.ValueKind != JsonValueKind.Array)
+        {
+            return false;
+        }
+
+        var count = 0;
+        foreach (var item in value.EnumerateArray())
+        {
+            if (count++ == MetadataText.MaxItemCount)
+            {
+                return false;
+            }
+
+            if (isItem(item))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // The item as a tag, trimmed; null when it is no string or breaks the rules of a tag.
+    private static string? GetTag(JsonElement item)
+        => item.ValueKind == JsonValueKind.String && GetText(item)?.Trim() is { } tag && MetadataText.IsAllowedTag(tag) ? tag : null;
+
+    // The url and the path of the item as a link: an object with exactly one of them, without a control or format
+    // character, as a link without title shows it as text.
+    private static bool TryGetTarget(JsonElement item, out string? url, out string? path)
+    {
+        url = null;
+        path = null;
+        if (item.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        url = GetMember(item, "url");
+        path = GetMember(item, "path");
+        return (url is null) != (path is null) && !MetadataText.HasControlOrFormatCharacter(url ?? path!);
+    }
 
     /// <summary>
     /// Gets the links of the first 20 items of the key, leaving out an item that is no object with exactly one of a
-    /// <c>url</c> and a <c>path</c> string, or whose url or path has a control or format character; empty without an array. The members are returned without whitespace around them,
-    /// a title with a control or format character as none, and the address of a link otherwise as it is held, see
-    /// <see cref="MetadataLink.IsAllowedAddress"/>.
+    /// <c>url</c> and a <c>path</c> string, or whose url or path has a control or format character; empty without an
+    /// array. The members are returned without whitespace around them, a title with a control or format character as
+    /// none, and the address of a link otherwise as it is held, see <see cref="MetadataLink.IsAllowedAddress"/>.
     /// </summary>
     public static ImmutableArray<MetadataLink> GetLinks(this IReadOnlyDictionary<string, JsonElement>? metadata, string key)
     {
@@ -102,15 +150,7 @@ public static class MetadataDictionaryExtensions
         var links = ImmutableArray.CreateBuilder<MetadataLink>();
         foreach (var item in value.EnumerateArray().Take(MetadataText.MaxItemCount))
         {
-            if (item.ValueKind != JsonValueKind.Object)
-            {
-                continue;
-            }
-
-            var url = GetMember(item, "url");
-            var path = GetMember(item, "path");
-            // A link without title shows its url or path as text.
-            if ((url is null) != (path is null) && !MetadataText.HasControlOrFormatCharacter(url ?? path!))
+            if (TryGetTarget(item, out var url, out var path))
             {
                 var title = GetMember(item, "title");
                 links.Add(new MetadataLink(title is not null && MetadataText.HasControlOrFormatCharacter(title) ? null : title, url, path));
