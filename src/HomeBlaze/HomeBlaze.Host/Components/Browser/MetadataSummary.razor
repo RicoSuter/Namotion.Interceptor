@@ -25,7 +25,11 @@
         @if (_links.Length > 0 || _tags.Length > 0)
         {
             <div class="d-flex flex-wrap gap-1 mt-1">
-                @foreach (var link in GetResolvedLinks())
+                @* Resolved in every render, which reads the titles of the targets, so that a change of one renders the
+                   summary again; reading PathsVersion does so when a subject is attached or detached, which can mend
+                   or break a link. *@
+                @{ _ = PathResolver.PathsVersion; }
+                @foreach (var link in _links.Select(LinkResolver.Resolve))
                 {
                     @if (link.IsBroken)
                     {
@@ -75,10 +79,6 @@
     private ImmutableArray<MetadataLink> _links = [];
     private ImmutableArray<string> _tags = [];
 
-    // The links as resolved for the metadata and the paths version they were resolved at.
-    private ImmutableArray<ResolvedMetadataLink> _resolvedLinks = [];
-    private long _resolvedPathsVersion = -1;
-
     protected override void OnParametersSet()
     {
         // Once per value, as the parent renders on every change of its subject and the notes are parsed here.
@@ -94,20 +94,5 @@
 
         _links = Metadata.GetLinks(MetadataKeys.Links);
         _tags = Metadata.GetTags();
-        _resolvedPathsVersion = -1;
-    }
-
-    // Resolved again when a subject is attached or detached, which can mend or break a link. Read in the render, so
-    // that such a change renders the summary again.
-    private ImmutableArray<ResolvedMetadataLink> GetResolvedLinks()
-    {
-        var pathsVersion = PathResolver.PathsVersion;
-        if (pathsVersion != _resolvedPathsVersion)
-        {
-            _resolvedLinks = [.. _links.Select(LinkResolver.Resolve)];
-            _resolvedPathsVersion = pathsVersion;
-        }
-
-        return _resolvedLinks;
     }
 }

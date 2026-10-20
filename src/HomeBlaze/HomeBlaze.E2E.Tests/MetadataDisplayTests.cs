@@ -467,4 +467,28 @@ public class MetadataDisplayTests
         await Assertions.Expect(dialog.GetByTestId("metadata-tag-chip")).ToHaveTextAsync(["e2e-heat-pump"], new() { Timeout = PageLoadTimeout });
         await Assertions.Expect(tagInput).ToHaveValueAsync("");
     });
+
+    [Fact]
+    public Task WhenTheTitleOfTheTargetOfALinkChanges_ThenTheLinkShowsTheNewTitle() => WithSidecarAsync(
+        "Motor.metadata.json", """{ "links": [{ "path": "/Demo/Motor" }] }""", async () =>
+    {
+        // Arrange
+        var motor = (HomeBlaze.Samples.Motor)((VirtualFolder)((FluentStorageContainer)_fixture.ServerServices.GetRequiredService<RootManager>().Root!).Children["Demo"]).Children["Motor"];
+        var name = motor.Name;
+        var (_, pane) = await OpenPaneAsync("Demo/Motor");
+        var link = pane.GetByTestId("metadata-summary").GetByTestId("metadata-link");
+        await Assertions.Expect(link).ToHaveTextAsync(name, new() { Timeout = PageLoadTimeout });
+        try
+        {
+            // Act
+            motor.Name = "E2E renamed motor";
+
+            // Assert
+            await Assertions.Expect(link).ToHaveTextAsync("E2E renamed motor", new() { Timeout = PageLoadTimeout });
+        }
+        finally
+        {
+            motor.Name = name;
+        }
+    });
 }
