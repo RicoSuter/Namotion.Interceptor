@@ -125,6 +125,9 @@
     private MudAutocomplete<string>? _tagInput;
     private bool _isSaving;
 
+    // The values of the fields as loaded, so that a save writes only what was changed.
+    private Dictionary<string, JsonNode?> _loadedValues = [];
+
     protected override void OnInitialized()
     {
         var metadata = PropertyName is null
@@ -141,27 +144,29 @@
 
         // Once per dialog, as finding them walks the whole tree.
         _tagsInUse = RootManager.Root is { } root ? MetadataSearch.GetTags(root, static subject => subject.IsExcludedFrom(ExclusionTarget.UserInterface)) : [];
-        if (PropertyName is not null)
-            return;
-
-        _isFolder = IsFolder(Owner);
-        _navigationTitlePlaceholder = Owner.GetTitle();
-        _navigationTitle = metadata.GetString(MetadataKeys.NavigationTitle);
-        _icon = metadata.GetString(MetadataKeys.Icon);
-        if (_isFolder)
+        if (PropertyName is null)
         {
-            _titlePlaceholder = Owner.TryGetRegisteredSubject()?.Parents.FirstOrDefault().Index?.ToString();
-            _iconPlaceholder = "Folder";
-            _title = metadata.GetString(MetadataKeys.Title);
-        }
-        else
-        {
-            if ((Owner as IIconProvider)?.IconName is { Length: > 0 } iconName)
-                _iconPlaceholder = iconName;
+            _isFolder = IsFolder(Owner);
+            _navigationTitlePlaceholder = Owner.GetTitle();
+            _navigationTitle = metadata.GetString(MetadataKeys.NavigationTitle);
+            _icon = metadata.GetString(MetadataKeys.Icon);
+            if (_isFolder)
+            {
+                _titlePlaceholder = Owner.TryGetRegisteredSubject()?.Parents.FirstOrDefault().Index?.ToString();
+                _iconPlaceholder = "Folder";
+                _title = metadata.GetString(MetadataKeys.Title);
+            }
+            else
+            {
+                if ((Owner as IIconProvider)?.IconName is { Length: > 0 } iconName)
+                    _iconPlaceholder = iconName;
 
-            _location = metadata.GetEnum<NavigationLocation>(MetadataKeys.Location);
-            _alignment = metadata.GetEnum<AppBarAlignment>(MetadataKeys.Alignment);
+                _location = metadata.GetEnum<NavigationLocation>(MetadataKeys.Location);
+                _alignment = metadata.GetEnum<AppBarAlignment>(MetadataKeys.Alignment);
+            }
         }
+
+        _loadedValues = GetValues();
     }
 
     private void AddTag(string? tag)
@@ -212,32 +217,25 @@
         // A tag that was typed and not added yet is kept.
         AddTag(_tagText);
 
+        // Only the fields that were changed, so that a field left empty removes its key, and a value that the dialog does
+        // not show as it is held, such as a link it cannot read or notes edited by hand, or that was written while the
+        // dialog was open, stays.
+        var values = new JsonObject();
+        foreach (var (key, value) in GetValues())
+        {
+            if (!JsonNode.DeepEquals(value, _loadedValues[key]))
+                values[key] = value;
+        }
+
+        if (values.Count == 0)
+        {
+            MudDialog?.Close(DialogResult.Ok(true));
+            return;
+        }
+
         _isSaving = true;
         try
         {
-            // Every field the dialog shows, so that a field left empty removes its key and the other keys stay.
-            var values = new JsonObject();
-            if (PropertyName is null)
-            {
-                if (_isFolder)
-                {
-                    values[MetadataKeys.Title] = GetValue(_title);
-                }
-
-                values[MetadataKeys.NavigationTitle] = GetValue(_navigationTitle);
-                values[MetadataKeys.Icon] = GetValue(_icon);
-                if (!_isFolder)
-                {
-                    values[MetadataKeys.Location] = _location?.ToString();
-                    values[MetadataKeys.Alignment] = _location == NavigationLocation.AppBar ? _alignment?.ToString() : null;
-                }
-            }
-
-            // Kept as written, as surrounding whitespace can be part of the Markdown.
-            values[MetadataKeys.Notes] = string.IsNullOrWhiteSpace(_notes) ? null : _notes;
-            values[MetadataKeys.Links] = CreateLinks();
-            values[MetadataKeys.Tags] = _tags.Count > 0 ? new JsonArray([.. _tags.Select(tag => JsonValue.Create(tag))]) : null;
-
             await store.SetMetadataAsync(Owner, PropertyName, JsonElement.Parse(values.ToJsonString()), CancellationToken.None);
             MudDialog?.Close(DialogResult.Ok(true));
         }
@@ -249,6 +247,33 @@
         {
             _isSaving = false;
         }
+    }
+
+    // The value of each field the dialog shows, by its key; null for a field left empty.
+    private Dictionary<string, JsonNode?> GetValues()
+    {
+        var values = new Dictionary<string, JsonNode?>();
+        if (PropertyName is null)
+        {
+            if (_isFolder)
+            {
+                values[MetadataKeys.Title] = GetValue(_title);
+            }
+
+            values[MetadataKeys.NavigationTitle] = GetValue(_navigationTitle);
+            values[MetadataKeys.Icon] = GetValue(_icon);
+            if (!_isFolder)
+            {
+                values[MetadataKeys.Location] = _location?.ToString();
+                values[MetadataKeys.Alignment] = _location == NavigationLocation.AppBar ? _alignment?.ToString() : null;
+            }
+        }
+
+        // Kept as written, as surrounding whitespace can be part of the Markdown.
+        values[MetadataKeys.Notes] = string.IsNullOrWhiteSpace(_notes) ? null : _notes;
+        values[MetadataKeys.Links] = CreateLinks();
+        values[MetadataKeys.Tags] = _tags.Count > 0 ? new JsonArray([.. _tags.Select(tag => JsonValue.Create(tag))]) : null;
+        return values;
     }
 
     // An address that starts with a slash is a path, any other a web address. Rows without an address are left out.

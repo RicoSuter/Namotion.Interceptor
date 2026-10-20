@@ -395,4 +395,33 @@ public class MetadataDisplayTests
         using var sidecar = JsonDocument.Parse(text);
         Assert.Equal(notes, sidecar.RootElement.GetProperty("notes").GetString());
     });
+
+    [Fact]
+    public Task WhenOnlyTheIconIsChanged_ThenNotesAndLinksEditedByHandAreKeptAsTheyAre() => WithSidecarAsync("Motor.metadata.json", """
+        {
+          "notes": "Raw <b>bold</b> text",
+          "links": [{ "title": "Manual", "url": "https://example.com/motor.pdf", "kind": "pdf" }, { "url": "javascript:alert(1)" }]
+        }
+        """, async () =>
+    {
+        // Arrange
+        var (page, pane) = await OpenPaneAsync("Demo/Motor");
+        await pane.GetByTestId("edit-metadata-button").ClickAsync();
+
+        // MudDialog puts its test id on its content, which does not hold the actions.
+        var dialog = page.Locator(".mud-dialog").Filter(new() { Has = page.GetByTestId("metadata-edit-dialog") });
+        await dialog.GetByTestId("metadata-icon").FillAsync("Settings");
+
+        // Act
+        await dialog.GetByTestId("metadata-save").ClickAsync();
+
+        // Assert
+        await Assertions.Expect(dialog).ToHaveCountAsync(0, new() { Timeout = PageLoadTimeout });
+        var text = await _fixture.WaitForDemoPageTextAsync("Motor.metadata.json", text => text.Contains("Settings"), "The icon was not written");
+        using var sidecar = JsonDocument.Parse(text);
+        Assert.Equal("Raw <b>bold</b> text", sidecar.RootElement.GetProperty("notes").GetString());
+        Assert.Equal(
+            """[{"title":"Manual","url":"https://example.com/motor.pdf","kind":"pdf"},{"url":"javascript:alert(1)"}]""",
+            JsonSerializer.Serialize(sidecar.RootElement.GetProperty("links")));
+    });
 }
