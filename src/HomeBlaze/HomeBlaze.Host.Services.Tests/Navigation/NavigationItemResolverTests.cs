@@ -1,4 +1,5 @@
 using HomeBlaze.Components.Abstractions.Attributes;
+using HomeBlaze.Components.Abstractions.Pages;
 using HomeBlaze.Host.Services.Navigation;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Components;
@@ -63,6 +64,28 @@ public class NavigationItemResolverTests
         var item = Assert.Single(items);
         Assert.Same(page, item.Subject);
     }
+
+    [Fact]
+    public void WhenPagesAreInTheAppBarMenu_ThenTheirItemsHaveTheMenuAlignmentAndAreSortedByPositionThenTitle()
+    {
+        // Arrange
+        _root.MenuPages = new Dictionary<string, NavigationTestMenuPage>
+        {
+            ["c.md"] = new(_context) { NavigationTitle = "Charlie", PagePosition = 10 },
+            ["b.md"] = new(_context) { NavigationTitle = "Bravo", PagePosition = 20 },
+            ["a.md"] = new(_context) { NavigationTitle = "Alpha", PagePosition = 20 },
+            ["r.md"] = new(_context) { NavigationTitle = "Right", PagePosition = 1, AppBarAlignment = AppBarAlignment.Right }
+        };
+
+        // Act
+        var items = _resolver.GetChildItems(_root)
+            .Where(item => item.Location == NavigationLocation.AppBar && item.Alignment == AppBarAlignment.Menu)
+            .ToList();
+
+        // Assert
+        Assert.Equal(["Charlie", "Alpha", "Bravo"], items.Select(item => item.Title));
+        Assert.All(items, item => Assert.Equal("Lightbulb", item.Icon));
+    }
 }
 
 [InterceptorSubject]
@@ -71,6 +94,8 @@ public partial class NavigationTestParent
     public partial NavigationTestPage? First { get; set; }
 
     public partial NavigationTestPage? Second { get; set; }
+
+    public partial Dictionary<string, NavigationTestMenuPage>? MenuPages { get; set; }
 }
 
 [InterceptorSubject]
@@ -80,5 +105,24 @@ public partial class NavigationTestPage
 
 [SubjectComponent(SubjectComponentType.Page, typeof(NavigationTestPage))]
 public class NavigationTestPageComponent
+{
+}
+
+[InterceptorSubject]
+public partial class NavigationTestMenuPage : IPage
+{
+    public string? NavigationTitle { get; init; }
+
+    public string? NavigationIconName => "Lightbulb";
+
+    public int? PagePosition { get; init; }
+
+    public NavigationLocation PageLocation => NavigationLocation.AppBar;
+
+    public AppBarAlignment AppBarAlignment { get; init; } = AppBarAlignment.Menu;
+}
+
+[SubjectComponent(SubjectComponentType.Page, typeof(NavigationTestMenuPage))]
+public class NavigationTestMenuPageComponent
 {
 }

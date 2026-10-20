@@ -2,6 +2,7 @@ using System.Text;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
+using HomeBlaze.Components.Abstractions.Pages;
 using HomeBlaze.Samples;
 using HomeBlaze.Services;
 using HomeBlaze.Storage;
@@ -237,6 +238,71 @@ public class MarkdownFileTests
         await markdown.OnFileChangedAsync(CancellationToken.None);
 
         Assert.Equal("mdi-custom", markdown.NavigationIconName);
+    }
+
+    [Theory]
+    [InlineData("Left", AppBarAlignment.Left)]
+    [InlineData("Right", AppBarAlignment.Right)]
+    [InlineData("Menu", AppBarAlignment.Menu)]
+    public void WhenFrontmatterHasAnAlignment_ThenItIsParsed(string alignment, AppBarAlignment expected)
+    {
+        // Arrange
+        var content = $"""
+            ---
+            title: Test
+            location: AppBar
+            alignment: {alignment}
+            ---
+            # Content
+            """;
+
+        // Act
+        var result = FrontmatterParser.Parse<MarkdownFrontmatter>(content);
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Equal(NavigationLocation.AppBar, result.Location);
+        Assert.Equal(expected, result.Alignment);
+    }
+
+    [Fact]
+    public async Task WhenFrontmatterPutsThePageIntoTheAppBarMenu_ThenThePageHasTheMenuAlignment()
+    {
+        // Arrange
+        var (storage, serviceProvider) = await CreateInMemoryStorageAsync();
+        var content = """
+            ---
+            title: Test
+            location: AppBar
+            alignment: Menu
+            ---
+            # Content
+            """;
+        await WriteFileAsync(storage, "test.md", content);
+        var markdown = CreateMarkdownFile(serviceProvider, storage, "test.md");
+
+        // Act
+        await markdown.OnFileChangedAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(NavigationLocation.AppBar, markdown.PageLocation);
+        Assert.Equal(AppBarAlignment.Menu, markdown.AppBarAlignment);
+    }
+
+    [Fact]
+    public async Task WhenFrontmatterHasNoLocation_ThenThePageIsInTheNavBarWithTheDefaultAlignment()
+    {
+        // Arrange
+        var (storage, serviceProvider) = await CreateInMemoryStorageAsync();
+        await WriteFileAsync(storage, "test.md", "# Content");
+        var markdown = CreateMarkdownFile(serviceProvider, storage, "test.md");
+
+        // Act
+        await markdown.OnFileChangedAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(NavigationLocation.NavBar, markdown.PageLocation);
+        Assert.Equal(AppBarAlignment.Left, markdown.AppBarAlignment);
     }
 
     [Fact]

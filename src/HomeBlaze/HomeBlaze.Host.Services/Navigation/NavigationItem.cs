@@ -49,7 +49,7 @@ public class NavigationItem
     public NavigationLocation Location { get; init; }
 
     /// <summary>
-    /// AppBar alignment (Left or Right). Only used when Location is AppBar.
+    /// AppBar alignment (Left, Right or Menu). Only used when Location is AppBar.
     /// </summary>
     public AppBarAlignment Alignment { get; init; }
 

@@ -60,3 +60,24 @@
 ::deep .subject-action-bar[data-mudpopover-flip^="bottom"] {
     margin-top: 4px;
 }
+
+/* The menu button at the end of the app bar lines up with the edge like the drawer toggle at the start. */
+::deep .app-bar-menu > .mud-menu-icon-button-activator {
+    margin-inline-end: -12px;
+}
+
+::deep .app-bar-menu-list {
+    min-width: 240px;
+}
+
+/* The open page in the app bar menu, like the primary color of the app bar icon of an open page. */
+::deep .app-bar-menu-page.active,
+::deep .app-bar-menu-page.active .mud-menu-item-icon {
+    color: var(--mud-palette-primary);
+}
+
+/* The dark primary is below 4.5:1 on the surface of the menu. */
+.homeblaze-dark-mode ::deep .app-bar-menu-page.active,
+.homeblaze-dark-mode ::deep .app-bar-menu-page.active .mud-menu-item-icon {
+    color: var(--mud-palette-primary-lighten);
+}

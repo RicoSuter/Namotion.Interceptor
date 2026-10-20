@@ -60,7 +60,23 @@ position: 1
 | `icon` | string | MudBlazor icon name (e.g., `Dashboard`, `Settings`, `Article`) |
 | `position` | number | Sort order in navigation (lower = higher in list) |
 | `location` | string | Where to show in navigation: `NavBar` (sidebar, default) or `AppBar` (top bar) |
-| `alignment` | string | AppBar alignment: `Left` (default) or `Right`. Only used when `location` is `AppBar` |
+| `alignment` | string | AppBar alignment: `Left` (default), `Right` or `Menu` (an entry of the menu behind the ⋮ button at the right end of the top bar). Only used when `location` is `AppBar` |
+
+### The Top Bar Menu
+
+The ⋮ button at the right end of the top bar opens a menu with the developer mode, the time zone and the dark mode. A page with `location: AppBar` and `alignment: Menu` is an entry of that menu instead of an icon in the bar, above these three and separated from them by a line. Use it for pages that are opened now and then, so that the bar keeps room for the ones opened every day:
+
+```yaml
+---
+title: Heating Schedule
+icon: Thermostat
+location: AppBar
+alignment: Menu
+position: 10
+---
+```
+
+The entries show the icon and the title, are sorted by `position` and then by title like the icons in the bar, and the entry of the open page has the primary color.
 
 ---
 
@@ -111,7 +127,7 @@ A picture is shown in a size that fits the page, and it always keeps its proport
 The navigation follows pages that are added, removed or changed while a browser tab is open:
 
 - **Sidebar.** The menu re-reads its items every 5 seconds, including the contents of every expanded folder. A folder appears once it contains a page.
-- **Top bar.** Pages with `location: AppBar` are read when the layout renders, which happens on navigation. Only pages at the top level of the data folder appear there.
+- **Top bar.** Pages with `location: AppBar` are read when the layout renders, which happens on navigation. This includes the entries of the top bar menu. Only pages at the top level of the data folder appear there.
 
 ### Known Limitations and Follow-ups
 

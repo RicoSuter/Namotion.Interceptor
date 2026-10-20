@@ -21,10 +21,10 @@
 
         var items = NavigationResolver.GetChildItems(Root).Where(i => i.IsPage).ToList();
 
-        // Try first AppBar page (left aligned first, then right)
+        // Try first AppBar page (left aligned first, then right, then the menu)
         var appBarPage = items
             .Where(i => i.Location == NavigationLocation.AppBar)
-            .OrderBy(i => i.Alignment == AppBarAlignment.Left ? 0 : 1)
+            .OrderBy(i => i.Alignment switch { AppBarAlignment.Left => 0, AppBarAlignment.Right => 1, _ => 2 })
             .ThenBy(i => i.Order)
             .FirstOrDefault();
 
