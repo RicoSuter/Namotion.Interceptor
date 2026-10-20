@@ -548,6 +548,43 @@ public class NavigationMetadataTests
     }
 
     [Fact]
+    public async Task WhenTheLocationIsChangedFromTheTopBar_ThenTheAlignmentIsShownEmptyAndRemovedOnSave()
+    {
+        // Arrange
+        var sidecarPath = _fixture.GetDemoPagePath("Motor.metadata.json");
+        var originalSidecar = File.Exists(sidecarPath) ? await File.ReadAllTextAsync(sidecarPath) : null;
+        try
+        {
+            await File.WriteAllTextAsync(sidecarPath, """{ "location": "AppBar", "alignment": "Right" }""");
+            await _fixture.ReconcileStorageAsync();
+
+            var (page, pane) = await OpenPaneAsync("Demo/Motor");
+            await pane.GetByTestId("edit-metadata-button").ClickAsync();
+
+            // MudDialog puts its test id on its content, which does not hold the actions.
+            var dialog = page.Locator(".mud-dialog").Filter(new() { Has = page.GetByTestId("metadata-edit-dialog") });
+            var alignment = dialog.Locator("input[data-testid='metadata-alignment']");
+            await Assertions.Expect(alignment).ToHaveValueAsync("Right");
+
+            // Act
+            await dialog.GetByRole(AriaRole.Combobox, new() { Name = "Location" }).ClickAsync();
+            await page.Locator(".mud-popover-open").GetByText("Sidebar", new() { Exact = true }).ClickAsync();
+
+            // Assert
+            await Assertions.Expect(alignment).ToHaveValueAsync("");
+            await dialog.GetByTestId("metadata-save").ClickAsync();
+            await Assertions.Expect(dialog).ToHaveCountAsync(0, new() { Timeout = PageLoadTimeout });
+            using var sidecar = JsonDocument.Parse(await File.ReadAllTextAsync(sidecarPath));
+            Assert.Equal("NavBar", sidecar.RootElement.GetProperty("location").GetString());
+            Assert.False(sidecar.RootElement.TryGetProperty("alignment", out _));
+        }
+        finally
+        {
+            await RestoreFileAsync(sidecarPath, originalSidecar);
+        }
+    }
+
+    [Fact]
     public async Task WhenAnAgentChangesAKeyWhileTheDialogIsOpen_ThenSavingAnotherFieldKeepsTheChange()
     {
         // Arrange

@@ -610,21 +610,64 @@ public partial class FluentStorageContainer :
     {
         // A copy, as the worker reads the values later, and the caller can dispose the document that holds them.
         var copy = values.Clone();
+        await WriteMetadataAsync(subject, propertyName, () => copy, cancellationToken);
+    }
+
+    /// <summary>
+    /// Sets the order of a folder of this storage or of its root: see <see cref="MetadataStoreExtensions.SetOrderAsync"/>.
+    /// </summary>
+    internal Task WriteOrderAsync(IInterceptorSubject folder, string[] names, CancellationToken cancellationToken)
+        => WriteMetadataAsync(folder, null, () => CreateOrder(folder, names), cancellationToken);
+
+    // The values are made on the worker, so that values that depend on the tree are those of the tree they are written for.
+    private async Task WriteMetadataAsync(
+        IInterceptorSubject subject, string? propertyName, Func<JsonElement> getValues, CancellationToken cancellationToken)
+    {
         var connection = Connection;
         await RunOperationAsync(connection, async token =>
         {
             var target = GetMetadataTarget(connection, subject, propertyName);
+            var values = getValues();
 
             // Fresh from the storage, so that an edit that no pass has seen yet is kept.
             var content = await connection.Reconciler.ReadMetadataFileAsync(target.FilePath, token);
-            var written = StorageMetadataWriter.Merge(content, target, copy);
-            if (target.IsContainer && GetOrderError(subject, copy) is { } orderError)
+            var written = StorageMetadataWriter.Merge(content, target, values);
+            if (target.IsContainer && GetOrderError(subject, values) is { } orderError)
             {
                 throw new StorageRefusedException(orderError);
             }
 
             await WriteMetadataFileAsync(connection, target.FilePath, written, token);
         }, cancellationToken);
+    }
+
+    // The given names first, then the other children in the order in which they are shown.
+    private static JsonElement CreateOrder(IInterceptorSubject folder, string[] names)
+    {
+        var listedNames = new HashSet<string>(names, StringComparer.Ordinal);
+        var buffer = new ArrayBufferWriter<byte>();
+        using (var writer = new Utf8JsonWriter(buffer))
+        {
+            writer.WriteStartObject();
+            writer.WriteStartArray(MetadataKeys.Order);
+            foreach (var name in names)
+            {
+                writer.WriteStringValue(name);
+            }
+
+            foreach (var name in ChildOrdering.GetShownNames(folder))
+            {
+                if (!listedNames.Contains(name))
+                {
+                    writer.WriteStringValue(name);
+                }
+            }
+
+            writer.WriteEndArray();
+            writer.WriteEndObject();
+        }
+
+        return JsonElement.Parse(buffer.WrittenSpan);
     }
 
     // Runs on the worker, after the writer accepted the values, so that their keys and names can be read. The names of

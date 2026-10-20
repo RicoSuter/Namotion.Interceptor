@@ -38,6 +38,7 @@
             {
                 <MudSelect T="NavigationLocation?"
                            @bind-Value="_location"
+                           @bind-Value:after="OnLocationChanged"
                            Label="Location"
                            Placeholder="Sidebar"
                            Clearable="true"
@@ -172,6 +173,7 @@
 
                 _location = metadata.GetEnum<NavigationLocation>(MetadataKeys.Location);
                 _alignment = metadata.GetEnum<AppBarAlignment>(MetadataKeys.Alignment);
+                OnLocationChanged();
             }
         }
 
@@ -249,6 +251,13 @@
 
     private void Cancel() => MudDialog?.Cancel();
 
+    // A save writes the alignment only for the top bar, so the dialog shows none otherwise.
+    private void OnLocationChanged()
+    {
+        if (_location != NavigationLocation.AppBar)
+            _alignment = null;
+    }
+
     private async Task SaveAsync()
     {
         if (_isSaving)
@@ -280,6 +289,12 @@
         }
 
         _isSaving = true;
+
+        // A save cannot be canceled, so nothing dismisses the dialog while it runs.
+        var options = MudDialog?.Options;
+        if (MudDialog is not null && options is not null)
+            await MudDialog.SetOptionsAsync(options with { CloseButton = false, BackdropClick = false, CloseOnEscapeKey = false });
+
         try
         {
             await store.SetMetadataAsync(Owner, PropertyName, JsonElement.Parse(values.ToJsonString()), CancellationToken.None);
@@ -288,6 +303,8 @@
         catch (Exception exception)
         {
             Snackbar.Add($"Error saving metadata: {exception.Message}", Severity.Error);
+            if (MudDialog is not null && options is not null)
+                await MudDialog.SetOptionsAsync(options);
         }
         finally
         {

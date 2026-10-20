@@ -1,5 +1,4 @@
 using System.Buffers;
-using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -140,13 +139,7 @@ internal static class StorageMetadataWriter
 
     private static JsonObject Parse(byte[] content)
     {
-        ReadOnlySpan<byte> json = content;
-        if (json.StartsWith(Encoding.UTF8.Preamble))
-        {
-            json = json[Encoding.UTF8.Preamble.Length..];
-        }
-
-        return JsonNode.Parse(json, documentOptions: StorageMetadataFile.DocumentOptions) as JsonObject
+        return JsonNode.Parse(StorageMetadataFile.GetJson(content), documentOptions: StorageMetadataFile.DocumentOptions) as JsonObject
             ?? throw new JsonException("A metadata file holds a JSON object.");
     }
 
