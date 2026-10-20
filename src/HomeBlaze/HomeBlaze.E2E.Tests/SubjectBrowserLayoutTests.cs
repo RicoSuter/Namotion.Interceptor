@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 using HomeBlaze.Abstractions;
 using HomeBlaze.E2E.Tests.Infrastructure;
+using HomeBlaze.E2E.Tests.Models;
 using HomeBlaze.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Playwright;
@@ -415,6 +416,54 @@ public class SubjectBrowserLayoutTests
             // Assert
             await page.WaitForURLAsync("**/browser/Demo/Motor", new() { Timeout = PageLoadTimeout });
             await WaitUntilSettledAsync(page, paneCount: 3);
+        }
+        finally
+        {
+            _fixture.RemoveSubjectFromRoot(name, subject);
+        }
+    }
+
+    [Fact]
+    public async Task WhenAPathHasTheIntegerKeyOfADictionaryEntry_ThenThePaneOfTheEntryOpens()
+    {
+        // Arrange
+        var (name, subject) = await _fixture.AddSubjectToRootAsync<IntKeyedChildrenSubject>();
+        try
+        {
+            var entry = _fixture.ServerServices.GetRequiredService<SubjectFactory>().CreateSubject<PlainConfigurableSubject>();
+            entry.Website = new Uri("https://example.com/entry-three");
+            subject.Items = new Dictionary<int, PlainConfigurableSubject> { [3] = entry };
+
+            // Act
+            var page = await OpenAsync($"browser/{name}/Items/3", 1280, 720, paneCount: 3);
+
+            // Assert
+            await Assertions.Expect(ValueRow(LastPane(page), "Website").Locator("[data-testid='subject-pane-value-text']"))
+                .ToHaveTextAsync("https://example.com/entry-three", new() { Timeout = PageLoadTimeout });
+        }
+        finally
+        {
+            _fixture.RemoveSubjectFromRoot(name, subject);
+        }
+    }
+
+    [Fact]
+    public async Task WhenAPathHasTheIntegerKeyOfAnInlinePathsEntry_ThenThePaneOfTheEntryOpens()
+    {
+        // Arrange
+        var (name, subject) = await _fixture.AddSubjectToRootAsync<IntKeyedInlineChildrenSubject>();
+        try
+        {
+            var entry = _fixture.ServerServices.GetRequiredService<SubjectFactory>().CreateSubject<PlainConfigurableSubject>();
+            entry.Website = new Uri("https://example.com/inline-entry-three");
+            subject.Items = new Dictionary<int, PlainConfigurableSubject> { [3] = entry };
+
+            // Act
+            var page = await OpenAsync($"browser/{name}/3", 1280, 720, paneCount: 3);
+
+            // Assert
+            await Assertions.Expect(ValueRow(LastPane(page), "Website").Locator("[data-testid='subject-pane-value-text']"))
+                .ToHaveTextAsync("https://example.com/inline-entry-three", new() { Timeout = PageLoadTimeout });
         }
         finally
         {
