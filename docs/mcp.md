@@ -144,7 +144,7 @@ Browse the subject tree starting at a path. Use `text` format (default) for over
 | `path` | root | Starting path (e.g., `Folder/Device`) |
 | `depth` | 1 | Max traversal depth (0 = properties only) |
 | `includeProperties` | false | Include property values |
-| `includeAttributes` | false | Include registry attributes on properties, leaving out those without a value |
+| `includeAttributes` | false | Include registry attributes on properties, leaving out read-only ones without a value |
 | `includeMethods` | false | Include `$methods` in subject nodes |
 | `includeInterfaces` | false | Include `$interfaces` in subject nodes |
 | `properties` | (all) | Return only these properties, e.g. `["IsConnected", "BatteryLevel"]`; implies `includeProperties` |
@@ -197,7 +197,7 @@ Search across all subjects. Use `text` format (default) for overview, `json` for
 | `where` | (none) | Filter by property values, see [Filtering by value](#filtering-by-value) |
 | `properties` | (all) | Return only these properties, e.g. `["IsConnected", "BatteryLevel"]`; implies `includeProperties` |
 | `includeProperties` | false | Include property values |
-| `includeAttributes` | false | Include registry attributes on properties, leaving out those without a value |
+| `includeAttributes` | false | Include registry attributes on properties, leaving out read-only ones without a value |
 | `includeMethods` | false | Include `$methods` in subject nodes |
 | `includeInterfaces` | false | Include `$interfaces` in subject nodes |
 | `excludeTypes` | (none) | Exclude subjects matching these type/interface names |
@@ -240,7 +240,7 @@ In text, each warning is a `# warning: ` line before the footer, or after the "n
 
 ### `get_property`
 
-Read a property value by path. Returns the value, JSON schema type, optional writeability flag, and the registry attributes of the property that have a value.
+Read a property value by path. Returns the value, JSON schema type, optional writeability flag, and the registry attributes of the property, leaving out read-only ones without a value.
 
 ### `set_property`
 

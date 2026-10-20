@@ -178,7 +178,7 @@ public class GetPropertyToolTests
     }
 
     [Fact]
-    public async Task WhenAnAttributeHasNoValue_ThenItIsLeftOut()
+    public async Task WhenAReadOnlyAttributeHasNoValue_ThenItIsLeftOutAndAWritableOneIsKept()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create()
@@ -189,6 +189,7 @@ public class GetPropertyToolTests
         var temperatureProperty = room.TryGetRegisteredSubject()!.TryGetProperty("Temperature")!;
         temperatureProperty.AddAttribute<string>("Unit", _ => "Celsius");
         temperatureProperty.AddAttribute<string>("Note", _ => null);
+        temperatureProperty.AddAttribute("Comment", typeof(string), _ => null, (_, _) => { });
 
         var config = new McpServerConfiguration
         {
@@ -204,5 +205,6 @@ public class GetPropertyToolTests
         var attributes = json.GetProperty("attributes");
         Assert.Equal("Celsius", attributes.GetProperty("Unit").GetString());
         Assert.False(attributes.TryGetProperty("Note", out _));
+        Assert.Equal(JsonValueKind.Null, attributes.GetProperty("Comment").ValueKind);
     }
 }

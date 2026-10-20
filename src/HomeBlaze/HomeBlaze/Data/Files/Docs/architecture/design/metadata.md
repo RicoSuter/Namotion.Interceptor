@@ -59,7 +59,7 @@ The limits of entries, keys, values and files are in [Limits](../../administrati
 - **The whole file applied again.** After a load or a write the whole file is applied to its tree instead of updating single entries. This is simple, applies a hand edit and a write the same way, and costs little because metadata changes rarely.
 - **Nested storages keep their own metadata.** A storage stored inside another storage keeps all its metadata in its own root, so each file has one owner and a storage keeps its metadata wherever it is mounted.
 - **Agents cannot change the metadata of agents.** Like the settings and operations of agents, this keeps an agent from changing agents.
-- **Null attributes left out by MCP.** Because the registry cannot remove an attribute, removed metadata stays as a null value, and the MCP tools leave out attributes without a value so that it reads as no metadata.
+- **Null attributes left out by MCP.** Because the registry cannot remove an attribute, removed metadata stays as a null value, and the MCP tools leave out read-only attributes without a value, as the metadata attribute is, so that it reads as no metadata.
 
 ## Planned
 

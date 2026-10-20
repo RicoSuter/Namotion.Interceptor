@@ -222,8 +222,9 @@ internal static class McpToolHelper
             attributes = [];
             foreach (var attribute in property.Attributes)
             {
-                // An attribute without a value says nothing about its property.
-                if (attribute.GetValue() is { } value)
+                // A read-only attribute without a value says nothing about its property; a writable one can be set.
+                var value = attribute.GetValue();
+                if (value is not null || attribute.HasSetter)
                 {
                     attributes.Add(new PropertyAttribute(attribute.BrowseName, value));
                 }
