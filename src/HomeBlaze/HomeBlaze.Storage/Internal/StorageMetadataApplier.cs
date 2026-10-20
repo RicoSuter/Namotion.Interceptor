@@ -117,6 +117,12 @@ internal sealed class StorageMetadataApplier
 
                 foreach (var child in property.Children)
                 {
+                    // A store keeps its own metadata and that of what is inside it.
+                    if (child.Subject is IMetadataStore)
+                    {
+                        continue;
+                    }
+
                     // A subject that this property only references is applied where its first parent holds it.
                     if (child.Subject.TryGetRegisteredSubject() is { Parents: [var parent, ..] } registeredChild && parent.Property == property)
                     {

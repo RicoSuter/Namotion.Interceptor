@@ -386,6 +386,36 @@ public class StorageMetadataApplyTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenAStorageIsHeldInAPropertyOfAStoredSubject_ThenItKeepsItsOwnMetadataWhenTheOuterSidecarChanges()
+    {
+        // Arrange
+        var nestedDirectory = CreateTemporaryDirectory();
+        File.WriteAllText(Path.Combine(nestedDirectory.FullName, "a.md"), "a");
+        WriteFile("Holder.json", MetadataTestHolder.Serialize(SerializeStorage(nestedDirectory.FullName)));
+        WriteFile("Holder.metadata.json", """{ "$properties": { "Content": { "comment": "old" } } }""");
+        var storage = await ConnectAsync();
+        var holder = Assert.IsType<MetadataTestHolder>(storage.Children["Holder"]);
+        var nested = Assert.IsType<FluentStorageContainer>(holder.Content);
+        await nested.ConnectAsync(CancellationToken.None);
+        try
+        {
+            await nested.SetMetadataAsync(nested, null, Values("""{ "navTitle": "Archive" }"""), CancellationToken.None);
+            WriteFile("Holder.metadata.json", """{ "$properties": { "Content": { "comment": "new" } } }""");
+
+            // Act
+            await storage.ReconcileAsync(Named("Holder.metadata.json"));
+
+            // Assert
+            Assert.Equal("new", GetProperty(holder, nameof(MetadataTestHolder.Content)).GetMetadata().GetString("comment"));
+            Assert.Equal("Archive", nested.GetMetadata().GetString(MetadataKeys.NavigationTitle));
+        }
+        finally
+        {
+            nested.Dispose();
+        }
+    }
+
+    [Fact]
     public async Task WhenANestedStorageIsRemovedFromTheOuterStorage_ThenItsMetadataIsNoLongerWritten()
     {
         // Arrange

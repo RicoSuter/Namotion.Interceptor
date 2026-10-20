@@ -64,3 +64,16 @@ public partial class MetadataTestChannel : IConfigurable
     public static string Serialize(string name)
         => $$"""{ "$type": "{{typeof(MetadataTestChannel).FullName}}", "name": "{{name}}" }""";
 }
+
+/// <summary>A configurable subject that holds any subject in an ordinary property.</summary>
+[InterceptorSubject]
+public partial class MetadataTestHolder : IConfigurable
+{
+    [Configuration]
+    public partial Namotion.Interceptor.IInterceptorSubject? Content { get; set; }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    public static string Serialize(string contentJson)
+        => $$"""{ "$type": "{{typeof(MetadataTestHolder).FullName}}", "content": {{contentJson}} }""";
+}
