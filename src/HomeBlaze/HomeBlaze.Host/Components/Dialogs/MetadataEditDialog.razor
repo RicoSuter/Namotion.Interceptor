@@ -262,9 +262,9 @@
         // A tag that was typed and not added yet is kept.
         AddTag(_tagText);
 
-        // Only the fields that were changed, so that a field left empty removes its key, and a value that the dialog does
-        // not show as it is held, such as a link it cannot read or notes edited by hand, or that was written while the
-        // dialog was open, stays.
+        // Only the fields that were changed, so that a field left empty removes its key, and the value of a key whose field
+        // was not changed stays, also one that the dialog does not show as it is held, such as a link it cannot read, or
+        // that was written while the dialog was open.
         var values = new JsonObject();
         foreach (var (key, value) in GetValues())
         {
