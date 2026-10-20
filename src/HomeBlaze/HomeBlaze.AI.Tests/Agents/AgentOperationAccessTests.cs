@@ -151,29 +151,24 @@ public class AgentOperationAccessTests
     }
 
     [Theory]
-    [InlineData("Secret")]
+    [InlineData("Hidden")]
     [InlineData("Missing")]
-    public async Task WhenAnAgentSetsTheMetadataOfAPropertyHiddenFromAgents_ThenItIsRefusedAsAMissingOne(string property)
+    public async Task WhenAnAgentSetsNoJsonObjectAsTheMetadataOfASubjectHiddenFromAgents_ThenItIsRefusedAsForAMissingOne(string path)
     {
         // Arrange
-        var (root, _, services) = CreateGraph();
+        var (root, _, services) = CreateGraph(typeof(AgentExcludedThing));
         var storage = CreateStorage(services);
         root.Children = new Dictionary<string, IInterceptorSubject> { ["Storage"] = storage };
-        var room = new AgentTestRoot();
-        storage.Children = new Dictionary<string, IInterceptorSubject> { ["Room"] = room };
-        room.TryGetRegisteredSubject()!.AddProperty("Secret", typeof(int), _ => 1, null);
+        storage.Children = new Dictionary<string, IInterceptorSubject> { ["Hidden"] = new AgentExcludedThing() };
         var invokeOperation = CreateTools(services, root, forAgents: true)["invoke_operation"];
 
         // Act
         var result = JsonSerializer.SerializeToElement(await invokeOperation.Handler(
-            JsonSerializer.SerializeToElement(new
-            {
-                path = "/Storage", method = "SetMetadata", parameters = new { path = "Room", property, values = new { comment = "x" } }
-            }),
+            JsonSerializer.SerializeToElement(new { path = "/Storage", method = "SetMetadata", parameters = new { path, values = new[] { "x" } } }),
             CancellationToken.None));
 
         // Assert
-        Assert.Equal($"The subject has no property '{property}'.", result.GetProperty("error").GetString());
+        Assert.StartsWith("values must be a JSON object", result.GetProperty("error").GetString());
     }
 
     [Fact]

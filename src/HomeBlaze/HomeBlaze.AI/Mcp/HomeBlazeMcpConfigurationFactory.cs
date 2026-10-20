@@ -1,3 +1,4 @@
+using System.Text.Json;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
@@ -107,11 +108,11 @@ internal static class HomeBlazeMcpConfigurationFactory
             return "Agents cannot run operations of agents.";
         }
 
-        // The arguments are the input parameters in declaration order, and path and property are the first two input
-        // parameters of SetMetadata.
+        // The arguments are the input parameters in declaration order: path, property and values of SetMetadata. Other
+        // arguments are left to the method, which refuses them before it resolves the path.
         if (method.PropertyName == FluentStorageContainer.SetMetadataMethodName &&
             subject.Subject is FluentStorageContainer &&
-            arguments is [string path, var property, ..])
+            arguments is [string path, var property, JsonElement { ValueKind: JsonValueKind.Object }, ..])
         {
             return GetSetMetadataError(subject, path, property as string, pathProvider, excludeTypes);
         }
@@ -137,14 +138,20 @@ internal static class HomeBlazeMcpConfigurationFactory
             return "Agents cannot change the metadata of agents.";
         }
 
-        if (propertyName is not null &&
-            (visibleTarget.TryGetProperty(propertyName) is not { IsAttribute: false } property || !pathProvider.IsPropertyIncluded(property)))
+        if (propertyName is not null && IsPropertyChecked(target) && !IsPropertyVisible(visibleTarget, propertyName, pathProvider))
         {
             return FluentStorageContainer.GetNoPropertyMessage(propertyName);
         }
 
         return null;
     }
+
+    // The method checks the property only of a subject that a store keeps the metadata of, and not of a folder or a storage.
+    private static bool IsPropertyChecked(IInterceptorSubject target)
+        => target is not (FluentStorageContainer or VirtualFolder) && target.FindMetadataStore()?.CanStoreMetadata(target) == true;
+
+    private static bool IsPropertyVisible(RegisteredSubject subject, string propertyName, PathProviderBase pathProvider)
+        => subject.TryGetProperty(propertyName) is { IsAttribute: false } property && pathProvider.IsPropertyIncluded(property);
 
     // The subject or one of the subjects that hold it below the storage, through the first parent of each, is of a type
     // that agents do not see.

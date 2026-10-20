@@ -21,6 +21,11 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
     private readonly DirectoryInfo _directory = Directory.CreateTempSubdirectory("homeblaze-metadata-tools-");
     private readonly List<FluentStorageContainer> _storages = [];
 
+    private const string FolderPropertyMessage = "A folder and the root of a storage have metadata of their own, but their properties have none.";
+
+    private const string NoMetadataMessage =
+        "Only a storage, its folders, the subjects of its JSON files and the subjects and properties inside them have metadata.";
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -150,6 +155,34 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
         Assert.Contains("No subject at 'Gone'", unknownPath.GetProperty("error").GetString());
         Assert.Contains("'gone.md'", unknownName.GetProperty("error").GetString());
         Assert.Equal("not json", await File.ReadAllTextAsync(Path.Combine(_directory.FullName, "Docs", ".metadata.json")));
+    }
+
+    [Theory]
+    [InlineData("Docs/Pump.json", "Secret", "The subject has no property 'Secret'.")]
+    [InlineData("Docs/Pump.json", "Missing", "The subject has no property 'Missing'.")]
+    [InlineData("Docs", "Secret", FolderPropertyMessage)]
+    [InlineData("Docs", "Missing", FolderPropertyMessage)]
+    [InlineData("Docs/Readme.md", "Secret", NoMetadataMessage)]
+    [InlineData("Docs/Readme.md", "Missing", NoMetadataMessage)]
+    public async Task WhenAnAgentSetsTheMetadataOfAPropertyHiddenFromAgents_ThenItIsRefusedAsAMissingOne(
+        string path, string property, string expectedError)
+    {
+        // Arrange
+        WriteFile("Docs/Pump.json", """{ "speed": 1 }""");
+        WriteFile("Docs/Readme.md", "# Readme");
+        var (tools, storage) = await CreateToolsAsync(forAgents: true);
+        var folder = (VirtualFolder)storage.Children["Docs"];
+        var target = path == "Docs" ? folder : folder.Children[Path.GetFileName(path)];
+        target.TryGetRegisteredSubject()!.AddProperty("Secret", typeof(int), _ => 1, null);
+
+        // Act
+        var result = await CallAsync(tools["invoke_operation"], new
+        {
+            path = "/Storage", method = "SetMetadata", parameters = new { path, property, values = new { comment = "x" } }
+        });
+
+        // Assert
+        Assert.Equal(expectedError, result.GetProperty("error").GetString());
     }
 
     [Fact]
