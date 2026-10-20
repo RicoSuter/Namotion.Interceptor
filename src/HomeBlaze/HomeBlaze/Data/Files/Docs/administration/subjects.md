@@ -81,7 +81,7 @@ Folders use `[InlinePaths]`, so children are path segments directly (no `Childre
 
 ### Metadata Files
 
-A folder can hold a `.metadata.json` with its title, icon and the order of its children, and a subject file `X.json` can have an `X.metadata.json` beside it with the metadata of that subject, of the subjects inside it and of their properties. Both are written by the browser, can be edited by hand, and are read and changed by agents, see [Metadata of Folders, Subjects and Properties](pages.md#metadata-of-folders-subjects-and-properties).
+A folder can hold a `.metadata.json` with its title, icon and the order of its children, and a subject file `X.json` can have an `X.metadata.json` beside it with the metadata of that subject, of the subjects inside it and of their properties. Both are written by the browser, can be edited by hand, and are read and changed by agents, see [Metadata](metadata.md).
 
 ---
 

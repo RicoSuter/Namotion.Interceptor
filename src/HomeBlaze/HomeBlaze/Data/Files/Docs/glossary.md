@@ -125,11 +125,11 @@ Set via markdown frontmatter on `.md` files — see [Markdown Pages — Frontmat
 
 ### Metadata File
 
-A `.metadata.json` in a folder holds the metadata of the folder, such as its title, icon and order, and an `X.metadata.json` beside a subject file `X.json` holds the metadata of that subject, of the subjects inside it and of their properties. See [Metadata of Folders, Subjects and Properties](administration/pages.md#metadata-of-folders-subjects-and-properties).
+A `.metadata.json` in a folder holds the metadata of the folder, such as its title, icon and order, and an `X.metadata.json` beside a subject file `X.json` holds the metadata of that subject, of the subjects inside it and of their properties. See [Metadata: Where Metadata Is Stored](administration/metadata.md#where-metadata-is-stored).
 
 ### Metadata
 
-Keys and JSON values that describe a subject or a property, such as its navigation title or a comment, kept in a [Metadata File](#metadata-file). The registry holds the metadata of a subject in its property `HomeBlaze:Metadata` and that of a property in its attribute of that name. Agents change it through `SetMetadata` of a storage. See [Ordering and Metadata by Agents](administration/pages.md#ordering-and-metadata-by-agents).
+Keys and JSON values that describe a subject or a property, such as its navigation title or a comment, kept in a [Metadata File](#metadata-file). The registry holds the metadata of a subject in its property `HomeBlaze:Metadata` and that of a property in its attribute of that name. Agents change it through `SetMetadata` of a storage. See [Metadata](administration/metadata.md) and, for agents, [Metadata: Agents](administration/metadata.md#agents).
 
 ### Navigation Location
 
