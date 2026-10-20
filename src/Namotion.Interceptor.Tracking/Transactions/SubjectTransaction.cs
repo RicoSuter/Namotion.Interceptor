@@ -670,7 +670,7 @@ public sealed class SubjectTransaction : IDisposable
                     }
                     else
                     {
-                        failure = CreateFailureException(applied, applyFailed, applyErrors);
+                        failure = CreateBestEffortFailureException(applied, applyFailed, applyErrors);
                     }
                 }
             }
@@ -785,6 +785,8 @@ public sealed class SubjectTransaction : IDisposable
         var rejectionErrors = RunPreApplyCheck(failedSource);
         if (rejectionErrors is not null)
         {
+            // Timeout not propagated here: a retry would lose the rejection, and once the local model changed
+            // it would replay the snapshot onto it, so the timeout is reported as a failed revert instead.
             var revert = await RevertSourceWritesSafelyAsync(writer, written, revertState, propagateTimeout: false, cancellationToken).ConfigureAwait(false);
             return CreateRollbackFailureException(
                 GetCheckedSetFailedChanges(changes.Span, failedSource, [], revert.Failed),
@@ -847,20 +849,19 @@ public sealed class SubjectTransaction : IDisposable
             // ITransactionWriter.RevertSourceWritesAsync), so applyFailed already reports it.
             var toRevert = SubjectPropertyChangeOperations.FilterByProperty(written, applyFailed, keepMatches: true);
             var bestEffortRevert = await RevertSourceWritesSafelyAsync(writer, toRevert, revertState, propagateTimeout: false, cancellationToken).ConfigureAwait(false);
-            return CreateFailureException(
+            return CreateBestEffortFailureException(
                 applied,
                 SubjectPropertyChangeOperations.Concat(failedSource, applyFailed),
                 SubjectPropertyChangeOperations.Concat(sourceErrors, applyErrors, bestEffortRevert.Errors));
         }
 
-        return CreateFailureAfterSuccessfulLocalApply(changes, exclude, applied, failedSource, sourceErrors);
+        return CreateFailureAfterSuccessfulLocalApply(changes, applied, failedSource, sourceErrors);
     }
 
     /// <summary>
-    /// Returns the changes a pre-apply rejection or a failed apply reports after handlers checked them: every change,
-    /// the source-write failures first, because they were checked as a set and none of them commits once one fails.
-    /// The changes whose local revert failed follow, then those whose source revert failed, so a stuck property
-    /// appears a second time.
+    /// Returns the changes a pre-apply rejection or a failed apply reports after handlers checked them: every
+    /// change, source-write failures first, then the changes whose local revert failed, then those whose source
+    /// revert failed, so a stuck property appears a second time.
     /// </summary>
     private static IReadOnlyList<SubjectPropertyChange> GetCheckedSetFailedChanges(
         ReadOnlySpan<SubjectPropertyChange> changes,
@@ -868,6 +869,8 @@ public sealed class SubjectTransaction : IDisposable
         IReadOnlyList<SubjectPropertyChange> revertFailed,
         IReadOnlyList<SubjectPropertyChange> sourceRevertFailed)
     {
+        // Handlers checked the whole set together, so once one change fails none of them commits: report
+        // every change, source-write failures first.
         return SubjectPropertyChangeOperations.Concat(
             failedSource,
             SubjectPropertyChangeOperations.ExcludeByProperty(changes, failedSource, []),
@@ -897,7 +900,6 @@ public sealed class SubjectTransaction : IDisposable
 
     private SubjectTransactionException? CreateFailureAfterSuccessfulLocalApply(
         Memory<SubjectPropertyChange> changes,
-        IReadOnlyList<SubjectPropertyChange>? exclude,
         IReadOnlyList<SubjectPropertyChange> applied,
         IReadOnlyList<SubjectPropertyChange> failedSource,
         IReadOnlyList<Exception> sourceErrors)
@@ -906,8 +908,8 @@ public sealed class SubjectTransaction : IDisposable
         {
             // Without exclusions ApplyLocalChanges leaves its successful list empty, so the snapshot
             // must be copied before the pooled storage is returned at commit completion.
-            var appliedChanges = exclude is null ? changes.ToArray() : applied;
-            return CreateFailureException(appliedChanges, failedSource, sourceErrors);
+            var appliedChanges = failedSource.Count == 0 ? changes.ToArray() : applied;
+            return CreateBestEffortFailureException(appliedChanges, failedSource, sourceErrors);
         }
 
         return null;
@@ -947,13 +949,9 @@ public sealed class SubjectTransaction : IDisposable
     }
 
     /// <summary>
-    /// Converts a contract-violating throw from <see cref="ITransactionWriter.RevertSourceWritesAsync"/>
-    /// into "every requested revert failed" so the commit stays on the reported-failure path and becomes
-    /// terminal; a propagating throw would leave the transaction retryable, and a retry would re-push
-    /// to sources that already accepted writes. Only the commit timeout propagates, and only when
-    /// <paramref name="propagateTimeout"/> is true, for the revert after a source write failure. After a pre-apply
-    /// rejection a retry would lose the rejection, and once the local model changed it would replay the snapshot onto
-    /// it, so the timeout is reported as a failed revert there too.
+    /// Converts a contract-violating throw from <see cref="ITransactionWriter.RevertSourceWritesAsync"/> into "every
+    /// requested revert failed" so the commit stays on the reported-failure path and becomes terminal. Only the
+    /// commit timeout propagates, and only when <paramref name="propagateTimeout"/> is true.
     /// </summary>
     private static async ValueTask<SourceRevertResult> RevertSourceWritesSafelyAsync(
         ITransactionWriter writer,
@@ -1240,22 +1238,14 @@ public sealed class SubjectTransaction : IDisposable
         }
     }
 
-    private const string RollbackFailureMessage =
-        "One or more changes failed. Rollback was attempted. No changes have been applied to the local model.";
-
-    private SubjectTransactionException CreateFailureException(
+    private SubjectTransactionException CreateBestEffortFailureException(
         IReadOnlyList<SubjectPropertyChange> successful,
         IReadOnlyList<SubjectPropertyChange> failed,
         IReadOnlyList<Exception> errors)
     {
-        var message = _failureHandling switch
-        {
-            TransactionFailureHandling.BestEffort => "One or more changes failed. Successful changes have been applied.",
-            TransactionFailureHandling.Rollback => RollbackFailureMessage,
-            _ => "One or more changes failed."
-        };
-
-        return new SubjectTransactionException(message, successful, failed, errors);
+        Debug.Assert(_failureHandling == TransactionFailureHandling.BestEffort, "Only reached in BestEffort mode; Rollback always routes through CreateRollbackFailureException.");
+        return new SubjectTransactionException(
+            "One or more changes failed. Successful changes have been applied.", successful, failed, errors);
     }
 
     /// <summary>
@@ -1269,7 +1259,7 @@ public sealed class SubjectTransaction : IDisposable
     {
         var message = localRevertFailed
             ? "One or more changes failed. Rollback was attempted, but some changes could not be reverted in the local model."
-            : RollbackFailureMessage;
+            : "One or more changes failed. Rollback was attempted. No changes have been applied to the local model.";
         return new SubjectTransactionException(message, [], failed, errors);
     }
 

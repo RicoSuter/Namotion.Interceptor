@@ -416,32 +416,6 @@ public class SubjectTransactionWriterTests
         Assert.Equal(newValue, change.GetNewValue<string>());
     }
 
-    /// <summary>
-    /// Writes nothing to any source but marks each accepted snapshot slot with a fixed source in place,
-    /// emulating a custom writer fulfilling the in-place marking contract.
-    /// </summary>
-    private sealed class MarkingTransactionWriter(object source) : ITransactionWriter
-    {
-        public ValueTask<SourceWriteResult> WriteToSourcesAsync(
-            Memory<SubjectPropertyChange> changes,
-            TransactionRequirement requirement,
-            CancellationToken cancellationToken)
-        {
-            var span = changes.Span;
-            for (var i = 0; i < span.Length; i++)
-            {
-                span[i] = span[i].WithOrigin(ChangeOrigin.Confirmed(source));
-            }
-            return new ValueTask<SourceWriteResult>(new SourceWriteResult([], [], [], RevertState: null));
-        }
-
-        public ValueTask<SourceRevertResult> RevertSourceWritesAsync(
-            IReadOnlyList<SubjectPropertyChange> written,
-            object? revertState,
-            CancellationToken cancellationToken)
-            => new(new SourceRevertResult([], []));
-    }
-
     [Fact]
     public async Task WhenCustomWriterMarksSnapshotInPlace_ThenApplyNotificationsCarryThatSource()
     {
@@ -450,7 +424,7 @@ public class SubjectTransactionWriterTests
         var changes = new List<SubjectPropertyChange>();
         var context = CreateContext();
         context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(changes.Add);
-        context.AddService<ITransactionWriter>(new MarkingTransactionWriter(source));
+        context.AddService<ITransactionWriter>(new CountingTransactionWriter { ConfirmingSource = source });
 
         var person = new Person(context);
         changes.Clear();

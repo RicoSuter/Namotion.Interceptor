@@ -119,7 +119,7 @@ internal static class SubjectPropertyChangeOperations
     /// commit write mark of that transaction.
     /// </summary>
     internal static (IReadOnlyList<SubjectPropertyChange> Failed, IReadOnlyList<Exception> Errors) RevertLocalChanges(
-        IReadOnlyList<SubjectPropertyChange> applied, SubjectTransaction? markingTransaction = null)
+        IReadOnlyList<SubjectPropertyChange> applied, SubjectTransaction? markingTransaction)
     {
         List<SubjectPropertyChange>? failed = null;
         List<Exception>? errors = null;
@@ -133,10 +133,7 @@ internal static class SubjectPropertyChangeOperations
             if (!rollback.TryApplyLocalChange(markingTransaction, out var error))
             {
                 (failed ??= []).Add(original);
-                if (error != null)
-                {
-                    (errors ??= []).Add(error);
-                }
+                (errors ??= []).Add(error);
             }
         }
 

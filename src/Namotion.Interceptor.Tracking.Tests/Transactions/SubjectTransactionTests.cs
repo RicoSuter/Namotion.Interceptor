@@ -14,13 +14,6 @@ namespace Namotion.Interceptor.Tracking.Tests.Transactions;
 
 public class SubjectTransactionTests
 {
-    private static IInterceptorSubjectContext CreateTransactionContext()
-    {
-        return InterceptorSubjectContext.Create()
-            .WithFullPropertyTracking()
-            .WithTransactions();
-    }
-
     [Fact]
     public async Task WhenTransactionsNotEnabled_ThenBeginThrows()
     {
@@ -44,8 +37,8 @@ public class SubjectTransactionTests
         // one transaction-enabled context and attached into a graph rooted on another resolves two. The
         // subject's own interceptor is first and the fallback's interceptor is second, so binding must scan
         // all resolved instances by reference rather than accepting only the first one.
-        var context = CreateTransactionContext();
-        var fallbackContext = CreateTransactionContext();
+        var context = CreateContext();
+        var fallbackContext = CreateContext();
 
         var person = new Person(context);
         ((IInterceptorSubject)person).Context.AddFallbackContext(fallbackContext);
@@ -70,8 +63,8 @@ public class SubjectTransactionTests
     public async Task WhenTransactionIsBoundToAnUnrelatedContext_ThenWriteThrows()
     {
         // Arrange
-        var subjectContext = CreateTransactionContext();
-        var transactionContext = CreateTransactionContext();
+        var subjectContext = CreateContext();
+        var transactionContext = CreateContext();
         var person = new Person(subjectContext);
 
         using var transaction = await transactionContext.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
@@ -89,7 +82,7 @@ public class SubjectTransactionTests
     public async Task WhenTransactionCommitted_ThenChangesAreApplied()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var person = new Person(context);
 
         // Act
@@ -109,7 +102,7 @@ public class SubjectTransactionTests
     public async Task WhenTransactionDisposedWithoutCommit_ThenChangesAreDiscarded()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var person = new Person(context) { FirstName = "Original" };
 
         // Act
@@ -126,7 +119,7 @@ public class SubjectTransactionTests
     public async Task WhenReadingPropertyDuringTransaction_ThenPendingValueIsReturned()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var person = new Person(context) { FirstName = "Original" };
 
         // Act & Assert
@@ -142,7 +135,7 @@ public class SubjectTransactionTests
     public async Task WhenSamePropertyWrittenTwice_ThenLastWriteWinsAndOriginalOldValuePreserved()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var person = new Person(context) { FirstName = "Original" };
 
         // Act
@@ -167,7 +160,7 @@ public class SubjectTransactionTests
     public async Task WhenCommittedWithNoChanges_ThenSucceeds()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
 
         // Act & Assert
         using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
@@ -183,7 +176,7 @@ public class SubjectTransactionTests
     public async Task WhenConflictDetected_ThenConflictExceptionThrown()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var person = new Person(context) { FirstName = "Original" };
 
         using (var transaction = await context.BeginTransactionAsync(
@@ -211,7 +204,7 @@ public class SubjectTransactionTests
     public async Task WhenConflictBehaviorIsIgnore_ThenNoConflictException()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var person = new Person(context) { FirstName = "Original" };
 
         using (var transaction = await context.BeginTransactionAsync(
@@ -236,7 +229,7 @@ public class SubjectTransactionTests
     {
         // Arrange: a successful non-empty commit, so the committed state comes from the
         // full commit path rather than the empty-commit early return.
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var person = new Person(context);
 
         using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
@@ -257,7 +250,7 @@ public class SubjectTransactionTests
     public async Task WhenEmptyCommitIsTerminal_ThenLaterAccessUsesTheModel()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var person = new Person(context);
         using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
         await transaction.CommitAsync(CancellationToken.None);
@@ -278,7 +271,7 @@ public class SubjectTransactionTests
     public async Task WhenSuccessfulCommitIsTerminal_ThenLaterAccessUsesTheModel()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var person = new Person(context) { FirstName = "model" };
         using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
         person.FirstName = "committed";
@@ -301,7 +294,7 @@ public class SubjectTransactionTests
     public async Task WhenCommitFailureIsTerminal_ThenLaterAccessUsesTheModel()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var subject = new TransactionCascadeSubject(context) { Plain = "model" };
         using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
         subject.Plain = "applied";
@@ -327,7 +320,7 @@ public class SubjectTransactionTests
     public async Task WhenApplyFailsInBestEffortWithoutHandlers_ThenSuccessfulAppliesAreKept()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var subject = new TransactionCascadeSubject(context) { Plain = "model", Failing = "model" };
 
         // Act
@@ -354,7 +347,7 @@ public class SubjectTransactionTests
     public async Task WhenApplyFailsInBestEffortWithHandler_ThenNothingLands()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         context.AddService<ITransactionHandler>(new RecordingHandler());
         var subject = new TransactionCascadeSubject(context) { Plain = "model", Failing = "model" };
 
@@ -384,7 +377,7 @@ public class SubjectTransactionTests
     public async Task WhenCommitFailureIsRetryable_ThenLaterWritesRemainCaptured()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var person = new Person(context) { FirstName = "original" };
         using var transaction = await context.BeginTransactionAsync(
             TransactionFailureHandling.BestEffort,
@@ -417,7 +410,7 @@ public class SubjectTransactionTests
     public async Task WhenTransactionDisposed_ThenCommitThrows()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
         transaction.Dispose();
 
@@ -430,7 +423,7 @@ public class SubjectTransactionTests
     public async Task WhenNestedTransactionAttempted_ThenThrows()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
 
         using (await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
         {
@@ -447,7 +440,7 @@ public class SubjectTransactionTests
     public async Task WhenExclusiveLocking_ThenSecondTransactionWaits()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var order = new List<int>();
         var task1CanCommit = new ManualResetEventSlim(false);
         var task2Waiting = new ManualResetEventSlim(false);
@@ -491,7 +484,7 @@ public class SubjectTransactionTests
     public async Task WhenOptimisticLocking_ThenBothTransactionsCanBegin()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var bothStarted = new CountdownEvent(2);
 
         // Act
@@ -535,7 +528,7 @@ public class SubjectTransactionTests
     {
         // Arrange
         var changes = new List<SubjectPropertyChange>();
-        var context = CreateTransactionContext();
+        var context = CreateContext();
 
         context
             .GetPropertyChangeObservable(ImmediateScheduler.Instance)
@@ -564,7 +557,7 @@ public class SubjectTransactionTests
     {
         // Arrange
         var changes = new List<SubjectPropertyChange>();
-        var context = CreateTransactionContext();
+        var context = CreateContext();
 
         context
             .GetPropertyChangeObservable(ImmediateScheduler.Instance)
@@ -587,7 +580,7 @@ public class SubjectTransactionTests
     public async Task WhenGetPendingChangesCalled_ThenReturnsSnapshotOfPendingChanges()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var person = new Person(context);
 
         // Act
@@ -609,7 +602,7 @@ public class SubjectTransactionTests
     public async Task WhenDisposeCalledMultipleTimes_ThenIsIdempotent()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
         Assert.Same(transaction, SubjectTransaction.Current);
 
@@ -625,7 +618,7 @@ public class SubjectTransactionTests
     public async Task WhenMultipleSubjectsModified_ThenAllChangesCommittedAtomically()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var person1 = new Person(context);
         var person2 = new Person(context);
 
@@ -646,7 +639,7 @@ public class SubjectTransactionTests
     public async Task WhenExclusiveTransactionDisposed_ThenLockIsReleased()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
 
         var disposedTransaction = await context.BeginTransactionAsync(
             TransactionFailureHandling.BestEffort,
@@ -670,7 +663,7 @@ public class SubjectTransactionTests
     public async Task WhenDerivedPropertyRead_ThenReflectsPendingChanges()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var person = new Person(context);
 
         // Act
@@ -692,7 +685,7 @@ public class SubjectTransactionTests
     public async Task WhenConflictExceptionThrown_ThenConflictingPropertiesAreReported()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var person = new Person(context) { FirstName = "Original1", LastName = "Original2" };
 
         using (var transaction = await context.BeginTransactionAsync(
@@ -723,7 +716,7 @@ public class SubjectTransactionTests
     public async Task WhenPropertyNotChangedExternally_ThenNoConflictDetected()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var person = new Person(context) { FirstName = "Original" };
 
         // Act
@@ -744,7 +737,7 @@ public class SubjectTransactionTests
     public async Task WhenPropertyIsWrittenBackToLandedValue_ThenCommitKeepsLandedValue()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var person = new Person(context) { FirstName = "Ann" };
 
         // Act
@@ -765,7 +758,7 @@ public class SubjectTransactionTests
     public async Task WhenLandedValueIsWrittenWithoutPendingChange_ThenNothingIsCaptured()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var person = new Person(context) { FirstName = "Ann" };
 
         // Act
@@ -781,7 +774,7 @@ public class SubjectTransactionTests
     {
         // Arrange
         var changes = new List<SubjectPropertyChange>();
-        var context = CreateTransactionContext();
+        var context = CreateContext();
 
         context
             .GetPropertyChangeObservable(ImmediateScheduler.Instance)
@@ -806,7 +799,7 @@ public class SubjectTransactionTests
     public async Task WhenPropertyIsRewrittenAfterWriteBack_ThenItKeepsItsOldValueAndPosition()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var person = new Person(context) { FirstName = "Ann" };
 
         // Act
@@ -834,7 +827,7 @@ public class SubjectTransactionTests
     public async Task WhenPropertyIsRewrittenAfterWriteBackAndChangedOutside_ThenCommitDetectsConflict()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var person = new Person(context) { FirstName = "Original" };
 
         using var transaction = await context.BeginTransactionAsync(

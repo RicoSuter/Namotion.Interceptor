@@ -567,22 +567,6 @@ public class SubjectTransactionHandlerTests
     }
 
     [Fact]
-    public async Task WhenNoHandlerIsRegistered_ThenCommitSucceeds()
-    {
-        // Arrange
-        var context = CreateContext();
-        var person = new Person(context);
-
-        // Act
-        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-        person.FirstName = "Bob";
-        await transaction.CommitAsync(CancellationToken.None);
-
-        // Assert
-        Assert.Equal("Bob", person.FirstName);
-    }
-
-    [Fact]
     public async Task WhenOnCommittingThrows_ThenWriterIsNotCalled()
     {
         // Arrange
@@ -736,6 +720,7 @@ public class SubjectTransactionHandlerTests
 
         // Assert
         Assert.False(Assert.Single(probe.Writes, write => write.Property == nameof(Person.FirstName)).Consumed);
+        Assert.Equal("Bob", person.FirstName);
     }
 
     [Theory]
