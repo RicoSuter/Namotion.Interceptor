@@ -157,6 +157,27 @@ public class NavigationItemResolverTests
     }
 
     [Fact]
+    public void WhenTheAppBarItemsAreWalkedAgainWithoutAChange_ThenTheSameArrayIsReturned()
+    {
+        // Arrange
+        var maximumAge = TimeSpan.FromSeconds(5);
+        var root = CreateFolder(new() { ["Alpha"] = CreateTopBarPage() });
+        var resolver = CreateResolver(root);
+        var first = resolver.GetRecentAppBarItems(root, maximumAge);
+        _timeProvider.Advance(maximumAge);
+
+        // Act
+        var unchanged = resolver.GetRecentAppBarItems(root, maximumAge);
+        root.Children = new() { ["Alpha"] = root.Children["Alpha"], ["Beta"] = CreateTopBarPage() };
+        _timeProvider.Advance(maximumAge);
+        var changed = resolver.GetRecentAppBarItems(root, maximumAge);
+
+        // Assert
+        Assert.True(first == unchanged);
+        Assert.False(first == changed);
+    }
+
+    [Fact]
     public void WhenTopBarPagesAreOnSeveralLevels_ThenAppBarItemsFollowNavigationOrder()
     {
         // Arrange

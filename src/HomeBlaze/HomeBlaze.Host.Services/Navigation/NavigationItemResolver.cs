@@ -120,7 +120,8 @@ public class NavigationItemResolver
 
     /// <summary>
     /// Gets <see cref="GetAppBarItems"/> of <paramref name="root"/> as of a walk at most <paramref name="maximumAge"/>
-    /// ago, which every caller shares.
+    /// ago, which every caller shares: the same array as before while the items show the same subjects with the same
+    /// title, icon, path and alignment.
     /// </summary>
     public ImmutableArray<NavigationItem> GetRecentAppBarItems(IInterceptorSubject root, TimeSpan maximumAge)
     {
@@ -133,9 +134,18 @@ public class NavigationItemResolver
 
         var timestamp = _timeProvider.GetTimestamp();
         var items = GetAppBarItems(root).ToImmutableArray();
+        if (recent is not null && ReferenceEquals(recent.Root, root) && items.SequenceEqual(recent.Items, IsShownAlike))
+        {
+            items = recent.Items;
+        }
+
         _recentAppBarItems = new RecentAppBarItems(root, items, timestamp);
         return items;
     }
+
+    private static bool IsShownAlike(NavigationItem item, NavigationItem other)
+        => ReferenceEquals(item.Subject, other.Subject) && item.Title == other.Title && item.Icon == other.Icon &&
+           item.Path == other.Path && item.Alignment == other.Alignment;
 
     private sealed record RecentAppBarItems(IInterceptorSubject Root, ImmutableArray<NavigationItem> Items, long Timestamp);
 
