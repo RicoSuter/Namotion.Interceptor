@@ -115,7 +115,7 @@ internal sealed class StorageMetadataFile
             }
 
             var reservedKeys = new List<JsonProperty>();
-            var own = ReadValues(root, reservedKeys);
+            var own = ReadValues(root, reservedKeys, cloneValues: true);
             var subjects = NoEntries;
             var properties = NoEntries;
             List<string>? duplicatePaths = null;
@@ -149,8 +149,10 @@ internal sealed class StorageMetadataFile
     }
 
     // The keys of an object that hold a value; null without one. The reserved keys, which start with $, go to
-    // reservedKeys, or are left out without it.
-    private static ImmutableDictionary<string, JsonElement>? ReadValues(JsonElement entry, List<JsonProperty>? reservedKeys)
+    // reservedKeys, or are left out without it. A value refers to the document it was read from, which an unchanged
+    // value that is kept when the file is read again keeps alive: the values of the root are cloned each, and an entry
+    // is cloned as a whole before it is read, so that neither keeps the document of the whole file.
+    private static ImmutableDictionary<string, JsonElement>? ReadValues(JsonElement entry, List<JsonProperty>? reservedKeys, bool cloneValues)
     {
         if (entry.ValueKind != JsonValueKind.Object)
         {
@@ -174,7 +176,7 @@ internal sealed class StorageMetadataFile
             }
             else if (property.Value.ValueKind != JsonValueKind.Null)
             {
-                values[name] = property.Value;
+                values[name] = cloneValues ? property.Value.Clone() : property.Value;
             }
         }
 
@@ -198,7 +200,7 @@ internal sealed class StorageMetadataFile
             var path = entry.Name;
             var key = MetadataPathKey.Normalize(path)
                 ?? throw new JsonException($"The path {NameList.Format([path])} cannot be read.");
-            var values = ReadValues(entry.Value, reservedKeys: null);
+            var values = ReadValues(entry.Value.Clone(), reservedKeys: null, cloneValues: false);
             if (!keys.Add(key))
             {
                 (duplicatePaths ??= []).Add(path);
