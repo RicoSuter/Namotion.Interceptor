@@ -366,6 +366,18 @@ public class StorageMetadataWriterTests
     }
 
     [Fact]
+    public void WhenTheMembersOfLinksHaveSpacesAround_ThenTheyAreStoredTrimmed()
+    {
+        // Act
+        var written = Merge(null, Subject, """{ "links": [{ "title": " Manual ", "url": " https://example.com/manual.pdf " }, { "path": " /Devices/Pump " }] }""");
+
+        // Assert
+        Assert.Equal(
+            "{\n  \"links\": [\n    {\n      \"title\": \"Manual\",\n      \"url\": \"https://example.com/manual.pdf\"\n    },\n    {\n      \"path\": \"/Devices/Pump\"\n    }\n  ]\n}\n",
+            written);
+    }
+
+    [Fact]
     public void WhenNotesAreLongerThanAStringMayBe_ThenTheyAreStillWritten()
     {
         // Act
@@ -413,6 +425,7 @@ public class StorageMetadataWriterTests
     [InlineData("""{ "links": [{ "url": "data:text/html,x" }] }""", "no absolute http, https or mailto address")]
     [InlineData("""{ "links": [{ "url": "manual.pdf" }] }""", "no absolute http, https or mailto address")]
     [InlineData("""{ "links": [{ "path": "Devices/Pump" }] }""", "no absolute path")]
+    [InlineData("""{ "links": [{ "url": 1 }] }""", "'links' item member 'url' must be a string")]
     [InlineData("""{ "links": [{ "path": "/Devices", "target": "_blank" }] }""", "'target'")]
     [InlineData("""{ "links": [{ "url": "https://example.com", "URL": "https://example.org" }] }""", "'url' more than once")]
     [InlineData("""{ "links": ["https://example.com"] }""", "an object")]

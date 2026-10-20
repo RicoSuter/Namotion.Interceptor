@@ -387,17 +387,28 @@ internal static class StorageMetadataWriter
                 throw Refuse($"An item of '{key}' gives {NameList.Format([name])} more than once, without regard to case.");
             }
 
-            if (ToString(key, member.Value) is not { } text)
+            if (member.Value.ValueKind == JsonValueKind.Null)
             {
                 continue;
             }
 
-            if (text.GetValue<string>().Length > MaxStringLength)
+            if (member.Value.ValueKind != JsonValueKind.String)
+            {
+                throw Refuse($"'{key}' item member {NameList.Format([name])} must be a string.");
+            }
+
+            var text = GetString(key, member.Value)!.Trim();
+            if (text.Length == 0)
+            {
+                continue;
+            }
+
+            if (text.Length > MaxStringLength)
             {
                 throw Refuse($"The {name} of an item of '{key}' is longer than {MaxStringLength} characters.");
             }
 
-            link[name] = text;
+            link[name] = JsonValue.Create(text);
         }
 
         var url = (string?)link["url"];
