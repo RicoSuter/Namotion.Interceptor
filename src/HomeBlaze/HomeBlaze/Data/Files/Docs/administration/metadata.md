@@ -84,7 +84,7 @@ The sidebar shows a folder only when it holds a page for the sidebar, so a folde
 
 **Metadata** in the header of the browser opens a dialog for a folder, for a subject stored as `X.json` or inside one, and for a storage stored inside another storage. The button is colored when the item has metadata. A folder has the fields **Title**, **Navigation title** and **Icon**; a subject has **Navigation title**, **Icon**, **Location** and **Alignment**. Both have **Notes**, **Links** and **Tags**, see [Notes, Links and Tags](#notes-links-and-tags). The button is not shown for pages or for the subjects of their blocks.
 
-When the item has notes, links or tags, the button first shows them, and **Edit** opens the dialog. Otherwise it opens the dialog directly and is disabled while the storage is not connected. While the storage is not connected, **Edit** shows a message instead. The root of the storage has the button only when it has notes, links or tags, and without **Edit**: its `.metadata.json` is changed by hand or by agents.
+When the item has notes, links or tags, the button first shows them, with **Edit** to open the dialog. While the storage is not connected, **Edit** shows a message, and the button is disabled when it has nothing to show. The root of the storage has the button only when it has notes, links or tags, and without **Edit**, as its `.metadata.json` is changed by hand or by agents.
 
 Saving writes only the fields you changed. A field left empty removes its key, and every other key stays, also one that changed while the dialog was open. Changing a link writes all links as the dialog shows them, so a link edited by hand that the dialog cannot read is removed.
 
@@ -92,7 +92,7 @@ Saving writes only the fields you changed. A field left empty removes its key, a
 
 ## Notes, Links and Tags
 
-Folders, subjects and properties can have notes, links and tags. Pages and other files cannot have them yet.
+Folders, subjects and properties can have notes, links and tags. Notes and tags for pages and other files are [planned](../architecture/design/metadata.md#planned).
 
 ```json
 {
@@ -131,7 +131,7 @@ A web link opens in a new tab and a mailto link in place. A link to a page opens
 
 A metadata entry has up to 20 tags of 1 to 64 characters, each given once without regard to case. The dialog suggests the tags in use that contain the typed text, and Enter adds the typed tag.
 
-Titles, addresses, paths and tags cannot contain control or format characters, such as line breaks or zero-width characters. Of a file edited by hand, links and tags that break these rules are left out, and only the first 20 of each are read.
+Titles, addresses, paths and tags cannot contain control or format characters, such as line breaks or zero-width characters. Of a file edited by hand, only the first 20 links and tags are read. Links and tags that break these rules are left out, and a title that breaks them is ignored.
 
 ---
 

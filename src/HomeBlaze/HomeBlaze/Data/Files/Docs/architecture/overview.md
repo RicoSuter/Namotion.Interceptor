@@ -162,7 +162,7 @@ Detailed designs: [AI](design/ai.md), [History](design/history.md), [Messages](d
 
 The knowledge graph is the central data structure. It unifies live state, history, metadata, documents, and operations into a single queryable model.
 
-The **Unified Namespace (UNS)** is the live state layer: all subject properties and operations, synced across instances in real time. The **knowledge graph** extends the UNS with property history, documents, and user-defined metadata (annotations, tags, links between subjects).
+The **Unified Namespace (UNS)** is the live state layer: all subject properties and operations, synced across instances in real time. The **knowledge graph** extends the UNS with property history, documents, and user-defined metadata, such as notes, tags and links between subjects.
 
 ```
 ┌──────────────────────────────────────────────────────┐

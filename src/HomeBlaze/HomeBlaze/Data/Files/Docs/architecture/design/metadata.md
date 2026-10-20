@@ -50,7 +50,7 @@ Docs (folder)                        HomeBlaze:Metadata             = { title, o
 
 ## Search [Implemented]
 
-- **`MetadataSearch`.** One service finds metadata for `SearchMetadata`, the tag filter and the suggested tags. It walks the tree below a subject on each call and keeps nothing. A subject that the caller excludes is skipped with everything below it.
+- **`MetadataSearch`.** One static search serves `SearchMetadata`, the tag filter and the suggested tags. It walks the tree below a subject on each call and keeps nothing. A subject that the caller excludes is skipped with everything below it.
 - **Tag filter.** A click on a tag opens `MetadataTagFilterDialog`. It and the tag field of the **Metadata** dialog leave out subjects excluded from user interfaces, what is below them, and properties that the browser does not show.
 - **Notes in `search_markdown`.** `MarkdownSearchSourceFinder` gives `search_markdown` the pages and the notes of metadata in one list in path order, see [Markdown Tools](ai.md#markdown-tools).
 
@@ -70,7 +70,7 @@ Agents read metadata with `browse`, `search` and `get_property`, find it with th
 - **Nested storages keep their own metadata.** A storage stored inside another storage keeps all its metadata in its own root, so each file has one owner and a storage keeps its metadata wherever it is mounted.
 - **Agents cannot change the metadata of agents.** Like the settings and operations of agents, this keeps an agent from changing agents.
 - **Null attributes left out by MCP.** Because the registry cannot remove an attribute, removed metadata stays as a null value, and the MCP tools leave out read-only attributes without a value, so that it reads as no metadata.
-- **Notes under the rules of pages.** Notes are shown inside the page of the application, so they follow the rules for new content of pages and cannot run or load anything.
+- **Notes under the rules of pages.** Notes are shown inside the page of the application, so they follow the [page write rules](ai.md#page-write-rules) and cannot run or load anything.
 - **Tags as plain strings.** A tag needs no definition before it is used. Tags are unique without regard to case, so `Floor-2` and `floor-2` are one tag.
 - **No search cache.** Metadata changes rarely and walking the tree is cheap enough, while a cache would have to be invalidated on every change of a path.
 - **Notes found by `search_markdown`.** Notes are searched together with the pages instead of by a tool of their own, so an agent finds text with one call wherever it is written.

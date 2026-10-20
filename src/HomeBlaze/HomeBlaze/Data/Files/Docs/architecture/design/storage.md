@@ -292,7 +292,7 @@ The "recover from source of truth" model means most data does NOT need backup fo
 |------|----------------------------|-------------|
 | Subject configuration (JSON) | No | Must reconfigure all subjects manually |
 | Knowledge files (Markdown, documents) | No | Operational documentation and runbooks lost |
-| Dynamic metadata / annotations | No | User-created tags, links, and enrichments lost |
+| Metadata (`.metadata.json` files) | No | Titles, icons, order, notes, links and tags lost |
 | Plugin configuration | No | Must reconfigure plugin list and feeds |
 | Time-series history | **No — this is the critical one** | Historical data is generated locally and cannot be recovered from devices. Once lost, it is gone |
 | Live state (property values) | **Yes** — recovers from devices/peers | No backup needed |
@@ -351,13 +351,13 @@ Live state has zero data loss — it recovers to the current device state, not t
 | File format | JSON for configuration, Markdown for knowledge | Human-readable, diffable, version-controllable |
 | Configuration vs state | `[Configuration]` (persisted) vs `[State]` (runtime-only) | Clear developer intent, explicit persistence boundary |
 | Configuration writer chain | Resolved via parent hierarchy | Different storage containers can own different subtrees |
-| Dynamic metadata storage | Separate JSON files | Decoupled from subject configuration, reapplied on restart |
+| Metadata storage | Separate `.metadata.json` files | Decoupled from subject configuration, applied again on restart, see [Metadata](metadata.md) |
 
 ## Open Questions
 
 - Shared storage concurrency model for HA pairs (locking, optimistic concurrency, conflict resolution)
 - Change notification across nodes when using shared cloud backends
 - Configuration migration strategy when subject types change across versions (see [Upgrade and Migration](upgrade-and-migration.md))
-- Dynamic metadata schema and validation
+- Schema and validation of annotations and other custom metadata keys, see [Metadata](metadata.md#planned)
 - Configuration sync between instances (should central know satellite configs?)
 - Backup and restore procedures for each storage backend
