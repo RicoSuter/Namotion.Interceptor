@@ -46,7 +46,6 @@ public partial class FluentStorageContainer :
     private readonly IServiceProvider _serviceProvider;
     private readonly ConfigurableSubjectSerializer _serializer;
     private readonly ILogger<FluentStorageContainer>? _logger;
-    private readonly StorageMetadataApplier _metadataApplier;
 
     private readonly SemaphoreSlim _connectGate = new(1, 1);
 
@@ -74,7 +73,7 @@ public partial class FluentStorageContainer :
     private bool IsOwnMetadataStore => ReferenceEquals(((IInterceptorSubject)this).FindMetadataStore(), this);
 
     /// <summary>Applies the metadata files of the subjects of this storage.</summary>
-    internal StorageMetadataApplier MetadataApplier => _metadataApplier;
+    internal StorageMetadataApplier MetadataApplier { get; }
 
     /// <summary>Wraps the storage client when the storage connects.</summary>
     internal Func<IBlobStorage, IBlobStorage>? ClientDecorator { get; set; }
@@ -162,7 +161,7 @@ public partial class FluentStorageContainer :
         _serviceProvider = serviceProvider;
         _serializer = serializer;
         _logger = logger;
-        _metadataApplier = new StorageMetadataApplier(this);
+        MetadataApplier = new StorageMetadataApplier(this);
 
         StorageType = "disk";
         ConnectionString = string.Empty;
@@ -603,14 +602,13 @@ public partial class FluentStorageContainer :
     }
 
     /// <inheritdoc />
-    public bool CanStoreMetadata(IInterceptorSubject subject) => _metadataApplier.CanStoreMetadata(subject);
+    public bool CanStoreMetadata(IInterceptorSubject subject) => MetadataApplier.CanStoreMetadata(subject);
 
     /// <inheritdoc />
     /// <remarks>
     /// Keeps the metadata of this storage and of its folders in their <c>.metadata.json</c>, and that of a subject
     /// stored as <c>X.json</c>, of the subjects inside it and of their properties in <c>X.metadata.json</c> beside it.
-    /// Runs on the worker: reads the file fresh, so that an edit no pass has seen yet is kept, merges the values into
-    /// the entry of the target, and writes the file, or deletes it once it holds no key.
+    /// A storage that another storage holds keeps only its own order; the other one keeps the rest of its metadata.
     /// </remarks>
     public async Task SetMetadataAsync(IInterceptorSubject subject, string? propertyName, JsonElement values, CancellationToken cancellationToken)
     {
@@ -620,6 +618,8 @@ public partial class FluentStorageContainer :
         await RunOperationAsync(connection, async token =>
         {
             var target = GetMetadataTarget(connection, subject, propertyName, copy);
+
+            // Fresh from the storage, so that an edit that no pass has seen yet is kept.
             var content = await connection.Reconciler.ReadMetadataFileAsync(target.FilePath, token);
             var written = StorageMetadataWriter.Merge(content, target, copy);
             await WriteMetadataFileAsync(connection, target.FilePath, written, token);
@@ -645,7 +645,7 @@ public partial class FluentStorageContainer :
         }
 
         if (subject.TryGetRegisteredSubject() is not { } registered ||
-            !_metadataApplier.TryFindStoredSubject(registered, out var storedSubject) ||
+            !MetadataApplier.TryFindStoredSubject(registered, out var storedSubject) ||
             !connection.Index.TryGetEntry(storedSubject.Subject, out var entry) ||
             entry is not { IsPlaced: true, HasSidecar: true })
         {
@@ -663,7 +663,7 @@ public partial class FluentStorageContainer :
             ?? throw new StorageRefusedException("The subject cannot be reached from the subject of its file.");
         if (propertyName is not null)
         {
-            return new StorageMetadataTarget(filePath, StorageMetadataFile.PropertiesKey, path.Length == 0 ? propertyName : $"{path}/{propertyName}", IsContainer: false);
+            return new StorageMetadataTarget(filePath, StorageMetadataFile.PropertiesKey, MetadataPathKey.GetPropertyKey(path, propertyName), IsContainer: false);
         }
 
         return path.Length == 0
