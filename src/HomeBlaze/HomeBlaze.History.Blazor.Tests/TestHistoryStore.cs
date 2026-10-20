@@ -20,7 +20,7 @@ internal sealed class TestHistoryStore : IHistoryStore
 
     public int Priority { get; }
 
-    public ImmutableArray<HistoryCoverage> CoverageRanges { get; }
+    public ImmutableArray<HistoryCoverage> CoverageRanges { get; set; }
 
     public IReadOnlySet<string> SupportedAggregations { get; } =
         new HashSet<string>(HistoryAggregations.All, StringComparer.Ordinal);

@@ -369,6 +369,7 @@ namespace HomeBlaze.Services.Display
                 "NeedsSpace"})]
         public static System.ValueTuple<string, bool>? GetUnitInfo(HomeBlaze.Abstractions.Attributes.StateUnit unit) { }
         public static string? GetUnitSuffix(HomeBlaze.Abstractions.Attributes.StateUnit unit) { }
+        public static bool TryGetScaledUnit(HomeBlaze.Abstractions.Attributes.StateUnit unit, decimal magnitude, out string suffix, out decimal factor) { }
     }
 }
 namespace HomeBlaze.Services.Lifecycle

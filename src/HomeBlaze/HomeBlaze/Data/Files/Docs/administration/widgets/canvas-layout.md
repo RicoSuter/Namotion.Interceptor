@@ -133,7 +133,7 @@ A wall of eight tiles that fits the width, but is never drawn larger than its 11
 - **Unscaled while edited**: While the page is edited, a `FitWidth` canvas is drawn unscaled, so that nodes move in canvas pixels. It scrolls horizontally when it is wider than the page.
 - **An invalid width**: A `Width`, `MinWidth` or `MaxWidth` of 0 or less shows that it must be above 0, and a `MaxWidth` below `MinWidth` shows `MaxWidth must not be below MinWidth`, with the value in place of the canvas, see [Value Widget Errors](../page-errors.md#value-widget-errors).
 - **No frame**: A node draws no border, no background and no room around its content, it only places it. Content that needs a surface brings its own: put it into a [Card](card.md), or use a tile.
-- **Fixed size**: A node has a fixed size and cuts off content that needs more room.
+- **Fixed size**: A node has a fixed size and cuts off content that needs more room. Only the shadow of a card or a tile that fills the node reaches past it, except in Safari, which cuts it off too.
 - **Names**: Give a node a `#name` to keep it and everything in it when nodes are added or removed, as for the cells of a [GridLayout](grid-layout.md).
 - **Cards and tiles**: A [Card](card.md) in a node fills the node, as in a cell of a `GridLayout`, and so does a tile ([Switch](switch.md), [OperationButton](operation-button.md) or [ValueTile](value-tile.md) with `Kind=Tile`). A [Gauge](gauge.md) that is the only content of a node stands in the middle of the node.
 

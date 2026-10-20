@@ -13,7 +13,8 @@ public sealed partial class ValueColor
 {
     private const string DarkText = "rgba(0, 0, 0, 0.87)";
     private const string LightText = "#ffffff";
-    private const string ThemeText = "var(--mud-palette-text-primary)";
+    internal const string ThemeText = "var(--mud-palette-text-primary)";
+    private const string PrimaryText = "var(--mud-palette-primary-text)";
 
     // One instance per theme color, so that converting a theme color allocates nothing.
     private static readonly ValueColor[] ThemeColors = Enum.GetValues<Color>()
@@ -36,7 +37,11 @@ public sealed partial class ValueColor
         Theme = Color.Primary;
         Css = css;
         ContrastText = contrastText;
-        Style = $"--mud-palette-primary: {css}; --mud-palette-primary-text: {contrastText}; --mud-palette-primary-hover: color-mix(in srgb, {css} 6%, transparent)";
+        // The primary color with alpha keeps the primary text of the theme, because redefining that variable as itself
+        // would make it invalid.
+        Style = contrastText == PrimaryText
+            ? $"--mud-palette-primary: {css}; --mud-palette-primary-hover: color-mix(in srgb, {css} 6%, transparent)"
+            : $"--mud-palette-primary: {css}; --mud-palette-primary-text: {contrastText}; --mud-palette-primary-hover: color-mix(in srgb, {css} 6%, transparent)";
     }
 
     /// <summary>The theme color <see cref="Color.Default"/>.</summary>
@@ -45,7 +50,10 @@ public sealed partial class ValueColor
     /// <summary>The theme color to pass to MudBlazor. For a CSS color it is <see cref="Color.Primary"/>, which <see cref="Style"/> redefines.</summary>
     public Color Theme { get; }
 
-    /// <summary>The CSS color as written, or null for a theme color.</summary>
+    /// <summary>
+    /// The CSS color as written, or null for a theme color. For a theme color with alpha, such as <c>Surface 30%</c>,
+    /// it is the CSS color that mixes the palette color with transparent.
+    /// </summary>
     public string? Css { get; }
 
     /// <summary>Whether this is the theme color <see cref="Color.Default"/>.</summary>
@@ -53,7 +61,9 @@ public sealed partial class ValueColor
 
     /// <summary>
     /// The inline style that redefines the primary color of MudBlazor as the CSS color, and the text on it as black or
-    /// white, whichever contrasts more, or the text color of the theme for a <c>var()</c>. Null for a theme color.
+    /// white, whichever contrasts more, the text color of the theme for a <c>var()</c> and for <c>Surface</c> with alpha,
+    /// or the text of the palette color for another theme color with alpha, which <c>Primary</c> with alpha keeps as it
+    /// is. Null for a theme color.
     /// </summary>
     public string? Style { get; }
 
@@ -62,6 +72,49 @@ public sealed partial class ValueColor
 
     /// <summary>The tile styles of the CSS color by variant, built by <see cref="Controls.TileStyle"/> on first use.</summary>
     internal string[]? TileStyles { get; set; }
+
+    // The styles of a text color on this color as fill, by the theme text color.
+    private TextOnFill?[]? _themeTextsOnFill;
+
+    // The styles of this CSS color as text on the last fill it was drawn on.
+    private TextOnFill? _cssTextOnFill;
+
+    /// <summary>
+    /// Gets the styles of a text color on a fill, built once and kept: for a theme text color on the fill, and for a
+    /// CSS text color on itself for the last fill it was drawn on, which is the fill of its own case of a map.
+    /// </summary>
+    internal static TextOnFill GetTextOnFill(ValueColor fill, ValueColor text)
+    {
+        if (text.Css is null)
+        {
+            // A lost race builds the same styles twice, which is cheaper than a lock on every render.
+            var byTheme = fill._themeTextsOnFill ??= new TextOnFill?[ThemeColors.Length];
+            return byTheme[(int)text.Theme] ??= new TextOnFill(fill, text);
+        }
+
+        var cached = text._cssTextOnFill;
+        if (cached is null || !ReferenceEquals(cached.Fill, fill))
+        {
+            cached = new TextOnFill(fill, text);
+            text._cssTextOnFill = cached;
+        }
+
+        return cached;
+    }
+
+    /// <summary>Gets the name of the palette variables of a theme color that fills, or null for one that does not.</summary>
+    internal static string? GetPaletteName(Color color) => color switch
+    {
+        Color.Primary => "primary",
+        Color.Secondary => "secondary",
+        Color.Tertiary => "tertiary",
+        Color.Info => "info",
+        Color.Success => "success",
+        Color.Warning => "warning",
+        Color.Error => "error",
+        Color.Dark => "dark",
+        _ => null
+    };
 
     /// <summary>Gets the color of a theme color. A value that <see cref="Color"/> does not define is <see cref="Default"/>.</summary>
     internal static ValueColor FromTheme(Color color) =>
@@ -72,8 +125,11 @@ public sealed partial class ValueColor
     /// <summary>
     /// Parses the name of a theme color, without regard to case, or a CSS color: <c>#rgb</c>, <c>#rgba</c>,
     /// <c>#rrggbb</c>, <c>#rrggbbaa</c>, <c>rgb()</c> or <c>rgba()</c> with numbers or percentages, or
-    /// <c>var(--mud-palette-name)</c>. Null, empty and white space give <see cref="Default"/>. Anything else,
-    /// a number for a theme color included, is no color.
+    /// <c>var(--mud-palette-name)</c>. The variable of a theme color, such as <c>var(--mud-palette-success)</c>, gives
+    /// that theme color. A theme color that has a palette variable followed by a percentage from 0 to 100, such as
+    /// <c>Surface 30%</c>, is that color with that alpha, which follows the theme. Null, empty and white space give
+    /// <see cref="Default"/>. Anything else, a number for a theme color, the primary text and hover variables that
+    /// <see cref="Style"/> redefines and the <c>-rgb</c> variables included, is no color.
     /// </summary>
     public static bool TryParse(string? text, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out ValueColor? color)
     {
@@ -84,16 +140,20 @@ public sealed partial class ValueColor
             return true;
         }
 
-        for (var index = 0; index < ThemeNames.Length; index++)
+        if (IndexOfThemeName(trimmed) is var themeIndex and >= 0)
         {
-            if (trimmed.Equals(ThemeNames[index], StringComparison.OrdinalIgnoreCase))
-            {
-                color = ThemeColors[index];
-                return true;
-            }
+            color = ThemeColors[themeIndex];
+            return true;
         }
 
         var css = trimmed.ToString();
+        var themeAlpha = ThemeAlphaRegex().Match(css);
+        if (themeAlpha.Success)
+        {
+            color = FromThemeAlpha(themeAlpha.Groups["name"].ValueSpan, themeAlpha.Groups["percent"].ValueSpan);
+            return color is not null;
+        }
+
         if (HexColorRegex().IsMatch(css))
         {
             color = new ValueColor(css, GetContrastText(ParseHex(css)));
@@ -113,7 +173,7 @@ public sealed partial class ValueColor
 
         if (PaletteVariableRegex().IsMatch(css))
         {
-            color = new ValueColor(css, ThemeText);
+            color = FromPaletteVariable(css);
             return true;
         }
 
@@ -121,9 +181,52 @@ public sealed partial class ValueColor
         return false;
     }
 
+    private static ValueColor? FromThemeAlpha(ReadOnlySpan<char> name, ReadOnlySpan<char> percentText)
+    {
+        var index = IndexOfThemeName(name);
+        var isSurface = index == (int)Color.Surface;
+
+        // Default, Inherit and Transparent have no palette color to mix.
+        var paletteName = isSurface ? "surface" : index < 0 ? null : GetPaletteName((Color)index);
+        var percent = double.Parse(percentText, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture);
+        if (paletteName is null || percent > 100)
+        {
+            return null;
+        }
+
+        // Style redefines the primary variable on the element in terms of this color, so the primary color is read
+        // from its channel variable, which Style leaves as it is.
+        var css = index == (int)Color.Primary
+            ? $"rgba(var(--mud-palette-primary-rgb), {(percent / 100).ToString("0.#####", CultureInfo.InvariantCulture)})"
+            : $"color-mix(in srgb, var(--mud-palette-{paletteName}) {percent.ToString("0.###", CultureInfo.InvariantCulture)}%, transparent)";
+        return new ValueColor(css, isSurface ? ThemeText : $"var(--mud-palette-{paletteName}-text)");
+    }
+
+    private static ValueColor FromPaletteVariable(string css)
+    {
+        // The regex matched, so the name stands between "--mud-palette-" and the closing parenthesis. Only the theme
+        // colors with a palette fill are theme colors by their variable; var(--mud-palette-surface) stays a CSS color.
+        var name = css.AsSpan(4, css.Length - 5).Trim(" \t\r\n\f")["--mud-palette-".Length..];
+        var index = IndexOfThemeName(name);
+        return index >= 0 && GetPaletteName((Color)index) is not null ? ThemeColors[index] : new ValueColor(css, ThemeText);
+    }
+
+    private static int IndexOfThemeName(ReadOnlySpan<char> name)
+    {
+        for (var index = 0; index < ThemeNames.Length; index++)
+        {
+            if (name.Equals(ThemeNames[index], StringComparison.OrdinalIgnoreCase))
+            {
+                return index;
+            }
+        }
+
+        return -1;
+    }
+
     /// <summary>Gets the widget argument error of a color that <see cref="TryParse"/> does not take.</summary>
     internal static string GetError(string? text) =>
-        $"Unknown color '{text}': use a theme color like Success or a CSS color like #ffffff80";
+        $"Unknown color '{text}': use a theme color like Success or Surface 30%, or a CSS color like #ffffff80";
 
     public override string ToString() => Css ?? Theme.ToString();
 
@@ -186,6 +289,12 @@ public sealed partial class ValueColor
         RegexOptions.CultureInvariant)]
     private static partial Regex RgbColorRegex();
 
-    [GeneratedRegex("^var\\(" + Space + "*--mud-palette-[a-z0-9]+(?:-[a-z0-9]+)*" + Space + "*\\)$", RegexOptions.CultureInvariant)]
+    // A theme color name and a percentage without sign or exponent; the name is checked against the theme colors.
+    [GeneratedRegex("^(?<name>[A-Za-z]+)" + Space + "+(?<percent>[0-9]{1,3}(?:\\.[0-9]+)?)%$", RegexOptions.CultureInvariant)]
+    private static partial Regex ThemeAlphaRegex();
+
+    // Style redefines the primary text and hover variables on the element, so a color of one of them would be the
+    // redefined text color or refer to itself. An -rgb variable holds the channels without rgb() around them.
+    [GeneratedRegex("^var\\(" + Space + "*--mud-palette-(?!(?:primary-text|primary-hover|[a-z0-9-]*-rgb)" + Space + "*\\))[a-z0-9]+(?:-[a-z0-9]+)*" + Space + "*\\)$", RegexOptions.CultureInvariant)]
     private static partial Regex PaletteVariableRegex();
 }

@@ -22,6 +22,9 @@ public partial class Motor : BackgroundService, IConfigurable, ITemperatureSenso
     // before the stop cannot overwrite it afterwards.
     private readonly Lock _simulationLock = new();
 
+    // The simulated power in watts per RPM of the current speed.
+    private const double PowerPerSpeed = 0.5;
+
     // Configuration (persisted to JSON)
 
     /// <summary>
@@ -121,6 +124,12 @@ public partial class Motor : BackgroundService, IConfigurable, ITemperatureSenso
     [State(Unit = StateUnit.Percent, Position = 9)]
     public partial double Load { get; set; }
 
+    /// <summary>
+    /// The energy the motor has used since it started, a counter that only grows.
+    /// </summary>
+    [State(Unit = StateUnit.WattHour, IsCumulative = true, Position = 10)]
+    public partial double Energy { get; set; }
+
     [Derived]
     [PropertyAttribute(nameof(PowerOn), KnownAttributes.IsEnabled)]
     public bool PowerOn_IsEnabled => !IsPowered;
@@ -194,6 +203,7 @@ public partial class Motor : BackgroundService, IConfigurable, ITemperatureSenso
             }
 
             CurrentSpeed = currentSpeed;
+            Energy += currentSpeed * PowerPerSpeed * SimulationInterval.TotalHours;
 
             if (isPowered)
             {

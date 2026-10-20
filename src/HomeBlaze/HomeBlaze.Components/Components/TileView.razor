@@ -7,7 +7,7 @@
 @using HomeBlaze.Components.Controls
 @using Microsoft.AspNetCore.Components.Rendering
 
-<div class="@(Disabled ? "tile-widget place-filler tile-widget-disabled" : "tile-widget place-filler")" style="@TileStyle.GetStyle(Color, Variant)" data-testid="@TestId">
+<div class="@(Disabled ? "tile-widget place-filler tile-widget-disabled" : "tile-widget place-filler")" style="@TileStyle.GetStyle(Color, Variant, TextColor)" data-testid="@TestId">
     @if (OnClick.HasDelegate)
     {
         <button type="button"
@@ -78,6 +78,9 @@
 
     /// <summary>The fill, a theme color or a CSS color, see <see cref="TileStyle"/>.</summary>
     [Parameter] public ValueColor Color { get; set; } = ValueColor.Default;
+
+    /// <summary>The text color, which the badge inherits, or <see cref="ValueColor.Default"/> for the one that goes with <see cref="Color"/>.</summary>
+    [Parameter] public ValueColor TextColor { get; set; } = ValueColor.Default;
 
     [Parameter] public Variant Variant { get; set; } = Variant.Filled;
 

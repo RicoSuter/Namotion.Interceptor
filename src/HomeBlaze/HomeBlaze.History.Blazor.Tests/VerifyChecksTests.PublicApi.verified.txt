@@ -8,7 +8,8 @@ namespace HomeBlaze.History.Blazor
     [HomeBlaze.Abstractions.Attributes.SubjectIcon("ShowChart")]
     [Namotion.Interceptor.Attributes.InterceptorSubject]
     [System.ComponentModel.Category("Dashboard")]
-    [System.ComponentModel.Description("Shows the recorded history of numbers as lines and of states as bands")]
+    [System.ComponentModel.Description("Shows the recorded history of numbers as lines, of counters as bars and of states" +
+        " as bands")]
     [System.ComponentModel.DisplayName("History chart")]
     public class HistoryChart : HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
@@ -49,10 +50,11 @@ namespace HomeBlaze.History.Blazor
     }
     public sealed class HistoryChartData : System.IEquatable<HomeBlaze.History.Blazor.HistoryChartData>
     {
-        public HistoryChartData(System.DateTimeOffset From, System.DateTimeOffset To, System.TimeSpan? Bucket, System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.HistoryChartLine> Lines, System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.HistoryChartBand> Bands) { }
+        public HistoryChartData(System.DateTimeOffset From, System.DateTimeOffset To, HomeBlaze.History.Abstractions.HistoryBucket? Bucket, System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.HistoryChartLine> Lines, System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.HistoryChartBand> Bands, bool IsBars = false) { }
         public System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.HistoryChartBand> Bands { get; init; }
-        public System.TimeSpan? Bucket { get; init; }
+        public HomeBlaze.History.Abstractions.HistoryBucket? Bucket { get; init; }
         public System.DateTimeOffset From { get; init; }
+        public bool IsBars { get; init; }
         public bool IsEmpty { get; }
         public System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.HistoryChartLine> Lines { get; init; }
         public System.DateTimeOffset To { get; init; }
@@ -65,17 +67,20 @@ namespace HomeBlaze.History.Blazor
     }
     public sealed class HistoryChartLine : System.IEquatable<HomeBlaze.History.Blazor.HistoryChartLine>
     {
-        public HistoryChartLine(string Label, string Color, System.Collections.Generic.IReadOnlyList<System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Abstractions.HistoryPoint>> Runs, bool IsPercent = false) { }
+        public HistoryChartLine(string Label, string Color, System.Collections.Generic.IReadOnlyList<System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Abstractions.HistoryPoint>> Runs, bool IsPercent = false, HomeBlaze.Abstractions.Attributes.StateUnit Unit = 0, bool IsNegated = false) { }
         public string Color { get; init; }
+        public bool IsNegated { get; init; }
         public bool IsPercent { get; init; }
         public string Label { get; init; }
         public System.Collections.Generic.IReadOnlyList<System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Abstractions.HistoryPoint>> Runs { get; init; }
+        public HomeBlaze.Abstractions.Attributes.StateUnit Unit { get; init; }
     }
     public readonly struct HistoryChartPlaceholder : System.IEquatable<HomeBlaze.History.Blazor.HistoryChartPlaceholder>
     {
-        public HistoryChartPlaceholder(bool HasLines, int BandCount) { }
+        public HistoryChartPlaceholder(bool HasLines, int BandCount, bool IsBars = false) { }
         public int BandCount { get; init; }
         public bool HasLines { get; init; }
+        public bool IsBars { get; init; }
     }
     [HomeBlaze.Abstractions.Attributes.ExcludeFromCreation]
     [HomeBlaze.Abstractions.Attributes.PageLayout]
@@ -90,6 +95,8 @@ namespace HomeBlaze.History.Blazor
         public string? Color { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public string? Label { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public bool Negate { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         [HomeBlaze.Abstractions.Attributes.SubjectPath(ValueTypes=new System.Type[] {
                 typeof(System.Numerics.INumber<!0>),
@@ -126,6 +133,8 @@ namespace HomeBlaze.History.Blazor
         [Microsoft.AspNetCore.Components.Parameter]
         public HomeBlaze.History.Blazor.HistoryChartPlaceholder? Placeholder { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback<int> SeriesClicked { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
         public bool ShowAxes { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public bool ShowRange { get; set; }
@@ -157,23 +166,24 @@ namespace HomeBlaze.History.Blazor
     {
         public const int MaxPoints = 1000;
         public static readonly System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.PropertyHistoryChartModel.ChartPeriod> Periods;
-        public static System.TimeSpan AutoBucket(System.TimeSpan range, System.TimeSpan? availableCoverage = default) { }
+        public static System.TimeSpan AutoBucket(System.TimeSpan range, System.TimeSpan? availableCoverage = default, int bucketCount = 200) { }
         public static System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Blazor.PropertyHistoryChartModel.StateSegment> BuildStateSegments(System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Abstractions.HistoryPoint> points, HomeBlaze.History.Abstractions.HistoryPoint? valueAtStart, System.DateTimeOffset from, System.DateTimeOffset to, System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Abstractions.HistoryCoverage> coverage, System.Func<HomeBlaze.History.Abstractions.HistoryPoint, string?> format) { }
         public static string DescribeAggregation(string aggregation) { }
-        public static string DescribePeriod(HomeBlaze.History.Blazor.PropertyHistoryChartModel.ChartPeriod period, System.TimeSpan? resolvedBucket) { }
+        public static string DescribePeriod(HomeBlaze.History.Blazor.PropertyHistoryChartModel.ChartPeriod period, HomeBlaze.History.Abstractions.HistoryBucket? resolvedBucket) { }
         public static string? FormatDiscreteValue(HomeBlaze.History.Abstractions.HistoryPoint point, System.Type propertyType) { }
         public static System.Collections.Generic.IReadOnlyList<string> GateAggregations(HomeBlaze.History.Abstractions.ValueColumn column, bool isCumulative, System.Collections.Generic.IReadOnlySet<string> storeUnion, bool isDiscrete = false) { }
         public static bool IsDiscrete(System.Type propertyType, bool isDiscreteState) { }
-        public static System.TimeSpan? ResolveBucket(HomeBlaze.History.Blazor.PropertyHistoryChartModel.ChartPeriod period, System.TimeSpan range, System.TimeSpan? availableCoverage = default) { }
+        public static HomeBlaze.History.Abstractions.HistoryBucket? ResolveBucket(HomeBlaze.History.Blazor.PropertyHistoryChartModel.ChartPeriod period, System.TimeSpan range, System.TimeZoneInfo timeZone, System.TimeSpan? availableCoverage = default, bool isBars = false) { }
         [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
                 "From",
                 "To"})]
         public static System.ValueTuple<System.DateTimeOffset, System.DateTimeOffset> ResolveCustomRange(System.DateTime? customFrom, System.DateTime? customTo, System.DateTimeOffset now, System.Func<System.DateTime, System.DateTimeOffset> toUtc) { }
-        public static System.Collections.Generic.IReadOnlyList<System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Abstractions.HistoryPoint>> SplitIntoGapRuns(System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Abstractions.HistoryPoint> points, System.TimeSpan? singlePointWidth, System.DateTimeOffset windowEnd) { }
+        public static System.Collections.Generic.IReadOnlyList<System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Abstractions.HistoryPoint>> SplitIntoGapRuns(System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Abstractions.HistoryPoint> points, HomeBlaze.History.Abstractions.HistoryBucket? bucket, System.DateTimeOffset windowEnd) { }
         public readonly struct ChartPeriod : System.IEquatable<HomeBlaze.History.Blazor.PropertyHistoryChartModel.ChartPeriod>
         {
-            public ChartPeriod(string ShortName, string Label, System.TimeSpan? Bucket, bool IsAuto) { }
+            public ChartPeriod(string ShortName, string Label, System.TimeSpan? Bucket, bool IsAuto, HomeBlaze.History.Abstractions.HistoryCalendarUnit? CalendarUnit = default) { }
             public System.TimeSpan? Bucket { get; init; }
+            public HomeBlaze.History.Abstractions.HistoryCalendarUnit? CalendarUnit { get; init; }
             public bool IsAuto { get; init; }
             public bool IsRaw { get; }
             public string Label { get; init; }

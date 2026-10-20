@@ -6,10 +6,10 @@ using Namotion.Interceptor.Attributes;
 namespace HomeBlaze.History.Blazor;
 
 /// <summary>
-/// Shows the recorded history of numbers as lines and of states as bands in one chart.
+/// Shows the recorded history of numbers as lines, of the increase of counters as bars and of states as bands in one chart.
 /// </summary>
 [Category("Dashboard")]
-[Description("Shows the recorded history of numbers as lines and of states as bands")]
+[Description("Shows the recorded history of numbers as lines, of counters as bars and of states as bands")]
 [DisplayName("History chart")]
 [SubjectIcon("ShowChart")]
 [PageLayout]
@@ -26,23 +26,25 @@ public partial class HistoryChart : IConfigurable, ITitleProvider
     }
 
     /// <summary>
-    /// The time span that ends now, a short name of <see cref="PropertyHistoryChartModel.RangePresets"/>: 1h, 6h, 24h, 7d or 30d.
+    /// The time span that ends now, a short name of <see cref="PropertyHistoryChartModel.RangePresets"/>: 1h, 6h, 24h, 7d,
+    /// 30d, 90d or 1y. With a calendar bucket it starts at the start of a period, see
+    /// <see cref="PropertyHistoryChartModel.GetWindowStart"/>.
     /// </summary>
     [Configuration]
     public partial string Range { get; set; }
 
     /// <summary>
-    /// The interval one point of a line stands for, a short name of <see cref="PropertyHistoryChartModel.Periods"/>:
-    /// Auto, Raw or a fixed size such as 5m. A fixed size must divide the range into at most
-    /// <see cref="PropertyHistoryChartModel.MaxPoints"/> intervals.
+    /// The interval one point of a line or one bar stands for, a short name of <see cref="PropertyHistoryChartModel.Periods"/>:
+    /// Auto, Raw, a fixed size such as 5m, or a calendar period day, week or month in the time zone of the viewer. A fixed
+    /// size must divide the range into at most <see cref="PropertyHistoryChartModel.MaxPoints"/> intervals.
     /// </summary>
     [Configuration]
     public partial string Bucket { get; set; }
 
     /// <summary>
     /// How the values in a bucket become one point of a line, a name of <see cref="HomeBlaze.History.Abstractions.HistoryAggregations"/>
-    /// other than Delta, such as Maximum, or Average for the time-weighted average. Null or empty for the automatic choice: the first aggregation the property and the stores offer.
-    /// A band and a raw bucket ignore it.
+    /// such as Maximum, or Average for the time-weighted average. Null or empty for the automatic choice: the first aggregation the property and the stores offer.
+    /// Delta, the increase of a counter, draws bars when every line uses it. A band and a raw bucket ignore it.
     /// </summary>
     [Configuration]
     public partial string? Aggregation { get; set; }
@@ -54,8 +56,8 @@ public partial class HistoryChart : IConfigurable, ITitleProvider
     public partial int Height { get; set; }
 
     /// <summary>
-    /// How often the chart queries again at most while its values change. Less than a minute counts as a minute, a bucket
-    /// longer than the interval lengthens it to the bucket, and more than a day is an error.
+    /// How often the chart queries again at most while its values change. Less than a minute counts as a minute, a fixed
+    /// bucket longer than the interval lengthens it to the bucket, and more than a day is an error.
     /// </summary>
     [Configuration]
     public partial TimeSpan RefreshInterval { get; set; }
