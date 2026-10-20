@@ -143,6 +143,11 @@
 
         _isSaving = true;
 
+        // A save cannot be canceled, so nothing dismisses the dialog while it runs.
+        var options = MudDialog?.Options;
+        if (MudDialog is not null && options is not null)
+            await MudDialog.SetOptionsAsync(options with { CloseButton = false, BackdropClick = false, CloseOnEscapeKey = false });
+
         try
         {
             await store.SetMetadataAsync(Owner, null, JsonElement.Parse(values.ToJsonString()), CancellationToken.None);
@@ -151,6 +156,8 @@
         catch (Exception exception)
         {
             Snackbar.Add($"Error saving metadata: {exception.Message}", Severity.Error);
+            if (MudDialog is not null && options is not null)
+                await MudDialog.SetOptionsAsync(options);
         }
         finally
         {
