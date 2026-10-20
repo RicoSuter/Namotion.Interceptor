@@ -272,9 +272,12 @@ public static class MarkdownPageParser
 {
     internal static readonly MarkdownPipeline Pipeline = CreatePipelineBuilder().Build();
 
-    public static MarkdownPage Parse(string source)
+    public static MarkdownPage Parse(string source) => Parse(source, Pipeline);
+
+    /// <summary>Parses the source with a pipeline built from <see cref="CreatePipelineBuilder"/>.</summary>
+    internal static MarkdownPage Parse(string source, MarkdownPipeline pipeline)
     {
-        var document = Markdig.Markdown.Parse(source, Pipeline);
+        var document = Markdig.Markdown.Parse(source, pipeline);
         var page = new MarkdownPage(source, document, FindCodeSpans(source, document));
         Visit(document, page.BlockList, page, allowsBlocks: true, hasOwner: false);
         return page;

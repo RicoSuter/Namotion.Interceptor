@@ -4,6 +4,7 @@ using HomeBlaze.Storage.Internal;
 using HomeBlaze.Storage.Pages;
 using Markdig;
 using Markdig.Extensions.AutoIdentifiers;
+using Markdig.Extensions.Footnotes;
 using Markdig.Extensions.GenericAttributes;
 using Markdig.Renderers.Html;
 using Markdig.Syntax;
@@ -13,27 +14,24 @@ namespace HomeBlaze.Storage;
 
 /// <summary>
 /// The <c>notes</c> of metadata: Markdown under the rules that the write operations of pages apply to new content, no
-/// HTML, pictures, blocks or expressions, and links only to http, https or mailto addresses or to absolute paths in this
-/// application; and without any attributes, also no identifier or class, as notes are shown inside the page of the
-/// application.
+/// HTML, pictures, blocks or expressions, and links only to http, https or mailto addresses or to the routes of this
+/// application, <c>/</c>, <c>/browser</c>, <c>/browser/...</c> and <c>/pages/...</c>; and without attributes, also no
+/// identifier or class, as notes are shown inside the page of the application. Braces that give none, such as
+/// <c>{low}</c>, and footnotes are text.
 /// </summary>
 public static class MetadataNotes
 {
     /// <summary>The largest notes, in bytes of UTF-8.</summary>
     public const int MaxSize = 4 * 1024;
 
-    // The pipeline of pages without attributes and without the identifiers that it gives headings, so that notes put no
-    // identifier or class of the application on the page that shows them.
+    // The pipeline of pages without attributes, footnotes and the identifiers that it gives headings, so that notes put
+    // no identifier, class or link to a fragment on the page that shows them.
     private static readonly MarkdownPipeline Pipeline = CreatePipeline(withAttributes: false);
 
     // The same with attributes, to find the attributes that notes give.
     private static readonly MarkdownPipeline AttributesPipeline = CreatePipeline(withAttributes: true);
 
-    private const string RulesMessage =
-        "notes hold Markdown text without HTML, pictures, blocks, element attributes or {{ }} expressions, and links only to " +
-        "http, https or mailto addresses or to absolute paths in this application, such as /pages/Docs/Setup.md.";
-
-    /// <summary>Gets why the notes are refused, or null when they may be written.</summary>
+    /// <summary>Gets why the notes are refused, naming the rule they break, or null when they may be written.</summary>
     public static string? GetError(string notes)
     {
         if (Encoding.UTF8.GetByteCount(notes) > MaxSize)
@@ -43,44 +41,76 @@ public static class MetadataNotes
 
         if (notes.Contains("{{", StringComparison.Ordinal))
         {
-            return RulesMessage;
+            return "notes may not hold {{ }} expressions.";
         }
 
         try
         {
-            MarkdownWriteRules.EnsureActiveContentUnchanged(string.Empty, notes, nameof(notes));
-            return HasLinkNotAllowed(notes) || HasAttributes(notes) ? RulesMessage : null;
+            var document = Markdown.Parse(notes, Pipeline);
+            if (document.Descendants().Any(static node => node is HtmlBlock or HtmlInline))
+            {
+                return "notes may not hold HTML.";
+            }
+
+            if (document.Descendants<LinkInline>().Any(static link => link.IsImage))
+            {
+                return "notes may not hold pictures.";
+            }
+
+            if (GetLinkNotAllowed(document) is { } url)
+            {
+                return $"notes may not link to '{url}': links lead only to http, https or mailto addresses or to the routes " +
+                    "of this application, /, /browser/... and /pages/..., such as /pages/Docs/Setup.md.";
+            }
+
+            if (HasAttributes(notes, document))
+            {
+                return "notes may not give attributes, such as {#id}, {.class} or {key=value}.";
+            }
+
+            MarkdownWriteRules.EnsureNoActiveContent(notes, Pipeline, nameof(notes));
+            return null;
         }
         catch (ArgumentException)
         {
-            return RulesMessage;
+            // Thrown for a block or other active content of pages, and for Markdown nested beyond the depth limit of Markdig.
+            return "notes may not hold blocks, math, diagrams, abbreviations or Markdown nested too deep.";
         }
     }
 
     // A relative path or a fragment would resolve against the address of the application rather than that of the page
-    // that shows the notes. Browsers read a path that starts with two slashes or backslashes, ignoring whitespace and
-    // control characters, as one to another host.
-    private static bool HasLinkNotAllowed(string notes)
-        => Markdown.Parse(notes, Pipeline).Descendants().Any(static node => node switch
+    // that shows the notes, and a path that is no route of the application leads to no page.
+    private static string? GetLinkNotAllowed(MarkdownDocument document)
+    {
+        foreach (var node in document.Descendants())
         {
-            LinkInline { Url: var url } => !IsAllowedLink(url),
-            LinkReferenceDefinition { Url: { } url } => !IsAllowedLink(url),
-            AutolinkInline { IsEmail: false, Url: var url } => !IsAllowedLink(url),
-            _ => false
-        });
+            var url = node switch
+            {
+                LinkInline link => link.Url ?? string.Empty,
+                LinkReferenceDefinition { Url: { } definitionUrl } => definitionUrl,
+                AutolinkInline { IsEmail: false } link => link.Url,
+                _ => null
+            };
+            if (url is not null && !IsAllowedLink(url))
+            {
+                return url;
+            }
+        }
 
-    private static bool IsAllowedLink(string? url)
-        => url is not null && (url.StartsWith('/') ? !IsToOtherHost(url) : MetadataLink.IsAllowedAddress(url));
+        return null;
+    }
 
-    private static bool IsToOtherHost(string url)
-        => url.Where(static character => !char.IsWhiteSpace(character) && !char.IsControl(character))
-              .Take(2)
-              .Count(static character => character is '/' or '\\') == 2;
+    private static bool IsAllowedLink(string url)
+        => url is "/" or "/browser" ||
+           url.StartsWith("/browser/", StringComparison.Ordinal) ||
+           url.StartsWith("/pages/", StringComparison.Ordinal) ||
+           MetadataLink.IsAllowedAddress(url);
 
     // Extensions set attributes as well, such as the classes of a task list, so attributes are given by the notes where
-    // they differ from those without the attributes extension.
-    private static bool HasAttributes(string notes)
-        => !GetAttributes(Markdown.Parse(notes, AttributesPipeline)).SequenceEqual(GetAttributes(Markdown.Parse(notes, Pipeline)), StringComparer.Ordinal);
+    // they differ from those without the attributes extension. Braces with only names, such as {low}, give no identifier,
+    // class or value and are text in the notes as shown.
+    private static bool HasAttributes(string notes, MarkdownDocument document)
+        => !GetAttributes(Markdown.Parse(notes, AttributesPipeline)).SequenceEqual(GetAttributes(document), StringComparer.Ordinal);
 
     private static IEnumerable<string> GetAttributes(MarkdownDocument document)
         => document.Descendants()
@@ -89,12 +119,15 @@ public static class MetadataNotes
             .Select(static attributes => string.Join(" ",
                 attributes.Id,
                 string.Join(".", attributes.Classes ?? []),
-                string.Join(",", attributes.Properties?.Select(static property => property.Key + "=" + property.Value) ?? [])));
+                string.Join(",", attributes.Properties?.Where(static property => property.Value is not null)
+                    .Select(static property => property.Key + "=" + property.Value) ?? [])))
+            .Where(static attributes => !string.IsNullOrWhiteSpace(attributes));
 
     private static MarkdownPipeline CreatePipeline(bool withAttributes)
     {
         var builder = MarkdownPageParser.CreatePipelineBuilder();
         builder.Extensions.TryRemove<AutoIdentifierExtension>();
+        builder.Extensions.TryRemove<FootnoteExtension>();
         if (!withAttributes)
         {
             builder.Extensions.TryRemove<GenericAttributesExtension>();

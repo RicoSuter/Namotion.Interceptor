@@ -411,7 +411,7 @@ public class StorageMetadataWriterTests
     }
 
     [Theory]
-    [InlineData("""{ "notes": "<b>bold</b>" }""", "notes hold Markdown")]
+    [InlineData("""{ "notes": "<b>bold</b>" }""", "notes may not hold HTML")]
     [InlineData("""{ "notes": 1 }""", "'notes'")]
     [InlineData("""{ "links": [{ "title": "Manual" }] }""", "exactly one of a url and a path")]
     [InlineData("""{ "links": [{ "url": "https://example.com", "path": "/Devices" }] }""", "exactly one of a url and a path")]

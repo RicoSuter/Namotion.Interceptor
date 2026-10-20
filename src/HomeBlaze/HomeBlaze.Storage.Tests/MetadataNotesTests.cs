@@ -6,10 +6,10 @@ public class MetadataNotesTests
     public void WhenNotesFollowTheRules_ThenTheyAreRenderedAsHtml()
     {
         // Act
-        var html = MetadataNotes.ToHtml("Calibrated **2026**, see [Setup](/Docs/Setup.md).");
+        var html = MetadataNotes.ToHtml("Calibrated **2026**, see [Setup](/pages/Docs/Setup.md).");
 
         // Assert
-        Assert.Equal("<p>Calibrated <strong>2026</strong>, see <a href=\"/Docs/Setup.md\">Setup</a>.</p>\n", html);
+        Assert.Equal("<p>Calibrated <strong>2026</strong>, see <a href=\"/pages/Docs/Setup.md\">Setup</a>.</p>\n", html);
     }
 
     [Theory]
@@ -27,9 +27,15 @@ public class MetadataNotesTests
     [InlineData("[Setup]\n\n[Setup]: Setup.md")]
     [InlineData("Text {.mud-overlay}")]
     [InlineData("# Pump {#app}")]
-    [InlineData("[Setup](/Docs/Setup.md){.mud-button}")]
+    [InlineData("[Setup](/pages/Docs/Setup.md){.mud-button}")]
+    [InlineData("[Setup](/Docs/Setup.md)")]
+    [InlineData("[Settings](/settings)")]
     [InlineData("Text {data-value=1}")]
     [InlineData("::: Card\n:::")]
+    [InlineData("::: {.mud-overlay}\nText\n:::")]
+    [InlineData("$$\nx^2\n$$")]
+    [InlineData("*[HTML]: Hyper Text\n\nHTML")]
+    [InlineData("Calibrated[^1]\n\n[^1]: Setup.md")]
     public void WhenNotesBreakTheRules_ThenTheyAreNotRenderedAsHtml(string notes)
     {
         // Act
@@ -38,6 +44,57 @@ public class MetadataNotesTests
         // Assert
         Assert.Null(html);
         Assert.NotNull(MetadataNotes.GetError(notes));
+    }
+
+    [Theory]
+    [InlineData("<b>Pump</b>", "HTML")]
+    [InlineData("![pump](https://example.com/pump.png)", "pictures")]
+    [InlineData("{{ Temperature }}", "{{ }} expressions")]
+    [InlineData("[Setup](/Docs/Setup.md)", "'/Docs/Setup.md'")]
+    [InlineData("Text {.mud-overlay}", "attributes")]
+    public void WhenNotesBreakARule_ThenTheErrorNamesTheRule(string notes, string expectedRule)
+    {
+        // Act
+        var error = MetadataNotes.GetError(notes);
+
+        // Assert
+        Assert.Contains(expectedRule, error);
+    }
+
+    [Fact]
+    public void WhenNotesHaveAFootnote_ThenItIsRenderedAsText()
+    {
+        // Act
+        var html = MetadataNotes.ToHtml("Calibrated[^1]\n\n[^1]: In 2026.");
+
+        // Assert
+        Assert.Equal("<p>Calibrated[^1]</p>\n<p>[^1]: In 2026.</p>\n", html);
+    }
+
+    [Theory]
+    [InlineData("Range {low}", "<p>Range {low}</p>\n")]
+    [InlineData("Range {low high}", "<p>Range {low high}</p>\n")]
+    public void WhenNotesHaveBracesThatGiveNoIdentifierClassOrValue_ThenTheyAreRenderedAsText(string notes, string expectedHtml)
+    {
+        // Act
+        var html = MetadataNotes.ToHtml(notes);
+
+        // Assert
+        Assert.Equal(expectedHtml, html);
+    }
+
+    [Theory]
+    [InlineData("[Home](/)")]
+    [InlineData("[Browser](/browser)")]
+    [InlineData("[Pump](/browser/Devices/Pump)")]
+    [InlineData("[Setup](/pages/Docs/Setup.md)")]
+    public void WhenNotesLinkToARouteOfTheApplication_ThenTheyAreAllowed(string notes)
+    {
+        // Act
+        var error = MetadataNotes.GetError(notes);
+
+        // Assert
+        Assert.Null(error);
     }
 
     [Fact]
