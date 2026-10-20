@@ -375,7 +375,7 @@ public class StorageMetadataWriterTests
         var written = Merge(null, Subject, """
             {
               "notes": "Calibrated **2026**, see [the manual](https://example.com/manual.pdf).",
-              "links": [{ "Title": "Manual", "URL": "https://example.com/manual.pdf" }, { "path": "/Devices/Pump/Temperature" }],
+              "links": [{ "title": "Manual", "url": "https://example.com/manual.pdf" }, { "path": "/Devices/Pump/Temperature" }],
               "tags": [" floor-2 ", "Pumps"]
             }
             """);
@@ -440,7 +440,10 @@ public class StorageMetadataWriterTests
     [InlineData("""{ "links": [{ "path": "Devices/Pump" }] }""", "no absolute path")]
     [InlineData("""{ "links": [{ "url": 1 }] }""", "'links' item member 'url' must be a string")]
     [InlineData("""{ "links": [{ "path": "/Devices", "target": "_blank" }] }""", "'target'")]
-    [InlineData("""{ "links": [{ "url": "https://example.com", "URL": "https://example.org" }] }""", "'url' more than once")]
+    [InlineData("""{ "links": [{ "url": "https://example.com", "url": "https://example.org" }] }""", "'url' more than once")]
+    [InlineData("""{ "links": [{ "URL": "https://example.com" }] }""", "use 'url'")]
+    [InlineData("""{ "links": [{ "Title": "Manual", "path": "/Devices" }] }""", "use 'title'")]
+    [InlineData("""{ "links": [{ "\uD800": "x", "url": "https://example.com" }] }""", "A member name of an item of 'links' cannot be read")]
     [InlineData("""{ "links": ["https://example.com"] }""", "an object")]
     [InlineData("""{ "links": "https://example.com" }""", "an array")]
     [InlineData("""{ "tags": ["floor-2", "Floor-2"] }""", "'Floor-2'")]

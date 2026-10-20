@@ -236,8 +236,7 @@ internal static class StorageMetadataWriter
             }
 
             var knownKey = Array.IndexOf(KnownKeys, key) >= 0 ? key : null;
-            if (knownKey is null && property.Value.ValueKind != JsonValueKind.Null &&
-                Array.Find(KnownKeys, candidate => string.Equals(candidate, key, StringComparison.OrdinalIgnoreCase)) is { } canonicalKey)
+            if (knownKey is null && property.Value.ValueKind != JsonValueKind.Null && FindInAnotherCase(KnownKeys, key) is { } canonicalKey)
             {
                 throw Refuse($"Keys match exactly, so {NameList.Format([key])} would not be read: use {NameList.Format([canonicalKey])}.");
             }
@@ -371,11 +370,26 @@ internal static class StorageMetadataWriter
         var link = new JsonObject();
         foreach (var member in item.EnumerateObject())
         {
-            var name = Array.Find(LinkMembers, candidate => string.Equals(candidate, member.Name, StringComparison.OrdinalIgnoreCase))
-                ?? throw Refuse($"An item of '{key}' has {NameList.Format([member.Name])}; a link has only a title and a url or a path.");
+            string name;
+            try
+            {
+                name = member.Name;
+            }
+            catch (InvalidOperationException)
+            {
+                throw Refuse($"A member name of an item of '{key}' cannot be read, such as one with a lone surrogate.");
+            }
+
+            if (Array.IndexOf(LinkMembers, name) < 0)
+            {
+                throw FindInAnotherCase(LinkMembers, name) is { } canonicalName
+                    ? Refuse($"Names match exactly, so {NameList.Format([name])} of an item of '{key}' would not be read: use {NameList.Format([canonicalName])}.")
+                    : Refuse($"An item of '{key}' has {NameList.Format([name])}; a link has only a title and a url or a path.");
+            }
+
             if (link.ContainsKey(name))
             {
-                throw Refuse($"An item of '{key}' gives {NameList.Format([name])} more than once, without regard to case.");
+                throw Refuse($"An item of '{key}' gives {NameList.Format([name])} more than once.");
             }
 
             if (member.Value.ValueKind == JsonValueKind.Null)
@@ -543,6 +557,20 @@ internal static class StorageMetadataWriter
 
         buffer.Write("\n"u8);
         return buffer.WrittenSpan.ToArray();
+    }
+
+    // The name of the list that the name gives in another case, for the hint of a refusal.
+    private static string? FindInAnotherCase(string[] names, string name)
+    {
+        foreach (var candidate in names)
+        {
+            if (string.Equals(candidate, name, StringComparison.OrdinalIgnoreCase))
+            {
+                return candidate;
+            }
+        }
+
+        return null;
     }
 
     private static StorageRefusedException Refuse(string message) => new(message);

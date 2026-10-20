@@ -93,7 +93,8 @@ public class MetadataDictionaryExtensionsTests
             {
               "links": [
                 { "title": "Manual", "url": "https://example.com/manual.pdf" },
-                { "PATH": "/Devices/Pump" },
+                { "path": "/Devices/Pump" },
+                { "PATH": "/Devices/Fan" },
                 { "title": "Neither" },
                 { "url": "https://example.com", "path": "/Devices" },
                 "https://example.com"
@@ -213,10 +214,24 @@ public class MetadataDictionaryExtensionsTests
     }
 
     [Fact]
+    public void WhenTheMembersOfALinkHaveNamesInAnotherCase_ThenTheyAreNotRead()
+    {
+        // Arrange
+        var metadata = Metadata("""{ "links": [{ "Title": "Manual", "url": "https://example.com" }, { "URL": "https://example.org" }, { "\u0050ath": "/Devices" }] }""");
+
+        // Act
+        var links = metadata.GetLinks();
+
+        // Assert
+        Assert.Equal([new MetadataLink(null, "https://example.com", null)], links.ToArray());
+        Assert.False(Metadata("""{ "links": [{ "URL": "https://example.org" }] }""").HasNotesLinksOrTags());
+    }
+
+    [Fact]
     public void WhenALinkHasAMemberWhoseNameCannotBeRead_ThenTheLinkIsReadWithoutIt()
     {
         // Arrange
-        var metadata = Metadata("""{ "links": [{ "\uD800": "x", "\u0055rl": "https://example.com" }] }""");
+        var metadata = Metadata("""{ "links": [{ "\uD800": "x", "\u0075rl": "https://example.com" }] }""");
 
         // Act
         var links = metadata.GetLinks();
@@ -255,7 +270,7 @@ public class MetadataDictionaryExtensionsTests
         // Arrange
         var notes = Metadata($$"""{ "notes": "{{value}}" }""");
         var tags = Metadata($$"""{ "tags": ["{{value}}"] }""");
-        var urls = Metadata($$"""{ "links": [{ "title": "Manual", "URL": "{{value}}" }] }""");
+        var urls = Metadata($$"""{ "links": [{ "title": "Manual", "url": "{{value}}" }] }""");
         var paths = Metadata($$"""{ "links": [{ "\u0070ath": 1, "path": "{{value}}" }] }""");
         var urlsAndPaths = Metadata($$"""{ "links": [{ "url": "{{value}}", "path": "/Devices" }] }""");
 
@@ -300,7 +315,7 @@ public class MetadataDictionaryExtensionsTests
         // Arrange
         var notes = Metadata("""{ "notes": " Calibrated in 2026, see the manual." }""");
         var tags = Metadata("""{ "tags": [" ", "pump"] }""");
-        var links = Metadata("""{ "links": [{ "title": "Manual", "URL": "https://example.com/manual.pdf" }] }""");
+        var links = Metadata("""{ "links": [{ "title": "Manual", "\u0075rl": "https://example.com/manual.pdf" }] }""");
         var none = Metadata("""{ "notes": " ", "tags": [" "], "links": [{ "title": "Neither" }] }""");
         bool Check() => notes.HasNotesLinksOrTags() && tags.HasNotesLinksOrTags() && links.HasNotesLinksOrTags() && !none.HasNotesLinksOrTags();
         var firstResult = Check();

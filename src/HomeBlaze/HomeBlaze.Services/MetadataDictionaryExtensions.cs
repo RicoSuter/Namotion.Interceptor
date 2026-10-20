@@ -1,7 +1,5 @@
 using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
-using System.Text;
 using System.Text.Json;
 using HomeBlaze.Storage.Abstractions;
 
@@ -144,16 +142,16 @@ public static class MetadataDictionaryExtensions
             return false;
         }
 
-        url = GetMember(item, "url"u8, "url");
-        path = GetMember(item, "path"u8, "path");
+        url = GetMember(item, "url"u8);
+        path = GetMember(item, "path"u8);
         return (url is null) != (path is null) && !MetadataText.HasControlOrFormatCharacter(url ?? path!);
     }
 
     /// <summary>
     /// Gets the links of the first 20 items of <c>links</c>, leaving out an item that is no object with exactly one of a
     /// <c>url</c> and a <c>path</c> string, or whose url or path has a control or format character; empty without an
-    /// array. The members are returned without whitespace around them, a title with a control or format character as
-    /// none, and the address of a link otherwise as it is held, see <see cref="MetadataLink.IsAllowedAddress"/>.
+    /// array. The members are matched by their exact names and returned without whitespace around them, a title with a
+    /// control or format character as none, and the address of a link otherwise as it is held, see <see cref="MetadataLink.IsAllowedAddress"/>.
     /// </summary>
     public static ImmutableArray<MetadataLink> GetLinks(this IReadOnlyDictionary<string, JsonElement>? metadata)
     {
@@ -167,7 +165,7 @@ public static class MetadataDictionaryExtensions
         {
             if (TryGetTarget(item, out var url, out var path))
             {
-                var title = GetMember(item, "title"u8, "title");
+                var title = GetMember(item, "title"u8);
                 links.Add(new MetadataLink(title is not null && MetadataText.HasControlOrFormatCharacter(title) ? null : title, url, path));
             }
         }
@@ -175,13 +173,12 @@ public static class MetadataDictionaryExtensions
         return links.DrainToImmutable();
     }
 
-    // The string of a member, by its name without regard to case, trimmed as a write trims it; null when it is not set,
-    // no string or blank.
-    private static string? GetMember(JsonElement item, ReadOnlySpan<byte> utf8Name, string name)
+    // The string of a member, by its exact name, trimmed as a write trims it; null when it is not set, no string or blank.
+    private static string? GetMember(JsonElement item, ReadOnlySpan<byte> utf8Name)
     {
         foreach (var member in item.EnumerateObject())
         {
-            if (member.Value.ValueKind == JsonValueKind.String && HasName(member, utf8Name, name))
+            if (member.Value.ValueKind == JsonValueKind.String && HasName(member, utf8Name))
             {
                 var text = GetText(member.Value)?.Trim();
                 return string.IsNullOrEmpty(text) ? null : text;
@@ -191,19 +188,12 @@ public static class MetadataDictionaryExtensions
         return null;
     }
 
-    // Whether the member has the name, of ASCII letters, without regard to case; a name that cannot be read has none. The
-    // name is read as a string only when it has escapes.
-    private static bool HasName(JsonProperty member, ReadOnlySpan<byte> utf8Name, string name)
+    // Whether the member has exactly the name; a name that cannot be read, such as one with a lone surrogate, has none.
+    private static bool HasName(JsonProperty member, ReadOnlySpan<byte> utf8Name)
     {
-        var rawName = JsonMarshal.GetRawUtf8PropertyName(member);
-        if (!rawName.Contains((byte)'\\'))
-        {
-            return Ascii.EqualsIgnoreCase(rawName, utf8Name);
-        }
-
         try
         {
-            return string.Equals(member.Name, name, StringComparison.OrdinalIgnoreCase);
+            return member.NameEquals(utf8Name);
         }
         catch (InvalidOperationException)
         {
