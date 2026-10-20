@@ -276,7 +276,8 @@ internal static class StorageMetadataWriter
 
             var size = GetSize(key, value);
 
-            // The order of a folder is limited by the file only, as it names every child, and notes by their own limit.
+            // The order of a folder is limited by the file only, as it names every child; notes are bounded by their own UTF-8
+            // limit, as escaping can make notes within it larger than a value may be.
             var hasOwnLimit = isOrder || knownKey == MetadataKeys.Notes;
             if (!hasOwnLimit && property.Value.ValueKind == JsonValueKind.String && GetString(key, property.Value) is { Length: > MaxStringLength })
             {

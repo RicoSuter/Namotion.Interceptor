@@ -376,6 +376,29 @@ public class StorageMetadataWriterTests
     }
 
     [Theory]
+    [InlineData("\U0001F600", 1000)]
+    [InlineData("a\n", 2000)]
+    public void WhenNotesAreWithinTheirLimitButLargerThanAValueEscaped_ThenTheyAreWritten(string part, int count)
+    {
+        // Arrange
+        var notes = string.Concat(Enumerable.Repeat(part, count));
+
+        // Act
+        var written = Merge(null, Subject, $$"""{ "notes": {{JsonSerializer.Serialize(notes)}} }""");
+
+        // Assert
+        Assert.Equal(notes, JsonElement.Parse(written!).GetProperty("notes").GetString());
+    }
+
+    [Fact]
+    public void WhenNotesAreLargerThanTheirLimitInUtf8_ThenTheWriteIsRefused()
+    {
+        // Act & Assert
+        var exception = Assert.Throws<StorageRefusedException>(() => Merge(null, Subject, $$"""{ "notes": "{{new string('\u20AC', 1366)}}" }"""));
+        Assert.Contains("4 KB", exception.Message);
+    }
+
+    [Theory]
     [InlineData("""{ "notes": "<b>bold</b>" }""", "notes hold Markdown")]
     [InlineData("""{ "notes": "![pump](https://example.com/pump.png)" }""", "notes hold Markdown")]
     [InlineData("""{ "notes": "[run](javascript:alert(1))" }""", "notes hold Markdown")]
