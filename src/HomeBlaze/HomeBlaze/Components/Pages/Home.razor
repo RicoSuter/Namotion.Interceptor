@@ -30,7 +30,7 @@
 
         if (appBarPage != null)
         {
-            Navigation.NavigateTo(appBarPage.PageUrl);
+            Navigation.NavigateTo(appBarPage.PageUrl, replace: true);
             return;
         }
 
@@ -42,11 +42,11 @@
 
         if (navBarPage != null)
         {
-            Navigation.NavigateTo(navBarPage.PageUrl);
+            Navigation.NavigateTo(navBarPage.PageUrl, replace: true);
             return;
         }
 
         // Fallback to browser
-        Navigation.NavigateTo("/browser");
+        Navigation.NavigateTo("/browser", replace: true);
     }
 }

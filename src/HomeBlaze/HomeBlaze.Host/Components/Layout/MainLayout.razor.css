@@ -71,13 +71,13 @@
 }
 
 /* The open page in the app bar menu, like the primary color of the app bar icon of an open page. */
-::deep .app-bar-menu-page.active,
-::deep .app-bar-menu-page.active .mud-menu-item-icon {
+::deep .app-bar-menu-list > [aria-current="page"],
+::deep .app-bar-menu-list > [aria-current="page"] .mud-menu-item-icon {
     color: var(--mud-palette-primary);
 }
 
 /* The dark primary is below 4.5:1 on the surface of the menu. */
-.homeblaze-dark-mode ::deep .app-bar-menu-page.active,
-.homeblaze-dark-mode ::deep .app-bar-menu-page.active .mud-menu-item-icon {
+.homeblaze-dark-mode ::deep .app-bar-menu-list > [aria-current="page"],
+.homeblaze-dark-mode ::deep .app-bar-menu-list > [aria-current="page"] .mud-menu-item-icon {
     color: var(--mud-palette-primary-lighten);
 }

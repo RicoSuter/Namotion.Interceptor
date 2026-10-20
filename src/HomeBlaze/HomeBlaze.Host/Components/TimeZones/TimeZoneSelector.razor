@@ -10,7 +10,7 @@
 @inject ILogger<TimeZoneSelector> Logger
 
 @* A submenu: it must be placed inside a MudMenu, whose list then shows it as an entry with the active zone. *@
-<MudMenu @ref="_menu" AriaLabel="Select timezone" MaxHeight="500" data-testid="time-zone-menu">
+<MudMenu @ref="_menu" MaxHeight="500" data-testid="time-zone-menu">
     <ActivatorContent>
         <span class="time-zone-menu-activator">
             <MudIcon Icon="@Icons.Material.Filled.Schedule" Class="mud-menu-item-icon" />
@@ -18,11 +18,12 @@
                 <span>Time zone</span>
                 <span class="mud-typography-caption mud-text-secondary" data-testid="time-zone-current">@CurrentLabel</span>
             </span>
-            <MudIcon Icon="@Icons.Material.Filled.ArrowRight" Class="time-zone-menu-arrow" />
+            <MudIcon Icon="@Icons.Material.Filled.ArrowRight" />
         </span>
     </ActivatorContent>
     <ChildContent>
-    <div style="min-width: min(320px, calc(100vw - 32px));">
+    @* The submenu has no menu items of its own, so MudMenu does not close it on Escape. *@
+    <div style="min-width: min(320px, calc(100vw - 32px));" @onkeydown="OnKeyDownAsync">
         <div style="position: sticky; top: 0; z-index: 1; background-color: var(--mud-palette-surface);">
             <MudTextField @bind-Value="_search" Placeholder="Search timezone" Immediate="true"
                           Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
@@ -152,6 +153,15 @@
         if (exception is JSException)
         {
             Logger.LogWarning(exception, "Could not detect the browser time zone.");
+        }
+    }
+
+    private async Task OnKeyDownAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape" && _menu is not null)
+        {
+            _search = string.Empty;
+            await _menu.CloseMenuAsync();
         }
     }
 

@@ -23,9 +23,10 @@
         <MudLayout>
             <TimeZoneInitializer />
             <MudAppBar Elevation="1">
+                @{ var appBarItems = GetAppBarItems(); }
                 <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start"
                                OnClick="@DrawerToggleAsync" title="Toggle Navigation"/>
-                @foreach (var item in GetAppBarItems(AppBarAlignment.Left))
+                @foreach (var item in appBarItems.Where(item => item.Alignment == AppBarAlignment.Left))
                 {
                     <MudIconButton Icon="@SubjectIconExtensions.ResolveMudBlazorIcon(item.Icon)"
                                    Href="@item.PageUrl"
@@ -33,14 +34,14 @@
                                    title="@item.Title"/>
                 }
                 <MudSpacer/>
-                @foreach (var item in GetAppBarItems(AppBarAlignment.Right))
+                @foreach (var item in appBarItems.Where(item => item.Alignment == AppBarAlignment.Right))
                 {
                     <MudIconButton Icon="@SubjectIconExtensions.ResolveMudBlazorIcon(item.Icon)"
                                    Href="@item.PageUrl"
                                    Color="@(IsActive(item) ? Color.Primary : Color.Inherit)"
                                    title="@item.Title"/>
                 }
-                <AppBarMenu Pages="@GetAppBarItems(AppBarAlignment.Menu).ToList()"
+                <AppBarMenu Pages="@appBarItems.Where(item => item.Alignment == AppBarAlignment.Menu).ToList()"
                             IsDarkMode="@_isDarkMode" OnToggleDarkMode="@DarkModeToggle"/>
             </MudAppBar>
             <MudDrawer id="nav-drawer" @bind-Open="_drawerOpen" ClipMode="DrawerClipMode.Always" Elevation="2">
@@ -206,13 +207,14 @@
         InvokeAsync(StateHasChanged);
     }
 
-    private IEnumerable<NavigationItem> GetAppBarItems(AppBarAlignment alignment)
+    private List<NavigationItem> GetAppBarItems()
     {
         if (RootManager.Root == null)
-            return Enumerable.Empty<NavigationItem>();
+            return [];
 
         return NavigationResolver.GetChildItems(RootManager.Root)
-            .Where(item => item.Location == NavigationLocation.AppBar && item.IsPage && item.Alignment == alignment);
+            .Where(item => item.Location == NavigationLocation.AppBar && item.IsPage)
+            .ToList();
     }
 
     // The error page is shown exactly when the system is unhealthy, so it must render even if the
@@ -221,12 +223,6 @@
         .ToBaseRelativePath(NavigationManager.Uri)
         .StartsWith("Error", StringComparison.OrdinalIgnoreCase);
 
-    private bool IsActive(NavigationItem item) => IsActive(NavigationManager, item);
-
-    /// <summary>Whether the page of an app bar item is the one that is open.</summary>
-    internal static bool IsActive(NavigationManager navigationManager, NavigationItem item)
-    {
-        var currentPath = navigationManager.ToBaseRelativePath(navigationManager.Uri);
-        return currentPath.Equals(item.PageUrl, StringComparison.OrdinalIgnoreCase);
-    }
+    private bool IsActive(NavigationItem item) =>
+        item.IsPageUrlOf(NavigationManager.ToBaseRelativePath(NavigationManager.Uri));
 }

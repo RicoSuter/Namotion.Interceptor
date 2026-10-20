@@ -7,7 +7,6 @@
 
 @implements IDisposable
 
-@* The circuit sets data-time-zone once it has resolved the zone of the browser, so it also tells that the page is interactive. *@
 <MudMenu Icon="@Icons.Material.Filled.MoreVert" Color="Color.Inherit" AriaLabel="Open menu" title="Menu"
          Class="app-bar-menu" ListClass="app-bar-menu-list"
          AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight"
@@ -17,7 +16,6 @@
         @foreach (var item in Pages)
         {
             <MudMenuItem Icon="@SubjectIconExtensions.ResolveMudBlazorIcon(item.Icon)" Href="@item.PageUrl"
-                         Class="@(IsActive(item) ? "app-bar-menu-page active" : "app-bar-menu-page")"
                          aria-current="@(IsActive(item) ? "page" : null)">
                 @item.Title
             </MudMenuItem>
@@ -28,20 +26,14 @@
                  OnClick="@DeveloperMode.Toggle" AutoClose="false"
                  role="menuitemcheckbox" aria-checked="@(DeveloperMode.IsEnabled ? "true" : "false")"
                  data-testid="app-bar-menu-developer-mode">
-        <span class="d-flex align-center justify-space-between gap-4">
-            <span>Developer mode</span>
-            <MudIcon Icon="@ToggleIcon(DeveloperMode.IsEnabled)" Color="@(DeveloperMode.IsEnabled ? Color.Success : Color.Default)"/>
-        </span>
+        @ToggleContent("Developer mode", DeveloperMode.IsEnabled)
     </MudMenuItem>
     <TimeZoneSelector/>
     <MudMenuItem Icon="@(IsDarkMode ? Icons.Material.Filled.DarkMode : Icons.Material.Outlined.DarkMode)"
                  OnClick="@OnToggleDarkMode" AutoClose="false"
                  role="menuitemcheckbox" aria-checked="@(IsDarkMode ? "true" : "false")"
                  data-testid="app-bar-menu-dark-mode">
-        <span class="d-flex align-center justify-space-between gap-4">
-            <span>Dark mode</span>
-            <MudIcon Icon="@ToggleIcon(IsDarkMode)" Color="@(IsDarkMode ? Color.Success : Color.Default)"/>
-        </span>
+        @ToggleContent("Dark mode", IsDarkMode)
     </MudMenuItem>
     @* An app started from the home screen has no address bar, so these two stand in for its reload button and address. *@
     <MudDivider/>
@@ -66,16 +58,20 @@
         ? Icons.Material.Filled.DeveloperMode
         : Icons.Material.Outlined.DeveloperMode;
 
-    private static string ToggleIcon(bool isOn) => isOn
-        ? Icons.Material.Filled.ToggleOn
-        : Icons.Material.Filled.ToggleOff;
+    private static RenderFragment ToggleContent(string label, bool isOn) =>
+        @<span class="d-flex align-center justify-space-between gap-4">
+            <span>@label</span>
+            <MudIcon Icon="@(isOn ? Icons.Material.Filled.ToggleOn : Icons.Material.Filled.ToggleOff)"
+                     Color="@(isOn ? Color.Success : Color.Default)"/>
+        </span>;
 
     protected override void OnInitialized()
     {
         DeveloperMode.OnChange += OnDeveloperModeChanged;
     }
 
-    private bool IsActive(NavigationItem item) => MainLayout.IsActive(NavigationManager, item);
+    private bool IsActive(NavigationItem item) =>
+        item.IsPageUrlOf(NavigationManager.ToBaseRelativePath(NavigationManager.Uri));
 
     private void Reload() => NavigationManager.Refresh(forceReload: true);
 

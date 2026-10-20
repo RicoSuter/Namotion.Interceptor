@@ -12,11 +12,11 @@ How HomeBlaze adapts what it shows to the viewer. Today this covers the display 
 
 ### Overview
 
-Every user-facing date and time in HomeBlaze renders in a timezone the viewer controls, chosen per browser. Storage stays UTC end to end; only display formatting and date-picker input parsing convert. The chosen zone defaults to the browser's own timezone and can be overridden to any IANA zone from a toolbar selector. The choice is persisted in a cookie, so it survives reloads and can be read during prerendering.
+Every user-facing date and time in HomeBlaze renders in a timezone the viewer controls, chosen per browser. Storage stays UTC end to end; only display formatting and date-picker input parsing convert. The chosen zone defaults to the browser's own timezone and can be overridden to any IANA zone from the time zone submenu of the app bar menu. The choice is persisted in a cookie, so it survives reloads and can be read during prerendering.
 
 HomeBlaze runs as Blazor Server, so C# `DateTime.Now` and `TimeZoneInfo.Local` resolve to the server's timezone, not the viewer's. This feature replaces all server-local rendering with a per-circuit display service driven by the browser's zone.
 
-**Status.** Implemented: the display service, IANA resolution and catalog, cookie persistence with a prerender bridge, the toolbar selector, and conversion of the state-value panel, the property-history dialog (display and custom-range input), and file-modified timestamps.
+**Status.** Implemented: the display service, IANA resolution and catalog, cookie persistence with a prerender bridge, the time zone submenu of the app bar menu, and conversion of the state-value panel, the property-history dialog (display and custom-range input), and file-modified timestamps.
 
 ### Architecture
 
@@ -33,7 +33,7 @@ Resolution and formatting are split between a pure, framework-free core in `Home
 | `TimeZoneInterop` + `timezone.js` (`HomeBlaze.Host` `wwwroot`) | `HomeBlaze.Host` | Reads the browser zone (`Intl.DateTimeFormat().resolvedOptions().timeZone`). |
 | `BrowserPreferences` | `HomeBlaze.Host` | Scoped store of the preferences a browser remembers, one `homeblaze.<key>` cookie per key. Hands the cookies of the prerender over to the circuit and writes them through `cookies.js`. |
 | `TimeZoneInitializer` | `HomeBlaze.Host` | Resolves the zone on load (see the flow below). Rendered once in `MainLayout`. |
-| `TimeZoneSelector` | `HomeBlaze.Host` | Toolbar control: Automatic plus a searchable zone list, marks the active zone, and persists the choice. |
+| `TimeZoneSelector` | `HomeBlaze.Host` | Submenu of the app bar menu that shows the active zone: Automatic plus a searchable zone list, marks the active zone, and persists the choice. |
 
 #### Service
 

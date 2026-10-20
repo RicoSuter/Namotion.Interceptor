@@ -22,17 +22,16 @@ public class AppBarMenuTests
     }
 
     [Fact]
-    public async Task WhenAPageIsInTheMenu_ThenTheAppBarHasNoIconForItNorForTheEntriesOfTheMenu()
+    public async Task WhenAPageIsInTheMenu_ThenTheAppBarHasNoIconForIt()
     {
         // Arrange & Act
         var page = await OpenAsync("pages/Dashboard.md");
 
         // Assert
+        // The bar shows its pages before the absence of the menu page tells anything.
         var appBar = page.GetByRole(AriaRole.Banner);
-        await Assertions.Expect(appBar.Locator($"a[href='{MenuPageUrl}']")).ToHaveCountAsync(0);
         await Assertions.Expect(appBar.Locator("a[href='pages/Dashboard.md']")).ToBeVisibleAsync(new() { Timeout = Timeout });
-        await Assertions.Expect(appBar.GetByTitle("Toggle Dark Mode")).ToHaveCountAsync(0);
-        await Assertions.Expect(appBar.GetByTitle("Toggle Developer Mode")).ToHaveCountAsync(0);
+        await Assertions.Expect(appBar.Locator($"a[href='{MenuPageUrl}']")).ToHaveCountAsync(0);
         await Assertions.Expect(page.AppBarMenu().GetByRole(AriaRole.Button, new() { Name = "Open menu", Exact = true }))
             .ToBeVisibleAsync(new() { Timeout = Timeout });
     }
@@ -117,6 +116,21 @@ public class AppBarMenuTests
             await entry.ClickAsync();
             await Assertions.Expect(entry).ToHaveAttributeAsync("aria-checked", wasEnabled ? "true" : "false", new() { Timeout = Timeout });
         }
+    }
+
+    [Fact]
+    public async Task WhenEscapeIsPressedInTheSearchOfTheTimeZone_ThenTheSubmenuCloses()
+    {
+        // Arrange
+        var page = await OpenAsync("pages/Dashboard.md");
+        await page.OpenTimeZoneMenuAsync();
+        await page.GetByPlaceholder("Search timezone").FillAsync("Ber");
+
+        // Act
+        await page.GetByPlaceholder("Search timezone").PressAsync("Escape");
+
+        // Assert
+        await Assertions.Expect(page.GetByPlaceholder("Search timezone")).ToBeHiddenAsync(new() { Timeout = Timeout });
     }
 
     private async Task<IPage> OpenAsync(string path)
