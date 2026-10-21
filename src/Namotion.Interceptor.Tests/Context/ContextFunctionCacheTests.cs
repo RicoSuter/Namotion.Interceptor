@@ -171,27 +171,31 @@ public class ContextFunctionCacheTests
 
     private static Type[] CreateDoublingPropertyTypes(int count)
     {
-        return CreatePropertyTypes(count, typeof(DoublingPropertyType<>), typeof(DoublingPropertyTypeRoot));
+        return CreateNestedGenericTypes(count, typeof(DoublingPropertyType<>), typeof(DoublingPropertyTypeRoot));
     }
 
     private static Type[] CreateHighIndexPropertyTypes(int count)
     {
-        return CreatePropertyTypes(count, typeof(HighIndexPropertyType<>), typeof(HighIndexPropertyTypeRoot));
+        return CreateNestedGenericTypes(count, typeof(HighIndexPropertyType<>), typeof(HighIndexPropertyTypeRoot));
     }
 
     private static Type[] CreatePropertyTypes(int count)
     {
-        return CreatePropertyTypes(count, typeof(PropertyType<>), typeof(PropertyTypeRoot));
+        return CreateNestedGenericTypes(count, typeof(PropertyType<>), typeof(PropertyTypeRoot));
     }
 
-    private static Type[] CreatePropertyTypes(int count, Type openGenericType, Type rootType)
+    /// <summary>
+    /// Returns <paramref name="count"/> distinct types nested in <paramref name="openGenericType"/>, starting from
+    /// <paramref name="rootType"/>, so a test gets fresh type indices without declaring a type per index.
+    /// </summary>
+    internal static Type[] CreateNestedGenericTypes(int count, Type openGenericType, Type rootType)
     {
         var result = new Type[count];
-        var propertyType = rootType;
+        var type = rootType;
         for (var index = 0; index < count; index++)
         {
-            propertyType = openGenericType.MakeGenericType(propertyType);
-            result[index] = propertyType;
+            type = openGenericType.MakeGenericType(type);
+            result[index] = type;
         }
 
         return result;
