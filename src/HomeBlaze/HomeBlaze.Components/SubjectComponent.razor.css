@@ -181,9 +181,14 @@
     margin: 0;
 }
 
-/* Each row keeps 8 pixels above and below its content, its padding and the margin of the text of MudListItem, so rows are
-   16 pixels apart like blocks. The first and the last row add nothing at the edge of the list, so that a list in a card
-   ends at the padding of the card. */
+/* Each row keeps 6 pixels above and below its content, the padding of 4 of a dense MudListItem and a margin of 2 of its
+   text in place of 4, so rows are 12 pixels apart, a little closer than blocks. The first and the last row add nothing
+   at the edge of the list, so that a list in a card ends at the padding of the card. */
+::deep .value-list > .value-list-item > .mud-list-item-text {
+    margin-top: 2px;
+    margin-bottom: 2px;
+}
+
 ::deep .value-list > .value-list-item:first-child {
     padding-top: 0;
 }
