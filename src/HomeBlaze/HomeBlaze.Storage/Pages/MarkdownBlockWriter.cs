@@ -172,7 +172,7 @@ public static class MarkdownBlockWriter
         owner.Children.Where(child => child.Kind == MarkdownBlockKind.Slot && child.Head!.Name == slotName);
 
     // The white space before the head line of the block on its line.
-    private static string GetIndentation(string source, MarkdownBlock block) =>
+    internal static string GetIndentation(string source, MarkdownBlock block) =>
         source[(source.AsSpan(0, block.HeadSpan.Start).LastIndexOf('\n') + 1)..block.HeadSpan.Start];
 
     /// <summary>
@@ -198,6 +198,52 @@ public static class MarkdownBlockWriter
         edit = new MarkdownLineEdit(source.AsSpan(0, offset).Count('\n') + 1, 0, insertedLineCount);
         return source.Insert(offset, text + lineEnding);
     }
+
+    /// <summary>
+    /// Inserts the lines of a block before the 1-based <paramref name="line"/>, with an empty line between the block
+    /// and a line before or after it that is not empty. A line after the last line of the text appends the block.
+    /// <paramref name="blockText"/> has no line ending after its last line.
+    /// </summary>
+    public static string InsertBlockText(string source, int line, string blockText, string lineEnding) =>
+        InsertBlockText(source, line, blockText, lineEnding, out _);
+
+    /// <inheritdoc cref="InsertBlockText(string, int, string, string)"/>
+    internal static string InsertBlockText(string source, int line, string blockText, string lineEnding, out MarkdownLineEdit edit)
+    {
+        var lineStart = GetLineStart(source, line);
+        var text = blockText;
+        if (line > 1 && !IsEmptyLine(source, GetLineStart(source, line - 1), lineStart))
+        {
+            text = lineEnding + text;
+        }
+
+        if (!IsEmptyLine(source, lineStart, GetLineStart(source, line + 1)))
+        {
+            text += lineEnding;
+        }
+
+        return InsertLines(source, line, text, lineEnding, out edit);
+    }
+
+    /// <summary>Gets the 1-based line that <see cref="InsertLines"/> takes to append after the last line of text.</summary>
+    internal static int GetAppendLine(string source)
+    {
+        var lineFeedCount = source.AsSpan().Count('\n');
+        return source.Length == 0 || source[^1] == '\n' ? lineFeedCount + 1 : lineFeedCount + 2;
+    }
+
+    /// <summary>Gets the lines of the block from its head line to its last line, without the line ending of the last line.</summary>
+    internal static string GetBlockText(string source, MarkdownBlock block)
+    {
+        var start = GetLineStart(source, block.Line);
+        var end = GetLineStart(source, block.EndLine + 1);
+        return source[start..end].TrimEnd('\n').TrimEnd('\r');
+    }
+
+    // Whether the line between the two offsets has nothing but white space. The text after the last line ending is a
+    // line of its own, and it is empty when the text ends with a line ending.
+    private static bool IsEmptyLine(string source, int lineStart, int nextLineStart) =>
+        source.AsSpan(lineStart, nextLineStart - lineStart).IsWhiteSpace();
 
     /// <summary>
     /// Removes the block with everything in it: the lines from its head line to its last line, which is its
@@ -271,7 +317,7 @@ public static class MarkdownBlockWriter
         indentation.Length == 0 ? text : indentation + text.Replace(lineEnding, lineEnding + indentation);
 
     // The offset of the first character of the 1-based line, or the length of the text for a line after the last one.
-    private static int GetLineStart(string source, int line)
+    internal static int GetLineStart(string source, int line)
     {
         var offset = 0;
         for (var current = 1; current < line; current++)

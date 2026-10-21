@@ -398,6 +398,7 @@ namespace HomeBlaze.Storage.Pages
         public static string CreateBlock(string typeName, string? id, string configurationJson, int fenceLength, string lineEnding = "
 ") { }
         public static string GetLineEnding(string source, int offset = 0) { }
+        public static string InsertBlockText(string source, int line, string blockText, string lineEnding) { }
         public static string WriteConfiguration(string source, HomeBlaze.Storage.Pages.MarkdownBlock block, string configurationJson) { }
     }
     public static class MarkdownErrorBox

@@ -701,4 +701,57 @@ public class MarkdownBlockWriterTests
         // Assert
         Assert.Equal("  a\r\n  b", result);
     }
+
+    [Theory]
+    [InlineData("intro\n\n:: Demo.One\n::\n", 3, "intro\n\n:: Demo.New\n::\n\n:: Demo.One\n::\n")]
+    [InlineData("intro\n:: Demo.One\n::\n", 2, "intro\n\n:: Demo.New\n::\n\n:: Demo.One\n::\n")]
+    [InlineData("intro\n", 2, "intro\n\n:: Demo.New\n::\n")]
+    [InlineData("intro", 2, "intro\n\n:: Demo.New\n::")]
+    [InlineData("", 1, ":: Demo.New\n::\n")]
+    public void WhenBlockTextIsInserted_ThenAnEmptyLineSeparatesItFromLinesThatAreNotEmpty(string source, int line, string expected)
+    {
+        // Act
+        var result = MarkdownBlockWriter.InsertBlockText(source, line, ":: Demo.New\n::", "\n");
+
+        // Assert
+        Assert.Equal(expected, result);
+    }
+
+    [Fact]
+    public void WhenBlockTextIsInsertedIntoAPageWithWindowsLineEndings_ThenTheResultHasOnlyWindowsLineEndings()
+    {
+        // Arrange
+        const string source = "intro\r\n:: Demo.One\r\n::\r\n";
+
+        // Act
+        var result = MarkdownBlockWriter.InsertBlockText(source, 2, ":: Demo.New\r\n::", "\r\n");
+
+        // Assert
+        Assert.Equal("intro\r\n\r\n:: Demo.New\r\n::\r\n\r\n:: Demo.One\r\n::\r\n", result);
+    }
+
+    [Theory]
+    [InlineData("intro\n", 2)]
+    [InlineData("intro", 2)]
+    [InlineData("a\nb\n", 3)]
+    [InlineData("", 1)]
+    public void WhenTheAppendLineIsAskedFor_ThenItIsTheLineAfterTheLastLineOfText(string source, int expected)
+    {
+        // Act & Assert
+        Assert.Equal(expected, MarkdownBlockWriter.GetAppendLine(source));
+    }
+
+    [Fact]
+    public void WhenTheTextOfABlockIsAskedFor_ThenItHasItsLinesWithoutTheLastLineEnding()
+    {
+        // Arrange
+        const string source = "intro\n\n:: Demo.Card\n::: Row Label=A\n:::\n::\n\noutro\n";
+        var card = MarkdownPageParser.Parse(source).Blocks[0];
+
+        // Act
+        var text = MarkdownBlockWriter.GetBlockText(source, card);
+
+        // Assert
+        Assert.Equal(":: Demo.Card\n::: Row Label=A\n:::\n::", text);
+    }
 }
