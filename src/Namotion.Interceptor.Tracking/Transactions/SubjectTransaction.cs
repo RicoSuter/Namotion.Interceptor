@@ -59,8 +59,9 @@ public sealed class SubjectTransaction : IDisposable
     private int _isDisposed;
 
     // Handoff from Dispose to EndCommit: when Dispose runs mid-commit, EndCommit releases the exclusive lock
-    // once the commit finishes, and clears this so the lock is released exactly once. Accessed only under
-    // _pendingChangesLock (no volatile needed; never read lock-free).
+    // once the commit finishes. The _isDisposed CAS and this handoff under _pendingChangesLock make the release
+    // happen exactly once; EndCommit clears the flag only defensively. Accessed only under _pendingChangesLock
+    // (no volatile needed; never read lock-free).
     private bool _disposeRequestedDuringCommit;
 
     // Written only by the committing thread as it enters and leaves a commit scope, and read only after
@@ -145,8 +146,8 @@ public sealed class SubjectTransaction : IDisposable
     internal SubjectTransactionInterceptor Interceptor { get; }
 
     /// <summary>
-    /// Gets the transaction handlers resolved from the context when the transaction began, followed by those added from
-    /// the contexts of subjects when they are written.
+    /// Gets the transaction handlers resolved from the context when the transaction began (after any wait for the
+    /// exclusive lock), followed by those added from the contexts of subjects when they are written.
     /// </summary>
     internal ImmutableArray<ITransactionHandler> Handlers => ImmutableCollectionsMarshal.AsImmutableArray(_handlerSet.Handlers);
 
@@ -518,25 +519,35 @@ public sealed class SubjectTransaction : IDisposable
             ?? throw new InvalidOperationException(
                 "Transactions are not enabled. Call WithTransactions() when creating the context.");
 
-        // Resolved before the lock is taken: the lookup can throw, and nothing would release the lock then.
-        var handlers = context.GetServices<ITransactionHandler>();
-
         if (locking == TransactionLocking.Exclusive)
         {
             await interceptor.AcquireExclusiveTransactionLockAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        // The caller assigns the transaction so the value flows into its execution context.
-        return new SubjectTransaction(
-            context,
-            interceptor,
-            failureHandling,
-            locking,
-            requirement,
-            conflictBehavior,
-            validationMode,
-            commitTimeout,
-            handlers);
+        try
+        {
+            // The caller assigns the transaction so the value flows into its execution context.
+            return new SubjectTransaction(
+                context,
+                interceptor,
+                failureHandling,
+                locking,
+                requirement,
+                conflictBehavior,
+                validationMode,
+                commitTimeout,
+                context.GetServices<ITransactionHandler>());
+        }
+        catch
+        {
+            // Resolving the handlers can throw, and no transaction exists yet to release the lock on dispose.
+            if (locking == TransactionLocking.Exclusive)
+            {
+                interceptor.ReleaseExclusiveTransactionLock();
+            }
+
+            throw;
+        }
     }
 
     /// <summary>

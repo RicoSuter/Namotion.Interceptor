@@ -17,8 +17,8 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
     private readonly SemaphoreSlim _exclusiveTransactionLock = new(1, 1);
 
     /// <summary>
-    /// Acquires the transaction lock for this context.
-    /// Used by serialized transactions to ensure only one transaction executes at a time.
+    /// Acquires the transaction lock for this context. Used by optimistic transactions to hold the lock for the duration
+    /// of a commit.
     /// </summary>
     /// <returns>An object whose first disposal releases the lock.</returns>
     internal async ValueTask<IDisposable> AcquireTransactionLockAsync(CancellationToken cancellationToken)
@@ -28,8 +28,9 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
     }
 
     /// <summary>
-    /// Acquires the transaction lock for this context without a releaser object. Once the returned task completes, the
-    /// caller must call <see cref="ReleaseExclusiveTransactionLock"/> exactly once.
+    /// Acquires the transaction lock for this context without a releaser object. Used by exclusive transactions to hold
+    /// the lock for their lifetime. Once the returned task completes, the caller must call
+    /// <see cref="ReleaseExclusiveTransactionLock"/> exactly once.
     /// </summary>
     internal Task AcquireExclusiveTransactionLockAsync(CancellationToken cancellationToken)
     {
