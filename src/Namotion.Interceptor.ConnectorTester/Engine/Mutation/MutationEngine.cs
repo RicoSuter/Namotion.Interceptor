@@ -27,6 +27,7 @@ public sealed class MutationEngine : BackgroundService
     public int StructuralMutationRate => _structuralMutationRate;
     public long ValueMutationCount => _counters.ValueMutationCount;
     public long StructuralMutationCount => _counters.StructuralMutationCount;
+    public long FailedCommitCount => _counters.FailedCommitCount;
 
     public void ResetCounters() => _counters.Reset();
 

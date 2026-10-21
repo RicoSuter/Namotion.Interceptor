@@ -54,7 +54,17 @@ public sealed class RandomValueMutationStrategy : IValueMutationStrategy
                         _counters.IncrementValue();
                     }
 
-                    await transaction.CommitAsync(cancellationToken);
+                    try
+                    {
+                        await transaction.CommitAsync(cancellationToken);
+                    }
+                    catch (SubjectTransactionException)
+                    {
+                        // Expected under chaos: a disconnected source fails the write, BestEffort
+                        // applies what it can, and the rest is reported back through the exception.
+                        // The mutations above are already counted; only the commit failure is new.
+                        _counters.IncrementFailedCommit();
+                    }
                 }
                 else
                 {

@@ -66,8 +66,9 @@ public sealed class CycleStatistics
 
         foreach (var engine in _mutationEngines)
         {
-            _logger.LogInformation("  {Name}: {Values:N0} value mutations, {Structural:N0} structural mutations",
-                engine.Name, engine.ValueMutationCount, engine.StructuralMutationCount);
+            _logger.LogInformation(
+                "  {Name}: {Values:N0} value mutations, {Structural:N0} structural mutations, {FailedCommits:N0} failed commits",
+                engine.Name, engine.ValueMutationCount, engine.StructuralMutationCount, engine.FailedCommitCount);
         }
 
         foreach (var engine in _chaosEngines)

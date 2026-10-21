@@ -135,7 +135,17 @@ public sealed class BatchValueMutationStrategy : IValueMutationStrategy
             }
         }
 
-        await transaction.CommitAsync(cancellationToken);
+        try
+        {
+            await transaction.CommitAsync(cancellationToken);
+        }
+        catch (SubjectTransactionException)
+        {
+            // Expected under chaos: a disconnected source fails the write, BestEffort applies
+            // what it can, and the rest is reported back through the exception. MutateNode above
+            // already counted the batch's mutations; only the commit failure is new.
+            _counters.IncrementFailedCommit();
+        }
     }
 
     private void MutateBatchParallel(

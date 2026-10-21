@@ -37,12 +37,29 @@ public class MutationCountersTests
     }
 
     [Fact]
-    public void WhenResetCalled_ThenBothCountersReturnToZero()
+    public void WhenIncrementFailedCommitCalled_ThenFailedCommitCountIncreases()
+    {
+        // Arrange
+        var counters = new MutationCounters();
+
+        // Act
+        counters.IncrementFailedCommit();
+        counters.IncrementFailedCommit();
+
+        // Assert
+        Assert.Equal(2, counters.FailedCommitCount);
+        Assert.Equal(0, counters.ValueMutationCount);
+        Assert.Equal(0, counters.StructuralMutationCount);
+    }
+
+    [Fact]
+    public void WhenResetCalled_ThenAllCountersReturnToZero()
     {
         // Arrange
         var counters = new MutationCounters();
         counters.IncrementValue();
         counters.IncrementStructural();
+        counters.IncrementFailedCommit();
 
         // Act
         counters.Reset();
@@ -50,6 +67,7 @@ public class MutationCountersTests
         // Assert
         Assert.Equal(0, counters.ValueMutationCount);
         Assert.Equal(0, counters.StructuralMutationCount);
+        Assert.Equal(0, counters.FailedCommitCount);
     }
 
     [Fact]
