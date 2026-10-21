@@ -7,29 +7,28 @@ public class InlineValueStorageTests
     [Fact]
     public void WhenBoxingStoredValue_ThenEveryInlineTypeBoxesAsItself()
     {
-        // Act & Assert
-        AssertBox(42);
-        AssertBox(42L);
-        AssertBox(4.2);
-        AssertBox(4.2f);
-        AssertBox(true);
-        AssertBox((byte)42);
-        AssertBox((sbyte)-42);
-        AssertBox((short)-42);
-        AssertBox((ushort)42);
-        AssertBox(42u);
-        AssertBox(42ul);
-        AssertBox('x');
-        AssertBox((nint)42);
-        AssertBox(4.2m);
-        AssertBox(new DateTime(2024, 1, 1, 12, 0, 0, DateTimeKind.Utc));
-        AssertBox(new DateTimeOffset(2024, 1, 1, 12, 0, 0, TimeSpan.FromHours(2)));
-        AssertBox(TimeSpan.FromSeconds(42));
-        AssertBox(Guid.Parse("11111111-1111-1111-1111-111111111111"));
-        AssertBox(DayOfWeek.Friday);
-        AssertBox(new SmallStruct(4, 2));
-        AssertBox<int?>(42);
-        AssertBox<int?>(null);
+        AssertBoxesAsItself(42);
+        AssertBoxesAsItself(42L);
+        AssertBoxesAsItself(4.2);
+        AssertBoxesAsItself(4.2f);
+        AssertBoxesAsItself(true);
+        AssertBoxesAsItself((byte)42);
+        AssertBoxesAsItself((sbyte)-42);
+        AssertBoxesAsItself((short)-42);
+        AssertBoxesAsItself((ushort)42);
+        AssertBoxesAsItself(42u);
+        AssertBoxesAsItself(42ul);
+        AssertBoxesAsItself('x');
+        AssertBoxesAsItself((nint)42);
+        AssertBoxesAsItself(4.2m);
+        AssertBoxesAsItself(new DateTime(2024, 1, 1, 12, 0, 0, DateTimeKind.Utc));
+        AssertBoxesAsItself(new DateTimeOffset(2024, 1, 1, 12, 0, 0, TimeSpan.FromHours(2)));
+        AssertBoxesAsItself(TimeSpan.FromSeconds(42));
+        AssertBoxesAsItself(Guid.Parse("11111111-1111-1111-1111-111111111111"));
+        AssertBoxesAsItself(DayOfWeek.Friday);
+        AssertBoxesAsItself(new SmallStruct(4, 2));
+        AssertBoxesAsItself<int?>(42);
+        AssertBoxesAsItself<int?>(null);
     }
 
     [Fact]
@@ -43,6 +42,7 @@ public class InlineValueStorageTests
 
         // Assert
         Assert.Null(boxed);
+        Assert.True(storage.IsEmpty);
         Assert.Null(storage.StoredType);
     }
 
@@ -87,11 +87,15 @@ public class InlineValueStorageTests
         Assert.Equal(0, intValue);
     }
 
-    private static void AssertBox<TValue>(TValue value)
+    private static void AssertBoxesAsItself<TValue>(TValue value)
     {
+        // Arrange
         var storage = InlineValueStorage.Create(value);
+
+        // Act
         var boxed = storage.GetValueBoxed();
 
+        // Assert
         Assert.Equal(value, boxed);
         Assert.Equal(value?.GetType(), boxed?.GetType());
         Assert.Equal(typeof(TValue), storage.StoredType);

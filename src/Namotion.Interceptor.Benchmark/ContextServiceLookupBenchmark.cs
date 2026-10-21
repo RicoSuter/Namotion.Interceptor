@@ -1,4 +1,3 @@
-using System.Collections.Immutable;
 using BenchmarkDotNet.Attributes;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Validation;
@@ -14,6 +13,8 @@ namespace Namotion.Interceptor.Benchmark;
 [MemoryDiagnoser]
 public class ContextServiceLookupBenchmark
 {
+    private const int Lookups = 64;
+
     private IInterceptorSubjectContext _subjectContext;
 
     [GlobalSetup]
@@ -27,9 +28,16 @@ public class ContextServiceLookupBenchmark
         _subjectContext = ((IInterceptorSubject)new Car(context)).Context;
     }
 
-    [Benchmark]
-    public ImmutableArray<IPropertyValidator> GetServicesOnSubjectContext()
+    [Benchmark(OperationsPerInvoke = Lookups)]
+    public int GetServicesOnSubjectContext()
     {
-        return _subjectContext.GetServices<IPropertyValidator>();
+        var context = _subjectContext;
+        var count = 0;
+        for (var index = 0; index < Lookups; index++)
+        {
+            count += context.GetServices<IPropertyValidator>().Length;
+        }
+
+        return count;
     }
 }
