@@ -67,6 +67,11 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         "ApplyConfigurationAsync of a subject that the reload inside that write applies. The call would wait for " +
         "the write that waits for it. " + StorageWorker.CallFromWithinWorkRemedy;
 
+    private const string ReloadRefusal = "Blocks cannot be inserted or removed until the page has been read again.";
+    private const string ConfigurationChangedRefusal = "The page changed while the configuration was written; save again.";
+    private const string StructureChangedRefusal = "The page changed while it was edited. Try again.";
+    private const string NoBlockRefusal = "The subject has no block on the page.";
+
     // The write of this page that the flow runs in, so that a write from inside it is refused instead of waiting
     // for _writeLock. Off the worker, the reload after a write or a refused write-back applies configuration within the write.
     private readonly AsyncLocal<WriteOfFlow?> _writeOfFlow = new();
@@ -482,6 +487,187 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         }
     }
 
+    /// <summary>Deletes the block of <paramref name="subject"/> with everything in it and saves the page.</summary>
+    /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage or from within a write of this page.</exception>
+    public Task<MarkdownEditResult> DeleteBlockAsync(IInterceptorSubject subject, CancellationToken cancellationToken) =>
+        EditStructureAsync(
+            (page, subjects) => FindOwnBlock(page, subjects, subject) is { } block
+                ? (MarkdownPageOperations.TryRemove(page, subjects, block, out var refusal), refusal)
+                : (null, NoBlockRefusal),
+            cancellationToken);
+
+    /// <summary>
+    /// Swaps the block of <paramref name="subject"/> with the block of the same slot before it (<paramref name="direction"/>
+    /// -1) or after it (1) and saves the page. The text between the two blocks stays in place.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage or from within a write of this page.</exception>
+    public Task<MarkdownEditResult> MoveBlockAsync(IInterceptorSubject subject, int direction, CancellationToken cancellationToken) =>
+        EditStructureAsync(
+            (page, subjects) => FindOwnBlock(page, subjects, subject) is { } block
+                ? (MarkdownPageOperations.TryMove(page, subjects, block, direction, out var refusal), refusal)
+                : (null, NoBlockRefusal),
+            cancellationToken);
+
+    /// <summary>
+    /// Inserts a block for <paramref name="widget"/>, with its configuration and <paramref name="name"/> after <c>#</c>,
+    /// into <paramref name="content"/>: this page or a fragment of one of its blocks. It goes before the block of
+    /// <paramref name="before"/>, or after the content when that is null. The page then creates its own subject for it.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage or from within a write of this page.</exception>
+    public Task<MarkdownEditResult> InsertWidgetAsync(
+        IInterceptorSubject content, IInterceptorSubject? before, IInterceptorSubject widget, string? name, CancellationToken cancellationToken)
+    {
+        var typeName = widget.GetType().FullName!;
+        var configurationJson = MarkdownBlockConfiguration.Serialize(_serializer, widget, block: null);
+        return EditStructureAsync(
+            (page, subjects) =>
+            {
+                MarkdownBlock? owner = null;
+                if (!ReferenceEquals(content, this) &&
+                    (owner = MarkdownPageOperations.FindContentBlock(page, subjects, content)) is null)
+                {
+                    return (null, "The content is not on this page.");
+                }
+
+                MarkdownBlock? beforeBlock = null;
+                if (before is not null && (beforeBlock = FindOwnBlock(page, subjects, before)) is null)
+                {
+                    return (null, NoBlockRefusal);
+                }
+
+                return (MarkdownPageOperations.TryInsertWidget(page, subjects, owner, beforeBlock, typeName, name, configurationJson, out var refusal), refusal);
+            },
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// Appends a block to the list slot <paramref name="slotName"/> of the block of <paramref name="owner"/>: with the
+    /// configuration of <paramref name="item"/>, or empty for a slot whose blocks hold page content (null item).
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage or from within a write of this page.</exception>
+    public Task<MarkdownEditResult> AddSlotItemAsync(
+        IInterceptorSubject owner, string slotName, IInterceptorSubject? item, CancellationToken cancellationToken)
+    {
+        var configurationJson = item is null ? "{}" : MarkdownBlockConfiguration.Serialize(_serializer, item, block: null);
+        return EditStructureAsync(
+            (page, subjects) =>
+            {
+                if (FindOwnBlock(page, subjects, owner) is not { } block)
+                {
+                    return (null, NoBlockRefusal);
+                }
+
+                if (!SlotMap.For(owner.GetType()).Named.TryGetValue(slotName, out var slot) || !slot.IsList ||
+                    (item is null ? !slot.IsOpen : item.GetType() != slot.ValueType))
+                {
+                    return (null, $"The block has no list slot '{slotName}' for this item.");
+                }
+
+                return (MarkdownPageOperations.TryAppendSlotBlock(page, subjects, block, slotName, configurationJson, out var refusal), refusal);
+            },
+            cancellationToken);
+    }
+
+    /// <summary>Gets what the block of <paramref name="subject"/> allows, all false when it has no block on this page.</summary>
+    public MarkdownBlockActions GetBlockActions(IInterceptorSubject subject)
+    {
+        var snapshot = _parseResult;
+        if (snapshot.Page is not { } page || FindOwnBlock(page, snapshot.BlockSubjects, subject) is not { } block)
+        {
+            return default;
+        }
+
+        return new MarkdownBlockActions(
+            CanDelete: true,
+            CanMoveUp: MarkdownPageOperations.FindMoveTarget(page, block, -1) is not null,
+            CanMoveDown: MarkdownPageOperations.FindMoveTarget(page, block, 1) is not null,
+            ContainedBlockCount: MarkdownPageOperations.CountBlocks(block) - 1);
+    }
+
+    /// <summary>Gets the list slots of the block of <paramref name="owner"/>, none when it has no block on this page.</summary>
+    public IReadOnlyList<MarkdownListSlot> GetListSlots(IInterceptorSubject owner)
+    {
+        var snapshot = _parseResult;
+        if (snapshot.Page is not { } page || FindOwnBlock(page, snapshot.BlockSubjects, owner) is null)
+        {
+            return [];
+        }
+
+        var result = new List<MarkdownListSlot>();
+        foreach (var slot in SlotMap.For(owner.GetType()).Slots)
+        {
+            if (slot.IsList)
+            {
+                result.Add(new MarkdownListSlot(slot.Name, slot.IsOpen ? null : slot.ValueType));
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>Gets the name after <c>#</c> of the block of <paramref name="subject"/>, or null without one.</summary>
+    public string? GetBlockName(IInterceptorSubject subject)
+    {
+        var snapshot = _parseResult;
+        return snapshot.Page is { } page ? FindOwnBlock(page, snapshot.BlockSubjects, subject)?.Head?.Id : null;
+    }
+
+    /// <summary>Gets whether <paramref name="content"/> is this page or the content of one of its blocks.</summary>
+    public bool IsContentOfPage(IInterceptorSubject content)
+    {
+        var snapshot = _parseResult;
+        return ReferenceEquals(content, this) ||
+               (snapshot.Page is { } page && MarkdownPageOperations.FindContentBlock(page, snapshot.BlockSubjects, content) is not null);
+    }
+
+    private async Task<MarkdownEditResult> EditStructureAsync(
+        Func<MarkdownPage, IReadOnlyDictionary<int, IInterceptorSubject>, (MarkdownStructureChange? Change, string? Refusal)> operation,
+        CancellationToken cancellationToken)
+    {
+        EnsureNotWithinWrite();
+        await _writeLock.WaitAsync(cancellationToken);
+        var write = BeginWrite();
+        try
+        {
+            var snapshot = _parseResult;
+            if (snapshot.Page is not { } page)
+            {
+                return MarkdownEditResult.Refused("The page has not been read yet.");
+            }
+
+            // The operations change only text, so a refusal leaves the graph as the snapshot has it.
+            var (change, refusal) = operation(page, snapshot.BlockSubjects);
+            if (change is null)
+            {
+                _parser.LogRefusedWrite(FullPath, refusal!);
+                return MarkdownEditResult.Refused(refusal!);
+            }
+
+            var publishRefusal = await PublishAndWriteAsync(snapshot, change.Write, change.ChangedBlock, StructureChangedRefusal);
+            return publishRefusal is null ? MarkdownEditResult.Written : MarkdownEditResult.Refused(publishRefusal);
+        }
+        finally
+        {
+            EndWrite(write);
+        }
+    }
+
+    // The block whose own subject the subject is. Unlike FindBlock, not the block that holds the subject in its
+    // configuration, such as the grid of a cell, which a delete must never take.
+    private static MarkdownBlock? FindOwnBlock(
+        MarkdownPage page, IReadOnlyDictionary<int, IInterceptorSubject> blockSubjects, IInterceptorSubject subject)
+    {
+        foreach (var (index, candidate) in blockSubjects)
+        {
+            if (ReferenceEquals(candidate, subject))
+            {
+                return page.AllBlocks[index];
+            }
+        }
+
+        return null;
+    }
+
     // Under _writeLock: no other write of this file runs, so only a reload can change the snapshot meanwhile.
     private async Task<bool> WriteBlockAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
     {
@@ -517,6 +703,14 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             return false;
         }
 
+        return await PublishAndWriteAsync(snapshot, write, page.AllBlocks[blockIndex], ConfigurationChangedRefusal) is null;
+    }
+
+    // Under _writeLock: publishes the write as the snapshot that follows `snapshot` and writes its text. Returns why
+    // nothing was written, or null. `changedBlock` is the block of the snapshot whose text changed, null for the page.
+    private async Task<string?> PublishAndWriteAsync(
+        MarkdownParseResult snapshot, MarkdownBlockWrite write, MarkdownBlock? changedBlock, string changedPageRefusal)
+    {
         // After the graph was read and before anything is published: the blocks were compared with slot values
         // that a reload may have changed since the snapshot was parsed. A reload that published since then fails
         // the exchange below. A full fence, because a volatile read lets the earlier reads of the graph pass it
@@ -524,22 +718,25 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         Thread.MemoryBarrier();
         if (write.HasInsertedOrRemovedBlocks && _isGraphAheadOfSnapshot)
         {
-            _parser.LogRefusedWrite(FullPath, "Blocks cannot be inserted or removed until the page has been read again.");
-            return false;
+            _parser.LogRefusedWrite(FullPath, ReloadRefusal);
+            return ReloadRefusal;
         }
 
         // The text was computed from the snapshot, so it would undo what a reload published since then.
         var published = snapshot with { Page = write.Page, BlockSubjects = write.BlockSubjects };
         if (!ReferenceEquals(Interlocked.CompareExchange(ref _parseResult, published, snapshot), snapshot))
         {
-            _parser.LogRefusedWrite(FullPath, "The page changed while the configuration was written; save again.");
-            return false;
+            _parser.LogRefusedWrite(FullPath, changedPageRefusal);
+            return changedPageRefusal;
         }
 
         // The text of the block and of the blocks around it changes in the file, so a later read of the text that
         // they had before is a change that must be applied, also when the read inside the write is skipped or fails.
         // The blocks inside it keep their text.
-        ForgetAppliedBlocksAround(page, page.AllBlocks[blockIndex], snapshot.BlockSubjects);
+        if (changedBlock is not null)
+        {
+            ForgetAppliedBlocksAround(snapshot.Page!, changedBlock, snapshot.BlockSubjects);
+        }
 
         // Before the write, because the storage reloads this file from inside the write. The reload
         // must find the keys that are now in the file, or a value that became null would recreate the subject.
@@ -552,7 +749,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         Content = content;
 
         await WriteUnlockedAsync(content);
-        return true;
+        return null;
     }
 
     // The block itself and every block whose lines contain its lines.
