@@ -16,7 +16,7 @@ public class StateAttributePathProvider : PathProviderBase
     public override char PathSeparator => '/';
 
     public override bool IsPropertyIncluded(RegisteredSubjectProperty property)
-        => property.TryGetAttribute(KnownAttributes.State) is not null || property.CanContainSubjects || HasMetadata(property);
+        => property.TryGetAttribute(KnownAttributes.State) is not null || property.CanContainSubjects || IsMetadataWithValue(property);
 
     public override string? TryGetPropertySegment(RegisteredSubjectProperty property)
     {
@@ -25,10 +25,11 @@ public class StateAttributePathProvider : PathProviderBase
             return property.Name;
         }
 
-        return property.CanContainSubjects || HasMetadata(property) ? property.Name : null;
+        return property.CanContainSubjects || IsMetadataWithValue(property) ? property.Name : null;
     }
 
-    private static bool HasMetadata(RegisteredSubjectProperty property) => property.IsMetadata() && property.GetValue() is not null;
+    // Removed metadata stays as a null value, as the registry cannot remove a property; it is listed as no metadata.
+    private static bool IsMetadataWithValue(RegisteredSubjectProperty property) => property.IsMetadata() && property.GetValue() is not null;
 
     public override RegisteredSubjectProperty? TryGetPropertyFromSegment(
         RegisteredSubject subject, string segment)
