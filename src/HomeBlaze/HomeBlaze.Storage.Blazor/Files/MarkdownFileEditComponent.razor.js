@@ -7,6 +7,7 @@ const Head = 2;
 const Fence = 3;
 const ClosingFence = 4;
 const Fold = 5;
+const Name = 6;
 const RecordLength = 6;
 
 const collections = new WeakMap();
@@ -61,6 +62,9 @@ export function update(editorId, version, values, labels) {
                 break;
             case Fence:
                 decorations.push({ range, options: { description: "block-fence", inlineClassName: `block-fence block-color-${color}` } });
+                break;
+            case Name:
+                decorations.push({ range, options: { description: "block-name", inlineClassName: "block-name" } });
                 break;
             case ClosingFence:
                 decorations.push({
