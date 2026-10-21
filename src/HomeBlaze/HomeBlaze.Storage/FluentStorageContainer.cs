@@ -1,13 +1,18 @@
+using System.Collections.Immutable;
 using System.ComponentModel;
 using System.Text;
+using System.Text.Json;
 using FluentStorage;
 using FluentStorage.Blobs;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Services;
+using HomeBlaze.Services.Metadata;
 using HomeBlaze.Storage.Abstractions;
+using HomeBlaze.Storage.Abstractions.Metadata;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
+using HomeBlaze.Storage.Metadata;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -34,7 +39,7 @@ namespace HomeBlaze.Storage;
 [InterceptorSubject]
 public partial class FluentStorageContainer :
     BackgroundService,
-    IStorageContainer, IConfigurationWriter, ITitleProvider, IIconProvider, IConfigurable
+    IStorageContainer, IConfigurationWriter, ITitleProvider, IIconProvider, IConfigurable, IMetadataContainer, IMetadataStore
 {
     private static readonly IReadOnlySet<string> NoPaths = new HashSet<string>();
 
@@ -58,12 +63,15 @@ public partial class FluentStorageContainer :
     // only what it read, so its item never touches the index or the client of a later connection.
     private volatile StorageConnection? _connection;
 
-    private StorageConnection Connection => _connection is { IsEnded: false } connection
+    internal StorageConnection Connection => _connection is { IsEnded: false } connection
         ? connection
-        : throw new InvalidOperationException("Storage not connected");
+        : throw new StorageRefusedException("Storage not connected");
 
     /// <summary>The clock for timeouts and timers. Read when the storage connects.</summary>
     internal TimeProvider TimeProvider { get; set; } = TimeProvider.System;
+
+    /// <summary>Applies and writes the metadata of this storage.</summary>
+    internal StorageMetadataStore MetadataStore { get; }
 
     /// <summary>Wraps the storage client when the storage connects.</summary>
     internal Func<IBlobStorage, IBlobStorage>? ClientDecorator { get; set; }
@@ -122,6 +130,9 @@ public partial class FluentStorageContainer :
     public partial StorageStatus Status { get; set; }
 
     /// <inheritdoc />
+    public partial ImmutableArray<string> ChildOrder { get; private set; }
+
+    /// <inheritdoc />
     public IReadOnlyCollection<string> ChildNames => [.. Children.Keys];
 
     public string Title => string.IsNullOrEmpty(ConnectionString)
@@ -148,6 +159,7 @@ public partial class FluentStorageContainer :
         _serviceProvider = serviceProvider;
         _serializer = serializer;
         _logger = logger;
+        MetadataStore = new StorageMetadataStore(this, logger);
 
         StorageType = "disk";
         ConnectionString = string.Empty;
@@ -155,6 +167,7 @@ public partial class FluentStorageContainer :
         ReconcileIntervalSeconds = 300;
         Children = new Dictionary<string, IInterceptorSubject>();
         Status = StorageStatus.Disconnected;
+        ChildOrder = [];
     }
         
     /// <summary>
@@ -492,6 +505,18 @@ public partial class FluentStorageContainer :
     }
 
     /// <summary>
+    /// Takes the metadata and the order from the <c>.metadata.json</c> in the root of the storage, or none without one.
+    /// Called on the worker.
+    /// </summary>
+    internal void ApplyMetadata(StorageMetadataFile? file)
+    {
+        if (StorageMetadataValues.SetOwnMetadata(this, ChildOrder, file) is { } childOrder)
+        {
+            ChildOrder = childOrder;
+        }
+    }
+
+    /// <summary>
     /// IConfigurationWriter - Saves the file of the subject, or of the subject it is nested in through
     /// [Configuration] properties.
     /// </summary>
@@ -532,13 +557,16 @@ public partial class FluentStorageContainer :
     /// <summary>
     /// Adds a new subject to storage at the specified path.
     /// </summary>
-    /// <exception cref="ArgumentException">The path is hidden or temporary and would not be loaded again.</exception>
+    /// <exception cref="ArgumentException">The path is hidden, temporary or the name of a metadata file, and would not be loaded again.</exception>
     /// <exception cref="InvalidOperationException">A file exists at the path, or its key in the hierarchy is taken.</exception>
     public async Task AddSubjectAsync(string path, IInterceptorSubject subject, CancellationToken cancellationToken)
     {
         var relativePath = StoragePath.Normalize(path);
         if (StoragePathFilter.IsIgnored(relativePath))
             throw new ArgumentException($"A subject at '{path}' would not be loaded again: the path is hidden or temporary.", nameof(path));
+
+        if (StorageMetadataPath.IsReservedSubjectPath(relativePath))
+            throw new ArgumentException($"A subject at '{path}' could be read as a metadata file: names that end with '.metadata', in any case, are reserved.", nameof(path));
 
         var connection = Connection;
         await RunOperationAsync(connection, async token =>
@@ -564,8 +592,23 @@ public partial class FluentStorageContainer :
         }, cancellationToken);
     }
 
+    /// <inheritdoc />
+    public bool CanStoreMetadata(IInterceptorSubject subject) => MetadataStore.Applier.CanStoreMetadata(subject);
+
+    /// <inheritdoc />
+    public void ApplyStoredMetadata(IInterceptorSubject subject, string? propertyName)
+        => MetadataStore.Applier.ApplyStoredMetadata(subject, propertyName);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Keeps the metadata of this storage and of its folders in their <c>.metadata.json</c>, and that of a subject
+    /// stored as <c>X.json</c>, of the subjects inside it and of their properties in <c>X.metadata.json</c> beside it.
+    /// </remarks>
+    public Task SetMetadataAsync(IInterceptorSubject subject, string? propertyName, JsonElement values, CancellationToken cancellationToken)
+        => MetadataStore.SetMetadataAsync(subject, propertyName, values, cancellationToken);
+
     // Recording version and hash is what keeps the event that this write raises from reloading the subject.
-    private async Task WriteAndRecordAsync(
+    internal async Task WriteAndRecordAsync(
         StorageConnection connection, StorageEntry entry, byte[] content, CancellationToken cancellationToken)
     {
         await WriteAsync(connection, entry.Path, content, cancellationToken);
@@ -590,7 +633,7 @@ public partial class FluentStorageContainer :
     /// <exception cref="InvalidOperationException">
     /// The connection ended before the operation was done, which is the same as no connection.
     /// </exception>
-    private static async Task RunOperationAsync(
+    internal static async Task RunOperationAsync(
         StorageConnection connection, Func<CancellationToken, Task> operation, CancellationToken cancellationToken)
     {
         try
@@ -599,7 +642,7 @@ public partial class FluentStorageContainer :
         }
         catch (OperationCanceledException) when (connection.IsEnded && !cancellationToken.IsCancellationRequested)
         {
-            throw new InvalidOperationException("Storage not connected");
+            throw new StorageRefusedException("Storage not connected");
         }
     }
 
@@ -623,7 +666,7 @@ public partial class FluentStorageContainer :
 
     // A call that failed can have changed the storage, and one that was given up can still do so. The pass
     // that finds out is asked for by the operation, because not every storage has a file watcher that would.
-    private static bool CanHaveReachedStorage(Exception exception)
+    internal static bool CanHaveReachedStorage(Exception exception)
         => exception is not (StorageRootUnavailableException or StorageUnresponsiveException { IsRefusal: true });
 
     /// <summary>
@@ -742,6 +785,72 @@ public partial class FluentStorageContainer :
             return Task.CompletedTask;
         }, cancellationToken);
     }
+
+    /// <summary>
+    /// The name of the method with which agents set metadata,
+    /// <see cref="SetMetadataAsync(string, string?, JsonElement, CancellationToken)"/>.
+    /// </summary>
+    public const string SetMetadataMethodName = "SetMetadata";
+
+    /// <summary>
+    /// Gets the message with which <see cref="SetMetadataAsync(string, string?, JsonElement, CancellationToken)"/>
+    /// refuses a path at which it finds no subject, so that a caller that hides a subject refuses it alike.
+    /// </summary>
+    public static string GetNoSubjectMessage(string path) => $"No subject at {NameList.Format([path])} in this storage.";
+
+    /// <summary>
+    /// Resolves the path that <see cref="SetMetadataAsync(string, string?, JsonElement, CancellationToken)"/> takes,
+    /// relative to <paramref name="storage"/> with the <see cref="ISubjectPathResolver"/> of its context, so that a
+    /// caller that checks the path resolves it alike: the storage itself for a path of only whitespace and slashes,
+    /// and null when no subject is at the path or the context has no resolver.
+    /// </summary>
+    public static IInterceptorSubject? ResolveMetadataPath(IInterceptorSubject storage, string path)
+    {
+        // Without leading slashes, which lead the resolver to the root of the application; "./" keeps the resolution
+        // inside the storage, which a leading "../" would leave.
+        var relativePath = path.AsSpan().Trim().TrimStart('/');
+        return relativePath.IsEmpty
+            ? storage
+            : storage.Context.TryGetService<ISubjectPathResolver>()?.ResolveSubject(string.Concat("./", relativePath), PathStyle.Canonical, storage);
+    }
+
+    /// <summary>
+    /// Gets the message with which a metadata write refuses a property that the subject does not have, so that a
+    /// caller that hides a property refuses it alike.
+    /// </summary>
+    public static string GetNoPropertyMessage(string propertyName) => $"The subject has no property {NameList.Format([propertyName])}.";
+
+    /// <summary>
+    /// Sets metadata of a subject in this storage, or of one of its properties, for agents: see
+    /// <see cref="SetMetadataAsync(IInterceptorSubject, string?, JsonElement, CancellationToken)"/>. A subject that a
+    /// storage inside this one holds is written by that storage.
+    /// </summary>
+    /// <param name="path">The path of the subject relative to this storage, empty for the storage itself.</param>
+    /// <param name="property">The name of a property of the subject, or null for the subject.</param>
+    /// <param name="values">A JSON object.</param>
+    /// <param name="cancellationToken">Cancels the write.</param>
+    /// <exception cref="ArgumentException">
+    /// The path is null or leads to no subject, the values are no JSON object, or the write is refused; the message says why.
+    /// </exception>
+    [Operation(Title = "Set Metadata", Description = StorageMetadataMethods.SetMetadataDescription, Position = 3)]
+    [ExcludeFrom(ExclusionTarget.UserInterface)]
+    public Task SetMetadataAsync(string path, string? property, JsonElement values, CancellationToken cancellationToken)
+        => StorageMetadataMethods.RunAsync(() => MetadataStore.SetMetadataAsync(path, property, values, cancellationToken));
+
+    /// <summary>Gets the names of the children of this storage in the order in which they are shown, for agents.</summary>
+    [Query(Title = "Get Order", Description = StorageMetadataMethods.GetOrderDescription, Position = 4)]
+    [ExcludeFrom(ExclusionTarget.UserInterface)]
+    public string[] GetOrder() => ChildOrdering.GetShownNames(this);
+
+    /// <summary>
+    /// Sets the order of the children of this storage, for agents: see
+    /// <see cref="MetadataStoreExtensions.SetOrderAsync"/>.
+    /// </summary>
+    /// <exception cref="ArgumentException">A name is refused, or the write is refused; the message says why.</exception>
+    [Operation(Title = "Set Order", Description = StorageMetadataMethods.SetOrderDescription, Position = 5)]
+    [ExcludeFrom(ExclusionTarget.UserInterface)]
+    public Task SetOrderAsync(string[] names, CancellationToken cancellationToken)
+        => StorageMetadataMethods.RunAsync(() => MetadataStoreExtensions.SetOrderAsync(this, names, cancellationToken));
 
     /// <summary>
     /// Opens the create subject dialog to add a new subject to this storage.
@@ -883,8 +992,12 @@ public partial class FluentStorageContainer :
         catch (Exception exception) when (CanHaveReachedStorage(exception))
         {
             connection.NotifyChanged(entry.Path);
+            await MetadataStore.DeleteSidecarAsync(connection, entry, isFileKnownGone: false);
             throw;
         }
+
+        // Before the tree follows, so that a failure of the tree cannot leave the metadata file behind.
+        await MetadataStore.DeleteSidecarAsync(connection, entry, isFileKnownGone: true);
 
         connection.Index.Remove(entry.Path);
         connection.Reconciler.Apply();

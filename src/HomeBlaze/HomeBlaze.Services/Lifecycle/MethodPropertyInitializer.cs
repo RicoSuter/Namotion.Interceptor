@@ -105,6 +105,7 @@ public class MethodPropertyInitializer : ILifecycleHandler
             Position = attribute.Position,
             Category = traits.Category,
             RequiresConfirmation = traits.RequiresConfirmation,
+            ExcludedFrom = traits.ExcludedFrom,
             Parameters = traits.Parameters,
             ResultType = resultType,
         };
@@ -131,8 +132,8 @@ public class MethodPropertyInitializer : ILifecycleHandler
         return returnType;
     }
 
-    /// <summary>The category, the confirmation and the parameters of a discovered method of one subject type.</summary>
-    private readonly record struct MethodTraits(string? Category, bool RequiresConfirmation, MethodParameter[] Parameters);
+    /// <summary>The category, the confirmation, the parameters and the exclusion of a discovered method of one subject type.</summary>
+    private readonly record struct MethodTraits(string? Category, bool RequiresConfirmation, MethodParameter[] Parameters, ExclusionTarget ExcludedFrom);
 
     /// <summary>The interface maps of a subject type and the traits of its methods, computed once per method.</summary>
     private sealed class SubjectTypeMethods
@@ -160,13 +161,23 @@ public class MethodPropertyInitializer : ILifecycleHandler
             // An explicit implementation is not a public class method, so the interface method decides for it.
             var classMethod = implementation is { IsPublic: true, DeclaringType.IsInterface: false } ? implementation : null;
 
+            var excludedFrom = GetExcludedFrom(method) | (classMethod is not null ? GetExcludedFrom(classMethod) : ExclusionTarget.None);
+            foreach (var implementedMethod in implementedMethods)
+            {
+                excludedFrom |= GetExcludedFrom(implementedMethod);
+            }
+
             return new MethodTraits(
                 FindCategory(method, isInterfaceMethod, classMethod, implementedMethods),
                 RequiresConfirmation(method) ||
                 (classMethod is not null && AnyOverriddenMethodRequiresConfirmation(classMethod)) ||
                 implementedMethods.Exists(RequiresConfirmation),
-                CreateParameters(method));
+                CreateParameters(method),
+                excludedFrom);
         }
+
+        private static ExclusionTarget GetExcludedFrom(MethodInfo method) =>
+            method.GetCustomAttribute<ExcludeFromAttribute>()?.Targets ?? ExclusionTarget.None;
 
         private static MethodParameter[] CreateParameters(MethodInfo method)
         {

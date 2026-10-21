@@ -8,10 +8,12 @@ namespace HomeBlaze.Abstractions.Attributes
         public ConfigurationAttribute() { }
         public bool IsSecret { get; set; }
     }
-    [System.AttributeUsage(System.AttributeTargets.Class, Inherited=true)]
-    public sealed class ExcludeFromBrowsingAttribute : System.Attribute
+    [System.AttributeUsage(System.AttributeTargets.Class | System.AttributeTargets.Method, Inherited=true)]
+    public sealed class ExcludeFromAttribute : System.Attribute
     {
-        public ExcludeFromBrowsingAttribute() { }
+        public ExcludeFromAttribute(HomeBlaze.Abstractions.Attributes.ExclusionTarget targets) { }
+        public HomeBlaze.Abstractions.Attributes.ExclusionTarget Targets { get; }
+        public static bool IsExcluded(System.Type type, HomeBlaze.Abstractions.Attributes.ExclusionTarget target) { }
     }
     [System.AttributeUsage(System.AttributeTargets.Class, Inherited=false)]
     public sealed class ExcludeFromCreationAttribute : System.Attribute
@@ -22,6 +24,18 @@ namespace HomeBlaze.Abstractions.Attributes
     public sealed class ExcludeFromExpressionsAttribute : System.Attribute
     {
         public ExcludeFromExpressionsAttribute() { }
+    }
+    public static class ExcludeFromExtensions
+    {
+        public static bool IsExcludedFrom(this Namotion.Interceptor.IInterceptorSubject subject, HomeBlaze.Abstractions.Attributes.ExclusionTarget target) { }
+    }
+    [System.Flags]
+    public enum ExclusionTarget
+    {
+        None = 0,
+        UserInterface = 1,
+        Agents = 2,
+        All = -1,
     }
     [System.AttributeUsage(System.AttributeTargets.Parameter)]
     public sealed class FromServicesAttribute : System.Attribute
@@ -548,11 +562,12 @@ namespace HomeBlaze.Abstractions
     public interface IVirtualSubject { }
     public static class KnownAttributes
     {
-        public const string Configuration = "HB:Configuration";
+        public const string Configuration = "HomeBlaze:Configuration";
         public const string IsEnabled = "IsEnabled";
         public const string Maximum = "Maximum";
+        public const string Metadata = "HomeBlaze:Metadata";
         public const string Minimum = "Minimum";
-        public const string State = "HB:State";
+        public const string State = "HomeBlaze:State";
     }
     public enum PathStyle
     {
@@ -798,6 +813,7 @@ namespace HomeBlaze.Abstractions.Metadata
         public MethodMetadata(Namotion.Interceptor.IInterceptorSubject subject, System.Reflection.MethodInfo method) { }
         public string? Category { get; init; }
         public string? Description { get; init; }
+        public HomeBlaze.Abstractions.Attributes.ExclusionTarget ExcludedFrom { get; init; }
         public string? Icon { get; init; }
         public HomeBlaze.Abstractions.Metadata.MethodKind Kind { get; init; }
         public HomeBlaze.Abstractions.Metadata.MethodParameter[] Parameters { get; init; }
@@ -807,6 +823,7 @@ namespace HomeBlaze.Abstractions.Metadata
         public System.Type? ResultType { get; init; }
         public string Title { get; init; }
         public System.Threading.Tasks.Task<object?> InvokeAsync(object?[]? parameters, System.IServiceProvider? serviceProvider, System.Threading.CancellationToken cancellationToken) { }
+        public bool IsExcludedFrom(HomeBlaze.Abstractions.Attributes.ExclusionTarget target) { }
     }
     public class MethodParameter
     {

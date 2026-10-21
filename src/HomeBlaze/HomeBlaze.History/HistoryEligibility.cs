@@ -7,7 +7,7 @@ namespace HomeBlaze.History;
 /// <summary>
 /// Single source of truth for whether a property is recorded and whether the UI offers the history
 /// action. Reads the HomeBlaze registry attribute (there is no IsState member on
-/// <see cref="RegisteredSubjectProperty"/>: "is state" is the presence of the HB:State attribute, and
+/// <see cref="RegisteredSubjectProperty"/>: "is state" is the presence of the HomeBlaze:State attribute, and
 /// "has children" is <see cref="RegisteredSubjectProperty.CanContainSubjects"/>), then defers to
 /// <see cref="HistoryColumns.IsRecordable"/> for the type half.
 ///

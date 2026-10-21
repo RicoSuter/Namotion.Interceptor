@@ -39,13 +39,15 @@ MCP tools are split across packages, configured via a single `McpServerConfigura
 
 - **One configuration**: `HomeBlazeMcpConfigurationFactory` builds the configuration for both the MCP server and the built-in agents. Satellite packages contribute tool providers once with `AddHomeBlazeMcpToolProvider`.
 - **No dependency on `/mcp`**: the agents get their tools through `HomeBlazeAgentToolSource` and serve them in-process or on their own listener. `McpServer:Enabled` only decides whether the MCP server is registered and `/mcp` is mapped.
+- **Excluded types**: `HomeBlazeMcpConfigurationFactory` gives `browse`, `search` and `list_types` every registered type with `[ExcludeFrom(ExclusionTarget.Agents)]` as types to leave out, which agents still reach by explicit path (see [Excluding Subjects and Methods](../../development/building-subjects.md#excluding-subjects-and-methods)).
+- **Metadata**: `StateAttributePathProvider` lists the metadata of a subject and resolves the path of the metadata of a property, such as `Temperature@HomeBlaze:Metadata`, both only where it has a value. How agents change it is in [Metadata: Agents](../../administration/metadata.md#agents), and the model in [Metadata](metadata.md).
 - **Transport-agnostic tools**: each tool is a `McpToolInfo` (metadata plus a plain function). It is served as an MCP tool through `McpToolDispatcher` (external agents and the CLI agent route) or wrapped with `ToAIFunction` (the API agent).
 - **Why method tools are HomeBlaze-specific**: method discovery uses `MethodMetadata` with `[Operation]` and `[Query]` registry attributes, a HomeBlaze convention, not a core interceptor concept. This keeps the interceptor library independently usable. Property metadata such as units and position is already in the registry as `StateMetadata` and is included in `browse` and `search` with `includeAttributes=true`.
 - **Paths** use the slash separator with `[InlinePaths]` flattening, such as `/Servers/OpcUaServer/Port`. See [MCP Server docs](../../../../../../../../docs/mcp.md) for the core MCP server design.
 
 #### Method Tools
 
-- `list_methods` lists each operation and query with name, kind (`query` or `operation`, matching the tool that calls it), title, description, return type and whether it requires confirmation.
+- `list_methods` lists each operation and query with name, kind (`query` or `operation`, matching the tool that calls it), title, description, return type and whether it requires confirmation. It leaves out the methods excluded from agents, see [Excluding Subjects and Methods](../../development/building-subjects.md#excluding-subjects-and-methods).
 - Parameters use the `McpMethodParameter` shape of the core library: JSON Schema `type`, `format`, `enum` names and `nullable`. HomeBlaze adds the unit of an `[OperationParameter(Unit = ...)]` as `description`. A `Percent` parameter reads "fraction where 1 = 100% (0.2 = 20%)", since agents pass the fraction and only the operation dialog takes 0 to 100.
 - `invoke_query` calls only `[Query]` methods and `invoke_operation` only `[Operation]` methods, so each permission is exactly one tool. A method of the other kind returns an error naming the right tool, and nothing is invoked. A read-only configuration does not offer `invoke_operation`.
 - Arguments are passed by name in a `parameters` object and converted with `McpValueConverter`: an enum accepts its name (ignoring case) or a defined number, a `TimeSpan` its `hh:mm:ss` string.
@@ -75,8 +77,8 @@ MCP tools are split across packages, configured via a single `McpServerConfigura
 ### Write Limits [Implemented]
 
 - **Configuration**: `set_property` refuses a property marked `[Configuration]`, also when it is `[State]` as well, through the `PropertyWriteFilter` that both the agents and the external `/mcp` server configure. The filter does not reach `invoke_operation`, so an operation can still change a `[Configuration]` property as part of what it does. The agents' own settings are configuration only and so are not reachable at all.
-- **Agent operations**: the agents' `invoke_operation` and Markdown tools refuse every operation of an agent subject, so agents cannot start runs or reset conversations of agents.
-- **Confirmation**: operations marked `[Operation(RequiresConfirmation = true)]` cannot be invoked through MCP; `invoke_operation` refuses them before reading the arguments. MCP elicitation, the server asking the client's user to confirm during a call, would allow them for clients that support it. It is not implemented, and the CLI agent runs non-interactively and could not answer it.
+- **Agent operations**: the agents' `invoke_operation` and Markdown tools refuse every operation of an agent subject, and `SetMetadata` of a storage whose path leads to an agent or to a subject inside one, or whose arguments do not have the shape of the method, so agents cannot start runs, reset conversations or change the metadata of agents. The filter gets the arguments of the call for that.
+- **Confirmation**: operations marked `[Operation(RequiresConfirmation = true)]` cannot be invoked through MCP; `invoke_operation` refuses them without running them, and reports the refusal before a problem with the arguments. MCP elicitation, the server asking the client's user to confirm during a call, would allow them for clients that support it. It is not implemented, and the CLI agent runs non-interactively and could not answer it.
 - **Pages**: the Markdown write operations, which all of these reach, follow the [page write rules](#page-write-rules), because a block becomes a running subject of any type configured outside these filters, HTML runs in the browser of whoever opens the page, and images and media embeds load content from other sites.
 
 The operator view of these limits and their remaining gaps is in [Tools and permissions](../../administration/ai-agents.md#tools-and-permissions).
@@ -141,7 +143,7 @@ With `edit_page_layout`, the agent's Markdown tools and `invoke_operation` may a
 **Agent route.** What the route exposes is in [How a turn runs the CLI](../../administration/ai-agents.md#how-a-turn-runs-the-cli).
 
 - `AgentMcpListener`, a hosted service, serves the stateless MCP route `/mcp/agents` on a web server of its own on `127.0.0.1`. The route never shares the bindings, reverse proxy or published ports of the HomeBlaze web server.
-- Each turn registers its tool set under a random bearer token. A request lists and calls exactly that turn's tools, with no server instructions, prompts or resources.
+- Each turn registers its tool set under a random bearer token. A request lists and calls exactly that turn's tools, with no prompts or resources.
 - Closing the tool set at the end of the turn makes a call that passed the token check just before fail without running.
 
 **Tool scoping.** `AllowedTools` is enforced where the tools are served: the API agent receives only the allowed functions, and the agent route lists and calls only the turn's tool set. A per-turn tool-call budget returns an error result once exhausted, so the model answers with what it has; `update_memory` is exempt. Every call is recorded in the timeline with previews of its arguments and result.

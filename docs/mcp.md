@@ -144,12 +144,14 @@ Browse the subject tree starting at a path. Use `text` format (default) for over
 | `path` | root | Starting path (e.g., `Folder/Device`) |
 | `depth` | 1 | Max traversal depth (0 = properties only) |
 | `includeProperties` | false | Include property values |
-| `includeAttributes` | false | Include registry attributes on properties |
+| `includeAttributes` | false | Include registry attributes on properties, leaving out read-only ones without a value |
 | `includeMethods` | false | Include `$methods` in subject nodes |
 | `includeInterfaces` | false | Include `$interfaces` in subject nodes |
 | `properties` | (all) | Return only these properties, e.g. `["IsConnected", "BatteryLevel"]`; implies `includeProperties` |
 | `excludeTypes` | (none) | Exclude subjects matching these type/interface names |
 | `maxSubjects` | server limit | Maximum subjects to return |
+
+Subjects of a type in `ExcludeTypes` of the configuration, or matching `excludeTypes`, are left out of the tree. A property collapsed at the depth limit counts and types only the remaining children and is left out if none remain.
 
 ### `search`
 
@@ -195,7 +197,7 @@ Search across all subjects. Use `text` format (default) for overview, `json` for
 | `where` | (none) | Filter by property values, see [Filtering by value](#filtering-by-value) |
 | `properties` | (all) | Return only these properties, e.g. `["IsConnected", "BatteryLevel"]`; implies `includeProperties` |
 | `includeProperties` | false | Include property values |
-| `includeAttributes` | false | Include registry attributes on properties |
+| `includeAttributes` | false | Include registry attributes on properties, leaving out read-only ones without a value |
 | `includeMethods` | false | Include `$methods` in subject nodes |
 | `includeInterfaces` | false | Include `$interfaces` in subject nodes |
 | `excludeTypes` | (none) | Exclude subjects matching these type/interface names |
@@ -238,7 +240,7 @@ In text, each warning is a `# warning: ` line before the footer, or after the "n
 
 ### `get_property`
 
-Read a property value by path. Returns the value, JSON schema type, and optional writeability flag.
+Read a property value by path. Returns the value, JSON schema type, optional writeability flag, and the registry attributes of the property, leaving out read-only ones without a value.
 
 ### `set_property`
 
@@ -248,7 +250,7 @@ An application can refuse writes to some properties with `PropertyWriteFilter` o
 
 ### `list_types`
 
-List available types from registered type providers. Interface types include property and method schemas; concrete types list their implemented interfaces.
+List available types from registered type providers. Interface types include property and method schemas; concrete types list their implemented interfaces. The types in `ExcludeTypes` of the configuration, and the types derived from them, are not listed.
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
@@ -279,6 +281,9 @@ var config = new McpServerConfiguration
 
     // Optional: refuse writes to some properties; return null to allow, else the reason for the client
     PropertyWriteFilter = property => property.Name == "Password" ? "Passwords cannot be changed." : null,
+
+    // Optional: subject types that browse, search and list_types leave out
+    ExcludeTypes = [typeof(MyInternalSubject)],
 
     // Safety limits
     MaxDepth = 10,

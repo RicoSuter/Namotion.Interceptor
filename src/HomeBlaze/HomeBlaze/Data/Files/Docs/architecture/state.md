@@ -1,7 +1,6 @@
 ---
 title: Implementation State
 navTitle: State
-position: 1
 ---
 
 # HomeBlaze Implementation State
@@ -35,7 +34,7 @@ Tracks the implementation status of building blocks described in [Architecture O
 | Cross-instance operation proxying (RPC) | Planned | WebSocket message types 5-6 |
 | Time-series history | Implemented | InMemory and SQLite stores, cross-store merger, chart, and `get_property_history`; TimescaleDB planned |
 | Document store | Planned | Documents as subjects |
-| Dynamic metadata / annotations | Planned | User-created attributes stored in config JSON |
+| Dynamic metadata / annotations | Partial | Metadata of folders, subjects and properties in `.metadata.json` files; annotations, tags and links planned, see [Metadata](design/metadata.md) |
 
 ## Events and Health
 

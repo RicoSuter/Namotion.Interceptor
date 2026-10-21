@@ -1,7 +1,6 @@
 ---
 title: Subjects, Storage & Files
 navTitle: Subjects
-position: 3
 ---
 
 # Subjects, Storage & Files
@@ -79,6 +78,10 @@ Files/
 ```
 
 Folders use `[InlinePaths]`, so children are path segments directly (no `Children[...]` brackets). See [Paths](paths.md) for full syntax.
+
+### Metadata Files
+
+A folder can hold a `.metadata.json`, and a subject file `X.json` an `X.metadata.json` beside it, with titles, icons, the order of children and other metadata, see [Metadata](metadata.md).
 
 ---
 

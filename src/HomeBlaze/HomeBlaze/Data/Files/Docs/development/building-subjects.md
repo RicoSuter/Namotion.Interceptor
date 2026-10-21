@@ -1,7 +1,6 @@
 ---
 title: Building Custom Subjects
 navTitle: Building Subjects
-position: 0
 ---
 
 # Building Custom Subjects
@@ -477,6 +476,10 @@ public partial class Motor
 - Confirmation is inherited: an implementation of an interface operation or an override of a base class operation that requires confirmation requires it too, also with its own `[Operation]`, and a `[Query]` in its place becomes an operation that requires confirmation
 - Do not require confirmation for safety actions such as an emergency stop; agents must be able to call them
 
+**Where a method is offered:**
+
+A method is offered everywhere by default; `[ExcludeFrom]` keeps it out of the user interface or away from agents, see [Excluding Subjects and Methods](#excluding-subjects-and-methods).
+
 **Supported parameter types:**
 - `string`, `int`, `long`, `double`, `float`, `decimal`, `bool`
 - `DateTime`, `DateTimeOffset`, `Guid`, `TimeSpan`
@@ -534,7 +537,7 @@ public partial class Server
 - The property attribute name (e.g., `"Start"`) must match the method name without the `Async` suffix
 - The `IsEnabled` property should be `[Derived]` so it automatically updates when dependencies change
 - When `IsEnabled` is `false`, the button is disabled in the UI
-- The attribute name is `IsEnabled`, without the `HB:` prefix of the HomeBlaze metadata: it describes the operation itself, so an external source can provide it and a connector that exports attributes shows it under this name
+- The attribute name is `IsEnabled`, without the `HomeBlaze:` prefix of the HomeBlaze metadata: it describes the operation itself, so an external source can provide it and a connector that exports attributes shows it under this name
 - The button renders again by itself when the derived property changes, because its render read it
 
 ## Categories
@@ -617,7 +620,7 @@ This associates `TargetSpeed_Minimum` and `TargetSpeed_Maximum` as metadata for 
 
 ### Range Attributes
 
-`KnownAttributes.Minimum` and `KnownAttributes.Maximum` give a number property its range, declared as above. A widget that shows or sets a number within a range reads them when the page sets no range of its own, and only when their value is a number; [Ranges](../administration/widgets/basics.md#ranges) has the order in which the widget looks for each end, including the range 0 to 1 of a property with `StateUnit.Percent`. Like `KnownAttributes.IsEnabled` and unlike `State` and `Configuration`, they have no `HB:` prefix: they describe the value and not how HomeBlaze shows it, so they read naturally where a connector exports the property, and an external source can provide them under the same name.
+`KnownAttributes.Minimum` and `KnownAttributes.Maximum` give a number property its range, declared as above. A widget that shows or sets a number within a range reads them when the page sets no range of its own, and only when their value is a number; [Ranges](../administration/widgets/basics.md#ranges) has the order in which the widget looks for each end, including the range 0 to 1 of a property with `StateUnit.Percent`. Like `KnownAttributes.IsEnabled` and unlike `State` and `Configuration`, they have no `HomeBlaze:` prefix: they describe the value and not how HomeBlaze shows it, so they read naturally where a connector exports the property, and an external source can provide them under the same name.
 
 ## Complete Example: Motor
 
@@ -886,7 +889,7 @@ Device interfaces compose small capability interfaces, split into state and cont
 
 ### HomeBlaze.Storage.Abstractions
 
-Storage contracts: `IStorageContainer`, `IStorageFile`, `IConfigurationWriter`, `StorageStatus`, `[FileExtension]`.
+Storage contracts: `IStorageContainer`, `IStorageFile`, `IConfigurationWriter`, `IMetadataStore`, `StorageStatus`, `[FileExtension]`.
 
 ### HomeBlaze.Components.Abstractions
 
@@ -1052,26 +1055,38 @@ In an Edit component of your own, use the `SubjectPathField` component for a pat
 
 ---
 
-### Excluding Subjects from Browsing
+### Excluding Subjects and Methods
 
-Internal implementation subjects that should not appear in the UI browser panel or MCP tools can be marked with the `[ExcludeFromBrowsing]` attribute:
+`[ExcludeFrom(ExclusionTarget)]` on a subject class keeps the subjects of that type, and of the types derived from it, out of the given targets, and on an `[Operation]` or `[Query]` it does the same for the method:
 
 ```csharp
 using HomeBlaze.Abstractions.Attributes;
 
 [InterceptorSubject]
-[ExcludeFromBrowsing]
+[ExcludeFrom(ExclusionTarget.All)]
 public partial class HtmlSegment
 {
     // Internal implementation detail, not user-facing
 }
 ```
 
-This hides the subject from:
-- The Blazor browser/panel tree view
-- MCP `browse` and `search` tool results
-
 Use this for internal subjects that are part of a parent subject's implementation but have no meaning to end users or AI agents (e.g., parsed HTML segments, render expressions).
+
+| Target | A subject type is not | A method is not |
+|--------|-----------------------|-----------------|
+| `UserInterface` | listed or counted as a child in the browser, offered by the path picker, or walked by the navigation | shown as a button, or offered by the path picker and the widget pickers |
+| `Agents` | listed by MCP `browse`, `search` and `list_types` and by the built-in agents | listed by `list_methods` and `$methods`, or run by `invoke_query`, `invoke_operation`, the Markdown tools and the built-in agents |
+| `All` | any of the above, also for targets added later | any of the above, also for targets added later |
+
+Exclusion decides where a subject or a method is offered, and is no access control: an agent still reaches a subject of a type excluded from agents by its explicit path and calls its methods, and a path to a method excluded from the user interface that a person types into a widget, such as an operation button, still runs it. Code checks a subject with the extension `IsExcludedFrom(target)`, a type with `ExcludeFromAttribute.IsExcluded(type, target)`, and lists the methods for a target with `GetAllMethods(target)`.
+
+Use `UserInterface` on a method that gives an agent what a person does through other controls, as a folder does for the order that people change by dragging:
+
+```csharp
+[Query(Title = "Get Order", Description = "Gets the names of the children in the order in which they are shown.")]
+[ExcludeFrom(ExclusionTarget.UserInterface)]
+public string[] GetOrder() => ChildOrdering.GetShownNames(this);
+```
 
 ### Page Layout Types
 

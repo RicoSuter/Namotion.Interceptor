@@ -1,7 +1,6 @@
 ---
 title: ValueTile
 navTitle: ValueTile
-position: 32
 ---
 
 # ValueTile

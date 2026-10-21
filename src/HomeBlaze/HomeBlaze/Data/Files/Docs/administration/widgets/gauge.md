@@ -1,7 +1,6 @@
 ---
 title: Gauge
 navTitle: Gauge
-position: 35
 ---
 
 # Gauge

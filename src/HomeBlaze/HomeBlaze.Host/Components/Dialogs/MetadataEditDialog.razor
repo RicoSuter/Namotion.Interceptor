@@ -1,0 +1,217 @@
+@using HomeBlaze.Components.Abstractions.Pages
+@using HomeBlaze.Services.Metadata
+@using HomeBlaze.Storage.Abstractions
+@using System.Text.Json
+@using System.Text.Json.Nodes
+@using HomeBlaze.Storage.Abstractions.Metadata
+
+@inject ISnackbar Snackbar
+
+<MudDialog data-testid="metadata-edit-dialog">
+    <DialogContent>
+        @if (_isFolder)
+        {
+            <MudTextField @bind-Value="_title"
+                          Label="Title"
+                          Placeholder="@_titlePlaceholder"
+                          Clearable="true"
+                          data-testid="metadata-title" />
+        }
+        <MudTextField @bind-Value="_navigationTitle"
+                      Label="Navigation title"
+                      Placeholder="@_navigationTitlePlaceholder"
+                      Clearable="true"
+                      data-testid="metadata-navigation-title" />
+        <MudTextField @bind-Value="_icon"
+                      Label="Icon"
+                      Placeholder="@_iconPlaceholder"
+                      Clearable="true"
+                      DebounceInterval="300"
+                      Adornment="Adornment.End"
+                      AdornmentIcon="@SubjectIconExtensions.ResolveMudBlazorIcon(GetValue(_icon) ?? _iconPlaceholder)"
+                      HelperText="A MudBlazor icon name, such as Dashboard or Settings"
+                      data-testid="metadata-icon" />
+        @if (!_isFolder)
+        {
+            <MudSelect T="NavigationLocation?"
+                       @bind-Value="_location"
+                       @bind-Value:after="OnLocationChanged"
+                       Label="Location"
+                       Placeholder="Sidebar"
+                       Clearable="true"
+                       data-testid="metadata-location">
+                <MudSelectItem T="NavigationLocation?" Value="@((NavigationLocation?)NavigationLocation.NavBar)">Sidebar</MudSelectItem>
+                <MudSelectItem T="NavigationLocation?" Value="@((NavigationLocation?)NavigationLocation.AppBar)">Top bar</MudSelectItem>
+            </MudSelect>
+            <MudSelect T="AppBarAlignment?"
+                       @bind-Value="_alignment"
+                       Label="Alignment"
+                       Placeholder="Left"
+                       Clearable="true"
+                       Disabled="@(_location != NavigationLocation.AppBar)"
+                       data-testid="metadata-alignment">
+                <MudSelectItem T="AppBarAlignment?" Value="@((AppBarAlignment?)AppBarAlignment.Left)">Left</MudSelectItem>
+                <MudSelectItem T="AppBarAlignment?" Value="@((AppBarAlignment?)AppBarAlignment.Right)">Right</MudSelectItem>
+                <MudSelectItem T="AppBarAlignment?" Value="@((AppBarAlignment?)AppBarAlignment.Menu)">Menu</MudSelectItem>
+            </MudSelect>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel" Disabled="@_isSaving">Cancel</MudButton>
+        <MudButton Color="Color.Primary" OnClick="SaveAsync" Disabled="@_isSaving" data-testid="metadata-save">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance? MudDialog { get; set; }
+
+    /// <summary>The folder or the subject whose metadata is edited. A storage is edited as a subject.</summary>
+    [Parameter, EditorRequired] public IInterceptorSubject Owner { get; set; } = default!;
+
+    private bool _isFolder;
+    private string? _titlePlaceholder;
+    private string _navigationTitlePlaceholder = "";
+    private string _iconPlaceholder = "Article";
+    private string? _title;
+    private string? _navigationTitle;
+    private string? _icon;
+    private NavigationLocation? _location;
+    private AppBarAlignment? _alignment;
+    private bool _isSaving;
+
+    // The values of the fields as loaded, so that a save writes only what was changed.
+    private Dictionary<string, string?> _loadedValues = [];
+
+    protected override void OnInitialized()
+    {
+        _isFolder = IsFolder(Owner);
+        _navigationTitlePlaceholder = Owner.GetTitle();
+
+        var metadata = Owner.GetMetadata();
+        _navigationTitle = metadata.GetString(MetadataKeys.NavigationTitle);
+        _icon = metadata.GetString(MetadataKeys.Icon);
+        if (_isFolder)
+        {
+            _titlePlaceholder = Owner.TryGetRegisteredSubject()?.Parents.FirstOrDefault().Index?.ToString();
+            _iconPlaceholder = "Folder";
+            _title = metadata.GetString(MetadataKeys.Title);
+        }
+        else
+        {
+            if ((Owner as IIconProvider)?.IconName is { Length: > 0 } iconName)
+                _iconPlaceholder = iconName;
+
+            _location = metadata.GetEnum<NavigationLocation>(MetadataKeys.Location);
+            _alignment = metadata.GetEnum<AppBarAlignment>(MetadataKeys.Alignment);
+            OnLocationChanged();
+        }
+
+        _loadedValues = GetValues();
+    }
+
+    private void Cancel() => MudDialog?.Cancel();
+
+    // A save writes the alignment only for the top bar, so the dialog shows none otherwise.
+    private void OnLocationChanged()
+    {
+        if (_location != NavigationLocation.AppBar)
+            _alignment = null;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_isSaving)
+            return;
+
+        if (Owner.FindMetadataStore() is not { } store)
+        {
+            Snackbar.Add("Error saving metadata: the item is no longer in a storage.", Severity.Error);
+            return;
+        }
+
+        // Only the fields that were changed, so that a field left empty removes its key, and a value that the dialog
+        // cannot show, such as a number edited by hand, or that was written while the dialog was open, stays.
+        var values = new JsonObject();
+        foreach (var (key, value) in GetValues())
+        {
+            if (value != _loadedValues[key])
+                values[key] = value;
+        }
+
+        if (values.Count == 0)
+        {
+            MudDialog?.Close(DialogResult.Ok(true));
+            return;
+        }
+
+        _isSaving = true;
+
+        // A save cannot be canceled, so nothing dismisses the dialog while it runs.
+        var options = MudDialog?.Options;
+        if (MudDialog is not null && options is not null)
+            await MudDialog.SetOptionsAsync(options with { CloseButton = false, BackdropClick = false, CloseOnEscapeKey = false });
+
+        try
+        {
+            await store.SetMetadataAsync(Owner, null, JsonElement.Parse(values.ToJsonString()), CancellationToken.None);
+            MudDialog?.Close(DialogResult.Ok(true));
+        }
+        catch (Exception exception)
+        {
+            Snackbar.Add($"Error saving metadata: {exception.Message}", Severity.Error);
+            if (MudDialog is not null && options is not null)
+                await MudDialog.SetOptionsAsync(options);
+        }
+        finally
+        {
+            _isSaving = false;
+        }
+    }
+
+    // The value of each field the dialog shows, by its key; null for a field left empty.
+    private Dictionary<string, string?> GetValues()
+    {
+        var values = new Dictionary<string, string?>();
+        if (_isFolder)
+        {
+            values[MetadataKeys.Title] = GetValue(_title);
+        }
+
+        values[MetadataKeys.NavigationTitle] = GetValue(_navigationTitle);
+        values[MetadataKeys.Icon] = GetValue(_icon);
+        if (!_isFolder)
+        {
+            values[MetadataKeys.Location] = _location?.ToString();
+            values[MetadataKeys.Alignment] = _location == NavigationLocation.AppBar ? _alignment?.ToString() : null;
+        }
+
+        return values;
+    }
+
+    private static string? GetValue(string? value)
+        => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    /// <summary>
+    /// Gets whether the owner is edited as a folder, with a title of its own, rather than as a subject. A storage is a
+    /// subject.
+    /// </summary>
+    private static bool IsFolder(IInterceptorSubject owner)
+        => owner is IMetadataContainer and not IConfigurable;
+
+    /// <summary>
+    /// Shows the dialog for the metadata of a folder or of a subject that a store keeps the metadata of.
+    /// </summary>
+    public static Task<IDialogReference> ShowAsync(IDialogService dialogService, IInterceptorSubject owner, string title)
+    {
+        var parameters = new DialogParameters<MetadataEditDialog> { { x => x.Owner, owner } };
+
+        var options = new DialogOptions
+        {
+            MaxWidth = MaxWidth.Small,
+            FullWidth = true,
+            CloseButton = true
+        };
+
+        return dialogService.ShowAsync<MetadataEditDialog>(title, parameters, options);
+    }
+}

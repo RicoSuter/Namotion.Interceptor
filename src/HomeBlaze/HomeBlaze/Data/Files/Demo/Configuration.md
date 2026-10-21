@@ -1,7 +1,6 @@
 ---
 title: Configuration Demo
 navTitle: Configuration Demo
-position: 9
 ---
 
 # Configuration Demo

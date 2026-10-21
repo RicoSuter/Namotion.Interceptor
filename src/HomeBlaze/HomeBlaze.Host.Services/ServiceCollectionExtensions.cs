@@ -3,6 +3,7 @@ using HomeBlaze.Host.Services.Navigation;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Components;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace HomeBlaze.Host.Services;
 
@@ -23,6 +24,7 @@ public static class ServiceCollectionExtensions
 
         // UI-specific services
         services.AddSingleton<SubjectComponentRegistry>();
+        services.TryAddSingleton(TimeProvider.System);
         services.AddSingleton<NavigationItemResolver>();
         services.AddScoped<PropertyRowLayoutService>();
 

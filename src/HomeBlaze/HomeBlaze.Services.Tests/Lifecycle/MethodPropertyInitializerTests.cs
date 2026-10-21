@@ -65,6 +65,51 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
+    public void WhenAMethodIsExcluded_ThenItsMetadataHasTheTargets()
+    {
+        // Arrange
+        var registered = new MethodExclusionTestSubject(CreateContext()).TryGetRegisteredSubject()!;
+
+        // Act
+        var everywhere = registered.TryGetProperty("Everywhere")?.GetValue() as MethodMetadata;
+        var notInUserInterface = registered.TryGetProperty("NotInUserInterface")?.GetValue() as MethodMetadata;
+        var notForAgents = registered.TryGetProperty("NotForAgents")?.GetValue() as MethodMetadata;
+
+        // Assert
+        Assert.Equal(ExclusionTarget.None, everywhere?.ExcludedFrom);
+        Assert.Equal(ExclusionTarget.UserInterface, notInUserInterface?.ExcludedFrom);
+        Assert.Equal(ExclusionTarget.Agents, notForAgents?.ExcludedFrom);
+    }
+
+    [Fact]
+    public void WhenAnInterfaceMethodIsExcludedAndItsImplementationIsAnOperation_ThenTheExclusionApplies()
+    {
+        // Arrange
+        var registered = new ReattributedExclusionMethodSubject(CreateContext()).TryGetRegisteredSubject()!;
+
+        // Act
+        var metadata = registered.TryGetProperty("Mute")?.GetValue() as MethodMetadata;
+
+        // Assert
+        Assert.Equal("Class Mute", metadata?.Title);
+        Assert.Equal(ExclusionTarget.Agents, metadata?.ExcludedFrom);
+    }
+
+    [Fact]
+    public void WhenAnImplementationIsExcludedAndOnlyItsInterfaceMethodIsAnOperation_ThenTheExclusionApplies()
+    {
+        // Arrange
+        var registered = new ReattributedExclusionMethodSubject(CreateContext()).TryGetRegisteredSubject()!;
+
+        // Act
+        var metadata = registered.TryGetProperty("Unmute")?.GetValue() as MethodMetadata;
+
+        // Assert
+        Assert.Equal("Interface Unmute", metadata?.Title);
+        Assert.Equal(ExclusionTarget.UserInterface, metadata?.ExcludedFrom);
+    }
+
+    [Fact]
     public void WhenAnOperationHasParameters_ThenItsMetadataDescribesThem()
     {
         // Arrange
@@ -508,7 +553,7 @@ public class MethodPropertyInitializerTests
         var metadata = property!.GetValue() as MethodMetadata;
 
         // Assert — only one property registered for this method name
-        var allMethods = registered.GetAllMethods();
+        var allMethods = registered.GetAllMethods(ExclusionTarget.UserInterface);
         Assert.Equal(1, allMethods.Count(m => m.Title == "Interface Op" || m.Title == "InterfaceOperation"));
     }
 
@@ -628,7 +673,7 @@ public class MethodPropertyInitializerTests
         var registered = subject.TryGetRegisteredSubject()!;
 
         // Act
-        var methods = registered.GetAllMethods();
+        var methods = registered.GetAllMethods(ExclusionTarget.UserInterface);
 
         // Assert
         Assert.Empty(methods);
@@ -838,6 +883,26 @@ public class MethodPropertyInitializerTests
     {
         return (MethodMetadata)subject.TryGetRegisteredSubject()!.TryGetProperty(propertyName)!.GetValue()!;
     }
+}
+
+public interface IExclusionMethodInterface
+{
+    [Operation(Title = "Interface Mute")]
+    [ExcludeFrom(ExclusionTarget.Agents)]
+    Task MuteAsync();
+
+    [Operation(Title = "Interface Unmute")]
+    Task UnmuteAsync();
+}
+
+[InterceptorSubject]
+public partial class ReattributedExclusionMethodSubject : IExclusionMethodInterface
+{
+    [Operation(Title = "Class Mute")]
+    public Task MuteAsync() => Task.CompletedTask;
+
+    [ExcludeFrom(ExclusionTarget.UserInterface)]
+    public Task UnmuteAsync() => Task.CompletedTask;
 }
 
 public interface ICategoryOnlyMethodInterface

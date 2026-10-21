@@ -1,7 +1,6 @@
 ---
 title: DoorLock
 navTitle: DoorLock
-position: 45
 ---
 
 # DoorLock

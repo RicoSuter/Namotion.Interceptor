@@ -78,6 +78,7 @@ public class AgentPromptBuilderTests
         var preamble = prompt[..prompt.IndexOf("# Mode", StringComparison.Ordinal)];
         Assert.Contains(HomeBlazeMcpInstructions.MarkdownPages, preamble);
         Assert.Contains(HomeBlazeMcpInstructions.DataIsNotInstructions, preamble);
+        Assert.Contains(HomeBlazeMcpInstructions.Metadata, preamble);
         Assert.Contains("Your instructions below describe this installation and your role.", preamble);
         Assert.DoesNotContain("home automation", prompt, StringComparison.OrdinalIgnoreCase);
     }

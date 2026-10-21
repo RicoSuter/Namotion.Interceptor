@@ -87,9 +87,7 @@ namespace HomeBlaze.Services
     }
     public static class RegisteredSubjectMethodExtensions
     {
-        public static System.Collections.Generic.IReadOnlyList<HomeBlaze.Abstractions.Metadata.MethodMetadata> GetAllMethods(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject) { }
-        public static System.Collections.Generic.IReadOnlyList<HomeBlaze.Abstractions.Metadata.MethodMetadata> GetOperationMethods(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject) { }
-        public static System.Collections.Generic.IReadOnlyList<HomeBlaze.Abstractions.Metadata.MethodMetadata> GetQueryMethods(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject) { }
+        public static System.Collections.Generic.IReadOnlyList<HomeBlaze.Abstractions.Metadata.MethodMetadata> GetAllMethods(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject, HomeBlaze.Abstractions.Attributes.ExclusionTarget target) { }
         public static bool IsMethodEnabled(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty methodProperty) { }
         public static HomeBlaze.Abstractions.Metadata.MethodMetadata? TryGetMethodMetadata(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
     }
@@ -135,6 +133,13 @@ namespace HomeBlaze.Services
     public static class SubjectLinkScopeExtensions
     {
         public static string? ResolveScopedLink(this Namotion.Interceptor.IInterceptorSubject subject, string? link) { }
+    }
+    public static class SubjectNavigationExtensions
+    {
+        public static HomeBlaze.Components.Abstractions.Pages.AppBarAlignment GetAppBarAlignment(this Namotion.Interceptor.IInterceptorSubject subject) { }
+        public static string GetNavigationIconName(this Namotion.Interceptor.IInterceptorSubject subject) { }
+        public static HomeBlaze.Components.Abstractions.Pages.NavigationLocation GetNavigationLocation(this Namotion.Interceptor.IInterceptorSubject subject) { }
+        public static string GetNavigationTitle(this Namotion.Interceptor.IInterceptorSubject subject, string? propertyKey = null) { }
     }
     [Namotion.Interceptor.Attributes.RunsAfter(new System.Type[] {
             typeof(Namotion.Interceptor.Registry.SubjectRegistry)})]
@@ -356,6 +361,37 @@ namespace HomeBlaze.Services.Lifecycle
         public void AttachProperty(Namotion.Interceptor.Tracking.Lifecycle.SubjectPropertyLifecycleChange change) { }
         public void DetachProperty(Namotion.Interceptor.Tracking.Lifecycle.SubjectPropertyLifecycleChange change) { }
         public void RefreshCollectionProperty(Namotion.Interceptor.PropertyReference property, object? value) { }
+    }
+}
+namespace HomeBlaze.Services.Metadata
+{
+    public static class ChildOrdering
+    {
+        public static string[] GetShownNames(Namotion.Interceptor.IInterceptorSubject container) { }
+        public static System.Collections.Generic.IEnumerable<T> Order<T>(System.Collections.Generic.IEnumerable<T> children, System.Collections.Immutable.ImmutableArray<string> childOrder, System.Func<T, string> getName) { }
+    }
+    public ref struct FirstParentChain
+    {
+        public FirstParentChain(Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject) { }
+        public Namotion.Interceptor.Registry.Abstractions.RegisteredSubject Current { get; }
+        public HomeBlaze.Services.Metadata.FirstParentChain GetEnumerator() { }
+        public bool MoveNext() { }
+    }
+    public static class MetadataDictionaryExtensions
+    {
+        public static TEnum? GetEnum<TEnum>(this System.Collections.Generic.IReadOnlyDictionary<string, System.Text.Json.JsonElement>? metadata, string key)
+            where TEnum :  struct, System.Enum { }
+        public static string? GetString(this System.Collections.Generic.IReadOnlyDictionary<string, System.Text.Json.JsonElement>? metadata, string key) { }
+        public static System.Collections.Immutable.ImmutableArray<string> GetStringArray(this System.Collections.Generic.IReadOnlyDictionary<string, System.Text.Json.JsonElement>? metadata, string key) { }
+        public static TEnum? ParseEnumName<TEnum>(string text)
+            where TEnum :  struct, System.Enum { }
+    }
+    public static class SubjectMetadataExtensions
+    {
+        public static HomeBlaze.Storage.Abstractions.Metadata.IMetadataStore? FindMetadataStore(this Namotion.Interceptor.IInterceptorSubject subject) { }
+        public static System.Collections.Immutable.ImmutableDictionary<string, System.Text.Json.JsonElement>? GetMetadata(this Namotion.Interceptor.IInterceptorSubject subject) { }
+        public static System.Collections.Immutable.ImmutableDictionary<string, System.Text.Json.JsonElement>? GetMetadata(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
+        public static bool IsMetadata(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
     }
 }
 namespace HomeBlaze.Services.Serialization

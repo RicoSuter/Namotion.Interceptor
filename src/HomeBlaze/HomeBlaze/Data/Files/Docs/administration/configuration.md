@@ -1,7 +1,6 @@
 ---
 title: Configuration
 navTitle: Configuration
-position: 2
 ---
 
 # Configuration

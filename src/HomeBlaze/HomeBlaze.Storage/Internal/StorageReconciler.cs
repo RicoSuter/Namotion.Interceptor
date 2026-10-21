@@ -3,7 +3,9 @@ using FluentStorage.Blobs;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Abstractions;
+using HomeBlaze.Storage.Abstractions.Metadata;
 using HomeBlaze.Storage.Files;
+using HomeBlaze.Storage.Metadata;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Tracking.Lifecycle;
@@ -27,6 +29,7 @@ internal sealed class StorageReconciler
     private readonly StorageIndex _index;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger? _logger;
+    private readonly bool _isOnDisk;
 
     // Cancelled when the connection ends. Nothing is assigned to the tree after that.
     private readonly CancellationToken _connectionToken;
@@ -47,6 +50,7 @@ internal sealed class StorageReconciler
         StorageIndex index,
         TimeProvider timeProvider,
         ILogger? logger,
+        bool isOnDisk,
         CancellationToken connectionToken)
     {
         _client = client;
@@ -56,6 +60,7 @@ internal sealed class StorageReconciler
         _index = index;
         _timeProvider = timeProvider;
         _logger = logger;
+        _isOnDisk = isOnDisk;
         _connectionToken = connectionToken;
     }
 
@@ -119,7 +124,33 @@ internal sealed class StorageReconciler
             {
                 var isChanged = !_index.TryGet(listed.Path, out var entry) || entry.Version != listed.Version ||
                                 isEveryFileNamed || namedPaths.Contains(listed.Path);
-                if (entry?.Subject != null)
+                if (StorageMetadataPath.IsMetadataFile(listed.Path))
+                {
+                    if (isChanged)
+                    {
+                        await LoadMetadataAsync(listed, entry, cancellationToken);
+                    }
+                }
+                // Neither a subject nor metadata: on a file system that ignores case, it is the metadata file of a subject.
+                // Its entry has no subject, so a new version is no change of the tree.
+                else if (StorageMetadataPath.IsReservedSubjectPath(listed.Path))
+                {
+                    if (entry is null || entry.Version != listed.Version)
+                    {
+                        _logger?.LogWarning(
+                            "Ignoring {Path}: rename it to end with .metadata.json in lower case to make it a metadata file",
+                            listed.Path);
+                        if (entry is null)
+                        {
+                            _index.Set(new StorageEntry { Path = listed.Path, IsFolder = false, Version = listed.Version });
+                        }
+                        else
+                        {
+                            entry.Version = listed.Version;
+                        }
+                    }
+                }
+                else if (entry?.Subject != null)
                 {
                     if (isChanged)
                     {
@@ -157,8 +188,9 @@ internal sealed class StorageReconciler
         };
 
     /// <summary>
-    /// Builds the children of every folder from the index and assigns those that changed. Does nothing when no
-    /// entry was added, replaced or removed since the last time it completed.
+    /// Builds the children of every folder from the index and assigns those that changed, then passes the content
+    /// of the metadata files on to what they describe. Does nothing when no entry was added, replaced or removed
+    /// since the last time it completed.
     /// </summary>
     public void Apply()
     {
@@ -271,11 +303,136 @@ internal sealed class StorageReconciler
                     _subjectFactory.Release(entry.Subject);
                 }
             }
+
+            // After the assignment, so that every subject it placed is registered and can take its metadata.
+            ApplyMetadata();
         }
 
         // Only here: an assignment that throws leaves the rest of the tree to the next call.
         _index.MarkApplied();
         _hasUnappliedMove = false;
+    }
+
+    /// <summary>
+    /// Passes the content of the metadata files on to what they describe: the root, every placed folder, and the
+    /// subject of every placed JSON file with what is inside it, which only when the file or the subject changed since
+    /// it was applied. A file that could not be read counts as none.
+    /// </summary>
+    private void ApplyMetadata()
+    {
+        _storage.ApplyMetadata(FindMetadata(StorageMetadataPath.GetFolderFilePath(string.Empty)));
+        foreach (var entry in _index.Entries)
+        {
+            if (!entry.IsPlaced)
+            {
+                continue;
+            }
+
+            if (entry.Subject is VirtualFolder folder)
+            {
+                folder.ApplyMetadata(FindMetadata(StorageMetadataPath.GetFolderFilePath(entry.Path)));
+            }
+            // A storage that this one holds keeps its metadata in its own root file.
+            else if (entry.HasSidecar && entry.Subject is not IMetadataStore)
+            {
+                var file = FindMetadata(StorageMetadataPath.GetSubjectFilePath(entry.Path)) ?? StorageMetadataFile.Empty;
+                if (!ReferenceEquals(entry.AppliedMetadata, file))
+                {
+                    _storage.MetadataStore.Applier.Apply(entry.Subject!, file);
+                    entry.AppliedMetadata = file;
+                }
+            }
+        }
+    }
+
+    // What the index holds for the metadata file at the path; null without one, and for one that could not be read.
+    private StorageMetadataFile? FindMetadata(string path)
+        => _index.TryGet(path, out var entry) ? entry.Metadata : null;
+
+    /// <summary>
+    /// Reads the content of a metadata file from the storage, which may be no metadata; null for a file that does not
+    /// exist.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// The path is a folder, on disk or in the index, its folder is gone, or the index holds the file in another case
+    /// under a name that is not a metadata file.
+    /// </exception>
+    public async Task<byte[]?> ReadMetadataFileAsync(string path, CancellationToken cancellationToken)
+    {
+        if (_index.TryGet(path, out var entry) && entry.IsFolder)
+        {
+            throw new StorageRefusedException($"'{path}' is a folder and not a metadata file.");
+        }
+
+        // On a file system that ignores case, a misnamed file would be read and written here, and a pass ignores it. A
+        // metadata file in another case is that of another subject or folder on a file system that respects case, but
+        // only while the index holds what it describes, in exact case: deriving the described path from the metadata
+        // file's own name would rebuild it with a lower case extension, which misses a subject whose own extension
+        // is not lower case even though it is still JSON (see StoragePath.IsJson).
+        foreach (var candidate in _index.Entries)
+        {
+            if (candidate.Path != path &&
+                string.Equals(candidate.Path, path, StringComparison.OrdinalIgnoreCase) &&
+                !(StorageMetadataPath.IsMetadataFile(candidate.Path) && DescribesEntryInStorage(candidate.Path)))
+            {
+                throw new StorageRefusedException($"Rename '{candidate.Path}' to '{StoragePath.GetName(path)}' to make it the metadata file, then try again.");
+            }
+        }
+
+        var folder = StoragePath.GetParent(path);
+        if (await IsFolderGoneAsync(folder, cancellationToken))
+        {
+            throw new StorageRefusedException($"The folder '{folder}' is no longer in the storage.");
+        }
+
+        // From the storage rather than the index, so that a write keeps an edit that no pass has seen yet, also of a
+        // file that the index does not hold.
+        var content = await TryReadAsync(path, cancellationToken);
+        if (content is null)
+        {
+            // The disk client reads a directory as a file that does not exist, and a write to it fails as access denied.
+            return await IsDirectoryOnDiskAsync(path, cancellationToken)
+                ? throw StorageMetadataWriter.CreateUnreadableException(path)
+                : null;
+        }
+
+        return content;
+    }
+
+    // Whether a subject or folder of the index has the path as its metadata file, in exact case. Used only for a
+    // candidate that already differs from the path asked for only in case, which is rare.
+    private bool DescribesEntryInStorage(string metadataPath)
+    {
+        foreach (var entry in _index.Entries)
+        {
+            if ((entry.HasSidecar && StorageMetadataPath.GetSubjectFilePath(entry.Path) == metadataPath) ||
+                (entry.IsFolder && StorageMetadataPath.GetFolderFilePath(entry.Path) == metadataPath))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Checks whether a folder of the index is gone from a storage on disk, where asking about a path in a folder
+    /// that does not exist creates that folder. Ask before a call that names a path in a folder that a pass has not
+    /// looked at since.
+    /// </summary>
+    public async Task<bool> IsFolderGoneAsync(string folder, CancellationToken cancellationToken)
+        => _isOnDisk && folder.Length > 0 && !await IsDirectoryOnDiskAsync(folder, cancellationToken);
+
+    // By a listing, which neither creates a folder nor reads a directory as a file that does not exist, as reading does.
+    private async Task<bool> IsDirectoryOnDiskAsync(string path, CancellationToken cancellationToken)
+    {
+        if (!_isOnDisk)
+        {
+            return false;
+        }
+
+        var blobs = await _client.ListAsync(new ListOptions { FolderPath = StoragePath.GetParent(path) }, cancellationToken);
+        return blobs.Any(blob => blob.IsFolder && StoragePath.FromBlob(blob) == path);
     }
 
     /// <summary>
@@ -333,12 +490,9 @@ internal sealed class StorageReconciler
     }
 
     private static string GetChildKey(string path, IInterceptorSubject subject)
-        => subject is IConfigurable && IsJson(path)
+        => subject is IConfigurable && StoragePath.IsJson(path)
             ? Path.GetFileNameWithoutExtension(path)
             : StoragePath.GetName(path);
-
-    private static bool IsJson(string path)
-        => Path.GetExtension(path).Equals(FileExtensions.Json, StringComparison.OrdinalIgnoreCase);
 
     private bool IsKeyFree(string parent, string key)
     {
@@ -381,6 +535,12 @@ internal sealed class StorageReconciler
         {
             var path = StoragePath.FromBlob(blob);
             if (path.Length == 0 || StoragePathFilter.IsIgnored(path))
+            {
+                continue;
+            }
+
+            // A directory named .metadata.json, which the path filter cannot tell from the file, would shadow it.
+            if (blob.IsFolder && string.Equals(StoragePath.GetName(path), StorageMetadataPath.FolderFileName, StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
@@ -466,7 +626,7 @@ internal sealed class StorageReconciler
     {
         var entry = new StorageEntry { Path = listed.Path, IsFolder = false, Version = listed.Version };
 
-        if (IsJson(listed.Path))
+        if (StoragePath.IsJson(listed.Path))
         {
             var content = await ReadAsync(listed.Path, cancellationToken);
             entry.Hash = StorageHash.Compute(content);
@@ -506,6 +666,52 @@ internal sealed class StorageReconciler
         }
 
         _index.Set(entry);
+    }
+
+    /// <summary>
+    /// Reads a metadata file into its entry. A file whose content is not valid metadata is logged and recorded with
+    /// no metadata, so that the next pass waits for another change of it.
+    /// </summary>
+    private async Task LoadMetadataAsync(StorageListing listed, StorageEntry? entry, CancellationToken cancellationToken)
+    {
+        var content = await ReadAsync(listed.Path, cancellationToken);
+        var hash = StorageHash.Compute(content);
+        if (entry != null && entry.Hash == hash)
+        {
+            entry.Version = listed.Version;
+            return;
+        }
+
+        if (!StorageMetadataFile.TryParse(content, out var metadata, out var error))
+        {
+            _logger?.LogWarning(error, "Ignoring a metadata file that is not valid: {Path}", listed.Path);
+        }
+        else
+        {
+            if (metadata.HoldsSubjectType)
+            {
+                _logger?.LogWarning(
+                    "The metadata file {Path} looks like a subject file; files named *.metadata.json are metadata files and are not loaded as subjects",
+                    listed.Path);
+            }
+
+            foreach (var duplicatePath in metadata.DuplicatePaths)
+            {
+                _logger?.LogWarning(
+                    "The metadata file {Path} has another entry for the target of {Entry} before it; that one applies",
+                    listed.Path, duplicatePath);
+            }
+        }
+
+        // Replaced rather than changed: the index then marks the tree as unapplied, and Apply passes the metadata on.
+        _index.Set(new StorageEntry
+        {
+            Path = listed.Path,
+            IsFolder = false,
+            Version = listed.Version,
+            Hash = hash,
+            Metadata = metadata
+        });
     }
 
     private IInterceptorSubject CreateFromJson(string path, string json, StorageVersion version)
@@ -587,7 +793,7 @@ internal sealed class StorageReconciler
 
         // Text that is not valid JSON fails here for a configurable subject, which then keeps what it has:
         // a file that is being written is no reason to stop a device.
-        if (entry.Subject is IConfigurable configurable && (!IsJson(entry.Path) || FileSubjectFactory.DescribesTypeOf(entry.Subject, json)))
+        if (entry.Subject is IConfigurable configurable && (!StoragePath.IsJson(entry.Path) || FileSubjectFactory.DescribesTypeOf(entry.Subject, json)))
         {
             // From here on the subject holds neither content until the configuration is applied. Not earlier:
             // text that was rejected above has not touched the subject.
@@ -604,7 +810,7 @@ internal sealed class StorageReconciler
             return false;
         }
 
-        if (!IsJson(entry.Path))
+        if (!StoragePath.IsJson(entry.Path))
         {
             return false;
         }
@@ -636,8 +842,8 @@ internal sealed class StorageReconciler
         // pass. Not after an IO error: that is often over by the next pass, such as a file its writer still holds.
         var version = exception is IOException ? default : listed.Version;
 
-        // A subject that is in the tree stays there with what it has.
-        if (_index.TryGet(listed.Path, out var entry) && entry.Subject != null)
+        // A subject that is in the tree stays there with what it has, and so does metadata that was read before.
+        if (_index.TryGet(listed.Path, out var entry) && (entry.Subject != null || entry.IsMetadata))
         {
             entry.Version = version;
             return;
@@ -691,8 +897,16 @@ internal sealed class StorageReconciler
            ?? throw new FileNotFoundException($"'{path}' is not in the storage.", path);
 
     private async Task<byte[]> ReadAsync(string path, CancellationToken cancellationToken)
+        => await TryReadAsync(path, cancellationToken) ?? throw new FileNotFoundException($"'{path}' is not in the storage.", path);
+
+    // Null for a file that does not exist, for which the client returns null although its signature does not say so.
+    private async Task<byte[]?> TryReadAsync(string path, CancellationToken cancellationToken)
     {
-        await using var stream = await OpenReadAsync(path, cancellationToken);
+        await using var stream = await _client.OpenReadAsync(path, cancellationToken);
+        if (stream is null)
+        {
+            return null;
+        }
 
         using var buffer = new MemoryStream();
         await stream.CopyToAsync(buffer, cancellationToken)

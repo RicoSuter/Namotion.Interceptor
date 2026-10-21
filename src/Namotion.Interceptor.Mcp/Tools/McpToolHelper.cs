@@ -33,7 +33,7 @@ internal static class McpToolHelper
 
         if (requestExcludeTypes is not null && requestExcludeTypes.Length > 0)
         {
-            var interfaces = subjectType.GetInterfaces();
+            var interfaces = TypeInterfaces.Get(subjectType);
             foreach (var name in requestExcludeTypes)
             {
                 if (subjectType.FullName == name || subjectType.Name == name)
@@ -41,9 +41,12 @@ internal static class McpToolHelper
                     return true;
                 }
 
-                if (interfaces.Any(i => i.FullName == name || i.Name == name))
+                foreach (var interfaceType in interfaces)
                 {
-                    return true;
+                    if (interfaceType.FullName == name || interfaceType.Name == name)
+                    {
+                        return true;
+                    }
                 }
             }
         }
@@ -222,7 +225,12 @@ internal static class McpToolHelper
             attributes = [];
             foreach (var attribute in property.Attributes)
             {
-                attributes.Add(new PropertyAttribute(attribute.BrowseName, attribute.GetValue()));
+                // A read-only attribute without a value says nothing about its property; a writable one can be set.
+                var value = attribute.GetValue();
+                if (value is not null || attribute.HasSetter)
+                {
+                    attributes.Add(new PropertyAttribute(attribute.BrowseName, value));
+                }
             }
 
             if (attributes.Count == 0)

@@ -1,14 +1,20 @@
-using HomeBlaze.Abstractions;
+using System.Text.Json;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.AI.Agents;
 using HomeBlaze.Services;
+using HomeBlaze.Abstractions;
+using HomeBlaze.Services.Metadata;
+using HomeBlaze.Storage;
+using HomeBlaze.Storage.Abstractions.Metadata;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Mcp;
 using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Registry.Paths;
+using Namotion.Interceptor.Tracking.Parent;
 
 namespace HomeBlaze.AI.Mcp;
 
@@ -19,8 +25,9 @@ internal static class HomeBlazeMcpConfigurationFactory
 {
     private const string PathPrefix = "/";
 
-    private static readonly Func<RegisteredSubject, MethodMetadata, string?> RefuseAgentOperation =
-        (subject, _) => subject.Subject is LlmAgentBase ? "Agents cannot run operations of agents." : null;
+    /// <summary>The refusal of a call of SetMetadata by an agent whose arguments do not have the shape of the method.</summary>
+    internal const string SetMetadataArgumentsMessage =
+        "SetMetadata takes path, a string, an optional property and values, a JSON object, for example {\"path\": \"Devices/Pump\", \"values\": {\"navTitle\": \"Pump\"}}.";
 
     private static readonly Func<RegisteredSubjectProperty, string?> RefuseConfigurationWrite =
         property => property.IsConfigurationProperty() ? "It is a configuration property; set_property cannot change configuration, an operation of the subject may." : null;
@@ -36,7 +43,9 @@ internal static class HomeBlazeMcpConfigurationFactory
     /// <param name="isReadOnly">Whether set_property and operations are blocked.</param>
     /// <param name="forAgents">
     /// Whether the tools serve the built-in agents; invoke_operation and the Markdown tools then refuse every
-    /// operation of an agent (<see cref="LlmAgentBase"/>).
+    /// operation of an agent (<see cref="LlmAgentBase"/>), and SetMetadata of a storage with arguments of another shape,
+    /// for an agent, a subject that an agent holds through any parent, and a subject or property hidden from agents,
+    /// which is refused as a missing one.
     /// </param>
     public static McpServerConfiguration Create(
         IServiceProvider serviceProvider,
@@ -53,7 +62,7 @@ internal static class HomeBlazeMcpConfigurationFactory
         };
 
         var excludeTypes = typeRegistry.RegisteredTypes
-            .Where(type => type.GetCustomAttributes(typeof(ExcludeFromBrowsingAttribute), true).Length > 0)
+            .Where(type => ExcludeFromAttribute.IsExcluded(type, ExclusionTarget.Agents))
             .ToArray();
 
         var invoker = new McpMethodInvoker(
@@ -62,7 +71,7 @@ internal static class HomeBlazeMcpConfigurationFactory
             serviceProvider,
             serviceProvider.GetRequiredService<ILoggerFactory>().CreateLogger<McpMethodInvoker>(),
             isReadOnly,
-            forAgents ? RefuseAgentOperation : null);
+            forAgents ? (subject, method, arguments) => GetAgentOperationError(subject, method, arguments, pathProvider, excludeTypes) : null);
         var configuration = new McpServerConfiguration
         {
             PathProvider = pathProvider,
@@ -93,6 +102,83 @@ internal static class HomeBlazeMcpConfigurationFactory
         }
 
         return configuration;
+    }
+
+    private static string? GetAgentOperationError(
+        RegisteredSubject subject, MethodMetadata method, object?[] arguments, PathProviderBase pathProvider, Type[] excludeTypes)
+    {
+        if (subject.Subject is LlmAgentBase)
+        {
+            return "Agents cannot run operations of agents.";
+        }
+
+        if (method.PropertyName != FluentStorageContainer.SetMetadataMethodName || subject.Subject is not IMetadataStore)
+        {
+            return null;
+        }
+
+        // The input parameters in declaration order, empty when they could not be read. Any other shape is refused
+        // without looking at the path, so that a subject hidden from agents reads as a missing one.
+        return arguments is [string path, string or null, JsonElement { ValueKind: JsonValueKind.Object }, ..]
+            ? GetSetMetadataError(subject, path, arguments[1] as string, pathProvider, excludeTypes)
+            : SetMetadataArgumentsMessage;
+    }
+
+    // Resolves the target of SetMetadata as the tools resolve a path, so that a subject or property hidden from agents
+    // is refused as a missing one, and refuses an agent and a subject that an agent holds through any parent.
+    private static string? GetSetMetadataError(
+        RegisteredSubject storage, string path, string? propertyName, PathProviderBase pathProvider, Type[] excludeTypes)
+    {
+        var target = FluentStorageContainer.ResolveMetadataPath(storage.Subject, path);
+        var trimmedPath = path.Trim();
+        var visibleTarget = trimmedPath.AsSpan().TrimStart('/').IsEmpty ? storage : pathProvider.TryGetSubjectFromPath(storage, trimmedPath);
+        if (target is null || !ReferenceEquals(visibleTarget?.Subject, target) || IsOfExcludedType(visibleTarget, storage, excludeTypes))
+        {
+            return FluentStorageContainer.GetNoSubjectMessage(path);
+        }
+
+        if (target.TryGetFirstParentOrSelf<LlmAgentBase>() is not null)
+        {
+            return "Agents cannot change the metadata of agents.";
+        }
+
+        if (propertyName is not null && IsPropertyChecked(target) && !IsPropertyVisible(visibleTarget, propertyName, pathProvider))
+        {
+            return FluentStorageContainer.GetNoPropertyMessage(propertyName);
+        }
+
+        return null;
+    }
+
+    // The method checks the property only of a subject that a store keeps the metadata of, and not of a folder or a storage.
+    private static bool IsPropertyChecked(IInterceptorSubject target)
+        => target is not (FluentStorageContainer or VirtualFolder) && target.FindMetadataStore()?.CanStoreMetadata(target) == true;
+
+    private static bool IsPropertyVisible(RegisteredSubject subject, string propertyName, PathProviderBase pathProvider)
+        => subject.TryGetProperty(propertyName) is { IsAttribute: false } property && pathProvider.IsPropertyIncluded(property);
+
+    // The subject or one of the subjects that hold it below the storage, through the first parent of each, is of a type
+    // that agents do not see.
+    private static bool IsOfExcludedType(RegisteredSubject subject, RegisteredSubject storage, Type[] excludeTypes)
+    {
+        foreach (var current in new FirstParentChain(subject))
+        {
+            if (ReferenceEquals(current, storage))
+            {
+                return false;
+            }
+
+            var type = current.Subject.GetType();
+            foreach (var excludedType in excludeTypes)
+            {
+                if (excludedType.IsAssignableFrom(type))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     /// <summary>

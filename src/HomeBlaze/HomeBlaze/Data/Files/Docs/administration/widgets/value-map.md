@@ -1,7 +1,6 @@
 ---
 title: ValueMap
 navTitle: ValueMap
-position: 30
 ---
 
 # ValueMap

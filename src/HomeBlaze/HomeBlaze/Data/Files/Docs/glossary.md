@@ -1,7 +1,6 @@
 ---
 title: Glossary
 navTitle: Glossary
-position: 10
 ---
 
 # Glossary
@@ -61,7 +60,7 @@ Marks a property for display in the UI property panel. Options: `Name`, `Positio
 Marks a computed property that auto-updates when its dependencies change. Must be expression-bodied (`=>`).
 
 ### `[Operation]`
-Marks a method as an executable action from the UI. Options: `Title`, `Description`, `Icon`, `Position`, `RequiresConfirmation`. An operation with `RequiresConfirmation` asks for confirmation in the UI and cannot be called through MCP, neither by AI agents nor by external clients, see [AI Agents](administration/ai-agents.md#tools-and-permissions).
+Marks a method as an executable action from the UI. Options: `Title`, `Description`, `Icon`, `Position`, `RequiresConfirmation`; `[ExcludeFrom]` beside it decides where it is offered. An operation with `RequiresConfirmation` asks for confirmation in the UI and cannot be called through MCP, neither by AI agents nor by external clients, see [AI Agents](administration/ai-agents.md#tools-and-permissions).
 
 ### `[Query]`
 Marks a method as a read-only query (no side effects). Similar to `[Operation]` but semantically non-mutating.
@@ -76,6 +75,9 @@ Associates metadata with another property (e.g., minimum/maximum values).
 [PropertyAttribute(nameof(TargetSpeed), "Minimum")]
 public partial int TargetSpeed_Minimum { get; set; }
 ```
+
+### `[ExcludeFrom]`
+Keeps a subject type or a method out of user interfaces, agents or both: `[ExcludeFrom(ExclusionTarget.UserInterface)]`, `Agents` or `All`. It decides where something is offered, not who may reach it. See [Building Subjects: Excluding Subjects and Methods](development/building-subjects.md#excluding-subjects-and-methods).
 
 ---
 
@@ -119,7 +121,11 @@ A full-page component for a subject type. Pages appear in the navigation when th
 
 ## Navigation
 
-Set via markdown frontmatter on `.md` files — see [Markdown Pages — Frontmatter](administration/pages.md#frontmatter).
+Set in the frontmatter of a page, see [Markdown Pages: Frontmatter](administration/pages.md#frontmatter), and in the metadata of folders and subjects, see [Metadata](administration/metadata.md).
+
+### Metadata
+
+Keys and values that describe a folder, a subject or a property, such as its navigation title, its icon or a comment, stored in `.metadata.json` files. See [Metadata](administration/metadata.md).
 
 ### Navigation Location
 

@@ -21,14 +21,10 @@ public class RegisteredSubjectMethodExtensionsTests
         var registered = subject.TryGetRegisteredSubject()!;
 
         // Act
-        var all = registered.GetAllMethods();
-        var operations = registered.GetOperationMethods();
-        var queries = registered.GetQueryMethods();
+        var all = registered.GetAllMethods(ExclusionTarget.UserInterface);
 
         // Assert
         Assert.Equal(new[] { "Object", "Interface", "Subclass" }, all.Select(method => method.Title));
-        Assert.Equal(new[] { "Object", "Subclass" }, operations.Select(method => method.Title));
-        Assert.Equal("Interface", Assert.Single(queries).Title);
     }
 
     private static IInterceptorSubjectContext CreateContext()
@@ -51,7 +47,7 @@ public class RegisteredSubjectMethodExtensionsTests
         var registered = subject.TryGetRegisteredSubject()!;
 
         // Act
-        var methods = registered.GetAllMethods();
+        var methods = registered.GetAllMethods(ExclusionTarget.UserInterface);
 
         // Assert
         Assert.Equal(3, methods.Count);
@@ -60,37 +56,6 @@ public class RegisteredSubjectMethodExtensionsTests
         Assert.Equal("Third", methods[2].Title);
     }
 
-    [Fact]
-    public void GetOperationMethods_ReturnsOnlyOperations()
-    {
-        // Arrange
-        var context = CreateContext();
-        var subject = new MethodExtTestSubject(context);
-        var registered = subject.TryGetRegisteredSubject()!;
-
-        // Act
-        var operations = registered.GetOperationMethods();
-
-        // Assert
-        Assert.Equal(2, operations.Count);
-        Assert.All(operations, m => Assert.Equal(MethodKind.Operation, m.Kind));
-    }
-
-    [Fact]
-    public void GetQueryMethods_ReturnsOnlyQueries()
-    {
-        // Arrange
-        var context = CreateContext();
-        var subject = new MethodExtTestSubject(context);
-        var registered = subject.TryGetRegisteredSubject()!;
-
-        // Act
-        var queries = registered.GetQueryMethods();
-
-        // Assert
-        Assert.Single(queries);
-        Assert.Equal(MethodKind.Query, queries[0].Kind);
-    }
     [Fact]
     public void GetAllMethods_IncludesDynamicallyAddedMethodMetadata()
     {
@@ -109,35 +74,11 @@ public class RegisteredSubjectMethodExtensionsTests
         registered.AddProperty("DynamicOp", typeof(MethodMetadata), _ => dynamicMetadata, null);
 
         // Act
-        var methods = registered.GetAllMethods();
+        var methods = registered.GetAllMethods(ExclusionTarget.UserInterface);
 
         // Assert — dynamic method should appear first (Position = 0) alongside the 3 attribute-based methods
         Assert.Equal(4, methods.Count);
         Assert.Equal("Dynamic", methods[0].Title);
-    }
-
-    [Fact]
-    public void GetOperationMethods_IncludesDynamicallyAddedOperationMetadata()
-    {
-        // Arrange
-        var context = CreateContext();
-        var subject = new MethodExtTestSubject(context);
-        var registered = subject.TryGetRegisteredSubject()!;
-
-        var dynamicMetadata = new MethodMetadata(_ => Task.CompletedTask)
-        {
-            Title = "DynamicOp",
-            Kind = MethodKind.Operation,
-            PropertyName = "DynamicOp",
-        };
-        registered.AddProperty("DynamicOp", typeof(MethodMetadata), _ => dynamicMetadata, null);
-
-        // Act
-        var operations = registered.GetOperationMethods();
-
-        // Assert — should include both attribute-based operations and the dynamic one
-        Assert.Equal(3, operations.Count);
-        Assert.All(operations, m => Assert.Equal(MethodKind.Operation, m.Kind));
     }
 
     [Fact]
@@ -216,6 +157,47 @@ public class RegisteredSubjectMethodExtensionsTests
         Assert.Null(unavailableMetadata);
         Assert.Equal("Object", objectMetadata?.Title);
     }
+
+    [Fact]
+    public void WhenMethodsAreListedForTheUserInterface_ThenTheMethodsExcludedFromItAreLeftOut()
+    {
+        // Arrange
+        var registered = new MethodExclusionTestSubject(CreateContext()).TryGetRegisteredSubject()!;
+
+        // Act
+        var methods = registered.GetAllMethods(ExclusionTarget.UserInterface);
+
+        // Assert
+        Assert.Equal(new[] { "Everywhere", "Not For Agents" }, methods.Select(method => method.Title));
+    }
+
+    [Fact]
+    public void WhenMethodsAreListedForAgents_ThenTheMethodsExcludedFromThemAreLeftOut()
+    {
+        // Arrange
+        var registered = new MethodExclusionTestSubject(CreateContext()).TryGetRegisteredSubject()!;
+
+        // Act
+        var methods = registered.GetAllMethods(ExclusionTarget.Agents);
+
+        // Assert
+        Assert.Equal(new[] { "Everywhere", "Not In User Interface" }, methods.Select(method => method.Title));
+    }
+}
+
+[InterceptorSubject]
+public partial class MethodExclusionTestSubject
+{
+    [Operation(Title = "Everywhere", Position = 1)]
+    public void Everywhere() { }
+
+    [Operation(Title = "Not In User Interface", Position = 2)]
+    [ExcludeFrom(ExclusionTarget.UserInterface)]
+    public void NotInUserInterface() { }
+
+    [Query(Title = "Not For Agents", Position = 3)]
+    [ExcludeFrom(ExclusionTarget.Agents)]
+    public string NotForAgents() => "result";
 }
 
 [InterceptorSubject]

@@ -17,7 +17,7 @@ HomeBlaze persists several categories of data through a pluggable storage layer.
 | Subject configuration | Subject settings, topology, plugin list | JSON (`[Configuration]` properties) | Yes |
 | Knowledge files | Documentation, runbooks, operating procedures | Markdown with YAML frontmatter |  Yes |
 | Documents | PDFs, images, data files linked to subjects | Binary blobs | Yes |
-| Dynamic metadata | Annotations, tags, links between subjects | JSON (separate from subject config) | Yes |
+| Metadata | Titles, icons and order in navigation, comments (see [Metadata](metadata.md)) | JSON (separate from subject config) | Yes |
 | Plugin configuration | NuGet feed URLs, package list | JSON | Yes |
 | Property values (live state) | Sensor readings, device status | — | No — recovers from field devices (satellites), peers via WebSocket Welcome snapshot (central/standby) |
 | Time-series history | Property change history | Via history sink (see [History](history.md)) | Yes (separate concern) |
@@ -198,6 +198,8 @@ File subjects are created based on file extension via `FileExtensionAttribute`:
 | `JsonFile` | `.json` | Plain JSON files (non-configurable subjects) |
 | `GenericFile` | Other | Fallback for unknown extensions, metadata only |
 
+**Metadata files** (`.metadata.json` in a folder, `X.metadata.json` beside `X.json`) never become subjects. How the storage indexes, applies and writes them is in [Metadata](metadata.md).
+
 Plugin authors can register additional file types via `[FileExtension]`. The storage sets `FileSize` and `LastModified` of such a file subject from its listing and calls its `OnFileChangedAsync` when the file is new or its content hash differs. That call runs on the worker of the storage, see "One thing at a time" for what it must not do. A read of the stream of the file in that call is not limited by the storage.
 
 ### Markdown Pages [Implemented]
@@ -255,7 +257,7 @@ Files in storage become subjects in the knowledge graph through two different pa
 - **Subject files** — `.json` files with a `$type` discriminator are deserialized into typed subjects (e.g., `Motor`, `OpcUaServer`). The file is the persistence format; the subject is what appears in the graph. Only `[Configuration]` properties are persisted.
 - **Documents** — all other files (Markdown, PDFs, images, plain JSON without `$type`) become document subjects (`MarkdownFile`, `JsonFile`, `GenericFile`, or custom types via `[FileExtension]` plugins). The file content is the document itself, visible as-is in the knowledge graph.
 
-Documents are browsable in the subject tree, editable in the Blazor UI (Monaco editor for text files), and accessible via MCP tools: `browse` or `search` finds them, and `invoke_query` reads them, for example `ReadEvaluatedContent` of a Markdown page. Markdown files can also be changed through `ReplaceText`, `ReplaceContent` and `CreateMarkdownFile`, which write through the same path as the editor but leave blocks, other than layout blocks for agents with `edit_page_layout`, and other active content to the page editor, see [Changing pages](../../administration/ai-agents.md#changing-pages). JSON and other files have no such operations. Linking documents to other subjects (e.g., "this PDF is the manual for motor CNC-01") is handled via dynamic metadata / annotations (planned, see below).
+Documents are browsable in the subject tree, editable in the Blazor UI (Monaco editor for text files), and accessible via MCP tools: `browse` or `search` finds them, and `invoke_query` reads them, for example `ReadEvaluatedContent` of a Markdown page. Markdown files can also be changed through `ReplaceText`, `ReplaceContent` and `CreateMarkdownFile`, which write through the same path as the editor but leave blocks, other than layout blocks for agents with `edit_page_layout`, and other active content to the page editor, see [Changing pages](../../administration/ai-agents.md#changing-pages). JSON and other files have no such operations. Linking documents to other subjects (e.g., "this PDF is the manual for motor CNC-01") is handled via metadata (planned, see [Metadata](metadata.md#planned)).
 
 ## Subject Configuration [Implemented]
 
@@ -266,19 +268,6 @@ The `[State]` attribute marks runtime-only properties that are not persisted.
 `IConfigurationWriter` forms a chain resolved via the subject's parent hierarchy — the nearest parent that implements `IConfigurationWriter` handles persistence. This allows different storage containers to own different subtrees.
 
 A storage container stores one subject per JSON file, so a subject nested in that file's configuration through `[Configuration]` properties, such as a cell of a grid layout, is written by rewriting the whole file. A markdown page rewrites the block of the subject instead, see Write-back under [Markdown Pages](#markdown-pages-implemented). A writer returns `false` when it wrote nothing, because it stores no configuration that contains the subject or is not connected, and its caller has to report that instead of success. `RootManager` writes the root configuration file one save at a time, so two saves of the root at once neither fail on the open file nor let the earlier state overwrite the later one.
-
-## Dynamic Metadata and Annotations [Planned]
-
-User-created metadata (annotations, tags, links between subjects) are stored as dynamic attributes on the registry. These are persisted in their own JSON files, separate from subject configuration, so they survive restarts and can be reapplied to subjects as they are instantiated.
-
-This enables operators and integrators to enrich the knowledge graph with domain-specific metadata without modifying subject code. Examples:
-
-- `tags: ["floor-2", "critical", "hvac"]` — cross-cutting grouping independent of folder hierarchy
-- `area: "Kitchen"` — physical location assignment (equivalent to Home Assistant areas)
-- `group: "cooling-system"` — logical grouping across different folders
-- `owner: "maintenance-team-b"` — organizational metadata
-
-All dynamic attributes are queryable through the registry, transmitted over the wire via WebSocket sync, and visible in the UI — no separate subsystem needed.
 
 ## HA and Multi-Instance Storage [Planned]
 

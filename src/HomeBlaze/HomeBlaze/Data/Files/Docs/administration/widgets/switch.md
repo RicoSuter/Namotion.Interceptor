@@ -1,7 +1,6 @@
 ---
 title: Switch
 navTitle: Switch
-position: 40
 ---
 
 # Switch
