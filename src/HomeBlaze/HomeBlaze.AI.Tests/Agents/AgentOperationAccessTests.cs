@@ -1,9 +1,10 @@
+using System.Collections.Immutable;
 using System.Text.Json;
+using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.AI.Agents;
 using HomeBlaze.AI.Mcp;
 using HomeBlaze.AI.Tests.Mcp;
-using HomeBlaze.Abstractions;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Lifecycle;
 using HomeBlaze.Storage;
@@ -124,6 +125,29 @@ public class AgentOperationAccessTests
         // Assert
         Assert.NotSame(agent, shared.TryGetRegisteredSubject()!.Parents[0].Property.Subject);
         Assert.Equal("Agents cannot change the metadata of agents.", result.GetProperty("error").GetString());
+    }
+
+    [Theory]
+    [InlineData(false, new[] { "Agent" })]
+    [InlineData(true, new string[0])]
+    public async Task WhenMetadataIsSearched_ThenOnlyAgentsFindNoMetadataOfAgents(bool forAgents, string[] expectedPaths)
+    {
+        // Arrange
+        var (root, agent, services) = CreateGraph();
+        var storage = CreateStorage(services);
+        root.Children = new Dictionary<string, IInterceptorSubject> { ["Storage"] = storage };
+        storage.Children = new Dictionary<string, IInterceptorSubject> { ["Agent"] = agent };
+        var metadata = ImmutableDictionary<string, JsonElement>.Empty.Add("tags", JsonElement.Parse("""["floor-2"]"""));
+        agent.TryGetRegisteredSubject()!.AddProperty(KnownAttributes.Metadata, metadata.GetType(), _ => metadata, null);
+        var invokeQuery = CreateTools(services, root, forAgents)["invoke_query"];
+
+        // Act
+        var result = JsonSerializer.SerializeToElement(await invokeQuery.Handler(
+            JsonSerializer.SerializeToElement(new { path = "/Storage", method = "SearchMetadata", parameters = new { tag = "floor-2" } }),
+            CancellationToken.None));
+
+        // Assert
+        Assert.Equal(expectedPaths, result.GetProperty("result").EnumerateArray().Select(match => match.GetProperty("path").GetString()));
     }
 
     [Theory]

@@ -64,5 +64,12 @@ public interface ITestSensorInterface
 public partial class AgentExcludedThing;
 
 [InterceptorSubject]
+[ExcludeFrom(ExclusionTarget.Agents)]
+public partial class AgentExcludedDevice : IConfigurable
+{
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+}
+
+[InterceptorSubject]
 [ExcludeFrom(ExclusionTarget.UserInterface)]
 public partial class UserInterfaceExcludedThing;

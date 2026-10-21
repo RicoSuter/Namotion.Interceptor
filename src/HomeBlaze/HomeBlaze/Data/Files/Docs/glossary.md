@@ -125,7 +125,7 @@ Set in the frontmatter of a page, see [Markdown Pages: Frontmatter](administrati
 
 ### Metadata
 
-Keys and values that describe a folder, a subject or a property, such as its navigation title, its icon or a comment, stored in `.metadata.json` files. See [Metadata](administration/metadata.md).
+Keys and values that describe a folder, a subject or a property, such as its navigation title, its icon, its notes, links and tags or a comment, stored in `.metadata.json` files. See [Metadata](administration/metadata.md).
 
 ### Navigation Location
 

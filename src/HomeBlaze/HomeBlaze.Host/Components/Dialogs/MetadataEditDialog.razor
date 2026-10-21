@@ -1,60 +1,106 @@
+@using HomeBlaze.Abstractions.Attributes
 @using HomeBlaze.Components.Abstractions.Pages
 @using HomeBlaze.Services.Metadata
 @using HomeBlaze.Storage.Abstractions
 @using System.Text.Json
 @using System.Text.Json.Nodes
+@using HomeBlaze.Components.Inputs
 @using HomeBlaze.Storage.Abstractions.Metadata
 
 @inject ISnackbar Snackbar
+@inject RootManager RootManager
 
 <MudDialog data-testid="metadata-edit-dialog">
     <DialogContent>
-        @if (_isFolder)
+        @if (PropertyName is null)
         {
-            <MudTextField @bind-Value="_title"
-                          Label="Title"
-                          Placeholder="@_titlePlaceholder"
+            @if (_isFolder)
+            {
+                <MudTextField @bind-Value="_title"
+                              Label="Title"
+                              Placeholder="@_titlePlaceholder"
+                              Clearable="true"
+                              data-testid="metadata-title" />
+            }
+            <MudTextField @bind-Value="_navigationTitle"
+                          Label="Navigation title"
+                          Placeholder="@_navigationTitlePlaceholder"
                           Clearable="true"
-                          data-testid="metadata-title" />
+                          data-testid="metadata-navigation-title" />
+            <MudTextField @bind-Value="_icon"
+                          Label="Icon"
+                          Placeholder="@_iconPlaceholder"
+                          Clearable="true"
+                          DebounceInterval="300"
+                          Adornment="Adornment.End"
+                          AdornmentIcon="@SubjectIconExtensions.ResolveMudBlazorIcon(GetValue(_icon) ?? _iconPlaceholder)"
+                          HelperText="A MudBlazor icon name, such as Dashboard or Settings"
+                          data-testid="metadata-icon" />
+            @if (!_isFolder)
+            {
+                <MudSelect T="NavigationLocation?"
+                           @bind-Value="_location"
+                           @bind-Value:after="OnLocationChanged"
+                           Label="Location"
+                           Placeholder="Sidebar"
+                           Clearable="true"
+                           data-testid="metadata-location">
+                    <MudSelectItem T="NavigationLocation?" Value="@((NavigationLocation?)NavigationLocation.NavBar)">Sidebar</MudSelectItem>
+                    <MudSelectItem T="NavigationLocation?" Value="@((NavigationLocation?)NavigationLocation.AppBar)">Top bar</MudSelectItem>
+                </MudSelect>
+                <MudSelect T="AppBarAlignment?"
+                           @bind-Value="_alignment"
+                           Label="Alignment"
+                           Placeholder="Left"
+                           Clearable="true"
+                           Disabled="@(_location != NavigationLocation.AppBar)"
+                           data-testid="metadata-alignment">
+                    <MudSelectItem T="AppBarAlignment?" Value="@((AppBarAlignment?)AppBarAlignment.Left)">Left</MudSelectItem>
+                    <MudSelectItem T="AppBarAlignment?" Value="@((AppBarAlignment?)AppBarAlignment.Right)">Right</MudSelectItem>
+                    <MudSelectItem T="AppBarAlignment?" Value="@((AppBarAlignment?)AppBarAlignment.Menu)">Menu</MudSelectItem>
+                </MudSelect>
+            }
         }
-        <MudTextField @bind-Value="_navigationTitle"
-                      Label="Navigation title"
-                      Placeholder="@_navigationTitlePlaceholder"
-                      Clearable="true"
-                      data-testid="metadata-navigation-title" />
-        <MudTextField @bind-Value="_icon"
-                      Label="Icon"
-                      Placeholder="@_iconPlaceholder"
-                      Clearable="true"
-                      DebounceInterval="300"
-                      Adornment="Adornment.End"
-                      AdornmentIcon="@SubjectIconExtensions.ResolveMudBlazorIcon(GetValue(_icon) ?? _iconPlaceholder)"
-                      HelperText="A MudBlazor icon name, such as Dashboard or Settings"
-                      data-testid="metadata-icon" />
-        @if (!_isFolder)
+        <MudTextField @bind-Value="_notes"
+                      Label="Notes"
+                      Lines="4"
+                      Sizing="InputSizing.Auto"
+                      MaxLines="12"
+                      HelperText="Markdown, without HTML, pictures or blocks"
+                      data-testid="metadata-notes-input" />
+        <MudText Typo="Typo.subtitle2" Class="mt-4">Links</MudText>
+        @foreach (var link in _links)
         {
-            <MudSelect T="NavigationLocation?"
-                       @bind-Value="_location"
-                       @bind-Value:after="OnLocationChanged"
-                       Label="Location"
-                       Placeholder="Sidebar"
-                       Clearable="true"
-                       data-testid="metadata-location">
-                <MudSelectItem T="NavigationLocation?" Value="@((NavigationLocation?)NavigationLocation.NavBar)">Sidebar</MudSelectItem>
-                <MudSelectItem T="NavigationLocation?" Value="@((NavigationLocation?)NavigationLocation.AppBar)">Top bar</MudSelectItem>
-            </MudSelect>
-            <MudSelect T="AppBarAlignment?"
-                       @bind-Value="_alignment"
-                       Label="Alignment"
-                       Placeholder="Left"
-                       Clearable="true"
-                       Disabled="@(_location != NavigationLocation.AppBar)"
-                       data-testid="metadata-alignment">
-                <MudSelectItem T="AppBarAlignment?" Value="@((AppBarAlignment?)AppBarAlignment.Left)">Left</MudSelectItem>
-                <MudSelectItem T="AppBarAlignment?" Value="@((AppBarAlignment?)AppBarAlignment.Right)">Right</MudSelectItem>
-                <MudSelectItem T="AppBarAlignment?" Value="@((AppBarAlignment?)AppBarAlignment.Menu)">Menu</MudSelectItem>
-            </MudSelect>
+            <div @key="link" class="d-flex align-center gap-2" data-testid="metadata-link-row">
+                <MudTextField @bind-Value="link.Title" Label="Title" Clearable="true" Class="flex-grow-1" data-testid="metadata-link-title" />
+                <SubjectPathField @bind-Value="link.Address" Label="URL or path" Placeholder="https://… or /Devices/Pump" Class="flex-grow-1" />
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" aria-label="Remove link" OnClick="@(() => _links.Remove(link))"
+                               data-testid="metadata-remove-link" />
+            </div>
         }
+        <MudButton StartIcon="@Icons.Material.Filled.AddLink" Variant="Variant.Text" OnClick="@(() => _links.Add(new LinkInput()))"
+                   data-testid="metadata-add-link">Add link</MudButton>
+        @* The value changes only when a suggestion is picked; typed text is added on Enter, not on every keystroke. The
+           keys are seen on the element around the field, as the field passes a key on only after it handled it, which
+           can wait for the browser, so that a later key could be seen first. *@
+        <div @onkeydown="OnTagKeyDown">
+            <MudAutocomplete T="string"
+                             @ref="_tagInput"
+                             Label="Add tag"
+                             ValueChanged="AddTagAndClearInputAsync"
+                             TextChanged="OnTagTextChanged"
+                             OnKeyUp="OnTagKeyUpAsync"
+                             SearchFunc="SearchTagsAsync"
+                             CoerceText="false"
+                             Class="mt-4"
+                             data-testid="metadata-tag-input" />
+        </div>
+        <div class="d-flex flex-wrap gap-1 mt-1">
+            @foreach (var tag in _tags)
+            {
+                <MudChip @key="tag" T="string" Size="Size.Small" OnClose="@(() => _tags.Remove(tag))" data-testid="metadata-tag-chip">@tag</MudChip>
+            }
+        </div>
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="Cancel" Disabled="@_isSaving">Cancel</MudButton>
@@ -65,8 +111,11 @@
 @code {
     [CascadingParameter] private IMudDialogInstance? MudDialog { get; set; }
 
-    /// <summary>The folder or the subject whose metadata is edited. A storage is edited as a subject.</summary>
+    /// <summary>The folder or the subject whose metadata, or that of whose property, is edited. A storage is edited as a subject.</summary>
     [Parameter, EditorRequired] public IInterceptorSubject Owner { get; set; } = default!;
+
+    /// <summary>The name of the property of the owner whose metadata is edited, or null for the owner itself.</summary>
+    [Parameter] public string? PropertyName { get; set; }
 
     private bool _isFolder;
     private string? _titlePlaceholder;
@@ -77,36 +126,130 @@
     private string? _icon;
     private NavigationLocation? _location;
     private AppBarAlignment? _alignment;
+    private string? _notes;
+    private readonly List<LinkInput> _links = [];
+    private readonly List<string> _tags = [];
+    private IReadOnlyList<string> _tagsInUse = [];
+    private string? _tagText;
+    private bool _isSuggestionChosen;
+    private string? _enterText;
+    private MudAutocomplete<string>? _tagInput;
     private bool _isSaving;
 
     // The values of the fields as loaded, so that a save writes only what was changed.
-    private Dictionary<string, string?> _loadedValues = [];
+    private Dictionary<string, JsonNode?> _loadedValues = [];
 
     protected override void OnInitialized()
     {
-        _isFolder = IsFolder(Owner);
-        _navigationTitlePlaceholder = Owner.GetTitle();
+        var metadata = PropertyName is null
+            ? Owner.GetMetadata()
+            : Owner.TryGetRegisteredSubject()?.TryGetProperty(PropertyName)?.GetMetadata();
 
-        var metadata = Owner.GetMetadata();
-        _navigationTitle = metadata.GetString(MetadataKeys.NavigationTitle);
-        _icon = metadata.GetString(MetadataKeys.Icon);
-        if (_isFolder)
+        _notes = metadata.GetString(MetadataKeys.Notes);
+        foreach (var link in metadata.GetLinks())
         {
-            _titlePlaceholder = Owner.TryGetRegisteredSubject()?.Parents.FirstOrDefault().Index?.ToString();
-            _iconPlaceholder = "Folder";
-            _title = metadata.GetString(MetadataKeys.Title);
+            _links.Add(new LinkInput { Title = link.Title, Address = link.Url ?? link.Path });
         }
-        else
-        {
-            if ((Owner as IIconProvider)?.IconName is { Length: > 0 } iconName)
-                _iconPlaceholder = iconName;
 
-            _location = metadata.GetEnum<NavigationLocation>(MetadataKeys.Location);
-            _alignment = metadata.GetEnum<AppBarAlignment>(MetadataKeys.Alignment);
-            OnLocationChanged();
+        _tags.AddRange(metadata.GetTags());
+
+        // Once per dialog, as finding them walks the whole tree; only those that the tag filter lists.
+        _tagsInUse = RootManager.Root is { } root
+            ? MetadataSearch.GetTags(root, static subject => subject.IsExcludedFrom(ExclusionTarget.UserInterface), static property => property.IsShownAsValue())
+            : [];
+        if (PropertyName is null)
+        {
+            _isFolder = IsFolder(Owner);
+            _navigationTitlePlaceholder = Owner.GetTitle();
+            _navigationTitle = metadata.GetString(MetadataKeys.NavigationTitle);
+            _icon = metadata.GetString(MetadataKeys.Icon);
+            if (_isFolder)
+            {
+                _titlePlaceholder = Owner.TryGetRegisteredSubject()?.Parents.FirstOrDefault().Index?.ToString();
+                _iconPlaceholder = "Folder";
+                _title = metadata.GetString(MetadataKeys.Title);
+            }
+            else
+            {
+                if ((Owner as IIconProvider)?.IconName is { Length: > 0 } iconName)
+                    _iconPlaceholder = iconName;
+
+                _location = metadata.GetEnum<NavigationLocation>(MetadataKeys.Location);
+                _alignment = metadata.GetEnum<AppBarAlignment>(MetadataKeys.Alignment);
+                OnLocationChanged();
+            }
         }
 
         _loadedValues = GetValues();
+    }
+
+    private void AddTag(string? tag)
+    {
+        var text = GetValue(tag);
+        if (text is not null && !_tags.Contains(text, StringComparer.OrdinalIgnoreCase))
+            _tags.Add(text);
+
+        _tagText = null;
+    }
+
+    // A picked suggestion; also called with null when the field is cleared. On Enter the field picks the highlighted
+    // suggestion, which can be one of a search for text typed before, so Enter adds the typed text instead unless a
+    // suggestion was chosen with the arrow keys and not dismissed with Escape since.
+    private async Task AddTagAndClearInputAsync(string? tag)
+    {
+        if (tag is null)
+            return;
+
+        AddTag(_enterText ?? tag);
+        _enterText = null;
+
+        // The field keeps the text of what it added, which would look like a tag not added yet.
+        if (_tagInput is not null)
+            await _tagInput.ClearAsync();
+    }
+
+    private void OnTagTextChanged(string? text)
+    {
+        _tagText = text;
+
+        // Typing searches again, which highlights the first suggestion.
+        _isSuggestionChosen = false;
+    }
+
+    // Runs in the order of the keys, before the field handles the release of Enter.
+    private void OnTagKeyDown(KeyboardEventArgs args)
+    {
+        if (args.Key is "ArrowDown" or "ArrowUp")
+            _isSuggestionChosen = true;
+        else if (args.Key is "Escape")
+            _isSuggestionChosen = false;
+        else if (args.Key is "Enter" or "NumpadEnter")
+            _enterText = _isSuggestionChosen ? null : _tagText ?? string.Empty;
+    }
+
+    // Runs after the field handled the key: when Enter picked a suggestion, the field is cleared already.
+    private async Task OnTagKeyUpAsync(KeyboardEventArgs args)
+    {
+        if (args.Key is not ("Enter" or "NumpadEnter"))
+            return;
+
+        var text = _enterText;
+        _enterText = null;
+        _isSuggestionChosen = false;
+        if (text is not null)
+            await AddTagAndClearInputAsync(text);
+    }
+
+    // The tags in use that contain the text, so that the same tag is written the same way, after the text itself unless
+    // it is one of them.
+    private Task<IEnumerable<string>> SearchTagsAsync(string? text, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return Task.FromResult(_tagsInUse.AsEnumerable());
+
+        var typed = text.Trim();
+        var matches = _tagsInUse.Where(tag => tag.Contains(typed, StringComparison.OrdinalIgnoreCase));
+        return Task.FromResult(_tagsInUse.Contains(typed, StringComparer.OrdinalIgnoreCase) ? matches : matches.Prepend(typed));
     }
 
     private void Cancel() => MudDialog?.Cancel();
@@ -129,12 +272,16 @@
             return;
         }
 
-        // Only the fields that were changed, so that a field left empty removes its key, and a value that the dialog
-        // cannot show, such as a number edited by hand, or that was written while the dialog was open, stays.
+        // A tag that was typed and not added yet is kept.
+        AddTag(_tagText);
+
+        // Only the fields that were changed, so that a field left empty removes its key, and the value of a key whose field
+        // was not changed stays, also one that the dialog cannot show, such as a number or a link edited by hand, or one
+        // that was written while the dialog was open.
         var values = new JsonObject();
         foreach (var (key, value) in GetValues())
         {
-            if (value != _loadedValues[key])
+            if (!JsonNode.DeepEquals(value, _loadedValues[key]))
                 values[key] = value;
         }
 
@@ -153,7 +300,7 @@
 
         try
         {
-            await store.SetMetadataAsync(Owner, null, JsonElement.Parse(values.ToJsonString()), CancellationToken.None);
+            await store.SetMetadataAsync(Owner, PropertyName, JsonElement.Parse(values.ToJsonString()), CancellationToken.None);
             MudDialog?.Close(DialogResult.Ok(true));
         }
         catch (Exception exception)
@@ -169,23 +316,50 @@
     }
 
     // The value of each field the dialog shows, by its key; null for a field left empty.
-    private Dictionary<string, string?> GetValues()
+    private Dictionary<string, JsonNode?> GetValues()
     {
-        var values = new Dictionary<string, string?>();
-        if (_isFolder)
+        var values = new Dictionary<string, JsonNode?>();
+        if (PropertyName is null)
         {
-            values[MetadataKeys.Title] = GetValue(_title);
+            if (_isFolder)
+            {
+                values[MetadataKeys.Title] = GetValue(_title);
+            }
+
+            values[MetadataKeys.NavigationTitle] = GetValue(_navigationTitle);
+            values[MetadataKeys.Icon] = GetValue(_icon);
+            if (!_isFolder)
+            {
+                values[MetadataKeys.Location] = _location?.ToString();
+                values[MetadataKeys.Alignment] = _location == NavigationLocation.AppBar ? _alignment?.ToString() : null;
+            }
         }
 
-        values[MetadataKeys.NavigationTitle] = GetValue(_navigationTitle);
-        values[MetadataKeys.Icon] = GetValue(_icon);
-        if (!_isFolder)
-        {
-            values[MetadataKeys.Location] = _location?.ToString();
-            values[MetadataKeys.Alignment] = _location == NavigationLocation.AppBar ? _alignment?.ToString() : null;
-        }
-
+        // Kept as written, as surrounding whitespace can be part of the Markdown.
+        values[MetadataKeys.Notes] = string.IsNullOrWhiteSpace(_notes) ? null : _notes;
+        values[MetadataKeys.Links] = CreateLinks();
+        values[MetadataKeys.Tags] = _tags.Count > 0 ? new JsonArray([.. _tags.Select(tag => JsonValue.Create(tag))]) : null;
         return values;
+    }
+
+    // An address that starts with a slash is a path, any other a web address. Rows without an address are left out.
+    private JsonArray? CreateLinks()
+    {
+        var links = new JsonArray();
+        foreach (var link in _links)
+        {
+            if (GetValue(link.Address) is not { } address)
+                continue;
+
+            var item = new JsonObject();
+            if (GetValue(link.Title) is { } title)
+                item["title"] = title;
+
+            item[address.StartsWith('/') ? "path" : "url"] = address;
+            links.Add(item);
+        }
+
+        return links.Count > 0 ? links : null;
     }
 
     private static string? GetValue(string? value)
@@ -199,11 +373,16 @@
         => owner is IMetadataContainer and not IConfigurable;
 
     /// <summary>
-    /// Shows the dialog for the metadata of a folder or of a subject that a store keeps the metadata of.
+    /// Shows the dialog for the metadata of a folder or of a subject that a store keeps the metadata of, or of a
+    /// property of it.
     /// </summary>
-    public static Task<IDialogReference> ShowAsync(IDialogService dialogService, IInterceptorSubject owner, string title)
+    public static Task<IDialogReference> ShowAsync(IDialogService dialogService, IInterceptorSubject owner, string title, string? propertyName = null)
     {
-        var parameters = new DialogParameters<MetadataEditDialog> { { x => x.Owner, owner } };
+        var parameters = new DialogParameters<MetadataEditDialog>
+        {
+            { x => x.Owner, owner },
+            { x => x.PropertyName, propertyName }
+        };
 
         var options = new DialogOptions
         {
@@ -213,5 +392,12 @@
         };
 
         return dialogService.ShowAsync<MetadataEditDialog>(title, parameters, options);
+    }
+
+    private sealed class LinkInput
+    {
+        public string? Title { get; set; }
+
+        public string? Address { get; set; }
     }
 }

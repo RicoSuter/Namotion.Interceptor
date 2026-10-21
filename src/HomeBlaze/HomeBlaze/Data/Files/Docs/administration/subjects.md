@@ -81,7 +81,7 @@ Folders use `[InlinePaths]`, so children are path segments directly (no `Childre
 
 ### Metadata Files
 
-A folder can hold a `.metadata.json`, and a subject file `X.json` an `X.metadata.json` beside it, with titles, icons, the order of children and other metadata, see [Metadata](metadata.md).
+A folder can hold a `.metadata.json`, and a subject file `X.json` an `X.metadata.json` beside it, with titles, icons, the order of children, notes, links, tags and other metadata, see [Metadata](metadata.md).
 
 ---
 

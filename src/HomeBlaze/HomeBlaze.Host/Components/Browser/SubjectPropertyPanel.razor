@@ -1,3 +1,5 @@
+@using System.Collections.Immutable
+@using System.Text.Json
 @using HomeBlaze.Abstractions.Attributes
 @using HomeBlaze.Abstractions.Metadata
 @using HomeBlaze.History.Abstractions
@@ -37,12 +39,16 @@
                     // A folder left with fewer than two children leaves the mode rather than return to it later.
                     StopReordering();
                 }
+
+                var subjectMetadata = Subject.GetMetadata();
+                var hasNotesLinksOrTags = subjectMetadata.HasNotesLinksOrTags();
+                _metadataStore = GetMetadataStore();
             }
             <MudListSubheader Class="d-flex align-center gap-1" Style="flex-shrink: 0;">
                 @{
                     var canEdit = CanEdit();
                     var canDelete = Subject is IStorageFile or IConfigurable;
-                    var metadataStore = GetMetadataStore();
+                    var showsMetadataButton = _metadataStore is not null || hasNotesLinksOrTags;
                 }
 
                 @* Stays an h1: the page focuses the first h1 after navigation. *@
@@ -62,14 +68,15 @@
                                        data-testid="edit-subject-button" />
                     </MudTooltip>
                 }
-                @if (metadataStore is not null)
+                @if (showsMetadataButton)
                 {
                     <MudTooltip Text="Metadata">
-                        <MudIconButton OnClick="@OpenMetadataDialogAsync"
+                        <MudIconButton OnClick="@(() => OpenMetadataAsync($"Metadata of {GetSubjectTitle()}", null, subjectMetadata, hasNotesLinksOrTags))"
                                        Icon="@Icons.Material.Filled.Label"
+                                       Color="@(subjectMetadata is { Count: > 0 } ? Color.Primary : Color.Default)"
                                        Variant="Variant.Text"
                                        Size="Size.Small"
-                                       Disabled="@(!IsConnected(metadataStore))"
+                                       Disabled="@(!hasNotesLinksOrTags && !IsConnected(_metadataStore!))"
                                        aria-label="Metadata"
                                        data-testid="edit-metadata-button" />
                     </MudTooltip>
@@ -101,7 +108,7 @@
                 }
                 @if (CanClose)
                 {
-                    @if (canEdit || canDelete || metadataStore is not null || reorderContainer is not null)
+                    @if (canEdit || canDelete || showsMetadataButton || reorderContainer is not null)
                     {
                         <MudDivider Vertical="true" FlexItem="true" Class="mx-1 my-1" />
                     }
@@ -119,6 +126,9 @@
                     </MudTooltip>
                 }
             </MudListSubheader>
+
+            @* Only the tags, as notes can be long. *@
+            <MetadataSummary Metadata="@subjectMetadata" OnTagClick="@OpenTagFilterAsync" ShowTagsOnly="true" Class="px-4 pb-1 mt-n2" />
 
             @* Each block gets the gap above it from GetGapClass, by the block before it. *@
             <div data-testid="subject-pane-content" style="flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;">
@@ -257,14 +267,20 @@
 <style>
     /* MudBlazor has no parameter or class for the rules below. */
 
-    /* The copy button of a value shows while its row is hovered or focused, and always on a device without hover.
-       Transparent rather than hidden, so that it stays in the tab order. */
+    /* The copy button of a value shows while its row is hovered or focused by the keyboard, and always on a device
+       without hover. Transparent rather than hidden, so that it stays in the tab order. Not on any focus, as a button
+       keeps the focus of a click, and gets it back when a dialog that it opened closes. */
     .subject-pane-copy {
         opacity: 0;
     }
 
+    /* The row of the property that a link leads to. */
+    .subject-pane-row-highlighted {
+        background-color: var(--mud-palette-primary-hover);
+    }
+
     .subject-pane-row:hover .subject-pane-copy,
-    .subject-pane-row:focus-within .subject-pane-copy {
+    .subject-pane-row:has(:focus-visible) .subject-pane-copy {
         opacity: 1;
     }
 
@@ -492,6 +508,13 @@
     [Parameter]
     public EventCallback OnDelete { get; set; }
 
+    /// <summary>The name of the property whose row is highlighted, such as the target of a link.</summary>
+    [Parameter]
+    public string? HighlightedProperty { get; set; }
+
+    // The store of the shown subject, set at the start of each render, before the header and the rows read it.
+    private IMetadataStore? _metadataStore;
+
     public async ValueTask DisposeAsync()
     {
         _isDisposed = true;
@@ -636,10 +659,7 @@
         // Read in the render, so that a property added at run time, which increments the version, renders the panel again.
         _ = PathResolver.PathsVersion;
         return _registeredSubject.Properties
-            .Where(p =>
-                p.GetStateMetadata() != null
-                && p is { IsAttribute: false, CanContainSubjects: false }
-                && p.GetConfigurationMetadata()?.IsSecret != true)
+            .Where(static p => p.IsShownAsValue())
             .OrderBy(p => p.GetDisplayPosition());
     }
 
@@ -774,6 +794,13 @@
 
         // A detail without an arrow starts where the name of one with an arrow starts.
         var rowClass = depth > 0 && !hasAttributes ? "subject-pane-row d-flex align-start py-1 pl-6" : "subject-pane-row d-flex align-start py-1";
+        var isHighlighted = depth == 0 && prop.Name == HighlightedProperty;
+        if (isHighlighted)
+        {
+            rowClass += " subject-pane-row-highlighted";
+        }
+
+        var propertyMetadata = prop.IsAttribute ? null : prop.GetMetadata();
 
         RenderFragment nameAndValue =
             @<text>
@@ -795,7 +822,7 @@
                 </MudText>
             </text>;
 
-        <div class="@rowClass" data-testid="subject-pane-value">
+        <div class="@rowClass" data-testid="subject-pane-value" data-highlighted="@(isHighlighted ? "true" : null)">
             @* Outside the link, so that a click on the arrow does not open the history. *@
             @if (hasAttributes)
             {
@@ -848,6 +875,34 @@
                                aria-label="@($"Copy {displayName}")"
                                data-copy-value="@displayValue"
                                data-testid="subject-pane-value-copy" />
+            }
+            @* Enabled also while the storage is disconnected, as a disabled button shows no tooltip. *@
+            @if (!prop.IsAttribute && propertyMetadata.HasNotesLinksOrTags())
+            {
+                <MudTooltip>
+                    <ChildContent>
+                        <MudIconButton Icon="@Icons.Material.Filled.StickyNote2"
+                                       Size="Size.Small"
+                                       Color="Color.Primary"
+                                       Class="pa-0 ml-2"
+                                       aria-label="@($"Metadata of {displayName}")"
+                                       OnClick="@(() => OpenMetadataAsync($"Metadata of {displayName}", prop.Name, propertyMetadata, hasNotesLinksOrTags: true))"
+                                       data-testid="subject-pane-value-metadata" />
+                    </ChildContent>
+                    <TooltipContent>
+                        <MetadataSummary Metadata="@propertyMetadata" Class="py-1" />
+                    </TooltipContent>
+                </MudTooltip>
+            }
+            else if (!prop.IsAttribute && _metadataStore is not null)
+            {
+                <MudIconButton Icon="@Icons.Material.Outlined.StickyNote2"
+                               Size="Size.Small"
+                               Class="pa-0 ml-2 subject-pane-copy"
+                               title="Metadata"
+                               aria-label="@($"Metadata of {displayName}")"
+                               OnClick="@(() => OpenMetadataEditorAsync($"Metadata of {displayName}", prop.Name))"
+                               data-testid="subject-pane-value-metadata" />
             }
         </div>
 
@@ -972,12 +1027,30 @@
             ? store
             : null;
 
-    private async Task OpenMetadataDialogAsync()
+    private Task OpenTagFilterAsync(string tag) => MetadataTagFilterDialog.ShowAsync(DialogService, tag);
+
+    // Shows the notes, links and tags of the shown subject, or of its property with the given name, with a button to edit
+    // them where a store keeps them; edits the metadata right away when it has none of them.
+    private Task OpenMetadataAsync(
+        string title, string? propertyName, ImmutableDictionary<string, JsonElement>? metadata, bool hasNotesLinksOrTags)
+        => hasNotesLinksOrTags
+            ? MetadataSummaryDialog.ShowAsync(DialogService, title, metadata,
+                _metadataStore is not null ? () => OpenMetadataEditorAsync(title, propertyName) : null)
+            : OpenMetadataEditorAsync(title, propertyName);
+
+    // Edits the metadata of the shown subject, or of its property with the given name.
+    private async Task OpenMetadataEditorAsync(string title, string? propertyName)
     {
-        if (Subject is null || GetMetadataStore() is null)
+        if (Subject is null || GetMetadataStore() is not { } store)
             return;
 
-        await MetadataEditDialog.ShowAsync(DialogService, Subject, $"Metadata of {GetSubjectTitle()}");
+        if (!IsConnected(store))
+        {
+            Snackbar.Add("The metadata cannot be edited while the storage is not connected.", Severity.Warning);
+            return;
+        }
+
+        await MetadataEditDialog.ShowAsync(DialogService, Subject, title, propertyName);
     }
 
     private bool CanShowHistory(RegisteredSubjectProperty property)
@@ -1043,9 +1116,10 @@
             @foreach (var property in values)
             {
                 // Read here also for a value that gets no row: the render records the read, so the pane is
-                // rendered again once the value is set.
+                // rendered again once the value is set. A property with metadata, or that a link leads to, gets its
+                // row also without a value, for its metadata icon and its highlight.
                 var value = property.GetValue();
-                if (value is null && !HasDetails(property))
+                if (value is null && !HasDetails(property) && property.Name != HighlightedProperty && property.GetMetadata() is null)
                 {
                     emptyValues ??= [];
                     emptyValues.Add(property);

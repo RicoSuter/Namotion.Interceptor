@@ -17,7 +17,7 @@ HomeBlaze persists several categories of data through a pluggable storage layer.
 | Subject configuration | Subject settings, topology, plugin list | JSON (`[Configuration]` properties) | Yes |
 | Knowledge files | Documentation, runbooks, operating procedures | Markdown with YAML frontmatter |  Yes |
 | Documents | PDFs, images, data files linked to subjects | Binary blobs | Yes |
-| Metadata | Titles, icons and order in navigation, comments (see [Metadata](metadata.md)) | JSON (separate from subject config) | Yes |
+| Metadata | Titles, icons and order in navigation, notes, links, tags and comments (see [Metadata](metadata.md)) | JSON (separate from subject config) | Yes |
 | Plugin configuration | NuGet feed URLs, package list | JSON | Yes |
 | Property values (live state) | Sensor readings, device status | — | No — recovers from field devices (satellites), peers via WebSocket Welcome snapshot (central/standby) |
 | Time-series history | Property change history | Via history sink (see [History](history.md)) | Yes (separate concern) |
@@ -257,7 +257,7 @@ Files in storage become subjects in the knowledge graph through two different pa
 - **Subject files** — `.json` files with a `$type` discriminator are deserialized into typed subjects (e.g., `Motor`, `OpcUaServer`). The file is the persistence format; the subject is what appears in the graph. Only `[Configuration]` properties are persisted.
 - **Documents** — all other files (Markdown, PDFs, images, plain JSON without `$type`) become document subjects (`MarkdownFile`, `JsonFile`, `GenericFile`, or custom types via `[FileExtension]` plugins). The file content is the document itself, visible as-is in the knowledge graph.
 
-Documents are browsable in the subject tree, editable in the Blazor UI (Monaco editor for text files), and accessible via MCP tools: `browse` or `search` finds them, and `invoke_query` reads them, for example `ReadEvaluatedContent` of a Markdown page. Markdown files can also be changed through `ReplaceText`, `ReplaceContent` and `CreateMarkdownFile`, which write through the same path as the editor but leave blocks, other than layout blocks for agents with `edit_page_layout`, and other active content to the page editor, see [Changing pages](../../administration/ai-agents.md#changing-pages). JSON and other files have no such operations. Linking documents to other subjects (e.g., "this PDF is the manual for motor CNC-01") is handled via metadata (planned, see [Metadata](metadata.md#planned)).
+Documents are browsable in the subject tree, editable in the Blazor UI (Monaco editor for text files), and accessible via MCP tools: `browse` or `search` finds them, and `invoke_query` reads them, for example `ReadEvaluatedContent` of a Markdown page. Markdown files can also be changed through `ReplaceText`, `ReplaceContent` and `CreateMarkdownFile`, which write through the same path as the editor but leave blocks, other than layout blocks for agents with `edit_page_layout`, and other active content to the page editor, see [Changing pages](../../administration/ai-agents.md#changing-pages). JSON and other files have no such operations. Linking documents to other subjects (e.g., "this PDF is the manual for motor CNC-01") is done with the links of metadata, see [Notes, Links and Tags](../../administration/metadata.md#notes-links-and-tags).
 
 ## Subject Configuration [Implemented]
 
@@ -292,7 +292,7 @@ The "recover from source of truth" model means most data does NOT need backup fo
 |------|----------------------------|-------------|
 | Subject configuration (JSON) | No | Must reconfigure all subjects manually |
 | Knowledge files (Markdown, documents) | No | Operational documentation and runbooks lost |
-| Dynamic metadata / annotations | No | User-created tags, links, and enrichments lost |
+| Metadata (`.metadata.json` files) | No | Titles, icons, order, notes, links and tags lost |
 | Plugin configuration | No | Must reconfigure plugin list and feeds |
 | Time-series history | **No — this is the critical one** | Historical data is generated locally and cannot be recovered from devices. Once lost, it is gone |
 | Live state (property values) | **Yes** — recovers from devices/peers | No backup needed |
@@ -351,13 +351,13 @@ Live state has zero data loss — it recovers to the current device state, not t
 | File format | JSON for configuration, Markdown for knowledge | Human-readable, diffable, version-controllable |
 | Configuration vs state | `[Configuration]` (persisted) vs `[State]` (runtime-only) | Clear developer intent, explicit persistence boundary |
 | Configuration writer chain | Resolved via parent hierarchy | Different storage containers can own different subtrees |
-| Dynamic metadata storage | Separate JSON files | Decoupled from subject configuration, reapplied on restart |
+| Metadata storage | Separate `.metadata.json` files | Decoupled from subject configuration, applied again on restart, see [Metadata](metadata.md) |
 
 ## Open Questions
 
 - Shared storage concurrency model for HA pairs (locking, optimistic concurrency, conflict resolution)
 - Change notification across nodes when using shared cloud backends
 - Configuration migration strategy when subject types change across versions (see [Upgrade and Migration](upgrade-and-migration.md))
-- Dynamic metadata schema and validation
+- Schema and validation of annotations and other custom metadata keys, see [Metadata](metadata.md#planned)
 - Configuration sync between instances (should central know satellite configs?)
 - Backup and restore procedures for each storage backend

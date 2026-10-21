@@ -1,15 +1,17 @@
 using System.Text.Json;
+using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.AI.Mcp;
 using HomeBlaze.AI.Tests.Agents;
-using HomeBlaze.Abstractions;
 using HomeBlaze.Services;
+using HomeBlaze.Services.Metadata;
 using HomeBlaze.Storage;
 using HomeBlaze.Storage.Internal;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Mcp;
 using Namotion.Interceptor.Mcp.Tools;
 using Namotion.Interceptor.Registry;
@@ -231,10 +233,96 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
         Assert.Contains(folderMethodsForAgents, method => method.Title == "Set Order");
     }
 
+    [Fact]
+    public async Task WhenMetadataIsSearched_ThenTheMatchesAreReturnedAsSetMetadataTakesThem()
+    {
+        // Arrange
+        WriteFile("Docs/Pump.json", """{ "speed": 1 }""");
+        WriteFile("Docs/Pump.metadata.json", """{ "tags": ["floor-2"], "$properties": { "FileSize": { "notes": "Shrinks." } } }""");
+        WriteFile("Docs/Fan.json", """{ "speed": 2 }""");
+        WriteFile("Docs/Fan.metadata.json", """{ "$properties": { "FileSize": { "notes": "Grows." } } }""");
+        var (tools, _) = await CreateToolsAsync();
+
+        // Act
+        var result = await CallAsync(tools["invoke_query"], new
+        {
+            path = "/Storage", method = "SearchMetadata", parameters = new { key = "notes", value = "Grows.", path = "Docs" }
+        });
+
+        // Assert
+        Assert.Equal(["Docs/Fan.json|FileSize"], GetMatches(result));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenMetadataIsSearchedThroughTheTools_ThenTheSubjectsAndPropertiesHiddenFromTheToolsAreLeftOut(bool forAgents)
+    {
+        // Arrange
+        WriteFile("Docs/Pump.json", """{ "speed": 1 }""");
+        WriteFile("Docs/Pump.metadata.json", """{ "tags": ["floor-2"] }""");
+        WriteFile("Docs/Hidden.json", $$"""{ "$type": "{{typeof(AgentExcludedDevice).FullName}}" }""");
+        WriteFile("Docs/Hidden.metadata.json", """{ "tags": ["floor-2"] }""");
+        WriteFile("Docs/Device.json", $$"""{ "$type": "{{typeof(MetadataSearchTestDevice).FullName}}" }""");
+        WriteFile("Docs/Device.metadata.json", """{ "tags": ["floor-2"], "$properties": { "Host": { "tags": ["floor-2"] } } }""");
+        var (tools, _) = await CreateToolsAsync(forAgents);
+
+        // Act
+        var result = await CallAsync(tools["invoke_query"], new { path = "/Storage", method = "SearchMetadata", parameters = new { tag = "floor-2" } });
+
+        // Assert
+        Assert.Equal(["Docs/Device|", "Docs/Pump.json|"], GetMatches(result));
+    }
+
+    [Fact]
+    public async Task WhenMoreThanAHundredSubjectsMatch_ThenTheFirstHundredAreReturned()
+    {
+        // Arrange
+        for (var index = 0; index < 101; index++)
+        {
+            WriteFile($"Docs/Pump{index:000}.json", """{ "speed": 1 }""");
+            WriteFile($"Docs/Pump{index:000}.metadata.json", """{ "tags": ["floor-2"] }""");
+        }
+
+        var (tools, _) = await CreateToolsAsync();
+
+        // Act
+        var result = await CallAsync(tools["invoke_query"], new { path = "/Storage", method = "SearchMetadata", parameters = new { tag = "floor-2" } });
+
+        // Assert
+        var matches = GetMatches(result);
+        Assert.Equal(100, matches.Length);
+        Assert.Equal("Docs/Pump000.json|", matches[0]);
+        Assert.Equal("Docs/Pump099.json|", matches[^1]);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenSearchMetadataReturnsAResultOfAnotherShape_ThenNoMatchIsReturned(bool forAgents)
+    {
+        // Arrange
+        var (_, storage) = await CreateToolsAsync(forAgents);
+        var subject = storage.TryGetRegisteredSubject()!;
+        var method = subject.TryGetProperty(nameof(FluentStorageContainer.SearchMetadata))!.TryGetMethodMetadata()!;
+
+        // Act
+        var result = AgentMetadataAccess.FilterSearchMetadataResult(
+            subject, method, new[] { "Docs/Hidden.json" }, forAgents, new StateAttributePathProvider(), []);
+
+        // Assert
+        Assert.Empty(Assert.IsType<MetadataSearchMatch[]>(result));
+    }
+
+    private static string[] GetMatches(JsonElement result)
+        => [.. result.GetProperty("result").EnumerateArray().Select(match =>
+            $"{match.GetProperty("path").GetString()}|{(match.TryGetProperty("property", out var property) ? property.GetString() : null)}")];
+
     private async Task<(Dictionary<string, McpToolInfo> Tools, FluentStorageContainer Storage)> CreateToolsAsync(bool forAgents = false)
     {
         var typeProvider = new TypeProvider();
         typeProvider.AddAssembly(typeof(FluentStorageContainer).Assembly);
+        typeProvider.AddAssembly(typeof(MetadataSearchTestDevice).Assembly);
         var typeRegistry = new SubjectTypeRegistry(typeProvider);
 
         var services = new ServiceCollection();
@@ -284,4 +372,13 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
 
         _directory.Delete(recursive: true);
     }
+}
+
+[InterceptorSubject]
+public partial class MetadataSearchTestDevice : IConfigurable
+{
+    [Configuration]
+    public partial string? Host { get; set; }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }

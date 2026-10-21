@@ -420,6 +420,41 @@ public class NavigationMetadataTests
     }
 
     [Fact]
+    public async Task WhenMetadataIsWrittenAndRemoved_ThenTheMetadataButtonColorChangesAndReverts()
+    {
+        // Arrange - the subject starts without metadata of its own, which is reflected in its own file beside it.
+        var root = (FluentStorageContainer)_fixture.ServerServices.GetRequiredService<RootManager>().Root!;
+        var agent = ((VirtualFolder)root.Children["Agents"]).Children["TestAgent"];
+        var sidecarPath = _fixture.GetPagePath(Path.Combine("Agents", "TestAgent.metadata.json"));
+        var originalSidecar = File.Exists(sidecarPath) ? await File.ReadAllTextAsync(sidecarPath) : null;
+        Assert.Null(agent.GetMetadata());
+        try
+        {
+            var (_, pane) = await OpenPaneAsync("Agents/TestAgent");
+            var button = pane.GetByTestId("edit-metadata-button");
+            await Assertions.Expect(button).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
+            await Assertions.Expect(button).Not.ToHaveClassAsync(new Regex(@"\bmud-primary-text\b"));
+
+            // Act - the method that agents call, while the pane is open.
+            await root.SetMetadataAsync("Agents/TestAgent", null, JsonElement.Parse("""{ "tags": ["e2e-button-color"] }"""), CancellationToken.None);
+
+            // Assert - without a reload.
+            await Assertions.Expect(button).ToHaveClassAsync(new Regex(@"\bmud-primary-text\b"), new() { Timeout = PageLoadTimeout });
+
+            // Act - the metadata is removed again.
+            await root.SetMetadataAsync("Agents/TestAgent", null, JsonElement.Parse("""{ "tags": null }"""), CancellationToken.None);
+
+            // Assert
+            await Assertions.Expect(button).Not.ToHaveClassAsync(new Regex(@"\bmud-primary-text\b"), new() { Timeout = PageLoadTimeout });
+            Assert.Null(agent.GetMetadata());
+        }
+        finally
+        {
+            await RestoreFileAsync(sidecarPath, originalSidecar);
+        }
+    }
+
+    [Fact]
     public async Task WhenASubjectInsideAStoredSubjectGetsANavigationTitle_ThenTheFileBesideTheStoredSubjectHasItsEntry()
     {
         // Arrange

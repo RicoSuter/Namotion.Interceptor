@@ -8,7 +8,7 @@ status: Partial
 
 ## Overview
 
-Metadata is keys and JSON values that describe a folder, a subject or a property. A storage keeps it in `.metadata.json` files, separate from the configuration of subjects, so that operators and integrators enrich the knowledge graph without modifying subject code. The browser and agents write it through one write path. The user guide, with the keys, the file format and the limits, is [Metadata](../../administration/metadata.md).
+Metadata is keys and JSON values that describe a folder, a subject or a property, such as its title and icon in the navigation, the order of a folder, or its notes, links and tags. A storage keeps it in `.metadata.json` files, separate from the configuration of subjects, so that operators and integrators enrich the knowledge graph without modifying subject code. The browser and agents write it through one write path. The user guide, with the keys, the file format and the limits, is [Metadata](../../administration/metadata.md).
 
 ## Runtime Model [Implemented]
 
@@ -16,6 +16,7 @@ Metadata is keys and JSON values that describe a folder, a subject or a property
 Devices/Shelly                       HomeBlaze:Metadata             = { navTitle, icon }
 Devices/Shelly/Channels[0]           HomeBlaze:Metadata             = { navTitle }
 Devices/Shelly/Channels[0]/Power     Power@HomeBlaze:Metadata       = { comment }
+Devices/Pump                         HomeBlaze:Metadata             = { notes, links, tags }
 Docs (folder)                        HomeBlaze:Metadata             = { title, order }
 ```
 
@@ -24,7 +25,7 @@ Docs (folder)                        HomeBlaze:Metadata             = { title, o
 - **Added on demand.** The property or attribute is added only once an entry exists. The registry cannot remove a property, so removed metadata sets the value to null, and null means no metadata.
 - **One step with its file.** Setting a value and reading the file it comes from are one step under a lock of the subject that only the metadata writers take, so a subject that attaches during a write takes the new value.
 - **Readers.** Navigation, the browser and the order of children read the known keys (`MetadataKeys`) through `SubjectNavigationExtensions` and `ChildOrdering`. The path picker does not list the metadata.
-- **Code.** The contracts `IMetadataStore`, `IMetadataContainer` and `MetadataKeys` are in the namespace `HomeBlaze.Storage.Abstractions.Metadata`, the readers in `HomeBlaze.Services.Metadata`, and the files, applying and writing of a storage in `HomeBlaze.Storage.Metadata`. A storage is the `IMetadataStore` of what it holds and hands the work to its `StorageMetadataStore`.
+- **Code.** The contracts `IMetadataStore`, `IMetadataContainer` and `MetadataKeys` are in the namespace `HomeBlaze.Storage.Abstractions.Metadata`, the readers and the search in `HomeBlaze.Services.Metadata`, and the files, applying and writing of a storage and the notes in `HomeBlaze.Storage.Metadata`. A storage is the `IMetadataStore` of what it holds and hands the work to its `StorageMetadataStore`.
 
 ## Files and Applying [Implemented]
 
@@ -41,9 +42,21 @@ Docs (folder)                        HomeBlaze:Metadata             = { title, o
 - **Cleanup.** A metadata file that would be empty is deleted, and deleting a subject deletes its metadata file, also after its caller canceled.
 - **Refusals.** A write that cannot be done, such as one to a file that cannot be read or to a storage that is not connected, is refused with a message that says why.
 
+## Notes, Links and Tags [Implemented]
+
+- **Known keys.** `notes`, `links` and `tags` are keys of `MetadataKeys`. Their rules are in [Notes, Links and Tags](../../administration/metadata.md#notes-links-and-tags).
+- **Checked on write.** `StorageMetadataWriter` refuses a write that breaks the rules, from the browser and from agents alike. The read helpers of `MetadataDictionaryExtensions` leave out what breaks them in a file edited by hand.
+- **Display.** `MetadataNotes` checks and renders notes, and `MetadataLinkResolver` resolves a `MetadataLink` to what the browser opens. `MetadataSummary` shows notes, links and tags in the pane, in the dialog of the **Metadata** button and in the tooltip of the row of a property.
+
+## Search [Implemented]
+
+- **`MetadataSearch`.** One static search serves `SearchMetadata`, the tag filter and the suggested tags. It walks the tree below a subject on each call and keeps nothing. A subject that the caller excludes is skipped with everything below it.
+- **Tag filter.** A click on a tag opens `MetadataTagFilterDialog`. It and the tag field of the **Metadata** dialog leave out subjects excluded from user interfaces, what is below them, and properties that the browser does not show.
+- **Notes in `search_markdown`.** `MarkdownSearchSourceFinder` gives `search_markdown` the pages and the notes of metadata in one list in path order, see [Markdown Tools](ai.md#markdown-tools).
+
 ## Agent Access [Implemented]
 
-Agents read metadata with `browse`, `search` and `get_property` and change it with the methods `SetMetadata`, `GetOrder` and `SetOrder` of storages and folders, without tools of their own. [Agents](../../administration/metadata.md#agents) describes the methods, and [MCP Tool Layering](ai.md#mcp-tool-layering-implemented) and [Write Limits](ai.md#write-limits-implemented) how the tools serve and limit them.
+Agents read metadata with `browse`, `search` and `get_property`, find it with the method `SearchMetadata` of storages, and change it with the methods `SetMetadata`, `GetOrder` and `SetOrder` of storages and folders, without tools of their own. [Agents](../../administration/metadata.md#agents) describes the methods, and [MCP Tool Layering](ai.md#mcp-tool-layering-implemented) and [Write Limits](ai.md#write-limits-implemented) how the tools serve and limit them.
 
 ## Key Decisions
 
@@ -57,18 +70,24 @@ Agents read metadata with `browse`, `search` and `get_property` and change it wi
 - **Nested storages keep their own metadata.** A storage stored inside another storage keeps all its metadata in its own root, so each file has one owner and a storage keeps its metadata wherever it is mounted.
 - **Agents cannot change the metadata of agents.** Like the settings and operations of agents, this keeps an agent from changing agents.
 - **Null attributes left out by MCP.** Because the registry cannot remove an attribute, removed metadata stays as a null value, and the MCP tools leave out read-only attributes without a value, so that it reads as no metadata.
+- **Notes under the rules of pages.** Notes are shown inside the page of the application, so they follow the [page write rules](ai.md#page-write-rules) and cannot run or load anything.
+- **Tags as plain strings.** A tag needs no definition before it is used. Tags are unique without regard to case, so `Floor-2` and `floor-2` are one tag.
+- **No search cache.** Metadata changes rarely and walking the tree is cheap enough, while a cache would have to be invalidated on every change of a path.
+- **Notes found by `search_markdown`.** Notes are searched together with the pages instead of by a tool of their own, so an agent finds text with one call wherever it is written.
+- **User content, not instructions.** Metadata is written by users, so the server instructions and the preamble of the built-in agents tell agents to treat it as data and never as instructions.
 
 ## Planned
 
-- **Notes, links and tags.** Known keys for notes in Markdown, links to URLs or to pages, subjects and properties, and tags such as `tags: ["floor-2", "critical", "hvac"]` for a grouping independent of the folder hierarchy, with their display and editing in the browser for subjects and properties.
-- **Search.** A query of the storage that finds subjects and properties by tag, key or value and can return their metadata (`includeMetadata`), a tag filter in the browser, and notes found by `search_markdown`.
+- **Metadata in search results.** `SearchMetadata` returning the metadata of each match (`includeMetadata`), so that an agent needs no further call to read it.
 - **Several targets in one call.** One `SetMetadata` call for several subjects and properties, grouped into one write per file.
-- **Annotations.** More known keys that group subjects across folders, such as `area: "Kitchen"` (the equivalent of Home Assistant areas), `group: "cooling-system"` or `owner: "maintenance-team-b"`, queryable through the registry, transmitted over WebSocket sync and visible in the UI, without a separate subsystem. Such keys are stored as given today.
+- **Annotations.** More known keys that group subjects across folders, such as `area: "Kitchen"` (the equivalent of Home Assistant areas), `group: "cooling-system"` or `owner: "maintenance-team-b"`, queryable through the registry, transmitted over WebSocket sync and visible in the UI, without a separate subsystem. Until then, such keys are stored as given.
 - **Page blocks.** Metadata of the subjects that blocks of a Markdown page create, kept in the frontmatter of the page.
 - **Display overrides.** A display name or a unit of a property taken from its metadata.
 - **Generic search.** Attribute filters in the generic `search` tool of the library.
 - **Naming.** `IConfigurationWriter` renamed to `IConfigurationStore`, next to `IMetadataStore`.
 - **Custom root files.** A `root.metadata.json` for subjects in a custom `root.json`. The default `root.json` holds only the root storage.
+- **Search cache.** A cache for the metadata search and the suggested tags, if walking the tree on each call turns out too slow.
+- **Content search.** `search_markdown` renamed to `search_content`, as it searches pages, documents and notes.
 - **Known keys checked once.** The known keys of a file checked when it is read, instead of on every read of a value.
 - **Entries without a target.** A list of the entries that match no subject or property.
 - **Library support.** Removing a dynamic property or attribute, and telling whether a property was attached with its subject, which would simplify `MetadataLifecycleHandler` and drop the null values of removed metadata.

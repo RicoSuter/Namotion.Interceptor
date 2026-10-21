@@ -381,10 +381,47 @@ namespace HomeBlaze.Services.Metadata
     {
         public static TEnum? GetEnum<TEnum>(this System.Collections.Generic.IReadOnlyDictionary<string, System.Text.Json.JsonElement>? metadata, string key)
             where TEnum :  struct, System.Enum { }
+        public static System.Collections.Immutable.ImmutableArray<HomeBlaze.Services.Metadata.MetadataLink> GetLinks(this System.Collections.Generic.IReadOnlyDictionary<string, System.Text.Json.JsonElement>? metadata) { }
         public static string? GetString(this System.Collections.Generic.IReadOnlyDictionary<string, System.Text.Json.JsonElement>? metadata, string key) { }
         public static System.Collections.Immutable.ImmutableArray<string> GetStringArray(this System.Collections.Generic.IReadOnlyDictionary<string, System.Text.Json.JsonElement>? metadata, string key) { }
+        public static System.Collections.Immutable.ImmutableArray<string> GetTags(this System.Collections.Generic.IReadOnlyDictionary<string, System.Text.Json.JsonElement>? metadata) { }
+        public static bool HasNotesLinksOrTags(this System.Collections.Generic.IReadOnlyDictionary<string, System.Text.Json.JsonElement>? metadata) { }
         public static TEnum? ParseEnumName<TEnum>(string text)
             where TEnum :  struct, System.Enum { }
+    }
+    public sealed class MetadataLink : System.IEquatable<HomeBlaze.Services.Metadata.MetadataLink>
+    {
+        public MetadataLink(string? Title, string? Url, string? Path) { }
+        public string? Path { get; init; }
+        public string? Title { get; init; }
+        public string? Url { get; init; }
+        public static bool IsAllowedAddress(string url) { }
+        public static bool IsAllowedScheme(string scheme) { }
+        public static bool IsWebAddress(string url) { }
+    }
+    public static class MetadataSearch
+    {
+        [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
+                "PropertyName",
+                "Metadata"})]
+        public static System.Collections.Generic.IEnumerable<System.ValueTuple<string?, System.Collections.Immutable.ImmutableDictionary<string, System.Text.Json.JsonElement>>> GetEntries(Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject) { }
+        public static System.Collections.Generic.IReadOnlyList<string> GetTags(Namotion.Interceptor.IInterceptorSubject root, System.Func<Namotion.Interceptor.IInterceptorSubject, bool>? isExcluded = null, System.Func<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty, bool>? isPropertyIncluded = null) { }
+        public static System.Collections.Generic.IReadOnlyList<HomeBlaze.Services.Metadata.MetadataSearchMatch> Search(Namotion.Interceptor.IInterceptorSubject root, string? tag = null, string? key = null, string? value = null, Namotion.Interceptor.IInterceptorSubject? start = null, System.Func<Namotion.Interceptor.IInterceptorSubject, bool>? isExcluded = null) { }
+    }
+    public sealed class MetadataSearchMatch : System.IEquatable<HomeBlaze.Services.Metadata.MetadataSearchMatch>
+    {
+        public MetadataSearchMatch(string Path, string? Property) { }
+        [System.Text.Json.Serialization.JsonPropertyName("path")]
+        public string Path { get; init; }
+        [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        [System.Text.Json.Serialization.JsonPropertyName("property")]
+        public string? Property { get; init; }
+    }
+    public static class MetadataText
+    {
+        public const int MaxItemCount = 20;
+        public const int MaxTagLength = 64;
+        public static bool HasControlOrFormatCharacter(string text) { }
     }
     public static class SubjectMetadataExtensions
     {

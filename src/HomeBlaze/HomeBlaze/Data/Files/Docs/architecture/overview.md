@@ -162,7 +162,7 @@ Detailed designs: [AI](design/ai.md), [History](design/history.md), [Messages](d
 
 The knowledge graph is the central data structure. It unifies live state, history, metadata, documents, and operations into a single queryable model.
 
-The **Unified Namespace (UNS)** is the live state layer: all subject properties and operations, synced across instances in real time. The **knowledge graph** extends the UNS with property history, documents, and user-defined metadata (annotations, tags, links between subjects).
+The **Unified Namespace (UNS)** is the live state layer: all subject properties and operations, synced across instances in real time. The **knowledge graph** extends the UNS with property history, documents, and user-defined metadata, such as notes, tags and links between subjects.
 
 ```
 ┌──────────────────────────────────────────────────────┐
@@ -195,7 +195,7 @@ The **Unified Namespace (UNS)** is the live state layer: all subject properties 
 | Time-Series Store | Property history, configurable retention | `get_property_history` MCP tool, plugin-based (see [History](design/history.md)) |
 | File Storage | **Subject files** (`.json` with `$type`) are deserialized into typed subjects; the file is the persistence format. **Documents** (Markdown, PDFs, images, manuals) become document subjects visible as-is in the graph. See [Storage](design/storage.md) | Subject files via configuration system, documents via `browse` or `search` + `invoke_query` (for example `ReadEvaluatedContent` of a Markdown page) |
 
-Folders, subjects and properties can also carry user-defined metadata, persisted in `.metadata.json` files separate from subject configuration, so operators enrich the knowledge graph without modifying subject code. See [Metadata](design/metadata.md).
+Folders, subjects and properties can also carry user-defined metadata, such as titles, icons, notes, links and tags, persisted in `.metadata.json` files separate from subject configuration, so operators enrich the knowledge graph without modifying subject code. See [Metadata](design/metadata.md).
 
 **How each consumer accesses the knowledge graph:**
 

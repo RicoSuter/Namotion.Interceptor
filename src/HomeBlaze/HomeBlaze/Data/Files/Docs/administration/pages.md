@@ -1075,6 +1075,6 @@ What the sample uses:
 - [Widgets](widgets/overview.md) - Every widget for pages, each with a page of its own
 - [Page Errors](page-errors.md) - Every error message with its cause and its fix
 - [Subjects, Storage & Files](subjects.md) - Configure subjects and file layout
-- [Metadata](metadata.md) - Order, titles and icons of folders and subjects
+- [Metadata](metadata.md) - Order, titles, icons, notes, links and tags of folders, subjects and properties
 - [Paths](paths.md) - Path syntax reference
 - [Building Custom Subjects](../development/building-subjects.md) - Create subject types and widgets with content slots

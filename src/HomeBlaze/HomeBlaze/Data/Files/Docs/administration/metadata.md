@@ -5,7 +5,7 @@ navTitle: Metadata
 
 # Metadata
 
-Metadata describes a folder, a subject or a property: its title and icon in the navigation, the order of the children of a folder, or keys of your own such as a comment. A storage keeps it in `.metadata.json` files, apart from the configuration of the subjects. You change it in the browser or by hand, and agents change it through methods of the storage. Pages keep their title, icon and place in the navigation in their [frontmatter](pages.md#frontmatter) instead.
+Metadata describes a folder, a subject or a property: its title and icon in the navigation, the order of the children of a folder, its notes, links and tags, or keys of your own such as a comment. A storage keeps it in `.metadata.json` files, apart from the configuration of the subjects. You change it in the browser or by hand, and agents change it through methods of the storage. Pages keep their title, icon and place in the navigation in their [frontmatter](pages.md#frontmatter) instead.
 
 On this page:
 
@@ -13,8 +13,9 @@ On this page:
 - [Keys](#keys): the keys that HomeBlaze reads
 - [Navigation Order](#navigation-order): the order of pages, folders and subjects, and the top bar
 - [The Metadata Dialog](#the-metadata-dialog): editing metadata in the browser
+- [Notes, Links and Tags](#notes-links-and-tags): their rules and how the browser shows them
 - [File Format](#file-format): paths, rules and limits of the files
-- [Agents](#agents): reading and changing metadata through the MCP tools
+- [Agents](#agents): reading, finding and changing metadata through the MCP tools
 - [Related Documentation](#related-documentation)
 
 ---
@@ -51,6 +52,9 @@ A folder file looks like this:
 | `location` | Subject with a page | `NavBar` (sidebar, default) or `AppBar` (top bar) |
 | `alignment` | Subject in the top bar | `Left` (default), `Right` or `Menu` |
 | `order` | Folder | Names of the children in the order they are shown, see [Navigation Order](#navigation-order) |
+| `notes` | Folder, subject, property | Notes in Markdown, see [Notes, Links and Tags](#notes-links-and-tags) |
+| `links` | Folder, subject, property | Links to web addresses, pages, subjects and properties |
+| `tags` | Folder, subject, property | Tags that group items across folders |
 
 Metadata never changes the title or the icon of the subject itself. Any other key, such as `comment`, is kept as it is.
 
@@ -78,9 +82,56 @@ The sidebar shows a folder only when it holds a page for the sidebar, so a folde
 
 ## The Metadata Dialog
 
-**Metadata** in the header of the browser opens a dialog for a folder, for a subject stored as `X.json` or inside one, and for a storage stored inside another storage. A folder has the fields **Title**, **Navigation title** and **Icon**; a subject has **Navigation title**, **Icon**, **Location** and **Alignment**. The button is not shown for the root of the storage, for pages or for the subjects of their blocks, and it is disabled while the storage is not connected.
+**Metadata** in the header of the browser opens a dialog for a folder, for a subject stored as `X.json` or inside one, and for a storage stored inside another storage. The button is colored when the item has metadata. A folder has the fields **Title**, **Navigation title** and **Icon**; a subject has **Navigation title**, **Icon**, **Location** and **Alignment**. Both have **Notes**, **Links** and **Tags**, see [Notes, Links and Tags](#notes-links-and-tags). The button is not shown for pages or for the subjects of their blocks.
 
-Saving writes only the fields you changed. A field left empty removes its key, and every other key stays, also one that changed while the dialog was open.
+When the item has notes, links or tags, the button first shows them, with **Edit** to open the dialog. While the storage is not connected, **Edit** shows a message, and the button is disabled when it has nothing to show. The root of the storage has the button only when it has notes, links or tags, and without **Edit**, as its `.metadata.json` is changed by hand or by agents.
+
+Saving writes only the fields you changed. A field left empty removes its key, and every other key stays, also one that changed while the dialog was open. Changing a link writes all links as the dialog shows them, so a link edited by hand that the dialog cannot read is removed.
+
+---
+
+## Notes, Links and Tags
+
+Folders, subjects and properties can have notes, links and tags. Notes and tags for pages and other files are [planned](../architecture/design/metadata.md#planned).
+
+```json
+{
+  "notes": "Calibrated **2026**, see the [manual](https://example.com/pump.pdf).",
+  "links": [
+    { "title": "Manual", "url": "https://example.com/pump.pdf" },
+    { "title": "Flow temperature", "path": "/Devices/HeatPump/FlowTemperature" }
+  ],
+  "tags": ["floor-2", "heating"]
+}
+```
+
+### In the Browser
+
+The pane shows the tags of its folder or subject below its header, and the [Metadata button](#the-metadata-dialog) shows its notes, links and tags. The row of a property with notes, links or tags has an icon that shows them in a tooltip, also when the property has no value. A click on the icon shows them in a dialog with **Edit**. On the row of a property without them, an outlined icon appears while the row is hovered or has the keyboard focus, and a click opens the **Metadata** dialog. A property whose metadata no storage keeps, such as one of the root of the storage, can show its notes, links and tags but not edit them.
+
+A click on a tag lists everything that has the tag, except what the browser does not show.
+
+### Notes
+
+Notes are Markdown of up to 4 KB, shown formatted. A save is refused, with the rule it breaks, when notes hold:
+
+- HTML, pictures, blocks or `{{ }}` expressions
+- Attributes, such as `{#id}`, `{.class}` or `{key=value}`
+- A link that leads anywhere other than an http, https or mailto address or a route of HomeBlaze: `/`, the browser, such as `/browser/Devices/Pump`, or a page, such as `/pages/Docs/Setup.md`. A route may not contain `.` or `..` segments or backslashes, and relative paths and links to a `#` fragment alone are refused
+
+Braces with only names, such as `{low}`, and footnotes are shown as text. A link to an http or https address opens in a new tab. Notes that break the rules, for example after an edit by hand, are shown as plain text.
+
+### Links
+
+A metadata entry has up to 20 links. Each link has an optional `title` and either a `url`, an http, https or mailto address, or a `path`, the absolute path of a page, subject or property, such as `/Devices/Pump/Temperature`. These member names are matched exactly, and a link has no other members. In the dialog, an address that starts with `/` is a path, and the path picker helps to find it.
+
+A web link opens in a new tab and a mailto link in place. A link to a page opens the page, to a subject the subject in the browser, and to a property its subject with the row of the property highlighted. A link without a title shows what it leads to. A link that leads to nothing, to another kind of address or to a property that the browser does not show is shown as broken and cannot be opened.
+
+### Tags
+
+A metadata entry has up to 20 tags of 1 to 64 characters, each given once without regard to case. The dialog suggests the tags in use that contain the typed text, and Enter adds the typed tag.
+
+Titles, addresses, paths and tags cannot contain control or format characters, such as line breaks or zero-width characters. Of a file edited by hand, only the first 20 links and tags are read. Links and tags that break these rules are left out, and a title that breaks them is ignored.
 
 ---
 
@@ -145,7 +196,7 @@ Saving metadata is refused beyond these limits. They are checked only on save, s
 
 - 64 keys per entry
 - Key names of up to 64 characters
-- Strings of up to 256 characters and values of up to 4 KB, except for `order`
+- Strings of up to 256 characters and values of up to 4 KB, except for `order` and for [`notes`](#notes), which have a limit of their own
 - Files of up to 512 KB; a save that does not make a larger file larger is still allowed
 
 ### Reserved Names
@@ -169,13 +220,14 @@ When a [seed directory](configuration.md#homeblazeseeddirectory) is set, the doc
 
 Agents read metadata with the MCP tools. `browse` and `search` show the metadata of a subject as its property `HomeBlaze:Metadata` with `includeProperties`, and the metadata of a property as its attribute `@HomeBlaze:Metadata` with `includeAttributes`, both only where there is metadata. `get_property` reads paths such as `/Devices/Shelly/HomeBlaze:Metadata` and `/Devices/Shelly/Firmware@HomeBlaze:Metadata`.
 
-`set_property` cannot change metadata. Agents change it with these methods through `invoke_operation` and `invoke_query`, when they may use these tools. The browser does not show the methods.
+`set_property` cannot change metadata. Agents find and change it with these methods through `invoke_query` and `invoke_operation`, when they may use these tools. The browser does not show the methods.
 
 | Method | On | Description |
 |--------|----|-------------|
 | `SetMetadata` | A storage, such as the root `/` | Merges `values`, a JSON object, into the metadata of the subject at `path`, or of its property `property`. A key with a value is set, replacing a nested value as a whole, a key with `null` is removed, and every other key stays |
 | `GetOrder` | A folder or a storage | Returns the names of the children in the order they are shown. The names include children that are hidden from agents |
 | `SetOrder` | A folder or a storage | Puts the given `names` first, in that order, then the other children in the order they are shown. A name that is not a child, or that is given twice, is refused |
+| `SearchMetadata` | A storage | Returns the subjects and properties whose metadata matches every filter that is given, see below |
 
 `path` is the path of a subject relative to the storage, as `browse` shows it, such as `Devices/Shelly/Channels[0]`. It is empty for the storage itself, and a leading `/` is ignored. An example of `values`:
 
@@ -183,7 +235,20 @@ Agents read metadata with the MCP tools. `browse` and `search` show the metadata
 { "navTitle": "Hall light", "icon": null }
 ```
 
-`SetMetadata` checks the [keys](#keys) that HomeBlaze reads. `title`, `navTitle` and `icon` take a string, and a blank string removes the key. `location` and `alignment` take one of their names. `order`, of a folder or a storage only, takes names of children, which are checked as with `SetOrder`. Other keys are stored as given, within the [limits](#limits). A refused call returns the reason to the agent. Agents cannot change the metadata of an agent or of a subject inside one.
+`SetMetadata` checks the [keys](#keys) that HomeBlaze reads. `title`, `navTitle` and `icon` take a string, and a blank string removes the key. `location` and `alignment` take one of their names. `notes`, `links` and `tags` follow the rules of [Notes, Links and Tags](#notes-links-and-tags), and a blank string or an empty array removes the key. `order`, of a folder or a storage only, takes names of children, which are checked as with `SetOrder`. Other keys are stored as given, within the [limits](#limits). A refused call returns the reason to the agent. Agents cannot change the metadata of an agent or of a subject inside one.
+
+`SearchMetadata` takes these filters, each optional:
+
+| Filter | Matches |
+|--------|---------|
+| `tag` | A tag in `tags`, without regard to case |
+| `key` | A key that is set, such as `notes`, matched exactly |
+| `value` | A string that equals the whole value, or a string in an array, of `key` when it is given, else of any key, without regard to case. Numbers and booleans never match |
+| `path` | Subjects and properties at or below this path, relative to the storage |
+
+Each match has the `path` of its subject and, for a property, its `property`, as `SetMetadata` takes them, sorted by path and then property. The MCP tools return at most the first 100 matches and leave out what they do not show. For agents they also leave out what `SetMetadata` would refuse them, such as the metadata of an agent.
+
+To find text inside notes, agents use `search_markdown`, which searches the notes along with the pages and returns with each match in notes the path that `get_property` reads them with, see [Markdown Tools](../architecture/design/ai.md#markdown-tools).
 
 Which tools an agent may use is set in [AI Agents](ai-agents.md#tools-and-permissions).
 

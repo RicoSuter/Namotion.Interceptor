@@ -96,6 +96,24 @@ public class AgentPromptBuilderTests
             prompt[..prompt.IndexOf("# Mode", StringComparison.Ordinal)]);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public Task WhenInvokeOperationIsAvailable_ThenThePreambleNamesTheMethodsThatChangeMetadata(bool canInvokeOperations)
+    {
+        // Act
+        var prompt = AgentPromptBuilder.BuildSystemPrompt(
+            AgentTurnKind.Chat, null, AgentMemorySnapshot.Empty, canInvokeOperations: canInvokeOperations);
+
+        // Assert
+        var preamble = prompt[..prompt.IndexOf("# Mode", StringComparison.Ordinal)];
+        Assert.Contains(HomeBlazeMcpInstructions.Metadata, preamble);
+        Assert.Equal(canInvokeOperations, preamble.Contains(HomeBlazeMcpInstructions.MetadataChanging, StringComparison.Ordinal));
+        Assert.Equal(!canInvokeOperations, preamble.Contains(HomeBlazeMcpInstructions.MetadataSearching, StringComparison.Ordinal));
+        Assert.Equal(canInvokeOperations, preamble.Contains("SetMetadata", StringComparison.Ordinal));
+        return Verifier.Verify(preamble).UseParameters(canInvokeOperations);
+    }
+
     [Fact]
     public Task WhenBuildingAChatSystemPromptWithoutMemory_ThenMemorySectionSaysEmpty()
     {

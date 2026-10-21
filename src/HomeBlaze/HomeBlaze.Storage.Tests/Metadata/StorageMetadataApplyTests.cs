@@ -221,6 +221,26 @@ public class StorageMetadataApplyTests : StorageTestBase
     }
 
     [Theory]
+    [InlineData(null, new[] { "Shelly", "Shelly/Channels[1]" })]
+    [InlineData("Shelly", new[] { "Shelly", "Shelly/Channels[1]" })]
+    [InlineData(" /Shelly/Channels[1] ", new[] { "Shelly/Channels[1]" })]
+    [InlineData("Missing", new string[0])]
+    public async Task WhenMetadataIsSearchedByPath_ThenThePathIsResolvedRelativeToTheStorage(string? path, string[] expectedPaths)
+    {
+        // Arrange
+        WriteFile("Shelly.json", MetadataTestDevice.Serialize());
+        var storage = await ConnectAsync();
+        await storage.SetMetadataAsync("Shelly", null, Values("""{ "tags": ["floor-2"] }"""), CancellationToken.None);
+        await storage.SetMetadataAsync("Shelly/Channels[1]", null, Values("""{ "tags": ["floor-2"] }"""), CancellationToken.None);
+
+        // Act
+        var matches = storage.SearchMetadata("floor-2", null, null, path);
+
+        // Assert
+        Assert.Equal(expectedPaths, matches.Select(match => match.Path));
+    }
+
+    [Theory]
     [InlineData("Unknown")]
     [InlineData(KnownAttributes.Metadata)]
     public async Task WhenThePropertyIsNoPropertyOfTheSubject_ThenTheWriteIsRefused(string propertyName)

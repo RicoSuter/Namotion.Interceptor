@@ -26,6 +26,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<SubjectComponentRegistry>();
         services.TryAddSingleton(TimeProvider.System);
         services.AddSingleton<NavigationItemResolver>();
+        services.AddSingleton<MetadataLinkResolver>();
         services.AddScoped<PropertyRowLayoutService>();
 
         return services;
