@@ -33,6 +33,8 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
     private static int _lastServiceTypeIndex = -1;
 
+    private static readonly Lock ServiceArraysLock = new();
+
     // Recorded on a state whose chain was proven cyclic, so a context on the loop pays one walk
     // per state rather than one per query. A context merely leading into a loop records nothing
     // and re-walks every query, which is the price of never raising from an unverified record.
@@ -975,12 +977,12 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         private Delegate? _methodInvocationFunction;
 
         // Indexed by ServiceTypeIndex, each entry the TInterface[] of an ImmutableArray. Unlike the
-        // function arrays below, an entry is canonical: callers may key caches on its identity, which
-        // no other state shares except for the shared empty array, so a fill must never be lost to a
-        // concurrent growth. Fills and growths therefore serialize on _serviceArraysLock, created
-        // with the first fill, while reads take no lock.
+        // function arrays below, an entry is canonical: a non-empty one belongs to this state alone,
+        // so callers may key caches on its identity, while every empty result is the one array behind
+        // ImmutableArray<T>.Empty, shared by all states, and is not to be keyed on. A fill must
+        // therefore never be lost to a concurrent growth, so fills and growths serialize on the
+        // static ServiceArraysLock, while reads take no lock.
         private object?[]? _serviceArrays;
-        private object? _serviceArraysLock;
 
         // Indexed by PropertyTypeIndex, grown by replacing the array. Only a context a chain ends
         // on ever fills these, since everything above it resolves to that context.
@@ -1049,8 +1051,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         {
             // A leaf lock: nothing below calls into a context or user code, so it cannot take part
             // in a lock cycle with the context locks.
-            var serviceArraysLock = Volatile.Read(ref _serviceArraysLock) ?? InitializeServiceArraysLock();
-            lock (serviceArraysLock)
+            lock (ServiceArraysLock)
             {
                 var current = _serviceArrays;
                 if (current is null || serviceTypeIndex >= current.Length)
@@ -1073,13 +1074,6 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
                 Volatile.Write(ref current[serviceTypeIndex], services);
                 return services;
             }
-        }
-
-        private object InitializeServiceArraysLock()
-        {
-            // The CAS keeps one canonical lock when two fills race the first use.
-            var created = new object();
-            return Interlocked.CompareExchange(ref _serviceArraysLock, created, null) ?? created;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
