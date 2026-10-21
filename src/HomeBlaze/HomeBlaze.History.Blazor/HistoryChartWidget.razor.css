@@ -8,13 +8,3 @@
     outline-offset: 2px;
     border-radius: 2px;
 }
-
-/* A chart that is the first block of a card body below a subtitle keeps 8 more pixels from it, because the top label
-   of its value axis is small text like the subtitle and would read as its next line. A title alone stands apart by its
-   size, so below it the chart keeps the closer distance that SubjectComponent.razor.css of HomeBlaze.Components gives
-   every card body. It is a padding, because a margin would collapse into the block spacing that the page cancels at the
-   start of the body. */
-:is(.card-widget > .mud-card-header:has([data-testid=card-subtitle]) + .mud-card-content > .subject-component-wrapper,
-    .card-widget > .mud-card-header:has([data-testid=card-subtitle]) + .mud-card-content > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper:nth-child(1 of :not(:empty))) > [data-testid=history-chart] {
-    padding-top: 8px;
-}

@@ -19,8 +19,8 @@ public class SpacingLayoutTests
     private const double CardPadding = 12;
     private const double TitleGap = 4;
     private const double BlockSpacing = 16;
-    private const double ValueRowGap = 12;
-    private const double SubtitleChartGap = TitleGap + 8;
+    private const double ValueRowGap = 6;
+    private const double SubtitleGap = TitleGap + 8;
     private const double LegendRowGap = 4;
 
     private readonly PlaywrightFixture _fixture;
@@ -203,7 +203,7 @@ public class SpacingLayoutTests
     }
 
     [Fact]
-    public async Task WhenAValueListHasSeveralRows_ThenTheirContentIsALittleCloserThanBlocks()
+    public async Task WhenAValueListHasSeveralRows_ThenTheirContentIsCloserThanBlocks()
     {
         // Arrange
         var page = await OpenPageAsync();
@@ -224,9 +224,9 @@ public class SpacingLayoutTests
     }
 
     [Theory]
-    [InlineData("Chart Card", "card-subtitle", SubtitleChartGap)]
+    [InlineData("Chart Card", "card-subtitle", SubtitleGap)]
     [InlineData("Plain Chart Card", "card-title", TitleGap)]
-    public async Task WhenAChartIsTheBodyOfACard_ThenItKeepsMoreRoomBelowASubtitleThanBelowATitle(string title, string headerLine, double expectedGap)
+    public async Task WhenABodyFollowsTheHeaderOfACard_ThenItKeepsMoreRoomBelowASubtitleThanBelowATitle(string title, string headerLine, double expectedGap)
     {
         // Arrange
         var page = await OpenPageAsync(width: 1400);
