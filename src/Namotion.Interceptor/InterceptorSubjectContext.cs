@@ -590,9 +590,14 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         _serviceQueryVisited = null;
         try
         {
-            return CollectServices(typeof(TInterface), this, state, visited)
+            var services = CollectServices(typeof(TInterface), this, state, visited)
                 .OfType<TInterface>()
                 .ToArray();
+
+            // The empty result is the array behind ImmutableArray<T>.Empty, which an empty context returns too.
+            return services.Length == 0
+                ? ImmutableCollectionsMarshal.AsArray(ImmutableArray<TInterface>.Empty)!
+                : services;
         }
         finally
         {
