@@ -575,22 +575,12 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         }
 
         var serviceTypeIndex = ServiceTypeIndex<TInterface>.Value;
-        var cached = state.TryGetServiceArray(serviceTypeIndex);
-        if (cached is not null)
-        {
-            // The entry at this index is only ever a TInterface[], so the checked cast is skipped.
-            Debug.Assert(cached is TInterface[], "A service type index was shared by two service types.");
-            return ImmutableCollectionsMarshal.AsImmutableArray(Unsafe.As<TInterface[]>(cached));
-        }
+        var services = state.TryGetServiceArray(serviceTypeIndex)
+            ?? state.GetOrSetServiceArray(serviceTypeIndex, ComputeServices<TInterface>(state));
 
-        return CreateServices<TInterface>(state, serviceTypeIndex);
-    }
-
-    private ImmutableArray<TInterface> CreateServices<TInterface>(ContextState state, int serviceTypeIndex)
-    {
-        var services = ComputeServices<TInterface>(state);
-        return ImmutableCollectionsMarshal.AsImmutableArray(
-            Unsafe.As<TInterface[]>(state.GetOrSetServiceArray(serviceTypeIndex, services)));
+        // The entry at this index is only ever a TInterface[], so the checked cast is skipped.
+        Debug.Assert(services is TInterface[], "A service type index was shared by two service types.");
+        return ImmutableCollectionsMarshal.AsImmutableArray(Unsafe.As<TInterface[]>(services));
     }
 
     private TInterface[] ComputeServices<TInterface>(ContextState state)
@@ -1058,23 +1048,23 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             lock (serviceArraysLock)
             {
                 var current = _serviceArrays;
-                if (current is not null && serviceTypeIndex < current.Length)
+                if (current is null || serviceTypeIndex >= current.Length)
                 {
-                    var existing = current[serviceTypeIndex];
-                    if (existing is not null)
-                    {
-                        return existing;
-                    }
-
-                    // Release: the array's elements are visible before a lock-free reader sees it.
-                    Volatile.Write(ref current[serviceTypeIndex], services);
-                    return services;
+                    // Doubled, like the function arrays, rather than reallocated for each new service type.
+                    var grown = new object?[Math.Max(Volatile.Read(ref _lastServiceTypeIndex) + 1, (current?.Length ?? 0) * 2)];
+                    current?.CopyTo(grown, 0);
+                    current = grown;
+                    Volatile.Write(ref _serviceArrays, current);
                 }
 
-                var grown = new object?[Math.Max(serviceTypeIndex, Volatile.Read(ref _lastServiceTypeIndex)) + 1];
-                current?.CopyTo(grown, 0);
-                grown[serviceTypeIndex] = services;
-                Volatile.Write(ref _serviceArrays, grown);
+                var existing = current[serviceTypeIndex];
+                if (existing is not null)
+                {
+                    return existing;
+                }
+
+                // Release: the array's elements are visible before a lock-free reader sees it.
+                Volatile.Write(ref current[serviceTypeIndex], services);
                 return services;
             }
         }

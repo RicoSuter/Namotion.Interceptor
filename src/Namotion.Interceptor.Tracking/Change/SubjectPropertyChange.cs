@@ -235,21 +235,15 @@ public readonly struct SubjectPropertyChange : IEquatable<SubjectPropertyChange>
             return true;
         }
 
-        // Support casting to object (will box the value)
+        // Support casting to object (will box the value); an empty storage was a null string/reference
         if (typeof(TValue) == typeof(object))
         {
-            // If no inline storage was used, this was a null string/reference
-            if (storage.IsEmpty)
-            {
-                value = default!;
-                return true;
-            }
             value = (TValue)storage.GetValueBoxed()!;
             return true;
         }
 
         // Handle null strings: no inline storage was used
-        if (typeof(TValue) == typeof(string) && storage.IsEmpty)
+        if (typeof(TValue) == typeof(string) && storage.StoredType == null)
         {
             value = default!;
             return true;

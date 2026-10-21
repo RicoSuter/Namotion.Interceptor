@@ -17,11 +17,6 @@ internal readonly struct InlineValueStorage
     [FieldOffset(8)] private readonly long _valueData1;
     [FieldOffset(16)] private readonly InlineValueOperations? _operations;
 
-    /// <summary>
-    /// Gets whether no value is stored, which is how a change records a null string or reference.
-    /// </summary>
-    public bool IsEmpty => _operations is null;
-
     public Type? StoredType => _operations?.Type;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
