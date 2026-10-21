@@ -243,7 +243,7 @@ public readonly struct SubjectPropertyChange : IEquatable<SubjectPropertyChange>
         }
 
         // Handle null strings: no inline storage was used
-        if (typeof(TValue) == typeof(string) && storage.StoredType == null)
+        if (typeof(TValue) == typeof(string) && storage.IsEmpty)
         {
             value = default!;
             return true;

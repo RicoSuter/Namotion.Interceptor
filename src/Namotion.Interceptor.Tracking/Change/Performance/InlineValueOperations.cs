@@ -1,3 +1,5 @@
+using System.Runtime.CompilerServices;
+
 namespace Namotion.Interceptor.Tracking.Change.Performance;
 
 /// <summary>
@@ -33,7 +35,8 @@ internal abstract class InlineValueOperations
 internal sealed class InlineValueOperations<TValue> : InlineValueOperations
 {
     // Native AOT pre-initializes this class only while it has no constructor arguments and no static state besides
-    // this instance; otherwise every inline read pays a class constructor check before comparing against it.
+    // this instance, and a nested holder class would not be pre-initialized either; otherwise every inline read or
+    // comparison pays a class constructor check first.
     internal static readonly InlineValueOperations<TValue> Instance = new();
 
     private InlineValueOperations()
@@ -46,30 +49,27 @@ internal sealed class InlineValueOperations<TValue> : InlineValueOperations
 
     // A value of another runtime type, null included, decides by its own Equals, so it takes the boxed comparison.
     public override bool ValueEquals(in InlineValueStorage storage, object? value) =>
-        EqualityAgreement.EqualsAgreesWithObjectEquals && value is TValue typed
+        IsEqualsKnownToAgreeWithObjectEquals() && value is TValue typed
             ? EqualityComparer<TValue>.Default.Equals(typed, storage.Read<TValue>())
             : Equals(value, Box(storage));
 
-    private static class EqualityAgreement
+    // object.Equals(value, stored) calls value.Equals(object). Only for these types is Equals(TValue), which the
+    // default comparer calls, known to answer the same; a user struct may implement the two differently. Inlined so
+    // the type tests fold to a constant per TValue.
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IsEqualsKnownToAgreeWithObjectEquals()
     {
-        // object.Equals(value, stored) calls value.Equals(object). Only for these types is Equals(TValue), which the
-        // default comparer calls, known to answer the same; a user struct may implement the two differently.
-        internal static readonly bool EqualsAgreesWithObjectEquals = IsEqualsKnownToAgreeWithObjectEquals();
-
-        private static bool IsEqualsKnownToAgreeWithObjectEquals()
+        if (typeof(TValue).IsPrimitive || typeof(TValue).IsEnum)
         {
-            if (typeof(TValue).IsPrimitive || typeof(TValue).IsEnum)
-            {
-                return true;
-            }
-
-            if (typeof(TValue) == typeof(decimal) || typeof(TValue) == typeof(DateTime))
-            {
-                return true;
-            }
-
-            return typeof(TValue) == typeof(DateTimeOffset) || typeof(TValue) == typeof(TimeSpan) ||
-                typeof(TValue) == typeof(Guid);
+            return true;
         }
+
+        if (typeof(TValue) == typeof(decimal) || typeof(TValue) == typeof(DateTime))
+        {
+            return true;
+        }
+
+        return typeof(TValue) == typeof(DateTimeOffset) || typeof(TValue) == typeof(TimeSpan) ||
+            typeof(TValue) == typeof(Guid);
     }
 }

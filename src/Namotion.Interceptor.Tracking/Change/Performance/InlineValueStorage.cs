@@ -17,6 +17,12 @@ internal readonly struct InlineValueStorage
     [FieldOffset(8)] private readonly long _valueData1;
     [FieldOffset(16)] private readonly InlineValueOperations? _operations;
 
+    /// <summary>
+    /// Gets whether no value is stored inline, which is the case for every value a change keeps in a boxed holder. Empty
+    /// storage without a boxed holder records a null string or reference.
+    /// </summary>
+    public bool IsEmpty => _operations is null;
+
     public Type? StoredType => _operations?.Type;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -66,6 +72,15 @@ internal readonly struct InlineValueStorage
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public TValue Read<TValue>()
     {
+        // The guard of Create, folded to a constant: a type that cannot be stored inline fails fast instead of reading
+        // a reference out of untracked memory.
+        if (!typeof(TValue).IsValueType ||
+            RuntimeHelpers.IsReferenceOrContainsReferences<TValue>() ||
+            Unsafe.SizeOf<TValue>() > MaxSize)
+        {
+            ThrowUnsupportedType<TValue>();
+        }
+
         Debug.Assert(ReferenceEquals(_operations, InlineValueOperations<TValue>.Instance), "The value is read as another type than the stored one.");
         return Unsafe.ReadUnaligned<TValue>(ref Unsafe.As<long, byte>(ref Unsafe.AsRef(in _valueData0)));
     }
