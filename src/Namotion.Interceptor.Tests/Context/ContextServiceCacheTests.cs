@@ -74,20 +74,22 @@ public class ContextServiceCacheTests
     public void WhenNoServiceMatches_ThenContextsShareOneEmptyArray()
     {
         // Arrange: an empty array is the one result callers must not key caches on, because it is shared.
-        // An empty context, contexts with services but no match, and a delegating context take different paths.
+        // An empty context, contexts with services but no match, and a context that also collects the services of a
+        // fallback take different paths.
         var emptyContext = InterceptorSubjectContext.Create();
         var firstContext = InterceptorSubjectContext.Create();
         firstContext.AddService(new MarkerService());
         var secondContext = InterceptorSubjectContext.Create();
         secondContext.AddService(new MarkerService());
-        var delegatingContext = InterceptorSubjectContext.Create();
-        delegatingContext.AddFallbackContext(secondContext);
+        var fallbackContext = InterceptorSubjectContext.Create();
+        fallbackContext.AddService(new MarkerService());
+        fallbackContext.AddFallbackContext(secondContext);
 
         // Act
         var emptyServices = emptyContext.GetServices<OtherMarkerService>();
         var firstServices = firstContext.GetServices<OtherMarkerService>();
         var secondServices = secondContext.GetServices<OtherMarkerService>();
-        var delegatingServices = delegatingContext.GetServices<OtherMarkerService>();
+        var fallbackServices = fallbackContext.GetServices<OtherMarkerService>();
 
         // Assert
         Assert.Empty(firstServices);
@@ -95,7 +97,7 @@ public class ContextServiceCacheTests
         Assert.Same(expected, ImmutableCollectionsMarshal.AsArray(emptyServices));
         Assert.Same(expected, ImmutableCollectionsMarshal.AsArray(firstServices));
         Assert.Same(expected, ImmutableCollectionsMarshal.AsArray(secondServices));
-        Assert.Same(expected, ImmutableCollectionsMarshal.AsArray(delegatingServices));
+        Assert.Same(expected, ImmutableCollectionsMarshal.AsArray(fallbackServices));
     }
 
     [Theory]

@@ -1055,8 +1055,9 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
                 var current = _serviceArrays;
                 if (current is null || serviceTypeIndex >= current.Length)
                 {
-                    // Doubled, like the function arrays, rather than reallocated for each new service type.
-                    var grown = new object?[Math.Max(Volatile.Read(ref _lastServiceTypeIndex) + 1, (current?.Length ?? 0) * 2)];
+                    // Doubled rather than reallocated for each new service type.
+                    var requiredLength = Math.Max(serviceTypeIndex, Volatile.Read(ref _lastServiceTypeIndex)) + 1;
+                    var grown = new object?[Math.Max(requiredLength, (current?.Length ?? 0) * 2)];
                     current?.CopyTo(grown, 0);
                     current = grown;
                     Volatile.Write(ref _serviceArrays, current);
