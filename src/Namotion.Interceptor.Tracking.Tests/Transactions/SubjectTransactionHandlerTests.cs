@@ -567,6 +567,27 @@ public class SubjectTransactionHandlerTests
     }
 
     [Fact]
+    public async Task WhenResolvingHandlersFailsOnBegin_ThenExclusiveLockIsNotHeld()
+    {
+        // Arrange
+        var context = CreateContext();
+        var handlerContext = InterceptorSubjectContext.Create();
+        handlerContext.AddService<ITransactionHandler>(new MisorderedHandler());
+        context.AddFallbackContext(handlerContext);
+        var beginException = await Record.ExceptionAsync(() => BeginInOwnFlowAsync(context));
+        context.RemoveFallbackContext(handlerContext);
+
+        // Act
+        // Started inline so that it completes synchronously only if the failed begin left the lock free.
+        var competingBegin = BeginInOwnFlowAsync(context);
+
+        // Assert
+        Assert.Contains("[RunsFirst] and [RunsLast]", Assert.IsType<InvalidOperationException>(beginException).Message);
+        Assert.True(competingBegin.IsCompletedSuccessfully);
+        (await competingBegin).Dispose();
+    }
+
+    [Fact]
     public async Task WhenOnCommittingThrows_ThenWriterIsNotCalled()
     {
         // Arrange
@@ -786,6 +807,22 @@ public class SubjectTransactionHandlerTests
             TransactionFailureHandling.BestEffort, TransactionLocking.Optimistic);
         person.LastName = "Lee";
         await transaction.CommitAsync(CancellationToken.None);
+    }
+
+    /// <summary>
+    /// Declares contradicting ordering attributes, so resolving the transaction handlers throws while it is registered.
+    /// </summary>
+    [RunsFirst]
+    [RunsLast]
+    private sealed class MisorderedHandler : ITransactionHandler
+    {
+        public void OnCapturing<TProperty>(SubjectTransaction transaction, PropertyReference property, TProperty newValue, ChangeOrigin origin)
+        {
+        }
+
+        public void OnCommitting(SubjectTransaction transaction, ReadOnlySpan<SubjectPropertyChange> changes)
+        {
+        }
     }
 
     /// <summary>

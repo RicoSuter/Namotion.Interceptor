@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Runtime.InteropServices;
 
 namespace Namotion.Interceptor.Tracking.Transactions;
@@ -21,11 +22,11 @@ internal struct TransactionHandlerSet
     private ITransactionHandler[] _lastIncludedHandlers;
 
     /// <summary>
-    /// Initializes the set with the handlers of the transaction's context.
+    /// Initializes the set with <paramref name="transactionContextHandlers"/>, the handlers of the transaction's context.
     /// </summary>
-    internal TransactionHandlerSet(IInterceptorSubjectContext transactionContext)
+    internal TransactionHandlerSet(ImmutableArray<ITransactionHandler> transactionContextHandlers)
     {
-        _handlers = ImmutableCollectionsMarshal.AsArray(transactionContext.GetServices<ITransactionHandler>()) ?? [];
+        _handlers = ImmutableCollectionsMarshal.AsArray(transactionContextHandlers) ?? [];
         _lastIncludedHandlers = _handlers;
     }
 

@@ -449,7 +449,7 @@ public sealed class SubjectTransaction : IDisposable
     /// </summary>
     public TransactionValidationMode ValidationMode { get; }
 
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S107", Justification = "The private constructor explicitly initializes the transaction context, policies and acquired lock ownership as one coherent state.")]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S107", Justification = "The private constructor explicitly initializes the transaction context, policies, handlers and acquired lock ownership as one coherent state.")]
     private SubjectTransaction(
         IInterceptorSubjectContext context,
         SubjectTransactionInterceptor interceptor,
@@ -459,6 +459,7 @@ public sealed class SubjectTransaction : IDisposable
         TransactionConflictBehavior conflictBehavior,
         TransactionValidationMode validationMode,
         TimeSpan commitTimeout,
+        ImmutableArray<ITransactionHandler> handlers,
         IDisposable? lockReleaser)
     {
         Context = context;
@@ -470,7 +471,7 @@ public sealed class SubjectTransaction : IDisposable
         ValidationMode = validationMode;
         _commitTimeout = commitTimeout;
         _lockReleaser = lockReleaser;
-        _handlerSet = new TransactionHandlerSet(context);
+        _handlerSet = new TransactionHandlerSet(handlers);
 
         Interlocked.Increment(ref _activeTransactionCount);
     }
@@ -511,6 +512,9 @@ public sealed class SubjectTransaction : IDisposable
             ?? throw new InvalidOperationException(
                 "Transactions are not enabled. Call WithTransactions() when creating the context.");
 
+        // Resolved before the lock is taken: the lookup can throw, and nothing would release the lock then.
+        var handlers = context.GetServices<ITransactionHandler>();
+
         IDisposable? transactionLock = null;
 
         if (locking == TransactionLocking.Exclusive)
@@ -528,6 +532,7 @@ public sealed class SubjectTransaction : IDisposable
             conflictBehavior,
             validationMode,
             commitTimeout,
+            handlers,
             transactionLock);
     }
 
