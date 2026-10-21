@@ -19,7 +19,8 @@ public interface IMetadataStore
     /// Applies the metadata that the store keeps for a subject that attached and for its properties, or for a property
     /// that was added to an attached subject, so that a subject or property that appears after the store applied its
     /// metadata takes it. Called for every subject that attaches below the store and every property added later, also
-    /// for those whose metadata the store does not keep, which it leaves alone. Thread-safe.
+    /// for those whose metadata the store does not keep, which it leaves alone. Synchronous, as it runs while the subject
+    /// attaches: it reads no file, only the metadata files that the store has read already. Thread-safe.
     /// </summary>
     /// <param name="subject">The subject that attached, or the subject of the property.</param>
     /// <param name="propertyName">The name of the property that was added, neither the metadata nor an attribute; null for a subject that attached.</param>

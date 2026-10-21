@@ -799,6 +799,22 @@ public partial class FluentStorageContainer :
     public static string GetNoSubjectMessage(string path) => $"No subject at {NameList.Format([path])} in this storage.";
 
     /// <summary>
+    /// Resolves the path that <see cref="SetMetadataAsync(string, string?, JsonElement, CancellationToken)"/> takes,
+    /// relative to <paramref name="storage"/> with the <see cref="ISubjectPathResolver"/> of its context, so that a
+    /// caller that checks the path resolves it alike: the storage itself for a path of only whitespace and slashes,
+    /// and null when no subject is at the path or the context has no resolver.
+    /// </summary>
+    public static IInterceptorSubject? ResolveMetadataPath(IInterceptorSubject storage, string path)
+    {
+        // Without leading slashes, which lead the resolver to the root of the application; "./" keeps the resolution
+        // inside the storage, which a leading "../" would leave.
+        var relativePath = path.AsSpan().Trim().TrimStart('/');
+        return relativePath.IsEmpty
+            ? storage
+            : storage.Context.TryGetService<ISubjectPathResolver>()?.ResolveSubject(string.Concat("./", relativePath), PathStyle.Canonical, storage);
+    }
+
+    /// <summary>
     /// Gets the message with which a metadata write refuses a property that the subject does not have, so that a
     /// caller that hides a property refuses it alike.
     /// </summary>

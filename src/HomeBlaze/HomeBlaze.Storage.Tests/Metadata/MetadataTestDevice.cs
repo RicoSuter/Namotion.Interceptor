@@ -72,6 +72,9 @@ public partial class MetadataTestHolder : IConfigurable
     [Configuration]
     public partial Namotion.Interceptor.IInterceptorSubject? Content { get; set; }
 
+    [State]
+    public partial MetadataTestHolder? Next { get; set; }
+
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     public static string Serialize(string contentJson)

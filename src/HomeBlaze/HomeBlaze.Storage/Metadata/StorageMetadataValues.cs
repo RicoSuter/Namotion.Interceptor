@@ -18,6 +18,10 @@ internal static class StorageMetadataValues
     // the subject, as the registry builds new properties when a subject attaches again after a detach.
     private const string ValueKey = "HomeBlaze.MetadataValue";
 
+    // Serializes the writers of the metadata of a subject. Its own and not the SyncRoot of the subject, which the library
+    // takes as well, for instance while it adds a property.
+    private static readonly ConditionalWeakTable<IInterceptorSubject, object> Locks = new();
+
     /// <summary>
     /// Sets the metadata of the subject, or of its property <paramref name="propertyName"/>. The property or attribute
     /// is added on the first value that is not null and stays, as the registry cannot remove a property, so null is set
@@ -25,8 +29,8 @@ internal static class StorageMetadataValues
     /// that is no longer the current one of the subject.
     /// </summary>
     /// <remarks>
-    /// Holds the <see cref="IInterceptorSubject.SyncRoot"/> of the subject, which adding a property takes as well, as
-    /// adding a property twice would register it twice. A caller that reads the values from state that another thread
+    /// Holds the lock of the subject, see <see cref="GetLock"/>, as two first values at once would add the property
+    /// twice, and the registry does not check that. A caller that reads the values from state that another thread
     /// changes reads them while it holds the same lock. The change is published while the lock is held, so whatever
     /// handles it synchronously must not write a property that holds subjects: that takes the lifecycle lock of the
     /// context, while a thread that attaches a subject holds the lifecycle lock and waits for this one.
@@ -34,7 +38,7 @@ internal static class StorageMetadataValues
     public static void Set(RegisteredSubject subject, string? propertyName, ImmutableDictionary<string, JsonElement>? values)
     {
         var name = propertyName is null ? KnownAttributes.Metadata : $"{propertyName}@{KnownAttributes.Metadata}";
-        lock (subject.Subject.SyncRoot)
+        lock (GetLock(subject.Subject))
         {
             // The registration of the caller is stale when the subject was detached and attached again since it was read,
             // or detached for good. Its values may be those of its previous place; the attach applies the current ones.
@@ -59,6 +63,10 @@ internal static class StorageMetadataValues
             }
         }
     }
+
+    /// <summary>Gets the lock that <see cref="Set"/> holds for the subject, the same instance on each call.</summary>
+    public static object GetLock(IInterceptorSubject subject)
+        => Locks.GetValue(subject, static _ => new object());
 
     /// <summary>
     /// Sets the own metadata of a folder or of the root of a storage from its <c>.metadata.json</c>, or none without one,

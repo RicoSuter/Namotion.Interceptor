@@ -14,9 +14,6 @@ namespace HomeBlaze.Services.Metadata;
 /// </summary>
 public static class SubjectMetadataExtensions
 {
-    // Guards against a cycle of parents, which a walk up would follow forever.
-    private const int MaxDepth = 256;
-
     /// <summary>Gets the metadata of the subject; null without any, and for a subject that is not registered.</summary>
     public static ImmutableDictionary<string, JsonElement>? GetMetadata(this IInterceptorSubject subject)
         => subject.TryGetRegisteredSubject()?.TryGetProperty(KnownAttributes.Metadata)?.GetValue() as ImmutableDictionary<string, JsonElement>;
@@ -43,13 +40,14 @@ public static class SubjectMetadataExtensions
             return own;
         }
 
-        var current = subject.TryGetRegisteredSubject();
-        for (var depth = 0; depth < MaxDepth && current is { Parents: [var parent, ..] }; depth++)
+        if (subject.TryGetRegisteredSubject() is { } registered)
         {
-            current = parent.Property.Parent;
-            if (current.Subject is IMetadataStore store)
+            foreach (var current in new FirstParentChain(registered))
             {
-                return store;
+                if (current.Subject is IMetadataStore store)
+                {
+                    return store;
+                }
             }
         }
 

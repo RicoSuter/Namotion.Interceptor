@@ -368,7 +368,14 @@ namespace HomeBlaze.Services.Metadata
     public static class ChildOrdering
     {
         public static string[] GetShownNames(Namotion.Interceptor.IInterceptorSubject container) { }
-        public static System.Collections.Generic.IEnumerable<T> Order<T>(System.Collections.Generic.IEnumerable<T> children, System.Collections.Immutable.ImmutableArray<string> childOrder, System.Func<T, string> getName, System.Func<T, string> getTitle) { }
+        public static System.Collections.Generic.IEnumerable<T> Order<T>(System.Collections.Generic.IEnumerable<T> children, System.Collections.Immutable.ImmutableArray<string> childOrder, System.Func<T, string> getName) { }
+    }
+    public ref struct FirstParentChain
+    {
+        public FirstParentChain(Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject) { }
+        public Namotion.Interceptor.Registry.Abstractions.RegisteredSubject Current { get; }
+        public HomeBlaze.Services.Metadata.FirstParentChain GetEnumerator() { }
+        public bool MoveNext() { }
     }
     public static class MetadataDictionaryExtensions
     {
@@ -391,11 +398,6 @@ namespace HomeBlaze.Services.Metadata
         public static bool IsAllowedAddress(string url) { }
         public static bool IsAllowedScheme(string scheme) { }
         public static bool IsWebAddress(string url) { }
-    }
-    public static class MetadataPaths
-    {
-        public static Namotion.Interceptor.Registry.Paths.PathProviderBase PathProvider { get; }
-        public static Namotion.Interceptor.IInterceptorSubject? TryResolveSubject(Namotion.Interceptor.IInterceptorSubject origin, string path) { }
     }
     public static class MetadataSearch
     {

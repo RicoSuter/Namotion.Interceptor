@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using HomeBlaze.Abstractions;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Internal;
@@ -81,6 +82,9 @@ public abstract class StorageTestBase : IDisposable
         var serviceProvider = services.BuildServiceProvider();
         _serviceProvider = serviceProvider;
         Context = context;
+
+        // As the root manager of the application does.
+        context.AddService<ISubjectPathResolver>(serviceProvider.GetRequiredService<SubjectPathResolver>());
 
         var storage = new FluentStorageContainer(
             typeRegistry,

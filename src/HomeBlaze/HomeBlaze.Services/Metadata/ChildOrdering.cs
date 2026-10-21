@@ -8,7 +8,7 @@ namespace HomeBlaze.Services.Metadata;
 
 /// <summary>
 /// The order in which the children of a container are shown everywhere: the names in the order of the container
-/// first, in that order, then the others, a readme first and an index second, then by title and name.
+/// first, in that order, then the others, a readme first and an index second, then by name.
 /// </summary>
 public static class ChildOrdering
 {
@@ -18,13 +18,7 @@ public static class ChildOrdering
     /// <param name="children">The children.</param>
     /// <param name="childOrder">The names in the order of the container. Unknown and repeated names are ignored.</param>
     /// <param name="getName">Gets the name of a child in its container.</param>
-    /// <param name="getTitle">Gets the navigation title of a child, called only for children that the order, the
-    /// readme and the index leave equal.</param>
-    public static IEnumerable<T> Order<T>(
-        IEnumerable<T> children,
-        ImmutableArray<string> childOrder,
-        Func<T, string> getName,
-        Func<T, string> getTitle)
+    public static IEnumerable<T> Order<T>(IEnumerable<T> children, ImmutableArray<string> childOrder, Func<T, string> getName)
     {
         Dictionary<string, int>? positions = null;
         if (!childOrder.IsDefaultOrEmpty)
@@ -44,25 +38,13 @@ public static class ChildOrdering
             entries.Add(new Entry<T>(child, name, position, GetDefaultRank(name), entries.Count));
         }
 
-        string?[]? titles = null;
         var span = CollectionsMarshal.AsSpan(entries);
-        span.Sort((left, right) =>
+        span.Sort(static (left, right) =>
         {
-            // First, as the sort may compare an entry with itself, which must not read its title.
-            if (left.Index == right.Index)
-            {
-                return 0;
-            }
-
             var result = left.Position.CompareTo(right.Position);
             if (result == 0)
             {
                 result = left.Rank.CompareTo(right.Rank);
-            }
-
-            if (result == 0)
-            {
-                result = StringComparer.InvariantCulture.Compare(GetTitle(left), GetTitle(right));
             }
 
             if (result == 0)
@@ -81,8 +63,6 @@ public static class ChildOrdering
         }
 
         return ordered;
-
-        string GetTitle(Entry<T> entry) => (titles ??= new string?[entries.Count])[entry.Index] ??= getTitle(entry.Child);
     }
 
     /// <summary>
@@ -93,11 +73,7 @@ public static class ChildOrdering
     {
         var children = container.TryGetRegisteredSubject()?.TryGetProperty(IMetadataContainer.ChildrenPropertyName)?.Children ?? [];
         var childOrder = (container as IMetadataContainer)?.ChildOrder ?? [];
-        return Order(
-                children,
-                childOrder,
-                static child => child.Index?.ToString() ?? string.Empty,
-                static child => child.Subject.GetNavigationTitle(child.Index?.ToString()))
+        return Order(children, childOrder, static child => child.Index?.ToString() ?? string.Empty)
             .Select(static child => child.Index?.ToString() ?? string.Empty)
             .ToArray();
     }

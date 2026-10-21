@@ -1,6 +1,7 @@
 using System.Text.Json;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Services.Metadata;
+using HomeBlaze.Services.Tests.Models;
 using HomeBlaze.Storage.Abstractions.Metadata;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
@@ -77,6 +78,44 @@ public class SubjectMetadataExtensionsTests
         Assert.Same(inner, storeOfInner);
         Assert.Same(outer, storeOfOuter);
     }
+
+    [Fact]
+    public void WhenTheStoreIsFarUpTheParents_ThenItIsFound()
+    {
+        // Arrange
+        var leaf = new TestContainer();
+        var top = leaf;
+        for (var depth = 0; depth < 300; depth++)
+        {
+            top = new TestContainer { Child = top };
+        }
+
+        var store = new MetadataTestStore(InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry()) { Container = top };
+
+        // Act
+        var found = leaf.FindMetadataStore();
+
+        // Assert
+        Assert.Same(store, found);
+    }
+
+    [Fact]
+    public void WhenTheFirstParentsFormACycleWithoutAStore_ThenNoStoreIsFound()
+    {
+        // Arrange: subjects that only reference each other keep their first parents in a cycle once the store lets go.
+        var first = new TestContainer();
+        var second = new TestContainer { Child = first };
+        first.Child = second;
+        var store = new MetadataTestStore(InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry()) { Container = first };
+        store.Container = null;
+
+        // Act
+        var found = first.FindMetadataStore();
+
+        // Assert
+        Assert.NotNull(first.TryGetRegisteredSubject());
+        Assert.Null(found);
+    }
 }
 
 [InterceptorSubject]
@@ -91,6 +130,8 @@ public partial class MetadataTestStore : IMetadataStore
     public partial MetadataTestStore? Inner { get; set; }
 
     public partial MetadataTestSubject? Child { get; set; }
+
+    public partial TestContainer? Container { get; set; }
 
     public bool CanStoreMetadata(IInterceptorSubject subject) => true;
 

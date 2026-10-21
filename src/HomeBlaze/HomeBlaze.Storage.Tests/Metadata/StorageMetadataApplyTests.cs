@@ -177,6 +177,50 @@ public class StorageMetadataApplyTests : StorageTestBase
     }
 
     [Theory]
+    [InlineData("Shelly/Channels[1]")]
+    [InlineData("/Shelly/Channels[1]")]
+    [InlineData(" //Shelly//Channels[1] ")]
+    [InlineData("Shelly/Meters[Main]")]
+    [InlineData("Shelly/Channel")]
+    [InlineData("")]
+    [InlineData(" / ")]
+    public async Task WhenMetadataIsSetByPath_ThenThePathIsResolvedRelativeToTheStorage(string path)
+    {
+        // Arrange
+        WriteFile("Shelly.json", MetadataTestDevice.Serialize());
+        var storage = await ConnectAsync();
+        var device = Assert.IsType<MetadataTestDevice>(storage.Children["Shelly"]);
+        var expected = path.Trim().TrimStart('/') switch
+        {
+            "" => (IInterceptorSubject)storage,
+            "Shelly/Meters[Main]" => device.Meters["Main"],
+            "Shelly/Channel" => device.Channel!,
+            _ => device.Channels[1]
+        };
+
+        // Act
+        await storage.SetMetadataAsync(path, null, Values("""{ "navTitle": "Porch" }"""), CancellationToken.None);
+
+        // Assert
+        Assert.Equal("Porch", expected.GetMetadata().GetString(MetadataKeys.NavigationTitle));
+    }
+
+    [Theory]
+    [InlineData("Shelly/Channels[9]")]
+    [InlineData("Missing")]
+    public async Task WhenNoSubjectIsAtThePath_ThenTheWriteIsRefused(string path)
+    {
+        // Arrange
+        WriteFile("Shelly.json", MetadataTestDevice.Serialize());
+        var storage = await ConnectAsync();
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<ArgumentException>(() =>
+            storage.SetMetadataAsync(path, null, Values("""{ "navTitle": "Porch" }"""), CancellationToken.None));
+        Assert.Equal(FluentStorageContainer.GetNoSubjectMessage(path), exception.Message);
+    }
+
+    [Theory]
     [InlineData("Unknown")]
     [InlineData(KnownAttributes.Metadata)]
     public async Task WhenThePropertyIsNoPropertyOfTheSubject_ThenTheWriteIsRefused(string propertyName)
@@ -273,6 +317,50 @@ public class StorageMetadataApplyTests : StorageTestBase
         Assert.True(storage.CanStoreMetadata(device.Channels[1]));
         Assert.False(storage.CanStoreMetadata(docs.Children["Readme.md"]));
         Assert.Same(storage, device.Channels[1].FindMetadataStore());
+    }
+
+    [Fact]
+    public async Task WhenASubjectIsFarInsideAStoredSubject_ThenTheStoreKeepsItsMetadata()
+    {
+        // Arrange
+        WriteFile("Holder.json", MetadataTestHolder.Serialize("null"));
+        var storage = await ConnectAsync();
+        var holder = Assert.IsType<MetadataTestHolder>(storage.Children["Holder"]);
+        var leaf = new MetadataTestHolder();
+        var top = leaf;
+        for (var depth = 0; depth < 300; depth++)
+        {
+            top = new MetadataTestHolder { Next = top };
+        }
+
+        holder.Next = top;
+
+        // Act
+        var canStore = storage.CanStoreMetadata(leaf);
+
+        // Assert
+        Assert.True(canStore);
+    }
+
+    [Fact]
+    public async Task WhenSubjectsThatLeftAStoredSubjectStillReferenceEachOther_ThenTheStoreKeepsNoneOfTheirMetadata()
+    {
+        // Arrange
+        WriteFile("Holder.json", MetadataTestHolder.Serialize("null"));
+        var storage = await ConnectAsync();
+        var holder = Assert.IsType<MetadataTestHolder>(storage.Children["Holder"]);
+        var first = new MetadataTestHolder();
+        var second = new MetadataTestHolder { Next = first };
+        first.Next = second;
+        holder.Next = first;
+        holder.Next = null;
+
+        // Act
+        var canStore = storage.CanStoreMetadata(first);
+
+        // Assert
+        Assert.NotNull(first.TryGetRegisteredSubject());
+        Assert.False(canStore);
     }
 
     [Theory]
@@ -408,6 +496,34 @@ public class StorageMetadataApplyTests : StorageTestBase
             // Assert
             Assert.Equal("new", GetProperty(holder, nameof(MetadataTestHolder.Content)).GetMetadata().GetString("comment"));
             Assert.Equal("Archive", nested.GetMetadata().GetString(MetadataKeys.NavigationTitle));
+        }
+        finally
+        {
+            nested.Dispose();
+        }
+    }
+
+    [Theory]
+    [InlineData("..")]
+    [InlineData("../Content")]
+    public async Task WhenThePathOfANestedStorageLeadsAboveIt_ThenNoSubjectIsFound(string path)
+    {
+        // Arrange
+        var nestedDirectory = CreateTemporaryDirectory();
+        File.WriteAllText(Path.Combine(nestedDirectory.FullName, "a.md"), "a");
+        WriteFile("Holder.json", MetadataTestHolder.Serialize(SerializeStorage(nestedDirectory.FullName)));
+        var storage = await ConnectAsync();
+        var holder = Assert.IsType<MetadataTestHolder>(storage.Children["Holder"]);
+        var nested = Assert.IsType<FluentStorageContainer>(holder.Content);
+        await nested.ConnectAsync(CancellationToken.None);
+        try
+        {
+            // Act & Assert
+            var exception = await Assert.ThrowsAsync<ArgumentException>(() =>
+                nested.SetMetadataAsync(path, null, Values("""{ "navTitle": "Archive" }"""), CancellationToken.None));
+            Assert.Equal(FluentStorageContainer.GetNoSubjectMessage(path), exception.Message);
+            Assert.Null(holder.GetMetadata());
+            Assert.Null(nested.GetMetadata());
         }
         finally
         {
