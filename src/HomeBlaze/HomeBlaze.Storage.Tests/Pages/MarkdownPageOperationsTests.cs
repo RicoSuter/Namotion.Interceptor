@@ -165,4 +165,46 @@ public class MarkdownPageOperationsTests
         Assert.Null(change);
         Assert.Contains("carriage return", refusal);
     }
+
+    [Fact]
+    public void WhenTheTextBetweenTwoBlocksWouldGoToABlockWithoutClosingLine_ThenTheMoveIsRefused()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse(":: Demo.Card\n::: Row Label=A\n:::\nbetween\n::: Row Label=B\nsecond\n::\n");
+
+        // Act
+        var change = MarkdownPageOperations.TryMove(page, NoSubjects, page.Blocks[0].Children[1], -1, out var refusal);
+
+        // Assert
+        Assert.Null(change);
+        Assert.Contains("would change other blocks", refusal);
+    }
+
+    [Fact]
+    public void WhenAWidgetWithASlotChildIsMovedPastAnotherWidget_ThenEverySubjectFollowsItsBlock()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse(":: Demo.One\n::: Row\n:::\n::\n\n:: Demo.Two\n::\n");
+        var widgetOne = page.Blocks[0];
+        var row = widgetOne.Children[0];
+        var widgetTwo = page.Blocks[1];
+        var subjectOne = new TestLeaf();
+        var subjectRow = new TestLeaf();
+        var subjectTwo = new TestLeaf();
+        var subjects = new Dictionary<int, IInterceptorSubject>
+        {
+            [widgetOne.Index] = subjectOne, [row.Index] = subjectRow, [widgetTwo.Index] = subjectTwo
+        };
+
+        // Act
+        var change = MarkdownPageOperations.TryMove(page, subjects, widgetOne, 1, out var refusal);
+
+        // Assert
+        Assert.Null(refusal);
+        Assert.Equal(":: Demo.Two\n::\n\n:: Demo.One\n::: Row\n:::\n::\n", change!.Write.Page.Source);
+        var result = change.Write;
+        Assert.Same(subjectTwo, result.BlockSubjects[result.Page.Blocks[0].Index]);
+        Assert.Same(subjectOne, result.BlockSubjects[result.Page.Blocks[1].Index]);
+        Assert.Same(subjectRow, result.BlockSubjects[result.Page.Blocks[1].Children[0].Index]);
+    }
 }

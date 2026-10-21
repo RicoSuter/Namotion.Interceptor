@@ -84,7 +84,14 @@ internal static class MarkdownPageOperations
         var after = MarkdownPageParser.Parse(newSource);
         var map = MarkdownBlockAlignment.TryAlign(
             page, after, edit, CountBlocks(first) + CountBlocks(second), parent, block.Kind);
-        if (map is null)
+
+        // The alignment skips the swapped lines, so a block without a closing line could have taken the text between.
+        var secondLineCountAfter = second.EndLine - second.Line + 1;
+        var middleLineCountAfter = second.Line - first.EndLine - 1;
+        var movedSecondLine = first.Line + secondLineCountAfter + middleLineCountAfter;
+        if (map is null ||
+            !EndsAt(after, first.Line, first.Line + secondLineCountAfter - 1) ||
+            !EndsAt(after, movedSecondLine, movedSecondLine + (first.EndLine - first.Line)))
         {
             refusal = $"Moving the block at line {block.Line} would change other blocks of the page.";
             return null;
@@ -222,6 +229,8 @@ internal static class MarkdownPageOperations
             }
         }
     }
+
+    private static bool EndsAt(MarkdownPage page, int line, int endLine) => FindBlockAt(page, line).EndLine == endLine;
 
     private static MarkdownBlock FindBlockAt(MarkdownPage page, int line)
     {
