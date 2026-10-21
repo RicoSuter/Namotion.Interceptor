@@ -156,7 +156,7 @@ public class WidgetSelectionTests
     }
 
     [Fact]
-    public async Task WhenATopLevelWidgetWithoutConfigurationIsSelected_ThenItHasNoBar()
+    public async Task WhenATopLevelWidgetWithoutConfigurationIsSelected_ThenItsBarHasNoEditOrParentAction()
     {
         // Arrange
         var page = await OpenPageInInlineModeAsync();
@@ -166,9 +166,12 @@ public class WidgetSelectionTests
         // Act
         await wrapper.ClickAsync(new() { Force = true });
 
-        // Assert
+        // Assert: the bar holds only the actions on the block of the page.
         await Assertions.Expect(wrapper).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
-        await Assertions.Expect(page.GetWidgetActionBar()).ToHaveCountAsync(0);
+        var actionBar = page.GetWidgetActionBar();
+        await Assertions.Expect(actionBar.GetByTestId("delete-block-button")).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(actionBar.GetByTestId("edit-subject-button")).ToHaveCountAsync(0);
+        await Assertions.Expect(actionBar.GetByTestId("select-parent-button")).ToHaveCountAsync(0);
     }
 
     [Fact]
@@ -269,14 +272,14 @@ public class WidgetSelectionTests
         await Assertions.Expect(wrapper).ToBeVisibleAsync(new() { Timeout = Timeout });
         await wrapper.FocusAsync();
         await page.Keyboard.PressAsync("Enter");
-        var editButton = page.GetWidgetActionBar().GetByTestId("edit-subject-button");
-        await Assertions.Expect(editButton).ToBeVisibleAsync(new() { Timeout = Timeout });
+        var firstButton = page.GetWidgetActionBar().GetByRole(AriaRole.Button).First;
+        await Assertions.Expect(firstButton).ToBeVisibleAsync(new() { Timeout = Timeout });
 
         // Act
         await page.Keyboard.PressAsync("Tab");
 
         // Assert
-        await Assertions.Expect(editButton).ToBeFocusedAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(firstButton).ToBeFocusedAsync(new() { Timeout = Timeout });
 
         // Act
         await page.Keyboard.PressAsync("Escape");

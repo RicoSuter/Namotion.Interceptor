@@ -1,3 +1,4 @@
+@using HomeBlaze.Components
 @using HomeBlaze.Components.Abstractions
 @using HomeBlaze.Components.Abstractions.Attributes
 @using HomeBlaze.Storage.Files
@@ -10,18 +11,23 @@
 
 @implements ISubjectComponent
 @inject IJSRuntime JsRuntime
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject SubjectFactory SubjectFactory
 
 <CascadingValue Value="@IsEditing" Name="IsEditing">
-    <div class="markdown-content" style="position: relative;">
-        @if (IsLoading)
-        {
-            <MudProgressCircular Indeterminate="true" />
-        }
-        else
-        {
-            <MarkdownContentView Children="@File?.Children" />
-        }
-    </div>
+    <CascadingValue Value="@StructureEditor" TValue="IPageStructureEditor">
+        <div class="markdown-content" style="position: relative;">
+            @if (IsLoading)
+            {
+                <MudProgressCircular Indeterminate="true" />
+            }
+            else
+            {
+                <MarkdownContentView Content="@File" Children="@File?.Children" />
+            }
+        </div>
+    </CascadingValue>
 </CascadingValue>
 
 <style>
@@ -59,7 +65,32 @@
 
     private const string ModulePath = "./_content/HomeBlaze.Storage.Blazor/Files/MarkdownFilePageComponent.razor.js";
 
+    [CascadingParameter]
+    public WidgetSelection? Selection { get; set; }
+
+    private MarkdownPageStructureEditor? _structureEditor;
+
     private MarkdownFile? File => Subject as MarkdownFile;
+
+    // Inline mode is editing with a selection. The Split preview is not editing, so it never changes the page.
+    private IPageStructureEditor? StructureEditor
+    {
+        get
+        {
+            if (!IsEditing || Selection is null || File is not { } file)
+            {
+                return null;
+            }
+
+            // A navigation to another page keeps this component and gives it the other file.
+            if (_structureEditor?.File != file)
+            {
+                _structureEditor = new MarkdownPageStructureEditor(file, DialogService, Snackbar, SubjectFactory);
+            }
+
+            return _structureEditor;
+        }
+    }
 
     private bool IsLoading => File?.Content is null;
 

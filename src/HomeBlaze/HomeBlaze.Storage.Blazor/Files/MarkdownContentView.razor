@@ -21,6 +21,10 @@
 }
 
 @code {
+    /// <summary>The page or the fragment whose segments these are, into which new blocks are inserted.</summary>
+    [Parameter]
+    public IInterceptorSubject? Content { get; set; }
+
     /// <summary>
     /// The segments of a page or of a fragment, in order.
     /// </summary>
