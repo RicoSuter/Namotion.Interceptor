@@ -23,11 +23,16 @@ internal static class MarkdownBlockAlignment
     /// <param name="edit">What the change did to the lines.</param>
     /// <param name="expectedInsertedBlockCount">How many blocks of every kind the inserted lines must hold.</param>
     /// <param name="owner">The block of <paramref name="before"/> that the lines were inserted into, or null for a removal.</param>
+    /// <param name="insertedKind">
+    /// The kind of the blocks that the inserted lines put directly into <paramref name="owner"/>, or directly onto the
+    /// page for <see cref="MarkdownBlockKind.Widget"/> without an owner.
+    /// </param>
     /// <returns>Null when the change did more than insert or remove its blocks.</returns>
     public static int[]? TryAlign(
-        MarkdownPage before, MarkdownPage after, MarkdownLineEdit edit, int expectedInsertedBlockCount, MarkdownBlock? owner)
+        MarkdownPage before, MarkdownPage after, MarkdownLineEdit edit, int expectedInsertedBlockCount, MarkdownBlock? owner,
+        MarkdownBlockKind insertedKind = MarkdownBlockKind.Slot)
     {
-        var map = TryMapBlocks(before, after, edit, expectedInsertedBlockCount, owner);
+        var map = TryMapBlocks(before, after, edit, expectedInsertedBlockCount, owner, insertedKind);
         return map is not null && HasSameDocument(before, after, edit) ? map : null;
     }
 
@@ -39,11 +44,12 @@ internal static class MarkdownBlockAlignment
     /// Null when a block of the page tells that the change did more than insert or remove its blocks. Every
     /// other block, of every kind, must have the same kind, fence, head line, closing line and json block as
     /// before, the lines that the change explains, and the same block around it. Every inserted block must be a
-    /// slot block directly inside <paramref name="owner"/> or stand inside another inserted block, and must end
+    /// block of the inserted kind directly inside <paramref name="owner"/>, or a widget block directly on the page without an owner, or stand inside another inserted block, and must end
     /// on the inserted lines.
     /// </returns>
     internal static int[]? TryMapBlocks(
-        MarkdownPage before, MarkdownPage after, MarkdownLineEdit edit, int expectedInsertedBlockCount, MarkdownBlock? owner)
+        MarkdownPage before, MarkdownPage after, MarkdownLineEdit edit, int expectedInsertedBlockCount, MarkdownBlock? owner,
+        MarkdownBlockKind insertedKind = MarkdownBlockKind.Slot)
     {
         var oldBlocks = Flatten(before.Blocks);
         var newBlocks = Flatten(after.Blocks);
@@ -64,14 +70,14 @@ internal static class MarkdownBlockAlignment
             {
                 var (block, parent) = newBlocks[newPosition++];
                 var isInsideInsertedBlock = parent is not null && insertedBlocks.Contains(parent);
-                var isSlotBlockOfOwner =
-                    block.Kind == MarkdownBlockKind.Slot &&
-                    owner is not null &&
-                    counterparts.TryGetValue(owner, out var newOwner) &&
-                    ReferenceEquals(parent, newOwner);
+                var isInsertedIntoOwner =
+                    block.Kind == insertedKind &&
+                    (owner is null
+                        ? insertedKind == MarkdownBlockKind.Widget && parent is null
+                        : counterparts.TryGetValue(owner, out var newOwner) && ReferenceEquals(parent, newOwner));
 
                 // A block that goes on after the inserted lines has taken over what follows it.
-                if (block.EndLine >= edit.InsertedEnd || (!isInsideInsertedBlock && !isSlotBlockOfOwner))
+                if (block.EndLine >= edit.InsertedEnd || (!isInsideInsertedBlock && !isInsertedIntoOwner))
                 {
                     return false;
                 }
