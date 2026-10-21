@@ -275,6 +275,50 @@ public class StorageMetadataApplyTests : StorageTestBase
         Assert.Same(storage, device.Channels[1].FindMetadataStore());
     }
 
+    [Fact]
+    public async Task WhenASubjectIsFarInsideAStoredSubject_ThenTheStoreKeepsItsMetadata()
+    {
+        // Arrange
+        WriteFile("Holder.json", MetadataTestHolder.Serialize("null"));
+        var storage = await ConnectAsync();
+        var holder = Assert.IsType<MetadataTestHolder>(storage.Children["Holder"]);
+        var leaf = new MetadataTestHolder();
+        var top = leaf;
+        for (var depth = 0; depth < 300; depth++)
+        {
+            top = new MetadataTestHolder { Next = top };
+        }
+
+        holder.Next = top;
+
+        // Act
+        var canStore = storage.CanStoreMetadata(leaf);
+
+        // Assert
+        Assert.True(canStore);
+    }
+
+    [Fact]
+    public async Task WhenSubjectsThatLeftAStoredSubjectStillReferenceEachOther_ThenTheStoreKeepsNoneOfTheirMetadata()
+    {
+        // Arrange
+        WriteFile("Holder.json", MetadataTestHolder.Serialize("null"));
+        var storage = await ConnectAsync();
+        var holder = Assert.IsType<MetadataTestHolder>(storage.Children["Holder"]);
+        var first = new MetadataTestHolder();
+        var second = new MetadataTestHolder { Next = first };
+        first.Next = second;
+        holder.Next = first;
+        holder.Next = null;
+
+        // Act
+        var canStore = storage.CanStoreMetadata(first);
+
+        // Assert
+        Assert.NotNull(first.TryGetRegisteredSubject());
+        Assert.False(canStore);
+    }
+
     [Theory]
     [InlineData("set", LoneSurrogateContent, "Pump")]
     [InlineData("order", LoneSurrogateContent, "Pump")]

@@ -1,6 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using HomeBlaze.Abstractions;
+using HomeBlaze.Services.Metadata;
 using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Abstractions.Metadata;
 using Namotion.Interceptor;
@@ -16,9 +17,6 @@ namespace HomeBlaze.Storage.Metadata;
 /// </summary>
 internal sealed class StorageMetadataApplier
 {
-    // Guards against a cycle of parents, which a walk up would follow forever.
-    private const int MaxDepth = 256;
-
     private readonly FluentStorageContainer _storage;
 
     // The file applied last to each stored subject, for the lookups of an attaching subject, which has no entry at hand.
@@ -53,18 +51,14 @@ internal sealed class StorageMetadataApplier
     /// </summary>
     public bool TryFindStoredSubject(RegisteredSubject subject, [NotNullWhen(true)] out RegisteredSubject? storedSubject)
     {
-        var current = subject;
-        for (var depth = 0; depth < MaxDepth && current.Parents is [var first, ..]; depth++)
+        foreach (var current in new FirstParentChain(subject))
         {
-            var parent = first.Property;
-            if (parent.Name == IMetadataContainer.ChildrenPropertyName && parent.Subject is IMetadataContainer container)
+            if (current.Parents is [{ Property: { Name: IMetadataContainer.ChildrenPropertyName, Subject: IMetadataContainer container } }, ..])
             {
                 var isOwn = container is VirtualFolder folder ? ReferenceEquals(folder.Storage, _storage) : ReferenceEquals(container, _storage);
                 storedSubject = isOwn ? current : null;
                 return isOwn;
             }
-
-            current = parent.Parent;
         }
 
         storedSubject = null;

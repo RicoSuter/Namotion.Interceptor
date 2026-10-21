@@ -370,6 +370,13 @@ namespace HomeBlaze.Services.Metadata
         public static string[] GetShownNames(Namotion.Interceptor.IInterceptorSubject container) { }
         public static System.Collections.Generic.IEnumerable<T> Order<T>(System.Collections.Generic.IEnumerable<T> children, System.Collections.Immutable.ImmutableArray<string> childOrder, System.Func<T, string> getName, System.Func<T, string> getTitle) { }
     }
+    public ref struct FirstParentChain
+    {
+        public FirstParentChain(Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject) { }
+        public Namotion.Interceptor.Registry.Abstractions.RegisteredSubject Current { get; }
+        public HomeBlaze.Services.Metadata.FirstParentChain GetEnumerator() { }
+        public bool MoveNext() { }
+    }
     public static class MetadataDictionaryExtensions
     {
         public static TEnum? GetEnum<TEnum>(this System.Collections.Generic.IReadOnlyDictionary<string, System.Text.Json.JsonElement>? metadata, string key)

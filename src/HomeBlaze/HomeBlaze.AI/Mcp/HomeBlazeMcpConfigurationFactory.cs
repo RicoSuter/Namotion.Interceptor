@@ -25,9 +25,6 @@ internal static class HomeBlazeMcpConfigurationFactory
 {
     private const string PathPrefix = "/";
 
-    // Guards against a cycle of parents, which a walk up would follow forever.
-    private const int MaxDepth = 256;
-
     /// <summary>The refusal of a call of SetMetadata by an agent whose arguments do not have the shape of the method.</summary>
     internal const string SetMetadataArgumentsMessage =
         "SetMetadata takes path, a string, an optional property and values, a JSON object, for example {\"path\": \"Devices/Pump\", \"values\": {\"navTitle\": \"Pump\"}}.";
@@ -164,21 +161,21 @@ internal static class HomeBlazeMcpConfigurationFactory
     // that agents do not see.
     private static bool IsOfExcludedType(RegisteredSubject subject, RegisteredSubject storage, Type[] excludeTypes)
     {
-        var current = subject;
-        for (var depth = 0; depth < MaxDepth && !ReferenceEquals(current, storage); depth++)
+        foreach (var current in new FirstParentChain(subject))
         {
+            if (ReferenceEquals(current, storage))
+            {
+                return false;
+            }
+
             var type = current.Subject.GetType();
-            if (Array.Exists(excludeTypes, excludedType => excludedType.IsAssignableFrom(type)))
+            foreach (var excludedType in excludeTypes)
             {
-                return true;
+                if (excludedType.IsAssignableFrom(type))
+                {
+                    return true;
+                }
             }
-
-            if (current.Parents is not [var parent, ..])
-            {
-                break;
-            }
-
-            current = parent.Property.Parent;
         }
 
         return false;
