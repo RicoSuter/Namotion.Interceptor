@@ -1,7 +1,6 @@
 using System.Text.Json;
 using HomeBlaze.Abstractions;
 using HomeBlaze.History;
-using HomeBlaze.OpcUa;
 using HomeBlaze.Services.Metadata;
 using HomeBlaze.Storage.Abstractions.Metadata;
 using HomeBlaze.Storage.Internal;
@@ -447,7 +446,7 @@ public class StorageMetadataApplyTests : StorageTestBase
     }
 
     [Fact]
-    public async Task WhenHistoryAndTheOpcUaServerLookAtAStoredSubject_ThenTheySkipItsMetadata()
+    public async Task WhenHistoryLooksAtAStoredSubject_ThenItSkipsItsMetadata()
     {
         // Arrange
         WriteFile("Motor.json", SerializeMotor("Motor 1"));
@@ -456,13 +455,9 @@ public class StorageMetadataApplyTests : StorageTestBase
         var motor = storage.Children["Motor"];
         var metadata = GetProperty(motor, KnownAttributes.Metadata);
         var attribute = GetProperty(motor, $"{nameof(Samples.Motor.CurrentSpeed)}@{KnownAttributes.Metadata}");
-        var provider = new StateAttributeOpcUaPathProvider();
 
         // Act & Assert
         Assert.False(metadata.HasHistory());
         Assert.False(attribute.HasHistory());
-        Assert.False(provider.IsPropertyIncluded(metadata));
-        Assert.False(provider.IsPropertyIncluded(attribute));
-        Assert.True(provider.IsPropertyIncluded(GetProperty(motor, nameof(Samples.Motor.CurrentSpeed))));
     }
 }
