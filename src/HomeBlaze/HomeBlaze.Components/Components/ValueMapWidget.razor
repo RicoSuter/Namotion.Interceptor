@@ -1,9 +1,93 @@
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(ValueMap))]
 @implements ISubjectComponent
+@implements IInvisibleWidget
+@implements IDisposable
 
-@* A map shows nothing. The component exists so that the page does not report a missing one. *@
+@* A map shows nothing on a viewed page. Edited inline, it is a chip, and while it or one of its cases is selected,
+   the list of its cases. *@
+@if (IsEditing && Selection is not null && Subject is ValueMap map)
+{
+    <div class="invisible-widget-chip" data-testid="invisible-widget-chip">
+        <MudIcon Icon="@Icons.Material.Filled.SwapHoriz" Size="Size.Small" aria-hidden="true" />
+        <span>@(StructureEditor?.GetBlockName(map) ?? nameof(ValueMap))</span>
+    </div>
+
+    @if (Owner?.ContainsSelection == true)
+    {
+        <div class="value-map-cases" data-testid="value-map-cases">
+            @foreach (var mapCase in map.Cases)
+            {
+                <SubjectComponent @key="mapCase" Subject="@mapCase" Type="SubjectComponentType.Widget" />
+            }
+
+            @if (StructureEditor is { } editor && FindCaseSlot(editor, map) is { } slot)
+            {
+                <MudButton Size="Size.Small"
+                           StartIcon="@Icons.Material.Filled.Add"
+                           Class="edit-mode-interactive"
+                           OnClick="@(() => editor.AddListItemAsync(map, slot))"
+                           data-testid="add-case-button">Add case</MudButton>
+            }
+        </div>
+    }
+}
 
 @code {
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
+
+    [CascadingParameter(Name = "IsEditing")]
+    public bool IsEditing { get; set; }
+
+    [CascadingParameter]
+    public WidgetSelection? Selection { get; set; }
+
+    [CascadingParameter]
+    public IPageStructureEditor? StructureEditor { get; set; }
+
+    [CascadingParameter(Name = "ParentSubjectComponent")]
+    public SubjectComponent? Owner { get; set; }
+
+    private WidgetSelection? _subscribedSelection;
+
+    protected override void OnParametersSet()
+    {
+        // The list follows the selection, which changes without new parameters.
+        var selection = IsEditing ? Selection : null;
+        if (!ReferenceEquals(selection, _subscribedSelection))
+        {
+            Unsubscribe();
+            _subscribedSelection = selection;
+            if (selection is not null)
+            {
+                selection.Changed += OnSelectionChanged;
+            }
+        }
+    }
+
+    private void OnSelectionChanged() => _ = InvokeAsync(StateHasChanged);
+
+    private static PageListSlot? FindCaseSlot(IPageStructureEditor editor, ValueMap map)
+    {
+        foreach (var slot in editor.GetListSlots(map))
+        {
+            if (slot.Name == "Case")
+            {
+                return slot;
+            }
+        }
+
+        return null;
+    }
+
+    private void Unsubscribe()
+    {
+        if (_subscribedSelection is not null)
+        {
+            _subscribedSelection.Changed -= OnSelectionChanged;
+            _subscribedSelection = null;
+        }
+    }
+
+    public void Dispose() => Unsubscribe();
 }

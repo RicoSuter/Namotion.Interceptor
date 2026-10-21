@@ -89,6 +89,53 @@ public class InlineStructureEditingTests
         await Assertions.Expect(page.GetByTestId("delete-block-button")).ToHaveCountAsync(0, new() { Timeout = Timeout });
     }
 
+    [Fact]
+    public async Task WhenThePageIsEditedInline_ThenAValueMapIsAChipWithItsName()
+    {
+        // Arrange & Act
+        var page = await OpenPageInInlineModeAsync();
+
+        // Assert
+        var chip = page.GetByTestId("invisible-widget-chip").Filter(new() { HasText = "structuremap" });
+        await Assertions.Expect(chip).ToBeVisibleAsync(new() { Timeout = Timeout });
+    }
+
+    [Fact]
+    public async Task WhenAValueMapChipIsSelected_ThenItsCasesAreListedAndACaseCanBeAdded()
+    {
+        // Arrange
+        var page = await OpenPageInInlineModeAsync();
+        var chip = page.GetByTestId("invisible-widget-chip").Filter(new() { HasText = "structuremap" });
+        await chip.SelectWidgetAsync();
+        var cases = page.GetByTestId("value-map-cases");
+        await Assertions.Expect(cases.GetByTestId("value-map-case")).ToHaveCountAsync(1, new() { Timeout = Timeout });
+
+        // Act
+        await cases.GetByTestId("add-case-button").ClickAsync();
+        var dialog = page.GetByTestId("create-subject-dialog");
+        await dialog.GetByLabel("Value", new() { Exact = true }).FillAsync("Running");
+
+        // The actions of a dialog stand outside the element with its test id.
+        await page.GetByTestId("create-button").ClickAsync();
+
+        // Assert
+        await _fixture.WaitForDemoPageTextAsync(
+            PageName, text => text.Contains("::: Case Value=Stopped Text=\"Off\"\n:::\n::: Case Value=Running"), "The case was not added.");
+    }
+
+    [Fact]
+    public async Task WhenThePageIsViewed_ThenNoChipIsShown()
+    {
+        // Arrange
+        var page = await OpenPageInInlineModeAsync();
+
+        // Act
+        await page.SelectEditModeAsync("View", Timeout);
+
+        // Assert
+        await Assertions.Expect(page.GetByTestId("invisible-widget-chip")).ToHaveCountAsync(0, new() { Timeout = Timeout });
+    }
+
     private async Task<IPage> OpenPageInInlineModeAsync()
     {
         await _fixture.WriteDemoPageAsync(PageName, Content);

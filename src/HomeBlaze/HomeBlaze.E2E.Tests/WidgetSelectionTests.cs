@@ -175,7 +175,7 @@ public class WidgetSelectionTests
     }
 
     [Fact]
-    public async Task WhenAWidgetShowsNothing_ThenItIsHiddenInEditMode()
+    public async Task WhenAWidgetShowsNothingOnAViewedPage_ThenItIsASelectableChipInEditMode()
     {
         // Arrange
         var page = await OpenPageAsync();
@@ -184,9 +184,9 @@ public class WidgetSelectionTests
         // Act
         await page.SwitchToInlineModeAsync();
 
-        // Assert: a hidden element is no tab stop.
+        // Assert
         await Assertions.Expect(wrapper).ToHaveCountAsync(1, new() { Timeout = Timeout });
-        await Assertions.Expect(wrapper).ToHaveCSSAsync("display", "none");
+        await Assertions.Expect(wrapper.GetByTestId("invisible-widget-chip")).ToBeVisibleAsync(new() { Timeout = Timeout });
     }
 
     [Fact]

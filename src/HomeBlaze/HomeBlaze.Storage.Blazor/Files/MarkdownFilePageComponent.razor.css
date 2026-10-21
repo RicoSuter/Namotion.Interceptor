@@ -14,8 +14,8 @@
     margin: 1rem 0;
 }
 
-/* A widget that shows nothing, such as a ValueMap, takes no space, in view mode as in edit mode (see
-   SubjectComponent.razor.css of HomeBlaze.Components). */
+/* A widget that shows nothing, such as a ValueMap on a viewed page, takes no space (see SubjectComponent.razor.css of
+   HomeBlaze.Components). Edited inline, a ValueMap is a chip, see the stack below. */
 .markdown-content ::deep .subject-component-wrapper:empty {
     display: none;
 }
@@ -95,4 +95,25 @@
    that is still too wide scrolls in its box. */
 .markdown-content ::deep :not(pre) > code {
     overflow-wrap: break-word;
+}
+
+/* The widgets that show nothing, such as a ValueMap, stand as chips at the top right of the content they belong to
+   while the page is edited inline. On the page itself they start below the button of the page menu. */
+.markdown-content ::deep .markdown-fragment:has(> .invisible-widget-stack) {
+    position: relative;
+}
+
+.markdown-content ::deep .invisible-widget-stack {
+    position: absolute;
+    top: 0;
+    right: 0;
+    z-index: 5;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 6px;
+}
+
+.markdown-content > ::deep .invisible-widget-stack {
+    top: 3.5rem;
 }
