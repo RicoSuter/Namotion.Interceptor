@@ -972,8 +972,8 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         // it disagreeing with them.
         internal readonly InterceptorSubjectContext? DelegationTarget;
 
-        // Caches belong to the state that produced them, created lazily via CAS. A topology change
-        // publishes a new state, so a late insert lands in a state no later query pins.
+        // Caches belong to the state that produced them. A topology change publishes a new state, so
+        // a late insert lands in a state no later query pins. This one is set once via CAS.
         private Delegate? _methodInvocationFunction;
 
         // Indexed by ServiceTypeIndex, each entry the TInterface[] of an ImmutableArray. Unlike the

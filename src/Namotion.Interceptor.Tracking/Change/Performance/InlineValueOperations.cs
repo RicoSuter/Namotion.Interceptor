@@ -34,9 +34,8 @@ internal abstract class InlineValueOperations
 /// </summary>
 internal sealed class InlineValueOperations<TValue> : InlineValueOperations
 {
-    // Native AOT pre-initializes this class only while it has no constructor arguments and no static state besides
-    // this instance, and a nested holder class would not be pre-initialized either; otherwise every inline read or
-    // comparison pays a class constructor check first.
+    // Keep this the only static state and the constructor without arguments; anything else blocks Native AOT
+    // pre-initialization and adds a class constructor check to every read.
     internal static readonly InlineValueOperations<TValue> Instance = new();
 
     private InlineValueOperations()

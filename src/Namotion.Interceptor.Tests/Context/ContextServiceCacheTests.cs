@@ -71,6 +71,34 @@ public class ContextServiceCacheTests
     }
 
     [Fact]
+    public void WhenServiceArrayGrows_ThenFilledEntriesKeepTheirArray()
+    {
+        // Arrange: the service types below get their indices only now, beyond the array the first
+        // query sized, so querying them grows it at least once.
+        var context = InterceptorSubjectContext.Create();
+        context.AddService(new MarkerService());
+        var servicesBefore = context.GetServices<MarkerService>();
+        var getServiceArrays = ContextFunctionCacheTests
+            .CreateNestedGenericTypes(64, typeof(GrowingServiceType<>), typeof(GrowingServiceTypeRoot))
+            .Select(serviceType => GetServiceArrayMethod
+                .MakeGenericMethod(serviceType)
+                .CreateDelegate<Func<IInterceptorSubjectContext, object>>())
+            .ToArray();
+
+        // Act
+        foreach (var getServiceArray in getServiceArrays)
+        {
+            getServiceArray(context);
+        }
+
+        var servicesAfter = context.GetServices<MarkerService>();
+
+        // Assert
+        Assert.Single(servicesBefore);
+        Assert.Same(ImmutableCollectionsMarshal.AsArray(servicesBefore), ImmutableCollectionsMarshal.AsArray(servicesAfter));
+    }
+
+    [Fact]
     public void WhenNoServiceMatches_ThenContextsShareOneEmptyArray()
     {
         // Arrange: an empty array is the one result callers must not key caches on, because it is shared.
@@ -168,4 +196,8 @@ public class ContextServiceCacheTests
     private sealed class RacedServiceType<TService>;
 
     private sealed class RacedServiceTypeRoot;
+
+    private sealed class GrowingServiceType<TService>;
+
+    private sealed class GrowingServiceTypeRoot;
 }
