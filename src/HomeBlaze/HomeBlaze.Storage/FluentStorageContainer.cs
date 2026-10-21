@@ -841,11 +841,17 @@ public partial class FluentStorageContainer :
     /// Finds the subjects and properties in this storage whose metadata matches every filter that is given, for agents:
     /// see <see cref="MetadataSearch.Search"/>.
     /// </summary>
-    /// <returns>Every match, in order, with the path of its subject relative to this storage, as <see cref="SetMetadataAsync(string, string?, JsonElement, CancellationToken)"/> takes it.</returns>
+    /// <returns>
+    /// Every match, in order, with the path of its subject relative to this storage, as <see cref="SetMetadataAsync(string, string?, JsonElement, CancellationToken)"/>
+    /// takes it; none when <paramref name="path"/> is given and <see cref="ResolveMetadataPath"/> resolves it to no subject.
+    /// </returns>
     [Query(Title = "Search Metadata", Description = StorageMetadataMethods.SearchMetadataDescription, Position = 6)]
     [ExcludeFrom(ExclusionTarget.UserInterface)]
     public MetadataSearchMatch[] SearchMetadata(string? tag, string? key, string? value, string? path)
-        => [.. MetadataSearch.Search(this, tag, key, value, path)];
+    {
+        var start = path is null ? this : ResolveMetadataPath(this, path);
+        return start is null ? [] : [.. MetadataSearch.Search(this, tag, key, value, start)];
+    }
 
     /// <summary>Gets the names of the children of this storage in the order in which they are shown, for agents.</summary>
     [Query(Title = "Get Order", Description = StorageMetadataMethods.GetOrderDescription, Position = 4)]

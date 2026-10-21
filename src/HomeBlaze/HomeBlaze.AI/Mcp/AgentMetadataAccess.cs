@@ -18,9 +18,6 @@ namespace HomeBlaze.AI.Mcp;
 /// </summary>
 internal static class AgentMetadataAccess
 {
-    // Guards against a cycle of parents, which a walk up would follow forever.
-    private const int MaxDepth = 256;
-
     // The tools return at most this many matches of SearchMetadata, as its description says; the method itself returns
     // every match.
     private const int MaxSearchMetadataMatches = 100;
@@ -78,7 +75,7 @@ internal static class AgentMetadataAccess
     // The subject at the path of the storage when the tools resolve the path to it and show it, else null.
     private static RegisteredSubject? TryGetVisibleTarget(RegisteredSubject storage, string path, PathProviderBase pathProvider, Type[] excludeTypes)
     {
-        var target = MetadataPaths.TryResolveSubject(storage.Subject, path);
+        var target = FluentStorageContainer.ResolveMetadataPath(storage.Subject, path);
         var trimmedPath = path.Trim();
         var visibleTarget = trimmedPath.AsSpan().TrimStart('/').IsEmpty ? storage : pathProvider.TryGetSubjectFromPath(storage, trimmedPath);
         return target is not null && ReferenceEquals(visibleTarget?.Subject, target) && !IsOfExcludedType(visibleTarget, storage.Subject, excludeTypes)
@@ -92,21 +89,21 @@ internal static class AgentMetadataAccess
     /// </summary>
     public static bool IsOfExcludedType(RegisteredSubject subject, IInterceptorSubject top, Type[] excludeTypes)
     {
-        var current = subject;
-        for (var depth = 0; depth < MaxDepth && !ReferenceEquals(current.Subject, top); depth++)
+        foreach (var current in new FirstParentChain(subject))
         {
+            if (ReferenceEquals(current.Subject, top))
+            {
+                return false;
+            }
+
             var type = current.Subject.GetType();
-            if (Array.Exists(excludeTypes, excludedType => excludedType.IsAssignableFrom(type)))
+            foreach (var excludedType in excludeTypes)
             {
-                return true;
+                if (excludedType.IsAssignableFrom(type))
+                {
+                    return true;
+                }
             }
-
-            if (current.Parents is not [var parent, ..])
-            {
-                break;
-            }
-
-            current = parent.Property.Parent;
         }
 
         return false;

@@ -1,5 +1,6 @@
 @using HomeBlaze.Abstractions.Attributes
 @using HomeBlaze.Services.Metadata
+@using HomeBlaze.Storage
 @inject MetadataLinkResolver LinkResolver
 @inject RootManager RootManager
 
@@ -43,7 +44,7 @@
         foreach (var match in MetadataSearch.Search(root, tag: Tag, isExcluded: static subject => subject.IsExcludedFrom(ExclusionTarget.UserInterface)))
         {
             // A subject detached since the search, and a property that the browser does not show, are not listed.
-            var subject = MetadataPaths.TryResolveSubject(root, match.Path);
+            var subject = FluentStorageContainer.ResolveMetadataPath(root, match.Path);
             if (subject is null ||
                 match.Property is not null && subject.TryGetRegisteredSubject()?.TryGetProperty(match.Property)?.IsShownAsValue() != true)
                 continue;

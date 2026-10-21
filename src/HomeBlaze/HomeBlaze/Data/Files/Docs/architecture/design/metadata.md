@@ -23,7 +23,7 @@ Docs (folder)                        HomeBlaze:Metadata             = { title, o
 - **Value.** The registry holds metadata as an `ImmutableDictionary<string, JsonElement>`: that of a subject in its dynamic property `HomeBlaze:Metadata`, that of a property in its attribute of that name.
 - **No setter.** Both change only through the store, so `set_property` cannot change metadata.
 - **Added on demand.** The property or attribute is added only once an entry exists. The registry cannot remove a property, so removed metadata sets the value to null, and null means no metadata.
-- **One step with its file.** Setting a value and reading the file it comes from are one step under the `SyncRoot` of the subject, so a subject that attaches during a write takes the new value.
+- **One step with its file.** Setting a value and reading the file it comes from are one step under a lock of the subject that only the metadata writers take, so a subject that attaches during a write takes the new value.
 - **Readers.** Navigation, the browser and the order of children read the known keys (`MetadataKeys`) through `SubjectNavigationExtensions` and `ChildOrdering`. The path picker does not list the metadata.
 - **Code.** The contracts `IMetadataStore`, `IMetadataContainer` and `MetadataKeys` are in the namespace `HomeBlaze.Storage.Abstractions.Metadata`, the readers and the search in `HomeBlaze.Services.Metadata`, and the files, applying and writing of a storage and the notes in `HomeBlaze.Storage.Metadata`. A storage is the `IMetadataStore` of what it holds and hands the work to its `StorageMetadataStore`.
 

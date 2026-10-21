@@ -13,27 +13,23 @@ namespace HomeBlaze.Services.Metadata;
 /// </summary>
 public static class MetadataSearch
 {
+    private static readonly DefaultPathProvider PathProvider = new('/');
+
     /// <summary>
-    /// Gets the subjects and properties at or below the subject at <paramref name="path"/> (<paramref name="root"/> when
-    /// null) whose metadata matches every filter that is given: a tag in <c>tags</c>, a key that is set, and a value that
-    /// equals a string value, or a string in an array, of the key when one is given, else of any key. Keys match
-    /// exactly, and tags and values without regard to case. <paramref name="path"/> and the paths of the matches are
-    /// relative to <paramref name="root"/>, as <see cref="MetadataPaths"/> resolves them. The matches are ordered by path
-    /// and then property, ordinal; none are found when no subject is at <paramref name="path"/>. A subject for which
-    /// <paramref name="isExcluded"/> returns true, and every subject below it, is skipped.
+    /// Gets the subjects and properties at or below <paramref name="start"/> (<paramref name="root"/> when null) whose
+    /// metadata matches every filter that is given: a tag in <c>tags</c>, a key that is set, and a value that equals a
+    /// string value, or a string in an array, of the key when one is given, else of any key. Keys match exactly, and tags
+    /// and values without regard to case. The paths of the matches are relative to <paramref name="root"/>, through the
+    /// first parent that reaches it, as the registry writes them (<c>Pump/Channels[0]</c>); a subject that no path from
+    /// <paramref name="root"/> reaches is not found. The matches are ordered by path and then property, ordinal. A subject
+    /// for which <paramref name="isExcluded"/> returns true, and every subject below it, is skipped.
     /// </summary>
     public static IReadOnlyList<MetadataSearchMatch> Search(
-        IInterceptorSubject root, string? tag = null, string? key = null, string? value = null, string? path = null,
+        IInterceptorSubject root, string? tag = null, string? key = null, string? value = null, IInterceptorSubject? start = null,
         Func<IInterceptorSubject, bool>? isExcluded = null)
     {
-        var start = path is null ? root : MetadataPaths.TryResolveSubject(root, path);
-        if (start is null)
-        {
-            return [];
-        }
-
         var matches = new List<MetadataSearchMatch>();
-        foreach (var subject in Walk(start, isExcluded))
+        foreach (var subject in Walk(start ?? root, isExcluded))
         {
             string? subjectPath = null;
             foreach (var (propertyName, metadata) in GetEntries(subject))
@@ -105,7 +101,7 @@ public static class MetadataSearch
 
         foreach (var parent in subject.Parents)
         {
-            if (parent.Property.TryGetPath(MetadataPaths.PathProvider, root, parent.Index) is { } path)
+            if (parent.Property.TryGetPath(PathProvider, root, parent.Index) is { } path)
             {
                 return path;
             }
