@@ -64,6 +64,29 @@ public class InlineValueStorageTests
         Assert.False(readAsObject);
     }
 
+    [Fact]
+    public void WhenNothingIsStored_ThenReadingAnyTypeReturnsNoValue()
+    {
+        // Arrange
+        var storage = default(InlineValueStorage);
+
+        // Act
+        var readAsString = storage.TryGetValue<string>(out var stringValue);
+        var readAsLargeStruct = storage.TryGetValue<LargeStruct>(out var largeStructValue);
+        var readAsStructWithReference = storage.TryGetValue<StructWithReference>(out var structWithReferenceValue);
+        var readAsInt = storage.TryGetValue<int>(out var intValue);
+
+        // Assert
+        Assert.False(readAsString);
+        Assert.Null(stringValue);
+        Assert.False(readAsLargeStruct);
+        Assert.Equal(default, largeStructValue);
+        Assert.False(readAsStructWithReference);
+        Assert.Equal(default, structWithReferenceValue);
+        Assert.False(readAsInt);
+        Assert.Equal(0, intValue);
+    }
+
     private static void AssertBox<TValue>(TValue value)
     {
         var storage = InlineValueStorage.Create(value);
@@ -75,4 +98,8 @@ public class InlineValueStorageTests
     }
 
     private readonly record struct SmallStruct(int First, int Second);
+
+    private readonly record struct LargeStruct(long First, long Second, long Third);
+
+    private readonly record struct StructWithReference(int Number, string? Text);
 }
