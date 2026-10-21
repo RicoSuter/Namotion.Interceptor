@@ -14,6 +14,12 @@ public sealed class WidgetSelection
     public SubjectComponent? Selected { get; private set; }
 
     /// <summary>
+    /// Raised after the selection changed, for components that depend on where the selection is, such as a widget
+    /// that shows more while the selection is inside it.
+    /// </summary>
+    public event Action? Changed;
+
+    /// <summary>
     /// Selects the widget, or clears the selection when it is null.
     /// </summary>
     public void Select(SubjectComponent? component)
@@ -27,6 +33,7 @@ public sealed class WidgetSelection
         Selected = component;
         previous?.OnSelectionChanged();
         component?.OnSelectionChanged();
+        Changed?.Invoke();
     }
 
     /// <summary>
@@ -39,6 +46,7 @@ public sealed class WidgetSelection
         if (ReferenceEquals(Selected, component))
         {
             Selected = null;
+            Changed?.Invoke();
         }
     }
 }

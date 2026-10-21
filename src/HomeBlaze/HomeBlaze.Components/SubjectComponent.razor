@@ -31,10 +31,13 @@
              @onkeydown="@(isSelectable ? _keyDownCallback : default)"
              @onkeydown:stopPropagation="@isSelectable">
             @{
-                var selectableParent = isSelected ? SelectableParent : null;
+                var selectableParent = isSelected ? SelectableAncestor : null;
                 var hasEditAction = isSelected && HasEditComponent;
+                var structureEditor = isSelected ? StructureEditor : null;
+                var actions = structureEditor?.GetActions(Subject) ?? default;
+                var listSlots = structureEditor?.GetListSlots(Subject) ?? [];
             }
-            @if (isSelected && (selectableParent != null || hasEditAction))
+            @if (isSelected && (selectableParent != null || hasEditAction || actions.CanDelete || listSlots.Count > 0))
             {
                 @* The anchor of the bar, see SubjectComponent.razor.css. *@
                 <div class="subject-action-bar-anchor">
@@ -60,6 +63,37 @@
                                                data-testid="select-parent-button" />
                             }
 
+                            @if (actions.CanMoveUp)
+                            {
+                                <MudIconButton Icon="@Icons.Material.Filled.KeyboardArrowUp"
+                                               Size="Size.Small"
+                                               title="Move up"
+                                               aria-label="Move up"
+                                               OnClick="_moveUpCallback"
+                                               data-testid="move-up-button" />
+                            }
+
+                            @if (actions.CanMoveDown)
+                            {
+                                <MudIconButton Icon="@Icons.Material.Filled.KeyboardArrowDown"
+                                               Size="Size.Small"
+                                               title="Move down"
+                                               aria-label="Move down"
+                                               OnClick="_moveDownCallback"
+                                               data-testid="move-down-button" />
+                            }
+
+                            @foreach (var slot in listSlots)
+                            {
+                                @* Only the selected widget renders its bar, so the lambda allocates for one widget. *@
+                                <MudIconButton Icon="@Icons.Material.Filled.Add"
+                                               Size="Size.Small"
+                                               title="@($"Add {slot.Name}")"
+                                               aria-label="@($"Add {slot.Name}")"
+                                               OnClick="@(() => structureEditor!.AddListItemAsync(Subject!, slot))"
+                                               data-testid="@($"add-slot-item-button-{slot.Name}")" />
+                            }
+
                             @if (hasEditAction)
                             {
                                 <MudIconButton Icon="@Icons.Material.Filled.Edit"
@@ -69,6 +103,17 @@
                                                aria-label="Edit"
                                                OnClick="_editCallback"
                                                data-testid="edit-subject-button" />
+                            }
+
+                            @if (actions.CanDelete)
+                            {
+                                <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                               Size="Size.Small"
+                                               Color="Color.Error"
+                                               title="Delete"
+                                               aria-label="Delete"
+                                               OnClick="_deleteCallback"
+                                               data-testid="delete-block-button" />
                             }
                         </div>
                     </MudPopover>
@@ -117,6 +162,33 @@
     [CascadingParameter]
     public WidgetSelection? Selection { get; set; }
 
+    /// <summary>
+    /// The editor of the structure of the page, cascaded while the page is edited inline. Without it no structure action
+    /// is shown.
+    /// </summary>
+    [CascadingParameter]
+    public IPageStructureEditor? StructureEditor { get; set; }
+
+    /// <summary>Gets whether the selected widget is this one or a widget inside it.</summary>
+    public bool ContainsSelection
+    {
+        get
+        {
+            for (var component = Selection?.Selected; component is not null; component = component.ParentComponent)
+            {
+                if (ReferenceEquals(component, this))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+    }
+
+    /// <summary>Gets this widget when it can be selected, otherwise the nearest widget around it that can, or null.</summary>
+    public SubjectComponent? GetSelectableSelfOrAncestor() => IsSelectable ? this : SelectableAncestor;
+
     [CascadingParameter(Name = "ParentSubjectComponent")]
     private SubjectComponent? ParentComponent { get; set; }
 
@@ -136,6 +208,9 @@
     private EventCallback<KeyboardEventArgs> _keyDownCallback;
     private EventCallback _selectParentCallback;
     private EventCallback _editCallback;
+    private EventCallback _moveUpCallback;
+    private EventCallback _moveDownCallback;
+    private EventCallback _deleteCallback;
 
     /// <summary>
     /// Two-way binding for accessing the rendered component instance.
@@ -189,7 +264,8 @@
     private static RegisteredSubjectProperty? TryGetTextProperty(RegisteredSubject? subject, string propertyName) =>
         subject?.TryGetProperty(propertyName) is { } property && property.Type == typeof(string) ? property : null;
 
-    private SubjectComponent? SelectableParent
+    /// <summary>Gets the nearest widget around this one that can be selected, or null.</summary>
+    public SubjectComponent? SelectableAncestor
     {
         get
         {
@@ -210,6 +286,9 @@
         _keyDownCallback = EventCallback.Factory.Create<KeyboardEventArgs>(this, OnKeyDown);
         _selectParentCallback = EventCallback.Factory.Create(this, SelectParent);
         _editCallback = EventCallback.Factory.Create(this, OpenEditDialog);
+        _moveUpCallback = EventCallback.Factory.Create(this, () => StructureEditor!.MoveAsync(Subject!, -1));
+        _moveDownCallback = EventCallback.Factory.Create(this, () => StructureEditor!.MoveAsync(Subject!, 1));
+        _deleteCallback = EventCallback.Factory.Create(this, () => StructureEditor!.DeleteAsync(Subject!));
         if (ParentComponent != null)
         {
             (ParentComponent._childComponents ??= []).Add(this);
@@ -252,7 +331,7 @@
 
     private void SelectParent()
     {
-        Selection?.Select(SelectableParent);
+        Selection?.Select(SelectableAncestor);
     }
 
     private void OnPointerDown(PointerEventArgs args)
