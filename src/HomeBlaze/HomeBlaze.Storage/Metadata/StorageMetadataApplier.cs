@@ -81,8 +81,8 @@ internal sealed class StorageMetadataApplier
         var hasEntries = HasEntries(file) || (_files.TryGetValue(storedSubject, out var previous) && HasEntries(previous));
 
         // Published before the registration is read and the values are set: a subject that attaches meanwhile reads the
-        // file under the SyncRoot of the subject, which setting its values takes as well, so either it reads this file
-        // or its values are set after it.
+        // file under the lock of the subject, which setting its values takes as well, so either it reads this file or
+        // its values are set after it.
         _files.AddOrUpdate(storedSubject, file);
         if (storedSubject.TryGetRegisteredSubject() is not { } stored)
         {
@@ -152,7 +152,7 @@ internal sealed class StorageMetadataApplier
             return;
         }
 
-        lock (attachedSubject.SyncRoot)
+        lock (StorageMetadataValues.GetLock(attachedSubject))
         {
             // Read again under the lock, see Apply.
             if (!_files.TryGetValue(stored.Subject, out file))

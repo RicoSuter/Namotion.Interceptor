@@ -6,6 +6,7 @@ using HomeBlaze.Storage.Metadata;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.Storage.Tests.Metadata;
 
@@ -74,5 +75,41 @@ public class StorageMetadataValuesTests
 
         // Assert
         Assert.Null(staleRegistration.TryGetProperty(KnownAttributes.Metadata));
+    }
+
+    [Fact]
+    public void WhenAFirstValueAddsTheMetadata_ThenItIsAddedUnderTheLockOfTheSubject()
+    {
+        // Arrange
+        var handler = new LockRecordingHandler();
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry()
+            .WithService<IPropertyLifecycleHandler>(() => handler, existing => ReferenceEquals(existing, handler));
+        var channel = new MetadataTestChannel();
+        _ = new MetadataTestDevice(context) { Channel = channel };
+        var registration = channel.TryGetRegisteredSubject()!;
+
+        // Act
+        StorageMetadataValues.Set(registration, null, Parse("""{ "navTitle": "Pump" }"""));
+        StorageMetadataValues.Set(registration, nameof(MetadataTestChannel.Power), Parse("""{ "comment": "outside" }"""));
+
+        // Assert
+        Assert.Equal([true, true], handler.AddedUnderLock);
+    }
+
+    private sealed class LockRecordingHandler : IPropertyLifecycleHandler
+    {
+        public List<bool> AddedUnderLock { get; } = [];
+
+        public void AttachProperty(SubjectPropertyLifecycleChange change)
+        {
+            if (change.Property.Name == KnownAttributes.Metadata || change.Property.Name.EndsWith($"@{KnownAttributes.Metadata}", StringComparison.Ordinal))
+            {
+                AddedUnderLock.Add(Monitor.IsEntered(StorageMetadataValues.GetLock(change.Subject)));
+            }
+        }
+
+        public void DetachProperty(SubjectPropertyLifecycleChange change)
+        {
+        }
     }
 }
