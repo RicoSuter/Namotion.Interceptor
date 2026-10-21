@@ -1193,7 +1193,7 @@ public sealed class SubjectTransaction : IDisposable
         if (ConflictBehavior == TransactionConflictBehavior.FailOnConflict)
         {
             var conflictingProperties = SubjectPropertyChangeOperations.DetectChangeConflicts(changes);
-            if (conflictingProperties.Count > 0)
+            if (conflictingProperties is not null)
             {
                 throw new SubjectTransactionConflictException(conflictingProperties);
             }

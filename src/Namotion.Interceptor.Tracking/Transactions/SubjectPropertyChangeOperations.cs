@@ -278,9 +278,10 @@ internal static class SubjectPropertyChangeOperations
     }
 
     /// <summary>
-    /// Detects conflicts by comparing captured OldValue with current actual value.
+    /// Detects conflicts by comparing captured OldValue with current actual value. Returns the conflicting properties,
+    /// or null when there are none.
     /// </summary>
-    internal static List<PropertyReference> DetectChangeConflicts(ReadOnlySpan<SubjectPropertyChange> changes)
+    internal static List<PropertyReference>? DetectChangeConflicts(ReadOnlySpan<SubjectPropertyChange> changes)
     {
         List<PropertyReference>? conflictingProperties = null;
         foreach (var change in changes)
@@ -294,6 +295,6 @@ internal static class SubjectPropertyChangeOperations
                 conflictingProperties.Add(change.Property);
             }
         }
-        return conflictingProperties ?? [];
+        return conflictingProperties;
     }
 }
