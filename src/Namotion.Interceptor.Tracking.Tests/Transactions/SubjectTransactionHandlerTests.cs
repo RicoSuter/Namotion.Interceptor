@@ -567,6 +567,31 @@ public class SubjectTransactionHandlerTests
     }
 
     [Fact]
+    public async Task WhenDisposedDuringOnCommittingAndAgainAfterCommit_ThenLockIsReleasedOnce()
+    {
+        // Arrange
+        var context = CreateContext(out var handler);
+        var person = new Person(context) { FirstName = "Ann" };
+        handler.OnCommittingAction = (committingTransaction, _) => committingTransaction.Dispose();
+        var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "Bob";
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Act
+        transaction.Dispose();
+        var firstBegin = BeginInOwnFlowAsync(context);
+        var firstBeginCompletedSynchronously = firstBegin.IsCompletedSuccessfully;
+        var secondBegin = BeginInOwnFlowAsync(context);
+        var secondBeginCompletedWhileFirstHeld = secondBegin.IsCompleted;
+        (await firstBegin).Dispose();
+        (await secondBegin).Dispose();
+
+        // Assert
+        Assert.True(firstBeginCompletedSynchronously);
+        Assert.False(secondBeginCompletedWhileFirstHeld);
+    }
+
+    [Fact]
     public async Task WhenResolvingHandlersFailsOnBegin_ThenExclusiveLockIsNotHeld()
     {
         // Arrange

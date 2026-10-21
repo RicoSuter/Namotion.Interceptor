@@ -35,7 +35,6 @@ public sealed class SubjectTransaction : IDisposable
     private readonly TransactionFailureHandling _failureHandling;
     private readonly TransactionRequirement _requirement;
     private readonly TimeSpan _commitTimeout;
-    private readonly IDisposable? _lockReleaser; // null for Optimistic until commit
 
     // A mutable struct: never copy it or make this field readonly (see TransactionHandlerSet).
     private TransactionHandlerSet _handlerSet;
@@ -60,7 +59,8 @@ public sealed class SubjectTransaction : IDisposable
     private int _isDisposed;
 
     // Handoff from Dispose to EndCommit: when Dispose runs mid-commit, EndCommit releases the exclusive lock
-    // once the commit finishes. Accessed only under _pendingChangesLock (no volatile needed; never read lock-free).
+    // once the commit finishes, and clears this so the lock is released exactly once. Accessed only under
+    // _pendingChangesLock (no volatile needed; never read lock-free).
     private bool _disposeRequestedDuringCommit;
 
     // Written only by the committing thread as it enters and leaves a commit scope, and read only after
@@ -449,7 +449,7 @@ public sealed class SubjectTransaction : IDisposable
     /// </summary>
     public TransactionValidationMode ValidationMode { get; }
 
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S107", Justification = "The private constructor explicitly initializes the transaction context, policies, handlers and acquired lock ownership as one coherent state.")]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S107", Justification = "The private constructor explicitly initializes the transaction context, policies and handlers as one coherent state.")]
     private SubjectTransaction(
         IInterceptorSubjectContext context,
         SubjectTransactionInterceptor interceptor,
@@ -459,8 +459,7 @@ public sealed class SubjectTransaction : IDisposable
         TransactionConflictBehavior conflictBehavior,
         TransactionValidationMode validationMode,
         TimeSpan commitTimeout,
-        ImmutableArray<ITransactionHandler> handlers,
-        IDisposable? lockReleaser)
+        ImmutableArray<ITransactionHandler> handlers)
     {
         Context = context;
         Interceptor = interceptor;
@@ -470,7 +469,6 @@ public sealed class SubjectTransaction : IDisposable
         ConflictBehavior = conflictBehavior;
         ValidationMode = validationMode;
         _commitTimeout = commitTimeout;
-        _lockReleaser = lockReleaser;
         _handlerSet = new TransactionHandlerSet(handlers);
 
         Interlocked.Increment(ref _activeTransactionCount);
@@ -515,11 +513,9 @@ public sealed class SubjectTransaction : IDisposable
         // Resolved before the lock is taken: the lookup can throw, and nothing would release the lock then.
         var handlers = context.GetServices<ITransactionHandler>();
 
-        IDisposable? transactionLock = null;
-
         if (locking == TransactionLocking.Exclusive)
         {
-            transactionLock = await interceptor.AcquireTransactionLockAsync(cancellationToken).ConfigureAwait(false);
+            await interceptor.AcquireExclusiveTransactionLockAsync(cancellationToken).ConfigureAwait(false);
         }
 
         // The caller assigns the transaction so the value flows into its execution context.
@@ -532,8 +528,7 @@ public sealed class SubjectTransaction : IDisposable
             conflictBehavior,
             validationMode,
             commitTimeout,
-            handlers,
-            transactionLock);
+            handlers);
     }
 
     /// <summary>
@@ -1012,6 +1007,7 @@ public sealed class SubjectTransaction : IDisposable
             releaseDeferredLock = _disposeRequestedDuringCommit;
             if (releaseDeferredLock)
             {
+                _disposeRequestedDuringCommit = false;
                 pendingChangesToReturn = _pendingChanges;
                 _pendingChanges = null;
             }
@@ -1035,13 +1031,25 @@ public sealed class SubjectTransaction : IDisposable
 
         if (releaseDeferredLock)
         {
-            _lockReleaser?.Dispose();
+            ReleaseExclusiveLock();
         }
 
         if (!_isCommitted)
         {
             // Only failures that escape before FinishCommit are retryable; later failures are terminal.
             Volatile.Write(ref _commitStarted, 0);
+        }
+    }
+
+    /// <summary>
+    /// Releases the exclusive lock acquired when the transaction began. Called exactly once: by
+    /// <see cref="Dispose"/>, or by <see cref="EndCommit"/> when Dispose ran during the commit.
+    /// </summary>
+    private void ReleaseExclusiveLock()
+    {
+        if (Locking == TransactionLocking.Exclusive)
+        {
+            Interceptor.ReleaseExclusiveTransactionLock();
         }
     }
 
@@ -1310,7 +1318,7 @@ public sealed class SubjectTransaction : IDisposable
                 {
                     PendingChangesPool.Return(pendingChangesToReturn);
                 }
-                _lockReleaser?.Dispose(); // May be null for Optimistic transactions
+                ReleaseExclusiveLock();
             }
         }
     }
