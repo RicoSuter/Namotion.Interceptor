@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 namespace Namotion.Interceptor.Tracking.Transactions;
@@ -16,9 +17,14 @@ internal struct TransactionHandlerSet
     // service array.
     private ITransactionHandler[] _handlers;
 
-    // Caches only (a stale read just takes the slow path): the last subject context and handler array included.
-    // Written after _handlers with release semantics, so a reader that skips on a hit also sees the included handlers.
-    private IInterceptorSubjectContext? _lastIncludedContext;
+    // Caches only (a stale read just takes the slow path): the transaction interceptors of the last subject context
+    // included, and the last handler array included. Written after _handlers with release semantics, so a reader that
+    // skips on a hit also sees the included handlers.
+    //
+    // The interceptor array identifies the subject context's handlers: subject contexts that resolve to the same
+    // context state get the same cached service arrays from it, and any change to the services they resolve installs
+    // a new state with new arrays. Only a non-empty array is a key: an empty one is shared by unrelated contexts.
+    private SubjectTransactionInterceptor[]? _lastIncludedInterceptors;
     private ITransactionHandler[] _lastIncludedHandlers;
 
     /// <summary>
@@ -38,30 +44,54 @@ internal struct TransactionHandlerSet
     /// <summary>
     /// Adds the handlers of <paramref name="subjectContext"/> that are not registered on the transaction's context.
     /// </summary>
+    /// <param name="subjectContext">The context of the written subject.</param>
+    /// <param name="subjectInterceptors">
+    /// The transaction interceptors <paramref name="subjectContext"/> resolves, as returned by its
+    /// <see cref="IInterceptorSubjectContext.GetServices{TInterface}"/>.
+    /// </param>
+    /// <param name="transaction">The transaction the set belongs to.</param>
     /// <exception cref="InvalidOperationException">
     /// Thrown by <see cref="SubjectTransaction.CanCaptureUnderLock"/> while a commit is in progress and
     /// <paramref name="subjectContext"/> adds handlers.
     /// </exception>
-    internal void Include(IInterceptorSubjectContext subjectContext, SubjectTransaction transaction)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal void Include(
+        IInterceptorSubjectContext subjectContext,
+        ImmutableArray<SubjectTransactionInterceptor> subjectInterceptors,
+        SubjectTransaction transaction)
+    {
+        var interceptors = ImmutableCollectionsMarshal.AsArray(subjectInterceptors);
+        if (interceptors is not { Length: > 0 } || !ReferenceEquals(interceptors, Volatile.Read(ref _lastIncludedInterceptors)))
+        {
+            IncludeUncached(subjectContext, interceptors, transaction);
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void IncludeUncached(
+        IInterceptorSubjectContext subjectContext,
+        SubjectTransactionInterceptor[]? subjectInterceptors,
+        SubjectTransaction transaction)
     {
         var transactionContext = transaction.Context;
-        if (ReferenceEquals(subjectContext, transactionContext) || ReferenceEquals(subjectContext, Volatile.Read(ref _lastIncludedContext)))
+        if (!ReferenceEquals(subjectContext, transactionContext))
         {
-            return;
-        }
-
-        var subjectHandlers = ImmutableCollectionsMarshal.AsArray(subjectContext.GetServices<ITransactionHandler>()) ?? [];
-        if (!ReferenceEquals(subjectHandlers, Volatile.Read(ref _lastIncludedHandlers)))
-        {
-            if (!TryInclude(subjectHandlers, transactionContext.GetServices<ITransactionHandler>().AsSpan(), transaction))
+            var subjectHandlers = ImmutableCollectionsMarshal.AsArray(subjectContext.GetServices<ITransactionHandler>()) ?? [];
+            if (!ReferenceEquals(subjectHandlers, Volatile.Read(ref _lastIncludedHandlers)))
             {
-                return;
-            }
+                if (!TryInclude(subjectHandlers, transactionContext.GetServices<ITransactionHandler>().AsSpan(), transaction))
+                {
+                    return;
+                }
 
-            Volatile.Write(ref _lastIncludedHandlers, subjectHandlers);
+                Volatile.Write(ref _lastIncludedHandlers, subjectHandlers);
+            }
         }
 
-        Volatile.Write(ref _lastIncludedContext, subjectContext);
+        if (subjectInterceptors is { Length: > 0 })
+        {
+            Volatile.Write(ref _lastIncludedInterceptors, subjectInterceptors);
+        }
     }
 
     /// <summary>

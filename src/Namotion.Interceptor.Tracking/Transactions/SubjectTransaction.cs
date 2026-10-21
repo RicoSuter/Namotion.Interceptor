@@ -165,13 +165,21 @@ public sealed class SubjectTransaction : IDisposable
     /// Adds the transaction handlers of <paramref name="subjectContext"/> that are not registered on the transaction's
     /// context, when a subject of it is written and the transaction is about to capture the write.
     /// </summary>
+    /// <param name="subjectContext">The context of the written subject.</param>
+    /// <param name="subjectInterceptors">
+    /// The transaction interceptors <paramref name="subjectContext"/> resolves, as returned by its
+    /// <see cref="IInterceptorSubjectContext.GetServices{TInterface}"/>.
+    /// </param>
     /// <exception cref="InvalidOperationException">
     /// Thrown while a commit is in progress and <paramref name="subjectContext"/> adds handlers, like the capture
     /// would (see <see cref="TransactionHandlerSet.Include"/>).
     /// </exception>
-    internal void IncludeHandlersOf(IInterceptorSubjectContext subjectContext)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal void IncludeHandlersOf(
+        IInterceptorSubjectContext subjectContext,
+        ImmutableArray<SubjectTransactionInterceptor> subjectInterceptors)
     {
-        _handlerSet.Include(subjectContext, this);
+        _handlerSet.Include(subjectContext, subjectInterceptors, this);
     }
 
     /// <summary>

@@ -140,9 +140,9 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
         }
 
         var subjectContext = context.Property.Subject.Context;
-        ValidateTransactionContext(subjectContext, context.Property, transaction);
+        var subjectInterceptors = ValidateTransactionContext(subjectContext, context.Property, transaction);
 
-        transaction.IncludeHandlersOf(subjectContext);
+        transaction.IncludeHandlersOf(subjectContext, subjectInterceptors);
         InvokeCapturingHandlers(transaction, context.Property, context.NewValue, context.Origin);
 
         // Origin comparison can run user equality code, so resolve it before taking the transaction lock.
@@ -189,8 +189,12 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
         return transaction.IsInactiveUnderLockOrThrowIfCommitting();
     }
 
+    /// <summary>
+    /// Throws when <paramref name="subjectContext"/> does not resolve the interceptor of <paramref name="transaction"/>,
+    /// and otherwise returns the transaction interceptors it resolves.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void ValidateTransactionContext(
+    private static ImmutableArray<SubjectTransactionInterceptor> ValidateTransactionContext(
         IInterceptorSubjectContext subjectContext,
         PropertyReference property,
         SubjectTransaction transaction)
@@ -204,6 +208,8 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
         {
             ThrowTransactionContextMismatch(property);
         }
+
+        return subjectInterceptors;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
