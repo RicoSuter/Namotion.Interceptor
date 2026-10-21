@@ -257,4 +257,126 @@ internal static class MarkdownPageOperations
 
         return -1;
     }
+
+    /// <summary>
+    /// Inserts a new widget block into the content of <paramref name="owner"/>, or of the page when it is null: before
+    /// <paramref name="before"/>, or after the content when it is null, which is before the first slot block of the
+    /// owner. The block takes the fence of the block beside it and closing lines unless the page has none.
+    /// </summary>
+    public static MarkdownStructureChange? TryInsertWidget(
+        MarkdownPage page,
+        IReadOnlyDictionary<int, IInterceptorSubject> blockSubjects,
+        MarkdownBlock? owner,
+        MarkdownBlock? before,
+        string typeName,
+        string? id,
+        string configurationJson,
+        out string? refusal)
+    {
+        if (!CanInsertOrRemoveBlocks(page, out refusal))
+        {
+            return null;
+        }
+
+        var source = page.Source;
+        var siblings = owner?.Children ?? page.Blocks;
+        var firstSlotBlock = siblings.FirstOrDefault(block => block.Kind == MarkdownBlockKind.Slot);
+        var line = before?.Line
+            ?? firstSlotBlock?.Line
+            ?? (owner is null ? MarkdownBlockWriter.GetAppendLine(source) : owner.HasClosingLine ? owner.EndLine : owner.EndLine + 1);
+        line = page.GetLineForNewBlock(line);
+
+        var reference = before ?? siblings.LastOrDefault(block => block.Kind == MarkdownBlockKind.Widget);
+        var fenceLength = reference?.FenceLength ?? (owner is null ? MarkdownBlockFence.MinimumLength : owner.FenceLength + 1);
+        var indentation = reference is not null ? MarkdownBlockWriter.GetIndentation(source, reference)
+            : owner is not null ? MarkdownBlockWriter.GetIndentation(source, owner)
+            : string.Empty;
+        var lineEnding = MarkdownBlockWriter.GetLineEnding(source, reference?.HeadSpan.End ?? owner?.HeadSpan.End ?? 0);
+        var hasClosingLine = !page.AllBlocks.Any(
+            block => block.Kind is MarkdownBlockKind.Widget or MarkdownBlockKind.Slot && !block.HasClosingLine);
+
+        var text = MarkdownBlockWriter.Indent(
+            MarkdownBlockWriter.CreateBlock(typeName, id, configurationJson, fenceLength, lineEnding, hasClosingLine),
+            indentation,
+            lineEnding);
+        var newSource = MarkdownBlockWriter.InsertBlockText(source, line, text, lineEnding, out var edit);
+        var after = MarkdownPageParser.Parse(newSource);
+        var map = MarkdownBlockAlignment.TryAlign(page, after, edit, expectedInsertedBlockCount: 1, owner, MarkdownBlockKind.Widget);
+        if (map is null)
+        {
+            refusal = $"Inserting a block at line {line} would change other blocks of the page.";
+            return null;
+        }
+
+        return new MarkdownStructureChange(
+            new MarkdownBlockWrite(after, MapSubjects(blockSubjects, map), [], HasInsertedOrRemovedBlocks: true), owner);
+    }
+
+    /// <summary>
+    /// Appends a new block of the slot <paramref name="slotName"/> to <paramref name="owner"/>, after the last block of
+    /// that slot and written like it, as <see cref="MarkdownBlockWriter.GetSlotBlockPlacement"/> places it.
+    /// </summary>
+    public static MarkdownStructureChange? TryAppendSlotBlock(
+        MarkdownPage page,
+        IReadOnlyDictionary<int, IInterceptorSubject> blockSubjects,
+        MarkdownBlock owner,
+        string slotName,
+        string configurationJson,
+        out string? refusal)
+    {
+        if (!CanInsertOrRemoveBlocks(page, out refusal))
+        {
+            return null;
+        }
+
+        var placement = MarkdownBlockWriter.GetSlotBlockPlacement(page, owner, slotName);
+        var text = MarkdownBlockWriter.Indent(
+            MarkdownBlockWriter.CreateBlock(
+                slotName, null, configurationJson, placement.FenceLength, placement.LineEnding, placement.HasClosingLine),
+            placement.Indentation,
+            placement.LineEnding);
+        var source = MarkdownBlockWriter.InsertLines(page.Source, placement.Line, text, placement.LineEnding, out var edit);
+        var after = MarkdownPageParser.Parse(source);
+        if (MarkdownBlockAlignment.TryAlign(page, after, edit, expectedInsertedBlockCount: 1, owner) is not { } map)
+        {
+            refusal = $"Inserting a '{slotName}' block at line {placement.Line} would change other blocks of the page.";
+            return null;
+        }
+
+        return new MarkdownStructureChange(
+            new MarkdownBlockWrite(after, MapSubjects(blockSubjects, map), [], HasInsertedOrRemovedBlocks: true), owner);
+    }
+
+    /// <summary>
+    /// Gets the block whose content <paramref name="fragment"/> shows: the block of the subject that holds it in its
+    /// default slot, or the slot block that holds it for a named or a list slot. Null when no block of the page holds it.
+    /// </summary>
+    public static MarkdownBlock? FindContentBlock(
+        MarkdownPage page, IReadOnlyDictionary<int, IInterceptorSubject> blockSubjects, IInterceptorSubject fragment)
+    {
+        foreach (var (index, subject) in blockSubjects)
+        {
+            foreach (var slot in SlotMap.For(subject.GetType()).Slots)
+            {
+                if (!slot.IsOpen)
+                {
+                    continue;
+                }
+
+                var value = slot.GetValue(subject);
+                var position = value is Array values ? Array.IndexOf(values, fragment) : ReferenceEquals(value, fragment) ? 0 : -1;
+                if (position < 0)
+                {
+                    continue;
+                }
+
+                var block = page.AllBlocks[index];
+                return slot.IsDefault && !slot.IsList
+                    ? block
+                    : MarkdownBlockWriter.GetSlotBlocks(block, slot.Name).ElementAtOrDefault(position);
+            }
+        }
+
+        return null;
+    }
 }

@@ -207,4 +207,108 @@ public class MarkdownPageOperationsTests
         Assert.Same(subjectOne, result.BlockSubjects[result.Page.Blocks[1].Index]);
         Assert.Same(subjectRow, result.BlockSubjects[result.Page.Blocks[1].Children[0].Index]);
     }
+
+    [Fact]
+    public void WhenAWidgetIsInsertedBeforeABlockOnThePage_ThenItStandsBeforeItWithEmptyLinesAround()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("intro\n\n:: Demo.One\n::\n");
+
+        // Act
+        var change = MarkdownPageOperations.TryInsertWidget(
+            page, NoSubjects, owner: null, before: page.Blocks[0], "Demo.New", "fresh", """{ "Min": 1 }""", out var refusal);
+
+        // Assert
+        Assert.Null(refusal);
+        Assert.Equal("intro\n\n:: Demo.New#fresh Min=1\n::\n\n:: Demo.One\n::\n", change!.Write.Page.Source);
+        Assert.Null(change.ChangedBlock);
+    }
+
+    [Fact]
+    public void WhenAWidgetIsAppendedToThePage_ThenItEndsThePage()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("intro\n");
+
+        // Act
+        var change = MarkdownPageOperations.TryInsertWidget(page, NoSubjects, null, null, "Demo.New", null, "{}", out _);
+
+        // Assert
+        Assert.Equal("intro\n\n:: Demo.New\n::\n", change!.Write.Page.Source);
+    }
+
+    [Fact]
+    public void WhenAWidgetIsAppendedToAnEmptyCard_ThenItIsInsideTheCardWithALongerFence()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("::Demo.Card Title=A\n::\n");
+        var card = page.Blocks[0];
+
+        // Act
+        var change = MarkdownPageOperations.TryInsertWidget(page, NoSubjects, card, null, "Demo.New", null, "{}", out var refusal);
+
+        // Assert
+        Assert.Null(refusal);
+        Assert.Equal("::Demo.Card Title=A\n\n::: Demo.New\n:::\n\n::\n", change!.Write.Page.Source);
+        Assert.Same(card, change.ChangedBlock);
+        Assert.Equal(MarkdownBlockKind.Widget, change.Write.Page.Blocks[0].Children.Single().Kind);
+    }
+
+    [Fact]
+    public void WhenAWidgetIsAppendedToACardWithAFooter_ThenItGoesBeforeTheFooter()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse(":: Demo.Card\nbody\n::: Footer\nfoot\n:::\n::\n");
+
+        // Act
+        var change = MarkdownPageOperations.TryInsertWidget(page, NoSubjects, page.Blocks[0], null, "Demo.New", null, "{}", out var refusal);
+
+        // Assert
+        Assert.Null(refusal);
+        Assert.Equal(":: Demo.Card\nbody\n\n::: Demo.New\n:::\n\n::: Footer\nfoot\n:::\n::\n", change!.Write.Page.Source);
+    }
+
+    [Fact]
+    public void WhenThePageHasNoClosingLines_ThenTheInsertedWidgetHasNoneEither()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse(":: Demo.One\n\n:: Demo.Two\n");
+
+        // Act
+        var change = MarkdownPageOperations.TryInsertWidget(page, NoSubjects, null, page.Blocks[1], "Demo.New", null, "{}", out var refusal);
+
+        // Assert
+        Assert.Null(refusal);
+        Assert.Equal(":: Demo.One\n\n:: Demo.New\n\n:: Demo.Two\n", change!.Write.Page.Source);
+    }
+
+    [Fact]
+    public void WhenASlotBlockIsAppended_ThenItFollowsTheLastBlockOfTheSlotLikeIt()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("::Demo.List\n::: Value Label=A\n:::\n::\n");
+
+        // Act
+        var change = MarkdownPageOperations.TryAppendSlotBlock(page, NoSubjects, page.Blocks[0], "Value", """{ "Label": "B" }""", out var refusal);
+
+        // Assert
+        Assert.Null(refusal);
+        Assert.Equal("::Demo.List\n::: Value Label=A\n:::\n::: Value Label=B\n:::\n::\n", change!.Write.Page.Source);
+        Assert.Same(page.Blocks[0], change.ChangedBlock);
+    }
+
+    [Fact]
+    public void WhenAnInsertedWidgetWouldTakeOverTheTextAfterIt_ThenTheInsertIsRefused()
+    {
+        // Arrange: the block to insert before stands outside of the card, so the new block would not be in the card.
+        var page = MarkdownPageParser.Parse(":: Demo.Card\none\ntwo\n:: Demo.Other\n");
+        var card = page.Blocks[0];
+
+        // Act
+        var change = MarkdownPageOperations.TryInsertWidget(page, NoSubjects, card, page.Blocks[1], "Demo.New", null, "{}", out var refusal);
+
+        // Assert
+        Assert.Null(change);
+        Assert.Contains("would change other blocks", refusal);
+    }
 }
