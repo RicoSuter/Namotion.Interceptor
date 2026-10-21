@@ -62,6 +62,25 @@ A paragraph last.
 ::::: HomeBlaze.Components.Indicator Path=spacingmotor/IsAtTargetSpeed Kind=Icon Icon=Speed
 ::
 
+:: HomeBlaze.Components.Card Title="Chart Card" Subtitle="Chart subtitle"
+::: HomeBlaze.History.Blazor.HistoryChart Range=1h Height=150
+:::: Series Path=spacingmotor/CurrentSpeed Label="Wrapped legend entry 1"
+:::: Series Path=spacingmotor/TargetSpeed Label="Wrapped legend entry 2"
+:::: Series Path=spacingmotor/CurrentSpeed Label="Wrapped legend entry 3"
+:::: Series Path=spacingmotor/TargetSpeed Label="Wrapped legend entry 4"
+:::: Series Path=spacingmotor/CurrentSpeed Label="Wrapped legend entry 5"
+:::: Series Path=spacingmotor/TargetSpeed Label="Wrapped legend entry 6"
+:::: Series Path=spacingmotor/CurrentSpeed Label="Wrapped legend entry 7"
+:::: Series Path=spacingmotor/TargetSpeed Label="Wrapped legend entry 8"
+:::: Series Path=spacingmotor/CurrentSpeed Label="Wrapped legend entry 9"
+:::: Series Path=spacingmotor/TargetSpeed Label="Wrapped legend entry 10"
+::
+
+:: HomeBlaze.Components.Card Title="Plain Chart Card"
+::: HomeBlaze.History.Blazor.HistoryChart Range=1h Height=150
+:::: Series Path=spacingmotor/CurrentSpeed Label="Title speed"
+::
+
 :: HomeBlaze.Components.Card Title="Heading Card"
 A paragraph above the heading.
 

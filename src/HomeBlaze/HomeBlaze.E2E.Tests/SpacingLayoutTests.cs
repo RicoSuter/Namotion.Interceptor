@@ -19,6 +19,9 @@ public class SpacingLayoutTests
     private const double CardPadding = 12;
     private const double TitleGap = 4;
     private const double BlockSpacing = 16;
+    private const double ValueRowGap = 12;
+    private const double SubtitleChartGap = TitleGap + 8;
+    private const double LegendRowGap = 4;
 
     private readonly PlaywrightFixture _fixture;
 
@@ -197,6 +200,72 @@ public class SpacingLayoutTests
         // Assert
         Assert.Equal(TitleGap, gaps[0], Tolerance);
         Assert.Equal(CardPadding, gaps[1], Tolerance);
+    }
+
+    [Fact]
+    public async Task WhenAValueListHasSeveralRows_ThenTheirContentIsALittleCloserThanBlocks()
+    {
+        // Arrange
+        var page = await OpenPageAsync();
+        var card = page.GetCard("List Card");
+        await Assertions.Expect(card.GetByTestId("value-row")).ToHaveCountAsync(2, new() { Timeout = Timeout });
+
+        // Act
+        var gap = await card.EvaluateAsync<double>(
+            """
+            card => {
+                const rows = [...card.querySelectorAll('[data-testid=value-row] .d-flex')].map(row => row.getBoundingClientRect());
+                return rows[1].top - rows[0].bottom;
+            }
+            """);
+
+        // Assert
+        Assert.Equal(ValueRowGap, gap, Tolerance);
+    }
+
+    [Theory]
+    [InlineData("Chart Card", "card-subtitle", SubtitleChartGap)]
+    [InlineData("Plain Chart Card", "card-title", TitleGap)]
+    public async Task WhenAChartIsTheBodyOfACard_ThenItKeepsMoreRoomBelowASubtitleThanBelowATitle(string title, string headerLine, double expectedGap)
+    {
+        // Arrange
+        var page = await OpenPageAsync(width: 1400);
+        var card = page.GetCard(title);
+        await Assertions.Expect(card.GetByTestId("history-chart-lines")).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Act
+        var gap = await card.EvaluateAsync<double>(
+            "(card, headerLine) => card.querySelector('[data-testid=history-chart-lines]').getBoundingClientRect().top - card.querySelector(`[data-testid=${headerLine}]`).getBoundingClientRect().bottom",
+            headerLine);
+
+        // Assert
+        Assert.Equal(expectedGap, gap, Tolerance);
+    }
+
+    [Fact]
+    public async Task WhenTheLegendOfAChartWraps_ThenItsRowsAreCloserThanItsEntries()
+    {
+        // Arrange
+        var page = await OpenPageAsync(width: 400);
+        var entries = page.GetCard("Chart Card").GetByTestId("history-chart-legend-entry");
+        await Assertions.Expect(entries).ToHaveCountAsync(10, new() { Timeout = Timeout });
+
+        // Act
+        var rows = await entries.EvaluateAllAsync<double[][]>(
+            """
+            entries => {
+                const rows = new Map();
+                for (const entry of entries) {
+                    const box = entry.getBoundingClientRect();
+                    rows.set(Math.round(box.top), box.bottom);
+                }
+                return [...rows].map(([top, bottom]) => [top, bottom]);
+            }
+            """);
+
+        // Assert
+        Assert.True(rows.Length >= 2, $"The legend has {rows.Length} row, so the test page does not show the case.");
+        Assert.Equal(LegendRowGap, rows[1][0] - rows[0][1], Tolerance);
     }
 
     [Fact]
