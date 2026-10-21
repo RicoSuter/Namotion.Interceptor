@@ -559,10 +559,10 @@ public class TransactionValidationTests
     }
 
     [Theory]
-    [InlineData(TransactionValidationMode.Immediate, true, new[] { typeof(int), typeof(object), typeof(object) })]
-    [InlineData(TransactionValidationMode.Deferred, true, new[] { typeof(object), typeof(object) })]
-    [InlineData(TransactionValidationMode.Immediate, false, new[] { typeof(int), typeof(object) })]
-    [InlineData(TransactionValidationMode.Deferred, false, new[] { typeof(object) })]
+    [InlineData(TransactionValidationMode.Immediate, true, new[] { typeof(int), typeof(int), typeof(int) })]
+    [InlineData(TransactionValidationMode.Deferred, true, new[] { typeof(int), typeof(int) })]
+    [InlineData(TransactionValidationMode.Immediate, false, new[] { typeof(int), typeof(int) })]
+    [InlineData(TransactionValidationMode.Deferred, false, new[] { typeof(int) })]
     public async Task WhenValidValueIsCommitted_ThenValidatorIsCalledOncePerCaptureAndCheck(
         TransactionValidationMode validationMode, bool withWriter, Type[] expectedTypeArguments)
     {
@@ -596,6 +596,45 @@ public class TransactionValidationTests
             Assert.Equal(50, call.Value);
         });
         Assert.Equal(50, motor.MotorSpeed);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenPropertyTypeIsNotACommonValueType_ThenChecksValidateTheValueAsObject(bool withWriter)
+    {
+        // Arrange
+        var validator = new RecordingValidator();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithTransactions()
+            .WithPropertyValidation()
+            .WithService<IPropertyValidator>(() => validator);
+        if (withWriter)
+        {
+            context.AddService<ITransactionWriter>(new TestTransactionWriter());
+        }
+
+        var gearbox = new Gearbox(context);
+        validator.Calls.Clear();
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(
+            TransactionFailureHandling.Rollback, validationMode: TransactionValidationMode.Deferred);
+        gearbox.Gear = 3;
+        gearbox.Label = "Sport";
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        (string, Type, object?)[] checkCalls =
+        [
+            (nameof(Gearbox.Gear), typeof(object), 3),
+            (nameof(Gearbox.Label), typeof(object), "Sport")
+        ];
+        Assert.Equal(withWriter ? [.. checkCalls, .. checkCalls] : checkCalls, validator.Calls);
+        Assert.Equal(3, gearbox.Gear);
+        Assert.Equal("Sport", gearbox.Label);
     }
 
     [Theory]

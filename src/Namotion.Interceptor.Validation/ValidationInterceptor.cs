@@ -61,7 +61,7 @@ public class ValidationInterceptor : IWriteInterceptor, ITransactionHandler
                 continue;
             }
 
-            var errorMessage = Validate(validators, change.Property, change.GetNewValue<object?>(), change.Origin);
+            var errorMessage = ValidateNewValue(validators, change);
             if (errorMessage is not null)
             {
                 (failedChanges ??= []).Add(change);
@@ -87,6 +87,55 @@ public class ValidationInterceptor : IWriteInterceptor, ITransactionHandler
 
     /// <inheritdoc />
     public override int GetHashCode() => GetType().GetHashCode();
+
+    /// <summary>
+    /// Validates the new value of <paramref name="change"/> with the property type as the type argument when it is one
+    /// of the common value types listed in <see cref="IPropertyValidator.Validate{TProperty}"/>, so the value is not
+    /// boxed, and as <c>object</c> otherwise.
+    /// </summary>
+    private static string? ValidateNewValue(ImmutableArray<IPropertyValidator> validators, in SubjectPropertyChange change)
+    {
+        var type = change.Property.Metadata.Type;
+        if (type.IsValueType)
+        {
+            string? errorMessage;
+            if ((type == typeof(int) && TryValidateAs<int>(validators, change, out errorMessage)) ||
+                (type == typeof(long) && TryValidateAs<long>(validators, change, out errorMessage)) ||
+                (type == typeof(double) && TryValidateAs<double>(validators, change, out errorMessage)) ||
+                (type == typeof(float) && TryValidateAs<float>(validators, change, out errorMessage)) ||
+                (type == typeof(decimal) && TryValidateAs<decimal>(validators, change, out errorMessage)) ||
+                (type == typeof(bool) && TryValidateAs<bool>(validators, change, out errorMessage)) ||
+                (type == typeof(DateTime) && TryValidateAs<DateTime>(validators, change, out errorMessage)) ||
+                (type == typeof(DateTimeOffset) && TryValidateAs<DateTimeOffset>(validators, change, out errorMessage)) ||
+                (type == typeof(TimeSpan) && TryValidateAs<TimeSpan>(validators, change, out errorMessage)) ||
+                (type == typeof(Guid) && TryValidateAs<Guid>(validators, change, out errorMessage)))
+            {
+                return errorMessage;
+            }
+        }
+
+        return Validate(validators, change.Property, change.GetNewValue<object?>(), change.Origin);
+    }
+
+    /// <summary>
+    /// Validates the new value of <paramref name="change"/> as <typeparamref name="TProperty"/>. Returns false without
+    /// validating when the change does not hold a <typeparamref name="TProperty"/>, for example when it was captured
+    /// through an untyped write.
+    /// </summary>
+    private static bool TryValidateAs<TProperty>(
+        ImmutableArray<IPropertyValidator> validators,
+        in SubjectPropertyChange change,
+        out string? errorMessage)
+    {
+        if (change.TryGetNewValue(out TProperty value))
+        {
+            errorMessage = Validate(validators, change.Property, value, change.Origin);
+            return true;
+        }
+
+        errorMessage = null;
+        return false;
+    }
 
     private static void ThrowIfInvalid<TProperty>(PropertyReference property, TProperty value, ChangeOrigin origin)
     {
