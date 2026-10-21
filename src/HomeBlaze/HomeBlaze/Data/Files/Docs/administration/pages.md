@@ -57,9 +57,26 @@ icon: Dashboard
 | `navTitle` | string | Short title for navigation menu (optional, defaults to `title`) |
 | `icon` | string | MudBlazor icon name (e.g., `Dashboard`, `Settings`, `Article`) |
 | `location` | string | Where to show in navigation: `NavBar` (sidebar, default) or `AppBar` (top bar) |
-| `alignment` | string | AppBar alignment: `Left` (default) or `Right`. Only used when `location` is `AppBar` |
+| `alignment` | string | AppBar alignment: `Left` (default), `Right` or `Menu` (see [The Top Bar Menu](#the-top-bar-menu)). Only used when `location` is `AppBar` |
 
 The place of a page among the other children of its folder is set with **Reorder** in the browser, see [Navigation Order](metadata.md#navigation-order).
+
+### The Top Bar Menu
+
+The ⋮ button at the right end of the top bar opens a menu with the developer mode, the time zone, the dark mode, and Home and Reload for a phone that shows no address bar. A page with `location: AppBar` and `alignment: Menu` is an entry at the top of this menu instead of an icon in the bar, which suits pages that are opened now and then:
+
+```yaml
+---
+title: Heating Schedule
+icon: Thermostat
+location: AppBar
+alignment: Menu
+---
+```
+
+The entries follow the navigation order, like the icons in the bar.
+
+The start page, which Home opens, is the first top bar page in navigation order on the left, else on the right, else in the menu. Without one it is the first sidebar page at the top level of the data folder, and without any page the subject browser.
 
 ---
 
@@ -110,7 +127,7 @@ A picture is shown in a size that fits the page, and it always keeps its proport
 The navigation follows pages that are added, removed or changed while a browser tab is open:
 
 - **Sidebar.** The menu re-reads its items every 5 seconds, including the contents of every expanded folder. A folder appears once it contains a page for the sidebar, at any depth.
-- **Top bar.** The top bar re-reads its items from every folder every 5 seconds and on navigation: the pages with `location: AppBar` and the subjects whose metadata sets `location` to `AppBar`.
+- **Top bar.** The top bar re-reads its items, including the entries of its menu, from every folder every 5 seconds and on navigation: the pages with `location: AppBar` and the subjects whose metadata sets `location` to `AppBar`.
 
 ---
 

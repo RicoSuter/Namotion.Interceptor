@@ -2,7 +2,6 @@
 
 @inherits LayoutComponentBase
 
-@inject DeveloperModeService DeveloperMode
 @inject RootManager RootManager
 @inject NavigationManager NavigationManager
 @inject BrowserPreferences Preferences
@@ -24,15 +23,7 @@
             <MudAppBar Elevation="1">
                 <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start"
                                OnClick="@DrawerToggleAsync" title="Toggle Navigation"/>
-                <AppBarItems Root="@RootManager.Root"/>
-                <MudIconButton Icon="@(DeveloperModeIcon)"
-                               Color="@(DeveloperMode.IsEnabled ? Color.Success : Color.Inherit)"
-                               OnClick="@DeveloperMode.Toggle"
-                               title="Toggle Developer Mode"/>
-                <TimeZoneSelector />
-                <MudIconButton Icon="@(DarkLightModeButtonIcon)" Color="Color.Inherit" OnClick="@DarkModeToggle"
-                               title="Toggle Dark Mode"/>
-                <MudIconButton Icon="@Icons.Material.Filled.MoreVert" Color="Color.Inherit" Edge="Edge.End"/>
+                <AppBarItems Root="@RootManager.Root" IsDarkMode="@_isDarkMode" OnToggleDarkMode="@DarkModeToggle"/>
             </MudAppBar>
             <MudDrawer id="nav-drawer" @bind-Open="_drawerOpen" ClipMode="DrawerClipMode.Always" Elevation="2">
                 <NavMenu Root="@RootManager.Root"/>
@@ -82,8 +73,6 @@
     protected override void OnInitialized()
     {
         base.OnInitialized();
-        DeveloperMode.OnChange += OnStateHasChanged;
-
         _isRootLoaded = RootManager.RootLoaded.IsCompletedSuccessfully;
         _drawerOpen = Preferences.Get(BrowserPreferenceKeys.Drawer) != DrawerClosed;
 
@@ -184,27 +173,10 @@
         LinesInputs = "rgba(255,255,255,0.4)"
     };
 
-    public string DarkLightModeButtonIcon => _isDarkMode switch
-    {
-        true => Icons.Material.Rounded.AutoMode,
-        false => Icons.Material.Outlined.DarkMode,
-    };
-
-    public string DeveloperModeIcon => DeveloperMode.IsEnabled
-        ? Icons.Material.Filled.DeveloperMode
-        : Icons.Material.Outlined.DeveloperMode;
-
     public void Dispose()
     {
-        DeveloperMode.OnChange -= OnStateHasChanged;
-
         _disposalTokenSource.Cancel();
         _disposalTokenSource.Dispose();
-    }
-
-    private void OnStateHasChanged()
-    {
-        InvokeAsync(StateHasChanged);
     }
 
     // The error page is shown exactly when the system is unhealthy, so it must render even if the

@@ -389,6 +389,31 @@ public class NavigationItemResolverTests
         // Assert
         Assert.Equal(["Shown"], items.Select(item => item.Title));
     }
+
+    [Fact]
+    public void WhenPagesAreInTheAppBarMenu_ThenTheirItemsHaveTheMenuAlignmentAndFollowNavigationOrder()
+    {
+        // Arrange
+        var root = CreateFolder(
+            new()
+            {
+                ["a.md"] = new NavigationTestMenuPage(_context) { NavigationTitle = "Alpha" },
+                ["b.md"] = new NavigationTestMenuPage(_context) { NavigationTitle = "Bravo" },
+                ["c.md"] = new NavigationTestMenuPage(_context) { NavigationTitle = "Charlie" },
+                ["r.md"] = new NavigationTestMenuPage(_context) { NavigationTitle = "Right", AppBarAlignment = AppBarAlignment.Right }
+            },
+            ["r.md", "c.md"]);
+        var resolver = CreateResolver(root);
+
+        // Act
+        var items = resolver.GetAppBarItems(root)
+            .Where(item => item.Alignment == AppBarAlignment.Menu)
+            .ToList();
+
+        // Assert
+        Assert.Equal(["Charlie", "Alpha", "Bravo"], items.Select(item => item.Title));
+        Assert.All(items, item => Assert.Equal("Lightbulb", item.Icon));
+    }
 }
 
 [InterceptorSubject]
@@ -476,5 +501,22 @@ public partial class NavigationTestHiddenPage
 
 [SubjectComponent(SubjectComponentType.Page, typeof(NavigationTestHiddenPage))]
 public class NavigationTestHiddenPageComponent
+{
+}
+
+[InterceptorSubject]
+public partial class NavigationTestMenuPage : IPage
+{
+    public string? NavigationTitle { get; init; }
+
+    public string? NavigationIconName => "Lightbulb";
+
+    public NavigationLocation PageLocation => NavigationLocation.AppBar;
+
+    public AppBarAlignment AppBarAlignment { get; init; } = AppBarAlignment.Menu;
+}
+
+[SubjectComponent(SubjectComponentType.Page, typeof(NavigationTestMenuPage))]
+public class NavigationTestMenuPageComponent
 {
 }

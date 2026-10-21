@@ -52,7 +52,7 @@ public class NavigationItem
     public NavigationLocation Location { get; init; }
 
     /// <summary>
-    /// AppBar alignment (Left or Right). Only used when Location is AppBar.
+    /// AppBar alignment (Left, Right or Menu). Only used when Location is AppBar.
     /// </summary>
     public AppBarAlignment Alignment { get; init; }
 
@@ -60,4 +60,15 @@ public class NavigationItem
     /// Gets the full page URL for navigation.
     /// </summary>
     public string PageUrl => $"pages{Path}";
+
+    /// <summary>
+    /// Whether a URL relative to the base URI, as the browser has it, opens this page: escaped characters are compared
+    /// unescaped, and the query and the fragment are ignored.
+    /// </summary>
+    public bool IsPageUrlOf(string baseRelativeUrl)
+    {
+        var end = baseRelativeUrl.AsSpan().IndexOfAny('?', '#');
+        var path = end < 0 ? baseRelativeUrl : baseRelativeUrl[..end];
+        return Uri.UnescapeDataString(path).Equals(PageUrl, StringComparison.OrdinalIgnoreCase);
+    }
 }

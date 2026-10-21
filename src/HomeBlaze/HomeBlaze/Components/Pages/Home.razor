@@ -22,16 +22,19 @@
             return;
 
         // Outside the try: during prerendering a navigation throws to redirect the response.
-        Navigation.NavigateTo(GetDefaultPageUrl(Root));
+        Navigation.NavigateTo(GetDefaultPageUrl(Root), replace: true);
     }
 
     private string GetDefaultPageUrl(IInterceptorSubject root)
     {
         try
         {
-            // The first page of the top bar as it shows it: left aligned first, then right, each in navigation order.
+            // The first page of the top bar as it shows it: left aligned first, then right, then the menu, each in
+            // navigation order.
             var appBarItems = NavigationResolver.GetAppBarItems(root);
-            var appBarPage = appBarItems.FirstOrDefault(i => i.Alignment == AppBarAlignment.Left) ?? appBarItems.FirstOrDefault();
+            var appBarPage = appBarItems.FirstOrDefault(i => i.Alignment == AppBarAlignment.Left) ??
+                appBarItems.FirstOrDefault(i => i.Alignment == AppBarAlignment.Right) ??
+                appBarItems.FirstOrDefault();
             if (appBarPage != null)
                 return appBarPage.PageUrl;
 

@@ -48,8 +48,8 @@ public class BrowserPreferencesTests
         await page.WaitForFunctionAsync(SubjectBrowserPage.IsInteractive, null, new() { Timeout = PageLoadTimeout });
 
         // Assert
-        await Assertions.Expect(page.GetByTitle("Europe/Berlin", new() { Exact = true }))
-            .ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
+        await page.OpenAppBarMenuAsync();
+        await Assertions.Expect(CurrentTimeZone(page)).ToHaveTextAsync("Europe/Berlin", new() { Timeout = PageLoadTimeout });
     }
 
     [Fact]
@@ -157,8 +157,8 @@ public class BrowserPreferencesTests
     {
         // Arrange
         var page = await OpenAsync();
-        await page.GetByRole(AriaRole.Button, new() { Name = "Select timezone", Exact = true }).ClickAsync();
-        await page.GetByPlaceholder("Search timezone").FillAsync("Berlin");
+        await page.OpenTimeZoneMenuAsync();
+        await page.TimeZoneSearch().FillAsync("Berlin");
         await page.Locator(".mud-popover-open .mud-list-item")
             .Filter(new() { HasTextRegex = new Regex(@"^Europe/Berlin \(") })
             .ClickAsync();
@@ -171,8 +171,8 @@ public class BrowserPreferencesTests
         await page.WaitForFunctionAsync(SubjectBrowserPage.IsInteractive, null, new() { Timeout = PageLoadTimeout });
 
         // Assert
-        await Assertions.Expect(page.GetByTitle("Europe/Berlin", new() { Exact = true }))
-            .ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
+        await page.OpenAppBarMenuAsync();
+        await Assertions.Expect(CurrentTimeZone(page)).ToHaveTextAsync("Europe/Berlin", new() { Timeout = PageLoadTimeout });
     }
 
     private async Task<IPage> OpenAsync()
@@ -184,6 +184,8 @@ public class BrowserPreferencesTests
     }
 
     private static ILocator Drawer(IPage page) => page.Locator("#nav-drawer");
+
+    private static ILocator CurrentTimeZone(IPage page) => page.GetByTestId("time-zone-current");
 
     private static Task ToggleDrawerAsync(IPage page) =>
         page.GetByTitle("Toggle Navigation", new() { Exact = true }).ClickAsync();

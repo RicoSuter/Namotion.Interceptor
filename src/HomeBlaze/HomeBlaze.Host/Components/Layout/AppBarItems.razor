@@ -21,11 +21,21 @@
 {
     @RenderButton(item)
 }
+<AppBarMenu Pages="@items.Where(item => item.Alignment == AppBarAlignment.Menu).ToList()"
+            IsDarkMode="@IsDarkMode" OnToggleDarkMode="@OnToggleDarkMode"/>
 
 @code {
     // A parameter for the same reason as the one of NavMenu: the root can appear after the first render.
     [Parameter]
     public IInterceptorSubject? Root { get; set; }
+
+    /// <summary>Whether the dark mode is on.</summary>
+    [Parameter]
+    public bool IsDarkMode { get; set; }
+
+    /// <summary>Raised when the dark mode entry of the menu is clicked.</summary>
+    [Parameter]
+    public EventCallback OnToggleDarkMode { get; set; }
 
     private static readonly TimeSpan RefreshInterval = TimeSpan.FromSeconds(5);
 
@@ -74,11 +84,8 @@
         return _items;
     }
 
-    private bool IsActive(NavigationItem item)
-    {
-        var currentPath = NavigationManager.ToBaseRelativePath(NavigationManager.Uri);
-        return currentPath.Equals(item.PageUrl, StringComparison.OrdinalIgnoreCase);
-    }
+    private bool IsActive(NavigationItem item) =>
+        item.IsPageUrlOf(NavigationManager.ToBaseRelativePath(NavigationManager.Uri));
 
     private RenderFragment RenderButton(NavigationItem item) =>
         @<MudIconButton Icon="@SubjectIconExtensions.ResolveMudBlazorIcon(item.Icon)"

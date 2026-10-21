@@ -2,6 +2,7 @@ using System.Text;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
+using HomeBlaze.Components.Abstractions.Pages;
 using HomeBlaze.Samples;
 using HomeBlaze.Services;
 using HomeBlaze.Storage;
@@ -221,6 +222,31 @@ public class MarkdownFileTests
         await markdown.OnFileChangedAsync(CancellationToken.None);
 
         Assert.Equal("mdi-custom", markdown.NavigationIconName);
+    }
+
+    [Theory]
+    [InlineData(null, NavigationLocation.NavBar, AppBarAlignment.Left)]
+    [InlineData("", NavigationLocation.NavBar, AppBarAlignment.Left)]
+    [InlineData("location: AppBar\n", NavigationLocation.AppBar, AppBarAlignment.Left)]
+    [InlineData("location: AppBar\nalignment: Left\n", NavigationLocation.AppBar, AppBarAlignment.Left)]
+    [InlineData("location: AppBar\nalignment: Right\n", NavigationLocation.AppBar, AppBarAlignment.Right)]
+    [InlineData("location: AppBar\nalignment: Menu\n", NavigationLocation.AppBar, AppBarAlignment.Menu)]
+    public async Task WhenFrontmatterSetsTheLocationAndAlignment_ThenThePageHasThem(
+        string? frontmatter, NavigationLocation expectedLocation, AppBarAlignment expectedAlignment)
+    {
+        // Arrange
+        var (storage, serviceProvider) = await CreateInMemoryStorageAsync();
+        // Null stands for a file without any front matter.
+        var content = frontmatter is null ? "# Content\n" : $"---\ntitle: Test\n{frontmatter}---\n# Content\n";
+        await WriteFileAsync(storage, "test.md", content);
+        var markdown = CreateMarkdownFile(serviceProvider, storage, "test.md");
+
+        // Act
+        await markdown.OnFileChangedAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(expectedLocation, markdown.PageLocation);
+        Assert.Equal(expectedAlignment, markdown.AppBarAlignment);
     }
 
     [Fact]
