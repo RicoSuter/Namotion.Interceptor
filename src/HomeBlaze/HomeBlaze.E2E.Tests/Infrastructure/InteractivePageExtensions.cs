@@ -1,4 +1,3 @@
-using System.Text.RegularExpressions;
 using Microsoft.Playwright;
 
 namespace HomeBlaze.E2E.Tests.Infrastructure;
@@ -9,12 +8,13 @@ namespace HomeBlaze.E2E.Tests.Infrastructure;
 /// </summary>
 internal static class InteractivePageExtensions
 {
-    // The automatic time zone resolves through JS after the circuit has rendered, so its title tells that it is connected.
-    private static readonly Regex AutomaticTimeZoneTitle = new(@"^Automatic \(");
+    // The automatic time zone resolves through JS after the circuit has rendered, so the app bar menu showing it tells
+    // that the circuit is connected.
+    private const string ResolvedAutomaticTimeZone = "[data-testid='app-bar-menu'][data-time-zone^='Automatic (']";
 
     /// <summary>
     /// Waits until the page is rendered by its circuit.
     /// </summary>
     public static Task WaitUntilInteractiveAsync(this IPage page, float timeout = 30000)
-        => Assertions.Expect(page.GetByTitle(AutomaticTimeZoneTitle)).ToBeVisibleAsync(new() { Timeout = timeout });
+        => Assertions.Expect(page.Locator(ResolvedAutomaticTimeZone)).ToBeVisibleAsync(new() { Timeout = timeout });
 }

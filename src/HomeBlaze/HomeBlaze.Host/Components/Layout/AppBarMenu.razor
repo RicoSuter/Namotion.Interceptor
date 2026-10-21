@@ -1,0 +1,87 @@
+@using HomeBlaze.Components.Abstractions.TimeZones
+@using HomeBlaze.Host.Components.TimeZones
+
+@inject DeveloperModeService DeveloperMode
+@inject NavigationManager NavigationManager
+@inject ITimeZoneDisplay TimeZone
+
+@implements IDisposable
+
+<MudMenu Icon="@Icons.Material.Filled.MoreVert" Color="Color.Inherit" AriaLabel="Open menu" title="Menu"
+         Class="app-bar-menu" ListClass="app-bar-menu-list"
+         AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight"
+         data-testid="app-bar-menu" data-time-zone="@TimeZoneSelector.GetCurrentLabel(TimeZone)">
+    @if (Pages.Count > 0)
+    {
+        @foreach (var item in Pages)
+        {
+            <MudMenuItem Icon="@SubjectIconExtensions.ResolveMudBlazorIcon(item.Icon)" Href="@item.PageUrl"
+                         aria-current="@(IsActive(item) ? "page" : null)">
+                @item.Title
+            </MudMenuItem>
+        }
+        <MudDivider/>
+    }
+    <MudMenuItem Icon="@DeveloperModeIcon" IconColor="@(DeveloperMode.IsEnabled ? Color.Success : Color.Default)"
+                 OnClick="@DeveloperMode.Toggle" AutoClose="false"
+                 role="menuitemcheckbox" aria-checked="@(DeveloperMode.IsEnabled ? "true" : "false")"
+                 data-testid="app-bar-menu-developer-mode">
+        @ToggleContent("Developer mode", DeveloperMode.IsEnabled)
+    </MudMenuItem>
+    <TimeZoneSelector/>
+    <MudMenuItem Icon="@(IsDarkMode ? Icons.Material.Filled.DarkMode : Icons.Material.Outlined.DarkMode)"
+                 OnClick="@OnToggleDarkMode" AutoClose="false"
+                 role="menuitemcheckbox" aria-checked="@(IsDarkMode ? "true" : "false")"
+                 data-testid="app-bar-menu-dark-mode">
+        @ToggleContent("Dark mode", IsDarkMode)
+    </MudMenuItem>
+    @* An app started from the home screen has no address bar, so these two stand in for its reload button and address. *@
+    <MudDivider/>
+    <MudMenuItem Icon="@Icons.Material.Filled.Home" Href="/" data-testid="app-bar-menu-home">Home</MudMenuItem>
+    <MudMenuItem Icon="@Icons.Material.Filled.Refresh" OnClick="@Reload" data-testid="app-bar-menu-reload">Reload</MudMenuItem>
+</MudMenu>
+
+@code {
+    /// <summary>The pages with <c>alignment: Menu</c>, in the order the menu lists them.</summary>
+    [Parameter, EditorRequired]
+    public IReadOnlyList<NavigationItem> Pages { get; set; } = [];
+
+    /// <summary>Whether the dark mode is on.</summary>
+    [Parameter]
+    public bool IsDarkMode { get; set; }
+
+    /// <summary>Raised when the dark mode entry is clicked.</summary>
+    [Parameter]
+    public EventCallback OnToggleDarkMode { get; set; }
+
+    private string DeveloperModeIcon => DeveloperMode.IsEnabled
+        ? Icons.Material.Filled.DeveloperMode
+        : Icons.Material.Outlined.DeveloperMode;
+
+    private static RenderFragment ToggleContent(string label, bool isOn) =>
+        @<span class="d-flex align-center justify-space-between gap-4">
+            <span>@label</span>
+            <MudIcon Icon="@(isOn ? Icons.Material.Filled.ToggleOn : Icons.Material.Filled.ToggleOff)"
+                     Color="@(isOn ? Color.Success : Color.Default)"/>
+        </span>;
+
+    protected override void OnInitialized()
+    {
+        DeveloperMode.OnChange += OnDeveloperModeChanged;
+    }
+
+    private bool IsActive(NavigationItem item) =>
+        item.IsPageUrlOf(NavigationManager.ToBaseRelativePath(NavigationManager.Uri));
+
+    private void Reload() => NavigationManager.Refresh(forceReload: true);
+
+    private void OnDeveloperModeChanged()
+    {
+        InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        DeveloperMode.OnChange -= OnDeveloperModeChanged;
+    }
+}

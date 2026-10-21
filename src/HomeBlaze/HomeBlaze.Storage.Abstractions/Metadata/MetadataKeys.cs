@@ -17,7 +17,7 @@ public static class MetadataKeys
     /// <summary>Where a subject with a page appears in navigation, a name of <c>NavigationLocation</c>.</summary>
     public const string Location = "location";
 
-    /// <summary>The side of the top bar of a subject, a name of <c>AppBarAlignment</c>.</summary>
+    /// <summary>Where in the top bar a subject appears, a name of <c>AppBarAlignment</c>.</summary>
     public const string Alignment = "alignment";
 
     /// <summary>The names of the children of a folder in the order they are shown.</summary>

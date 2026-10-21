@@ -50,7 +50,7 @@ A folder file looks like this:
 | `navTitle` | Folder, subject | Title in the navigation. Defaults to the title |
 | `icon` | Folder, subject | MudBlazor icon name, such as `Dashboard`. A folder shows it everywhere and defaults to `Folder`; a subject shows it in the navigation only |
 | `location` | Subject with a page | `NavBar` (sidebar, default) or `AppBar` (top bar) |
-| `alignment` | Subject in the top bar | `Left` (default) or `Right` |
+| `alignment` | Subject in the top bar | `Left` (default), `Right` or `Menu` |
 | `order` | Folder | Names of the children in the order they are shown, see [Navigation Order](#navigation-order) |
 | `notes` | Folder, subject, property | Notes in Markdown, see [Notes, Links and Tags](#notes-links-and-tags) |
 | `links` | Folder, subject, property | Links to web addresses, pages, subjects and properties |
@@ -74,7 +74,7 @@ Each move writes the whole order of the folder, so every child has its place aft
 
 ### The Top Bar
 
-The top bar shows every page with `location: AppBar` and every subject with a page whose metadata sets `location` to `AppBar`, in whichever folder it is. The items follow the navigation order: the folders in their order, and the items of a folder in the order of that folder. **Reorder** moves an item among the items of its folder, and moving a folder moves its items with it. Each item goes to the left or the right side by its `alignment`.
+The top bar shows every page with `location: AppBar` and every subject with a page whose metadata sets `location` to `AppBar`, in whichever folder it is. The items follow the navigation order: the folders in their order, and the items of a folder in the order of that folder. **Reorder** moves an item among the items of its folder, and moving a folder moves its items with it. Each item goes to the left side, the right side or the menu of the top bar by its `alignment`.
 
 The sidebar shows a folder only when it holds a page for the sidebar, so a folder whose pages are all in the top bar does not appear there, and neither does a page that is reached only through an item of the top bar. A subject with a page of its own that holds no page for the sidebar shows as a link to its page.
 

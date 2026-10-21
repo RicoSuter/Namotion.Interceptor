@@ -13,7 +13,7 @@ internal static class StorageMetadataMethods
         "for example Devices/Shelly/Channels[0] (a leading / is ignored), and empty for the storage itself; property is the name of a property of that subject, or omitted for the subject. " +
         "values is a JSON object that is merged into the metadata: a key with a value is set, replacing a nested value as a whole, a key with null is removed, and " +
         "every other key stays; keys match exactly, case included. HomeBlaze reads title (of a folder), navTitle, icon (a MudBlazor icon name), location (NavBar or " +
-        "AppBar), alignment (Left or Right), notes (Markdown of up to 4 KB without HTML, pictures or blocks), links (an array of at most 20 objects with an " +
+        "AppBar), alignment (Left, Right or Menu), notes (Markdown of up to 4 KB without HTML, pictures or blocks), links (an array of at most 20 objects with an " +
         "optional title and either url, an http, https or mailto address, or path, the absolute path of a page, subject or property) and tags (an array of " +
         "at most 20 strings of up to 64 characters, unique without regard to case); any other key, such as comment, is stored as given. " +
         "Example: {\"navTitle\": \"Hall light\", \"tags\": [\"floor-2\"], \"icon\": null}.";

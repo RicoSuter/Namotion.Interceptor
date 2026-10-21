@@ -130,14 +130,15 @@ Keys and values that describe a folder, a subject or a property, such as its nav
 ### Navigation Location
 
 Where a page appears in the application:
-- `NavBar` — Sidebar navigation (default)
-- `AppBar` — Top application bar
+- `NavBar`: Sidebar navigation (default)
+- `AppBar`: Top application bar
 
 ### AppBar Alignment
 
 For `AppBar` items:
-- `Left` — Left side of the top bar (default)
-- `Right` — Right side
+- `Left`: Left side of the top bar (default)
+- `Right`: Right side
+- `Menu`: Entry of the menu behind the ⋮ button at the right end of the top bar
 
 ---
 

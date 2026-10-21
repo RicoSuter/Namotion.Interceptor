@@ -9,11 +9,24 @@
 @inject BrowserPreferences Preferences
 @inject ILogger<TimeZoneSelector> Logger
 
-<MudMenu @ref="_menu" Icon="@Icons.Material.Filled.Schedule" Color="Color.Inherit"
-         title="@CurrentLabel" AriaLabel="Select timezone" MaxHeight="500">
-    <div style="min-width: 320px;">
+@* A submenu: it must be placed inside a MudMenu, whose list then shows it as an entry with the active zone. *@
+<MudMenu @ref="_menu" MaxHeight="500" data-testid="time-zone-menu">
+    <ActivatorContent>
+        <span class="time-zone-menu-activator">
+            <MudIcon Icon="@Icons.Material.Filled.Schedule" Class="mud-menu-item-icon" />
+            <span class="time-zone-menu-text">
+                <span>Time zone</span>
+                <span class="mud-typography-caption mud-text-secondary" data-testid="time-zone-current">@CurrentLabel</span>
+            </span>
+            <MudIcon Icon="@Icons.Material.Filled.ArrowRight" />
+        </span>
+    </ActivatorContent>
+    <ChildContent>
+    @* The submenu has no menu items of its own, so MudMenu does not close it on Escape. The search field takes the
+       focus from the list wrapper that MudMenu focuses on opening, so that a key reaches this handler at once. *@
+    <div style="min-width: min(320px, calc(100vw - 32px));" @onkeydown="OnKeyDownAsync">
         <div style="position: sticky; top: 0; z-index: 1; background-color: var(--mud-palette-surface);">
-            <MudTextField @bind-Value="_search" Placeholder="Search timezone" Immediate="true"
+            <MudTextField @bind-Value="_search" Placeholder="Search timezone" Immediate="true" AutoFocus="true"
                           Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
                           Class="px-3 py-2" />
         </div>
@@ -41,15 +54,22 @@
             }
         </MudList>
     </div>
+    </ChildContent>
 </MudMenu>
 
 @code {
     private static readonly IReadOnlyList<TimeZoneOption> Zones = TimeZoneCatalog.GetZones();
     private MudMenu? _menu;
     private string _search = string.Empty;
+    private bool _skipRender;
 
-    private string CurrentLabel => TimeZone.IsResolved
-        ? (TimeZone.Preference.IsAutomatic ? $"Automatic ({SelectedZoneId})" : SelectedZoneId)
+    private string CurrentLabel => GetCurrentLabel(TimeZone);
+
+    private string SelectedZoneId => GetSelectedZoneId(TimeZone);
+
+    /// <summary>The active zone as the menu shows it: "Automatic (zone)", the pinned zone, or "Timezone" while unresolved.</summary>
+    public static string GetCurrentLabel(ITimeZoneDisplay timeZone) => timeZone.IsResolved
+        ? (timeZone.Preference.IsAutomatic ? $"Automatic ({GetSelectedZoneId(timeZone)})" : GetSelectedZoneId(timeZone))
         : "Timezone";
 
     /// <summary>
@@ -58,9 +78,9 @@
     /// the IANA-keyed catalog never matches. The result is no check mark on any entry and the resolved
     /// zone duplicated at the top of the list on every render.
     /// </summary>
-    private string SelectedZoneId =>
-        TimeZone.Preference.ZoneId
-        ?? (TimeZone.Zone is { } zone ? TimeZoneCatalog.CreateOption(zone)?.Id ?? zone.Id : string.Empty);
+    private static string GetSelectedZoneId(ITimeZoneDisplay timeZone) =>
+        timeZone.Preference.ZoneId
+        ?? (timeZone.Zone is { } zone ? TimeZoneCatalog.CreateOption(zone)?.Id ?? zone.Id : string.Empty);
 
     private bool IsZoneSelected(string id) =>
         !TimeZone.Preference.IsAutomatic && TimeZone.IsResolved &&
@@ -138,12 +158,37 @@
         }
     }
 
+    // Every other key changes nothing here, and a render would rebuild the whole list of zones once more per key.
+    // The input event of the search field renders on its own.
+    protected override bool ShouldRender()
+    {
+        if (_skipRender)
+        {
+            _skipRender = false;
+            return false;
+        }
+
+        return true;
+    }
+
+    private async Task OnKeyDownAsync(KeyboardEventArgs e)
+    {
+        if (e.Key != "Escape" || _menu is null)
+        {
+            _skipRender = true;
+            return;
+        }
+
+        _search = string.Empty;
+        await _menu.CloseMenuAsync();
+    }
+
     private async Task CloseMenuAsync()
     {
         _search = string.Empty;
         if (_menu is not null)
         {
-            await _menu.CloseMenuAsync();
+            await _menu.CloseAllMenusAsync();
         }
     }
 }

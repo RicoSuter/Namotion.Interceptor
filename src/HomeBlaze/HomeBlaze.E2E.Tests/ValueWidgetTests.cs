@@ -498,7 +498,7 @@ public class ValueWidgetTests
             Assert.NotEqual(await page.ResolveColorAsync("var(--mud-palette-surface)"), darkIcon);
 
             // Act
-            await page.GetByTitle("Toggle Dark Mode").ClickAsync();
+            await page.ToggleDarkModeAsync();
             await Assertions.Expect(page.Locator(".homeblaze-dark-mode")).ToHaveCountAsync(0, new() { Timeout = Timeout });
 
             // Assert: the same case follows the light theme.
