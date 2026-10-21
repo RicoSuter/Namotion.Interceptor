@@ -115,6 +115,33 @@ public class SubjectTransactionHandlerResolutionTests
     }
 
     [Fact]
+    public async Task WhenHandlerIsAddedToFallbackOfWrittenSubjectContextDuringTransaction_ThenNextWriteIncludesIt()
+    {
+        // Arrange
+        var handler = new RecordingHandler();
+        var transactionContext = CreateContext();
+        var handlerContext = InterceptorSubjectContext.Create();
+        var subjectContext = InterceptorSubjectContext.Create();
+        subjectContext.AddService(new object());
+        subjectContext.AddFallbackContext(transactionContext);
+        subjectContext.AddFallbackContext(handlerContext);
+        var person = new Person(subjectContext);
+
+        using var transaction = await transactionContext.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "Bob";
+
+        // Act
+        handlerContext.AddService<ITransactionHandler>(handler);
+        person.LastName = "Lee";
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(nameof(Person.LastName), Assert.Single(handler.Captured).Property.Name);
+        Assert.Equal(1, handler.CommittingCalls);
+        Assert.Equal("Lee", person.LastName);
+    }
+
+    [Fact]
     public async Task WhenHandlerIsIncludedBeforeRetryOfFailedCommit_ThenItChecksTheRetry()
     {
         // Arrange

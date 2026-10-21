@@ -598,6 +598,56 @@ public class TransactionValidationTests
         Assert.Equal(50, motor.MotorSpeed);
     }
 
+    private static readonly Dictionary<Type, Action<CommonValueTypes>> CommonValueTypeWrites = new()
+    {
+        [typeof(int)] = subject => subject.IntValue = 1,
+        [typeof(long)] = subject => subject.LongValue = 1,
+        [typeof(double)] = subject => subject.DoubleValue = 1,
+        [typeof(float)] = subject => subject.FloatValue = 1,
+        [typeof(decimal)] = subject => subject.DecimalValue = 1,
+        [typeof(bool)] = subject => subject.BoolValue = true,
+        [typeof(DateTime)] = subject => subject.DateTimeValue = new DateTime(2024, 1, 2, 0, 0, 0, DateTimeKind.Utc),
+        [typeof(DateTimeOffset)] = subject => subject.DateTimeOffsetValue = new DateTimeOffset(2024, 1, 2, 0, 0, 0, TimeSpan.Zero),
+        [typeof(TimeSpan)] = subject => subject.TimeSpanValue = TimeSpan.FromSeconds(1),
+        [typeof(Guid)] = subject => subject.GuidValue = Guid.NewGuid()
+    };
+
+    [Theory]
+    [InlineData(typeof(int))]
+    [InlineData(typeof(long))]
+    [InlineData(typeof(double))]
+    [InlineData(typeof(float))]
+    [InlineData(typeof(decimal))]
+    [InlineData(typeof(bool))]
+    [InlineData(typeof(DateTime))]
+    [InlineData(typeof(DateTimeOffset))]
+    [InlineData(typeof(TimeSpan))]
+    [InlineData(typeof(Guid))]
+    public async Task WhenPropertyTypeIsACommonValueType_ThenCommitCheckValidatesTheValueAsThatType(Type propertyType)
+    {
+        // Arrange
+        var validator = new RecordingValidator();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithTransactions()
+            .WithPropertyValidation()
+            .WithService<IPropertyValidator>(() => validator);
+        var subject = new CommonValueTypes(context);
+        validator.Calls.Clear();
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(
+            TransactionFailureHandling.Rollback, validationMode: TransactionValidationMode.Deferred);
+        CommonValueTypeWrites[propertyType](subject);
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        var call = Assert.Single(validator.Calls);
+        Assert.Equal(propertyType, call.TypeArgument);
+        Assert.IsType(propertyType, call.Value);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

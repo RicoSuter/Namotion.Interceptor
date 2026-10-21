@@ -150,6 +150,28 @@ public class ContextServiceResolutionTests
         Assert.NotSame(ImmutableCollectionsMarshal.AsArray(servicesBefore), ImmutableCollectionsMarshal.AsArray(servicesAfter));
     }
 
+    [Fact]
+    public void WhenFallbackOfContextWithOwnServicesGainsService_ThenGetServicesReturnsNewArrayInstance()
+    {
+        // Arrange
+        var service = new MarkerService();
+        var fallback = InterceptorSubjectContext.Create();
+        fallback.AddService(service);
+        var context = InterceptorSubjectContext.Create();
+        context.AddService(new object());
+        context.AddFallbackContext(fallback);
+        var servicesBefore = context.GetServices<MarkerService>();
+
+        // Act
+        fallback.AddService(new object());
+        var servicesAfter = context.GetServices<MarkerService>();
+
+        // Assert
+        Assert.Same(service, Assert.Single(servicesBefore));
+        Assert.Same(service, Assert.Single(servicesAfter));
+        Assert.NotSame(ImmutableCollectionsMarshal.AsArray(servicesBefore), ImmutableCollectionsMarshal.AsArray(servicesAfter));
+    }
+
     private sealed class MarkerService;
 
     private interface IOrderedTestService { }

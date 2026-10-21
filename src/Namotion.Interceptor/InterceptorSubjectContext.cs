@@ -568,6 +568,8 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             return (ImmutableArray<TInterface>)cachedServices;
         }
 
+        // A non-empty array is built here for this state alone and never reused by another state, so callers may key
+        // caches on its identity, as TransactionHandlerSet in Namotion.Interceptor.Tracking does.
         var services = ComputeServices<TInterface>(state);
 
         // The two-argument GetOrAdd canonicalizes racing computations without a closure allocation.
