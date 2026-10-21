@@ -697,11 +697,7 @@
 
         if (GetOrderedContainer(property) is { } container)
         {
-            children = ChildOrdering.Order(
-                children,
-                container.ChildOrder,
-                static child => child.Index?.ToString() ?? string.Empty,
-                static child => child.Subject.GetNavigationTitle(child.Index?.ToString()));
+            children = ChildOrdering.Order(children, container.ChildOrder, static child => child.Index?.ToString() ?? string.Empty);
         }
 
         return children.ToArray();

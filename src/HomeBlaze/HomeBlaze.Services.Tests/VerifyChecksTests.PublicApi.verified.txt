@@ -368,7 +368,7 @@ namespace HomeBlaze.Services.Metadata
     public static class ChildOrdering
     {
         public static string[] GetShownNames(Namotion.Interceptor.IInterceptorSubject container) { }
-        public static System.Collections.Generic.IEnumerable<T> Order<T>(System.Collections.Generic.IEnumerable<T> children, System.Collections.Immutable.ImmutableArray<string> childOrder, System.Func<T, string> getName, System.Func<T, string> getTitle) { }
+        public static System.Collections.Generic.IEnumerable<T> Order<T>(System.Collections.Generic.IEnumerable<T> children, System.Collections.Immutable.ImmutableArray<string> childOrder, System.Func<T, string> getName) { }
     }
     public ref struct FirstParentChain
     {

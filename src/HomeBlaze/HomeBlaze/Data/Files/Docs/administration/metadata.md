@@ -60,7 +60,7 @@ Metadata never changes the title or the icon of the subject itself. Any other ke
 
 Pages, folders and subjects appear in the same order in the sidebar, the top bar and the browser. A folder keeps that order in the `order` of its `.metadata.json`.
 
-A name in `order` is the name of a child as the browser address shows it: a subject file without `.json` (`Motor` for `Motor.json`), any other file with its extension (`Readme.md`), and a folder by its name. Children that are not listed come after the listed ones: a readme first, an index second, then by navigation title. Names of children that do not exist are ignored. A JSON file that does not load as a subject, for example because its JSON is invalid, is named with `.json` until it loads again, so meanwhile it is sorted with the children that are not listed.
+A name in `order` is the name of a child as the browser address shows it: a subject file without `.json` (`Motor` for `Motor.json`), any other file with its extension (`Readme.md`), and a folder by its name. Children that are not listed come after the listed ones: a readme first, an index second, then by name, in which uppercase letters come before lowercase ones. To show a folder in another order, put it in order by hand with **Reorder** in the browser, `SetOrder` or its `order`. Names of children that do not exist are ignored. A JSON file that does not load as a subject, for example because its JSON is invalid, is named with `.json` until it loads again, so meanwhile it is sorted with the children that are not listed.
 
 ### Ordering in the Browser
 

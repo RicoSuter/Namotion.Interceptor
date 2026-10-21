@@ -101,7 +101,7 @@ public class NavigationItemResolver
 
         var childOrder = parent is IMetadataContainer container ? container.ChildOrder : [];
         return ChildOrdering
-            .Order(items, childOrder, static item => item.Key, static item => item.Item.Title)
+            .Order(items, childOrder, static item => item.Key)
             .Select(static item => item.Item)
             .ToList();
     }

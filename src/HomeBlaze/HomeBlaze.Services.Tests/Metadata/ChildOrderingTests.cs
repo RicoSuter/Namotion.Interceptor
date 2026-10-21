@@ -11,10 +11,10 @@ namespace HomeBlaze.Services.Tests.Metadata;
 public class ChildOrderingTests
 {
     private static string[] Order(string[] names, ImmutableArray<string> childOrder)
-        => ChildOrdering.Order(names, childOrder, static name => name, static name => name).ToArray();
+        => ChildOrdering.Order(names, childOrder, static name => name).ToArray();
 
     [Fact]
-    public void WhenThereIsNoOrder_ThenReadmeAndIndexComeFirstAndTheRestByTitle()
+    public void WhenThereIsNoOrder_ThenReadmeAndIndexComeFirstAndTheRestByName()
     {
         // Act
         var ordered = Order(["b.md", "index.md", "a.md", "Readme.md"], []);
@@ -44,31 +44,13 @@ public class ChildOrderingTests
     }
 
     [Fact]
-    public void WhenTitlesAreEqual_ThenNamesDecide()
+    public void WhenNamesAreEqual_ThenTheInputOrderDecides()
     {
         // Act
-        var ordered = ChildOrdering.Order(["b", "a"], [], static name => name, static _ => "Same").ToArray();
+        var ordered = ChildOrdering.Order([("b", 0), ("a", 1), ("b", 2), ("a", 3)], [], static child => child.Item1).ToArray();
 
         // Assert
-        Assert.Equal(["a", "b"], ordered);
-    }
-
-    [Fact]
-    public void WhenTheOrderOrTheReadmeDecides_ThenNoTitleIsRead()
-    {
-        // Arrange
-        var titledNames = new List<string>();
-
-        // Act
-        var ordered = ChildOrdering.Order(["b.md", "Readme.md", "a.md", "c.md"], ["c.md"], static name => name, name =>
-        {
-            titledNames.Add(name);
-            return name;
-        }).ToArray();
-
-        // Assert
-        Assert.Equal(["c.md", "Readme.md", "a.md", "b.md"], ordered);
-        Assert.Equal(["a.md", "b.md"], titledNames.Order());
+        Assert.Equal([("a", 1), ("a", 3), ("b", 0), ("b", 2)], ordered);
     }
 
     [Fact]
@@ -105,6 +87,26 @@ public class ChildOrderingTests
 
         // Assert
         Assert.Equal(["a.md", "Readme.md", "b.md"], names);
+    }
+
+    [Fact]
+    public void WhenTheChildrenHaveNavigationTitles_ThenTheirNamesDecideTheOrder()
+    {
+        // Arrange
+        var first = new OrderingTestFolder();
+        var second = new OrderingTestFolder();
+        var folder = new OrderingTestFolder(InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry())
+        {
+            Children = new Dictionary<string, IInterceptorSubject> { ["b.md"] = second, ["a.md"] = first }
+        };
+        TestMetadata.Set(first, """{ "navTitle": "Zeta" }""");
+        TestMetadata.Set(second, """{ "navTitle": "Alpha" }""");
+
+        // Act
+        var names = ChildOrdering.GetShownNames(folder);
+
+        // Assert
+        Assert.Equal(["a.md", "b.md"], names);
     }
 }
 
