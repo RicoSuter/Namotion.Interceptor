@@ -1,5 +1,4 @@
 using System.Text;
-using HomeBlaze.Services.Metadata;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
 
@@ -13,10 +12,12 @@ namespace HomeBlaze.Storage.Metadata;
 /// </summary>
 internal static class MetadataPathKey
 {
+    private static readonly DefaultPathProvider PathProvider = new('/');
+
     /// <summary>Gets the key of a path, or null when the path is empty or cannot be read.</summary>
     public static string? Normalize(string path)
     {
-        if (!MetadataPaths.PathProvider.TryParsePath(path, out var segments, out _) || segments.Count == 0)
+        if (!PathProvider.TryParsePath(path, out var segments, out _) || segments.Count == 0)
         {
             return null;
         }
@@ -56,7 +57,7 @@ internal static class MetadataPathKey
         // Read once, as a detach can change the parents between two reads.
         var parents = subject.Parents;
         return parents.Length > 0
-            ? parents[0].Property.TryGetPath(MetadataPaths.PathProvider, storedSubject.Subject, parents[0].Index)
+            ? parents[0].Property.TryGetPath(PathProvider, storedSubject.Subject, parents[0].Index)
             : null;
     }
 

@@ -187,6 +187,7 @@ namespace HomeBlaze.Storage
         public System.Threading.Tasks.Task<bool> WriteConfigurationAsync(Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken) { }
         public static string GetNoPropertyMessage(string propertyName) { }
         public static string GetNoSubjectMessage(string path) { }
+        public static Namotion.Interceptor.IInterceptorSubject? ResolveMetadataPath(Namotion.Interceptor.IInterceptorSubject storage, string path) { }
     }
     public static class MarkdownPageLayoutPermission
     {

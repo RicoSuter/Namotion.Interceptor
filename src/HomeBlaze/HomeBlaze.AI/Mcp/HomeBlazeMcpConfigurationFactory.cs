@@ -129,7 +129,7 @@ internal static class HomeBlazeMcpConfigurationFactory
     private static string? GetSetMetadataError(
         RegisteredSubject storage, string path, string? propertyName, PathProviderBase pathProvider, Type[] excludeTypes)
     {
-        var target = MetadataPaths.TryResolveSubject(storage.Subject, path);
+        var target = FluentStorageContainer.ResolveMetadataPath(storage.Subject, path);
         var trimmedPath = path.Trim();
         var visibleTarget = trimmedPath.AsSpan().TrimStart('/').IsEmpty ? storage : pathProvider.TryGetSubjectFromPath(storage, trimmedPath);
         if (target is null || !ReferenceEquals(visibleTarget?.Subject, target) || IsOfExcludedType(visibleTarget, storage, excludeTypes))

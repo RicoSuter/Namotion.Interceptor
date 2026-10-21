@@ -3,6 +3,7 @@ using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.AI.Agents;
 using HomeBlaze.AI.Mcp;
 using HomeBlaze.AI.Tests.Mcp;
+using HomeBlaze.Abstractions;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Lifecycle;
 using HomeBlaze.Storage;
@@ -243,6 +244,7 @@ public class AgentOperationAccessTests
                 () => new MethodPropertyInitializer(),
                 handler => handler is MethodPropertyInitializer);
         var root = new AgentTestRoot(context);
+        context.AddService<ISubjectPathResolver>(new SubjectPathResolver(() => root));
         var agentServices = AgentTestContext.CreateServices(root);
         var agent = new FakeAgent(agentServices);
         root.Children = new Dictionary<string, IInterceptorSubject> { ["Agent"] = agent };

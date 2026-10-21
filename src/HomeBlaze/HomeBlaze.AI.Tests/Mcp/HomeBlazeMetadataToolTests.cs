@@ -2,6 +2,7 @@ using System.Text.Json;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.AI.Mcp;
 using HomeBlaze.AI.Tests.Agents;
+using HomeBlaze.Abstractions;
 using HomeBlaze.Services;
 using HomeBlaze.Storage;
 using HomeBlaze.Storage.Internal;
@@ -244,7 +245,9 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
         services.AddSingleton<SubjectFactory>();
         services.AddSingleton<ConfigurableSubjectSerializer>();
         AgentTestRoot? root = null;
-        services.AddSingleton(new SubjectPathResolver(() => root));
+        var pathResolver = new SubjectPathResolver(() => root);
+        context.AddService<ISubjectPathResolver>(pathResolver);
+        services.AddSingleton(pathResolver);
         services.AddSingleton<MarkdownContentParser>();
         services.AddSingleton<ILoggerFactory>(NullLoggerFactory.Instance);
         var serviceProvider = services.BuildServiceProvider();

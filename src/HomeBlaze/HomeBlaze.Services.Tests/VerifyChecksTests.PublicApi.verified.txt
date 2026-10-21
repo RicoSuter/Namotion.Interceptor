@@ -386,11 +386,6 @@ namespace HomeBlaze.Services.Metadata
         public static TEnum? ParseEnumName<TEnum>(string text)
             where TEnum :  struct, System.Enum { }
     }
-    public static class MetadataPaths
-    {
-        public static Namotion.Interceptor.Registry.Paths.PathProviderBase PathProvider { get; }
-        public static Namotion.Interceptor.IInterceptorSubject? TryResolveSubject(Namotion.Interceptor.IInterceptorSubject origin, string path) { }
-    }
     public static class SubjectMetadataExtensions
     {
         public static HomeBlaze.Storage.Abstractions.Metadata.IMetadataStore? FindMetadataStore(this Namotion.Interceptor.IInterceptorSubject subject) { }

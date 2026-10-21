@@ -153,7 +153,7 @@ Storage.Abs.   Components.Abs.   Abstractions
 - **Method Discovery**: Find `[Operation]` and `[Query]` methods on subjects
 - **Method Invocation**: Execute operations with parameter conversion
 - **Method Properties**: `MethodPropertyInitializer` creates virtual properties for methods, enabling `[PropertyAttribute]` on operations (e.g., `IsEnabled`)
-- **Metadata**: Read the metadata of subjects and properties, resolve metadata paths and order children, in the namespace `HomeBlaze.Services.Metadata`
+- **Metadata**: Read the metadata of subjects and properties and order children, in the namespace `HomeBlaze.Services.Metadata`
 
 **Dependencies**: `HomeBlaze.Abstractions`, `HomeBlaze.Storage.Abstractions`, `HomeBlaze.Components.Abstractions`
 
