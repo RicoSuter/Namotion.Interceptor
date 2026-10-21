@@ -958,11 +958,11 @@ public class SubjectPropertyChangeTests
             new OversizedCustomStruct { Value1 = 1L }, new OversizedCustomStruct { Value1 = 2L });
 
         // Act
-        var inlineAllocated = MeasureRollbackAllocations(inlineChange, c => c.GetNewValue<int>());
-        var stringAllocated = MeasureRollbackAllocations(stringChange, c => c.GetNewValue<string>().Length);
-        var referenceAllocated = MeasureRollbackAllocations(referenceChange, c => c.GetNewValue<CustomClass>().Id);
-        var oversizedAllocated = MeasureRollbackAllocations(
-            oversizedChange, c => (int)c.GetNewValue<OversizedCustomStruct>().Value1);
+        var inlineAllocated = MeasureAllocations(() => inlineChange.ToRollbackChange().GetNewValue<int>());
+        var stringAllocated = MeasureAllocations(() => stringChange.ToRollbackChange().GetNewValue<string>().Length);
+        var referenceAllocated = MeasureAllocations(() => referenceChange.ToRollbackChange().GetNewValue<CustomClass>().Id);
+        var oversizedAllocated = MeasureAllocations(
+            () => (int)oversizedChange.ToRollbackChange().GetNewValue<OversizedCustomStruct>().Value1);
 
         // Assert
         Assert.Equal(0L, inlineAllocated);
@@ -972,29 +972,130 @@ public class SubjectPropertyChangeTests
     }
 
     /// <summary>
-    /// Converts <paramref name="change"/> in a tight loop and returns the bytes allocated. The read is
-    /// passed in as a non-capturing lambda, so its delegate is cached before the measured window and the
-    /// result is consumed, which keeps the conversion from being optimized away.
+    /// Runs <paramref name="operation"/> in a tight loop and returns the bytes allocated. Its delegate is created
+    /// before the measured window and its result is consumed, which keeps the operation from being optimized away.
     /// </summary>
-    private static long MeasureRollbackAllocations(
-        SubjectPropertyChange change, Func<SubjectPropertyChange, int> read)
+    private static long MeasureAllocations(Func<int> operation)
     {
         // Warm up so JIT compilation does not land inside the measured window.
         var accumulator = 0L;
         for (var i = 0; i < 100; i++)
         {
-            accumulator += read(change.ToRollbackChange());
+            accumulator += operation();
         }
 
         var before = GC.GetAllocatedBytesForCurrentThread();
         for (var i = 0; i < 1000; i++)
         {
-            accumulator += read(change.ToRollbackChange());
+            accumulator += operation();
         }
         var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
         Assert.NotEqual(0L, accumulator);
         return allocated;
+    }
+
+    public static IEnumerable<object?[]> OldValueEqualityCases()
+    {
+        var subject = new Person(InterceptorSubjectContext.Create());
+        var property = new PropertyReference(subject, nameof(Person.FirstName));
+
+        object?[] Case<TValue>(string name, TValue oldValue, object? currentValue) =>
+            [name, SubjectPropertyChange.Create(property, ChangeOrigin.Local, default, null, oldValue, oldValue), currentValue];
+
+        yield return Case("int equal", 5, 5);
+        yield return Case("int different", 5, 6);
+        yield return Case("int null current", 5, null);
+        yield return Case("int long current", 5, 5L);
+        yield return Case("int enum current", 1, DayOfWeek.Monday);
+        yield return Case("double NaN", double.NaN, double.NaN);
+        yield return Case("double negative zero", 0.0, -0.0);
+        yield return Case("double float current", 1.0, 1.0f);
+        yield return Case("float NaN", float.NaN, float.NaN);
+        yield return Case("float negative zero", -0.0f, 0.0f);
+        yield return Case("decimal scale", 1.0m, 1.00m);
+        yield return Case("decimal asymmetric current", 1.0m, new EqualsAnyDecimal());
+        yield return Case("DateTime kind",
+            new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc), new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Local));
+        yield return Case("DateTimeOffset same instant",
+            new DateTimeOffset(2024, 1, 1, 12, 0, 0, TimeSpan.Zero), new DateTimeOffset(2024, 1, 1, 14, 0, 0, TimeSpan.FromHours(2)));
+        yield return Case("DateTimeOffset same clock time",
+            new DateTimeOffset(2024, 1, 1, 12, 0, 0, TimeSpan.Zero), new DateTimeOffset(2024, 1, 1, 12, 0, 0, TimeSpan.FromHours(2)));
+        yield return Case("DateTimeOffset DateTime current",
+            new DateTimeOffset(2024, 1, 1, 12, 0, 0, TimeSpan.Zero), new DateTime(2024, 1, 1, 12, 0, 0, DateTimeKind.Utc));
+        yield return Case("TimeSpan equal", TimeSpan.FromSeconds(1), TimeSpan.FromMilliseconds(1000));
+        yield return Case("Guid equal", Guid.Parse("11111111-1111-1111-1111-111111111111"), Guid.Parse("11111111-1111-1111-1111-111111111111"));
+        yield return Case<int?>("nullable int null", null, null);
+        yield return Case<int?>("nullable int null old", null, 0);
+        yield return Case<decimal?>("boxed holder nullable decimal scale", 1.0m, 1.00m);
+        yield return Case("enum underlying current", DayOfWeek.Monday, 1);
+        yield return Case("byte enum underlying current", ByteBackedLevel.First, (byte)1);
+        yield return Case<string?>("string null", null, null);
+        yield return Case<object?>("object decimal scale", 1.0m, 1.00m);
+        yield return Case("enum equal", DayOfWeek.Monday, DayOfWeek.Monday);
+        yield return Case("inconsistent struct equal", new InconsistentlyEquatableStruct(1), new InconsistentlyEquatableStruct(1));
+        yield return Case("inconsistent struct different", new InconsistentlyEquatableStruct(1), new InconsistentlyEquatableStruct(2));
+    }
+
+    [Theory]
+    [MemberData(nameof(OldValueEqualityCases))]
+    public void WhenComparingOldValue_ThenResultMatchesObjectEquals(string name, SubjectPropertyChange change, object? currentValue)
+    {
+        // Act
+        var equals = change.OldValueEquals(currentValue);
+
+        // Assert
+        Assert.True(Equals(currentValue, change.GetOldValue<object?>()) == equals, name);
+    }
+
+    [Fact]
+    public void WhenComparingInlineOldValue_ThenNothingIsAllocated()
+    {
+        // Arrange: the current values are boxed here, so only the comparison is measured.
+        var intChange = SubjectPropertyChange.Create(_property, ChangeOrigin.Local, _changedTimestamp, null, 5, 6);
+        var decimalChange = SubjectPropertyChange.Create(_property, ChangeOrigin.Local, _changedTimestamp, null, 1.0m, 2.0m);
+        var enumChange = SubjectPropertyChange.Create(_property, ChangeOrigin.Local, _changedTimestamp, null, DayOfWeek.Monday, DayOfWeek.Friday);
+        object currentInt = 5;
+        object currentDecimal = 1.00m;
+        object currentEnum = DayOfWeek.Monday;
+
+        // Act
+        var intAllocated = MeasureAllocations(() => intChange.OldValueEquals(currentInt) ? 1 : 0);
+        var decimalAllocated = MeasureAllocations(() => decimalChange.OldValueEquals(currentDecimal) ? 1 : 0);
+        var enumAllocated = MeasureAllocations(() => enumChange.OldValueEquals(currentEnum) ? 1 : 0);
+
+        // Assert
+        Assert.Equal(0L, intAllocated);
+        Assert.Equal(0L, decimalAllocated);
+        Assert.Equal(0L, enumAllocated);
+    }
+
+    private enum ByteBackedLevel : byte
+    {
+        First = 1
+    }
+
+    /// <summary>
+    /// Equal to every instance through <see cref="IEquatable{T}"/>, but by value through <see cref="object.Equals(object?)"/>,
+    /// which <c>object.Equals</c> calls, so it tells the two apart.
+    /// </summary>
+    private readonly struct InconsistentlyEquatableStruct(int value) : IEquatable<InconsistentlyEquatableStruct>
+    {
+        public int Value { get; } = value;
+
+        public bool Equals(InconsistentlyEquatableStruct other) => true;
+
+        public override bool Equals(object? obj) => obj is InconsistentlyEquatableStruct other && other.Value == Value;
+
+        public override int GetHashCode() => Value;
+    }
+
+    /// <summary>Equals any decimal, so it tells which side's Equals a comparison calls.</summary>
+    private sealed class EqualsAnyDecimal
+    {
+        public override bool Equals(object? obj) => obj is decimal;
+
+        public override int GetHashCode() => 0;
     }
 
     [Fact]

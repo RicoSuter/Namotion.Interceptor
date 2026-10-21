@@ -1,3 +1,4 @@
+using System.Globalization;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Transactions;
 using Namotion.Interceptor.Tracking.Tests.Models;
@@ -165,5 +166,25 @@ public class SubjectPropertyChangeOperationsTests
         Assert.Contains(third, successful);
         Assert.DoesNotContain(failing, successful);
         Assert.DoesNotContain(excluded, successful);
+    }
+
+    [Theory]
+    [InlineData("2.00", false)]
+    [InlineData("2.5", true)]
+    public void WhenDetectingConflicts_ThenCurrentValueIsComparedWithCapturedOldValue(string currentPressure, bool isConflict)
+    {
+        // Arrange: the captured old value 2.0 equals 2.00 at another scale, but not 2.5.
+        var tire = new Tire(CreateContext()) { Pressure = decimal.Parse(currentPressure, CultureInfo.InvariantCulture) };
+        var property = new PropertyReference(tire, nameof(Tire.Pressure));
+        SubjectPropertyChange[] changes =
+        [
+            SubjectPropertyChange.Create(property, ChangeOrigin.Local, DateTimeOffset.UtcNow, null, 2.0m, 3.0m)
+        ];
+
+        // Act
+        var conflicts = SubjectPropertyChangeOperations.DetectChangeConflicts(changes);
+
+        // Assert
+        Assert.Equal(isConflict ? [property] : [], conflicts);
     }
 }

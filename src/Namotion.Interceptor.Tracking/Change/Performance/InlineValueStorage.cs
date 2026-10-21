@@ -1,5 +1,4 @@
-using System.Collections.Concurrent;
-using System.Reflection;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
@@ -12,24 +11,27 @@ namespace Namotion.Interceptor.Tracking.Change.Performance;
 [StructLayout(LayoutKind.Explicit)]
 internal readonly struct InlineValueStorage
 {
-    private static readonly ConcurrentDictionary<Type, Func<InlineValueStorage, object>> BoxingDelegates = new();
-
     public const int MaxSize = 16; // 16 bytes per value (covers decimal, DateTime, DateTimeOffset, Guid, etc.)
 
     [FieldOffset(0)] private readonly long _valueData0;
     [FieldOffset(8)] private readonly long _valueData1;
-    [FieldOffset(16)] private readonly Type? _storedType;
+    [FieldOffset(16)] private readonly InlineValueOperations? _operations;
 
-    public Type? StoredType => _storedType;
+    /// <summary>
+    /// Gets whether no value is stored, which is how a change records a null string or reference.
+    /// </summary>
+    public bool IsEmpty => _operations is null;
+
+    public Type? StoredType => _operations?.Type;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static InlineValueStorage Create<TValue>(TValue value)
     {
         // Memory-safety invariants: no references, neither TValue itself nor contained ones (the long
         // fields below are not GC-scanned, so a hidden reference could dangle), and SizeOf <= MaxSize
-        // (a larger write would overwrite the GC-tracked Type field at offset 16). Such types belong in
-        // BoxedValueHolder. The IsValueType leg is redundant with IsReferenceOrContainsReferences and
-        // kept for symmetry with the caller's predicate. All checks fold to JIT constants: valid types
+        // (a larger write would overwrite the GC-tracked operations field at offset 16). Such types
+        // belong in BoxedValueHolder. The IsValueType leg is redundant with IsReferenceOrContainsReferences
+        // and kept for symmetry with the caller's predicate. All checks fold to JIT constants: valid types
         // pay nothing, an invalid caller fails fast in every configuration.
         if (!typeof(TValue).IsValueType ||
             RuntimeHelpers.IsReferenceOrContainsReferences<TValue>() ||
@@ -39,7 +41,7 @@ internal readonly struct InlineValueStorage
         }
 
         var storage = new InlineValueStorage();
-        Unsafe.AsRef(in storage._storedType) = typeof(TValue);
+        Unsafe.AsRef(in storage._operations) = InlineValueOperations<TValue>.Instance;
         Unsafe.WriteUnaligned(ref Unsafe.As<long, byte>(ref Unsafe.AsRef(in storage._valueData0)), value);
         return storage;
     }
@@ -47,9 +49,15 @@ internal readonly struct InlineValueStorage
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool TryGetValue<TValue>(out TValue value)
     {
-        if (_storedType == typeof(TValue))
+        // Each stored type has exactly one operations instance, so identity is the type check. The legs before it
+        // repeat the guard of Create and fold to constants: a type Create rejects is never read, even from an empty
+        // storage, and a reference type does not touch the instance.
+        if (typeof(TValue).IsValueType &&
+            !RuntimeHelpers.IsReferenceOrContainsReferences<TValue>() &&
+            Unsafe.SizeOf<TValue>() <= MaxSize &&
+            ReferenceEquals(_operations, InlineValueOperations<TValue>.Instance))
         {
-            value = Unsafe.ReadUnaligned<TValue>(ref Unsafe.As<long, byte>(ref Unsafe.AsRef(in _valueData0)));
+            value = Read<TValue>();
             return true;
         }
 
@@ -57,61 +65,23 @@ internal readonly struct InlineValueStorage
         return false;
     }
 
+    /// <summary>
+    /// Reads the stored value as <typeparamref name="TValue"/>, which must be the stored type.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S1541", Justification = "The ordered primitive specializations keep common value boxing on a direct path before the cached delegate fallback.")]
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S3776", Justification = "The ordered primitive specializations keep common value boxing on a direct path before the cached delegate fallback.")]
-    public object? GetValueBoxed()
+    public TValue Read<TValue>()
     {
-        if (_storedType == null) return null;
-
-        // Fast path for common primitive types (no reflection)
-        ref var byteRef = ref Unsafe.As<long, byte>(ref Unsafe.AsRef(in _valueData0));
-
-        // 1-8 byte types
-        if (_storedType == typeof(int)) return Unsafe.ReadUnaligned<int>(ref byteRef);
-        if (_storedType == typeof(long)) return Unsafe.ReadUnaligned<long>(ref byteRef);
-        if (_storedType == typeof(double)) return Unsafe.ReadUnaligned<double>(ref byteRef);
-        if (_storedType == typeof(float)) return Unsafe.ReadUnaligned<float>(ref byteRef);
-        if (_storedType == typeof(bool)) return Unsafe.ReadUnaligned<bool>(ref byteRef);
-        if (_storedType == typeof(byte)) return Unsafe.ReadUnaligned<byte>(ref byteRef);
-        if (_storedType == typeof(short)) return Unsafe.ReadUnaligned<short>(ref byteRef);
-        if (_storedType == typeof(uint)) return Unsafe.ReadUnaligned<uint>(ref byteRef);
-        if (_storedType == typeof(ulong)) return Unsafe.ReadUnaligned<ulong>(ref byteRef);
-        if (_storedType == typeof(ushort)) return Unsafe.ReadUnaligned<ushort>(ref byteRef);
-        if (_storedType == typeof(sbyte)) return Unsafe.ReadUnaligned<sbyte>(ref byteRef);
-        if (_storedType == typeof(char)) return Unsafe.ReadUnaligned<char>(ref byteRef);
-        if (_storedType == typeof(DateTime)) return Unsafe.ReadUnaligned<DateTime>(ref byteRef);
-
-        // 9-16 byte types
-        if (_storedType == typeof(decimal)) return Unsafe.ReadUnaligned<decimal>(ref byteRef);
-        if (_storedType == typeof(DateTimeOffset)) return Unsafe.ReadUnaligned<DateTimeOffset>(ref byteRef);
-        if (_storedType == typeof(Guid)) return Unsafe.ReadUnaligned<Guid>(ref byteRef);
-        if (_storedType == typeof(TimeSpan)) return Unsafe.ReadUnaligned<TimeSpan>(ref byteRef);
-
-        // Custom structs: use cached delegate (first call creates delegate via reflection, subsequent calls are fast)
-        return BoxingDelegates.GetOrAdd(_storedType, CreateBoxingDelegateForType)(this);
+        Debug.Assert(ReferenceEquals(_operations, InlineValueOperations<TValue>.Instance), "The value is read as another type than the stored one.");
+        return Unsafe.ReadUnaligned<TValue>(ref Unsafe.As<long, byte>(ref Unsafe.AsRef(in _valueData0)));
     }
 
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S3011", Justification = "Reflection accesses this type's known private factory to cache a typed boxing delegate; it does not inspect third-party internals or accept an external member name.")]
-    private static Func<InlineValueStorage, object> CreateBoxingDelegateForType(Type type)
-    {
-        // Use reflection once to create a typed delegate, subsequent calls use the fast delegate
-        var method = typeof(InlineValueStorage)
-            .GetMethod(nameof(CreateBoxingDelegate), BindingFlags.NonPublic | BindingFlags.Static)!
-            .MakeGenericMethod(type);
+    public object? GetValueBoxed() => _operations?.Box(in this);
 
-        return (Func<InlineValueStorage, object>)method.Invoke(null, null)!;
-    }
-
-    private static Func<InlineValueStorage, object> CreateBoxingDelegate<T>()
-    {
-        // This delegate is compiled once and reused - fast invocation after first call
-        return static storage =>
-        {
-            storage.TryGetValue<T>(out var value);
-            return value!;
-        };
-    }
+    /// <summary>
+    /// Returns <c>object.Equals(value, GetValueBoxed())</c>, boxing the stored value only when the result could differ
+    /// otherwise.
+    /// </summary>
+    public bool ValueEquals(object? value) => _operations?.ValueEquals(in this, value) ?? value is null;
 
     // Kept out of Create so the (JIT-eliminated) guard does not bloat its inlined body.
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -119,5 +89,5 @@ internal readonly struct InlineValueStorage
         throw new InvalidOperationException(
             $"InlineValueStorage cannot store '{typeof(TValue)}': it is a reference type, contains " +
             $"references (which the GC cannot track inside inline storage), or exceeds {MaxSize} bytes " +
-            "(which would overwrite the adjacent type field). Route this type to BoxedValueHolder.");
+            "(which would overwrite the adjacent operations field). Route this type to BoxedValueHolder.");
 }

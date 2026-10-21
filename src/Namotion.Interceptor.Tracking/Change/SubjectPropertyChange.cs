@@ -172,6 +172,13 @@ public readonly struct SubjectPropertyChange : IEquatable<SubjectPropertyChange>
     public bool TryGetOldValue<TValue>(out TValue value) =>
         TryGetValue(_oldValueStorage, _oldBoxedHolder, out value);
 
+    /// <summary>
+    /// Returns <c>object.Equals(value, GetOldValue&lt;object?&gt;())</c> without boxing an inline-stored old value of
+    /// a common value type.
+    /// </summary>
+    internal bool OldValueEquals(object? value) =>
+        _oldBoxedHolder is null ? _oldValueStorage.ValueEquals(value) : Equals(value, GetOldValue<object?>());
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool TryGetNewValue<TValue>(out TValue value) =>
         TryGetValue(_newValueStorage, _newBoxedHolder, out value);
@@ -232,7 +239,7 @@ public readonly struct SubjectPropertyChange : IEquatable<SubjectPropertyChange>
         if (typeof(TValue) == typeof(object))
         {
             // If no inline storage was used, this was a null string/reference
-            if (storage.StoredType == null)
+            if (storage.IsEmpty)
             {
                 value = default!;
                 return true;
@@ -242,7 +249,7 @@ public readonly struct SubjectPropertyChange : IEquatable<SubjectPropertyChange>
         }
 
         // Handle null strings: no inline storage was used
-        if (typeof(TValue) == typeof(string) && storage.StoredType == null)
+        if (typeof(TValue) == typeof(string) && storage.IsEmpty)
         {
             value = default!;
             return true;
