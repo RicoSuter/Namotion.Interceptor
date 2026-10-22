@@ -233,4 +233,23 @@ public class MarkdownStructureEditTests
         Assert.Same(first, page.Children["TestLeaf_0"]);
         Assert.Equal("b", ((TestLeaf)first).Name);
     }
+
+    [Fact]
+    public async Task WhenTheFileChangedSinceThePageWasRead_ThenTheStructureEditIsRefusedAndThePageReadsTheFile()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var page = await fixture.AddPageAsync("page.md", PanelPage);
+        var changed = PanelPage + "\nexternal\n";
+        await fixture.WriteAsync("page.md", changed);
+
+        // Act
+        var result = await page.DeleteBlockAsync(page.Children["leaf"], CancellationToken.None);
+
+        // Assert
+        Assert.False(result.IsWritten);
+        Assert.Equal("The page changed while it was edited. Try again.", result.Refusal);
+        Assert.Equal(changed, await fixture.ReadAsync("page.md"));
+        Assert.Equal(changed, page.Content);
+    }
 }

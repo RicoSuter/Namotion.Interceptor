@@ -499,11 +499,12 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     }
 
     /// <summary>Deletes the block of <paramref name="subject"/> with everything in it and saves the page.</summary>
+    /// <remarks>Refused when the file differs from the text the page last read; the page then reads it.</remarks>
     /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage or from within a write of this page.</exception>
     public Task<MarkdownEditResult> DeleteBlockAsync(IInterceptorSubject subject, CancellationToken cancellationToken) =>
         EditStructureAsync(
-            (page, subjects) => FindOwnBlock(page, subjects, subject) is { } block
-                ? (MarkdownPageOperations.TryRemove(page, subjects, block, out var refusal), refusal)
+            snapshot => FindOwnBlock(snapshot.Page!, snapshot.BlockSubjects, subject) is { } block
+                ? (MarkdownPageOperations.TryRemove(snapshot.Page!, snapshot.BlockSubjects, block, out var refusal), refusal)
                 : (null, NoBlockRefusal),
             cancellationToken);
 
@@ -511,11 +512,12 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// Swaps the block of <paramref name="subject"/> with the block of the same slot before it (<paramref name="direction"/>
     /// -1) or after it (1) and saves the page. The text between the two blocks stays in place.
     /// </summary>
+    /// <remarks>Refused when the file differs from the text the page last read; the page then reads it.</remarks>
     /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage or from within a write of this page.</exception>
     public Task<MarkdownEditResult> MoveBlockAsync(IInterceptorSubject subject, int direction, CancellationToken cancellationToken) =>
         EditStructureAsync(
-            (page, subjects) => FindOwnBlock(page, subjects, subject) is { } block
-                ? (MarkdownPageOperations.TryMove(page, subjects, block, direction, out var refusal), refusal)
+            snapshot => FindOwnBlock(snapshot.Page!, snapshot.BlockSubjects, subject) is { } block
+                ? (MarkdownPageOperations.TryMove(snapshot.Page!, snapshot.BlockSubjects, block, direction, out var refusal), refusal)
                 : (null, NoBlockRefusal),
             cancellationToken);
 
@@ -524,6 +526,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// into <paramref name="content"/>: this page or a fragment of one of its blocks. It goes before the block of
     /// <paramref name="before"/>, or after the content when that is null. The page then creates its own subject for it.
     /// </summary>
+    /// <remarks>Refused when the file differs from the text the page last read; the page then reads it.</remarks>
     /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage or from within a write of this page.</exception>
     public Task<MarkdownEditResult> InsertWidgetAsync(
         IInterceptorSubject content, IInterceptorSubject? before, IInterceptorSubject widget, string? name, CancellationToken cancellationToken)
@@ -531,8 +534,10 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         var typeName = widget.GetType().FullName!;
         var configurationJson = MarkdownBlockConfiguration.Serialize(_serializer, widget, block: null);
         return EditStructureAsync(
-            (page, subjects) =>
+            snapshot =>
             {
+                var page = snapshot.Page!;
+                var subjects = snapshot.BlockSubjects;
                 MarkdownBlock? owner = null;
                 if (!ReferenceEquals(content, this) &&
                     (owner = MarkdownPageOperations.FindContentBlock(page, subjects, content)) is null)
@@ -555,14 +560,17 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// Appends a block to the list slot <paramref name="slotName"/> of the block of <paramref name="owner"/>: with the
     /// configuration of <paramref name="item"/>, or empty for a slot whose blocks hold page content (null item).
     /// </summary>
+    /// <remarks>Refused when the file differs from the text the page last read; the page then reads it.</remarks>
     /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage or from within a write of this page.</exception>
     public Task<MarkdownEditResult> AddSlotItemAsync(
         IInterceptorSubject owner, string slotName, IInterceptorSubject? item, CancellationToken cancellationToken)
     {
         var configurationJson = item is null ? "{}" : MarkdownBlockConfiguration.Serialize(_serializer, item, block: null);
         return EditStructureAsync(
-            (page, subjects) =>
+            snapshot =>
             {
+                var page = snapshot.Page!;
+                var subjects = snapshot.BlockSubjects;
                 if (FindOwnBlock(page, subjects, owner) is not { } block)
                 {
                     return (null, NoBlockRefusal);
@@ -632,7 +640,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     }
 
     private async Task<MarkdownEditResult> EditStructureAsync(
-        Func<MarkdownPage, IReadOnlyDictionary<int, IInterceptorSubject>, (MarkdownStructureChange? Change, string? Refusal)> operation,
+        Func<MarkdownParseResult, (MarkdownStructureChange? Change, string? Refusal)> operation,
         CancellationToken cancellationToken)
     {
         EnsureNotWithinWrite();
@@ -646,8 +654,17 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
                 return MarkdownEditResult.Refused("The page has not been read yet.");
             }
 
+            // The new text is computed from the snapshot, which lags behind a change of the file until its event arrives,
+            // and would undo that change. The page is read now, so that a second try works on the file.
+            if (await ReadSourceUnlockedAsync(cancellationToken) != page.Source)
+            {
+                _parser.LogRefusedWrite(FullPath, StructureChangedRefusal);
+                await ReloadAfterRefusalAsync(cancellationToken);
+                return MarkdownEditResult.Refused(StructureChangedRefusal);
+            }
+
             // The operations change only text, so a refusal leaves the graph as the snapshot has it.
-            var (change, refusal) = operation(page, snapshot.BlockSubjects);
+            var (change, refusal) = operation(snapshot);
             if (change is null)
             {
                 _parser.LogRefusedWrite(FullPath, refusal!);
@@ -702,19 +719,24 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             // their text again, and the blocks around it are read in full so that the reload reaches them.
             ForgetAppliedConfigurations(page.AllBlocks[blockIndex], snapshot.BlockSubjects);
             ForgetAppliedBlocksAround(page, page.AllBlocks[blockIndex], snapshot.BlockSubjects);
-            try
-            {
-                await OnFileChangedAsync(cancellationToken);
-            }
-            catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
-            {
-                _parser.LogFailedReload(FullPath, exception);
-            }
-
+            await ReloadAfterRefusalAsync(cancellationToken);
             return false;
         }
 
         return await PublishAndWriteAsync(snapshot, write, page.AllBlocks[blockIndex], ConfigurationChangedRefusal) is null;
+    }
+
+    // Under _writeLock, after a refusal. A failed read is logged, and the next pass of the storage reads the file again.
+    private async Task ReloadAfterRefusalAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await OnFileChangedAsync(cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            _parser.LogFailedReload(FullPath, exception);
+        }
     }
 
     // Under _writeLock: publishes the write as the snapshot that follows `snapshot` and writes its text. Returns why
