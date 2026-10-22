@@ -406,8 +406,6 @@ namespace HomeBlaze.Storage.Pages
     }
     public static class MarkdownExpressions
     {
-        public const string DisplayPipe = "display";
-        public const string RawPipe = "raw";
         public static HomeBlaze.Services.Expressions.ParsedExpression? Parse(string text, out string? error) { }
     }
     [Namotion.Interceptor.Attributes.InterceptorSubject]

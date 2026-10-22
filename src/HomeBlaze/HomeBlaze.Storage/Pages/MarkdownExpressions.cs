@@ -11,10 +11,10 @@ namespace HomeBlaze.Storage.Pages;
 public static class MarkdownExpressions
 {
     /// <summary>The pipe that formats the value as the property panel shows it. It is the default.</summary>
-    public const string DisplayPipe = "display";
+    internal const string DisplayPipe = "display";
 
     /// <summary>The pipe that writes the value the same way on every system.</summary>
-    public const string RawPipe = "raw";
+    internal const string RawPipe = "raw";
 
     /// <summary>
     /// Parses the text, or returns null with the message to show in place of the value. A <c>\|</c>, which a table cell
