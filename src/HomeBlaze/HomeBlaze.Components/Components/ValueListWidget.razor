@@ -1,6 +1,6 @@
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(ValueList))]
 @implements ISubjectComponent
-@implements IDisposable
+@inherits SelectionContainingWidgetBase
 @inject SubjectPathResolver PathResolver
 @inject ITimeZoneDisplay TimeZone
 
@@ -34,7 +34,7 @@
             <SubjectComponent @key="row"
                               Subject="@row"
                               Type="SubjectComponentType.Widget"
-                              IsSelectionEnabled="@_containsSelection"
+                              IsSelectionEnabled="@ContainsSelection"
                               AdditionalParameters="@(new Dictionary<string, object?> { ["Path"] = path, ["Reading"] = reading, ["Icon"] = icon, ["AnyIcon"] = anyIcon })" />
         }
         else
@@ -43,7 +43,7 @@
         }
     }
 </MudList>
-@if (_containsSelection && StructureEditor is { } editor && Subject is ValueList list && FindValueSlot(editor, list) is { } slot)
+@if (ContainsSelection && StructureEditor is { } editor && Subject is ValueList list && PageListSlot.Find(editor.GetListSlots(list), "Value") is { } slot)
 {
     @* Shown while the list or one of its rows is selected, and it takes the pointer in both cases. *@
     <MudButton Size="Size.Small"
@@ -57,70 +57,6 @@
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
 
-    [CascadingParameter(Name = "IsEditing")]
-    public bool IsEditing { get; set; }
-
-    [CascadingParameter]
-    public WidgetSelection? Selection { get; set; }
-
     [CascadingParameter]
     public PageStructureEditor? StructureEditor { get; set; }
-
-    [CascadingParameter(Name = "ParentSubjectComponent")]
-    public SubjectComponent? Owner { get; set; }
-
-    private WidgetSelection? _subscribedSelection;
-    private bool _containsSelection;
-
-    protected override void OnParametersSet()
-    {
-        // The rows and the button follow the selection, which changes without new parameters.
-        var selection = IsEditing ? Selection : null;
-        if (!ReferenceEquals(selection, _subscribedSelection))
-        {
-            Unsubscribe();
-            _subscribedSelection = selection;
-            if (selection is not null)
-            {
-                selection.Changed += OnSelectionChanged;
-            }
-        }
-
-        _containsSelection = selection is not null && Owner?.ContainsSelection == true;
-    }
-
-    private void OnSelectionChanged()
-    {
-        // Every list of the page is notified, and only one that gains or loses the selection renders again.
-        var containsSelection = Owner?.ContainsSelection == true;
-        if (containsSelection != _containsSelection)
-        {
-            _containsSelection = containsSelection;
-            _ = InvokeAsync(StateHasChanged);
-        }
-    }
-
-    private static PageListSlot? FindValueSlot(PageStructureEditor editor, ValueList list)
-    {
-        foreach (var slot in editor.GetListSlots(list))
-        {
-            if (slot.Name == "Value")
-            {
-                return slot;
-            }
-        }
-
-        return null;
-    }
-
-    private void Unsubscribe()
-    {
-        if (_subscribedSelection is not null)
-        {
-            _subscribedSelection.Changed -= OnSelectionChanged;
-            _subscribedSelection = null;
-        }
-    }
-
-    public void Dispose() => Unsubscribe();
 }

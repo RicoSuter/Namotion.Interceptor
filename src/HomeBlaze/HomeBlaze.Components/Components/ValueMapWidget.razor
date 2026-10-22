@@ -1,6 +1,6 @@
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(ValueMap))]
 @implements ISubjectComponent
-@implements IDisposable
+@inherits SelectionContainingWidgetBase
 
 @* A map shows nothing on a viewed page. Edited inline, it is a chip, and while it or one of its cases is selected,
    the list of its cases. *@
@@ -11,7 +11,7 @@
         <span>@(StructureEditor?.GetBlockName(map) ?? nameof(ValueMap))</span>
     </div>
 
-    @if (_isShowingCases)
+    @if (ContainsSelection)
     {
         <div class="value-map-cases" data-testid="value-map-cases">
             @foreach (var mapCase in map.Cases)
@@ -19,7 +19,7 @@
                 <SubjectComponent @key="mapCase" Subject="@mapCase" Type="SubjectComponentType.Widget" />
             }
 
-            @if (StructureEditor is { } editor && FindCaseSlot(editor, map) is { } slot)
+            @if (StructureEditor is { } editor && PageListSlot.Find(editor.GetListSlots(map), "Case") is { } slot)
             {
                 <MudButton Size="Size.Small"
                            StartIcon="@Icons.Material.Filled.Add"
@@ -35,70 +35,6 @@
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
 
-    [CascadingParameter(Name = "IsEditing")]
-    public bool IsEditing { get; set; }
-
-    [CascadingParameter]
-    public WidgetSelection? Selection { get; set; }
-
     [CascadingParameter]
     public PageStructureEditor? StructureEditor { get; set; }
-
-    [CascadingParameter(Name = "ParentSubjectComponent")]
-    public SubjectComponent? Owner { get; set; }
-
-    private WidgetSelection? _subscribedSelection;
-    private bool _isShowingCases;
-
-    protected override void OnParametersSet()
-    {
-        // The list follows the selection, which changes without new parameters.
-        var selection = IsEditing ? Selection : null;
-        if (!ReferenceEquals(selection, _subscribedSelection))
-        {
-            Unsubscribe();
-            _subscribedSelection = selection;
-            if (selection is not null)
-            {
-                selection.Changed += OnSelectionChanged;
-            }
-        }
-
-        _isShowingCases = selection is not null && Owner?.ContainsSelection == true;
-    }
-
-    private void OnSelectionChanged()
-    {
-        // Every map of the page is notified, and only one whose list opens or closes renders again.
-        var isShowingCases = Owner?.ContainsSelection == true;
-        if (isShowingCases != _isShowingCases)
-        {
-            _isShowingCases = isShowingCases;
-            _ = InvokeAsync(StateHasChanged);
-        }
-    }
-
-    private static PageListSlot? FindCaseSlot(PageStructureEditor editor, ValueMap map)
-    {
-        foreach (var slot in editor.GetListSlots(map))
-        {
-            if (slot.Name == "Case")
-            {
-                return slot;
-            }
-        }
-
-        return null;
-    }
-
-    private void Unsubscribe()
-    {
-        if (_subscribedSelection is not null)
-        {
-            _subscribedSelection.Changed -= OnSelectionChanged;
-            _subscribedSelection = null;
-        }
-    }
-
-    public void Dispose() => Unsubscribe();
 }

@@ -1,6 +1,6 @@
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(Responsive))]
 @implements ISubjectComponent
-@implements IDisposable
+@inherits SelectionContainingWidgetBase
 
 @{
     var responsive = Subject as Responsive;
@@ -12,7 +12,7 @@
     if (Responsive.TryGetCssClasses(responsive.From, responsive.To, out var cssClasses, out var error))
     {
         var isEditingInline = IsEditing && Selection is not null;
-        var isPreview = isEditingInline && _containsSelection;
+        var isPreview = isEditingInline && ContainsSelection;
         @if (isEditingInline && !isPreview && Responsive.GetHiddenCssClasses(responsive.From, responsive.To) is { } hiddenClasses)
         {
             @* Edited inline, a chip stands where the content is hidden, and selecting it shows the content. *@
@@ -37,55 +37,4 @@
 @code {
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
-
-    [CascadingParameter(Name = "IsEditing")]
-    public bool IsEditing { get; set; }
-
-    [CascadingParameter]
-    public WidgetSelection? Selection { get; set; }
-
-    [CascadingParameter(Name = "ParentSubjectComponent")]
-    public SubjectComponent? Owner { get; set; }
-
-    private WidgetSelection? _subscribedSelection;
-    private bool _containsSelection;
-
-    protected override void OnParametersSet()
-    {
-        // The preview follows the selection, which changes without new parameters.
-        var selection = IsEditing ? Selection : null;
-        if (!ReferenceEquals(selection, _subscribedSelection))
-        {
-            Unsubscribe();
-            _subscribedSelection = selection;
-            if (selection is not null)
-            {
-                selection.Changed += OnSelectionChanged;
-            }
-        }
-
-        _containsSelection = selection is not null && Owner?.ContainsSelection == true;
-    }
-
-    private void OnSelectionChanged()
-    {
-        // Every Responsive block of the page is notified, and only one whose preview starts or ends renders again.
-        var containsSelection = Owner?.ContainsSelection == true;
-        if (containsSelection != _containsSelection)
-        {
-            _containsSelection = containsSelection;
-            _ = InvokeAsync(StateHasChanged);
-        }
-    }
-
-    private void Unsubscribe()
-    {
-        if (_subscribedSelection is not null)
-        {
-            _subscribedSelection.Changed -= OnSelectionChanged;
-            _subscribedSelection = null;
-        }
-    }
-
-    public void Dispose() => Unsubscribe();
 }

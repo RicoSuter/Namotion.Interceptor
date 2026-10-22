@@ -484,6 +484,7 @@ namespace HomeBlaze.Components
         public PageListSlot(string Name, System.Type? ItemType) { }
         public System.Type? ItemType { get; init; }
         public string Name { get; init; }
+        public static HomeBlaze.Components.PageListSlot? Find(System.Collections.Generic.IReadOnlyList<HomeBlaze.Components.PageListSlot> slots, string name) { }
     }
     public abstract class PageStructureEditor
     {
@@ -586,6 +587,19 @@ namespace HomeBlaze.Components
         protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
         protected void RaisePropertyChanged(string propertyName) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    public abstract class SelectionContainingWidgetBase : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
+    {
+        protected SelectionContainingWidgetBase() { }
+        protected bool ContainsSelection { get; }
+        [Microsoft.AspNetCore.Components.CascadingParameter(Name="IsEditing")]
+        public bool IsEditing { get; set; }
+        [Microsoft.AspNetCore.Components.CascadingParameter(Name="ParentSubjectComponent")]
+        public HomeBlaze.Components.SubjectComponent? Owner { get; set; }
+        [Microsoft.AspNetCore.Components.CascadingParameter]
+        public HomeBlaze.Components.WidgetSelection? Selection { get; set; }
+        public void Dispose() { }
+        protected override void OnParametersSet() { }
     }
     [HomeBlaze.Abstractions.Attributes.SubjectIcon("Tune")]
     [Namotion.Interceptor.Attributes.InterceptorSubject]
@@ -1303,20 +1317,12 @@ namespace HomeBlaze.Components.Components
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
     }
     [HomeBlaze.Components.Abstractions.Attributes.SubjectComponent(HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType.Widget, typeof(HomeBlaze.Components.Responsive?))]
-    public class ResponsiveWidget : Microsoft.AspNetCore.Components.ComponentBase, HomeBlaze.Components.Abstractions.ISubjectComponent, System.IDisposable
+    public class ResponsiveWidget : HomeBlaze.Components.SelectionContainingWidgetBase, HomeBlaze.Components.Abstractions.ISubjectComponent
     {
         public ResponsiveWidget() { }
-        [Microsoft.AspNetCore.Components.CascadingParameter(Name="IsEditing")]
-        public bool IsEditing { get; set; }
-        [Microsoft.AspNetCore.Components.CascadingParameter(Name="ParentSubjectComponent")]
-        public HomeBlaze.Components.SubjectComponent? Owner { get; set; }
-        [Microsoft.AspNetCore.Components.CascadingParameter]
-        public HomeBlaze.Components.WidgetSelection? Selection { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public Namotion.Interceptor.IInterceptorSubject? Subject { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
-        public void Dispose() { }
-        protected override void OnParametersSet() { }
     }
     public class SelectView : Microsoft.AspNetCore.Components.ComponentBase
     {
@@ -1488,23 +1494,15 @@ namespace HomeBlaze.Components.Components
         public HomeBlaze.Components.ValueRow Row { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
     }
-    [HomeBlaze.Components.Abstractions.Attributes.SubjectComponent(HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType.Widget, typeof(HomeBlaze.Components.ValueList?))]
-    public class ValueListWidget : Microsoft.AspNetCore.Components.ComponentBase, HomeBlaze.Components.Abstractions.ISubjectComponent, System.IDisposable
+    [HomeBlaze.Components.Abstractions.Attributes.SubjectComponent(HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType.Widget, typeof(HomeBlaze.Components.ValueList))]
+    public class ValueListWidget : HomeBlaze.Components.SelectionContainingWidgetBase, HomeBlaze.Components.Abstractions.ISubjectComponent
     {
         public ValueListWidget() { }
-        [Microsoft.AspNetCore.Components.CascadingParameter(Name="IsEditing")]
-        public bool IsEditing { get; set; }
-        [Microsoft.AspNetCore.Components.CascadingParameter(Name="ParentSubjectComponent")]
-        public HomeBlaze.Components.SubjectComponent? Owner { get; set; }
-        [Microsoft.AspNetCore.Components.CascadingParameter]
-        public HomeBlaze.Components.WidgetSelection? Selection { get; set; }
         [Microsoft.AspNetCore.Components.CascadingParameter]
         public HomeBlaze.Components.PageStructureEditor? StructureEditor { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public Namotion.Interceptor.IInterceptorSubject? Subject { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
-        public void Dispose() { }
-        protected override void OnParametersSet() { }
     }
     [HomeBlaze.Components.Abstractions.Attributes.SubjectComponent(HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType.Widget, typeof(HomeBlaze.Components.ValueMapCase?))]
     public class ValueMapCaseWidget : Microsoft.AspNetCore.Components.ComponentBase, HomeBlaze.Components.Abstractions.ISubjectComponent
@@ -1515,22 +1513,14 @@ namespace HomeBlaze.Components.Components
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
     }
     [HomeBlaze.Components.Abstractions.Attributes.SubjectComponent(HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType.Widget, typeof(HomeBlaze.Components.ValueMap?))]
-    public class ValueMapWidget : Microsoft.AspNetCore.Components.ComponentBase, HomeBlaze.Components.Abstractions.ISubjectComponent, System.IDisposable
+    public class ValueMapWidget : HomeBlaze.Components.SelectionContainingWidgetBase, HomeBlaze.Components.Abstractions.ISubjectComponent
     {
         public ValueMapWidget() { }
-        [Microsoft.AspNetCore.Components.CascadingParameter(Name="IsEditing")]
-        public bool IsEditing { get; set; }
-        [Microsoft.AspNetCore.Components.CascadingParameter(Name="ParentSubjectComponent")]
-        public HomeBlaze.Components.SubjectComponent? Owner { get; set; }
-        [Microsoft.AspNetCore.Components.CascadingParameter]
-        public HomeBlaze.Components.WidgetSelection? Selection { get; set; }
         [Microsoft.AspNetCore.Components.CascadingParameter]
         public HomeBlaze.Components.PageStructureEditor? StructureEditor { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public Namotion.Interceptor.IInterceptorSubject? Subject { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
-        public void Dispose() { }
-        protected override void OnParametersSet() { }
     }
     [HomeBlaze.Components.Abstractions.Attributes.SubjectComponent(HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType.Widget, typeof(HomeBlaze.Components.ValueRow?))]
     public class ValueRowWidget : Microsoft.AspNetCore.Components.ComponentBase, HomeBlaze.Components.Abstractions.ISubjectComponent
