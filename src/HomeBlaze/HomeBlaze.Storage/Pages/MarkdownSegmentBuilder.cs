@@ -59,17 +59,29 @@ public static partial class MarkdownSegmentBuilder
     /// The search reads the text and not the rendered page, so it also returns an expression that
     /// <see cref="Build"/> does not turn into a segment: one in the front matter, in the content of an invalid
     /// block or on the head line of a block, and one whose braces enclose markdown markup or the border of a block.
-    /// An expression with a character reference in it, such as <c>&amp;amp;</c>, is returned as written. The segment
-    /// of an expression in running text keeps it as written too, while the segment of an expression in HTML that the
-    /// page writes has the character.
+    /// An expression with a character reference in it, such as <c>&amp;amp;</c>, is returned as written, except one
+    /// in HTML that the page writes: its text has the character, like its segment, and one whose character
+    /// is a brace is skipped. The segment of an expression in running text keeps it as written.
     /// </remarks>
     public static IEnumerable<MarkdownExpression> FindExpressions(MarkdownPage page)
     {
         var source = page.Source;
         foreach (Match match in SourceExpressionRegex().Matches(HideBracesInCode(page)))
         {
-            var text = match.Groups[1];
-            yield return new MarkdownExpression(new MarkdownSpan(match.Index, match.Length), source.Substring(text.Index, text.Length));
+            var group = match.Groups[1];
+            var text = source.Substring(group.Index, group.Length);
+
+            // Raw HTML is HTML to the page, which reads a character reference in it, so a '<' is written as &lt;.
+            if (page.IsInsideRawHtml(match.Index))
+            {
+                text = WebUtility.HtmlDecode(text);
+                if (text.AsSpan().IndexOfAny(ExcludedFromText) >= 0)
+                {
+                    continue;
+                }
+            }
+
+            yield return new MarkdownExpression(new MarkdownSpan(match.Index, match.Length), text);
         }
     }
 

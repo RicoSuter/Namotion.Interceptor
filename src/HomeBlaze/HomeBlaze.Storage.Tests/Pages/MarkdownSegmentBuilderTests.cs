@@ -678,6 +678,8 @@ public class MarkdownSegmentBuilderTests
     [InlineData("""Value {{ Items["a"]/B }} and {{ A&B/C }} now""")]
     [InlineData("Value {{ a < b }} now and {{ c/D }}")]
     [InlineData("Value {{ a&b/C }} now")]
+    [InlineData("<div>{{ a/B &lt; 5 }}</div>")]
+    [InlineData("Value {{ a/B < 5 }} and <b title=\"{{ c/D &gt; 1 }}\">x</b>")]
     [InlineData("Nothing to see here")]
     public void WhenPageIsRendered_ThenItsExpressionsAreTheOnesFoundInItsText(string source)
     {

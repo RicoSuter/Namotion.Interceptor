@@ -193,6 +193,22 @@ public class MarkdownExpressionFormatTests
     }
 
     [Theory]
+    [InlineData("Is on: {{ meter/Power > 1000 }}", "Is on: Yes")]
+    [InlineData("<div>{{ meter/Power &lt; 5000 }}</div>", "<div>Yes</div>")]
+    [InlineData("<div>{{ meter/Power &gt; 5000 }}</div>", "<div>No</div>")]
+    public async Task WhenEvaluatedContentHasAConditionInTextOrHtml_ThenItIsEvaluated(string text, string expected)
+    {
+        // Arrange
+        var page = await AddPageAsync(text);
+
+        // Act
+        var evaluated = page.ReadEvaluatedContent();
+
+        // Assert
+        Assert.EndsWith(expected, evaluated!.TrimEnd());
+    }
+
+    [Theory]
     [InlineData("{{ meter/Power > 1000 }}", "Yes")]
     [InlineData("{{ meter/IsOn and meter/Power > 2000 }}", "No")]
     [InlineData("{{ meter/IsOn and meter/Power < 1000 }}", "No")]
