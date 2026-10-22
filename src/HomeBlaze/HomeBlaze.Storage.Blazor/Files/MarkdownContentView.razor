@@ -166,12 +166,12 @@ else
         }
 
         _textParameters ??= [];
-        if (_textParameters.TryGetValue(segment, out var parameters) && string.Equals((string?)parameters["Html"], html, StringComparison.Ordinal))
+        if (_textParameters.TryGetValue(segment, out var parameters) && string.Equals((string?)parameters[ITextBlockWidget.HtmlParameterName], html, StringComparison.Ordinal))
         {
             return parameters;
         }
 
-        parameters = new Dictionary<string, object?> { ["Html"] = html };
+        parameters = new Dictionary<string, object?> { [ITextBlockWidget.HtmlParameterName] = html };
         _textParameters[segment] = parameters;
         return parameters;
     }

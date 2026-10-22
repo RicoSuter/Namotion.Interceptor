@@ -311,12 +311,23 @@
     // Whether the widget of the subject is a block of text of its page, which can be selected without a configuration.
     private bool _isTextBlock;
 
+    // The kind and the first words of a block of text, from its markup, see ITextBlockWidget.
+    private string? _textBlockName;
+
     // Set first in Dispose: a render disposes a widget before the widgets inside it.
     private bool _isDisposed;
 
-    /// <summary>Gets the name that assistive technology reads for the widget: its title, its path or the name of its type.</summary>
+    /// <summary>
+    /// Gets the name that assistive technology reads for the widget: the kind and the first words of a block of text, or its
+    /// title, its path or the name of its type.
+    /// </summary>
     public string GetAccessibleName()
     {
+        if (_textBlockName is { } textBlockName)
+        {
+            return textBlockName;
+        }
+
         if (SubjectNames.TryGetTitle(Subject!, _labelProperty) is { } title)
         {
             return title;
@@ -521,6 +532,9 @@
                                typeof(ITextBlockWidget).IsAssignableFrom(componentType);
             }
 
+            _textBlockName = _isTextBlock && AdditionalParameters?.GetValueOrDefault(ITextBlockWidget.HtmlParameterName) is string html
+                ? TextBlockNames.Describe(html)
+                : null;
             _previousSubject = Subject;
             _previousAdditionalParameters = AdditionalParameters;
             _cachedParameters = BuildComponentParameters();

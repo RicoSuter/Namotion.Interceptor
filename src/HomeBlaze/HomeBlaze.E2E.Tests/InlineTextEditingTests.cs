@@ -776,6 +776,17 @@ public class InlineTextEditingTests
     }
 
     [Fact]
+    public async Task WhenTextBlocksAreSelectable_ThenEachIsNamedByItsKindAndItsFirstWords()
+    {
+        // Act
+        var page = await OpenPageInInlineModeAsync();
+
+        // Assert
+        await Assertions.Expect(GetTextWrapper(page, "Text Editing Demo")).ToHaveAttributeAsync("aria-label", "Heading: Text Editing Demo", new() { Timeout = Timeout });
+        await Assertions.Expect(GetTextWrapper(page, "First paragraph")).ToHaveAttributeAsync("aria-label", "Paragraph: First paragraph on the page.");
+    }
+
+    [Fact]
     public async Task WhenTheBodyTextOfACardIsClickedFirst_ThenTheCardIsSelected()
     {
         // Arrange

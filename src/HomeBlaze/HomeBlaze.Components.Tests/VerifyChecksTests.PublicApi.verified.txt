@@ -389,7 +389,9 @@ namespace HomeBlaze.Components
     {
         System.Threading.Tasks.Task<bool> RevealAsync(Namotion.Interceptor.IInterceptorSubject subject);
     }
-    public interface ITextBlockWidget { }
+    public interface ITextBlockWidget
+    {
+    }
     [HomeBlaze.Abstractions.Attributes.PageLayout]
     [HomeBlaze.Abstractions.Attributes.SubjectIcon("Lightbulb")]
     [Namotion.Interceptor.Attributes.InterceptorSubject]
