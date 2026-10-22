@@ -90,7 +90,7 @@ The selection outline, the keyboard handling, the action bar and the chain to th
 
 ### Chips of invisible widgets
 
-A widget component declares that it renders nothing. Today only `ValueMapWidget` does. In edit mode `MarkdownContentView` leaves such blocks out of the flow and renders them as a chip stack at the top right of its content area, whose element gets `position: relative` in edit mode. In view mode nothing changes. A selected ValueMap chip opens the panel of its cases.
+A widget component declares that it renders nothing. Today only `ValueMapWidget` does. In edit mode `MarkdownContentView` leaves such blocks out of the flow and renders them as a chip that floats right at the top right of its content area, so that content flows beside it. In view mode nothing changes. A selected ValueMap chip opens the overlay with its cases below the chip.
 
 ### Collapsed Responsive content
 
@@ -98,11 +98,11 @@ In edit mode `ResponsiveWidget` renders a chip in place with the inverse display
 
 ### Rows and cases
 
-`ValueListRow` renders inside a `SelectableFrame` while its list or one of its rows is selected. The ValueMap panel lists the cases of the map, each inside a `SelectableFrame`.
+`ValueListRow` renders inside a `SelectableFrame` while its list or one of its rows is selected. The case list of the ValueMap lists the cases of the map, each inside a `SelectableFrame`.
 
 ### Insert points
 
-`MarkdownContentView` renders a plus line between its blocks, and before the first and after the last, when its content area is the current scope. A click opens `SubjectSetupDialog` with any widget type and inserts the result after the block above the line. The selected container shows an "Add ..." button for each of its list slots, which opens the dialog with the type of the slot directly.
+`MarkdownContentView` renders a plus line between its blocks, and before the first and after the last, in the content where the selection is: the page while nothing is selected, otherwise the content of the selected widget and the content that directly holds it. The content of a grid cell and of a canvas node has none. A click opens `SubjectSetupDialog` with any widget type and inserts the result after the block above the line. The selected container shows an "Add ..." button for each of its list slots, which opens the dialog with the type of the slot directly.
 
 ### Split preview
 
@@ -131,8 +131,7 @@ The UI shows the reason as a warning snackbar, for example "The page changed whi
 - **`MarkdownPageOperations`**, unit tests in HomeBlaze.Storage.Tests, text in and text out in the style of `MarkdownBlockWriterTests`: remove, move and insert for top-level blocks, blocks in content slots (card body, tab), list slots (value rows, cases, tabs, flow items), blocks without closing lines, CRLF text and fences of several depths, and every refusal.
 - **`MarkdownFile.EditAsync`**, in HomeBlaze.Storage.Tests: a stale snapshot is refused, an edit reloads with the right subjects, and the configuration write keeps its behavior. The existing reconciler and write tests are the regression net.
 - **Decorations**: `BlockOutlineDecorations` writes the name range for `Tab`, `Tab#cooling` and a head line with arguments.
-- **E2E**, in HomeBlaze.E2E.Tests, for the behavior of the components, since the repository has no bUnit: the action bar shows move and delete only for blocks that allow them; ValueMap is a chip in Inline mode and nothing in View mode; the Responsive chip shows only where the content is hidden; the insert lines follow the scope of the selection; the Split preview selects nothing.
-- **E2E**, in HomeBlaze.E2E.Tests on a seeded page: delete a block with its confirmation, move a ValueList row, add a ValueMap case in the panel, insert a widget between two blocks, and in Split mode reveal a block with a click without selecting it.
+- **E2E**, in HomeBlaze.E2E.Tests, for the behavior of the components, since the repository has no bUnit: the action bar shows move and delete only for blocks that allow them; ValueMap is a chip in Inline mode and nothing in View mode; the Responsive chip shows only where the content is hidden; the insert lines follow the scope of the selection; the Split preview selects nothing. Seeded pages also cover: delete a block with its confirmation, move a ValueList row, add a ValueMap case through its case list, insert a widget between two blocks, and in Split mode reveal a block with a click without selecting it.
 
 ## Out of scope
 

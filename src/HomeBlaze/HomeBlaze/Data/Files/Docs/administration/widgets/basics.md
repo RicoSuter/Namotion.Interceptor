@@ -48,7 +48,7 @@ A subject file is a segment without its extension, so `Pump.json` is `Pump`. A p
 
 ## The Path Picker
 
-A widget's edit dialog lets you type a path or pick it in the tree of the subjects. Open it in the Inline or Split mode of the page, where a click on the widget selects it and "Edit" in the bar above it opens the dialog, or with the "Edit" button of the page editor for its block, as [Editing in the Page Editor](../pages.md#editing-in-the-page-editor) describes. For a path to a property, the tree offers the properties that have a state, which are the values that the property panel of a subject shows, and the subjects on the way to them. A configuration property without a state, for example the `Name` of a motor, is not offered, so type its path. A typed path is not checked.
+A widget's edit dialog lets you type a path or pick it in the tree of the subjects. Open it in the Inline mode of the page, where a click on the widget selects it and "Edit" in the bar above it opens the dialog, or with the "Edit" button of the page editor for its block, as [Editing in the Page Editor](../pages.md#editing-in-the-page-editor) describes. For a path to a property, the tree offers the properties that have a state, which are the values that the property panel of a subject shows, and the subjects on the way to them. A configuration property without a state, for example the `Name` of a motor, is not offered, so type its path. A typed path is not checked.
 
 Each path argument says what it can lead to, and the arguments table of each widget names it in brackets, for example `Path (Boolean)` or `Path (Number, writable)`:
 
@@ -135,7 +135,7 @@ The control widgets ([Switch](switch.md) and the others of the group Controls in
 - **Saving**: A write to a configuration property saves the subject that owns the configuration, one second after the last write to it, so a series of arrow keys gives one save. A subject defined on a page saves its block of that page and leaves the rest of the page as it is. A subject of a `*.json` file saves that file.
 - **Not saved**: When nothing can save the value, for example for a subject that a device discovered at runtime and that belongs to no file, a warning says that the value is not saved, and the value stays in memory. Such a subject warns at each save.
 - **Devices**: A write to a property that a connector sends to a device can fail later on the device side, without a message on the page.
-- **The text editor**: A page that is open in the Split mode text editor does not take what a control saved, and saving the editor afterwards overwrites it.
+- **The text editor**: A page that is open in the Split mode text editor does not take what a control on another open page or tab saved, and saving the editor afterwards overwrites it. The page next to the editor cannot be operated.
 - **Several viewers**: Two viewers who change two subjects of one page at the same time both keep their change: the saves of one page run one after the other. A value that was not saved stays in memory when the page is reloaded, as long as the block of its subject is not edited. Saving a block inside a layout counts as an edit of that layout: a cell that was added to the layout or removed from it and not saved yet is gone after it, while the configuration of the layout and its other cells keep what was not saved.
 
 ## Spacing
