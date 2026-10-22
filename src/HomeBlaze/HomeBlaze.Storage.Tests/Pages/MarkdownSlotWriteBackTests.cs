@@ -721,7 +721,7 @@ public class MarkdownSlotWriteBackTests
             entry => Assert.StartsWith("A change was not written to the page page.md:", entry.Message),
             entry =>
             {
-                Assert.Equal("Failed to reload the page page.md after a refused write", entry.Message);
+                Assert.Equal("Failed to reload the page page.md after a write that was refused or failed", entry.Message);
                 Assert.IsType<IOException>(entry.Exception);
             });
     }
