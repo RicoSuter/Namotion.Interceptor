@@ -385,7 +385,8 @@ public partial class DocumentationSamplesTests
     private static IEnumerable<SamplePath> FindPathsThatStartAtThePage(MarkdownPage page)
     {
         var expressions = MarkdownSegmentBuilder.FindExpressions(page)
-            .Select(expression => new SamplePath(expression.Path, IsExpression: true));
+            .SelectMany(expression => MarkdownExpressions.Parse(expression.Text, out _)?.Paths ?? [])
+            .Select(path => new SamplePath(path, IsExpression: true));
 
         var widgetBlocks = page.AllBlocks
             .Where(block => block.Head?.Name == typeof(Widget).FullName)

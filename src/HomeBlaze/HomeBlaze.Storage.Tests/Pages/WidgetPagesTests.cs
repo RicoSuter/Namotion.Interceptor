@@ -195,7 +195,7 @@ public class WidgetPagesTests : IClassFixture<AdministrationFolderFixture>
         var card = Assert.Single(lastCell.OfType<Card>());
         var body = Assert.IsType<MarkdownFragment>(card.Content).Children.Values;
         Assert.Empty(body.OfType<Widget>());
-        Assert.Equal([$"{PumpPath}/TargetSpeed", $"{FanPath}/TargetSpeed"], body.OfType<RenderExpression>().Select(expression => expression.Path));
+        Assert.Equal([$"{PumpPath}/TargetSpeed", $"{FanPath}/TargetSpeed"], body.OfType<RenderExpression>().Select(expression => expression.Text));
     }
 
     [Fact]
@@ -253,7 +253,7 @@ public class WidgetPagesTests : IClassFixture<AdministrationFolderFixture>
 
         var optionCard = cards[2];
         Assert.Equal(("Sample motor", "../pages.md", MudBlazor.Color.Primary, false, 6), (optionCard.Subtitle, optionCard.Href, optionCard.IconColor, optionCard.Outlined, optionCard.Elevation));
-        Assert.Contains(Assert.IsType<MarkdownFragment>(optionCard.HeaderRight).Children.Values, child => child is RenderExpression { Path: $"{PumpPath}/Status" });
+        Assert.Contains(Assert.IsType<MarkdownFragment>(optionCard.HeaderRight).Children.Values, child => child is RenderExpression { Text: $"{PumpPath}/Status" });
 
         Assert.Equal(["Pump", "Fan", "Notes"], cards.Where(card => card.AspectRatio is not null).Select(card => card.Title));
         Assert.All(cards.Where(card => card.AspectRatio is not null), card => Assert.Equal("4:3", card.AspectRatio));

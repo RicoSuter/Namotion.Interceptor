@@ -13,12 +13,12 @@ public abstract record MarkdownSegment;
 
 public sealed record HtmlMarkdownSegment(string Html) : MarkdownSegment;
 
-public sealed record ExpressionMarkdownSegment(string Path, ExpressionFormat Format, string? Error) : MarkdownSegment;
+public sealed record ExpressionMarkdownSegment(string Text) : MarkdownSegment;
 
 public sealed record BlockMarkdownSegment(MarkdownBlock Block, IReadOnlyList<MarkdownSegment> Content) : MarkdownSegment;
 
-/// <summary>One {{ path }} expression in the text of a page: where it stands, the path between the braces without the format, the format, and what is wrong with the format.</summary>
-public readonly record struct MarkdownExpression(MarkdownSpan Span, string Path, ExpressionFormat Format, string? Error);
+/// <summary>One {{ … }} expression in the text of a page: where it stands, and the text between the braces without the white space around it.</summary>
+public readonly record struct MarkdownExpression(MarkdownSpan Span, string Text);
 
 public static class MarkdownErrorBox
 {
@@ -51,9 +51,8 @@ public static partial class MarkdownSegmentBuilder
     private static readonly char[] ExcludedFromPath = ['{', '}', '<'];
 
     /// <summary>
-    /// Gets the expressions in the text of the page in document order. An expression is a path between two
-    /// pairs of braces that contains no brace and no '&lt;'. A brace inside markdown code neither opens nor
-    /// closes one.
+    /// Gets the expressions in the text of the page in document order: the text between two pairs of braces that
+    /// contains no brace and no '&lt;'. A brace inside markdown code neither opens nor closes one.
     /// </summary>
     /// <remarks>
     /// The search reads the text and not the rendered page, so it also returns an expression that
@@ -67,10 +66,8 @@ public static partial class MarkdownSegmentBuilder
         var source = page.Source;
         foreach (Match match in ExpressionRegex().Matches(HideBracesInCode(page)))
         {
-            var path = match.Groups[1];
-            var text = MarkdownExpressionText.Parse(source.Substring(path.Index, path.Length));
-            yield return new MarkdownExpression(
-                new MarkdownSpan(match.Index, match.Length), text.Path, text.Format, text.Error);
+            var text = match.Groups[1];
+            yield return new MarkdownExpression(new MarkdownSpan(match.Index, match.Length), source.Substring(text.Index, text.Length));
         }
     }
 
@@ -180,8 +177,7 @@ public static partial class MarkdownSegmentBuilder
 
             if (path is not null)
             {
-                var text = MarkdownExpressionText.Parse(path);
-                current.Add(new ExpressionMarkdownSegment(text.Path, text.Format, text.Error));
+                current.Add(new ExpressionMarkdownSegment(path));
             }
             else if (match.Groups[1].Length == 0)
             {

@@ -39,8 +39,8 @@ public class WidgetDocumentationPathTests : IClassFixture<AdministrationFolderFi
         // Assert
         var pathsToNothing = DocumentationFolderFixture.FindSubjects(page)
             .OfType<RenderExpression>()
-            .Where(expression => resolver.ResolveScopedProperty(expression.Path, PathStyle.Canonical, page) is null)
-            .Select(expression => expression.Path);
+            .Where(expression => resolver.ResolveScopedProperty(expression.Text, PathStyle.Canonical, page) is null)
+            .Select(expression => expression.Text);
 
         Assert.Empty(pathsToNothing);
     }
