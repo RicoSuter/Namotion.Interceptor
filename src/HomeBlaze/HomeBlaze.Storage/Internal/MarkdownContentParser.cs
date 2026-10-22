@@ -256,10 +256,22 @@ public sealed partial class MarkdownContentParser
     /// <summary>
     /// Parses page content and reconciles it with the existing children.
     /// </summary>
-    public async Task<MarkdownParseResult> ParseAsync(
+    public Task<MarkdownParseResult> ParseAsync(
         string? content,
         MarkdownFile parent,
         IDictionary<string, IInterceptorSubject> existingChildren,
+        CancellationToken cancellationToken) =>
+        ParseAsync(content, parent, existingChildren, reusableSubjects: null, cancellationToken);
+
+    /// <summary>
+    /// Parses page content and reconciles it with the existing children. With <paramref name="reusableSubjects"/>, the
+    /// subjects of a parse of the same content by block index, a block takes its subject from there instead of by its key.
+    /// </summary>
+    internal async Task<MarkdownParseResult> ParseAsync(
+        string? content,
+        MarkdownFile parent,
+        IDictionary<string, IInterceptorSubject> existingChildren,
+        IReadOnlyDictionary<int, IInterceptorSubject>? reusableSubjects,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrEmpty(content))
@@ -272,7 +284,7 @@ public sealed partial class MarkdownContentParser
         var pageName = EscapeFileNameForLink(Path.GetFileName(parent.FullPath));
         var segments = MarkdownSegmentBuilder.Build(page, url => RewriteLink(url, basePath, pageName));
 
-        var state = new ParseState(parent, page);
+        var state = new ParseState(parent, page, reusableSubjects);
         try
         {
             var children = await BuildChildrenAsync(segments, existingChildren, state, cancellationToken);
@@ -397,7 +409,18 @@ public sealed partial class MarkdownContentParser
             return (null, null, new BlockError(block.Line, FormatUsedTwice(key)));
         }
 
-        existingChildren.TryGetValue(key, out var existing);
+        // The text is the one that the page describes, so the subjects of that description are where their blocks are,
+        // also after a block before them was moved, inserted or removed, which would change their key.
+        IInterceptorSubject? existing;
+        if (state.ReusableSubjects is { } reusableSubjects)
+        {
+            existing = reusableSubjects.GetValueOrDefault(segment.Block.Index);
+        }
+        else
+        {
+            existingChildren.TryGetValue(key, out existing);
+        }
+
         var (subject, error) = await CreateBlockSubjectAsync(
             type, $"The type '{head.Name}'", segment, existing, state, cancellationToken);
 
@@ -584,10 +607,11 @@ public sealed partial class MarkdownContentParser
         private bool? _hasLoneCarriageReturn;
         private List<int>? _lineStarts;
 
-        public ParseState(MarkdownFile page, MarkdownPage parsedPage)
+        public ParseState(MarkdownFile page, MarkdownPage parsedPage, IReadOnlyDictionary<int, IInterceptorSubject>? reusableSubjects)
         {
             Page = page;
             Blocks = parsedPage.AllBlocks;
+            ReusableSubjects = reusableSubjects;
             _source = parsedPage.Source;
 
             // Decided before anything is built: slot blocks are built before the loose content around them, and
@@ -605,6 +629,12 @@ public sealed partial class MarkdownContentParser
 
         /// <summary>The widget, slot and invalid blocks of the page, by <see cref="MarkdownBlock.Index"/>.</summary>
         public IReadOnlyList<MarkdownBlock> Blocks { get; }
+
+        /// <summary>
+        /// The subjects of the blocks of a parse of the same text by block index, which this parse takes instead of finding
+        /// them by their key, or null.
+        /// </summary>
+        public IReadOnlyDictionary<int, IInterceptorSubject>? ReusableSubjects { get; }
 
         /// <summary>How many blocks this parse has shown as an error box so far.</summary>
         public int ErrorBoxCount { get; private set; }

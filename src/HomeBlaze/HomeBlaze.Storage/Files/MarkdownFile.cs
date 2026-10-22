@@ -166,7 +166,17 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             // the flag.
             _isGraphAheadOfSnapshot = true;
             Thread.MemoryBarrier();
-            var result = await _parser.ParseAsync(content, this, Children, cancellationToken);
+
+            // A read of the text that the snapshot describes, such as the read inside the write of a structure edit, takes the
+            // subjects of the snapshot: the edit has put them where their blocks went, which their keys may not tell. The
+            // reload lock keeps any other reload from publishing meanwhile. A write-back that publishes after this read
+            // leaves these subjects matched to the text read here, and the next reload, whose text then differs from the
+            // snapshot, finds them by their keys again.
+            var described = _parseResult;
+            var reusableSubjects = described.Page is { } describedPage && describedPage.Source == content
+                ? described.BlockSubjects
+                : null;
+            var result = await _parser.ParseAsync(content, this, Children, reusableSubjects, cancellationToken);
 
             // The page itself is assigned only after the parse succeeded, so a failed reload leaves its content,
             // its top-level children and the snapshot as they were. Subjects that the parse reused were already

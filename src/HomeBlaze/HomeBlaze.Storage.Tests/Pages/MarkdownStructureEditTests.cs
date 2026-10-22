@@ -11,6 +11,8 @@ public class MarkdownStructureEditTests
     private static readonly string PanelPage =
         $"intro\n\n:: {PanelType}#panel Title=P\n::: Row Label=A\n:::\n::: Row Label=B\n:::\n::\n\n:: {LeafType}#leaf Name=l\n::\n";
 
+    private static readonly string UnnamedLeavesPage = $"intro\n\n:: {LeafType} Name=a\n::\n\n:: {LeafType} Name=b\n::\n";
+
     [Fact]
     public async Task WhenABlockIsDeleted_ThenItsLinesAreRemovedFromTheFile()
     {
@@ -158,5 +160,77 @@ public class MarkdownStructureEditTests
         Assert.True(page.IsContentOfPage(page));
         Assert.True(page.IsContentOfPage(panel.Rows[0].Content!));
         Assert.False(page.IsContentOfPage(new MarkdownFragment()));
+    }
+
+    [Fact]
+    public async Task WhenAnUnnamedRowIsMovedDown_ThenEachRowKeepsItsSubject()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var page = await fixture.AddPageAsync("page.md", PanelPage);
+        var panel = (TestPanel)page.Children["panel"];
+        var rowA = panel.Rows[0];
+        var rowB = panel.Rows[1];
+
+        // Act
+        await page.MoveBlockAsync(rowA, 1, CancellationToken.None);
+        await page.OnFileChangedAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Same(rowB, panel.Rows[0]);
+        Assert.Same(rowA, panel.Rows[1]);
+        Assert.Equal(["B", "A"], panel.Rows.Select(row => row.Label));
+    }
+
+    [Fact]
+    public async Task WhenAWidgetIsInsertedBeforeUnnamedWidgets_ThenTheyKeepTheirSubjects()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var page = await fixture.AddPageAsync("page.md", UnnamedLeavesPage);
+        var leafA = page.Children["TestLeaf_0"];
+        var leafB = page.Children["TestLeaf_1"];
+
+        // Act
+        await page.InsertWidgetAsync(page, leafA, new TestLeaf { Name = "new" }, null, CancellationToken.None);
+        await page.OnFileChangedAsync(CancellationToken.None);
+
+        // Assert
+        var leaves = page.Children.Values.OfType<TestLeaf>().ToList();
+        Assert.Equal(["new", "a", "b"], leaves.Select(leaf => leaf.Name));
+        Assert.Same(leafA, leaves[1]);
+        Assert.Same(leafB, leaves[2]);
+    }
+
+    [Fact]
+    public async Task WhenAnUnnamedWidgetIsDeleted_ThenTheWidgetAfterItKeepsItsSubject()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var page = await fixture.AddPageAsync("page.md", UnnamedLeavesPage);
+        var leafB = page.Children["TestLeaf_1"];
+
+        // Act
+        await page.DeleteBlockAsync(page.Children["TestLeaf_0"], CancellationToken.None);
+        await page.OnFileChangedAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Same(leafB, Assert.Single(page.Children.Values.OfType<TestLeaf>()));
+    }
+
+    [Fact]
+    public async Task WhenTheFileChangedOutsideThePage_ThenTheReloadFindsTheSubjectsByTheirKeys()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var page = await fixture.AddPageAsync("page.md", UnnamedLeavesPage);
+        var first = page.Children["TestLeaf_0"];
+
+        // Act
+        await fixture.UpdatePageAsync(page, $"intro\n\n:: {LeafType} Name=b\n::\n\n:: {LeafType} Name=a\n::\n");
+
+        // Assert: by key, the subject at the first position takes the configuration of the block now there.
+        Assert.Same(first, page.Children["TestLeaf_0"]);
+        Assert.Equal("b", ((TestLeaf)first).Name);
     }
 }
