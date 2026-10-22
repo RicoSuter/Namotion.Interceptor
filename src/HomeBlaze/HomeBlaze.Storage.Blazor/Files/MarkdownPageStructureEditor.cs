@@ -4,6 +4,7 @@ using HomeBlaze.Services;
 using HomeBlaze.Storage.Blazor.Models;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Pages;
+using Microsoft.Extensions.Logging;
 using MudBlazor;
 using Namotion.Interceptor;
 
@@ -16,13 +17,16 @@ internal sealed class MarkdownPageStructureEditor : IPageStructureEditor
     private readonly IDialogService _dialogService;
     private readonly ISnackbar _snackbar;
     private readonly SubjectFactory _subjectFactory;
+    private readonly ILogger _logger;
 
-    public MarkdownPageStructureEditor(MarkdownFile file, IDialogService dialogService, ISnackbar snackbar, SubjectFactory subjectFactory)
+    public MarkdownPageStructureEditor(
+        MarkdownFile file, IDialogService dialogService, ISnackbar snackbar, SubjectFactory subjectFactory, ILogger logger)
     {
         _file = file;
         _dialogService = dialogService;
         _snackbar = snackbar;
         _subjectFactory = subjectFactory;
+        _logger = logger;
     }
 
     /// <summary>Gets the page whose blocks this editor changes.</summary>
@@ -126,15 +130,18 @@ internal sealed class MarkdownPageStructureEditor : IPageStructureEditor
         }
     }
 
-    // A write that the storage cannot make, such as a file that another process holds open, must not end the circuit.
+    // A write that the storage cannot make must not end the circuit: a file that another process holds open or that
+    // may not be written, a storage that does not answer in time (a TimeoutException) or that is not connected (an
+    // InvalidOperationException, the base of the internal refusal of the storage).
     private async Task RunAsync(Func<Task<MarkdownEditResult>> edit)
     {
         try
         {
             Report(await edit());
         }
-        catch (IOException exception)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or TimeoutException or InvalidOperationException)
         {
+            _logger.LogWarning(exception, "The structure edit of the page {Path} could not be saved", _file.FullPath);
             _snackbar.Add($"The page could not be saved. {exception.Message}", Severity.Error);
         }
     }

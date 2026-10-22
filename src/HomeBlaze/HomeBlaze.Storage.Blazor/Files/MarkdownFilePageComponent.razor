@@ -5,6 +5,7 @@
 @using MudBlazor
 @using Namotion.Interceptor
 @using HomeBlaze.Services
+@using Microsoft.Extensions.Logging
 @using Microsoft.JSInterop
 
 @attribute [SubjectComponent(SubjectComponentType.Page, typeof(MarkdownFile))]
@@ -14,6 +15,7 @@
 @inject IDialogService DialogService
 @inject ISnackbar Snackbar
 @inject SubjectFactory SubjectFactory
+@inject ILogger<MarkdownPageStructureEditor> StructureEditorLogger
 
 <CascadingValue Value="@IsEditing" Name="IsEditing">
     <CascadingValue Value="@StructureEditor" TValue="IPageStructureEditor">
@@ -85,7 +87,7 @@
             // A navigation to another page keeps this component and gives it the other file.
             if (_structureEditor?.File != file)
             {
-                _structureEditor = new MarkdownPageStructureEditor(file, DialogService, Snackbar, SubjectFactory);
+                _structureEditor = new MarkdownPageStructureEditor(file, DialogService, Snackbar, SubjectFactory, StructureEditorLogger);
             }
 
             return _structureEditor;
