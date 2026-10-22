@@ -34,7 +34,7 @@ public class BatchValueMutationStrategyTests
             new ParticipantConfiguration { Name = "test", ValueMutationRate = 1000, UseTransactions = false },
             numberOfBatches: 10,
             participantIndex: 0,
-                NullLogger.Instance);
+            NullLogger.Instance);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
 

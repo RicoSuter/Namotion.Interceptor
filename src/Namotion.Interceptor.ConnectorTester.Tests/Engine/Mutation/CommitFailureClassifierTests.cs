@@ -1,9 +1,12 @@
 using System.ComponentModel.DataAnnotations;
 using Xunit;
 using Microsoft.Extensions.Logging;
+using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Connectors.Transactions;
 using Namotion.Interceptor.ConnectorTester.Engine.Mutation;
 using Namotion.Interceptor.ConnectorTester.Model;
+using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Transactions;
 
@@ -48,6 +51,53 @@ public class CommitFailureClassifierTests
 
         // Assert
         Assert.Equal(CommitFailureKind.SourceWriteFailure, kind);
+    }
+
+    [Fact]
+    public async Task WhenOneOfTwoSourcesFailsInCommitWithLocalChanges_ThenFailureIsSourceWriteFailure()
+    {
+        // Arrange
+        var context = CreateTransactionContext();
+        var node = new TestNode(context);
+        new PropertyReference(node, nameof(TestNode.IntValue)).SetSource(new FailingSource { RootSubject = node });
+        new PropertyReference(node, nameof(TestNode.LongValue)).SetSource(new FailingSource { RootSubject = node, Fails = _ => false });
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        node.IntValue = 1;
+        node.LongValue = 2;
+        node.StringValue = "local";
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Act
+        var kind = CommitFailureClassifier.Classify(exception);
+
+        // Assert
+        Assert.Equal(CommitFailureKind.SourceWriteFailure, kind);
+        Assert.Equal(nameof(TestNode.IntValue), Assert.Single(exception.FailedChanges).Property.Name);
+        Assert.Equal(2, node.LongValue);
+        Assert.Equal("local", node.StringValue);
+    }
+
+    [Fact]
+    public async Task WhenSourceReportsOnlySomeChangesOfItsWriteAsFailed_ThenFailureIsSourceWriteFailure()
+    {
+        // Arrange
+        var context = CreateTransactionContext();
+        var node = new TestNode(context);
+        var source = new FailingSource { RootSubject = node, Fails = change => change.Property.Name == nameof(TestNode.IntValue) };
+        new PropertyReference(node, nameof(TestNode.IntValue)).SetSource(source);
+        new PropertyReference(node, nameof(TestNode.LongValue)).SetSource(source);
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        node.IntValue = 1;
+        node.LongValue = 2;
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Act
+        var kind = CommitFailureClassifier.Classify(exception);
+
+        // Assert
+        Assert.Equal(CommitFailureKind.SourceWriteFailure, kind);
+        Assert.Equal(nameof(TestNode.IntValue), Assert.Single(exception.FailedChanges).Property.Name);
+        Assert.Equal(2, node.LongValue);
     }
 
     [Fact]
@@ -125,6 +175,19 @@ public class CommitFailureClassifierTests
     }
 
     [Fact]
+    public void WhenCommitFailedWithoutErrorsOrFailedChanges_ThenFailureIsUnexpected()
+    {
+        // Arrange
+        var exception = CreateException([]);
+
+        // Act
+        var kind = CommitFailureClassifier.Classify(exception);
+
+        // Assert
+        Assert.Equal(CommitFailureKind.Unexpected, kind);
+    }
+
+    [Fact]
     public void WhenSameFailureIsRecordedTwice_ThenItIsCountedTwiceAndLoggedOnce()
     {
         // Arrange
@@ -160,6 +223,15 @@ public class CommitFailureClassifierTests
         Assert.Equal(1, counters.SourceWriteFailedCommitCount);
         Assert.Equal(2, logger.Levels.Count);
     }
+
+    private static IInterceptorSubjectContext CreateTransactionContext()
+        => InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithRegistry()
+            .WithParents()
+            .WithLifecycle()
+            .WithSourceTransactions();
 
     private SubjectPropertyChange CreateChange(string propertyName)
     {

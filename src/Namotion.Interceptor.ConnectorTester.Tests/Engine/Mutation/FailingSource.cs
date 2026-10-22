@@ -7,11 +7,14 @@ using Namotion.Interceptor.Tracking.Change;
 namespace Namotion.Interceptor.ConnectorTester.Tests.Engine.Mutation;
 
 /// <summary>
-/// Fails every write, as a disconnected connector would under chaos.
+/// Fails the writes of the changes <see cref="Fails"/> matches, every change by default, as a disconnected connector
+/// would under chaos. Reports a partial failure when only some changes of a write fail.
 /// </summary>
 internal sealed class FailingSource : ISubjectSource
 {
     public required IInterceptorSubject RootSubject { get; init; }
+
+    public Func<SubjectPropertyChange, bool> Fails { get; init; } = _ => true;
 
     public int WriteBatchSize => 0;
 
@@ -44,7 +47,14 @@ internal sealed class FailingSource : ISubjectSource
     }
 
     public ValueTask<WriteResult> WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
-        => new(WriteResult.Failure(changes, new InvalidOperationException("Source is not connected")));
+    {
+        var failed = changes.ToArray().Where(Fails).ToArray();
+        var error = new InvalidOperationException("Source is not connected");
+        var result = failed.Length == 0 ? WriteResult.Success
+            : failed.Length == changes.Length ? WriteResult.Failure(changes, error)
+            : WriteResult.PartialFailure(failed, error);
+        return new(result);
+    }
 
     public Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken)
         => Task.FromResult<Action?>(null);

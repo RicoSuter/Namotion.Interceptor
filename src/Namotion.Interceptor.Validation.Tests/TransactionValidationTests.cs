@@ -663,6 +663,7 @@ public class TransactionValidationTests
             TransactionFailureHandling.Rollback, validationMode: TransactionValidationMode.Deferred);
         new PropertyReference(motor, nameof(Motor.MotorSpeed)).SetPropertyValueWithInterception(
             value, motor.MotorSpeed, static (_, _) => { });
+        // Applying null or a value of another type to the int property fails; only the commit check's call matters here.
         await Record.ExceptionAsync(() => transaction.CommitAsync(CancellationToken.None).AsTask());
 
         // Assert
