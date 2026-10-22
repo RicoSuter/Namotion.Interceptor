@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.RegularExpressions;
 using HomeBlaze.E2E.Tests.Infrastructure;
 using Microsoft.Playwright;
@@ -269,14 +270,38 @@ public class InlineTextEditingTests
     [Fact]
     public async Task WhenThePageIsViewed_ThenItsTextIsNotWrapped()
     {
-        // Arrange
+        // Arrange: in Inline mode the text blocks have wrappers of their own, which View mode does not render.
         var page = await OpenPageInInlineModeAsync();
+        await Assertions.Expect(page.Locator(".subject-component-wrapper.text-block").First).ToBeAttachedAsync(new() { Timeout = Timeout });
 
         // Act
         await page.SelectEditModeAsync("View", Timeout);
 
         // Assert
         await Assertions.Expect(page.Locator(".markdown-text")).ToHaveCountAsync(0, new() { Timeout = Timeout });
+        await Assertions.Expect(page.Locator(".subject-component-wrapper.text-block")).ToHaveCountAsync(0);
+    }
+
+    [Fact]
+    public async Task WhenATextBlockIsSelected_ThenItsOutlineAndItsBarAreGreenUnlikeThoseOfAWidget()
+    {
+        // Arrange
+        var page = await OpenPageInInlineModeAsync();
+        var cardWrapper = page.Locator(".subject-component-wrapper.selectable:has(> [data-testid='card'])")
+            .Filter(new() { Has = page.GetByTestId("card-title").GetByText("Text Card", new() { Exact = true }) });
+
+        // Act
+        await SelectTextAsync(page, "First paragraph");
+        var textOutline = await GetOutlineColorAsync(GetTextWrapper(page, "First paragraph"));
+        await Assertions.Expect(page.GetWidgetActionBar()).ToHaveClassAsync(new Regex(@"\btext-block-bar\b"), new() { Timeout = Timeout });
+        await page.GetCard("Text Card").Locator(".mud-card-header").SelectWidgetAsync();
+        await Assertions.Expect(cardWrapper).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
+        var cardOutline = await GetOutlineColorAsync(cardWrapper);
+
+        // Assert
+        Assert.True(IsGreen(textOutline), $"The outline of the selected text is {textOutline}.");
+        Assert.False(IsGreen(cardOutline), $"The outline of the selected card is {cardOutline}.");
+        await Assertions.Expect(page.GetWidgetActionBar()).Not.ToHaveClassAsync(new Regex(@"\btext-block-bar\b"), new() { Timeout = Timeout });
     }
 
     [Fact]
@@ -482,5 +507,18 @@ public class InlineTextEditingTests
         await page.WaitForFunctionAsync(
             $"() => window.blazorMonaco?.editor.getEditor('{TextEditorId}', true) != null", null, new() { Timeout = Timeout });
         await page.EvaluateAsync($"text => blazorMonaco.editor.getEditor('{TextEditorId}').setValue(text)", text);
+    }
+
+    private static Task<string> GetOutlineColorAsync(ILocator element) =>
+        element.EvaluateAsync<string>("element => getComputedStyle(element).outlineColor");
+
+    // The success color of both palettes, #007932 and its lightened tone #0dde9c, has its largest channel in green, unlike
+    // the primary colors.
+    private static bool IsGreen(string color)
+    {
+        var channels = Regex.Matches(color, @"\d+(?:\.\d+)?")
+            .Select(match => double.Parse(match.Value, CultureInfo.InvariantCulture))
+            .ToArray();
+        return channels.Length >= 3 && channels[1] > channels[0] && channels[1] > channels[2];
     }
 }

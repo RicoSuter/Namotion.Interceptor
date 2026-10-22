@@ -46,6 +46,24 @@
     color: var(--mud-palette-primary-lighten) !important;
 }
 
+/* A selected block of text and its Edit and move actions in dark mode: the lightened success tone, for the same reason. */
+.homeblaze-dark-mode ::deep .subject-component-wrapper.selectable.selected.text-block {
+    outline-color: var(--mud-palette-success-lighten);
+}
+
+.homeblaze-dark-mode ::deep .subject-action-bar .mud-success-text {
+    color: var(--mud-palette-success-lighten) !important;
+}
+
+/* The bar of a selected block of text has a border in the color of its outline. */
+::deep .subject-action-bar.text-block-bar {
+    border: 1px solid var(--mud-palette-success);
+}
+
+.homeblaze-dark-mode ::deep .subject-action-bar.text-block-bar {
+    border-color: var(--mud-palette-success-lighten);
+}
+
 /* The bar with the actions of the selected widget is a popover, which MudBlazor renders in the provider above and not
    inside the widget, so the rules for the root of the popover are here. The content of the bar is styled in
    SubjectComponent.razor.css of HomeBlaze.Components. MudBlazor moves a popover whose top would be less than 24px (its

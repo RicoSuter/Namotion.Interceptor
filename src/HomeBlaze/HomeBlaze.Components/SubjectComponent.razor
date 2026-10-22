@@ -19,7 +19,7 @@
         var isRevealable = !isSelectable && Revealer is not null && Type == SubjectComponentType.Widget;
         @* A page fills a container of definite height, such as the split editor's pane, and keeps its natural
            height elsewhere. *@
-        <div class="@(isSelected ? "subject-component-wrapper selectable selected" : isSelectable ? "subject-component-wrapper selectable" : isRevealable ? "subject-component-wrapper revealable" : "subject-component-wrapper")"
+        <div class="@GetWrapperClass(isSelectable, isSelected, isRevealable, _isTextBlock)"
              style="position: relative;@(Type == SubjectComponentType.Page ? " height: 100%;" : null)"
              tabindex="@(isSelectable ? "0" : null)"
              role="@(isSelectable ? "group" : null)"
@@ -47,7 +47,7 @@
                                 TransformOrigin="Origin.BottomRight"
                                 OverflowBehavior="OverflowBehavior.FlipAlways"
                                 Elevation="4"
-                                Class="subject-action-bar"
+                                Class="@(_isTextBlock ? "subject-action-bar text-block-bar" : "subject-action-bar")"
                                 role="toolbar"
                                 aria-label="Widget actions"
                                 data-testid="widget-action-bar">
@@ -68,6 +68,7 @@
                             {
                                 <MudIconButton Icon="@Icons.Material.Filled.KeyboardArrowUp"
                                                Size="Size.Small"
+                                               Color="@(_isTextBlock ? Color.Success : Color.Default)"
                                                title="Move up"
                                                aria-label="Move up"
                                                OnClick="_moveUpCallback"
@@ -78,6 +79,7 @@
                             {
                                 <MudIconButton Icon="@Icons.Material.Filled.KeyboardArrowDown"
                                                Size="Size.Small"
+                                               Color="@(_isTextBlock ? Color.Success : Color.Default)"
                                                title="Move down"
                                                aria-label="Move down"
                                                OnClick="_moveDownCallback"
@@ -99,7 +101,7 @@
                             {
                                 <MudIconButton Icon="@Icons.Material.Filled.Edit"
                                                Size="Size.Small"
-                                               Color="Color.Primary"
+                                               Color="@(_isTextBlock ? Color.Success : Color.Primary)"
                                                title="Edit"
                                                aria-label="Edit"
                                                OnClick="_editCallback"
@@ -253,6 +255,15 @@
         Type == SubjectComponentType.Widget &&
         Selection != null &&
         (Subject is IConfigurable || _isTextBlock || HasEditComponent);
+
+    // Constant strings, so that rendering a wrapper allocates no class names. Text blocks are grouped only in Inline mode,
+    // so a viewed page never has the class text-block.
+    internal static string GetWrapperClass(bool isSelectable, bool isSelected, bool isRevealable, bool isTextBlock) =>
+        isSelected ? (isTextBlock ? "subject-component-wrapper selectable selected text-block" : "subject-component-wrapper selectable selected")
+        : isSelectable ? (isTextBlock ? "subject-component-wrapper selectable text-block" : "subject-component-wrapper selectable")
+        : isRevealable ? "subject-component-wrapper revealable"
+        : isTextBlock ? "subject-component-wrapper text-block"
+        : "subject-component-wrapper";
 
     // Keyed weakly, because the type of a widget can come from a plugin that is unloaded again.
     private static readonly ConditionalWeakTable<Type, string> TypeDisplayNames = new();

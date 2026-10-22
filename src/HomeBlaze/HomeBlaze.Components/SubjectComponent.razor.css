@@ -45,6 +45,30 @@
     box-shadow: 0 0 0 5px rgba(var(--mud-palette-primary-rgb), 0.35);
 }
 
+/* A block of text of a page is green, so that it stands apart from the widgets around it. Each rule is one class more
+   specific than the rule of a widget above it. The dark mode tones are in MainLayout.razor.css of HomeBlaze.Host. */
+.subject-component-wrapper.selectable.text-block {
+    outline-color: rgba(var(--mud-palette-success-rgb), 0.35);
+}
+
+@media (hover: hover) {
+    .subject-component-wrapper.selectable.text-block:not(.selected):hover:not(:has(.subject-component-wrapper.selectable:hover)) {
+        outline-color: rgba(var(--mud-palette-success-rgb), 0.7);
+    }
+}
+
+.subject-component-wrapper.selectable.text-block:focus-visible {
+    outline-color: rgba(var(--mud-palette-success-rgb), 0.7);
+}
+
+.subject-component-wrapper.selectable.selected.text-block {
+    outline-color: var(--mud-palette-success);
+}
+
+.subject-component-wrapper.selectable.selected.text-block:focus-visible {
+    box-shadow: 0 0 0 5px rgba(var(--mud-palette-success-rgb), 0.35);
+}
+
 /* The bar sits above the top right corner of the selected widget and flips below the widget when there is no room.
    MudBlazor flips a popover only at the edges of the window, so the anchor reaches up by the height of the fixed app bar
    and the bar moves down by as much while it is not flipped (see the bar in MainLayout.razor.css of HomeBlaze.Host): the
