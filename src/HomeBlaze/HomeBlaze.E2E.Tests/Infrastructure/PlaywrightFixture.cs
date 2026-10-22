@@ -17,6 +17,9 @@ namespace HomeBlaze.E2E.Tests.Infrastructure;
 /// </summary>
 public class PlaywrightFixture : IAsyncLifetime
 {
+    // The default timeout of AsyncTestHelpers.WaitUntilAsync, which the polls of the files use.
+    private static readonly TimeSpan ReadTimeout = TimeSpan.FromSeconds(30);
+
     private IPlaywright? _playwright;
     private IBrowser? _browser;
     private WebTestingHostFactory<App>? _factory;
@@ -253,14 +256,15 @@ public class PlaywrightFixture : IAsyncLifetime
     }
 
     // On the worker of the storage, which runs every write of the server. The server creates a file without sharing,
-    // which a file that is open for reading fails on Unix as well, whatever it shares, so a read beside a write would
-    // fail the write.
+    // and on Unix as well that fails while the file is open for reading, so a read beside a write would fail the write.
     private string ReadBetweenWritesOfServer(string path)
     {
         var connection = GetRoot().Connection;
         var text = string.Empty;
 
-        // Run on the thread pool for the reason given in WriteDemoPageAsync.
+        // Limited like the polls, so that a worker that hangs fails the test instead of holding it. Run on the thread
+        // pool for the reason given in WriteDemoPageAsync.
+        using var cancellation = new CancellationTokenSource(ReadTimeout);
         Task.Run(() => FluentStorageContainer.RunOperationAsync(
             connection,
             _ =>
@@ -268,7 +272,7 @@ public class PlaywrightFixture : IAsyncLifetime
                 text = File.ReadAllText(path);
                 return Task.CompletedTask;
             },
-            CancellationToken.None)).GetAwaiter().GetResult();
+            cancellation.Token)).GetAwaiter().GetResult();
 
         return text;
     }

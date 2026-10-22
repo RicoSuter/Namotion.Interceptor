@@ -27,28 +27,31 @@ Editing the markdown text between blocks (paragraphs, headings, lists) is out of
 | Insert into list slots | An "Add ..." button per list slot of the selected container (Add tab, Add item, Add value, Add case, Add series). |
 | ValueList rows | Selectable once the list or one of its rows is selected (the first click selects the list, a further click a row), with their own action bar. "Add value" at the end of the list. |
 | ValueMap cases | Listed in an overlay below the chip of the selected ValueMap, selectable once the map or one of its cases is selected, each with edit, move and delete. "Add case" is offered both in the action bar of the map and at the end of the case list. |
-| Split preview | View-only: widgets cannot be selected or operated, and their content takes no pointer input. A click on a widget reveals its block in the source editor and never writes. When the text before that block has unsaved changes, a warning asks to save first. Grid and canvas editing therefore happens in Inline mode only. |
+| Split preview | View-only: widgets cannot be selected or operated, their content takes no pointer input, and their controls are disabled, so that the keyboard cannot operate them either. A click on a widget reveals its block in the source editor and never writes. When the text before that block has unsaved changes, a warning asks to save first. Grid and canvas editing therefore happens in Inline mode only. |
 | Block names in the source editor | The name after the head fence is bold. The fence keeps its depth color and is no longer bold. A `#name` and the arguments stay regular. |
 | Write path | One transaction pipeline in `MarkdownFile` for every change of the page from the graph or the page UI, with pure text operations shared with the source editor. |
 
 ## Architecture
 
 ```
-Inline buttons (delete, move, insert)      Edit dialog save
-                 \                             /
-                  v                           v
-          MarkdownFile.EditAsync(operation)     <- lock, snapshot, stale check,
-                         |                         reload bookkeeping, write
-                         v
-       operation(page, blockSubjects) -> MarkdownBlockWrite or refusal
-                         |
-       MarkdownPageOperations (text in, text out)   <- also used by the
-         Remove, Move, Insert, WriteConfiguration      source editor's Create
+DeleteBlockAsync, MoveBlockAsync,              WriteConfigurationAsync
+InsertWidgetAsync, AddSlotItemAsync            (edit dialog save)
+                 |                                   |
+                 v                                   v
+  EditStructureAsync(operation)               WriteBlockAsync
+  operation(page, blockSubjects)              MarkdownBlockReconciler
+  -> MarkdownPageOperations                   -> MarkdownBlockWrite or refusal
+     TryRemove, TryMove, TryInsertWidget,            |
+     TryAppendSlotBlock                              |
+                  \                                  /
+                   v                                v
+          MarkdownFile.PublishAndWriteAsync     <- stale check, publish,
+                                                   reload bookkeeping, write
 ```
 
-### Write pipeline: `MarkdownFile.EditAsync`
+### Write pipeline: the shared `PublishAndWriteAsync` step
 
-`WriteBlockAsync` of `MarkdownFile` becomes a generic transaction that takes an operation. The operation receives the snapshot (the parsed page and the subjects of its blocks) and returns a `MarkdownBlockWrite` or a refusal. The transaction keeps what `WriteBlockAsync` does today, unchanged in order:
+`MarkdownFile` runs every change of the page from the graph or the page UI through one step, `PublishAndWriteAsync`. The structure edits `DeleteBlockAsync`, `MoveBlockAsync`, `InsertWidgetAsync` and `AddSlotItemAsync` run an operation over the snapshot (the parsed page and the subjects of its blocks) in `EditStructureAsync`, and `WriteConfigurationAsync` runs the reconciler in `WriteBlockAsync`. Both produce a `MarkdownBlockWrite` or a refusal and keep what `WriteBlockAsync` did before, unchanged in order:
 
 1. Takes the write lock of the page and rejects calls from within a write or from the worker of the storage.
 2. Reads the snapshot and runs the operation.
@@ -56,10 +59,11 @@ Inline buttons (delete, move, insert)      Edit dialog save
 4. Refuses an insert or removal while the graph is ahead of the snapshot.
 5. Publishes the new snapshot with a compare-exchange, and refuses when a reload published in the meantime.
 6. Forgets the applied state of the blocks around the change, remembers the written configurations, and writes the file.
+7. When the storage fails the write, puts the snapshot and the content back while no reload replaced them, reads the page again from its file, and lets the exception of the storage propagate, so that the next edit is not computed from the one that failed.
 
-`WriteConfigurationAsync` becomes `EditAsync` with the reconciler as its operation, and keeps its documented behavior. Three new public methods run the new operations: `DeleteBlockAsync(subject)`, `MoveBlockAsync(subject, direction)` and `InsertBlockAsync(target, subject)`. They return a result with the refusal reason, so that the UI can show it. `WriteConfigurationAsync` keeps returning a bool.
+Steps 1 to 3 are in `EditStructureAsync` and `WriteBlockAsync`, steps 4 to 7 in `PublishAndWriteAsync`. A structure operation changes only text, so its refusal needs no reload. `WriteConfigurationAsync` keeps its documented behavior and keeps returning a bool. The four structure edits are public methods: `DeleteBlockAsync(subject)`, `MoveBlockAsync(subject, direction)`, `InsertWidgetAsync(content, before, widget, name)` and `AddSlotItemAsync(owner, slotName, item)`. They return a `MarkdownEditResult` with the refusal reason, so that the UI can show it.
 
-The pipeline also offers read-only queries over the current snapshot for the UI: whether a subject has a block, whether that block has a previous or a next sibling in the same slot, how many blocks it contains, and which slots its block offers for inserting.
+The file also offers read-only queries over the current snapshot for the UI: `GetBlockActions` (whether a subject has a block, whether that block has a previous or a next sibling in the same slot, how many blocks it contains), `GetListSlots` (the list slots of its block), `GetBlockName` and `IsContentOfPage` (whether new blocks can go into a content).
 
 ### Text operations: `MarkdownPageOperations`
 
@@ -80,13 +84,13 @@ The UI addresses a block by its subject. A widget, a ValueList row (a `ValueRow`
 
 ### `IPageStructureEditor`
 
-A new interface in HomeBlaze.Components, cascaded to the widgets of a page. It answers `CanDelete(subject)`, `CanMove(subject, direction)` and `GetInsertSlots(owner)` and performs `DeleteAsync`, `MoveAsync` and `InsertAsync(owner, slot, after)`. Where no editor is cascaded, no structure button renders: in view mode, in the Split preview and on pages that are not markdown. Grid cells and canvas nodes keep their own `LayoutItemActions`.
+A new interface in HomeBlaze.Components, cascaded to the widgets of a page. It answers `GetActions(subject)`, `GetListSlots(owner)`, `GetBlockName(subject)` and `CanInsertInto(content)` and performs `DeleteAsync(subject)`, `MoveAsync(subject, direction)`, `InsertWidgetAsync(content, before)` and `AddListItemAsync(owner, slot)`. Where no editor is cascaded, no structure button renders: in view mode, in the Split preview and on pages that are not markdown. Grid cells and canvas nodes keep their own `LayoutItemActions`.
 
 `MarkdownPageStructureEditor` in HomeBlaze.Storage.Blazor implements it on top of a `MarkdownFile`. `MarkdownFilePageComponent` creates one per page and cascades it in Inline mode only. Its queries read the snapshot of the file. Its commands show the delete confirmation, open `SubjectSetupDialog` for an insert, call the file, and show a refusal as a warning snackbar.
 
-### `SelectableFrame`
+### Selectable rows and cases
 
-The selection outline, the keyboard handling, the action bar and the chain to the selectable parent move out of `SubjectComponent` into a component of their own, so that a row, a case and a chip can be selected like a widget. `SubjectComponent` uses it itself, so its behavior does not change. The action bar holds, each only when it applies: Select parent, Move up, Move down, Edit and Delete.
+There is no separate selectable frame. The selection outline, the keyboard handling, the action bar and the chain to the selectable parent stay in `SubjectComponent`, and a row and a case are selected like any widget: each is a `SubjectComponent` of its subject, rendered through `ValueRowWidget` and `ValueMapCaseWidget`. The action bar holds, each only when it applies: Select parent, Move up, Move down, an Add button per list slot, Edit and Delete.
 
 ### Chips of invisible widgets
 
@@ -98,7 +102,7 @@ In edit mode `ResponsiveWidget` renders a chip in place with the inverse display
 
 ### Rows and cases
 
-`ValueListRow` renders inside a `SelectableFrame` while its list or one of its rows is selected. The case list of the ValueMap lists the cases of the map, each inside a `SelectableFrame`.
+While the page is edited inline, `ValueListWidget` renders each row as a `SubjectComponent` with `ValueRowWidget`, whose `IsSelectionEnabled` is true only while the list or one of its rows is selected, so that the first click selects the list. The case list of the ValueMap renders each case as a `SubjectComponent` with `ValueMapCaseWidget`.
 
 ### Insert points
 
@@ -106,7 +110,7 @@ In edit mode `ResponsiveWidget` renders a chip in place with the inverse display
 
 ### Split preview
 
-`Pages.razor` gives the preview `IsEditing=false` and no structure editor, and cascades a reveal callback instead. A click on a widget of the preview passes its subject to the source editor, which looks for its block among its decoration regions, puts the cursor on the head line, scrolls it into view and highlights the block. When the unsaved text no longer has that block, the click does nothing.
+`Pages.razor` gives the preview `IsEditing=false` and no structure editor, and cascades a reveal callback instead. It also cascades `IsReadOnly=true`, on which the control views (switch, slider, select, operation button, door lock) disable themselves as they do on `IsEditing`, because the pointer guard of the preview does not stop the keyboard. A click on a widget of the preview passes its subject to the source editor, which looks for its block among its decoration regions, puts the cursor on the head line, scrolls it into view and highlights the block. When the unsaved text no longer has that block, the click does nothing.
 
 ### Block names in the source editor
 
@@ -122,16 +126,16 @@ An operation refuses and writes nothing when:
 - a move would leave its slot or has no sibling in its direction,
 - the parsed result differs from the expected change in other blocks.
 
-The structure operations change only text, so a refusal leaves the graph as it was and needs no reload. The configuration write keeps its reload after a refusal. A write that the storage cannot make, for example a file held open by another process, shows an error message instead of breaking the page.
+The structure operations change only text, so a refusal leaves the graph as it was and needs no reload. The configuration write keeps its reload after a refusal. A write that the storage cannot make, for example a file held open by another process, a storage that does not answer or is not connected, or a file that may not be written, is logged and shows an error message instead of breaking the page. The page then describes its file again (step 7 of the write pipeline).
 
 The UI shows the reason as a warning snackbar, for example "The page changed while you edited it. Try again." Because the Split preview never writes, it cannot race the editor buffer any more.
 
 ## Testing
 
 - **`MarkdownPageOperations`**, unit tests in HomeBlaze.Storage.Tests, text in and text out in the style of `MarkdownBlockWriterTests`: remove, move and insert for top-level blocks, blocks in content slots (card body, tab), list slots (value rows, cases, tabs, flow items), blocks without closing lines, CRLF text and fences of several depths, and every refusal.
-- **`MarkdownFile.EditAsync`**, in HomeBlaze.Storage.Tests: a stale snapshot is refused, an edit reloads with the right subjects, and the configuration write keeps its behavior. The existing reconciler and write tests are the regression net.
+- **The structure edits of `MarkdownFile`**, in HomeBlaze.Storage.Tests: a stale snapshot is refused, an edit reloads with the right subjects, a failed write leaves the page describing its file, and the configuration write keeps its behavior. The existing reconciler and write tests are the regression net.
 - **Decorations**: `BlockOutlineDecorations` writes the name range for `Tab`, `Tab#cooling` and a head line with arguments.
-- **E2E**, in HomeBlaze.E2E.Tests, for the behavior of the components, since the repository has no bUnit: the action bar shows move and delete only for blocks that allow them; ValueMap is a chip in Inline mode and nothing in View mode; the Responsive chip shows only where the content is hidden; the insert lines follow the scope of the selection; the Split preview selects nothing. Seeded pages also cover: delete a block with its confirmation, move a ValueList row, add a ValueMap case through its case list, insert a widget between two blocks, and in Split mode reveal a block with a click without selecting it.
+- **E2E**, in HomeBlaze.E2E.Tests, for the behavior of the components, since the repository has no bUnit: the action bar shows move and delete only for blocks that allow them; ValueMap is a chip in Inline mode and nothing in View mode; the Responsive chip shows only where the content is hidden; the insert lines follow the scope of the selection; the Split preview selects nothing. Seeded pages also cover: delete a block with its confirmation, move a ValueList row, add a ValueMap case through its case list, insert a widget between two blocks, and in Split mode reveal a block with a click without selecting it and leave a slider unchanged under the keyboard.
 
 ## Out of scope
 

@@ -299,12 +299,8 @@
         _pointerDownCallback = EventCallback.Factory.Create<PointerEventArgs>(this, OnPointerDown);
         _clickCallback = EventCallback.Factory.Create<MouseEventArgs>(this, OnClick);
         _keyDownCallback = EventCallback.Factory.Create<KeyboardEventArgs>(this, OnKeyDown);
-        _revealCallback = EventCallback.Factory.Create<MouseEventArgs>(this, RevealAsync);
         _selectParentCallback = EventCallback.Factory.Create(this, SelectParent);
         _editCallback = EventCallback.Factory.Create(this, OpenEditDialog);
-        _moveUpCallback = EventCallback.Factory.Create(this, () => StructureEditor!.MoveAsync(Subject!, -1));
-        _moveDownCallback = EventCallback.Factory.Create(this, () => StructureEditor!.MoveAsync(Subject!, 1));
-        _deleteCallback = EventCallback.Factory.Create(this, () => StructureEditor!.DeleteAsync(Subject!));
         if (ParentComponent != null)
         {
             (ParentComponent._childComponents ??= []).Add(this);
@@ -401,6 +397,19 @@
 
     protected override void OnParametersSet()
     {
+        // Created once, and only on a page that has a use for them, so that a viewed page allocates none per widget.
+        if (Revealer is not null && !_revealCallback.HasDelegate)
+        {
+            _revealCallback = EventCallback.Factory.Create<MouseEventArgs>(this, RevealAsync);
+        }
+
+        if (StructureEditor is not null && !_deleteCallback.HasDelegate)
+        {
+            _moveUpCallback = EventCallback.Factory.Create(this, () => StructureEditor!.MoveAsync(Subject!, -1));
+            _moveDownCallback = EventCallback.Factory.Create(this, () => StructureEditor!.MoveAsync(Subject!, 1));
+            _deleteCallback = EventCallback.Factory.Create(this, () => StructureEditor!.DeleteAsync(Subject!));
+        }
+
         if (Subject != _previousSubject || AdditionalParameters != _previousAdditionalParameters)
         {
             if (Subject != _previousSubject)

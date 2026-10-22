@@ -50,6 +50,14 @@ public class InlineStructureEditingTests
         + ":::\n"
         + "::\n";
 
+    // The first row of the list holds a widget in its content.
+    private static readonly string ContentWithProgressInRow = Content.Replace(
+        "::: Value Path=structuremotor/TargetSpeed Label=\"Row A\"\n:::\n",
+        "::: Value Path=structuremotor/TargetSpeed Label=\"Row A\"\n"
+        + ":::: HomeBlaze.Components.Progress Path=structuremotor/TargetSpeed Minimum=0 Maximum=1600\n"
+        + "::::\n"
+        + ":::\n");
+
     private readonly PlaywrightFixture _fixture;
 
     public InlineStructureEditingTests(PlaywrightFixture fixture)
@@ -165,12 +173,7 @@ public class InlineStructureEditingTests
     public async Task WhenAWidgetInTheContentOfARowIsClickedWhileTheListIsNotSelected_ThenItIsSelectedAndStaysSelected()
     {
         // Arrange
-        var page = await OpenPageInInlineModeAsync(Content.Replace(
-            "::: Value Path=structuremotor/TargetSpeed Label=\"Row A\"\n:::\n",
-            "::: Value Path=structuremotor/TargetSpeed Label=\"Row A\"\n"
-            + ":::: HomeBlaze.Components.Progress Path=structuremotor/TargetSpeed Minimum=0 Maximum=1600\n"
-            + "::::\n"
-            + ":::\n"));
+        var page = await OpenPageInInlineModeAsync(ContentWithProgressInRow);
         var progress = GetWrapperOf(page, "progress");
 
         // Act
@@ -392,13 +395,14 @@ public class InlineStructureEditingTests
     public async Task WhenAWidgetIsSelected_ThenOnlyTheContentAroundItHasInsertLines()
     {
         // Arrange
-        var page = await OpenPageInInlineModeAsync();
+        var page = await OpenPageInInlineModeAsync(ContentWithProgressInRow);
 
         // Act
-        await GetWrapperOf(page, "switch").SelectWidgetAsync();
+        var actionBar = await GetWrapperOf(page, "switch").SelectWidgetAsync();
 
         // Assert: the switch stands on the page, so the page keeps its lines and no content inside a block has any.
         await Assertions.Expect(page.Locator(".markdown-content > [data-testid='block-insert-line']").First).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await WaitForLinesAfterSelectionAsync(page, actionBar.GetByTestId("edit-subject-button"));
         await Assertions.Expect(page.Locator(".markdown-fragment [data-testid='block-insert-line']")).ToHaveCountAsync(0);
     }
 
@@ -406,12 +410,7 @@ public class InlineStructureEditingTests
     public async Task WhenAListIsSelected_ThenTheContentOfItsRowsHasInsertLinesOnlyOnceARowIsSelected()
     {
         // Arrange
-        var page = await OpenPageInInlineModeAsync(Content.Replace(
-            "::: Value Path=structuremotor/TargetSpeed Label=\"Row A\"\n:::\n",
-            "::: Value Path=structuremotor/TargetSpeed Label=\"Row A\"\n"
-            + ":::: HomeBlaze.Components.Progress Path=structuremotor/TargetSpeed Minimum=0 Maximum=1600\n"
-            + "::::\n"
-            + ":::\n"));
+        var page = await OpenPageInInlineModeAsync(ContentWithProgressInRow);
         var row = GetValueRowWrapper(page, "Row A");
         var rowLines = page.Locator(".markdown-fragment [data-testid='block-insert-line']");
 
@@ -420,7 +419,10 @@ public class InlineStructureEditingTests
 
         // Assert: the rows become selectable with the selection of the list, and the content of a row belongs to its row.
         await Assertions.Expect(row).ToHaveCountAsync(1, new() { Timeout = Timeout });
+        await WaitForLinesAfterSelectionAsync(page, page.GetByTestId("add-value-button"));
         await Assertions.Expect(rowLines).ToHaveCountAsync(0, new() { Timeout = Timeout });
+        await page.GetByRole(AriaRole.Dialog).GetByTestId("cancel-button").ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Dialog)).ToHaveCountAsync(0, new() { Timeout = Timeout });
 
         // Act
         await row.SelectWidgetAsync();
@@ -501,12 +503,7 @@ public class InlineStructureEditingTests
     public async Task WhenAWidgetInTheContentOfARowIsClickedInTheSplitPreview_ThenTheEditorSelectsItsOwnBlock()
     {
         // Arrange: the progress stands inside the list, which takes the clicks on the rest of its content.
-        var content = Content.Replace(
-            "::: Value Path=structuremotor/TargetSpeed Label=\"Row A\"\n:::\n",
-            "::: Value Path=structuremotor/TargetSpeed Label=\"Row A\"\n"
-            + ":::: HomeBlaze.Components.Progress Path=structuremotor/TargetSpeed Minimum=0 Maximum=1600\n"
-            + "::::\n"
-            + ":::\n");
+        var content = ContentWithProgressInRow;
         var page = await OpenPageInSplitModeAsync(content);
         var progress = page.Locator(".page-split-preview .subject-component-wrapper.revealable:has([data-testid='progress'])").Last;
         await Assertions.Expect(progress).ToBeVisibleAsync(new() { Timeout = Timeout });
@@ -547,6 +544,14 @@ public class InlineStructureEditingTests
         // The editor only knows its block regions once the decorations are applied, and a click before reveals nothing.
         await Assertions.Expect(page.Locator(".subject-block-decoration").First).ToBeVisibleAsync(new() { Timeout = Timeout });
         return page;
+    }
+
+    // A content updates its insert lines only after the render of the selection. The dialog that the button opens comes
+    // with a later round trip, so the lines are final once it shows, and a test can tell that none are left.
+    private static async Task WaitForLinesAfterSelectionAsync(IPage page, ILocator dialogButton)
+    {
+        await dialogButton.ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Dialog)).ToBeVisibleAsync(new() { Timeout = Timeout });
     }
 
     // The 1-based line of the page that contains the text.
