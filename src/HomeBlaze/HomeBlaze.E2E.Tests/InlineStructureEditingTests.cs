@@ -14,8 +14,38 @@ public class InlineStructureEditingTests
     private const int Timeout = 30000;
     private const string PageName = "Structure.md";
 
-    private static readonly string Content = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "TestData", "Demo", PageName))
-        .Replace("\r\n", "\n");
+    // The server writes the page in its output folder, so a run that ends with a change of the page would change the
+    // baseline of the next run if it were read from there.
+    private const string Content =
+        "---\n"
+        + "title: Structure Demo\n"
+        + "---\n"
+        + "\n"
+        + "# Structure Demo\n"
+        + "\n"
+        + ":: HomeBlaze.Samples.Motor#structuremotor Name=StructureMotor TargetSpeed=1000 SimulationInterval=00:00:01\n"
+        + "::\n"
+        + "\n"
+        + ":: HomeBlaze.Components.Switch Path=structuremotor/IsPowered\n"
+        + "::\n"
+        + "\n"
+        + ":: HomeBlaze.Components.ValueList\n"
+        + "::: Value Path=structuremotor/TargetSpeed Label=\"Row A\"\n"
+        + ":::\n"
+        + "::: Value Path=structuremotor/CurrentSpeed Label=\"Row B\"\n"
+        + ":::\n"
+        + "::\n"
+        + "\n"
+        + ":: HomeBlaze.Components.ValueMap#structuremap\n"
+        + "::: Case Value=Stopped Text=\"Off\"\n"
+        + ":::\n"
+        + "::\n"
+        + "\n"
+        + ":: HomeBlaze.Components.Responsive To=Xs\n"
+        + "::: HomeBlaze.Components.Card Title=\"Phone Card\"\n"
+        + "Only on phones.\n"
+        + ":::\n"
+        + "::\n";
 
     private readonly PlaywrightFixture _fixture;
 
