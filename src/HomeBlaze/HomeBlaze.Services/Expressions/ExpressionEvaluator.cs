@@ -28,32 +28,32 @@ internal static class ExpressionEvaluator
     {
         switch (node)
         {
-            case NotNode not:
-                return !EvaluateTruth(not.Operand, ref context);
+            case NotNode notNode:
+                return !EvaluateTruth(notNode.Operand, ref context);
 
-            case AndNode and:
+            case AndNode andNode:
             {
                 // False wins over unknown, so the right side is not read when the left one is false.
-                var left = EvaluateTruth(and.Left, ref context);
+                var left = EvaluateTruth(andNode.Left, ref context);
                 if (left == false)
                 {
                     return false;
                 }
 
-                var right = EvaluateTruth(and.Right, ref context);
+                var right = EvaluateTruth(andNode.Right, ref context);
                 return right == false ? false : left == true && right == true ? true : null;
             }
 
-            case OrNode or:
+            case OrNode orNode:
             {
                 // True wins over unknown, so the right side is not read when the left one is true.
-                var left = EvaluateTruth(or.Left, ref context);
+                var left = EvaluateTruth(orNode.Left, ref context);
                 if (left == true)
                 {
                     return true;
                 }
 
-                var right = EvaluateTruth(or.Right, ref context);
+                var right = EvaluateTruth(orNode.Right, ref context);
                 return right == true ? true : left == false && right == false ? false : null;
             }
 

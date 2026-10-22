@@ -119,6 +119,13 @@ public class ParsedExpressionEvaluationTests
     [InlineData("Unknown == null", true)]
     [InlineData("Power != null", true)]
     [InlineData("Power < null", null)]
+    [InlineData("Unknown and NotCharging", false)]
+    [InlineData("Unknown and IsCharging", null)]
+    [InlineData("Unknown or IsCharging", true)]
+    [InlineData("Unknown or NotCharging", null)]
+    [InlineData("Unknown and Unknown", null)]
+    [InlineData("Unknown or Unknown", null)]
+    [InlineData("not (Power > 1 and Unknown)", null)]
     public void WhenConditionIsEvaluated_ThenLogicHasThreeValues(string text, bool? expected)
     {
         // Arrange
@@ -148,6 +155,28 @@ public class ParsedExpressionEvaluationTests
     {
         // Arrange
         var values = new Dictionary<string, object?> { ["meter/Power"] = 7400m, ["meter/Maximum"] = 11000, ["meter/Float"] = 0.1f };
+
+        // Act
+        var result = EvaluateCondition(text, values);
+
+        // Assert
+        Assert.Equal(expected, result);
+    }
+
+    [Theory]
+    [InlineData("'2026-10-01' < room/StartsAt", true)]
+    [InlineData("'Monday' == room/Day", true)]
+    [InlineData("'Monday' < room/Day", null)]
+    [InlineData("'Kitchen' == room/Name", true)]
+    public void WhenOperandsAreSwapped_ThenTheComparisonIsTheSame(string text, bool? expected)
+    {
+        // Arrange
+        var values = new Dictionary<string, object?>
+        {
+            ["room/Name"] = "Kitchen",
+            ["room/Day"] = DayOfWeek.Monday,
+            ["room/StartsAt"] = new DateTimeOffset(2026, 10, 1, 12, 0, 0, TimeSpan.Zero)
+        };
 
         // Act
         var result = EvaluateCondition(text, values);

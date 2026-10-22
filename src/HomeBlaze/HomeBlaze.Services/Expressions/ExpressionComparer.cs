@@ -5,15 +5,18 @@ namespace HomeBlaze.Services.Expressions;
 /// <summary>
 /// Compares two values that are not null, with the rules of the where filter of MCP: a boolean only for equality, an enum
 /// by its name without regard to case and only for equality, a text without regard to case for equality and ordinal for
-/// order, a date against ISO 8601 text, a float as a float, and NaN never. Null is an order that cannot be told.
+/// order, a date against ISO 8601 text, a float as a float, and NaN never. A null result means the pair has no order, so the
+/// comparison is unknown.
 /// </summary>
 internal static class ExpressionComparer
 {
+    /// <summary>Compares two values that are not null.</summary>
     /// <param name="left">The left value.</param>
     /// <param name="leftInstant">The instant of the left operand when it is a text literal that is a date, otherwise null.</param>
     /// <param name="right">The right value.</param>
     /// <param name="rightInstant">The instant of the right operand when it is a text literal that is a date, otherwise null.</param>
     /// <param name="isEquality">Whether the comparison is <c>==</c> or <c>!=</c>.</param>
+    /// <returns>The order of the left value relative to the right one, or null when their types cannot be compared.</returns>
     public static int? Compare(object left, DateTimeOffset? leftInstant, object right, DateTimeOffset? rightInstant, bool isEquality)
     {
         if (IsNaN(left) || IsNaN(right))
