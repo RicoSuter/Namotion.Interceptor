@@ -335,11 +335,13 @@ internal static class MarkdownBlockAlignment
         }
 
         // Ended before the change. Only the block that was inserted into, and a block around it, can go on
-        // through the new lines, and only when no closing line ends it.
+        // into the new lines, and only when no closing line ends it. Such a block ends at its last non-empty
+        // line, so an empty line inserted after the new block ends it before the last inserted line.
         if (oldBlock.EndLine < edit.Line)
         {
             return newBlock.EndLine == oldBlock.EndLine ||
-                   (isOwnerOrAroundIt && !oldBlock.HasClosingLine && newBlock.EndLine == edit.InsertedEnd - 1);
+                   (isOwnerOrAroundIt && !oldBlock.HasClosingLine &&
+                    newBlock.EndLine >= edit.Line && newBlock.EndLine < edit.InsertedEnd);
         }
 
         // Around the change, with its last line after it.

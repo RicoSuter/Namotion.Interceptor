@@ -283,6 +283,27 @@ public class MarkdownPageOperationsTests
     }
 
     [Fact]
+    public void WhenAWidgetIsAppendedToASlotBlockWithoutClosingLinesBeforeItsNextSibling_ThenItIsInsideThatSlotBlock()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse(":: Demo.Flow\n::: Item\n:::: Demo.Tile\n::: Item\n:::: Demo.Tile\n");
+        var item = page.Blocks[0].Children[0];
+
+        // Act
+        var change = MarkdownPageOperations.TryInsertWidget(page, NoSubjects, item, null, "Demo.New", null, "{}", out var refusal);
+
+        // Assert
+        Assert.Null(refusal);
+        Assert.Equal(":: Demo.Flow\n::: Item\n:::: Demo.Tile\n\n:::: Demo.New\n\n::: Item\n:::: Demo.Tile\n", change!.Write.Page.Source);
+        Assert.Same(item, change.ChangedBlock);
+        var newItem = change.Write.Page.Blocks[0].Children[0];
+        Assert.Equal(2, newItem.Children.Count);
+        Assert.Equal(MarkdownBlockKind.Widget, newItem.Children[1].Kind);
+        Assert.Equal(5, newItem.Children[1].Line);
+        Assert.Single(change.Write.Page.Blocks[0].Children[1].Children);
+    }
+
+    [Fact]
     public void WhenASlotBlockIsAppended_ThenItFollowsTheLastBlockOfTheSlotLikeIt()
     {
         // Arrange
