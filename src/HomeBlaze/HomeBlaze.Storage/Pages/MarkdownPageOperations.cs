@@ -29,6 +29,8 @@ internal static class MarkdownPageOperations
     private const string WidgetPartRefusal = "Text can hold widgets, not the parts of a widget.";
     private const string StyleBlockRefusal = "Text can hold widgets, not style blocks.";
     private const string NoClosingLineRefusal = "Add the closing line of the block first.";
+    private const string MoveRefusal = "Moving the block would change other blocks of the page.";
+    private const string TextMoveRefusal = "Moving the text would change other blocks of the page.";
 
     /// <summary>Removes the block with everything in it.</summary>
     /// <returns>Null with a refusal when the change would change other blocks of the page.</returns>
@@ -45,7 +47,7 @@ internal static class MarkdownPageOperations
         var after = MarkdownPageParser.Parse(source);
         if (MarkdownBlockAlignment.TryAlign(page, after, edit, expectedInsertedBlockCount: 0, owner: null) is not { } map)
         {
-            refusal = $"Removing the block at line {block.Line} would change other blocks of the page.";
+            refusal = "Removing the block would change other blocks of the page.";
             return null;
         }
 
@@ -68,7 +70,7 @@ internal static class MarkdownPageOperations
     {
         if (FindMoveLine(page, block, direction) is not { } targetLine)
         {
-            refusal = $"The block at line {block.Line} has nothing {(direction < 0 ? "before" : "after")} it to move past.";
+            refusal = direction < 0 ? "The block has nothing before it to move past." : "The block has nothing after it to move past.";
             return null;
         }
 
@@ -89,7 +91,7 @@ internal static class MarkdownPageOperations
         var cutMap = MarkdownBlockAlignment.TryAlign(page, cutPage, cut, expectedInsertedBlockCount: 0, owner: null);
         if (cutMap is null)
         {
-            refusal = FormatMoveRefusal(block);
+            refusal = MoveRefusal;
             return null;
         }
 
@@ -100,7 +102,7 @@ internal static class MarkdownPageOperations
         if (MarkdownBlockAlignment.TryAlign(cutPage, after, insert, CountBlocks(block), cutParent, block.Kind) is not { } insertMap ||
             FindFirstBlockFrom(after, insert) is not { } moved)
         {
-            refusal = FormatMoveRefusal(block);
+            refusal = MoveRefusal;
             return null;
         }
 
@@ -111,9 +113,6 @@ internal static class MarkdownPageOperations
         return new MarkdownStructureChange(
             new MarkdownBlockWrite(after, subjects, [], HasInsertedOrRemovedBlocks: true), parent, moved.Index);
     }
-
-    private static string FormatMoveRefusal(MarkdownBlock block) =>
-        $"Moving the block at line {block.Line} would change other blocks of the page.";
 
     /// <summary>
     /// Moves the text block one place in <paramref name="direction"/> (-1 for up, 1 for down) among the items of its content,
@@ -139,20 +138,20 @@ internal static class MarkdownPageOperations
 
         if (FindTextMoveLine(page, textBlock, direction, out var joinsHtml) is not { } targetLine)
         {
-            refusal = $"The text at line {textBlock.Line} has nothing {(direction < 0 ? "before" : "after")} it to move past.";
+            refusal = direction < 0 ? "The text has nothing before it to move past." : "The text has nothing after it to move past.";
             return null;
         }
 
         if (joinsHtml)
         {
-            refusal = $"The text at line {textBlock.Line} would join the HTML next to it.";
+            refusal = "The text would join the HTML next to it.";
             return null;
         }
 
         var owner = textBlock.Owner;
         if (!CanInsertTextAt(page, owner, targetLine))
         {
-            refusal = $"Moving the text at line {textBlock.Line} would put it into a block without a closing line.";
+            refusal = "Moving the text would put it into a block without a closing line.";
             return null;
         }
 
@@ -166,7 +165,7 @@ internal static class MarkdownPageOperations
         var cutPage = MarkdownPageParser.Parse(cutSource);
         if (MarkdownBlockAlignment.TryAlign(page, cutPage, cut, expectedInsertedBlockCount: 0, owner: null) is not { } cutMap)
         {
-            refusal = FormatTextMoveRefusal(textBlock);
+            refusal = TextMoveRefusal;
             return null;
         }
 
@@ -177,13 +176,13 @@ internal static class MarkdownPageOperations
         var movedLine = FindFirstTextLine(after, insert);
         if (MarkdownBlockAlignment.TryAlign(cutPage, after, insert, expectedInsertedBlockCount: 0, cutOwner) is not { } insertMap)
         {
-            refusal = FormatTextMoveRefusal(textBlock);
+            refusal = TextMoveRefusal;
             return null;
         }
 
         if (!IsSameText(page, textBlock, after, movedLine, insert))
         {
-            refusal = $"The text at line {textBlock.Line} would join the text around it.";
+            refusal = "The text would join the text around it.";
             return null;
         }
 
@@ -192,9 +191,6 @@ internal static class MarkdownPageOperations
             owner,
             ResultTextLine: movedLine);
     }
-
-    private static string FormatTextMoveRefusal(MarkdownTextBlock textBlock) =>
-        $"Moving the text at line {textBlock.Line} would change other blocks of the page.";
 
     // The comparison of the document skips the inserted lines, so the moved text is checked on its own: one text block that
     // can be edited, on the inserted lines, with the same Markdown. A container before it that took it, such as a loose list
@@ -571,7 +567,7 @@ internal static class MarkdownPageOperations
         var map = MarkdownBlockAlignment.TryAlign(page, after, edit, expectedInsertedBlockCount: 1, owner, MarkdownBlockKind.Widget);
         if (map is null)
         {
-            refusal = $"Inserting a block at line {line} would change other blocks of the page.";
+            refusal = "Inserting a block here would change other blocks of the page.";
             return null;
         }
 
@@ -629,7 +625,7 @@ internal static class MarkdownPageOperations
         }
 
         var newSource = MarkdownBlockWriter.ReplaceLines(source, textBlock.Line, textBlock.EndLine, prepared, lineEnding, out var edit);
-        return AlignText(page, blockSubjects, newSource, edit, textBlock.Owner, blockCount, $"Changing the text at line {textBlock.Line}", out refusal);
+        return AlignText(page, blockSubjects, newSource, edit, textBlock.Owner, blockCount, "Changing the text would change other blocks of the page.", out refusal);
     }
 
     /// <summary>Removes the lines of the text block so that the text around it stays apart as before.</summary>
@@ -649,7 +645,7 @@ internal static class MarkdownPageOperations
         var after = MarkdownPageParser.Parse(newSource);
         if (MarkdownBlockAlignment.TryAlign(page, after, edit, expectedInsertedBlockCount: 0, owner: null) is not { } map)
         {
-            refusal = $"Removing the text at line {textBlock.Line} would change other blocks of the page.";
+            refusal = "Removing the text would change other blocks of the page.";
             return null;
         }
 
@@ -690,7 +686,7 @@ internal static class MarkdownPageOperations
         }
 
         var newSource = MarkdownBlockWriter.InsertBlockText(source, line, prepared, lineEnding, out var edit);
-        return AlignText(page, blockSubjects, newSource, edit, owner, blockCount, $"Inserting text at line {line}", out refusal);
+        return AlignText(page, blockSubjects, newSource, edit, owner, blockCount, "Inserting the text here would change other blocks of the page.", out refusal);
     }
 
     /// <summary>
@@ -717,7 +713,7 @@ internal static class MarkdownPageOperations
     {
         if (!textBlock.IsEditable)
         {
-            refusal = $"The text at line {textBlock.Line} cannot be edited as text.";
+            refusal = "The text cannot be edited as text.";
             return false;
         }
 
@@ -733,13 +729,13 @@ internal static class MarkdownPageOperations
         MarkdownLineEdit edit,
         MarkdownBlock? owner,
         int insertedBlockCount,
-        string description,
+        string alignmentRefusal,
         out string? refusal)
     {
         var after = MarkdownPageParser.Parse(newSource);
         if (MarkdownBlockAlignment.TryAlign(page, after, edit, insertedBlockCount, owner, MarkdownBlockKind.Widget) is not { } map)
         {
-            refusal = $"{description} would change other blocks of the page.";
+            refusal = alignmentRefusal;
             return null;
         }
 
@@ -936,7 +932,7 @@ internal static class MarkdownPageOperations
         var after = MarkdownPageParser.Parse(source);
         if (MarkdownBlockAlignment.TryAlign(page, after, edit, expectedInsertedBlockCount: 1, owner) is not { } map)
         {
-            refusal = $"Inserting a '{slotName}' block at line {placement.Line} would change other blocks of the page.";
+            refusal = $"Inserting a '{slotName}' block here would change other blocks of the page.";
             return null;
         }
 

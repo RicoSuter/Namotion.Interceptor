@@ -17,8 +17,8 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
     private const string ChangedWhileAskingMessage = "The page changed while the dialog was open. Try again.";
     private const string TextChangedWhileEditingMessage =
         "The text changed since you opened it. Copy your text, close the dialog and open the text again.";
-    private const string PageChangedWhileInsertingMessage =
-        "The page changed since you opened the dialog. Copy your text, close the dialog and insert it again.";
+    private const string PageChangedWhileCreatingMessage =
+        "The page changed since you opened the dialog. Copy your text, close the dialog and try again.";
 
     private readonly MarkdownFile _file;
     private readonly WidgetSelection _selection;
@@ -272,7 +272,7 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
                 // how to get the text into the page.
                 if (!string.Equals(pageContent, _file.Content, StringComparison.Ordinal))
                 {
-                    return PageChangedWhileInsertingMessage;
+                    return PageChangedWhileCreatingMessage;
                 }
 
                 var result = await RunAsync(() => write(text), reportsInSnackbar: false);

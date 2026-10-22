@@ -410,7 +410,7 @@ public class MarkdownStructureEditTests
         var result = await page.MoveTextBlockAsync(segment, -1, CancellationToken.None);
 
         // Assert
-        Assert.Equal("The text changed since you opened it.", result.Refusal);
+        Assert.Equal("The text moved or changed. Select it again.", result.Refusal);
         Assert.Equal("Intro.\n\n" + TextPage, await fixture.ReadAsync("page.md"));
     }
 
@@ -519,7 +519,7 @@ public class MarkdownStructureEditTests
     }
 
     [Fact]
-    public async Task WhenTheFileChangedBeforeAReplace_ThenTheRefusalSaysTheTextChanged()
+    public async Task WhenTheFileChangedBeforeAReplace_ThenTheRefusalAsksToTryAgain()
     {
         // Arrange
         var fixture = await MarkdownPageFixture.CreateAsync();
@@ -530,8 +530,8 @@ public class MarkdownStructureEditTests
         // Act
         var result = await page.ReplaceTextBlockAsync(FindText(page, "Old text."), "Old text.", "New.", CancellationToken.None);
 
-        // Assert
-        Assert.Equal("The text changed since you opened it.", result.Refusal);
+        // Assert: the text is the same after the read, so a second save succeeds.
+        Assert.Equal("The page changed while it was edited. Try again.", result.Refusal);
         Assert.Equal(changed, await fixture.ReadAsync("page.md"));
         Assert.Equal(changed, page.Content);
     }

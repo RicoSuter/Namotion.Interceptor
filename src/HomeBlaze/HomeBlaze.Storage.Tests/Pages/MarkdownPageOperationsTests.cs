@@ -420,7 +420,7 @@ public class MarkdownPageOperationsTests
 
         // Assert
         Assert.Null(change);
-        Assert.Contains("would change other blocks", refusal);
+        Assert.Equal("Inserting a block here would change other blocks of the page.", refusal);
     }
 
     [Fact]
@@ -1078,7 +1078,7 @@ public class MarkdownPageOperationsTests
 
         // Assert
         Assert.Null(change);
-        Assert.Contains("would change other blocks", refusal);
+        Assert.Equal("Moving the text would change other blocks of the page.", refusal);
     }
 
     [Theory]
@@ -1095,7 +1095,7 @@ public class MarkdownPageOperationsTests
 
         // Assert
         Assert.Null(change);
-        Assert.Equal($"The text at line {line} would join the text around it.", refusal);
+        Assert.Equal("The text would join the text around it.", refusal);
     }
 
     [Theory]
@@ -1115,7 +1115,7 @@ public class MarkdownPageOperationsTests
         // Assert
         Assert.Equal((false, false), directions);
         Assert.Null(change);
-        Assert.Equal($"The text at line {line} would join the HTML next to it.", refusal);
+        Assert.Equal("The text would join the HTML next to it.", refusal);
     }
 
     [Fact]

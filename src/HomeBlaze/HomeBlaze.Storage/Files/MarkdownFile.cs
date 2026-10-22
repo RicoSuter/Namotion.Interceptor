@@ -73,6 +73,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     private const string NoBlockRefusal = "The subject has no block on the page.";
     private const string TextChangedRefusal = "The text changed since you opened it.";
     private const string PageChangedRefusal = "The page changed since you opened it.";
+    private const string MovedTextRefusal = "The text moved or changed. Select it again.";
     private const string NotInContentRefusal = "The block to insert before is not in this content.";
 
     // The write of this page that the flow runs in, so that a write from inside it is refused instead of waiting
@@ -611,7 +612,9 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
 
                 return (MarkdownPageOperations.TryReplaceText(snapshot.Page!, snapshot.BlockSubjects, textBlock, newText, out var refusal), refusal);
             },
-            TextChangedRefusal,
+            // The page read again after the refusal keeps a segment while nothing before it changed, and then a second save
+            // of the same text succeeds.
+            StructureChangedRefusal,
             cancellationToken);
     }
 
@@ -655,8 +658,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         return EditStructureAsync(
             snapshot => snapshot.TextBlocks.TryGetValue(segment, out var textBlock)
                 ? (MarkdownPageOperations.TryMoveText(snapshot.Page!, snapshot.BlockSubjects, textBlock, direction, out var refusal), refusal)
-                : (null, TextChangedRefusal),
-            TextChangedRefusal,
+                : (null, MovedTextRefusal),
+            MovedTextRefusal,
             cancellationToken);
     }
 
