@@ -11,18 +11,30 @@ using Namotion.Interceptor;
 namespace HomeBlaze.Storage.Blazor.Files;
 
 /// <summary>Changes the blocks of a markdown page that is edited inline, with the dialogs that ask for them.</summary>
-internal sealed class MarkdownPageStructureEditor : IPageStructureEditor
+internal sealed class MarkdownPageStructureEditor : PageStructureEditor
 {
+    private const string ChangedWhileAskingMessage = "The page changed while the dialog was open. Try again.";
+
     private readonly MarkdownFile _file;
+    private readonly WidgetSelection _selection;
+    private readonly SubjectComponent _pageComponent;
     private readonly IDialogService _dialogService;
     private readonly ISnackbar _snackbar;
     private readonly SubjectFactory _subjectFactory;
     private readonly ILogger _logger;
 
     public MarkdownPageStructureEditor(
-        MarkdownFile file, IDialogService dialogService, ISnackbar snackbar, SubjectFactory subjectFactory, ILogger logger)
+        MarkdownFile file,
+        WidgetSelection selection,
+        SubjectComponent pageComponent,
+        IDialogService dialogService,
+        ISnackbar snackbar,
+        SubjectFactory subjectFactory,
+        ILogger logger)
     {
         _file = file;
+        _selection = selection;
+        _pageComponent = pageComponent;
         _dialogService = dialogService;
         _snackbar = snackbar;
         _subjectFactory = subjectFactory;
@@ -32,13 +44,19 @@ internal sealed class MarkdownPageStructureEditor : IPageStructureEditor
     /// <summary>Gets the page whose blocks this editor changes.</summary>
     public MarkdownFile File => _file;
 
-    public PageBlockActions GetActions(IInterceptorSubject subject)
+    /// <summary>Gets the selection that the editor sets after an edit.</summary>
+    public WidgetSelection Selection => _selection;
+
+    /// <summary>Gets the widget of the page, inside which the editor finds the widget to select.</summary>
+    public SubjectComponent PageComponent => _pageComponent;
+
+    public override PageBlockActions GetActions(IInterceptorSubject subject)
     {
         var actions = _file.GetBlockActions(subject);
         return new PageBlockActions(actions.CanDelete, actions.CanMoveUp, actions.CanMoveDown);
     }
 
-    public IReadOnlyList<PageListSlot> GetListSlots(IInterceptorSubject owner)
+    public override IReadOnlyList<PageListSlot> GetListSlots(IInterceptorSubject owner)
     {
         var slots = _file.GetListSlots(owner);
         var result = new PageListSlot[slots.Count];
@@ -50,11 +68,11 @@ internal sealed class MarkdownPageStructureEditor : IPageStructureEditor
         return result;
     }
 
-    public string? GetBlockName(IInterceptorSubject subject) => _file.GetBlockName(subject);
+    public override string? GetBlockName(IInterceptorSubject subject) => _file.GetBlockName(subject);
 
-    public bool CanInsertInto(IInterceptorSubject content) => _file.IsContentOfPage(content);
+    public override bool CanInsertInto(IInterceptorSubject content) => _file.IsContentOfPage(content);
 
-    public async Task DeleteAsync(IInterceptorSubject subject)
+    public override async Task DeleteAsync(IInterceptorSubject subject)
     {
         var actions = _file.GetBlockActions(subject);
         if (!actions.CanDelete)
@@ -70,21 +88,23 @@ internal sealed class MarkdownPageStructureEditor : IPageStructureEditor
             var count => $"Delete {name} and the {count} blocks inside it?"
         };
 
+        var content = _file.Content;
         var confirmed = await _dialogService.ShowMessageBoxAsync("Delete block", message, yesText: "Delete", cancelText: "Cancel");
-        if (confirmed == true)
+        if (confirmed == true && IsUnchangedSince(content))
         {
             await RunAsync(() => _file.DeleteBlockAsync(subject, CancellationToken.None));
         }
     }
 
-    public Task MoveAsync(IInterceptorSubject subject, int direction) =>
-        RunAsync(() => _file.MoveBlockAsync(subject, direction, CancellationToken.None));
+    public override async Task MoveAsync(IInterceptorSubject subject, int direction) =>
+        await RunAsync(() => _file.MoveBlockAsync(subject, direction, CancellationToken.None));
 
-    public async Task InsertWidgetAsync(IInterceptorSubject content, IInterceptorSubject? before)
+    public override async Task InsertWidgetAsync(IInterceptorSubject content, IInterceptorSubject? before)
     {
+        var pageContent = _file.Content;
         var result = await SubjectSetupDialog.ShowAsync(_dialogService, new SubjectSetupOptions
         {
-            NameField = MarkdownBlockNames.CreateNameOptions(_file.Content ?? string.Empty)
+            NameField = MarkdownBlockNames.CreateNameOptions(pageContent ?? string.Empty)
         });
 
         if (result is null)
@@ -95,7 +115,10 @@ internal sealed class MarkdownPageStructureEditor : IPageStructureEditor
         // Only the text of the subject goes into the page, and the reload creates the instance that lives on.
         try
         {
-            await RunAsync(() => _file.InsertWidgetAsync(content, before, result.Subject, result.Name, CancellationToken.None));
+            if (IsUnchangedSince(pageContent))
+            {
+                await RunAsync(() => _file.InsertWidgetAsync(content, before, result.Subject, result.Name, CancellationToken.None));
+            }
         }
         finally
         {
@@ -103,8 +126,9 @@ internal sealed class MarkdownPageStructureEditor : IPageStructureEditor
         }
     }
 
-    public async Task AddListItemAsync(IInterceptorSubject owner, PageListSlot slot)
+    public override async Task AddListItemAsync(IInterceptorSubject owner, PageListSlot slot)
     {
+        var pageContent = _file.Content;
         IInterceptorSubject? item = null;
         if (slot.ItemType is { } itemType)
         {
@@ -119,7 +143,10 @@ internal sealed class MarkdownPageStructureEditor : IPageStructureEditor
 
         try
         {
-            await RunAsync(() => _file.AddSlotItemAsync(owner, slot.Name, item, CancellationToken.None));
+            if (IsUnchangedSince(pageContent))
+            {
+                await RunAsync(() => _file.AddSlotItemAsync(owner, slot.Name, item, CancellationToken.None));
+            }
         }
         finally
         {
@@ -130,14 +157,28 @@ internal sealed class MarkdownPageStructureEditor : IPageStructureEditor
         }
     }
 
+    // A dialog asked about the blocks as they were. A reload while it was open can have given an unnamed subject another
+    // block, so the edit would hit a block the user did not choose. The same text means the same blocks.
+    private bool IsUnchangedSince(string? content)
+    {
+        if (string.Equals(content, _file.Content, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        _snackbar.Add(ChangedWhileAskingMessage, Severity.Warning);
+        return false;
+    }
+
     // A write that the storage cannot make must not end the circuit: a file that another process holds open or that
     // may not be written, a storage that does not answer in time (a TimeoutException) or that is not connected (an
-    // InvalidOperationException, the base of the internal refusal of the storage).
-    private async Task RunAsync(Func<Task<MarkdownEditResult>> edit)
+    // InvalidOperationException, the base of the internal refusal of the storage). Null when the edit threw.
+    private async Task<MarkdownEditResult?> RunAsync(Func<Task<MarkdownEditResult>> edit, bool reportsRefusal = true)
     {
+        MarkdownEditResult result;
         try
         {
-            Report(await edit());
+            result = await edit();
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or TimeoutException or InvalidOperationException)
         {
@@ -147,7 +188,22 @@ internal sealed class MarkdownPageStructureEditor : IPageStructureEditor
                 "The structure edit of the page {Path} could not be saved",
                 _file.FullPath);
             _snackbar.Add($"The page could not be saved. {exception.Message}", Severity.Error);
+            return null;
         }
+
+        if (!result.IsWritten)
+        {
+            if (reportsRefusal)
+            {
+                _snackbar.Add($"The page was not changed. {result.Refusal}", Severity.Warning);
+            }
+        }
+        else if (result.Subject is { } subject)
+        {
+            _selection.SelectSubject(subject, _pageComponent);
+        }
+
+        return result;
     }
 
     // The refusal and the timeout of the storage are internal types of its assembly. Any other invalid operation or
@@ -155,12 +211,4 @@ internal sealed class MarkdownPageStructureEditor : IPageStructureEditor
     private static bool IsStorageFailure(Exception exception) =>
         exception is IOException or UnauthorizedAccessException ||
         exception.GetType().Assembly == typeof(MarkdownFile).Assembly;
-
-    private void Report(MarkdownEditResult result)
-    {
-        if (!result.IsWritten)
-        {
-            _snackbar.Add($"The page was not changed. {result.Refusal}", Severity.Warning);
-        }
-    }
 }

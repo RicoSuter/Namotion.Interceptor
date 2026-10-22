@@ -381,17 +381,6 @@ namespace HomeBlaze.Components
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
     }
     public interface IInvisibleWidget { }
-    public interface IPageStructureEditor
-    {
-        System.Threading.Tasks.Task AddListItemAsync(Namotion.Interceptor.IInterceptorSubject owner, HomeBlaze.Components.PageListSlot slot);
-        bool CanInsertInto(Namotion.Interceptor.IInterceptorSubject content);
-        System.Threading.Tasks.Task DeleteAsync(Namotion.Interceptor.IInterceptorSubject subject);
-        HomeBlaze.Components.PageBlockActions GetActions(Namotion.Interceptor.IInterceptorSubject subject);
-        string? GetBlockName(Namotion.Interceptor.IInterceptorSubject subject);
-        System.Collections.Generic.IReadOnlyList<HomeBlaze.Components.PageListSlot> GetListSlots(Namotion.Interceptor.IInterceptorSubject owner);
-        System.Threading.Tasks.Task InsertWidgetAsync(Namotion.Interceptor.IInterceptorSubject content, Namotion.Interceptor.IInterceptorSubject? before);
-        System.Threading.Tasks.Task MoveAsync(Namotion.Interceptor.IInterceptorSubject subject, int direction);
-    }
     public interface IPropertyHistoryViewer
     {
         bool CanShow(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property);
@@ -494,6 +483,18 @@ namespace HomeBlaze.Components
         public PageListSlot(string Name, System.Type? ItemType) { }
         public System.Type? ItemType { get; init; }
         public string Name { get; init; }
+    }
+    public abstract class PageStructureEditor
+    {
+        protected PageStructureEditor() { }
+        public abstract System.Threading.Tasks.Task AddListItemAsync(Namotion.Interceptor.IInterceptorSubject owner, HomeBlaze.Components.PageListSlot slot);
+        public abstract bool CanInsertInto(Namotion.Interceptor.IInterceptorSubject content);
+        public abstract System.Threading.Tasks.Task DeleteAsync(Namotion.Interceptor.IInterceptorSubject subject);
+        public abstract HomeBlaze.Components.PageBlockActions GetActions(Namotion.Interceptor.IInterceptorSubject subject);
+        public abstract string? GetBlockName(Namotion.Interceptor.IInterceptorSubject subject);
+        public abstract System.Collections.Generic.IReadOnlyList<HomeBlaze.Components.PageListSlot> GetListSlots(Namotion.Interceptor.IInterceptorSubject owner);
+        public abstract System.Threading.Tasks.Task InsertWidgetAsync(Namotion.Interceptor.IInterceptorSubject content, Namotion.Interceptor.IInterceptorSubject? before);
+        public abstract System.Threading.Tasks.Task MoveAsync(Namotion.Interceptor.IInterceptorSubject subject, int direction);
     }
     [HomeBlaze.Abstractions.Attributes.PageLayout]
     [HomeBlaze.Abstractions.Attributes.SubjectIcon("LinearScale")]
@@ -633,7 +634,7 @@ namespace HomeBlaze.Components
         [Microsoft.AspNetCore.Components.CascadingParameter]
         public HomeBlaze.Components.WidgetSelection? Selection { get; set; }
         [Microsoft.AspNetCore.Components.CascadingParameter]
-        public HomeBlaze.Components.IPageStructureEditor? StructureEditor { get; set; }
+        public HomeBlaze.Components.PageStructureEditor? StructureEditor { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public Namotion.Interceptor.IInterceptorSubject? Subject { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
@@ -1017,6 +1018,7 @@ namespace HomeBlaze.Components
         public event System.Action? Changed;
         public void Clear() { }
         public void Select(HomeBlaze.Components.SubjectComponent? component) { }
+        public void SelectSubject(Namotion.Interceptor.IInterceptorSubject subject, HomeBlaze.Components.SubjectComponent root) { }
     }
     public class _Imports
     {
@@ -1492,7 +1494,7 @@ namespace HomeBlaze.Components.Components
         [Microsoft.AspNetCore.Components.CascadingParameter]
         public HomeBlaze.Components.WidgetSelection? Selection { get; set; }
         [Microsoft.AspNetCore.Components.CascadingParameter]
-        public HomeBlaze.Components.IPageStructureEditor? StructureEditor { get; set; }
+        public HomeBlaze.Components.PageStructureEditor? StructureEditor { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public Namotion.Interceptor.IInterceptorSubject? Subject { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
@@ -1518,7 +1520,7 @@ namespace HomeBlaze.Components.Components
         [Microsoft.AspNetCore.Components.CascadingParameter]
         public HomeBlaze.Components.WidgetSelection? Selection { get; set; }
         [Microsoft.AspNetCore.Components.CascadingParameter]
-        public HomeBlaze.Components.IPageStructureEditor? StructureEditor { get; set; }
+        public HomeBlaze.Components.PageStructureEditor? StructureEditor { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public Namotion.Interceptor.IInterceptorSubject? Subject { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }

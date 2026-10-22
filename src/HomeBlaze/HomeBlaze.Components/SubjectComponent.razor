@@ -175,7 +175,7 @@
     /// is shown.
     /// </summary>
     [CascadingParameter]
-    public IPageStructureEditor? StructureEditor { get; set; }
+    public PageStructureEditor? StructureEditor { get; set; }
 
     /// <summary>Cascaded to the preview next to an editor, where a click reveals the widget in the editor.</summary>
     [CascadingParameter]
@@ -332,6 +332,28 @@
         return null;
     }
 
+    /// <summary>Gets the selectable widget of the subject among this widget and the widgets inside it, or null.</summary>
+    internal SubjectComponent? FindSelectable(IInterceptorSubject subject)
+    {
+        if (ReferenceEquals(Subject, subject) && IsSelectable)
+        {
+            return this;
+        }
+
+        if (_childComponents != null)
+        {
+            foreach (var child in _childComponents)
+            {
+                if (child.FindSelectable(subject) is { } selectable)
+                {
+                    return selectable;
+                }
+            }
+        }
+
+        return null;
+    }
+
     // An event of the wrapper or the bar does not render the widget: a press, a key or a click that selects nothing changes
     // nothing, and a change of the selection renders the two widgets it concerns through OnSelectionChanged.
     Task IHandleEvent.HandleEventAsync(EventCallbackWorkItem callback, object? argument) => callback.InvokeAsync(argument);
@@ -445,6 +467,9 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        // A reload creates the widget of an inserted block after the edit returned, see WidgetSelection.SelectSubject.
+        Selection?.OnRendered(this);
+
         // Compared as the rendered object rather than as ISubjectComponent: the registry accepts any
         // component type, and a host that waits for this callback must also hear from one that is not
         // an ISubjectComponent.

@@ -1,3 +1,5 @@
+using Namotion.Interceptor;
+
 namespace HomeBlaze.Components;
 
 /// <summary>
@@ -8,6 +10,9 @@ namespace HomeBlaze.Components;
 /// </remarks>
 public sealed class WidgetSelection
 {
+    // The subject whose widget is selected when it renders, see SelectSubject.
+    private IInterceptorSubject? _pendingSubject;
+
     /// <summary>
     /// Gets the selected widget, or null when none is selected.
     /// </summary>
@@ -24,6 +29,7 @@ public sealed class WidgetSelection
     /// </summary>
     public void Select(SubjectComponent? component)
     {
+        _pendingSubject = null;
         var previous = Selected;
         if (ReferenceEquals(previous, component))
         {
@@ -37,9 +43,34 @@ public sealed class WidgetSelection
     }
 
     /// <summary>
+    /// Selects the selectable widget of <paramref name="subject"/> among <paramref name="root"/> and the widgets inside it.
+    /// When there is none yet, such as for a block that a reload of the page has just created, the selection is cleared and
+    /// the first such widget that renders is selected.
+    /// </summary>
+    public void SelectSubject(IInterceptorSubject subject, SubjectComponent root)
+    {
+        if (root.FindSelectable(subject) is { } component)
+        {
+            Select(component);
+            return;
+        }
+
+        Select(null);
+        _pendingSubject = subject;
+    }
+
+    /// <summary>
     /// Clears the selection.
     /// </summary>
     public void Clear() => Select(null);
+
+    internal void OnRendered(SubjectComponent component)
+    {
+        if (_pendingSubject is { } subject && ReferenceEquals(component.Subject, subject) && component.IsSelectable)
+        {
+            Select(component);
+        }
+    }
 
     internal void Remove(SubjectComponent component)
     {

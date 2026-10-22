@@ -43,7 +43,7 @@
     public WidgetSelection? Selection { get; set; }
 
     [CascadingParameter]
-    public IPageStructureEditor? StructureEditor { get; set; }
+    public PageStructureEditor? StructureEditor { get; set; }
 
     [CascadingParameter(Name = "ParentSubjectComponent")]
     public SubjectComponent? Owner { get; set; }
@@ -79,7 +79,7 @@
         }
     }
 
-    private static PageListSlot? FindCaseSlot(IPageStructureEditor editor, ValueMap map)
+    private static PageListSlot? FindCaseSlot(PageStructureEditor editor, ValueMap map)
     {
         foreach (var slot in editor.GetListSlots(map))
         {

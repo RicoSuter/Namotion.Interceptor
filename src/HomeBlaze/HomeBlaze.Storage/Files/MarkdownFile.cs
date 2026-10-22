@@ -594,9 +594,16 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             cancellationToken);
     }
 
-    /// <summary>Gets what the block of <paramref name="subject"/> allows, all false when it has no block on this page.</summary>
+    /// <summary>
+    /// Gets what the block of <paramref name="subject"/> allows, all false when it has no block on this page. It reads the
+    /// children of the page, so a component that renders it renders again after every reload.
+    /// </summary>
     public MarkdownBlockActions GetBlockActions(IInterceptorSubject subject)
     {
+        // The snapshot is not tracked, and the bar of a selected widget that a move kept would show the buttons of its old
+        // place. Do not remove it, although its result is not used.
+        _ = Children;
+
         var snapshot = _parseResult;
         if (snapshot.Page is not { } page || FindOwnBlock(page, snapshot.BlockSubjects, subject) is not { } block)
         {

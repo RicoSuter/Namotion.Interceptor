@@ -134,6 +134,48 @@ public class InlineStructureEditingTests
     }
 
     [Fact]
+    public async Task WhenARowIsMovedDown_ThenItStaysSelectedAndItsBarOffersMoveUp()
+    {
+        // Arrange
+        var page = await OpenPageInInlineModeAsync();
+        var actionBar = await SelectRowAsync(page, "Row A");
+        await Assertions.Expect(actionBar.GetByTestId("move-up-button")).ToHaveCountAsync(0, new() { Timeout = Timeout });
+
+        // Act
+        await actionBar.GetByTestId("move-down-button").ClickAsync();
+
+        // Assert
+        await _fixture.WaitForDemoPageTextAsync(
+            PageName,
+            text => text.IndexOf("Label=\"Row B\"", StringComparison.Ordinal) < text.IndexOf("Label=\"Row A\"", StringComparison.Ordinal),
+            "The rows were not swapped.");
+        await Assertions.Expect(GetValueRowWrapper(page, "Row A")).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetWidgetActionBar().GetByTestId("move-up-button")).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetWidgetActionBar().GetByTestId("move-down-button")).ToHaveCountAsync(0, new() { Timeout = Timeout });
+    }
+
+    [Fact]
+    public async Task WhenAWidgetIsInserted_ThenItIsSelected()
+    {
+        // Arrange
+        var page = await OpenPageInInlineModeAsync();
+        var line = GetInsertLineBefore(GetWrapperOf(page, "switch"));
+
+        // Act
+        await OpenWidgetDialogAtAsync(page, line);
+        var dialog = page.GetByTestId("create-subject-dialog");
+        await dialog.GetByTestId("type-search-input").FillAsync("Alert");
+        await dialog.GetByTestId("type-row-alert").ClickAsync();
+        await dialog.GetByTestId("create-name-input").FillAsync("selectedalert");
+        await page.GetByTestId("create-button").ClickAsync();
+
+        // Assert
+        await _fixture.WaitForDemoPageTextAsync(
+            PageName, text => text.Contains("HomeBlaze.Components.Alert#selectedalert"), "The alert was not inserted.");
+        await Assertions.Expect(page.Locator(".subject-component-wrapper.selected .mud-alert")).ToHaveCountAsync(1, new() { Timeout = Timeout });
+    }
+
+    [Fact]
     public async Task WhenAValueIsAddedToASelectedList_ThenItsRowFollowsTheLastRow()
     {
         // Arrange
@@ -373,8 +415,9 @@ public class InlineStructureEditingTests
         var lines = page.Locator(".markdown-content > [data-testid='block-insert-line']");
         await Assertions.Expect(lines.First).ToBeVisibleAsync(new() { Timeout = Timeout });
 
-        // Act: the second line stands before the switch.
-        await lines.Nth(1).ClickAsync();
+        // Act
+        var line = GetInsertLineBefore(GetWrapperOf(page, "switch"));
+        await OpenWidgetDialogAtAsync(page, line);
         var dialog = page.GetByTestId("create-subject-dialog");
         await dialog.GetByTestId("type-search-input").FillAsync("Alert");
         await dialog.GetByTestId("type-row-alert").ClickAsync();
@@ -600,4 +643,15 @@ public class InlineStructureEditingTests
         page.Locator($".subject-component-wrapper.selectable:has([data-testid='{testId}'])")
             .Filter(new() { HasNot = page.Locator($".subject-component-wrapper.selectable:has([data-testid='{testId}'])") })
             .First;
+
+    // The insert line right before the widget: the lines are siblings of the widgets of their content.
+    private static ILocator GetInsertLineBefore(ILocator wrapper) =>
+        wrapper.Locator("xpath=preceding-sibling::*[@data-testid='block-insert-line'][1]");
+
+    // Opens the dialog that inserts a widget at the line.
+    private static async Task OpenWidgetDialogAtAsync(IPage page, ILocator line)
+    {
+        await line.GetByRole(AriaRole.Button).ClickAsync();
+        await Assertions.Expect(page.GetByTestId("create-subject-dialog")).ToBeVisibleAsync(new() { Timeout = Timeout });
+    }
 }

@@ -18,7 +18,7 @@
 @inject ILogger<MarkdownPageStructureEditor> StructureEditorLogger
 
 <CascadingValue Value="@IsEditing" Name="IsEditing">
-    <CascadingValue Value="@StructureEditor" TValue="IPageStructureEditor">
+    <CascadingValue Value="@StructureEditor" TValue="PageStructureEditor">
         <div class="markdown-content" style="position: relative;">
             @if (IsLoading)
             {
@@ -70,24 +70,30 @@
     [CascadingParameter]
     public WidgetSelection? Selection { get; set; }
 
+    // The widget of the page, inside which the editor finds the widget of a subject to select.
+    [CascadingParameter(Name = "ParentSubjectComponent")]
+    public SubjectComponent? PageComponent { get; set; }
+
     private MarkdownPageStructureEditor? _structureEditor;
 
     private MarkdownFile? File => Subject as MarkdownFile;
 
     // Inline mode is editing with a selection. The Split preview is not editing, so it never changes the page.
-    private IPageStructureEditor? StructureEditor
+    private PageStructureEditor? StructureEditor
     {
         get
         {
-            if (!IsEditing || Selection is null || File is not { } file)
+            if (!IsEditing || Selection is not { } selection || PageComponent is not { } pageComponent || File is not { } file)
             {
                 return null;
             }
 
             // A navigation to another page keeps this component and gives it the other file.
-            if (_structureEditor?.File != file)
+            if (_structureEditor is null || _structureEditor.File != file || _structureEditor.Selection != selection ||
+                _structureEditor.PageComponent != pageComponent)
             {
-                _structureEditor = new MarkdownPageStructureEditor(file, DialogService, Snackbar, SubjectFactory, StructureEditorLogger);
+                _structureEditor = new MarkdownPageStructureEditor(
+                    file, selection, pageComponent, DialogService, Snackbar, SubjectFactory, StructureEditorLogger);
             }
 
             return _structureEditor;
