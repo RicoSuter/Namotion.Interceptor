@@ -81,12 +81,12 @@ An expression with a mistake does not take a block down. The page shows the mess
 
 | Message | Cause | Fix |
 |---------|-------|-----|
-| `Unknown pipe 'rounded'` | The pipe after the pipe character of an expression is neither `display` nor `raw`, like `{{ motor/Speed \| rounded }}`, where the backslash is only needed inside a table. The message shows the pipe as written | Use `display` or `raw`, or write no pipe, see [Pipes](pages.md#pipes) |
-| `The pipe 'raw' takes no arguments` | A pipe of the text of a page with an argument after a colon, like `{{ motor/Speed \| raw:2 }}` | Remove the colon and the argument |
+| `Unknown pipe 'rounded'` | The pipe at the end of an expression is neither `display` nor `raw`, like `{{ motor/Speed \| rounded }}`, where the backslash is only needed inside a table. The message shows the pipe as written | Use `display` or `raw`, or write no pipe, see [Pipes](pages.md#pipes) |
+| `The pipe 'raw' takes no arguments` | A pipe with an argument after a colon, like `{{ motor/Speed \| raw:2 }}` | Remove the colon and the argument |
 | `expected ')' at position 16` | A mistake in an expression: a parenthesis, a quote, an operator or a value is missing or in the wrong place. The position counts the characters between the braces from 0 | Correct the expression at that position, see [Conditions](pages.md#conditions) |
 | `use '==' for equality at position 12` | A single `=` in a comparison | Write `==` |
 | `arithmetic is not supported at position 2` | `+`, `-`, `*` or `/` between two values | Show the values separately |
-| `'value' is not available in the text of a page` | The text of a page uses `value` or `subject`, which only a widget has | Write the path of the property |
+| `'value' is not available in the text of a page` | The text of a page uses `value` or `subject`, which are reserved for the values that widgets give their expressions | Write the path of the property |
 
 ## Value Widget Errors
 

@@ -214,7 +214,6 @@ The reader sees "Speed: 600 RPM", and the tooltip of the text shows the target s
 - **In markdown code**: An expression in inline code, in an indented code block or in a fenced code block is shown as written, with its braces. A fenced code block is markdown's way to show code: a line of three or more backticks or tildes, the lines of code, and a line of the same characters. This page shows all its samples that way.
 - **On the head line of a block and in its `json` block**: The value of an argument is taken as written. `Title="{{ mymotor/Name }}"` gives a title with braces in it.
 - **In the frontmatter**.
-- **The names `value` and `subject`**: A block cannot be named `#value` or `#subject`, because widgets use these names in their expressions.
 - **In the address of a markdown link**: `[text](https://example.com/{{ path }})` gives a broken link. Write the link as an HTML `<a>` element, where an expression works inside the `href` attribute.
 
 ### Expression Limits
@@ -222,9 +221,10 @@ The reader sees "Speed: 600 RPM", and the tooltip of the text shows the target s
 - **Pipes**: An expression has the pipes `display` and `raw`. Another unit, another number of decimals and arithmetic are not supported.
 - **Single values**: An expression is made for text, numbers, yes or no, durations and times. For a property that holds a subject or a list of subjects, it shows a technical type name. A list of plain values is shown on one line with a space between the values. The form `raw` shows a technical type name for every list.
 - **No error for a wrong path**: An expression whose path leads to nothing shows nothing. Check the spelling of the path when a value is missing.
-- **Special characters in a name are percent-encoded**: A name with a space, `(`, `)`, `'`, `"`, `&`, `!`, `<`, `>`, `=`, `|`, `{` or `}` is written percent-encoded in an expression, such as `Notes%20%281%29.md` for `Notes (1).md`. A path with only spaces, as pages wrote before expressions had operators, still works without encoding. A name that starts with a digit and has no slash after it is written with `./` before it, such as `./2ndFloor`. Inside HTML that you write, write `<` as `&lt;`. [Paths](paths.md) says how to write such a name.
+- **Special characters in a name are percent-encoded**: A name with an operator character, a quote, a brace or a space is written percent-encoded in an expression, and a name that starts with a digit is written with `./` before it. [Paths](paths.md) has the characters and examples. Inside HTML that you write, write `<` as `&lt;`.
 - **Single braces in text can disappear**: The markdown renderer reads single braces anywhere in the text of a page as attributes, and removes them from the text, when they are empty or when everything between them reads as attributes: a word like `{id}`, a class like `{.wide}`, an id like `{#top}` or a pair like `{key=value}`, also several of them with spaces between. `Use /api/{id}` is then shown as "Use /api/". To show such braces, put the text in inline code, or write a backslash before the opening brace, as in `/api/\{id}`. A heading that starts with `#` is the exception: such braces cut the heading off, so that everything from the opening brace to the end of the line is lost, also inside inline code and after a backslash. `## Path {id} syntax` is shown as "Path". Keep such braces out of these headings.
 - **No live value in markdown code**: Markdown code keeps an expression as written, so a live value cannot stand inside it. Use a `<code>` element when a live value should look like code.
+- **The names `value` and `subject`**: A block cannot be named `#value` or `#subject`, because these names are reserved for the values that widgets give their expressions.
 
 ---
 
