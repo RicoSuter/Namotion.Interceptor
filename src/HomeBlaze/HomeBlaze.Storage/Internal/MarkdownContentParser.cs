@@ -282,13 +282,13 @@ public sealed partial class MarkdownContentParser
         var page = MarkdownPageParser.Parse(content);
         var basePath = GetLinkBasePath(parent);
         var pageName = EscapeFileNameForLink(Path.GetFileName(parent.FullPath));
-        var segments = MarkdownSegmentBuilder.Build(page, url => RewriteLink(url, basePath, pageName));
+        var segments = MarkdownSegmentBuilder.Build(page, url => RewriteLink(url, basePath, pageName), markTextBlocks: true);
 
         var state = new ParseState(parent, page, reusableSubjects);
         try
         {
             var children = await BuildChildrenAsync(segments, existingChildren, state, cancellationToken);
-            return new MarkdownParseResult(children, page, state.BlockSubjects, state.NamedSubjects);
+            return new MarkdownParseResult(children, page, state.BlockSubjects, state.NamedSubjects) { TextBlocks = state.TextBlocks };
         }
         catch
         {
@@ -312,7 +312,7 @@ public sealed partial class MarkdownContentParser
             switch (segments[index])
             {
                 case HtmlMarkdownSegment html:
-                    AddHtml(children, existingChildren, index, html.Html);
+                    AddHtml(children, existingChildren, index, html.Html, html.TextBlock, state);
                     break;
 
                 case ExpressionMarkdownSegment expression:
@@ -331,7 +331,7 @@ public sealed partial class MarkdownContentParser
                     if (subject is null)
                     {
                         state.AddErrorBox();
-                        AddHtml(children, existingChildren, index, error!.Render());
+                        AddHtml(children, existingChildren, index, error!.Render(), textBlock: null, state);
                     }
                     else
                     {
@@ -349,13 +349,24 @@ public sealed partial class MarkdownContentParser
         Dictionary<string, IInterceptorSubject> children,
         IDictionary<string, IInterceptorSubject> existingChildren,
         int index,
-        string html)
+        string html,
+        MarkdownTextBlock? textBlock,
+        ParseState state)
     {
+        var start = textBlock is null ? HtmlSegmentStart.None
+            : textBlock.IsEditable ? HtmlSegmentStart.Text
+            : HtmlSegmentStart.Other;
+
         // The index is part of the key because the same HTML can occur several times.
         var key = $"{HtmlKeyPrefix}{index}_{ComputeHash(html)}";
-        children[key] = existingChildren.TryGetValue(key, out var existing) && existing is HtmlSegment
-            ? existing
-            : new HtmlSegment(html);
+        var segment = existingChildren.TryGetValue(key, out var existing) && existing is HtmlSegment reused && reused.Start == start
+            ? reused
+            : new HtmlSegment(html, start);
+        children[key] = segment;
+        if (textBlock is not null)
+        {
+            state.TextBlocks[segment] = textBlock;
+        }
     }
 
     private async Task<(string? Key, IInterceptorSubject? Subject, BlockError? Error)> CreateWidgetAsync(
@@ -642,6 +653,9 @@ public sealed partial class MarkdownContentParser
         public Dictionary<int, IInterceptorSubject> BlockSubjects { get; } = new();
 
         public Dictionary<string, IInterceptorSubject> NamedSubjects { get; } = new();
+
+        /// <summary>The text block that each HTML segment of this parse starts.</summary>
+        public Dictionary<HtmlSegment, MarkdownTextBlock> TextBlocks { get; } = new(ReferenceEqualityComparer.Instance);
 
         public int RegistrationCount => _registrations.Count;
 

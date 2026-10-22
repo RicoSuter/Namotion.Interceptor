@@ -788,7 +788,13 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         }
 
         // The text was computed from the snapshot, so it would undo what a reload published since then.
-        var published = snapshot with { Page = write.Page, BlockSubjects = write.BlockSubjects };
+        // The text blocks have the lines of the text before the write; the read inside the write finds the new ones.
+        var published = snapshot with
+        {
+            Page = write.Page,
+            BlockSubjects = write.BlockSubjects,
+            TextBlocks = MarkdownParseResult.NoTextBlocks
+        };
         if (!ReferenceEquals(Interlocked.CompareExchange(ref _parseResult, published, snapshot), snapshot))
         {
             _parser.LogRefusedWrite(FullPath, changedPageRefusal);

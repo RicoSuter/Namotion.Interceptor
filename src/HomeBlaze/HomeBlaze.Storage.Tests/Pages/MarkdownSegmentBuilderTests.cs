@@ -769,6 +769,43 @@ public class MarkdownSegmentBuilderTests
         Assert.Contains("<code>Subtitle</code>", html);
     }
 
+    [Fact]
+    public void WhenTextBlocksAreMarked_ThenEachStartsAnHtmlSegmentWithItsLines()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("# Title\n\nFirst {{ a/B }} paragraph.\n\n:: Demo.Card\nInside.\n::\n");
+
+        // Act
+        var segments = MarkdownSegmentBuilder.Build(page, linkRewriter: null, markTextBlocks: true);
+
+        // Assert
+        var starts = segments.OfType<HtmlMarkdownSegment>().Where(segment => segment.TextBlock is not null).ToList();
+        Assert.Equal([1, 3], starts.Select(segment => segment.TextBlock!.Line));
+        Assert.StartsWith("<h1", starts[0].Html);
+        Assert.StartsWith("<p>First ", starts[1].Html.TrimStart());
+        var all = segments.ToList();
+        Assert.IsType<ExpressionMarkdownSegment>(all[all.IndexOf(starts[1]) + 1]);
+        var inside = segments.OfType<BlockMarkdownSegment>().Single().Content
+            .OfType<HtmlMarkdownSegment>().Single(segment => segment.TextBlock is not null);
+        Assert.Same(page.Blocks[0], inside.TextBlock!.Owner);
+        Assert.Contains("Inside.", inside.Html);
+    }
+
+    [Fact]
+    public void WhenThePageHasACommentShapedLikeATextMarker_ThenItStaysInTheHtml()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("<!--TEXT:00000000000000000000000000000000:0-->\n\nText.\n");
+
+        // Act
+        var segments = MarkdownSegmentBuilder.Build(page, linkRewriter: null, markTextBlocks: true);
+
+        // Assert
+        Assert.Contains(
+            "<!--TEXT:00000000000000000000000000000000:0-->",
+            string.Concat(segments.OfType<HtmlMarkdownSegment>().Select(segment => segment.Html)));
+    }
+
     // What a browser shows for the HTML: character references are decoded.
     private static string VisibleText(IEnumerable<MarkdownSegment> segments) =>
         WebUtility.HtmlDecode(AllHtml(segments));

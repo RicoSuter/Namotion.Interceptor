@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Text.RegularExpressions;
 using Markdig.Extensions.Tables;
@@ -11,7 +12,11 @@ namespace HomeBlaze.Storage.Pages;
 
 public abstract record MarkdownSegment;
 
-public sealed record HtmlMarkdownSegment(string Html) : MarkdownSegment;
+public sealed record HtmlMarkdownSegment(string Html) : MarkdownSegment
+{
+    /// <summary>The text block that this HTML starts, when the page was built with its text blocks marked, or null.</summary>
+    internal MarkdownTextBlock? TextBlock { get; init; }
+}
 
 public sealed record ExpressionMarkdownSegment(string Path, ExpressionFormat Format, string? Error) : MarkdownSegment;
 
@@ -34,7 +39,7 @@ public static partial class MarkdownSegmentBuilder
     // markers of the blocks in between.
     private const string ExpressionPattern = @"\{\{\s*([^{}<]+?)\s*\}\}";
 
-    [GeneratedRegex(@"<!--(/?)BLOCK:([0-9a-f]{32}):(\d+)-->|" + ExpressionPattern)]
+    [GeneratedRegex(@"<!--(/?)BLOCK:([0-9a-f]{32}):(\d+)-->|<!--TEXT:([0-9a-f]{32}):(\d+)-->|" + ExpressionPattern)]
     private static partial Regex MarkerRegex();
 
     [GeneratedRegex(ExpressionPattern)]
@@ -57,7 +62,7 @@ public static partial class MarkdownSegmentBuilder
     /// </summary>
     /// <remarks>
     /// The search reads the text and not the rendered page, so it also returns an expression that
-    /// <see cref="Build"/> does not turn into a segment: one in the front matter, in the content of an invalid
+    /// <see cref="Build(MarkdownPage, Func{string, string})"/> does not turn into a segment: one in the front matter, in the content of an invalid
     /// block or on the head line of a block, and one whose braces enclose markdown markup or the border of a block.
     /// A path with a character reference in it, such as <c>&amp;amp;</c>, is returned as written, while the
     /// segment has the character.
@@ -95,7 +100,15 @@ public static partial class MarkdownSegmentBuilder
     internal static bool IsOldSubjectFence(Block block) =>
         block is FencedCodeBlock { Info: { } info } && info.StartsWith("subject(", StringComparison.Ordinal);
 
-    public static IReadOnlyList<MarkdownSegment> Build(MarkdownPage page, Func<string, string>? linkRewriter = null)
+    public static IReadOnlyList<MarkdownSegment> Build(MarkdownPage page, Func<string, string>? linkRewriter = null) =>
+        Build(page, linkRewriter, markTextBlocks: false);
+
+    /// <summary>
+    /// Renders the page and cuts it into segments per block. With <paramref name="markTextBlocks"/>, every text block of the
+    /// page (see <see cref="MarkdownTextBlocks"/>) starts an <see cref="HtmlMarkdownSegment"/> of its own that carries it,
+    /// and the HTML of all segments together is the same as without.
+    /// </summary>
+    internal static IReadOnlyList<MarkdownSegment> Build(MarkdownPage page, Func<string, string>? linkRewriter, bool markTextBlocks)
     {
         // Page text may contain marker-shaped comments, so only markers carrying this token count.
         var token = Guid.NewGuid().ToString("N");
@@ -140,29 +153,56 @@ public static partial class MarkdownSegmentBuilder
             renderer.ObjectRenderers.Replace<HtmlTableRenderer>(scrollableRenderer);
         }
 
+        List<MarkdownTextBlock>? textBlocks = null;
+        if (markTextBlocks)
+        {
+            textBlocks = MarkdownTextBlocks.Find(page);
+            var markers = new Dictionary<Block, int>(textBlocks.Count, ReferenceEqualityComparer.Instance);
+            for (var index = 0; index < textBlocks.Count; index++)
+            {
+                markers[textBlocks[index].FirstBlock] = index;
+            }
+
+            // Straight to the writer and not through the renderer, which would take the marker for text on the line and write
+            // other line breaks around the block, so that the HTML would differ once Split takes the markers out.
+            renderer.ObjectWriteBefore += (_, markdownObject) =>
+            {
+                if (markdownObject is Block block && markers.TryGetValue(block, out var markerIndex))
+                {
+                    writer.Write($"<!--TEXT:{token}:{markerIndex.ToString(CultureInfo.InvariantCulture)}-->");
+                }
+            };
+        }
+
         renderer.Render(page.Document);
         writer.Flush();
 
-        return Split(writer.ToString(), page, token);
+        return Split(writer.ToString(), page, token, textBlocks);
     }
 
-    internal static List<MarkdownSegment> Split(string html, MarkdownPage page, string token)
+    internal static List<MarkdownSegment> Split(
+        string html, MarkdownPage page, string token, IReadOnlyList<MarkdownTextBlock>? textBlocks = null)
     {
         var root = new List<MarkdownSegment>();
         var stack = new Stack<(MarkdownBlock Block, List<MarkdownSegment> Outer)>();
         var current = root;
         var lastIndex = 0;
 
+        // The text block whose marker came last, which the next segment starts.
+        MarkdownTextBlock? pendingTextBlock = null;
+
         foreach (Match match in MarkerRegex().Matches(html))
         {
-            var isForgedMarker = match.Groups[2].Success && match.Groups[2].Value != token;
+            var isForgedMarker =
+                (match.Groups[2].Success && match.Groups[2].Value != token) ||
+                (match.Groups[4].Success && (match.Groups[4].Value != token || textBlocks is null));
             if (isForgedMarker)
             {
                 continue;
             }
 
             // The path is HTML here, so a quote or an ampersand in it is a character reference.
-            var path = match.Groups[4].Success ? WebUtility.HtmlDecode(match.Groups[4].Value) : null;
+            var path = match.Groups[6].Success ? WebUtility.HtmlDecode(match.Groups[6].Value) : null;
 
             // The pattern cannot see a '<' or a brace that the page text has literally, because the HTML has
             // a character reference for it. In the text such braces enclose no expression, so they stay text here.
@@ -173,10 +213,22 @@ public static partial class MarkdownSegmentBuilder
 
             if (match.Index > lastIndex)
             {
-                current.Add(new HtmlMarkdownSegment(html[lastIndex..match.Index]));
+                current.Add(CreateHtmlSegment(html[lastIndex..match.Index], ref pendingTextBlock));
             }
 
             lastIndex = match.Index + match.Length;
+
+            if (match.Groups[4].Success)
+            {
+                pendingTextBlock = textBlocks![int.Parse(match.Groups[5].Value, CultureInfo.InvariantCulture)];
+                continue;
+            }
+
+            // A text block that starts without HTML of its own still starts a segment, so that its content can tell it.
+            if (pendingTextBlock is not null)
+            {
+                current.Add(CreateHtmlSegment(string.Empty, ref pendingTextBlock));
+            }
 
             if (path is not null)
             {
@@ -185,7 +237,7 @@ public static partial class MarkdownSegmentBuilder
             }
             else if (match.Groups[1].Length == 0)
             {
-                stack.Push((page.AllBlocks[int.Parse(match.Groups[3].Value)], current));
+                stack.Push((page.AllBlocks[int.Parse(match.Groups[3].Value, CultureInfo.InvariantCulture)], current));
                 current = [];
             }
             else if (stack.Count > 0)
@@ -196,9 +248,9 @@ public static partial class MarkdownSegmentBuilder
             }
         }
 
-        if (lastIndex < html.Length)
+        if (lastIndex < html.Length || pendingTextBlock is not null)
         {
-            current.Add(new HtmlMarkdownSegment(html[lastIndex..]));
+            current.Add(CreateHtmlSegment(html[lastIndex..], ref pendingTextBlock));
         }
 
         // A closing marker that was not found must not take the content of its block out of the result.
@@ -210,6 +262,13 @@ public static partial class MarkdownSegmentBuilder
         }
 
         return root;
+    }
+
+    private static HtmlMarkdownSegment CreateHtmlSegment(string html, ref MarkdownTextBlock? pendingTextBlock)
+    {
+        var segment = new HtmlMarkdownSegment(html) { TextBlock = pendingTextBlock };
+        pendingTextBlock = null;
+        return segment;
     }
 
     private sealed class BlockMarkerRenderer(MarkdownPage page, string token) : HtmlObjectRenderer<MarkdownBlockContainer>

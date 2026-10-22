@@ -632,4 +632,21 @@ public class MarkdownWidgetBlockTests
         Assert.Contains($"<a href=\"{expectedUrl}\">fragment only</a>", html);
         Assert.Contains($"<a href=\"{expectedUrl}\">with page name</a>", html);
     }
+
+    [Fact]
+    public async Task WhenAPageIsRead_ThenEveryTopLevelBlockOfTextStartsAnHtmlSegmentOfItsOwn()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+
+        // Act
+        var page = await fixture.AddPageAsync(
+            "page.md", $"# Title\n\nText {{{{ missing/Path }}}}.\n\n<div>raw</div>\n\n:: {LeafType} Name=a\n::\n\nAfter.\n");
+
+        // Assert: the title, the text and the raw HTML before the block are one run with raw HTML in it.
+        var starts = page.Children.Values.OfType<HtmlSegment>()
+            .Select(segment => segment.Start)
+            .Where(start => start != HtmlSegmentStart.None);
+        Assert.Equal([HtmlSegmentStart.Other, HtmlSegmentStart.Text], starts);
+    }
 }

@@ -55,9 +55,9 @@ internal static class MarkdownSubjectKeys
     /// together with what is inside it. The configuration names of the block itself are left out, so that a view of the
     /// page that hides its configuration finds the block at the same place.
     /// </summary>
-    /// <param name="pageSegments">The segments of the page, from <see cref="MarkdownSegmentBuilder.Build"/>. A parse
-    /// builds them with a link rewriter, which only changes the addresses of links in the HTML and never the segments
-    /// or their order, so they can be built without it here.</param>
+    /// <param name="pageSegments">The segments of the page, from <see cref="MarkdownSegmentBuilder.Build(MarkdownPage, Func{string, string})"/>. A parse
+    /// builds them with a link rewriter and with its text blocks marked, which only change the addresses of links in the
+    /// HTML and where the HTML is cut, and never the other segments or their order, so they can be built without both here.</param>
     /// <param name="findType">Gets the type that a widget block names with its full name, or null when there is none.</param>
     /// <param name="getConfigurationNames">Gets the names of the configuration values of a block.</param>
     public static List<KeyedBlock> Walk(

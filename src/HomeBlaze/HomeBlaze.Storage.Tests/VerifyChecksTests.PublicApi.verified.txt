@@ -259,10 +259,12 @@ namespace HomeBlaze.Storage.Internal
     }
     [HomeBlaze.Abstractions.Attributes.ExcludeFrom(HomeBlaze.Abstractions.Attributes.ExclusionTarget.All)]
     [Namotion.Interceptor.Attributes.InterceptorSubject]
+    [System.ComponentModel.DisplayName("Text")]
     public class HtmlSegment : Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
-        public HtmlSegment(string html) { }
+        public HtmlSegment(string html, HomeBlaze.Storage.Internal.HtmlSegmentStart start = 0) { }
         public string Html { get; }
+        public HomeBlaze.Storage.Internal.HtmlSegmentStart Start { get; }
         public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
         public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
         protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
@@ -270,6 +272,12 @@ namespace HomeBlaze.Storage.Internal
         protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
         protected void RaisePropertyChanged(string propertyName) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    public enum HtmlSegmentStart
+    {
+        None = 0,
+        Text = 1,
+        Other = 2,
     }
     public sealed class MarkdownContentParser
     {
