@@ -5,8 +5,9 @@ namespace HomeBlaze.Storage.Pages;
 /// <summary>Whether a change of the blocks or the text of a page was written, why not, and what it wrote.</summary>
 /// <param name="Refusal">Why nothing was written, or null when the change was written.</param>
 /// <param name="Subject">
-/// The subject of the block that the change moved or inserted, once the page describes the written text, which it does
-/// when the storage read the file inside the write. Null otherwise, and for a deletion.
+/// The subject of the block that the change moved or inserted, or for a change of text the segment of the first block of
+/// text it wrote, once the page describes the written text, which it does when the storage read the file inside the
+/// write. Null otherwise, and for a deletion.
 /// </param>
 /// <remarks>
 /// A change whose write the storage fails has no result: the exception of the storage propagates, and the page then
