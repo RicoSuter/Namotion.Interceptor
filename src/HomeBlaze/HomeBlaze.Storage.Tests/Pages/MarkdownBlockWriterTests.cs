@@ -770,4 +770,18 @@ public class MarkdownBlockWriterTests
         // Assert
         Assert.Equal(expected, result);
     }
+
+    [Theory]
+    [InlineData("a\n\nOld\n\nb\n", 3, 3, "New", "a\n\nNew\n\nb\n")]
+    [InlineData("a\nOld\nb\n", 2, 2, "New", "a\n\nNew\n\nb\n")]
+    [InlineData(":: X\nOld\n::\n", 2, 2, "New", ":: X\nNew\n::\n")]
+    [InlineData("a\n\nOld", 3, 3, "New", "a\n\nNew")]
+    public void WhenLinesAreReplaced_ThenTheNewLinesStandApartFromTextAroundThem(string source, int line, int endLine, string text, string expected)
+    {
+        // Act
+        var result = MarkdownBlockWriter.ReplaceLines(source, line, endLine, text, "\n", out _);
+
+        // Assert
+        Assert.Equal(expected, result);
+    }
 }

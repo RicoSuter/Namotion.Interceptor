@@ -8,7 +8,9 @@ namespace HomeBlaze.Storage.Pages;
 /// The block of the page before the change whose content changed, or null when the change is directly on the page.
 /// </param>
 /// <param name="ResultBlockIndex">The index in the page of <paramref name="Write"/> of the block that the change moved or inserted, or -1.</param>
-internal sealed record MarkdownStructureChange(MarkdownBlockWrite Write, MarkdownBlock? ChangedBlock, int ResultBlockIndex = -1);
+/// <param name="ResultTextLine">The first line in the page of <paramref name="Write"/> of the text that the change wrote, or 0.</param>
+internal sealed record MarkdownStructureChange(
+    MarkdownBlockWrite Write, MarkdownBlock? ChangedBlock, int ResultBlockIndex = -1, int ResultTextLine = 0);
 
 /// <summary>
 /// Removes, moves and inserts whole blocks in the text of a page. Every change is checked with
@@ -337,15 +339,30 @@ internal static class MarkdownPageOperations
     }
 
     /// <summary>
-    /// Inserts a new widget block into the content of <paramref name="owner"/>, or of the page when it is null: before
-    /// <paramref name="before"/>, or after the content when it is null, which is before the first slot block of the
-    /// owner. The block takes the fence of the block beside it and closing lines unless the page has none.
+    /// Gets the line before which new content goes into the content of <paramref name="owner"/>, or of the page when it is
+    /// null: <paramref name="beforeLine"/>, the first line of an item of that content, or else the end of the content, which
+    /// is before the first slot block of the owner. Never before or inside the json block of the block around the line.
+    /// </summary>
+    public static int GetInsertLine(MarkdownPage page, MarkdownBlock? owner, int? beforeLine)
+    {
+        var siblings = owner?.Children ?? page.Blocks;
+        var firstSlotBlock = siblings.FirstOrDefault(block => block.Kind == MarkdownBlockKind.Slot);
+        var line = beforeLine
+            ?? firstSlotBlock?.Line
+            ?? (owner is null ? MarkdownBlockWriter.GetAppendLine(page.Source) : owner.HasClosingLine ? owner.EndLine : owner.EndLine + 1);
+        return page.GetLineForNewBlock(line);
+    }
+
+    /// <summary>
+    /// Inserts a new widget block into the content of <paramref name="owner"/>, or of the page when it is null, before the
+    /// 1-based <paramref name="line"/> from <see cref="GetInsertLine"/>. The block takes the fence of the widget block at or
+    /// after the line, or else of the last widget block, and closing lines unless the page has none.
     /// </summary>
     public static MarkdownStructureChange? TryInsertWidget(
         MarkdownPage page,
         IReadOnlyDictionary<int, IInterceptorSubject> blockSubjects,
         MarkdownBlock? owner,
-        MarkdownBlock? before,
+        int line,
         string typeName,
         string? id,
         string configurationJson,
@@ -358,13 +375,8 @@ internal static class MarkdownPageOperations
 
         var source = page.Source;
         var siblings = owner?.Children ?? page.Blocks;
-        var firstSlotBlock = siblings.FirstOrDefault(block => block.Kind == MarkdownBlockKind.Slot);
-        var line = before?.Line
-            ?? firstSlotBlock?.Line
-            ?? (owner is null ? MarkdownBlockWriter.GetAppendLine(source) : owner.HasClosingLine ? owner.EndLine : owner.EndLine + 1);
-        line = page.GetLineForNewBlock(line);
-
-        var reference = before ?? siblings.LastOrDefault(block => block.Kind == MarkdownBlockKind.Widget);
+        var reference = siblings.FirstOrDefault(block => block.Kind == MarkdownBlockKind.Widget && block.Line >= line)
+            ?? siblings.LastOrDefault(block => block.Kind == MarkdownBlockKind.Widget);
         var fenceLength = reference?.FenceLength ?? (owner is null ? MarkdownBlockFence.MinimumLength : owner.FenceLength + 1);
         var indentation = reference is not null ? MarkdownBlockWriter.GetIndentation(source, reference)
             : owner is not null ? MarkdownBlockWriter.GetIndentation(source, owner)
@@ -390,6 +402,154 @@ internal static class MarkdownPageOperations
             new MarkdownBlockWrite(after, MapSubjects(blockSubjects, map), [], HasInsertedOrRemovedBlocks: true),
             owner,
             FindFirstBlockFrom(after, edit)?.Index ?? -1);
+    }
+
+    /// <summary>Gets the Markdown of a text block: its lines without the indentation of its content, with line feeds.</summary>
+    public static string GetText(MarkdownPage page, MarkdownTextBlock textBlock)
+    {
+        var lines = MarkdownBlockWriter.GetLines(page.Source, textBlock.Line, textBlock.EndLine).ReplaceLineEndings("\n");
+        var indentation = GetContentIndentation(page, textBlock.Owner);
+        return indentation.Length == 0 ? lines : MarkdownBlockWriter.RemoveIndentation(lines, indentation);
+    }
+
+    /// <summary>
+    /// Replaces the lines of the text block with <paramref name="text"/>, or removes them when it is empty or white space.
+    /// The text gets the line endings of the page and the indentation of its content, and an empty line keeps it apart from
+    /// a line of text before or after it.
+    /// </summary>
+    /// <returns>Null with a refusal when the change would change other blocks of the page or the text around it.</returns>
+    public static MarkdownStructureChange? TryReplaceText(
+        MarkdownPage page, IReadOnlyDictionary<int, IInterceptorSubject> blockSubjects, MarkdownTextBlock textBlock, string text, out string? refusal)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return TryRemoveText(page, blockSubjects, textBlock, out refusal);
+        }
+
+        if (!CanInsertOrRemoveBlocks(page, out refusal))
+        {
+            return null;
+        }
+
+        var source = page.Source;
+        var lineEnding = MarkdownBlockWriter.GetLineEnding(source, MarkdownBlockWriter.GetLineStart(source, textBlock.Line));
+        var newSource = MarkdownBlockWriter.ReplaceLines(
+            source, textBlock.Line, textBlock.EndLine, PrepareText(page, text, textBlock.Owner, lineEnding), lineEnding, out var edit);
+        return AlignText(page, blockSubjects, newSource, edit, textBlock.Owner, $"Changing the text at line {textBlock.Line}", out refusal);
+    }
+
+    /// <summary>Removes the lines of the text block so that the text around it stays apart as before.</summary>
+    /// <returns>Null with a refusal when the change would change other blocks of the page or the text around it.</returns>
+    public static MarkdownStructureChange? TryRemoveText(
+        MarkdownPage page, IReadOnlyDictionary<int, IInterceptorSubject> blockSubjects, MarkdownTextBlock textBlock, out string? refusal)
+    {
+        if (!CanInsertOrRemoveBlocks(page, out refusal))
+        {
+            return null;
+        }
+
+        var newSource = MarkdownBlockWriter.CutLines(page.Source, textBlock.Line, textBlock.EndLine, out var edit);
+        var after = MarkdownPageParser.Parse(newSource);
+        if (MarkdownBlockAlignment.TryAlign(page, after, edit, expectedInsertedBlockCount: 0, owner: null) is not { } map)
+        {
+            refusal = $"Removing the text at line {textBlock.Line} would change other blocks of the page.";
+            return null;
+        }
+
+        return new MarkdownStructureChange(
+            new MarkdownBlockWrite(after, MapSubjects(blockSubjects, map), [], HasInsertedOrRemovedBlocks: false), textBlock.Owner);
+    }
+
+    /// <summary>
+    /// Inserts <paramref name="text"/> into the content of <paramref name="owner"/>, or of the page when it is null, before
+    /// the 1-based <paramref name="line"/> from <see cref="GetInsertLine"/>, with empty lines around it like a block.
+    /// </summary>
+    /// <returns>Null with a refusal when the text is empty or the change would change other blocks of the page or the text around it.</returns>
+    public static MarkdownStructureChange? TryInsertText(
+        MarkdownPage page, IReadOnlyDictionary<int, IInterceptorSubject> blockSubjects, MarkdownBlock? owner, int line, string text, out string? refusal)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            refusal = "The text is empty.";
+            return null;
+        }
+
+        if (!CanInsertOrRemoveBlocks(page, out refusal))
+        {
+            return null;
+        }
+
+        var source = page.Source;
+        var lineEnding = MarkdownBlockWriter.GetLineEnding(source, MarkdownBlockWriter.GetLineStart(source, Math.Max(line - 1, 1)));
+        var newSource = MarkdownBlockWriter.InsertBlockText(source, line, PrepareText(page, text, owner, lineEnding), lineEnding, out var edit);
+        return AlignText(page, blockSubjects, newSource, edit, owner, $"Inserting text at line {line}", out refusal);
+    }
+
+    /// <summary>
+    /// Gets whether text can go into the content of <paramref name="owner"/>, or of the page when it is null, before the
+    /// 1-based <paramref name="line"/>: not right after a block without a closing line, which would take the text.
+    /// </summary>
+    public static bool CanInsertTextAt(MarkdownPage page, MarkdownBlock? owner, int line)
+    {
+        MarkdownBlock? previous = null;
+        foreach (var sibling in owner?.Children ?? page.Blocks)
+        {
+            if (sibling.Line < line)
+            {
+                previous = sibling;
+            }
+        }
+
+        return previous is not { HasClosingLine: false };
+    }
+
+    // The change of a text holds no block, and the Markdown document around it stays as it was.
+    private static MarkdownStructureChange? AlignText(
+        MarkdownPage page,
+        IReadOnlyDictionary<int, IInterceptorSubject> blockSubjects,
+        string newSource,
+        MarkdownLineEdit edit,
+        MarkdownBlock? owner,
+        string description,
+        out string? refusal)
+    {
+        var after = MarkdownPageParser.Parse(newSource);
+        if (MarkdownBlockAlignment.TryAlign(page, after, edit, expectedInsertedBlockCount: 0, owner) is not { } map)
+        {
+            refusal = $"{description} would change other blocks of the page.";
+            return null;
+        }
+
+        refusal = null;
+        return new MarkdownStructureChange(
+            new MarkdownBlockWrite(after, MapSubjects(blockSubjects, map), [], HasInsertedOrRemovedBlocks: false),
+            owner,
+            ResultTextLine: FindFirstTextLine(newSource, edit));
+    }
+
+    // The text as lines of the page: its line endings, the indentation of its content, and no empty lines around it.
+    private static string PrepareText(MarkdownPage page, string text, MarkdownBlock? owner, string lineEnding)
+    {
+        var lines = text.ReplaceLineEndings("\n").Trim('\n').TrimEnd();
+        return MarkdownBlockWriter.Indent(lines.ReplaceLineEndings(lineEnding), GetContentIndentation(page, owner), lineEnding);
+    }
+
+    // The content of a block is indented like its head line, and the page has none.
+    private static string GetContentIndentation(MarkdownPage page, MarkdownBlock? owner) =>
+        owner is null ? string.Empty : MarkdownBlockWriter.GetIndentation(page.Source, owner);
+
+    // The first line of the change that is not empty: where the new text starts.
+    private static int FindFirstTextLine(string source, MarkdownLineEdit edit)
+    {
+        for (var line = edit.Line; line < edit.InsertedEnd; line++)
+        {
+            if (!string.IsNullOrWhiteSpace(MarkdownBlockWriter.GetLines(source, line, line)))
+            {
+                return line;
+            }
+        }
+
+        return 0;
     }
 
     /// <summary>

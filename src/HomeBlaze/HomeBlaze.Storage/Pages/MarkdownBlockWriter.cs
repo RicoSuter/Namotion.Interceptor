@@ -250,6 +250,46 @@ public static class MarkdownBlockWriter
     }
 
     /// <summary>
+    /// Replaces the lines from <paramref name="line"/> to <paramref name="endLine"/> with <paramref name="text"/>, which has
+    /// no line ending after its last line. An empty line keeps it apart from a line of text right before or after it.
+    /// </summary>
+    /// <remarks><paramref name="source"/> must have no lone carriage return, see <see cref="HasLoneCarriageReturn"/>.</remarks>
+    internal static string ReplaceLines(string source, int line, int endLine, string text, string lineEnding, out MarkdownLineEdit edit)
+    {
+        var start = GetLineStart(source, line);
+        var end = GetLineStart(source, endLine + 1);
+        if (line > 1 && IsTextLine(source, GetLineStart(source, line - 1), start))
+        {
+            text = lineEnding + text;
+        }
+
+        if (IsTextLine(source, end, GetLineStart(source, endLine + 2)))
+        {
+            text += lineEnding;
+        }
+
+        // Lines that end the text without a line ending give the new last line none either.
+        var replacement = end == source.Length && source.Length > 0 && source[^1] != '\n' ? text : text + lineEnding;
+        edit = new MarkdownLineEdit(line, endLine - line + 1, text.AsSpan().Count('\n') + 1);
+        return string.Concat(source.AsSpan(0, start), replacement, source.AsSpan(end));
+    }
+
+    /// <summary>Takes <paramref name="indentation"/> off the start of every line of <paramref name="text"/>, which has line feeds, that starts with it.</summary>
+    internal static string RemoveIndentation(string text, string indentation)
+    {
+        var lines = text.Split('\n');
+        for (var index = 0; index < lines.Length; index++)
+        {
+            if (lines[index].StartsWith(indentation, StringComparison.Ordinal))
+            {
+                lines[index] = lines[index][indentation.Length..];
+            }
+        }
+
+        return string.Join('\n', lines);
+    }
+
+    /// <summary>
     /// Removes the lines from <paramref name="line"/> to <paramref name="endLine"/> so that the text around them stays apart
     /// as before. Between two lines of text one empty line stays (see <see cref="RemoveBlock"/>). Of the empty lines around
     /// them, the one after goes with them when the one before is empty too or they start the text, and the one before when

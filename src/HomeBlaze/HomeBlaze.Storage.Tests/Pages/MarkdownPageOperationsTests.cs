@@ -9,6 +9,12 @@ public class MarkdownPageOperationsTests
 
     private const string Card = "intro\n\n:: Demo.Card\n::: Row Label=A\n:::\n::: Row Label=B\n:::\n::\n\noutro\n";
 
+    private static int InsertLine(MarkdownPage page, MarkdownBlock? owner, MarkdownBlock? before) =>
+        MarkdownPageOperations.GetInsertLine(page, owner, before?.Line);
+
+    private static MarkdownTextBlock TextAt(MarkdownPage page, int line) =>
+        MarkdownTextBlocks.Find(page).Single(textBlock => textBlock.Line == line);
+
     [Fact]
     public void WhenARowIsRemoved_ThenItsLinesAreGoneAndTheOtherRowKeepsItsSubject()
     {
@@ -301,7 +307,7 @@ public class MarkdownPageOperationsTests
 
         // Act
         var change = MarkdownPageOperations.TryInsertWidget(
-            page, NoSubjects, owner: null, before: page.Blocks[0], "Demo.New", "fresh", """{ "Min": 1 }""", out var refusal);
+            page, NoSubjects, owner: null, InsertLine(page, null, page.Blocks[0]), "Demo.New", "fresh", """{ "Min": 1 }""", out var refusal);
 
         // Assert
         Assert.Null(refusal);
@@ -316,7 +322,7 @@ public class MarkdownPageOperationsTests
         var page = MarkdownPageParser.Parse("intro\n");
 
         // Act
-        var change = MarkdownPageOperations.TryInsertWidget(page, NoSubjects, null, null, "Demo.New", null, "{}", out _);
+        var change = MarkdownPageOperations.TryInsertWidget(page, NoSubjects, null, InsertLine(page, null, null), "Demo.New", null, "{}", out _);
 
         // Assert
         Assert.Equal("intro\n\n:: Demo.New\n::\n", change!.Write.Page.Source);
@@ -330,7 +336,7 @@ public class MarkdownPageOperationsTests
         var card = page.Blocks[0];
 
         // Act
-        var change = MarkdownPageOperations.TryInsertWidget(page, NoSubjects, card, null, "Demo.New", null, "{}", out var refusal);
+        var change = MarkdownPageOperations.TryInsertWidget(page, NoSubjects, card, InsertLine(page, card, null), "Demo.New", null, "{}", out var refusal);
 
         // Assert
         Assert.Null(refusal);
@@ -346,7 +352,7 @@ public class MarkdownPageOperationsTests
         var page = MarkdownPageParser.Parse(":: Demo.Card\nbody\n::: Footer\nfoot\n:::\n::\n");
 
         // Act
-        var change = MarkdownPageOperations.TryInsertWidget(page, NoSubjects, page.Blocks[0], null, "Demo.New", null, "{}", out var refusal);
+        var change = MarkdownPageOperations.TryInsertWidget(page, NoSubjects, page.Blocks[0], InsertLine(page, page.Blocks[0], null), "Demo.New", null, "{}", out var refusal);
 
         // Assert
         Assert.Null(refusal);
@@ -360,7 +366,7 @@ public class MarkdownPageOperationsTests
         var page = MarkdownPageParser.Parse(":: Demo.One\n\n:: Demo.Two\n");
 
         // Act
-        var change = MarkdownPageOperations.TryInsertWidget(page, NoSubjects, null, page.Blocks[1], "Demo.New", null, "{}", out var refusal);
+        var change = MarkdownPageOperations.TryInsertWidget(page, NoSubjects, null, InsertLine(page, null, page.Blocks[1]), "Demo.New", null, "{}", out var refusal);
 
         // Assert
         Assert.Null(refusal);
@@ -375,7 +381,7 @@ public class MarkdownPageOperationsTests
         var item = page.Blocks[0].Children[0];
 
         // Act
-        var change = MarkdownPageOperations.TryInsertWidget(page, NoSubjects, item, null, "Demo.New", null, "{}", out var refusal);
+        var change = MarkdownPageOperations.TryInsertWidget(page, NoSubjects, item, InsertLine(page, item, null), "Demo.New", null, "{}", out var refusal);
 
         // Assert
         Assert.Null(refusal);
@@ -404,14 +410,13 @@ public class MarkdownPageOperationsTests
     }
 
     [Fact]
-    public void WhenAnInsertedWidgetWouldTakeOverTheTextAfterIt_ThenTheInsertIsRefused()
+    public void WhenAWidgetIsInsertedInsideAParagraph_ThenTheInsertIsRefused()
     {
-        // Arrange: the block to insert before stands outside of the card, so the new block would not be in the card.
-        var page = MarkdownPageParser.Parse(":: Demo.Card\none\ntwo\n:: Demo.Other\n");
-        var card = page.Blocks[0];
+        // Arrange
+        var page = MarkdownPageParser.Parse("First line\nsecond line\n");
 
         // Act
-        var change = MarkdownPageOperations.TryInsertWidget(page, NoSubjects, card, page.Blocks[1], "Demo.New", null, "{}", out var refusal);
+        var change = MarkdownPageOperations.TryInsertWidget(page, NoSubjects, null, 2, "Demo.New", null, "{}", out var refusal);
 
         // Assert
         Assert.Null(change);
@@ -426,7 +431,7 @@ public class MarkdownPageOperationsTests
 
         // Act
         var change = MarkdownPageOperations.TryInsertWidget(
-            page, NoSubjects, owner: null, before: page.Blocks[0], "Demo.New", null, "{}", out _);
+            page, NoSubjects, owner: null, InsertLine(page, null, page.Blocks[0]), "Demo.New", null, "{}", out _);
 
         // Assert
         Assert.Equal(change!.Write.Page.Blocks[0].Index, change.ResultBlockIndex);
@@ -443,5 +448,166 @@ public class MarkdownPageOperationsTests
 
         // Assert
         Assert.Equal(change!.Write.Page.Blocks[0].Children[1].Index, change.ResultBlockIndex);
+    }
+
+    [Fact]
+    public void WhenAParagraphIsReplaced_ThenItsLinesHaveTheNewText()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("# Title\n\nOld text.\n\n:: Demo.One\n::\n");
+
+        // Act
+        var change = MarkdownPageOperations.TryReplaceText(page, NoSubjects, TextAt(page, 3), "New text.\nOn two lines.", out var refusal);
+
+        // Assert
+        Assert.Null(refusal);
+        Assert.Equal("# Title\n\nNew text.\nOn two lines.\n\n:: Demo.One\n::\n", change!.Write.Page.Source);
+        Assert.Equal(3, change.ResultTextLine);
+        Assert.False(change.Write.HasInsertedOrRemovedBlocks);
+        Assert.Null(change.ChangedBlock);
+    }
+
+    [Fact]
+    public void WhenAHeadingRightBeforeAParagraphBecomesAParagraph_ThenAnEmptyLineKeepsThemApart()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("# Title\nText.\n");
+
+        // Act
+        var change = MarkdownPageOperations.TryReplaceText(page, NoSubjects, TextAt(page, 1), "Intro.", out var refusal);
+
+        // Assert
+        Assert.Null(refusal);
+        Assert.Equal("Intro.\n\nText.\n", change!.Write.Page.Source);
+    }
+
+    [Fact]
+    public void WhenTheTextOfACardIsReplaced_ThenItStaysInTheCard()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse(":: Demo.Card\nOld.\n::\n");
+
+        // Act
+        var change = MarkdownPageOperations.TryReplaceText(page, NoSubjects, TextAt(page, 2), "New.", out var refusal);
+
+        // Assert
+        Assert.Null(refusal);
+        Assert.Equal(":: Demo.Card\nNew.\n::\n", change!.Write.Page.Source);
+        Assert.Same(page.Blocks[0], change.ChangedBlock);
+    }
+
+    [Fact]
+    public void WhenTheLastTextOfABlockWithoutClosingLineIsReplaced_ThenTheBlockKeepsIt()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse(":: Demo.Card\nold\n\n:: Demo.Two\n::\n");
+
+        // Act
+        var change = MarkdownPageOperations.TryReplaceText(page, NoSubjects, TextAt(page, 2), "new", out var refusal);
+
+        // Assert
+        Assert.Null(refusal);
+        Assert.Equal(":: Demo.Card\nnew\n\n:: Demo.Two\n::\n", change!.Write.Page.Source);
+    }
+
+    [Fact]
+    public void WhenTextIsReplacedOnAPageWithWindowsLineEndings_ThenTheNewTextHasThem()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("Old.\r\n\r\nB\r\n");
+
+        // Act
+        var change = MarkdownPageOperations.TryReplaceText(page, NoSubjects, TextAt(page, 1), "One.\nTwo.", out _);
+
+        // Assert
+        Assert.Equal("One.\r\nTwo.\r\n\r\nB\r\n", change!.Write.Page.Source);
+    }
+
+    [Fact]
+    public void WhenTheTextIsReplacedWithNothing_ThenItIsRemoved()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("a\n\nP\n\nb\n");
+
+        // Act
+        var change = MarkdownPageOperations.TryReplaceText(page, NoSubjects, TextAt(page, 3), "  \n", out var refusal);
+
+        // Assert
+        Assert.Null(refusal);
+        Assert.Equal("a\n\nb\n", change!.Write.Page.Source);
+    }
+
+    [Fact]
+    public void WhenTextIsInsertedBeforeAWidget_ThenItStandsThereWithEmptyLinesAround()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("intro\n\n:: Demo.One\n::\n");
+
+        // Act
+        var change = MarkdownPageOperations.TryInsertText(
+            page, NoSubjects, null, InsertLine(page, null, page.Blocks[0]), "New.", out var refusal);
+
+        // Assert
+        Assert.Null(refusal);
+        Assert.Equal("intro\n\nNew.\n\n:: Demo.One\n::\n", change!.Write.Page.Source);
+        Assert.Equal(3, change.ResultTextLine);
+    }
+
+    [Fact]
+    public void WhenTextIsAppendedToACard_ThenItIsTheLastContentOfTheCard()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("::Demo.Card Title=A\n::\n");
+        var card = page.Blocks[0];
+
+        // Act
+        var change = MarkdownPageOperations.TryInsertText(page, NoSubjects, card, InsertLine(page, card, null), "New.", out var refusal);
+
+        // Assert
+        Assert.Null(refusal);
+        Assert.Equal("::Demo.Card Title=A\n\nNew.\n\n::\n", change!.Write.Page.Source);
+        Assert.Same(card, change.ChangedBlock);
+    }
+
+    [Theory]
+    [InlineData("```")]
+    [InlineData("::: Demo.X\n:::")]
+    public void WhenInsertedTextWouldChangeTheRestOfThePageOrAddABlock_ThenTheInsertIsRefused(string text)
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("intro\n\n:: Demo.One\n::\n\nafter\n");
+
+        // Act
+        var change = MarkdownPageOperations.TryInsertText(page, NoSubjects, null, 3, text, out var refusal);
+
+        // Assert
+        Assert.Null(change);
+        Assert.Contains("would change other blocks", refusal);
+    }
+
+    [Fact]
+    public void WhenTheBlockBeforeHasNoClosingLine_ThenTextCannotBeInsertedAfterIt()
+    {
+        // Arrange
+        var withoutClosingLines = MarkdownPageParser.Parse(":: Demo.One\n\n:: Demo.Two\n");
+        var withClosingLines = MarkdownPageParser.Parse("intro\n\n:: Demo.One\n::\n");
+
+        // Act & Assert
+        Assert.False(MarkdownPageOperations.CanInsertTextAt(withoutClosingLines, null, withoutClosingLines.Blocks[1].Line));
+        Assert.True(MarkdownPageOperations.CanInsertTextAt(withClosingLines, null, withClosingLines.Blocks[0].Line));
+        Assert.True(MarkdownPageOperations.CanInsertTextAt(withClosingLines, null, MarkdownPageOperations.GetInsertLine(withClosingLines, null, null)));
+    }
+
+    [Fact]
+    public void WhenTheTextOfABlockOfTextIsAskedFor_ThenItHasLineFeeds()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("Old.\r\nSecond line.\r\n");
+
+        // Act
+        var text = MarkdownPageOperations.GetText(page, TextAt(page, 1));
+
+        // Assert
+        Assert.Equal("Old.\nSecond line.", text);
     }
 }

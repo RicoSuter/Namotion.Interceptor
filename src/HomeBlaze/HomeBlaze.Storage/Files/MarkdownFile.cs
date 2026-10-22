@@ -560,7 +560,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
                     return (null, NoBlockRefusal);
                 }
 
-                return (MarkdownPageOperations.TryInsertWidget(page, subjects, owner, beforeBlock, typeName, name, configurationJson, out var refusal), refusal);
+                return (MarkdownPageOperations.TryInsertWidget(page, subjects, owner, MarkdownPageOperations.GetInsertLine(page, owner, beforeBlock?.Line), typeName, name, configurationJson, out var refusal), refusal);
             },
             cancellationToken);
     }

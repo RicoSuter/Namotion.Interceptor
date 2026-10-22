@@ -350,8 +350,11 @@ internal static class MarkdownBlockAlignment
             return newBlock.EndLine == oldBlock.EndLine + delta;
         }
 
-        // Around a removal that took its last line of content, so it now ends somewhere before the removed lines.
-        return newBlock.EndLine >= oldBlock.Line && newBlock.EndLine < edit.Line;
+        // Around a change that took its last line of content, so it now ends before the change. The block that the lines were
+        // inserted into ends on the new lines instead when no closing line ends it.
+        return newBlock.EndLine >= oldBlock.Line &&
+               (newBlock.EndLine < edit.Line ||
+                (isOwnerOrAroundIt && !oldBlock.HasClosingLine && newBlock.EndLine < edit.InsertedEnd));
     }
 
     private static ReadOnlySpan<char> GetHeadLine(MarkdownPage page, MarkdownBlock block) =>
