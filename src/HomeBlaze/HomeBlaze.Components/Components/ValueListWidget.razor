@@ -27,9 +27,9 @@
     {
         var row = rows[index];
         var (path, reading, icon) = items[index];
-        if (IsEditing && Selection is not null)
+        if (_containsSelection)
         {
-            @* Only while the page is edited inline, where a row is a widget of its own that can be selected. *@
+            @* Only while the list or one of its rows is selected, so that the first click on the list selects the list. *@
             <SubjectComponent @key="row"
                               Subject="@row"
                               Type="SubjectComponentType.Widget"
@@ -41,7 +41,7 @@
         }
     }
 </MudList>
-@if (_isShowingAddButton && StructureEditor is { } editor && Subject is ValueList list && FindValueSlot(editor, list) is { } slot)
+@if (_containsSelection && StructureEditor is { } editor && Subject is ValueList list && FindValueSlot(editor, list) is { } slot)
 {
     @* Shown while the list or one of its rows is selected, and it takes the pointer in both cases. *@
     <MudButton Size="Size.Small"
@@ -68,11 +68,11 @@
     public SubjectComponent? Owner { get; set; }
 
     private WidgetSelection? _subscribedSelection;
-    private bool _isShowingAddButton;
+    private bool _containsSelection;
 
     protected override void OnParametersSet()
     {
-        // The button follows the selection, which changes without new parameters.
+        // The rows and the button follow the selection, which changes without new parameters.
         var selection = IsEditing ? Selection : null;
         if (!ReferenceEquals(selection, _subscribedSelection))
         {
@@ -84,16 +84,16 @@
             }
         }
 
-        _isShowingAddButton = selection is not null && Owner?.ContainsSelection == true;
+        _containsSelection = selection is not null && Owner?.ContainsSelection == true;
     }
 
     private void OnSelectionChanged()
     {
-        // Every list of the page is notified, and only one whose button appears or disappears renders again.
-        var isShowingAddButton = Owner?.ContainsSelection == true;
-        if (isShowingAddButton != _isShowingAddButton)
+        // Every list of the page is notified, and only one that gains or loses the selection renders again.
+        var containsSelection = Owner?.ContainsSelection == true;
+        if (containsSelection != _containsSelection)
         {
-            _isShowingAddButton = isShowingAddButton;
+            _containsSelection = containsSelection;
             _ = InvokeAsync(StateHasChanged);
         }
     }

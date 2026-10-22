@@ -111,8 +111,7 @@ public class InlineStructureEditingTests
     {
         // Arrange
         var page = await OpenPageInInlineModeAsync();
-        var row = page.Locator(".subject-component-wrapper.selectable:has(> [data-testid='value-row'])").Filter(new() { HasText = "Row A" });
-        var actionBar = await row.SelectWidgetAsync();
+        var actionBar = await SelectRowAsync(page, "Row A");
 
         // Act
         await actionBar.GetByTestId("move-down-button").ClickAsync();
@@ -129,7 +128,7 @@ public class InlineStructureEditingTests
     {
         // Arrange
         var page = await OpenPageInInlineModeAsync();
-        await SelectValueListAsync(page);
+        await GetValueListWrapper(page).SelectWidgetAsync();
 
         // Act
         await page.GetByTestId("add-value-button").ClickAsync();
@@ -140,6 +139,30 @@ public class InlineStructureEditingTests
         // Assert
         await _fixture.WaitForDemoPageTextAsync(
             PageName, text => text.Contains("Label=\"Row B\"\n:::\n::: Value Label=\"Row C\""), "The value was not added.");
+    }
+
+    [Fact]
+    public async Task WhenAListThatIsNotSelectedIsClicked_ThenTheListIsSelectedAndASecondClickSelectsARow()
+    {
+        // Arrange
+        var page = await OpenPageInInlineModeAsync();
+        var list = GetValueListWrapper(page);
+        var row = GetValueRowWrapper(page, "Row A");
+        await Assertions.Expect(row).ToHaveCountAsync(0, new() { Timeout = Timeout });
+
+        // Act
+        await list.SelectWidgetAsync();
+
+        // Assert
+        await Assertions.Expect(list).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
+
+        // Act
+        await row.SelectWidgetAsync();
+
+        // Assert
+        await Assertions.Expect(row).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
+        await Assertions.Expect(list).Not.ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetWidgetActionBar().GetByTestId("move-down-button")).ToBeVisibleAsync(new() { Timeout = Timeout });
     }
 
     [Fact]
@@ -280,15 +303,22 @@ public class InlineStructureEditingTests
         return page;
     }
 
-    // The rows fill the list, so a click on the list selects a row, and the list is the parent of the row.
-    private static async Task SelectValueListAsync(IPage page)
+    // A row can be selected once its list is. The list has a bar with a move button as well, so the bar is returned only
+    // once it belongs to the row.
+    private static async Task<ILocator> SelectRowAsync(IPage page, string rowLabel)
     {
-        var row = page.Locator(".subject-component-wrapper.selectable:has(> [data-testid='value-row'])").Filter(new() { HasText = "Row B" });
+        await GetValueListWrapper(page).SelectWidgetAsync();
+        var row = GetValueRowWrapper(page, rowLabel);
         var actionBar = await row.SelectWidgetAsync();
-        await actionBar.GetByTestId("select-parent-button").ClickAsync();
-        var list = page.Locator(".subject-component-wrapper.selectable:has(> [data-testid='value-list'])");
-        await Assertions.Expect(list).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
+        await Assertions.Expect(row).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
+        return actionBar;
     }
+
+    private static ILocator GetValueListWrapper(IPage page) =>
+        page.Locator(".subject-component-wrapper.selectable:has(> [data-testid='value-list'])");
+
+    private static ILocator GetValueRowWrapper(IPage page, string rowLabel) =>
+        page.Locator(".subject-component-wrapper.selectable:has(> [data-testid='value-row'])").Filter(new() { HasText = rowLabel });
 
     // The innermost widget around the element with the test id.
     private static ILocator GetWrapperOf(IPage page, string testId) =>
