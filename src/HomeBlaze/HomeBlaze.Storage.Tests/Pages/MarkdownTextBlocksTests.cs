@@ -98,4 +98,33 @@ public class MarkdownTextBlocksTests
         // Assert
         Assert.Equal([(1, 1), (3, 4)], textBlocks.Select(textBlock => (textBlock.Line, textBlock.EndLine)));
     }
+
+    [Fact]
+    public void WhenAListItemHoldsAWidgetWithABlockInside_ThenTheListIsTextThatCannotBeEdited()
+    {
+        // Arrange: the widget in the list item is an invalid block, whose inner block the parser does not read.
+        var page = MarkdownPageParser.Parse("- item\n\n  :: Demo.Card\n  ::: Demo.One\n  :::\n  ::\n\nAfter.\n");
+
+        // Act
+        var textBlocks = MarkdownTextBlocks.Find(page);
+
+        // Assert
+        Assert.Equal(
+            [(1, 6, false), (8, 8, true)],
+            textBlocks.Select(textBlock => (textBlock.Line, textBlock.EndLine, textBlock.IsEditable)));
+    }
+
+    [Fact]
+    public void WhenThePageHasALoneCarriageReturn_ThenNoTextBlockCanBeEdited()
+    {
+        // Arrange: Markdig ends a line at the lone carriage return, the lines of the page count line feeds only.
+        var page = MarkdownPageParser.Parse("x\rb\n\nText.\n\n:: Demo.One\n::\n");
+
+        // Act
+        var textBlocks = MarkdownTextBlocks.Find(page);
+
+        // Assert
+        Assert.NotEmpty(textBlocks);
+        Assert.All(textBlocks, textBlock => Assert.False(textBlock.IsEditable));
+    }
 }

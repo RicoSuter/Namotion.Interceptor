@@ -313,6 +313,23 @@ public class MarkdownStructureEditTests
     }
 
     [Fact]
+    public async Task WhenThePageHasALoneCarriageReturn_ThenItsTextHasNoMarkdownAndAllowsNothing()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var page = await fixture.AddPageAsync("page.md", "x\rb\n\nText.\n");
+        var segment = page.Children.Values.OfType<HtmlSegment>().Single(candidate => candidate.Html.Contains("Text."));
+
+        // Act
+        var text = page.GetTextBlockText(segment);
+        var actions = page.GetBlockActions(segment);
+
+        // Assert
+        Assert.Null(text);
+        Assert.Equal(default, actions);
+    }
+
+    [Fact]
     public async Task WhenAParagraphIsReplaced_ThenTheFileHasTheNewText()
     {
         // Arrange

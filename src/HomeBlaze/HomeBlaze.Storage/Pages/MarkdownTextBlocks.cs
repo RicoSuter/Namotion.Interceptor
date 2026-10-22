@@ -14,7 +14,8 @@ namespace HomeBlaze.Storage.Pages;
 /// <param name="Owner">The block whose content it is, or null for the page.</param>
 /// <param name="IsEditable">
 /// Whether it can be edited as text: false for a run of content with raw HTML, a style block, an error, the footnotes, an
-/// old subject fence and a Markdig container with a block inside.
+/// old subject fence, a Markdig container with a block inside, and every text block of a page with a line ending that is a
+/// carriage return alone.
 /// </param>
 /// <param name="HoldsHtml">Whether it is a run of content with raw HTML, which takes the text that comes next to it.</param>
 internal sealed record MarkdownTextBlock(Block FirstBlock, int Line, int EndLine, MarkdownBlock? Owner, bool IsEditable, bool HoldsHtml);
@@ -32,18 +33,38 @@ internal static class MarkdownTextBlocks
         AddContent(page, page.Document, owner: null, result);
         Visit(page, page.Document, result);
         result.Sort(static (first, second) => first.Line.CompareTo(second.Line));
+
+        // Markdig ends a line at a lone carriage return as well, but the writes count lines by line feeds, so the lines
+        // of a text block are not its own there.
+        if (MarkdownBlockWriter.HasLoneCarriageReturn(page.Source))
+        {
+            for (var index = 0; index < result.Count; index++)
+            {
+                result[index] = result[index] with { IsEditable = false };
+            }
+        }
+
         return result;
     }
 
-    // Finds the widget and slot blocks at every depth, also inside a list or a style block, and adds their content.
+    // Finds the widget and slot blocks at every depth, also inside a list or a style block, and adds their content. The
+    // parser does not read the nodes inside an invalid block, which have no block of the page.
     private static void Visit(MarkdownPage page, ContainerBlock container, List<MarkdownTextBlock> result)
     {
         foreach (var child in container)
         {
-            if (child is MarkdownBlockContainer blockContainer &&
-                page.GetBlock(blockContainer) is { Kind: MarkdownBlockKind.Widget or MarkdownBlockKind.Slot } block)
+            if (child is MarkdownBlockContainer blockContainer)
             {
-                AddContent(page, blockContainer, block, result);
+                var block = page.GetBlock(blockContainer);
+                if (block.Kind == MarkdownBlockKind.Invalid)
+                {
+                    continue;
+                }
+
+                if (block.Kind is MarkdownBlockKind.Widget or MarkdownBlockKind.Slot)
+                {
+                    AddContent(page, blockContainer, block, result);
+                }
             }
 
             if (child is ContainerBlock inner)

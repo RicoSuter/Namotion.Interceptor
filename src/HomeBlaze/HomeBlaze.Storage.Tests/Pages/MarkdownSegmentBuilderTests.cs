@@ -792,6 +792,20 @@ public class MarkdownSegmentBuilderTests
     }
 
     [Fact]
+    public void WhenTextBlocksAreMarkedAndAListItemHoldsAWidgetWithABlockInside_ThenTheListStartsATextSegment()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("- item\n\n  :: Demo.Card\n  ::: Demo.One\n  :::\n  ::\n\nAfter.\n");
+
+        // Act
+        var segments = MarkdownSegmentBuilder.Build(page, linkRewriter: null, markTextBlocks: true);
+
+        // Assert
+        var starts = segments.OfType<HtmlMarkdownSegment>().Where(segment => segment.TextBlock is not null).ToList();
+        Assert.Equal([(1, false), (8, true)], starts.Select(segment => (segment.TextBlock!.Line, segment.TextBlock.IsEditable)));
+    }
+
+    [Fact]
     public void WhenThePageHasACommentShapedLikeATextMarker_ThenItStaysInTheHtmlAndStartsNoTextBlock()
     {
         // Arrange: the comment names the index of the last text block, but not the token of the build.
