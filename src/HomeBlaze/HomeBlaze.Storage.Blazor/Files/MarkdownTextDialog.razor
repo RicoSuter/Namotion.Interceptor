@@ -94,13 +94,14 @@
         if (_editor is null)
             return;
 
-        // CtrlCmd is Command on a Mac and Control elsewhere.
-        await _editor.AddCommand((int)KeyMod.CtrlCmd | (int)KeyCode.KeyS, arguments => _ = SaveByKeyAsync());
         if (await GetModuleAsync() is { } module)
         {
             await module.InvokeVoidAsync("focusEnd", EditorId);
             await DecorateAsync(module);
         }
+
+        // CtrlCmd is Command on a Mac and Control elsewhere.
+        await _editor.AddCommand((int)KeyMod.CtrlCmd | (int)KeyCode.KeyS, arguments => _ = SaveByKeyAsync());
     }
 
     private async Task OnContentChangedAsync(ModelContentChangedEvent change)
@@ -128,21 +129,49 @@
         if (_isDisposed)
             return null;
 
-        var module = await (_moduleImport ??= JsRuntime.InvokeAsync<IJSObjectReference>("import", MarkdownEditor.ModulePath).AsTask());
-        return _isDisposed ? null : module;
+        var moduleImport = _moduleImport ??= JsRuntime.InvokeAsync<IJSObjectReference>("import", MarkdownEditor.ModulePath).AsTask();
+        try
+        {
+            var module = await moduleImport;
+            return _isDisposed ? null : module;
+        }
+        catch (Exception exception) when (exception is JSException or OperationCanceledException)
+        {
+            // The next call imports again. Until then the editor has no decorations.
+            if (_moduleImport == moduleImport)
+            {
+                _moduleImport = null;
+            }
+
+            return null;
+        }
     }
 
     private void Cancel() => Dialog.Cancel();
 
     private async Task SaveAsync()
     {
-        if (_isSaving || _editor is null)
+        if (_isSaving || _editor is null || _isDisposed)
             return;
 
         _isSaving = true;
         try
         {
-            _refusal = await Save(await _editor.GetValue());
+            string text;
+            try
+            {
+                text = await _editor.GetValue();
+            }
+            catch (Exception exception) when (exception is JSException or JSDisconnectedException)
+            {
+                // Escape or Cancel closed the dialog and disposed the editor while it was read, so nothing is saved.
+                return;
+            }
+
+            if (_isDisposed)
+                return;
+
+            _refusal = await Save(text);
             if (_refusal is null)
             {
                 Dialog.Close(DialogResult.Ok(true));
