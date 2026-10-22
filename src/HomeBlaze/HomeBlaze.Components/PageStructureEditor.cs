@@ -38,4 +38,13 @@ public abstract class PageStructureEditor
 
     /// <summary>Asks for the new text of the text block <paramref name="subject"/>, saves it and selects it. Does nothing by default.</summary>
     public virtual Task EditTextAsync(IInterceptorSubject subject) => Task.CompletedTask;
+
+    /// <summary>Gets whether text can be inserted into <paramref name="content"/> before <paramref name="before"/>, or at its end. False by default.</summary>
+    public virtual bool CanInsertText(IInterceptorSubject content, IInterceptorSubject? before) => false;
+
+    /// <summary>
+    /// Asks for text, inserts it into <paramref name="content"/> before <paramref name="before"/>, or at its end, and selects
+    /// it. Does nothing by default.
+    /// </summary>
+    public virtual Task InsertTextAsync(IInterceptorSubject content, IInterceptorSubject? before) => Task.CompletedTask;
 }

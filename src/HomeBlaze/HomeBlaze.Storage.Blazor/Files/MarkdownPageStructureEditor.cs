@@ -17,6 +17,8 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
     private const string ChangedWhileAskingMessage = "The page changed while the dialog was open. Try again.";
     private const string TextChangedWhileEditingMessage =
         "The text changed since you opened it. Copy your text, close the dialog and open the text again.";
+    private const string PageChangedWhileInsertingMessage =
+        "The page changed since you opened the dialog. Copy your text, close the dialog and insert it again.";
 
     private readonly MarkdownFile _file;
     private readonly WidgetSelection _selection;
@@ -203,6 +205,30 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
                 return result.IsWritten || _file.GetTextBlockText(segment) == text
                     ? result.Refusal
                     : TextChangedWhileEditingMessage;
+            });
+    }
+
+    public override bool CanInsertText(IInterceptorSubject content, IInterceptorSubject? before) =>
+        _file.CanInsertTextAt(content, before);
+
+    public override async Task InsertTextAsync(IInterceptorSubject content, IInterceptorSubject? before)
+    {
+        var pageContent = _file.Content;
+        await MarkdownTextDialog.ShowAsync(
+            _dialogService,
+            "Insert text",
+            string.Empty,
+            async text =>
+            {
+                // The place was chosen in the page as it was, and every later save is refused as well, so the message says
+                // how to get the text into the page.
+                if (!string.Equals(pageContent, _file.Content, StringComparison.Ordinal))
+                {
+                    return PageChangedWhileInsertingMessage;
+                }
+
+                var result = await RunAsync(() => _file.InsertTextAsync(content, before, text, CancellationToken.None), reportsInSnackbar: false);
+                return result.Refusal;
             });
     }
 

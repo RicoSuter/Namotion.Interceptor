@@ -894,10 +894,11 @@ public class InlineStructureEditingTests
     private static ILocator GetInsertLineBefore(ILocator wrapper) =>
         wrapper.Locator("xpath=preceding-sibling::*[@data-testid='block-insert-line'][1]");
 
-    // Opens the dialog that inserts a widget at the line.
+    // Opens the dialog that inserts a widget at the line, through the menu of the line.
     private static async Task OpenWidgetDialogAtAsync(IPage page, ILocator line)
     {
         await line.GetByRole(AriaRole.Button).ClickAsync();
+        await page.GetByTestId("insert-widget-item").ClickAsync();
         await Assertions.Expect(page.GetByTestId("create-subject-dialog")).ToBeVisibleAsync(new() { Timeout = Timeout });
     }
 

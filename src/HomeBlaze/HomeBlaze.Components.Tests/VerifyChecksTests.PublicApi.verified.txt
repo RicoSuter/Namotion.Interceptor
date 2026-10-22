@@ -490,11 +490,13 @@ namespace HomeBlaze.Components
         protected PageStructureEditor() { }
         public abstract System.Threading.Tasks.Task AddListItemAsync(Namotion.Interceptor.IInterceptorSubject owner, HomeBlaze.Components.PageListSlot slot);
         public abstract bool CanInsertInto(Namotion.Interceptor.IInterceptorSubject content);
+        public virtual bool CanInsertText(Namotion.Interceptor.IInterceptorSubject content, Namotion.Interceptor.IInterceptorSubject? before) { }
         public abstract System.Threading.Tasks.Task DeleteAsync(Namotion.Interceptor.IInterceptorSubject subject);
         public virtual System.Threading.Tasks.Task EditTextAsync(Namotion.Interceptor.IInterceptorSubject subject) { }
         public abstract HomeBlaze.Components.PageBlockActions GetActions(Namotion.Interceptor.IInterceptorSubject subject);
         public abstract string? GetBlockName(Namotion.Interceptor.IInterceptorSubject subject);
         public abstract System.Collections.Generic.IReadOnlyList<HomeBlaze.Components.PageListSlot> GetListSlots(Namotion.Interceptor.IInterceptorSubject owner);
+        public virtual System.Threading.Tasks.Task InsertTextAsync(Namotion.Interceptor.IInterceptorSubject content, Namotion.Interceptor.IInterceptorSubject? before) { }
         public abstract System.Threading.Tasks.Task InsertWidgetAsync(Namotion.Interceptor.IInterceptorSubject content, Namotion.Interceptor.IInterceptorSubject? before);
         public abstract System.Threading.Tasks.Task MoveAsync(Namotion.Interceptor.IInterceptorSubject subject, int direction);
     }
@@ -1041,7 +1043,9 @@ namespace HomeBlaze.Components.Components
         [Microsoft.AspNetCore.Components.Parameter]
         public string Label { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
-        public Microsoft.AspNetCore.Components.EventCallback OnInsert { get; set; }
+        public Microsoft.AspNetCore.Components.EventCallback OnInsertText { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback OnInsertWidget { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
     }
     [HomeBlaze.Components.Abstractions.Attributes.SubjectComponent(HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType.Edit, typeof(HomeBlaze.Components.CanvasLayout?))]

@@ -21,7 +21,8 @@
     {
         position++;
         <BlockInsertLine Label="@($"Insert at position {position} of {contentName}")"
-                         OnInsert="@(() => StructureEditor!.InsertWidgetAsync(Content!, item))" />
+                         OnInsertWidget="@(() => StructureEditor!.InsertWidgetAsync(Content!, item))"
+                         OnInsertText="@GetInsertTextCallback(item)" />
     }
 
     @if (segment.Widget is not null)
@@ -46,7 +47,8 @@
 @if (showsInsertLines)
 {
     <BlockInsertLine Label="@($"Insert at the end of {contentName}")"
-                     OnInsert="@(() => StructureEditor!.InsertWidgetAsync(Content!, null))" />
+                     OnInsertWidget="@(() => StructureEditor!.InsertWidgetAsync(Content!, null))"
+                     OnInsertText="@GetInsertTextCallback(null)" />
 }
 
 @code {
@@ -234,6 +236,12 @@
         _isAtSelection = IsAtSelection();
         return _isAtSelection && StructureEditor!.CanInsertInto(Content!);
     }
+
+    // No text item where the block before the line has no closing line, which would take the text.
+    private EventCallback GetInsertTextCallback(IInterceptorSubject? before) =>
+        StructureEditor!.CanInsertText(Content!, before)
+            ? EventCallback.Factory.Create(this, () => StructureEditor!.InsertTextAsync(Content!, before))
+            : default;
 
     // The name of the content in the names of its insert lines: the name of the widget it belongs to, or the page.
     private string GetContentName() =>

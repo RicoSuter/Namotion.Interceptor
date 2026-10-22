@@ -176,6 +176,27 @@ public class InlineTextEditingTests
     }
 
     [Fact]
+    public async Task WhenTextIsInsertedAtAnInsertLine_ThenItStandsThereInTheFileAndIsSelected()
+    {
+        // Arrange: the lines of the page stand before the title, the first paragraph, the card and the last paragraph.
+        var page = await OpenPageInInlineModeAsync();
+        var lineButton = page.GetByRole(AriaRole.Button, new() { Name = "Insert at position 3 of the page", Exact = true });
+
+        // Act
+        await lineButton.ClickAsync();
+        await page.GetByTestId("insert-text-item").ClickAsync();
+        await page.GetByTestId("markdown-text-input").FillAsync("Inserted text.");
+        await page.GetByTestId("markdown-text-save").ClickAsync();
+
+        // Assert
+        await _fixture.WaitForDemoPageTextAsync(
+            PageName,
+            text => text.Contains("First paragraph on the page.\n\nInserted text.\n\n:: HomeBlaze.Components.Card"),
+            "The text was not inserted before the card.");
+        await Assertions.Expect(GetTextWrapper(page, "Inserted text")).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
+    }
+
+    [Fact]
     public async Task WhenTheTextChangedWhileItsDialogWasOpen_ThenTheSaveIsRefusedAndTheDialogKeepsTheInput()
     {
         // Arrange
