@@ -839,6 +839,52 @@ public class MarkdownSlotTests
             "::\n";
     }
 
+    [Fact]
+    public async Task WhenAPageIsReadAgainAfterTextBeforeAWidgetChanged_ThenTheTextInsideTheKeptWidgetHasItsNewLines()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var page = await fixture.AddPageAsync("page.md", $$$"""
+            Before.
+
+            :: {{{Namespace}}}.TestPanel#outer
+            Inside.
+
+            ::: {{{Namespace}}}.TestPanel#inner
+            Deep.
+            :::
+            ::
+            """);
+        var outer = Assert.IsType<TestPanel>(page.Children["outer"]);
+        var outerContent = Assert.IsType<MarkdownFragment>(outer.Content);
+        var inner = Assert.IsType<TestPanel>(outerContent.Children["inner"]);
+        var inside = outerContent.Children.Values.OfType<HtmlSegment>().Single(segment => segment.Html.Contains("Inside."));
+        var deep = Assert.IsType<MarkdownFragment>(inner.Content).Children.Values.OfType<HtmlSegment>()
+            .Single(segment => segment.Html.Contains("Deep."));
+        var parser = fixture.Services.GetRequiredService<MarkdownContentParser>();
+
+        // Act
+        var result = await parser.ParseAsync($$$"""
+            Before,
+            now on two lines.
+
+            :: {{{Namespace}}}.TestPanel#outer
+            Inside.
+
+            ::: {{{Namespace}}}.TestPanel#inner
+            Deep.
+            :::
+            ::
+            """.Replace("\r\n", "\n"), page, page.Children, CancellationToken.None);
+
+        // Assert
+        Assert.Same(outer, result.Children["outer"]);
+        Assert.Same(outerContent, outer.Content);
+        Assert.Equal(5, result.TextBlocks[inside].Line);
+        Assert.Equal(8, result.TextBlocks[deep].Line);
+        Assert.Same(result.Page!.AllBlocks[1], result.TextBlocks[deep].Owner);
+    }
+
     private static string Flatten(IEnumerable<Namotion.Interceptor.IInterceptorSubject?> subjects) =>
         string.Concat(subjects.Select(subject => subject switch
         {

@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using HomeBlaze.Storage.Internal;
 using Namotion.Interceptor;
 
@@ -22,7 +23,7 @@ public sealed record MarkdownParseResult(
 
     /// <summary>A snapshot without text blocks, such as one that a write published before the read of its text.</summary>
     internal static readonly IReadOnlyDictionary<HtmlSegment, MarkdownTextBlock> NoTextBlocks =
-        new Dictionary<HtmlSegment, MarkdownTextBlock>();
+        FrozenDictionary<HtmlSegment, MarkdownTextBlock>.Empty;
 
     /// <summary>The text block that each HTML segment of the parse starts, by the segment.</summary>
     internal IReadOnlyDictionary<HtmlSegment, MarkdownTextBlock> TextBlocks { get; init; } = NoTextBlocks;

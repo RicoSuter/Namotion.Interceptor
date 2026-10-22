@@ -218,16 +218,16 @@ public static partial class MarkdownSegmentBuilder
 
             lastIndex = match.Index + match.Length;
 
-            if (match.Groups[4].Success)
-            {
-                pendingTextBlock = textBlocks![int.Parse(match.Groups[5].Value, CultureInfo.InvariantCulture)];
-                continue;
-            }
-
             // A text block that starts without HTML of its own still starts a segment, so that its content can tell it.
             if (pendingTextBlock is not null)
             {
                 current.Add(CreateHtmlSegment(string.Empty, ref pendingTextBlock));
+            }
+
+            if (match.Groups[4].Success)
+            {
+                pendingTextBlock = textBlocks![int.Parse(match.Groups[5].Value, CultureInfo.InvariantCulture)];
+                continue;
             }
 
             if (path is not null)

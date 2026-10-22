@@ -792,18 +792,71 @@ public class MarkdownSegmentBuilderTests
     }
 
     [Fact]
-    public void WhenThePageHasACommentShapedLikeATextMarker_ThenItStaysInTheHtml()
+    public void WhenThePageHasACommentShapedLikeATextMarker_ThenItStaysInTheHtmlAndStartsNoTextBlock()
     {
-        // Arrange
-        var page = MarkdownPageParser.Parse("<!--TEXT:00000000000000000000000000000000:0-->\n\nText.\n");
+        // Arrange: the comment names the index of the last text block, but not the token of the build.
+        var page = MarkdownPageParser.Parse("<!--TEXT:00000000000000000000000000000000:1-->\n\nText.\n\n:: Demo.Card\n::\n\nAfter.\n");
 
         // Act
         var segments = MarkdownSegmentBuilder.Build(page, linkRewriter: null, markTextBlocks: true);
 
         // Assert
-        Assert.Contains(
-            "<!--TEXT:00000000000000000000000000000000:0-->",
-            string.Concat(segments.OfType<HtmlMarkdownSegment>().Select(segment => segment.Html)));
+        var starts = segments.OfType<HtmlMarkdownSegment>().Where(segment => segment.TextBlock is not null).ToList();
+        Assert.Equal([1, 8], starts.Select(segment => segment.TextBlock!.Line));
+        Assert.StartsWith("<!--TEXT:00000000000000000000000000000000:1-->", starts[0].Html);
+        Assert.Contains("Text.", starts[0].Html);
+        Assert.Contains("After.", starts[1].Html);
+    }
+
+    [Fact]
+    public void WhenTextBlocksStartRightBeforeAnotherMarker_ThenEachStartsAnEmptySegment()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("One.\n\nTwo.\n");
+        var textBlocks = MarkdownTextBlocks.Find(page);
+        const string token = "0123456789abcdef0123456789abcdef";
+
+        // Act: the first marker is right before another, the second right before an expression.
+        var segments = MarkdownSegmentBuilder.Split(
+            $"<!--TEXT:{token}:0--><!--TEXT:{token}:1-->{{{{ a/B }}}}<p>x</p>", page, token, textBlocks);
+
+        // Assert
+        Assert.Equal(4, segments.Count);
+        Assert.Equal(new HtmlMarkdownSegment(string.Empty) { TextBlock = textBlocks[0] }, segments[0]);
+        Assert.Equal(new HtmlMarkdownSegment(string.Empty) { TextBlock = textBlocks[1] }, segments[1]);
+        Assert.IsType<ExpressionMarkdownSegment>(segments[2]);
+        Assert.Equal(new HtmlMarkdownSegment("<p>x</p>"), segments[3]);
+    }
+
+    [Fact]
+    public void WhenTheLastTextBlockStartsAtTheEndOfTheHtml_ThenItStartsAnEmptySegment()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("One.\n");
+        var textBlocks = MarkdownTextBlocks.Find(page);
+        const string token = "0123456789abcdef0123456789abcdef";
+
+        // Act
+        var segments = MarkdownSegmentBuilder.Split($"<p>x</p><!--TEXT:{token}:0-->", page, token, textBlocks);
+
+        // Assert
+        Assert.Equal(
+            [new HtmlMarkdownSegment("<p>x</p>"), new HtmlMarkdownSegment(string.Empty) { TextBlock = textBlocks[0] }],
+            segments);
+    }
+
+    [Fact]
+    public void WhenTheHtmlIsSplitWithoutTextBlocks_ThenATextMarkerWithTheTokenStaysInTheHtml()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("One.\n");
+        const string token = "0123456789abcdef0123456789abcdef";
+
+        // Act
+        var segments = MarkdownSegmentBuilder.Split($"<!--TEXT:{token}:0--><p>One.</p>", page, token);
+
+        // Assert
+        Assert.Equal(new HtmlMarkdownSegment($"<!--TEXT:{token}:0--><p>One.</p>"), Assert.Single(segments));
     }
 
     // What a browser shows for the HTML: character references are decoded.

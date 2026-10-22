@@ -365,7 +365,7 @@ public sealed partial class MarkdownContentParser
         children[key] = segment;
         if (textBlock is not null)
         {
-            state.TextBlocks[segment] = textBlock;
+            state.AddTextBlock(segment, textBlock);
         }
     }
 
@@ -470,7 +470,7 @@ public sealed partial class MarkdownContentParser
         CancellationToken cancellationToken)
     {
         var block = segment.Block;
-        if (existing is not null && existing.GetType() == type && TryKeepUnchangedBlock(existing, block, state))
+        if (existing is not null && existing.GetType() == type && TryKeepUnchangedBlock(existing, segment, state))
         {
             return (existing, null);
         }
@@ -518,7 +518,7 @@ public sealed partial class MarkdownContentParser
                     state.Register(block, block.Head!.Id, subject);
                     if (state.ErrorBoxCount == errorBoxCount)
                     {
-                        RememberAppliedBlock(subject, block, state, registrationCount);
+                        RememberAppliedBlock(subject, segment, state, registrationCount);
                     }
 
                     return (subject, null);
@@ -656,6 +656,15 @@ public sealed partial class MarkdownContentParser
 
         /// <summary>The text block that each HTML segment of this parse starts.</summary>
         public Dictionary<HtmlSegment, MarkdownTextBlock> TextBlocks { get; } = new(ReferenceEqualityComparer.Instance);
+
+        /// <summary>The HTML segment that starts each text block of this parse, the reverse of <see cref="TextBlocks"/>.</summary>
+        public Dictionary<MarkdownTextBlock, HtmlSegment> SegmentsByTextBlock { get; } = new(ReferenceEqualityComparer.Instance);
+
+        public void AddTextBlock(HtmlSegment segment, MarkdownTextBlock textBlock)
+        {
+            TextBlocks[segment] = textBlock;
+            SegmentsByTextBlock[textBlock] = segment;
+        }
 
         public int RegistrationCount => _registrations.Count;
 
