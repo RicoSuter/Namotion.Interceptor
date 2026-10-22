@@ -279,3 +279,12 @@
 ::deep .block-insert-line .mud-icon-button {
     padding: 2px;
 }
+
+/* In the preview next to the editor, a click on a widget shows its block in the editor. */
+@media (hover: hover) {
+    .subject-component-wrapper.revealable:hover:not(:has(.subject-component-wrapper.revealable:hover)) {
+        outline: 1px dashed rgba(var(--mud-palette-primary-rgb), 0.5);
+        outline-offset: 1px;
+        cursor: pointer;
+    }
+}

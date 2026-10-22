@@ -25,6 +25,7 @@
 
 @attribute [SubjectComponent(SubjectComponentType.Edit, typeof(MarkdownFile))]
 @implements ISubjectEditComponent
+@implements ISubjectRevealTarget
 @implements IAsyncDisposable
 
 @if (string.IsNullOrEmpty(_originalContent))
@@ -142,6 +143,7 @@ else
     private string _currentContent = string.Empty;
     private bool _previousDarkMode = true;
     private List<DecorationRegion> _decorationRegions = new();
+    private List<BlockOutline> _outlines = new();
     private const string ModulePath = "./_content/HomeBlaze.Storage.Blazor/Files/MarkdownFileEditComponent.razor.js";
     private Task<IJSObjectReference>? _moduleImport;
     private bool _isDisposed;
@@ -470,12 +472,40 @@ else
         Func<int, IInterceptorSubject?>? getBlockSubject = File is null ? null : File.GetBlockSubject;
         var parsed = MarkdownDecorationParser.ParseDecorations(_currentContent, getBlockSubject);
         _decorationRegions = parsed.Regions;
+        _outlines = parsed.Outlines;
 
         var decorations = BlockOutlineDecorations.Create(parsed.Regions, parsed.Outlines);
         if (await GetModuleAsync() is { } module)
         {
             await module.InvokeVoidAsync("update", _editor.Id, version, decorations.Values, decorations.Labels);
         }
+    }
+
+    public async Task<bool> RevealAsync(IInterceptorSubject subject)
+    {
+        if (_editor is null || File is null)
+        {
+            return false;
+        }
+
+        var region = _decorationRegions.FirstOrDefault(
+            candidate => candidate.Type == DecorationRegionType.SubjectBlock && ReferenceEquals(candidate.Subject, subject));
+        if (region?.BlockIndex is not { } blockIndex)
+        {
+            return false;
+        }
+
+        // The subject belongs to the block of the saved page. Text that changed before the block makes the region point
+        // at another block, so it is only revealed while the text up to the block is saved.
+        if (MarkdownBlockMatcher.FindSavedBlock(await _editor.GetValue(), File.Content, blockIndex) is null ||
+            await GetModuleAsync() is not { } module)
+        {
+            return false;
+        }
+
+        var endLine = _outlines.FirstOrDefault(outline => outline.StartLine == region.StartLine)?.EndLine ?? region.EndLine;
+        await module.InvokeVoidAsync("reveal", _editor.Id, region.StartLine, endLine);
+        return true;
     }
 
     // Null once the component is disposed: the next page editor gets the same editor id, and a late call would

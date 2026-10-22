@@ -427,6 +427,50 @@ public class InlineStructureEditingTests
         await Assertions.Expect(rowLines).ToHaveCountAsync(2, new() { Timeout = Timeout });
     }
 
+    [Fact]
+    public async Task WhenAWidgetIsClickedInTheSplitPreview_ThenNothingIsSelectedAndTheEditorSelectsItsBlock()
+    {
+        // Arrange
+        await _fixture.WriteDemoPageAsync(PageName, Content);
+        var page = await _fixture.CreatePageAsync();
+        await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/{PageName}");
+        await page.WaitUntilInteractiveAsync(Timeout);
+        await page.SelectEditModeAsync("Split", Timeout);
+        var switchWrapper = page.Locator(".page-split-preview .subject-component-wrapper.revealable:has([data-testid='switch'])").Last;
+        await Assertions.Expect(switchWrapper).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Act
+        await switchWrapper.ClickAsync(new() { Position = new() { X = 2, Y = 2 } });
+
+        // Assert: the editor selects the block only after the round trip of the click, so the selection of the preview
+        // would have arrived by then.
+        var switchLine = Content.Split('\n').ToList().FindIndex(line => line.Contains("HomeBlaze.Components.Switch")) + 1;
+        await page.WaitForFunctionAsync(
+            "line => monaco.editor.getEditors()[0]?.getSelection()?.startLineNumber === line",
+            switchLine,
+            new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetWidgetActionBar()).ToHaveCountAsync(0);
+        await Assertions.Expect(page.Locator(".page-split-preview .subject-component-wrapper.selectable")).ToHaveCountAsync(0);
+    }
+
+    [Fact]
+    public async Task WhenThePageIsSplit_ThenTheSourceEditorShowsBlockNamesInBold()
+    {
+        // Arrange
+        await _fixture.WriteDemoPageAsync(PageName, Content);
+        var page = await _fixture.CreatePageAsync();
+        await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/{PageName}");
+        await page.WaitUntilInteractiveAsync(Timeout);
+
+        // Act
+        await page.SelectEditModeAsync("Split", Timeout);
+
+        // Assert
+        var name = page.Locator(".monaco-editor .block-name", new() { HasTextString = "HomeBlaze.Components.Switch" });
+        await Assertions.Expect(name).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(name).ToHaveCSSAsync("font-weight", "700");
+    }
+
     private async Task<IPage> OpenPageInInlineModeAsync(string content = Content)
     {
         await _fixture.WriteDemoPageAsync(PageName, content);

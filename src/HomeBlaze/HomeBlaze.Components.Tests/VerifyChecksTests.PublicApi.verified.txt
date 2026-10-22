@@ -397,6 +397,10 @@ namespace HomeBlaze.Components
         bool CanShow(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property);
         System.Threading.Tasks.Task ShowAsync(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, string displayName);
     }
+    public interface ISubjectRevealTarget
+    {
+        System.Threading.Tasks.Task<bool> RevealAsync(Namotion.Interceptor.IInterceptorSubject subject);
+    }
     [HomeBlaze.Abstractions.Attributes.PageLayout]
     [HomeBlaze.Abstractions.Attributes.SubjectIcon("Lightbulb")]
     [Namotion.Interceptor.Attributes.InterceptorSubject]
@@ -623,6 +627,8 @@ namespace HomeBlaze.Components
         public bool IsEditing { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public bool IsSelectionEnabled { get; set; }
+        [Microsoft.AspNetCore.Components.CascadingParameter]
+        public HomeBlaze.Components.SubjectRevealer? Revealer { get; set; }
         public HomeBlaze.Components.SubjectComponent? SelectableAncestor { get; }
         [Microsoft.AspNetCore.Components.CascadingParameter]
         public HomeBlaze.Components.WidgetSelection? Selection { get; set; }
@@ -638,6 +644,11 @@ namespace HomeBlaze.Components
         protected override System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender) { }
         protected override void OnInitialized() { }
         protected override void OnParametersSet() { }
+    }
+    public sealed class SubjectRevealer
+    {
+        public SubjectRevealer(System.Func<Namotion.Interceptor.IInterceptorSubject, System.Threading.Tasks.Task<bool>> reveal) { }
+        public System.Threading.Tasks.Task<bool> RevealAsync(Namotion.Interceptor.IInterceptorSubject subject) { }
     }
     [HomeBlaze.Abstractions.Attributes.PageLayout]
     [HomeBlaze.Abstractions.Attributes.SubjectIcon("TableChart")]
@@ -1706,6 +1717,7 @@ namespace HomeBlaze.Components.Editors
     public class SubjectEditPanel : Microsoft.AspNetCore.Components.ComponentBase, System.IAsyncDisposable
     {
         public SubjectEditPanel() { }
+        public HomeBlaze.Components.Abstractions.ISubjectComponent? EditComponent { get; }
         [Microsoft.AspNetCore.Components.Parameter]
         public bool IsCreating { get; set; }
         public bool IsValid { get; }

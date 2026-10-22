@@ -24,6 +24,25 @@ export function getContent(editorId) {
 }
 
 /**
+ * Selects the lines of a block, scrolls them into the middle of the editor and gives the editor the focus.
+ * @param {string} editorId The id of the editor of BlazorMonaco.
+ * @param {number} startLine The 1-based head line of the block.
+ * @param {number} endLine The 1-based last line of the block.
+ */
+export function reveal(editorId, startLine, endLine) {
+    const editor = window.blazorMonaco.editor.getEditor(editorId, true);
+    const model = editor?.getModel();
+    if (!model || model.isDisposed()) {
+        return;
+    }
+
+    const range = new monaco.Range(startLine, 1, endLine, model.getLineMaxColumn(endLine));
+    editor.setSelection(range);
+    editor.revealRangeInCenter(range);
+    editor.focus();
+}
+
+/**
  * Replaces the decorations and the folding ranges of an editor.
  * @param {string} editorId The id of the editor of BlazorMonaco.
  * @param {number} version The version of the model that the records were computed from, or 0 to apply them anyway.
