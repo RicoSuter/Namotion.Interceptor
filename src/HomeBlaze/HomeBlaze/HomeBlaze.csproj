@@ -54,6 +54,7 @@
         <PackageReference Include="BlazorMonaco" />
         <PackageReference Include="CodeBeam.MudBlazor.Extensions" />
         <PackageReference Include="ModelContextProtocol.AspNetCore" />
+        <PackageReference Include="Serilog.Extensions.Logging.File" />
     </ItemGroup>
 
     <ItemGroup>

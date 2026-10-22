@@ -88,6 +88,12 @@ public static class HomeBlazeWebApplication
             builder.WebHost.UseUrls([.. options.Urls]);
         }
 
+        if (options.LogFilePath is not null)
+        {
+            // A windowed host has no console, so the file is the only place its log can be read.
+            builder.Logging.AddFile(options.LogFilePath, minimumLevel: LogLevel.Information);
+        }
+
         builder.AddServiceDefaults();
 
         // Add all HomeBlaze services (cascades: Host -> Host.Services -> Services)

@@ -137,7 +137,10 @@ internal static class Program
                         $"'{folderPath}' is already open in another HomeBlaze window.");
                 }
 
-                _host = new EmbeddedHostController();
+                _host = new EmbeddedHostController(Path.Combine(
+                    Path.GetDirectoryName(ShellSettingsStore.DefaultFilePath)!,
+                    "Logs",
+                    "homeblaze-{Date}.log"));
                 address = await _host.StartAsync(workspace, CancellationToken.None);
             }
 

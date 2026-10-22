@@ -24,6 +24,13 @@ public sealed class EmbeddedHostController : IAsyncDisposable
         typeof(HomeBlazeWebApplication).Assembly.GetName().Name!;
 
     private WebApplication? _application;
+    private readonly string? _logFilePath;
+
+    /// <param name="logFilePath">File to append host logs to, or null for the configured default.</param>
+    public EmbeddedHostController(string? logFilePath = null)
+    {
+        _logFilePath = logFilePath;
+    }
 
     /// <summary>Services of the running host, or null before a successful start.</summary>
     public IServiceProvider? Services => _application?.Services;
@@ -50,7 +57,9 @@ public sealed class EmbeddedHostController : IAsyncDisposable
             // MapStaticAssets() locates its manifest file by IHostEnvironment.ApplicationName, which otherwise
             // defaults to this process's own entry assembly (HomeBlaze.App, or the test host). Pinning it to
             // HomeBlaze finds the manifest HomeBlaze's own build produced, regardless of which process hosts it.
-            CommandLineArguments = [$"--applicationName={HostingApplicationName}"]
+            CommandLineArguments = [$"--applicationName={HostingApplicationName}"],
+
+            LogFilePath = _logFilePath,
         };
 
         var application = await HomeBlazeWebApplication.CreateAsync(options, cancellationToken);

@@ -20,6 +20,9 @@ public sealed record HomeBlazeWebApplicationOptions
     /// <summary>Plugin configuration file. Sets <c>PluginConfigurationPath</c>.</summary>
     public string? PluginConfigurationPath { get; init; }
 
+    /// <summary>File to append logs to, or null to leave logging as configured.</summary>
+    public string? LogFilePath { get; init; }
+
     /// <summary>Addresses to bind. Empty keeps whatever the configuration specifies.</summary>
     public IReadOnlyList<string> Urls { get; init; } = [];
 
