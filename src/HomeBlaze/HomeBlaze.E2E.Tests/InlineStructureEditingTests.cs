@@ -155,6 +155,28 @@ public class InlineStructureEditingTests
     }
 
     [Fact]
+    public async Task WhenAWidgetOnThePageIsMovedToTheTop_ThenItStaysSelectedAndItsBarNoLongerOffersMoveUp()
+    {
+        // Arrange: unlike a row of a list, a widget on the page is not rendered again by its parent after the reload.
+        var page = await OpenPageInInlineModeAsync();
+        var actionBar = await GetWrapperOf(page, "switch").SelectWidgetAsync();
+        await Assertions.Expect(actionBar.GetByTestId("move-up-button")).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Act
+        await actionBar.GetByTestId("move-up-button").ClickAsync();
+
+        // Assert
+        await _fixture.WaitForDemoPageTextAsync(
+            PageName,
+            text => text.IndexOf("HomeBlaze.Components.Switch", StringComparison.Ordinal) <
+                    text.IndexOf("HomeBlaze.Samples.Motor", StringComparison.Ordinal),
+            "The switch was not moved above the motor.");
+        await Assertions.Expect(GetWrapperOf(page, "switch")).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetWidgetActionBar().GetByTestId("move-up-button")).ToHaveCountAsync(0, new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetWidgetActionBar().GetByTestId("move-down-button")).ToBeVisibleAsync(new() { Timeout = Timeout });
+    }
+
+    [Fact]
     public async Task WhenAWidgetIsInserted_ThenItIsSelected()
     {
         // Arrange
