@@ -33,8 +33,6 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
     private static int _lastServiceTypeIndex = -1;
 
-    private static readonly Lock ServiceArraysLock = new();
-
     // Recorded on a state whose chain was proven cyclic, so a context on the loop pays one walk
     // per state rather than one per query. A context merely leading into a loop records nothing
     // and re-walks every query, which is the price of never raising from an unverified record.
@@ -980,8 +978,8 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         // function arrays below, an entry is canonical: a non-empty one belongs to this state alone,
         // so callers may key caches on its identity, while every empty result is the one array behind
         // ImmutableArray<T>.Empty, shared by all states, and is not to be keyed on. A fill must
-        // therefore never be lost to a concurrent growth, so fills and growths serialize on the
-        // static ServiceArraysLock, while reads take no lock.
+        // therefore never be lost to a concurrent growth, so fills and growths serialize on a
+        // per-state leaf lock, the state itself, while reads take no lock.
         private object?[]? _serviceArrays;
 
         // Indexed by PropertyTypeIndex, grown by replacing the array. Only a context a chain ends
@@ -1047,11 +1045,12 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         /// <summary>
         /// Stores <paramref name="services"/> unless the entry is already filled, and returns the entry.
         /// </summary>
+        [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S2551", Justification = "ContextState is private and sealed and never escapes, so no other code can lock it; locking the instance gives a per-state leaf lock without a lock field or allocation.")]
         internal object GetOrSetServiceArray(int serviceTypeIndex, object services)
         {
-            // A leaf lock: nothing below calls into a context or user code, so it cannot take part
-            // in a lock cycle with the context locks.
-            lock (ServiceArraysLock)
+            // A per-state leaf lock: nothing else locks a ContextState, and nothing below calls into a
+            // context or user code, so it cannot take part in a lock cycle with the context locks.
+            lock (this)
             {
                 var current = _serviceArrays;
                 if (current is null || serviceTypeIndex >= current.Length)
