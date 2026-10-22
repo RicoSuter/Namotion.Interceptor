@@ -348,6 +348,52 @@ namespace HomeBlaze.Services.Display
         public static bool TryGetScaledUnit(HomeBlaze.Abstractions.Attributes.StateUnit unit, decimal magnitude, out string suffix, out decimal factor) { }
     }
 }
+namespace HomeBlaze.Services.Expressions
+{
+    public readonly struct ExpressionPipe : System.IEquatable<HomeBlaze.Services.Expressions.ExpressionPipe>
+    {
+        public ExpressionPipe(string Name, System.Collections.Immutable.ImmutableArray<string> Arguments) { }
+        public System.Collections.Immutable.ImmutableArray<string> Arguments { get; init; }
+        public string Name { get; init; }
+    }
+    public readonly struct ExpressionValue
+    {
+        public bool IsMissing { get; }
+        public bool IsText { get; }
+        public Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? Property { get; }
+        public object? Value { get; }
+        public static HomeBlaze.Services.Expressions.ExpressionValue Missing { get; }
+        public static HomeBlaze.Services.Expressions.ExpressionValue FromBoolean(bool? value) { }
+        public static HomeBlaze.Services.Expressions.ExpressionValue FromProperty(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, object? value) { }
+        public static HomeBlaze.Services.Expressions.ExpressionValue FromText(string text) { }
+        public static HomeBlaze.Services.Expressions.ExpressionValue FromValue(object? value) { }
+    }
+    public static class ExpressionVariables
+    {
+        public const string Subject = "subject";
+        public const string Value = "value";
+        public static bool TryGetVariable(string path, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out string? variable) { }
+    }
+    public interface IExpressionContext
+    {
+        HomeBlaze.Services.Expressions.ExpressionValue ApplyPipe(string name, System.Collections.Immutable.ImmutableArray<string> arguments, HomeBlaze.Services.Expressions.ExpressionValue input);
+        HomeBlaze.Services.Expressions.ExpressionValue ResolvePath(string path);
+    }
+    public sealed class ParsedExpression
+    {
+        public System.Collections.Immutable.ImmutableArray<string> Paths { get; }
+        public System.Collections.Immutable.ImmutableArray<HomeBlaze.Services.Expressions.ExpressionPipe> Pipes { get; }
+        public string? SinglePath { get; }
+        public string Text { get; }
+        public HomeBlaze.Services.Expressions.ExpressionValue Evaluate<TContext>(ref TContext context)
+            where TContext :  struct, HomeBlaze.Services.Expressions.IExpressionContext { }
+        public bool? EvaluateCondition<TContext>(ref TContext context)
+            where TContext :  struct, HomeBlaze.Services.Expressions.IExpressionContext { }
+        public HomeBlaze.Services.Expressions.ExpressionValue EvaluateWithoutPipes<TContext>(ref TContext context)
+            where TContext :  struct, HomeBlaze.Services.Expressions.IExpressionContext { }
+        public static bool TryParse(string text, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out HomeBlaze.Services.Expressions.ParsedExpression? expression, [System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out string? error) { }
+    }
+}
 namespace HomeBlaze.Services.Lifecycle
 {
     public class MethodPropertyInitializer : Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler
