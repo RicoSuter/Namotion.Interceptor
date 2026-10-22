@@ -468,6 +468,36 @@ public class InlineStructureEditingTests
     }
 
     [Fact]
+    public async Task WhenASliderInTheSplitPreviewIsOperatedByKeyboard_ThenItWritesNothing()
+    {
+        // Arrange
+        var content = Content.Replace(
+            ":: HomeBlaze.Components.Switch Path=structuremotor/IsPowered\n::\n",
+            ":: HomeBlaze.Components.Switch Path=structuremotor/IsPowered\n::\n"
+            + "\n"
+            + ":: HomeBlaze.Components.Slider Path=structuremotor/TargetSpeed Minimum=0 Maximum=3000 Label=\"Preview slider\"\n"
+            + "::\n");
+        var page = await OpenPageInSplitModeAsync(content);
+        var slider = page.Locator(".page-split-preview").GetByRole(AriaRole.Slider, new() { Name = "Preview slider", Exact = true });
+        await Assertions.Expect(slider).ToBeVisibleAsync(new() { Timeout = Timeout });
+        var motor = (Motor)((MarkdownFile)_fixture.GetDemoFolder().Children[PageName]).Children["structuremotor"];
+        var targetSpeedBefore = motor.TargetSpeed;
+
+        // Act: the pointer cannot reach the slider, but the keyboard can reach any control that is not disabled.
+        await slider.FocusAsync();
+        await page.Keyboard.PressAsync("ArrowRight");
+        await page.Keyboard.PressAsync("ArrowRight");
+
+        // Assert: the editor selects the block after the round trip of the click, by which a write of the keys would
+        // have arrived.
+        await page.Locator(".page-split-preview .subject-component-wrapper.revealable:has([data-testid='switch'])").Last
+            .ClickAsync(new() { Position = new() { X = 2, Y = 2 } });
+        await WaitForEditorSelectionAsync(page, GetLineOf(content, "HomeBlaze.Components.Switch"));
+        Assert.Equal(targetSpeedBefore, motor.TargetSpeed);
+        Assert.Equal(content, (await _fixture.ReadFileAsync(_fixture.GetDemoPagePath(PageName))).Replace("\r\n", "\n"));
+    }
+
+    [Fact]
     public async Task WhenAWidgetInTheContentOfARowIsClickedInTheSplitPreview_ThenTheEditorSelectsItsOwnBlock()
     {
         // Arrange: the progress stands inside the list, which takes the clicks on the rest of its content.

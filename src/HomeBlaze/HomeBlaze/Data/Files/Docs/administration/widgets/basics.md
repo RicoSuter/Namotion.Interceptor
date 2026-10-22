@@ -128,7 +128,7 @@ The `Icon` of a card, a tab, a panel, a row, a tile, an indicator, an alert, an 
 The control widgets ([Switch](switch.md) and the others of the group Controls in the [overview](overview.md)) write properties and invoke operations. They follow the same rules as the property panel of a subject.
 
 - **Who can operate**: Every viewer of a page can operate its controls. Every viewer of this documentation can operate the two sample motors and the sample lock through the control samples.
-- **Disabled**: A control is disabled when its path leads nowhere, when the property cannot be written because it has no public setter, and while the page is edited.
+- **Disabled**: A control is disabled when its path leads nowhere, when the property cannot be written because it has no public setter, and while the page is edited, also in the page next to the text editor of the Split mode.
 - **Live**: A control follows its property, so a change by another viewer or by the device moves it.
 - **Writes**: A value is converted to the type of the property. A value that the type cannot hold, or that the property refuses, shows an error message, and nothing is rolled back.
 - **Runtime values**: A property that is no configuration property, such as `IsPowered`, `Mode` and `Load` of the sample motors, changes in memory only and keeps its value until the subject restarts. The control samples of these pages write only such properties, so they change no file.

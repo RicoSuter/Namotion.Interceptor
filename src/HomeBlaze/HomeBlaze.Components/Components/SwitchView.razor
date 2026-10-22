@@ -32,7 +32,7 @@
         }
     }
 
-    var isDisabled = IsEditing || _pending is not null || !canToggle;
+    var isDisabled = IsEditing || IsReadOnly || _pending is not null || !canToggle;
     var label = ValueReader.GetLabel(property, Label, Path);
 }
 
@@ -143,6 +143,10 @@ else
 
     [CascadingParameter(Name = "IsEditing")]
     public bool IsEditing { get; set; }
+
+    /// <summary>Whether the page is shown without being operated, as in the preview next to the editor of a page.</summary>
+    [CascadingParameter(Name = "IsReadOnly")]
+    public bool IsReadOnly { get; set; }
 
     protected override void OnInitialized()
     {

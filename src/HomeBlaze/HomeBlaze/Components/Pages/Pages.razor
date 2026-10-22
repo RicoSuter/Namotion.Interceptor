@@ -55,12 +55,16 @@ else
                     <StartContent>
                         <div class="page-split-preview" style="width: 100%; height: 100%; overflow-y: auto;">
                             @* The preview shows the saved page and never writes it, so that it cannot overwrite the
-                               unsaved text of the editor. A click on a widget reveals its block in the editor. *@
+                               unsaved text of the editor: its controls are disabled, also for the keyboard, which the
+                               pointer guard of the revealable widgets does not stop. A click on a widget reveals its
+                               block in the editor. *@
                             <CascadingValue Value="false" Name="IsEditing">
-                                <CascadingValue Value="_revealer" IsFixed="true">
-                                    <SubjectComponent @key="_componentKey"
-                                                      Subject="@_subject"
-                                                      Type="SubjectComponentType.Page"/>
+                                <CascadingValue Value="true" Name="IsReadOnly" IsFixed="true">
+                                    <CascadingValue Value="_revealer" IsFixed="true">
+                                        <SubjectComponent @key="_componentKey"
+                                                          Subject="@_subject"
+                                                          Type="SubjectComponentType.Page"/>
+                                    </CascadingValue>
                                 </CascadingValue>
                             </CascadingValue>
                         </div>

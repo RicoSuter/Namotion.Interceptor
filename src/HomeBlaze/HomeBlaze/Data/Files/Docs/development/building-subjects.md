@@ -1220,6 +1220,13 @@ public bool IsEditing { get; set; }
 | Ignore | Read-only widget, no editing support | Status displays |
 | Hybrid | Simple fields inline, complex via dialog | Basic fields inline, advanced via dialog |
 
+The page next to the text editor of the Split mode gets `IsEditing` false and an `IsReadOnly` cascading parameter that is true, because it must not write the page under the unsaved text of the editor. A control that writes disables itself on either, as the control widgets that ship do:
+
+```csharp
+[CascadingParameter(Name = "IsReadOnly")]
+public bool IsReadOnly { get; set; }
+```
+
 ### Auto Edit Button
 
 In the Inline mode of a page, a click on a widget selects it, and the host shows a bar with its actions above the top right corner of the widget. Every widget block of a page that shows something can be selected. A block that shows nothing, such as a `ValueMap`, is a chip with its case list while the page is edited inline. In the Split mode, the page next to the editor cannot be operated, and a click on a widget shows its block in the editor instead. When the widget has an Edit component or configuration properties, the bar has an edit button. A widget without either, such as a `ValueList`, gets only the outline, and the bar when it has a parent to select:
