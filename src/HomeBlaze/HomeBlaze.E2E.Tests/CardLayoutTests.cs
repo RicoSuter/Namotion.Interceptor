@@ -144,6 +144,39 @@ public class CardLayoutTests
     }
 
     [Theory]
+    [InlineData("Grid Card", ".grid-cell-content")]
+    [InlineData("Canvas Card", ".canvas-node-content")]
+    public async Task WhenACardInAGridCellOrACanvasNodeIsSelectedInline_ThenItKeepsFillingItAndItsPlaceHasNoInsertLines(string title, string container)
+    {
+        // Arrange
+        var page = await OpenPageAsync();
+        var card = page.GetCard(title);
+        await Assertions.Expect(card).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await page.SelectEditModeAsync("Inline", Timeout);
+        var place = page.Locator(container).Filter(new() { Has = card });
+        var wrapper = place.Locator(".subject-component-wrapper.selectable").Filter(new() { Has = card }).Last;
+
+        // Act
+        var actionBar = await wrapper.SelectWidgetAsync();
+
+        // Assert
+        await Assertions.Expect(wrapper).ToHaveAttributeAsync("aria-current", "true", new() { Timeout = Timeout });
+        await Assertions.Expect(place.GetByTestId("block-insert-line")).ToHaveCountAsync(0);
+        var heights = await card.EvaluateAsync<double[]>(
+            "(card, container) => [card.getBoundingClientRect().height, card.closest(container).getBoundingClientRect().height]",
+            container);
+        Assert.Equal(heights[1], heights[0], 1.0);
+
+        // Act: the layout around the card.
+        await actionBar.GetByTestId("select-parent-button").ClickAsync();
+
+        // Assert
+        await Assertions.Expect(wrapper).Not.ToHaveAttributeAsync("aria-current", "true", new() { Timeout = Timeout });
+        await Assertions.Expect(page.Locator(".subject-component-wrapper.selected")).ToHaveCountAsync(1, new() { Timeout = Timeout });
+        await Assertions.Expect(place.GetByTestId("block-insert-line")).ToHaveCountAsync(0);
+    }
+
+    [Theory]
     [InlineData("Grid Ratio Card", ".grid-cell-content")]
     [InlineData("Canvas Ratio Card", ".canvas-node-content")]
     public async Task WhenACardWithAnAspectRatioIsInAGridCellOrACanvasNode_ThenItFillsItsWidthAndHeight(string title, string container)

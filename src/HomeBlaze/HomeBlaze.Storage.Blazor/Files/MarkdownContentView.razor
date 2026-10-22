@@ -73,6 +73,10 @@
     [CascadingParameter(Name = "ParentSubjectComponent")]
     public SubjectComponent? Owner { get; set; }
 
+    // The content of a grid cell or a canvas node, which must stay the only block of its place to fill it.
+    [CascadingParameter(Name = "PlaceContent")]
+    private IInterceptorSubject? PlaceContent { get; set; }
+
     private WidgetSelection? _subscribedSelection;
     private bool _isAtSelection;
 
@@ -171,7 +175,7 @@
     // the selected widget or the content that holds the selected widget directly.
     private bool IsAtSelection()
     {
-        if (StructureEditor is null || Content is null)
+        if (StructureEditor is null || Content is null || ReferenceEquals(Content, PlaceContent))
         {
             return false;
         }
