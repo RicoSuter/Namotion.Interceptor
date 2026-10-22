@@ -130,6 +130,11 @@ else
 }
 
 <style>
+    /* Set by Pages.razor.js while the pointer is over a widget of the preview that a click reveals. */
+    .page-split-preview.reveal-hover {
+        cursor: pointer;
+    }
+
     .page-head-content {
         display: flex;
         align-items: center;
@@ -290,7 +295,7 @@ else
                 _module ??= await JsRuntime.InvokeAsync<IJSObjectReference>("import", ModulePath);
                 if (mode == PageEditMode.Split)
                 {
-                    await _module.InvokeVoidAsync("forwardPreviewClicks");
+                    await _module.InvokeVoidAsync("forwardPreviewPointer");
                 }
 
                 _pageHeadFit = await _module.InvokeAsync<IJSObjectReference>("fitToEditorBar", _pageHeadContent, bar);

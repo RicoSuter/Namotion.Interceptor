@@ -578,17 +578,50 @@ public class InlineStructureEditingTests
     [Fact]
     public async Task WhenThePageIsSplit_ThenThePreviewIsInertAndItsControlsTakeNoFocus()
     {
-        // Arrange
-        var page = await OpenPageInSplitModeAsync();
-        var powerSwitch = page.Locator(".page-split-preview [role='switch']").First;
-        await Assertions.Expect(powerSwitch).ToBeVisibleAsync(new() { Timeout = Timeout });
+        // Arrange: a link ignores IsReadOnly, so only the inert content keeps the focus from it.
+        var page = await OpenPageInSplitModeAsync(Content + "\n[Preview link](https://example.com/preview)\n");
+        var link = page.Locator(".page-split-preview a[href='https://example.com/preview']");
+        await Assertions.Expect(link).ToBeVisibleAsync(new() { Timeout = Timeout });
+        var content = page.Locator(".page-split-preview-content");
+        await Assertions.Expect(content).ToHaveAttributeAsync("inert", "");
 
         // Act
-        await powerSwitch.EvaluateAsync("element => element.focus()");
+        await link.EvaluateAsync("element => element.focus()");
 
         // Assert
-        await Assertions.Expect(page.Locator(".page-split-preview-content")).ToHaveAttributeAsync("inert", "");
-        Assert.False(await powerSwitch.EvaluateAsync<bool>("element => element === document.activeElement"));
+        Assert.False(await link.EvaluateAsync<bool>("element => element === document.activeElement"));
+
+        // Act: without inert the link takes the focus, so the check above does not pass for another reason.
+        await content.EvaluateAsync("element => element.inert = false");
+        await link.EvaluateAsync("element => element.focus()");
+
+        // Assert
+        Assert.True(await link.EvaluateAsync<bool>("element => element === document.activeElement"));
+    }
+
+    [Fact]
+    public async Task WhenThePointerIsOverAWidgetInTheContentOfARowInTheSplitPreview_ThenOnlyThatWidgetShowsThatAClickRevealsIt()
+    {
+        // Arrange: the progress stands inside a row of the list, whose wrappers contain the pointer as well.
+        var page = await OpenPageInSplitModeAsync(ContentWithProgressInRow);
+        var progress = page.Locator(".page-split-preview .subject-component-wrapper.revealable:has([data-testid='progress'])").Last;
+        await Assertions.Expect(progress).ToBeVisibleAsync(new() { Timeout = Timeout });
+        var hovered = page.Locator(".page-split-preview .subject-component-wrapper.reveal-hover");
+
+        // Act: forced, because the content of the preview is inert.
+        await progress.HoverAsync(new() { Force = true });
+
+        // Assert
+        await Assertions.Expect(progress).ToHaveClassAsync(new Regex(@"\breveal-hover\b"), new() { Timeout = Timeout });
+        await Assertions.Expect(hovered).ToHaveCountAsync(1);
+        await Assertions.Expect(page.Locator(".page-split-preview")).ToHaveCSSAsync("cursor", "pointer");
+
+        // Act
+        await page.Locator(".monaco-editor").HoverAsync();
+
+        // Assert
+        await Assertions.Expect(hovered).ToHaveCountAsync(0, new() { Timeout = Timeout });
+        await Assertions.Expect(page.Locator(".page-split-preview")).Not.ToHaveCSSAsync("cursor", "pointer");
     }
 
     [Fact]
