@@ -63,10 +63,21 @@ internal static partial class MarkdownWriteRules
     public static string? GetContentSizeRefusal(string content)
     {
         var size = Encoding.UTF8.GetByteCount(content);
-        return size > MarkdownFile.MaxContentSize
-            ? $"The Markdown source would be {size} bytes, more than the limit of {MarkdownFile.MaxContentSize} bytes."
-            : null;
+        return size > MarkdownFile.MaxContentSize ? FormatSizeRefusal(size) : null;
     }
+
+    /// <summary>
+    /// Gets why the content is too large, larger than <see cref="MarkdownFile.MaxContentSize"/> bytes as UTF-8 and larger than
+    /// <paramref name="previousContent"/>, or null. An edit of a page that is already too large may keep or shrink its size.
+    /// </summary>
+    public static string? GetContentGrowthRefusal(string content, string previousContent)
+    {
+        var size = Encoding.UTF8.GetByteCount(content);
+        return size > MarkdownFile.MaxContentSize && size > Encoding.UTF8.GetByteCount(previousContent) ? FormatSizeRefusal(size) : null;
+    }
+
+    private static string FormatSizeRefusal(int size) =>
+        $"The Markdown source would be {size} bytes, more than the limit of {MarkdownFile.MaxContentSize} bytes.";
 
     private const string ActiveContentMessage =
         $"Blocks cannot be added, changed or removed, and {MarkdownFile.ActiveContent} cannot be added or changed through " +

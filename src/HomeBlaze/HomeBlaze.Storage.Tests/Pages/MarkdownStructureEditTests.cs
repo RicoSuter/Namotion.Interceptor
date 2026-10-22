@@ -521,4 +521,39 @@ public class MarkdownStructureEditTests
         Assert.StartsWith("The Markdown source would be ", result.Refusal);
         Assert.Equal(content, await fixture.ReadAsync("page.md"));
     }
+
+    [Fact]
+    public async Task WhenAPageIsAlreadyTooLarge_ThenEditsThatShrinkItAreWritten()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var large = new string('a', MarkdownFile.MaxContentSize + 100);
+        var page = await fixture.AddPageAsync("page.md", $"{large}\n\nOld text.\n\n:: {LeafType}#leaf\n::\n");
+
+        // Act
+        var replaced = await page.ReplaceTextBlockAsync(FindText(page, "Old text."), "Old text.", "New.", CancellationToken.None);
+        await page.OnFileChangedAsync(CancellationToken.None);
+        var deleted = await page.DeleteBlockAsync(page.Children["leaf"], CancellationToken.None);
+
+        // Assert
+        Assert.True(replaced.IsWritten);
+        Assert.True(deleted.IsWritten);
+        Assert.Equal($"{large}\n\nNew.\n\n", await fixture.ReadAsync("page.md"));
+    }
+
+    [Fact]
+    public async Task WhenAPageIsAlreadyTooLarge_ThenAnEditThatGrowsItIsRefused()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var content = $"{new string('a', MarkdownFile.MaxContentSize + 100)}\n\nOld text.\n";
+        var page = await fixture.AddPageAsync("page.md", content);
+
+        // Act
+        var result = await page.ReplaceTextBlockAsync(FindText(page, "Old text."), "Old text.", "Old text, longer.", CancellationToken.None);
+
+        // Assert
+        Assert.StartsWith("The Markdown source would be ", result.Refusal);
+        Assert.Equal(content, await fixture.ReadAsync("page.md"));
+    }
 }

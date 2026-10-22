@@ -704,7 +704,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         return true;
     }
 
-    // A segment of text does not survive the read after a refusal, so a refusal that asks to try again would fail again.
+    // A segment of page text usually does not survive the read after a refusal (only the segments of kept widgets are
+    // registered again), so a refusal that asks to try again would mostly fail again.
     private static string GetChangedPageRefusal(IInterceptorSubject? before) =>
         before is HtmlSegment ? PageChangedRefusal : StructureChangedRefusal;
 
@@ -837,7 +838,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
                 return MarkdownEditResult.Refused(refusal!);
             }
 
-            if (MarkdownWriteRules.GetContentSizeRefusal(change.Write.Page.Source) is { } sizeRefusal)
+            if (MarkdownWriteRules.GetContentGrowthRefusal(change.Write.Page.Source, page.Source) is { } sizeRefusal)
             {
                 _parser.LogRefusedWrite(FullPath, sizeRefusal);
                 return MarkdownEditResult.Refused(sizeRefusal);
