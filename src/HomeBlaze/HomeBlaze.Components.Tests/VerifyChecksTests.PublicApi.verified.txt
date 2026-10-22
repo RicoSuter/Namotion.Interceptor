@@ -389,6 +389,7 @@ namespace HomeBlaze.Components
     {
         System.Threading.Tasks.Task<bool> RevealAsync(Namotion.Interceptor.IInterceptorSubject subject);
     }
+    public interface ITextBlockWidget { }
     [HomeBlaze.Abstractions.Attributes.PageLayout]
     [HomeBlaze.Abstractions.Attributes.SubjectIcon("Lightbulb")]
     [Namotion.Interceptor.Attributes.InterceptorSubject]
@@ -472,8 +473,9 @@ namespace HomeBlaze.Components
     }
     public readonly struct PageBlockActions : System.IEquatable<HomeBlaze.Components.PageBlockActions>
     {
-        public PageBlockActions(bool CanDelete, bool CanMoveUp, bool CanMoveDown) { }
+        public PageBlockActions(bool CanDelete, bool CanMoveUp, bool CanMoveDown, bool CanEditText = false) { }
         public bool CanDelete { get; init; }
+        public bool CanEditText { get; init; }
         public bool CanMoveDown { get; init; }
         public bool CanMoveUp { get; init; }
     }
@@ -489,6 +491,7 @@ namespace HomeBlaze.Components
         public abstract System.Threading.Tasks.Task AddListItemAsync(Namotion.Interceptor.IInterceptorSubject owner, HomeBlaze.Components.PageListSlot slot);
         public abstract bool CanInsertInto(Namotion.Interceptor.IInterceptorSubject content);
         public abstract System.Threading.Tasks.Task DeleteAsync(Namotion.Interceptor.IInterceptorSubject subject);
+        public virtual System.Threading.Tasks.Task EditTextAsync(Namotion.Interceptor.IInterceptorSubject subject) { }
         public abstract HomeBlaze.Components.PageBlockActions GetActions(Namotion.Interceptor.IInterceptorSubject subject);
         public abstract string? GetBlockName(Namotion.Interceptor.IInterceptorSubject subject);
         public abstract System.Collections.Generic.IReadOnlyList<HomeBlaze.Components.PageListSlot> GetListSlots(Namotion.Interceptor.IInterceptorSubject owner);

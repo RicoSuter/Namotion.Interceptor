@@ -14,23 +14,33 @@
     var contentName = showsInsertLines ? GetContentName() : null;
     var position = 0;
 }
-@foreach (var segment in GetRenderSegments())
+@foreach (var segment in GetRenderSegments(groupsText: IsGroupingText()))
 {
-    @if (segment.Html != null)
+    var item = segment.Widget ?? segment.Start;
+    @if (showsInsertLines && item is not null)
     {
-        @((MarkupString)segment.Html)
+        position++;
+        <BlockInsertLine Label="@($"Insert at position {position} of {contentName}")"
+                         OnInsert="@(() => StructureEditor!.InsertWidgetAsync(Content!, item))" />
     }
-    else if (segment.Widget != null)
-    {
-        @if (showsInsertLines)
-        {
-            position++;
-            <BlockInsertLine Label="@($"Insert at position {position} of {contentName}")"
-                             OnInsert="@(() => StructureEditor!.InsertWidgetAsync(Content!, segment.Widget))" />
-        }
 
+    @if (segment.Widget is not null)
+    {
         @* Keyed, so that the state of a component stays with its subject when a reload inserts or removes a block. *@
         <SubjectComponent @key="segment.Widget" Subject="@segment.Widget" Type="SubjectComponentType.Widget" />
+    }
+    else if (segment.Start is { Start: HtmlSegmentStart.Text } text)
+    {
+        @* A block of text is selectable like a row of a selected list: once its content is at the selection. *@
+        <SubjectComponent @key="text"
+                          Subject="@text"
+                          Type="SubjectComponentType.Widget"
+                          IsSelectionEnabled="@_isAtSelection"
+                          AdditionalParameters="@(new Dictionary<string, object?> { ["Html"] = segment.Html })" />
+    }
+    else if (segment.Html is not null)
+    {
+        @((MarkupString)segment.Html)
     }
 }
 @if (showsInsertLines)
@@ -50,6 +60,9 @@
     [Parameter]
     public IDictionary<string, IInterceptorSubject>? Children { get; set; }
 
+    [CascadingParameter(Name = "IsEditing")]
+    public bool IsEditing { get; set; }
+
     [CascadingParameter]
     public WidgetSelection? Selection { get; set; }
 
@@ -66,22 +79,32 @@
     private WidgetSelection? _subscribedSelection;
     private bool _isAtSelection;
 
-    private record RenderSegment(string? Html, IInterceptorSubject? Widget);
+    // Html is the markup of a stretch of HTML and expressions; Start is the segment that starts it as a text block or other
+    // content, when the content groups its text; Widget is a block.
+    private record RenderSegment(string? Html, IInterceptorSubject? Widget, HtmlSegment? Start = null);
 
-    // Runs on every render and keeps nothing: the values of expressions are read here so that the render
-    // records them, and a reload replaces the dictionary and its subjects.
-    private List<RenderSegment> GetRenderSegments()
+    // Runs on every render and keeps nothing: the values of expressions are read here so that the render records them, and
+    // a reload replaces the dictionary and its subjects. Without grouping, as on a viewed page, the HTML and the expressions
+    // between two widgets are one piece of markup, so that an expression can sit inside an HTML attribute.
+    private List<RenderSegment> GetRenderSegments(bool groupsText)
     {
         var result = new List<RenderSegment>();
         if (Children is null)
             return result;
 
         StringBuilder? builder = null;
+        HtmlSegment? start = null;
 
         foreach (var child in Children.Values)
         {
             if (child is HtmlSegment html)
             {
+                if (groupsText && html.Start != HtmlSegmentStart.None)
+                {
+                    AddMarkup(result, builder, start);
+                    start = html;
+                }
+
                 builder ??= new StringBuilder();
                 builder.Append(html.Html);
             }
@@ -101,25 +124,31 @@
             }
             else
             {
-                // HTML and expressions are joined into one markup string so that an
-                // expression can sit inside an HTML attribute.
-                if (builder is { Length: > 0 })
-                {
-                    result.Add(new RenderSegment(builder.ToString(), null));
-                    builder.Clear();
-                }
-
+                AddMarkup(result, builder, start);
+                start = null;
                 result.Add(new RenderSegment(null, child));
             }
         }
 
-        if (builder is { Length: > 0 })
-        {
-            result.Add(new RenderSegment(builder.ToString(), null));
-        }
-
+        AddMarkup(result, builder, start);
         return result;
     }
+
+    // Adds the markup collected so far and empties the builder.
+    private static void AddMarkup(List<RenderSegment> result, StringBuilder? builder, HtmlSegment? start)
+    {
+        if (builder is { Length: > 0 } || start is not null)
+        {
+            result.Add(new RenderSegment(builder?.ToString() ?? string.Empty, null, start));
+            builder?.Clear();
+        }
+    }
+
+    // Text is selectable in Inline mode, except in the content of a grid cell or a canvas node, which must stay the only
+    // block of its place to fill it.
+    private bool IsGroupingText() =>
+        IsEditing && Selection is not null && StructureEditor is not null && Content is not null &&
+        !ReferenceEquals(Content, PlaceContent);
 
     protected override void OnParametersSet()
     {

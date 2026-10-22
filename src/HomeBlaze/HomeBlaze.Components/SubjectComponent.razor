@@ -33,9 +33,9 @@
              @onkeydown:stopPropagation="@isSelectable">
             @{
                 var selectableParent = isSelected ? SelectableAncestor : null;
-                var hasEditAction = isSelected && HasEditComponent;
                 var structureEditor = isSelected ? StructureEditor : null;
                 var actions = structureEditor?.GetActions(Subject) ?? default;
+                var hasEditAction = isSelected && (actions.CanEditText || HasEditComponent);
                 var listSlots = structureEditor?.GetListSlots(Subject) ?? [];
             }
             @if (isSelected && (selectableParent != null || hasEditAction || actions.CanDelete || listSlots.Count > 0))
@@ -245,14 +245,14 @@
         Subject != null &&
         (ComponentRegistry.HasComponent(Subject.GetType(), SubjectComponentType.Edit) || Subject.HasConfigurationProperties());
 
-    // Every block of a page is configurable, also one without configuration properties of its own. The content of a slot,
-    // such as the text of a card, and an expression in the text are not.
+    // Every block of a page is configurable, also one without configuration properties of its own, and a block of text is
+    // selectable as well. The content of a slot, such as the body of a card, and an expression in the text are not.
     internal bool IsSelectable =>
         IsEditing &&
         IsSelectionEnabled &&
         Type == SubjectComponentType.Widget &&
         Selection != null &&
-        (Subject is IConfigurable || HasEditComponent);
+        (Subject is IConfigurable || _isTextBlock || HasEditComponent);
 
     // Keyed weakly, because the type of a widget can come from a plugin that is unloaded again.
     private static readonly ConditionalWeakTable<Type, string> TypeDisplayNames = new();
@@ -260,6 +260,9 @@
     // The properties that name a selectable widget without a title, looked up once per subject.
     private RegisteredSubjectProperty? _labelProperty;
     private RegisteredSubjectProperty? _pathProperty;
+
+    // Whether the widget of the subject is a block of text of its page, which can be selected without a configuration.
+    private bool _isTextBlock;
 
     /// <summary>Gets the name that assistive technology reads for the widget: its title, its path or the name of its type.</summary>
     public string GetAccessibleName()
@@ -412,7 +415,7 @@
         {
             Selection.Select(this);
         }
-        else if (HasEditComponent)
+        else if (HasEditComponent || StructureEditor?.GetActions(Subject!).CanEditText == true)
         {
             await OpenEditDialog();
         }
@@ -440,6 +443,9 @@
                 var registeredSubject = Subject?.TryGetRegisteredSubject();
                 _labelProperty = TryGetTextProperty(registeredSubject, SubjectNames.LabelPropertyName);
                 _pathProperty = SubjectNames.TryGetPathProperty(registeredSubject);
+                _isTextBlock = Subject is not null &&
+                               ComponentRegistry.GetComponent(Subject.GetType(), Type)?.ComponentType is { } componentType &&
+                               typeof(ITextBlockWidget).IsAssignableFrom(componentType);
             }
 
             _previousSubject = Subject;
@@ -487,6 +493,12 @@
     {
         if (Subject == null)
             return;
+
+        if (StructureEditor is { } editor && editor.GetActions(Subject).CanEditText)
+        {
+            await editor.EditTextAsync(Subject);
+            return;
+        }
 
         var title = SubjectNames.TryGetTitle(Subject, _labelProperty);
         await SubjectEditDialog.ShowAsync(DialogService, ComponentRegistry, Subject, SubjectEditDialog.GetTitle(null, title));

@@ -136,3 +136,15 @@
     top: 50%;
     transform: translate(-50%, -50%);
 }
+
+/* A block of text that is edited inline stands in a wrapper (see MarkdownTextWidget). On the page the wrapper takes no
+   margin, so that the margins of the text apply as on the viewed page. In a container the wrapper has the margin of a
+   block, which the margin of its text collapses into, as on the viewed page. */
+.markdown-content > ::deep .subject-component-wrapper:has(> .markdown-text) {
+    margin: 0;
+}
+
+/* The title of a page that is edited inline makes room for the button of the page menu, as the title does above. */
+.markdown-content > ::deep .subject-component-wrapper > .markdown-text > h1:first-child {
+    padding-right: 3rem;
+}

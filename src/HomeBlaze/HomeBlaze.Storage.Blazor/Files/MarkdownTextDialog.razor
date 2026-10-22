@@ -1,0 +1,85 @@
+@using MudBlazor
+
+@* The Markdown of a block of text in a field that grows with it. A refusal, such as text that changed meanwhile, shows here
+   and keeps what was typed. *@
+<MudDialog>
+    <DialogContent>
+        @if (_refusal is not null)
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-2" data-testid="markdown-text-refusal">@_refusal</MudAlert>
+        }
+
+        <MudTextField T="string"
+                      @bind-Value="_text"
+                      Label="Markdown"
+                      Variant="Variant.Outlined"
+                      Lines="6"
+                      Sizing="InputSizing.Auto"
+                      MaxLines="24"
+                      AutoFocus="true"
+                      Immediate="true"
+                      Class="markdown-text-field"
+                      data-testid="markdown-text-input" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel" data-testid="markdown-text-cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="_isSaving" OnClick="SaveAsync" data-testid="markdown-text-save">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+<style>
+    .markdown-text-field textarea {
+        font-family: monospace;
+    }
+</style>
+
+@code {
+    [CascadingParameter]
+    private IMudDialogInstance Dialog { get; set; } = default!;
+
+    /// <summary>The Markdown that the field starts with.</summary>
+    [Parameter]
+    public string Text { get; set; } = string.Empty;
+
+    /// <summary>Saves the text and returns why it was not saved, or null when it was.</summary>
+    [Parameter]
+    public Func<string, Task<string?>> Save { get; set; } = default!;
+
+    private string _text = string.Empty;
+    private string? _refusal;
+    private bool _isSaving;
+
+    protected override void OnInitialized() => _text = Text;
+
+    private void Cancel() => Dialog.Cancel();
+
+    private async Task SaveAsync()
+    {
+        _isSaving = true;
+        try
+        {
+            _refusal = await Save(_text);
+            if (_refusal is null)
+            {
+                Dialog.Close(DialogResult.Ok(true));
+            }
+        }
+        finally
+        {
+            _isSaving = false;
+        }
+    }
+
+    /// <summary>Shows the dialog until the text is saved or the dialog is canceled.</summary>
+    public static async Task ShowAsync(IDialogService dialogService, string title, string text, Func<string, Task<string?>> save)
+    {
+        var parameters = new DialogParameters<MarkdownTextDialog>
+        {
+            { dialog => dialog.Text, text },
+            { dialog => dialog.Save, save }
+        };
+        var options = new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseOnEscapeKey = true };
+        var reference = await dialogService.ShowAsync<MarkdownTextDialog>(title, parameters, options);
+        await reference.Result;
+    }
+}

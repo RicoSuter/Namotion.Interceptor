@@ -3,6 +3,7 @@ using HomeBlaze.Components.Dialogs;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Blazor.Models;
 using HomeBlaze.Storage.Files;
+using HomeBlaze.Storage.Internal;
 using HomeBlaze.Storage.Pages;
 using Microsoft.Extensions.Logging;
 using MudBlazor;
@@ -52,6 +53,13 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
 
     public override PageBlockActions GetActions(IInterceptorSubject subject)
     {
+        if (subject is HtmlSegment segment)
+        {
+            return _file.GetTextBlockText(segment) is null
+                ? default
+                : new PageBlockActions(CanDelete: true, CanMoveUp: false, CanMoveDown: false, CanEditText: true);
+        }
+
         var actions = _file.GetBlockActions(subject);
         return new PageBlockActions(actions.CanDelete, actions.CanMoveUp, actions.CanMoveDown);
     }
@@ -74,6 +82,22 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
 
     public override async Task DeleteAsync(IInterceptorSubject subject)
     {
+        if (subject is HtmlSegment segment)
+        {
+            if (_file.GetTextBlockText(segment) is not { } text)
+            {
+                return;
+            }
+
+            var isConfirmed = await _dialogService.ShowMessageBoxAsync("Delete text", "Delete this text?", yesText: "Delete", cancelText: "Cancel");
+            if (isConfirmed == true)
+            {
+                await RunAsync(() => _file.ReplaceTextBlockAsync(segment, text, string.Empty, CancellationToken.None));
+            }
+
+            return;
+        }
+
         var actions = _file.GetBlockActions(subject);
         if (!actions.CanDelete)
         {
@@ -155,6 +179,32 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
                 _subjectFactory.DiscardSubject(item);
             }
         }
+    }
+
+    public override async Task EditTextAsync(IInterceptorSubject subject)
+    {
+        if (subject is not HtmlSegment segment || _file.GetTextBlockText(segment) is not { } text)
+        {
+            return;
+        }
+
+        await MarkdownTextDialog.ShowAsync(
+            _dialogService,
+            "Edit text",
+            text,
+            newText => SaveTextAsync(() => _file.ReplaceTextBlockAsync(segment, text, newText, CancellationToken.None)));
+    }
+
+    // The dialog shows a refusal and keeps the text, so that nothing that was typed is lost.
+    private async Task<string?> SaveTextAsync(Func<Task<MarkdownEditResult>> edit)
+    {
+        var result = await RunAsync(edit, reportsRefusal: false);
+        return result switch
+        {
+            null => "The page could not be saved.",
+            { IsWritten: false } refused => refused.Refusal,
+            _ => null
+        };
     }
 
     // A dialog asked about the blocks as they were. A reload while it was open can have given an unnamed subject another

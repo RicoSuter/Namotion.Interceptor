@@ -35,4 +35,7 @@ public abstract class PageStructureEditor
 
     /// <summary>Asks for the item when the slot has a type, appends it to the slot of <paramref name="owner"/> and selects it.</summary>
     public abstract Task AddListItemAsync(IInterceptorSubject owner, PageListSlot slot);
+
+    /// <summary>Asks for the new text of the text block <paramref name="subject"/>, saves it and selects it. Does nothing by default.</summary>
+    public virtual Task EditTextAsync(IInterceptorSubject subject) => Task.CompletedTask;
 }
