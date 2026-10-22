@@ -520,6 +520,12 @@ public sealed partial class MarkdownContentParser
                     {
                         RememberAppliedBlock(subject, segment, state, registrationCount);
                     }
+                    else
+                    {
+                        // The remembered text is the one before the error, so keeping the block when its text returns
+                        // to it would keep the content that shows the error.
+                        ForgetAppliedBlock(subject);
+                    }
 
                     return (subject, null);
                 }

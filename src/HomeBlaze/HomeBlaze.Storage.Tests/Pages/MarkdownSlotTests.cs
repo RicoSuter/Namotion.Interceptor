@@ -885,6 +885,39 @@ public class MarkdownSlotTests
         Assert.Same(result.Page!.AllBlocks[1], result.TextBlocks[deep].Owner);
     }
 
+    [Fact]
+    public async Task WhenTheTextOfAWidgetReturnsAfterAnErrorInsideIt_ThenTheErrorIsGoneAndItsTextHasItsTextBlock()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var valid = $$$"""
+            :: {{{Namespace}}}.TestPanel#outer
+            Inside.
+            ::
+            """.Replace("\r\n", "\n");
+        var page = await fixture.AddPageAsync("page.md", valid);
+        await fixture.UpdatePageAsync(page, $$$"""
+            :: {{{Namespace}}}.TestPanel#outer
+            ::: Unknown.Type
+            :::
+
+            Inside.
+            ::
+            """);
+        var outer = Assert.IsType<TestPanel>(page.Children["outer"]);
+        Assert.Contains("Unknown type", Html(Assert.IsType<MarkdownFragment>(outer.Content)));
+        var parser = fixture.Services.GetRequiredService<MarkdownContentParser>();
+
+        // Act
+        var result = await parser.ParseAsync(valid, page, page.Children, CancellationToken.None);
+
+        // Assert
+        var content = Assert.IsType<MarkdownFragment>(Assert.IsType<TestPanel>(result.Children["outer"]).Content);
+        Assert.DoesNotContain("Unknown type", Html(content));
+        var inside = content.Children.Values.OfType<HtmlSegment>().Single(segment => segment.Html.Contains("Inside."));
+        Assert.Equal(2, result.TextBlocks[inside].Line);
+    }
+
     private static string Flatten(IEnumerable<Namotion.Interceptor.IInterceptorSubject?> subjects) =>
         string.Concat(subjects.Select(subject => subject switch
         {
