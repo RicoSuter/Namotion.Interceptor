@@ -229,6 +229,21 @@ public class CanvasLayoutTests
     }
 
     [Fact]
+    public async Task WhenCanvasIsShownInTheSplitPreview_ThenItIsNotEdited()
+    {
+        // Arrange
+        var page = await OpenCanvasPageAsync();
+
+        // Act
+        await page.SelectEditModeAsync("Split", Timeout);
+
+        // Assert: the editor is the round trip after which the preview shows the canvas of the split mode.
+        await Assertions.Expect(page.Locator(".monaco-editor").First).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(page.Locator(".page-split-preview .canvas-layout-container")).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(page.Locator(".page-split-preview .canvas-layout-container.editing")).ToHaveCountAsync(0);
+    }
+
+    [Fact]
     public async Task WhenCanvasIsEdited_ThenAWidgetInANodeCannotBeOperated()
     {
         // Arrange

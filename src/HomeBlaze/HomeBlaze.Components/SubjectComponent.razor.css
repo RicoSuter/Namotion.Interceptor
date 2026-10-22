@@ -280,7 +280,21 @@
     padding: 2px;
 }
 
-/* In the preview next to the editor, a click on a widget shows its block in the editor. */
+/* In the preview next to the editor, a click on a widget shows its block in the editor. Its content takes no pointer
+   input, because a control that writes a configuration property would write the page under the unsaved text of the
+   editor. A nested widget takes the pointer again and reveals its own block. */
+.subject-component-wrapper.revealable {
+    pointer-events: auto;
+}
+
+.subject-component-wrapper.revealable > ::deep * {
+    pointer-events: none;
+}
+
+.subject-component-wrapper.revealable > .subject-component-wrapper.revealable {
+    pointer-events: auto;
+}
+
 @media (hover: hover) {
     .subject-component-wrapper.revealable:hover:not(:has(.subject-component-wrapper.revealable:hover)) {
         outline: 1px dashed rgba(var(--mud-palette-primary-rgb), 0.5);

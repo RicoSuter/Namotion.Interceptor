@@ -483,7 +483,7 @@ else
 
     public async Task<bool> RevealAsync(IInterceptorSubject subject)
     {
-        if (_editor is null || File is null)
+        if (_editor is null || File is null || _isDisposed)
         {
             return false;
         }
@@ -496,9 +496,15 @@ else
         }
 
         // The subject belongs to the block of the saved page. Text that changed before the block makes the region point
-        // at another block, so it is only revealed while the text up to the block is saved.
-        if (MarkdownBlockMatcher.FindSavedBlock(await _editor.GetValue(), File.Content, blockIndex) is null ||
-            await GetModuleAsync() is not { } module)
+        // at another block, so it is only revealed while the text up to the block is saved. The block is found all the
+        // same, so true keeps the caller from revealing a block around it instead.
+        if (MarkdownBlockMatcher.FindSavedBlock(await _editor.GetValue(), File.Content, blockIndex) is null)
+        {
+            Snackbar.Add($"Save the page to find {region.Name} in the editor. The text before it has changes that are not saved.", Severity.Warning);
+            return true;
+        }
+
+        if (await GetModuleAsync() is not { } module)
         {
             return false;
         }

@@ -1,5 +1,7 @@
 using System.Text.RegularExpressions;
 using HomeBlaze.E2E.Tests.Infrastructure;
+using HomeBlaze.Samples;
+using HomeBlaze.Storage.Files;
 using Microsoft.Playwright;
 
 namespace HomeBlaze.E2E.Tests;
@@ -431,11 +433,7 @@ public class InlineStructureEditingTests
     public async Task WhenAWidgetIsClickedInTheSplitPreview_ThenNothingIsSelectedAndTheEditorSelectsItsBlock()
     {
         // Arrange
-        await _fixture.WriteDemoPageAsync(PageName, Content);
-        var page = await _fixture.CreatePageAsync();
-        await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/{PageName}");
-        await page.WaitUntilInteractiveAsync(Timeout);
-        await page.SelectEditModeAsync("Split", Timeout);
+        var page = await OpenPageInSplitModeAsync();
         var switchWrapper = page.Locator(".page-split-preview .subject-component-wrapper.revealable:has([data-testid='switch'])").Last;
         await Assertions.Expect(switchWrapper).ToBeVisibleAsync(new() { Timeout = Timeout });
 
@@ -444,13 +442,50 @@ public class InlineStructureEditingTests
 
         // Assert: the editor selects the block only after the round trip of the click, so the selection of the preview
         // would have arrived by then.
-        var switchLine = Content.Split('\n').ToList().FindIndex(line => line.Contains("HomeBlaze.Components.Switch")) + 1;
-        await page.WaitForFunctionAsync(
-            "line => monaco.editor.getEditors()[0]?.getSelection()?.startLineNumber === line",
-            switchLine,
-            new() { Timeout = Timeout });
+        await WaitForEditorSelectionAsync(page, GetLineOf("HomeBlaze.Components.Switch"));
         await Assertions.Expect(page.GetWidgetActionBar()).ToHaveCountAsync(0);
         await Assertions.Expect(page.Locator(".page-split-preview .subject-component-wrapper.selectable")).ToHaveCountAsync(0);
+    }
+
+    [Fact]
+    public async Task WhenTheSwitchIsClickedInTheSplitPreview_ThenItIsNotToggledAndTheEditorSelectsItsBlock()
+    {
+        // Arrange
+        var page = await OpenPageInSplitModeAsync();
+        var powerSwitch = page.Locator(".page-split-preview").GetByRole(AriaRole.Switch);
+        await Assertions.Expect(powerSwitch).ToBeVisibleAsync(new() { Timeout = Timeout });
+        var isCheckedBefore = await powerSwitch.IsCheckedAsync();
+        var motor = (Motor)((MarkdownFile)_fixture.GetDemoFolder().Children[PageName]).Children["structuremotor"];
+        var isPoweredBefore = motor.IsPowered;
+
+        // Act: forced, because the content of the widget takes no pointer input and the wrapper around it takes the click.
+        await powerSwitch.ClickAsync(new() { Force = true });
+
+        // Assert: the editor selects the block after the round trip of the click, by which the toggle would have arrived.
+        await WaitForEditorSelectionAsync(page, GetLineOf("HomeBlaze.Components.Switch"));
+        Assert.Equal(isCheckedBefore, await powerSwitch.IsCheckedAsync());
+        Assert.Equal(isPoweredBefore, motor.IsPowered);
+    }
+
+    [Fact]
+    public async Task WhenAWidgetInTheContentOfARowIsClickedInTheSplitPreview_ThenTheEditorSelectsItsOwnBlock()
+    {
+        // Arrange: the progress stands inside the list, which takes the clicks on the rest of its content.
+        var content = Content.Replace(
+            "::: Value Path=structuremotor/TargetSpeed Label=\"Row A\"\n:::\n",
+            "::: Value Path=structuremotor/TargetSpeed Label=\"Row A\"\n"
+            + ":::: HomeBlaze.Components.Progress Path=structuremotor/TargetSpeed Minimum=0 Maximum=1600\n"
+            + "::::\n"
+            + ":::\n");
+        var page = await OpenPageInSplitModeAsync(content);
+        var progress = page.Locator(".page-split-preview .subject-component-wrapper.revealable:has([data-testid='progress'])").Last;
+        await Assertions.Expect(progress).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Act
+        await progress.ClickAsync(new() { Force = true });
+
+        // Assert
+        await WaitForEditorSelectionAsync(page, GetLineOf(content, "HomeBlaze.Components.Progress"));
     }
 
     [Fact]
@@ -470,6 +505,30 @@ public class InlineStructureEditingTests
         await Assertions.Expect(name).ToBeVisibleAsync(new() { Timeout = Timeout });
         await Assertions.Expect(name).ToHaveCSSAsync("font-weight", "700");
     }
+
+    private async Task<IPage> OpenPageInSplitModeAsync(string content = Content)
+    {
+        await _fixture.WriteDemoPageAsync(PageName, content);
+        var page = await _fixture.CreatePageAsync();
+        await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/{PageName}");
+        await page.WaitUntilInteractiveAsync(Timeout);
+        await page.SelectEditModeAsync("Split", Timeout);
+
+        // The editor only knows its block regions once the decorations are applied, and a click before reveals nothing.
+        await Assertions.Expect(page.Locator(".subject-block-decoration").First).ToBeVisibleAsync(new() { Timeout = Timeout });
+        return page;
+    }
+
+    // The 1-based line of the page that contains the text.
+    private static int GetLineOf(string text) => GetLineOf(Content, text);
+
+    private static int GetLineOf(string content, string text) => content.Split('\n').ToList().FindIndex(line => line.Contains(text)) + 1;
+
+    private static Task WaitForEditorSelectionAsync(IPage page, int startLine) =>
+        page.WaitForFunctionAsync(
+            "line => monaco.editor.getEditors()[0]?.getSelection()?.startLineNumber === line",
+            startLine,
+            new() { Timeout = Timeout });
 
     private async Task<IPage> OpenPageInInlineModeAsync(string content = Content)
     {
