@@ -27,12 +27,14 @@
     {
         var row = rows[index];
         var (path, reading, icon) = items[index];
-        if (_containsSelection)
+        if (IsEditing && Selection is not null)
         {
-            @* Only while the list or one of its rows is selected, so that the first click on the list selects the list. *@
+            @* A row is selectable only while the list or one of its rows is selected, so that the first click on the list
+               selects the list. It stays mounted when that changes, so that a selected widget in its content stays selected. *@
             <SubjectComponent @key="row"
                               Subject="@row"
                               Type="SubjectComponentType.Widget"
+                              IsSelectionEnabled="@_containsSelection"
                               AdditionalParameters="@(new Dictionary<string, object?> { ["Path"] = path, ["Reading"] = reading, ["Icon"] = icon, ["AnyIcon"] = anyIcon })" />
         }
         else

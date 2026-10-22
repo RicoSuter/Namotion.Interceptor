@@ -619,6 +619,8 @@ namespace HomeBlaze.Components
         public bool ContainsSelection { get; }
         [Microsoft.AspNetCore.Components.CascadingParameter(Name="IsEditing")]
         public bool IsEditing { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public bool IsSelectionEnabled { get; set; }
         public HomeBlaze.Components.SubjectComponent? SelectableAncestor { get; }
         [Microsoft.AspNetCore.Components.CascadingParameter]
         public HomeBlaze.Components.WidgetSelection? Selection { get; set; }

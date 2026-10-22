@@ -142,6 +142,45 @@ public class InlineStructureEditingTests
     }
 
     [Fact]
+    public async Task WhenARowIsSelected_ThenAValueCanBeAddedToItsList()
+    {
+        // Arrange
+        var page = await OpenPageInInlineModeAsync();
+        await SelectRowAsync(page, "Row A");
+
+        // Act
+        await page.GetByTestId("add-value-button").ClickAsync();
+        var dialog = page.GetByTestId("create-subject-dialog");
+        await dialog.GetByLabel("Label", new() { Exact = true }).FillAsync("Row C");
+        await page.GetByTestId("create-button").ClickAsync();
+
+        // Assert
+        await _fixture.WaitForDemoPageTextAsync(
+            PageName, text => text.Contains("Label=\"Row B\"\n:::\n::: Value Label=\"Row C\""), "The value was not added.");
+    }
+
+    [Fact]
+    public async Task WhenAWidgetInTheContentOfARowIsClickedWhileTheListIsNotSelected_ThenItIsSelectedAndStaysSelected()
+    {
+        // Arrange
+        var page = await OpenPageInInlineModeAsync(Content.Replace(
+            "::: Value Path=structuremotor/TargetSpeed Label=\"Row A\"\n:::\n",
+            "::: Value Path=structuremotor/TargetSpeed Label=\"Row A\"\n"
+            + ":::: HomeBlaze.Components.Progress Path=structuremotor/TargetSpeed Minimum=0 Maximum=1600\n"
+            + "::::\n"
+            + ":::\n"));
+        var progress = GetWrapperOf(page, "progress");
+
+        // Act
+        await progress.SelectWidgetAsync();
+
+        // Assert: the rows become selectable once the selection is in the list, and the progress stays selected then.
+        await Assertions.Expect(GetValueRowWrapper(page, "Row A")).ToHaveCountAsync(1, new() { Timeout = Timeout });
+        await Assertions.Expect(progress).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
+        await Assertions.Expect(page.Locator(".subject-component-wrapper.selected")).ToHaveCountAsync(1, new() { Timeout = Timeout });
+    }
+
+    [Fact]
     public async Task WhenAListThatIsNotSelectedIsClicked_ThenTheListIsSelectedAndASecondClickSelectsARow()
     {
         // Arrange
@@ -290,9 +329,9 @@ public class InlineStructureEditingTests
         await Assertions.Expect(page.GetByTestId("invisible-widget-chip")).ToHaveCountAsync(0, new() { Timeout = Timeout });
     }
 
-    private async Task<IPage> OpenPageInInlineModeAsync()
+    private async Task<IPage> OpenPageInInlineModeAsync(string content = Content)
     {
-        await _fixture.WriteDemoPageAsync(PageName, Content);
+        await _fixture.WriteDemoPageAsync(PageName, content);
         var page = await _fixture.CreatePageAsync();
         await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/{PageName}");
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);

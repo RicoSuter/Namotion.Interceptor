@@ -153,6 +153,13 @@
     [Parameter]
     public Dictionary<string, object?>? AdditionalParameters { get; set; }
 
+    /// <summary>
+    /// Whether the widget can be selected while the page is edited. A widget that cannot keeps rendering the same way,
+    /// and the widgets inside it stay selectable.
+    /// </summary>
+    [Parameter]
+    public bool IsSelectionEnabled { get; set; } = true;
+
     [CascadingParameter(Name = "IsEditing")]
     public bool IsEditing { get; set; }
 
@@ -235,6 +242,7 @@
     // such as the text of a card, and an expression in the text are not.
     internal bool IsSelectable =>
         IsEditing &&
+        IsSelectionEnabled &&
         Type == SubjectComponentType.Widget &&
         Selection != null &&
         (Subject is IConfigurable || HasEditComponent);
