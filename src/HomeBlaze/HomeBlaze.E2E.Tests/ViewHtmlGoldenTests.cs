@@ -33,7 +33,7 @@ public partial class ViewHtmlGoldenTests
         await Assertions.Expect(content.GetByText("Closing paragraph.")).ToBeVisibleAsync(new() { Timeout = Timeout });
 
         // Act
-        var html = BlazorMarker().Replace(await content.InnerHTMLAsync(), string.Empty);
+        var html = CssScopeAttribute().Replace(BlazorMarker().Replace(await content.InnerHTMLAsync(), string.Empty), string.Empty);
 
         // Assert
         var goldenPath = Path.Combine(AppContext.BaseDirectory, "Golden", GoldenFileName);
@@ -51,4 +51,8 @@ public partial class ViewHtmlGoldenTests
     // The comments that Blazor keeps in the document as boundaries of components.
     [GeneratedRegex("<!--!-->")]
     private static partial Regex BlazorMarker();
+
+    // The CSS isolation scope is a build-time hash of a stylesheet's path, unrelated to what the page renders.
+    [GeneratedRegex(" b-[a-z0-9]{10}=\"\"")]
+    private static partial Regex CssScopeAttribute();
 }
