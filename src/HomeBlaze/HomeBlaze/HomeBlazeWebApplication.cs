@@ -118,7 +118,7 @@ public static class HomeBlazeWebApplication
         if (mcpEnabled)
         {
             builder.Services.AddMcpServer()
-                .WithHttpTransport(options => options.Stateless = true)
+                .WithHttpTransport(transportOptions => transportOptions.Stateless = true)
                 .WithHomeBlazeMcpTools(isReadOnly: builder.Configuration.GetValue("McpServer:ReadOnly", true));
         }
 
