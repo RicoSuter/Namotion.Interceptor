@@ -366,48 +366,19 @@ public class InlineStructureEditingTests
     }
 
     [Fact]
-    public async Task WhenThePageIsEditedInline_ThenTheChipCoversNoContent()
+    public async Task WhenThePageIsEditedInline_ThenTheValueMapChipStandsWhereItsBlockIs()
     {
         // Arrange & Act
         var page = await OpenPageInInlineModeAsync();
         var chip = page.GetByTestId("invisible-widget-chip").Filter(new() { HasText = "structuremap" });
         await Assertions.Expect(chip).ToBeVisibleAsync(new() { Timeout = Timeout });
 
-        // Assert: neither a line of text, nor a block, nor an insert line of the content around the chips reaches into the chip.
-        var coveredContent = await chip.EvaluateAsync<string[]>(
-            """
-            chip => {
-                const box = chip.getBoundingClientRect();
-                const stack = chip.closest('.invisible-widget-stack');
-                const content = stack.parentElement;
-                const overlaps = rectangle => rectangle.width > 0 && rectangle.height > 0 &&
-                    rectangle.left < box.right && rectangle.right > box.left && rectangle.top < box.bottom && rectangle.bottom > box.top;
-                const covered = [];
-                for (const block of content.querySelectorAll(':scope > :is(.subject-component-wrapper, .block-insert-line)')) {
-                    if (overlaps(block.getBoundingClientRect())) {
-                        covered.push(block.getAttribute('aria-label') ?? 'block');
-                    }
-                }
-
-                const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT);
-                for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-                    if (stack.contains(node) || !node.textContent.trim()) {
-                        continue;
-                    }
-
-                    const range = document.createRange();
-                    range.selectNodeContents(node);
-                    for (const line of range.getClientRects()) {
-                        if (overlaps(line)) {
-                            covered.push(node.textContent.trim());
-                        }
-                    }
-                }
-
-                return covered;
-            }
-            """);
-        Assert.Empty(coveredContent);
+        // Assert: the map stands between the list and the Responsive block on the page, and so does its chip.
+        var list = await PageGeometry.GetBoxAsync(GetValueListWrapper(page));
+        var map = await PageGeometry.GetBoxAsync(chip);
+        var responsive = await PageGeometry.GetBoxAsync(page.GetByTestId("responsive-chip"));
+        Assert.True(list.Bottom <= map.Top, $"The chip at {map.Top} is not below the list, which ends at {list.Bottom}.");
+        Assert.True(map.Bottom <= responsive.Top, $"The chip, which ends at {map.Bottom}, is not above the Responsive chip at {responsive.Top}.");
     }
 
     [Fact]

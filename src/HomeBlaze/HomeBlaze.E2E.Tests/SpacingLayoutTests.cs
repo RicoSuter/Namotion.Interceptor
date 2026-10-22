@@ -312,13 +312,12 @@ public class SpacingLayoutTests
         Assert.Equal(8, gaps[1], Tolerance);
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task WhenAWidgetShowsNothing_ThenItTakesNoSpaceBetweenParagraphs(bool isInlineMode)
+    // Edited inline, such a widget shows a chip in its place (see InlineStructureEditingTests).
+    [Fact]
+    public async Task WhenAWidgetShowsNothing_ThenItTakesNoSpaceBetweenParagraphs()
     {
         // Arrange
-        var page = await OpenPageAsync(isInlineMode);
+        var page = await OpenPageAsync();
         var after = page.Locator(".markdown-content > p").GetByText("Text after the map.", new() { Exact = true });
         await Assertions.Expect(after).ToBeVisibleAsync(new() { Timeout = Timeout });
 

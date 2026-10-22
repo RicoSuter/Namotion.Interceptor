@@ -4,29 +4,13 @@
 @using HomeBlaze.Components.Abstractions.Attributes
 @using HomeBlaze.Components.Abstractions.TimeZones
 @using HomeBlaze.Components.Components
-@using HomeBlaze.Services.Components
 @using HomeBlaze.Storage.Internal
 @using Namotion.Interceptor
 @inject ITimeZoneDisplay TimeZone
-@inject SubjectComponentRegistry ComponentRegistry
 @implements IDisposable
 
 @{
-    var isEditingInline = IsEditing && Selection is not null;
     var showsInsertLines = ShowsInsertLines();
-}
-@if (isEditingInline && Children is not null && HasInvisibleWidget())
-{
-    @* Keyed, so that a chip keeps its state when a block is inserted or removed. *@
-    <div class="invisible-widget-stack">
-        @foreach (var child in Children!.Values)
-        {
-            if (IsInvisibleWidget(child))
-            {
-                <SubjectComponent @key="child" Subject="@child" Type="SubjectComponentType.Widget" />
-            }
-        }
-    </div>
 }
 @foreach (var segment in GetRenderSegments())
 {
@@ -34,7 +18,7 @@
     {
         @((MarkupString)segment.Html)
     }
-    else if (segment.Widget != null && !(isEditingInline && IsInvisibleWidget(segment.Widget)))
+    else if (segment.Widget != null)
     {
         @if (showsInsertLines)
         {
@@ -60,9 +44,6 @@
     /// </summary>
     [Parameter]
     public IDictionary<string, IInterceptorSubject>? Children { get; set; }
-
-    [CascadingParameter(Name = "IsEditing")]
-    public bool IsEditing { get; set; }
 
     [CascadingParameter]
     public WidgetSelection? Selection { get; set; }
@@ -205,22 +186,4 @@
     }
 
     public void Dispose() => Unsubscribe();
-
-    private bool HasInvisibleWidget()
-    {
-        foreach (var child in Children!.Values)
-        {
-            if (IsInvisibleWidget(child))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private bool IsInvisibleWidget(IInterceptorSubject subject) =>
-        subject is not (HtmlSegment or RenderExpression) &&
-        ComponentRegistry.GetComponent(subject.GetType(), SubjectComponentType.Widget)?.ComponentType is { } componentType &&
-        typeof(IInvisibleWidget).IsAssignableFrom(componentType);
 }

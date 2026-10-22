@@ -15,7 +15,7 @@
 }
 
 /* A widget that shows nothing, such as a ValueMap on a viewed page, takes no space (see SubjectComponent.razor.css of
-   HomeBlaze.Components). Edited inline, a ValueMap is a chip, see the stack below. */
+   HomeBlaze.Components). Edited inline, it shows a chip in its place. */
 .markdown-content ::deep .subject-component-wrapper:empty {
     display: none;
 }
@@ -97,31 +97,3 @@
     overflow-wrap: break-word;
 }
 
-/* The widgets that show nothing, such as a ValueMap, stand as chips at the top right of the content they belong to
-   while the page is edited inline, and the content flows around them. On the page itself they start below the button of
-   the page menu. */
-.markdown-content ::deep .invisible-widget-stack {
-    float: right;
-    clear: right;
-    margin: 0 0 0.5rem 1rem;
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 6px;
-}
-
-.markdown-content > ::deep .invisible-widget-stack {
-    margin-top: 3.5rem;
-}
-
-/* Text flows around a float, but a block runs under it, and a wrapper, which is positioned, would cover the chips. A
-   formatting context of its own keeps a block beside them. */
-.markdown-content ::deep .invisible-widget-stack ~ .subject-component-wrapper:not(:empty) {
-    display: flow-root;
-}
-
-/* The spacing of the blocks of a container would move the stack down from the top of the content. */
-.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > .invisible-widget-stack {
-    margin-top: 0;
-    margin-bottom: 0.5rem;
-}
