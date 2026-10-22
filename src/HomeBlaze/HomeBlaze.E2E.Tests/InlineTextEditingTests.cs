@@ -231,6 +231,15 @@ public class InlineTextEditingTests
         await ExpectTextEditorValueAsync(page, "First paragraph on the page.");
         await page.WaitForFunctionAsync(
             $"() => blazorMonaco.editor.getEditor('{TextEditorId}', true)?.hasTextFocus() === true", null, new() { Timeout = Timeout });
+        await page.WaitForFunctionAsync(
+            """
+            () => {
+                const editor = document.querySelector('[data-testid="markdown-text-input"]');
+                const content = document.querySelector('.mud-dialog-content');
+                return editor && content && editor.getBoundingClientRect().height > window.innerHeight * 0.5
+                    && content.scrollHeight - content.clientHeight <= 0;
+            }
+            """, null, new() { Timeout = Timeout });
         await page.Keyboard.TypeAsync(" More.");
         var editorHeight = (await page.GetByTestId("markdown-text-input").BoundingBoxAsync())!.Height;
         var contentOverflow = await page.Locator(".mud-dialog-content").EvaluateAsync<double>("content => content.scrollHeight - content.clientHeight");
@@ -279,7 +288,7 @@ public class InlineTextEditingTests
 
         // Assert
         await Assertions.Expect(page.Locator(".markdown-text")).ToHaveCountAsync(0, new() { Timeout = Timeout });
-        await Assertions.Expect(page.Locator(".subject-component-wrapper.text-block")).ToHaveCountAsync(0);
+        await Assertions.Expect(page.Locator(".subject-component-wrapper.text-block")).ToHaveCountAsync(0, new() { Timeout = Timeout });
     }
 
     [Fact]
@@ -292,6 +301,7 @@ public class InlineTextEditingTests
 
         // Act
         await SelectTextAsync(page, "First paragraph");
+        await Assertions.Expect(GetTextWrapper(page, "First paragraph")).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
         var textOutline = await GetOutlineColorAsync(GetTextWrapper(page, "First paragraph"));
         await Assertions.Expect(page.GetWidgetActionBar()).ToHaveClassAsync(new Regex(@"\btext-block-bar\b"), new() { Timeout = Timeout });
         await page.GetCard("Text Card").Locator(".mud-card-header").SelectWidgetAsync();
