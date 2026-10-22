@@ -21,13 +21,13 @@ Editing the markdown text between blocks (paragraphs, headings, lists) is out of
 | --- | --- |
 | Delete | In the action bar. A confirmation dialog names the block and, for a container, the number of blocks inside it. |
 | Move | Up and down buttons in the action bar, within the same slot. No drag and drop. |
-| Invisible widgets | A chip with icon and name (the `#id`, otherwise the type name), stacked vertically at the top right of the content area the block stands in. At page level the stack starts below the page menu button. |
+| Invisible widgets | A chip with icon and name (the `#id`, otherwise the type name), a right float at the top right of the content area the block stands in, so that content flows beside it instead of under it. At page level it starts below the page menu button. |
 | Hidden Responsive content | Collapsed to a chip in place, shown only at the widths where the content is hidden. Clicking the chip selects the Responsive block and shows its content dimmed while the selection is on it or inside it. |
-| Insert between blocks | Plus lines between the blocks of the current scope: the page when nothing is selected, otherwise the innermost content area that holds the selection. |
+| Insert between blocks | Plus lines in the content where the selection is: the page while nothing is selected, otherwise the content of the selected widget and the content that directly holds it. No plus lines in the content of a grid cell or a canvas node, which keep their own buttons and whose content fills the place. |
 | Insert into list slots | An "Add ..." button per list slot of the selected container (Add tab, Add item, Add value, Add case, Add series). |
-| ValueList rows | Selectable inside a selected list, with their own action bar. "Add value" at the end of the list. |
-| ValueMap cases | Listed in a panel below the selected ValueMap chip, each with edit, move and delete. "Add case" at the end of the panel. |
-| Split preview | View-only: no selection and no structure actions. A click on a widget reveals its block in the source editor and never writes. |
+| ValueList rows | Selectable once the list or one of its rows is selected (the first click selects the list, a further click a row), with their own action bar. "Add value" at the end of the list. |
+| ValueMap cases | Listed in an overlay below the chip of the selected ValueMap, selectable once the map or one of its cases is selected, each with edit, move and delete. "Add case" is offered both in the action bar of the map and at the end of the case list. |
+| Split preview | View-only: widgets cannot be selected or operated, and their content takes no pointer input. A click on a widget reveals its block in the source editor and never writes. When the text before that block has unsaved changes, a warning asks to save first. Grid and canvas editing therefore happens in Inline mode only. |
 | Block names in the source editor | The name after the head fence is bold. The fence keeps its depth color and is no longer bold. A `#name` and the arguments stay regular. |
 | Write path | One transaction pipeline in `MarkdownFile` for every change of the page from the graph or the page UI, with pure text operations shared with the source editor. |
 
@@ -114,13 +114,15 @@ In edit mode `ResponsiveWidget` renders a chip in place with the inverse display
 
 ## Refusals and errors
 
-An operation refuses, writes nothing, and the page reads its file again, when:
+An operation refuses and writes nothing when:
 
 - the file changed since the snapshot (the compare-exchange fails),
 - the subject has no block in the snapshot,
 - blocks would be inserted or removed while the graph is ahead of the snapshot,
 - a move would leave its slot or has no sibling in its direction,
 - the parsed result differs from the expected change in other blocks.
+
+The structure operations change only text, so a refusal leaves the graph as it was and needs no reload. The configuration write keeps its reload after a refusal. A write that the storage cannot make, for example a file held open by another process, shows an error message instead of breaking the page.
 
 The UI shows the reason as a warning snackbar, for example "The page changed while you edited it. Try again." Because the Split preview never writes, it cannot race the editor buffer any more.
 
@@ -129,7 +131,7 @@ The UI shows the reason as a warning snackbar, for example "The page changed whi
 - **`MarkdownPageOperations`**, unit tests in HomeBlaze.Storage.Tests, text in and text out in the style of `MarkdownBlockWriterTests`: remove, move and insert for top-level blocks, blocks in content slots (card body, tab), list slots (value rows, cases, tabs, flow items), blocks without closing lines, CRLF text and fences of several depths, and every refusal.
 - **`MarkdownFile.EditAsync`**, in HomeBlaze.Storage.Tests: a stale snapshot is refused, an edit reloads with the right subjects, and the configuration write keeps its behavior. The existing reconciler and write tests are the regression net.
 - **Decorations**: `BlockOutlineDecorations` writes the name range for `Tab`, `Tab#cooling` and a head line with arguments.
-- **bUnit**, in HomeBlaze.Components.Tests and HomeBlaze.Storage.Blazor.Tests: the action bar shows move and delete only when the editor allows them; ValueMap renders a chip in edit mode and nothing in view mode; the Responsive chip renders in edit mode only; the insert lines follow the scope of the selection; the Split preview is not editing and has no structure editor.
+- **E2E**, in HomeBlaze.E2E.Tests, for the behavior of the components, since the repository has no bUnit: the action bar shows move and delete only for blocks that allow them; ValueMap is a chip in Inline mode and nothing in View mode; the Responsive chip shows only where the content is hidden; the insert lines follow the scope of the selection; the Split preview selects nothing.
 - **E2E**, in HomeBlaze.E2E.Tests on a seeded page: delete a block with its confirmation, move a ValueList row, add a ValueMap case in the panel, insert a widget between two blocks, and in Split mode reveal a block with a click without selecting it.
 
 ## Out of scope
