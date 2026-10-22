@@ -591,7 +591,7 @@ public class MarkdownStructureEditTests
     }
 
     [Fact]
-    public async Task WhenInsertedTextWouldMakeThePageTooLarge_ThenTheInsertIsRefusedAndTheFileIsUnchanged()
+    public async Task WhenInsertedTextOrAnInsertedWidgetWouldMakeThePageTooLarge_ThenTheInsertIsRefusedAndTheFileIsUnchanged()
     {
         // Arrange
         var fixture = await MarkdownPageFixture.CreateAsync();
@@ -599,26 +599,12 @@ public class MarkdownStructureEditTests
         var page = await fixture.AddPageAsync("page.md", content);
 
         // Act
-        var result = await page.InsertTextAsync(page, null, "Text of more than ten bytes.", CancellationToken.None);
+        var text = await page.InsertTextAsync(page, null, "Text of more than ten bytes.", CancellationToken.None);
+        var widget = await page.InsertWidgetAsync(page, null, new TestLeaf(), "leaf", CancellationToken.None);
 
         // Assert
-        Assert.StartsWith("The Markdown source would be ", result.Refusal);
-        Assert.Equal(content, await fixture.ReadAsync("page.md"));
-    }
-
-    [Fact]
-    public async Task WhenAnInsertedWidgetWouldMakeThePageTooLarge_ThenTheInsertIsRefusedAndTheFileIsUnchanged()
-    {
-        // Arrange
-        var fixture = await MarkdownPageFixture.CreateAsync();
-        var content = "# Title\n\n" + new string('a', MarkdownFile.MaxContentSize - 20) + "\n";
-        var page = await fixture.AddPageAsync("page.md", content);
-
-        // Act
-        var result = await page.InsertWidgetAsync(page, null, new TestLeaf(), "leaf", CancellationToken.None);
-
-        // Assert
-        Assert.StartsWith("The Markdown source would be ", result.Refusal);
+        Assert.StartsWith("The Markdown source would be ", text.Refusal);
+        Assert.StartsWith("The Markdown source would be ", widget.Refusal);
         Assert.Equal(content, await fixture.ReadAsync("page.md"));
     }
 

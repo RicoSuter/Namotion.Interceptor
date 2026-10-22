@@ -517,8 +517,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage or from within a write of this page.</exception>
     public Task<MarkdownEditResult> DeleteBlockAsync(IInterceptorSubject subject, CancellationToken cancellationToken) =>
         EditStructureAsync(
-            snapshot => FindOwnBlock(snapshot.Page!, snapshot.BlockSubjects, subject) is { } block
-                ? (MarkdownPageOperations.TryRemove(snapshot.Page!, snapshot.BlockSubjects, block, out var refusal), refusal)
+            (snapshot, page) => FindOwnBlock(page, snapshot.BlockSubjects, subject) is { } block
+                ? (MarkdownPageOperations.TryRemove(page, snapshot.BlockSubjects, block, out var refusal), refusal)
                 : (null, NoBlockRefusal),
             StructureChangedRefusal,
             cancellationToken);
@@ -536,8 +536,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     public Task<MarkdownEditResult> MoveBlockAsync(
         IInterceptorSubject subject, int direction, CancellationToken cancellationToken) =>
         EditStructureAsync(
-            snapshot => FindOwnBlock(snapshot.Page!, snapshot.BlockSubjects, subject) is { } block
-                ? (MarkdownPageOperations.TryMove(snapshot.Page!, snapshot.BlockSubjects, block, direction, out var refusal), refusal)
+            (snapshot, page) => FindOwnBlock(page, snapshot.BlockSubjects, subject) is { } block
+                ? (MarkdownPageOperations.TryMove(page, snapshot.BlockSubjects, block, direction, out var refusal), refusal)
                 : (null, NoBlockRefusal),
             StructureChangedRefusal,
             cancellationToken);
@@ -559,9 +559,9 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         var typeName = widget.GetType().FullName!;
         var configurationJson = MarkdownBlockConfiguration.Serialize(_serializer, widget, block: null);
         return EditStructureAsync(
-            snapshot => TryGetInsertPoint(snapshot, content, before, out var owner, out var line, out var refusal)
+            (snapshot, page) => TryGetInsertPoint(snapshot, page, content, before, out var owner, out var line, out var refusal)
                 ? (MarkdownPageOperations.TryInsertWidget(
-                    snapshot.Page!, snapshot.BlockSubjects, owner, line, typeName, name, configurationJson, out refusal), refusal)
+                    page, snapshot.BlockSubjects, owner, line, typeName, name, configurationJson, out refusal), refusal)
                 : (null, refusal),
             GetChangedPageRefusal(before),
             cancellationToken);
@@ -602,15 +602,15 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         ArgumentNullException.ThrowIfNull(newText);
         var expected = expectedText.ReplaceLineEndings("\n");
         return EditStructureAsync(
-            snapshot =>
+            (snapshot, page) =>
             {
                 if (!snapshot.TextBlocks.TryGetValue(segment, out var textBlock) || !textBlock.IsEditable ||
-                    MarkdownPageOperations.GetText(snapshot.Page!, textBlock) != expected)
+                    MarkdownPageOperations.GetText(page, textBlock) != expected)
                 {
                     return (null, TextChangedRefusal);
                 }
 
-                return (MarkdownPageOperations.TryReplaceText(snapshot.Page!, snapshot.BlockSubjects, textBlock, newText, out var refusal), refusal);
+                return (MarkdownPageOperations.TryReplaceText(page, snapshot.BlockSubjects, textBlock, newText, out var refusal), refusal);
             },
             // The page read again after the refusal keeps a segment while nothing before it changed, and then a second save
             // of the same text succeeds.
@@ -635,8 +635,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     {
         ArgumentNullException.ThrowIfNull(text);
         return EditStructureAsync(
-            snapshot => TryGetInsertPoint(snapshot, content, before, out var owner, out var line, out var refusal)
-                ? (MarkdownPageOperations.TryInsertText(snapshot.Page!, snapshot.BlockSubjects, owner, line, text, out refusal), refusal)
+            (snapshot, page) => TryGetInsertPoint(snapshot, page, content, before, out var owner, out var line, out var refusal)
+                ? (MarkdownPageOperations.TryInsertText(page, snapshot.BlockSubjects, owner, line, text, out refusal), refusal)
                 : (null, refusal),
             GetChangedPageRefusal(before),
             cancellationToken);
@@ -656,8 +656,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     {
         ArgumentNullException.ThrowIfNull(segment);
         return EditStructureAsync(
-            snapshot => snapshot.TextBlocks.TryGetValue(segment, out var textBlock)
-                ? (MarkdownPageOperations.TryMoveText(snapshot.Page!, snapshot.BlockSubjects, textBlock, direction, out var refusal), refusal)
+            (snapshot, page) => snapshot.TextBlocks.TryGetValue(segment, out var textBlock)
+                ? (MarkdownPageOperations.TryMoveText(page, snapshot.BlockSubjects, textBlock, direction, out var refusal), refusal)
                 : (null, MovedTextRefusal),
             MovedTextRefusal,
             cancellationToken);
@@ -671,7 +671,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     {
         var snapshot = _parseResult;
         return snapshot.Page is { } page &&
-               TryGetInsertPoint(snapshot, content, before, out var owner, out var line, out _) &&
+               TryGetInsertPoint(snapshot, page, content, before, out var owner, out var line, out _) &&
                MarkdownPageOperations.CanInsertTextAt(page, owner, line);
     }
 
@@ -711,13 +711,13 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     // of `before`, a block or a text block of that content, or the end of the content.
     private bool TryGetInsertPoint(
         MarkdownParseResult snapshot,
+        MarkdownPage page,
         IInterceptorSubject content,
         IInterceptorSubject? before,
         out MarkdownBlock? owner,
         out int line,
         out string? refusal)
     {
-        var page = snapshot.Page!;
         owner = null;
         line = 0;
         if (!ReferenceEquals(content, this) &&
@@ -788,9 +788,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         ArgumentNullException.ThrowIfNull(item);
         var configurationJson = MarkdownBlockConfiguration.Serialize(_serializer, item, block: null);
         return EditStructureAsync(
-            snapshot =>
+            (snapshot, page) =>
             {
-                var page = snapshot.Page!;
                 var subjects = snapshot.BlockSubjects;
                 if (FindOwnBlock(page, subjects, owner) is not { } block)
                 {
@@ -860,9 +859,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     private Task<MarkdownEditResult> AddToSlotAsync(
         IInterceptorSubject owner, string? slotName, MarkdownContentInsert insert, CancellationToken cancellationToken) =>
         EditStructureAsync(
-            snapshot =>
+            (snapshot, page) =>
             {
-                var page = snapshot.Page!;
                 if (FindOwnBlock(page, snapshot.BlockSubjects, owner) is not { } block)
                 {
                     return (null, NoBlockRefusal);
@@ -1008,7 +1006,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
 
     // changedPageRefusal is the refusal when the file or the snapshot changed meanwhile.
     private async Task<MarkdownEditResult> EditStructureAsync(
-        Func<MarkdownParseResult, (MarkdownStructureChange? Change, string? Refusal)> operation,
+        Func<MarkdownParseResult, MarkdownPage, (MarkdownStructureChange? Change, string? Refusal)> operation,
         string changedPageRefusal,
         CancellationToken cancellationToken)
     {
@@ -1033,7 +1031,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             }
 
             // The operations change only text, so a refusal leaves the graph as the snapshot has it.
-            var (change, refusal) = operation(snapshot);
+            var (change, refusal) = operation(snapshot, page);
             if (change is null)
             {
                 _parser.LogRefusedWrite(FullPath, refusal!);

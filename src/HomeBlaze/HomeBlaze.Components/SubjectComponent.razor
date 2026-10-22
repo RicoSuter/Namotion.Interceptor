@@ -375,33 +375,11 @@
 
     /// <summary>
     /// Gets this widget when it can be selected, otherwise the first widget inside it that can, such as the widget in
-    /// the page content of a canvas node.
+    /// the page content of a canvas node. With <paramref name="subject"/>, only a widget of that subject counts.
     /// </summary>
-    internal SubjectComponent? FindSelectable()
+    internal SubjectComponent? FindSelectable(IInterceptorSubject? subject = null)
     {
-        if (IsSelectable)
-        {
-            return this;
-        }
-
-        if (_childComponents != null)
-        {
-            foreach (var child in _childComponents)
-            {
-                if (child.FindSelectable() is { } selectable)
-                {
-                    return selectable;
-                }
-            }
-        }
-
-        return null;
-    }
-
-    /// <summary>Gets the selectable widget of the subject among this widget and the widgets inside it, or null.</summary>
-    internal SubjectComponent? FindSelectable(IInterceptorSubject subject)
-    {
-        if (ReferenceEquals(Subject, subject) && IsSelectable)
+        if (IsSelectable && (subject is null || ReferenceEquals(Subject, subject)))
         {
             return this;
         }
@@ -502,8 +480,8 @@
         }
     }
 
-    // The condition of the Edit button in the bar.
-    private bool HasEditAction => HasEditComponent || StructureEditor?.GetActions(Subject!).CanEditText == true;
+    // The condition of the Edit button in the bar. The editor opens no dialog for text that cannot be edited.
+    private bool HasEditAction => HasEditComponent || (_isTextBlock && StructureEditor is not null);
 
     protected override void OnParametersSet()
     {
@@ -590,7 +568,7 @@
         if (Subject == null)
             return;
 
-        if (StructureEditor is { } editor && editor.GetActions(Subject).CanEditText)
+        if (_isTextBlock && StructureEditor is { } editor)
         {
             await editor.EditTextAsync(Subject);
             return;

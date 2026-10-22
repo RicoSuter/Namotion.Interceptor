@@ -613,36 +613,22 @@ public class MarkdownPageOperationsTests
     [InlineData("- item\n  :: Demo.Card\n  text\n  ::\n")]
     [InlineData("> quote\n>\n> :: Demo.Card\n> text\n> ::\n")]
     [InlineData(":: {.ab}\nStyled.\n::\n")]
-    public void WhenTextThatCannotBeEditedIsReplaced_ThenTheChangeIsRefused(string source)
+    public void WhenTextThatCannotBeEditedIsReplacedOrRemoved_ThenTheChangeIsRefused(string source)
     {
         // Arrange
         var page = MarkdownPageParser.Parse(source);
         var textBlock = TextAt(page, 1);
 
         // Act
-        var change = MarkdownPageOperations.TryReplaceText(page, NoSubjects, textBlock, "New.", out var refusal);
+        var replaced = MarkdownPageOperations.TryReplaceText(page, NoSubjects, textBlock, "New.", out var replaceRefusal);
+        var removed = MarkdownPageOperations.TryRemoveText(page, NoSubjects, textBlock, out var removeRefusal);
 
         // Assert
         Assert.False(textBlock.IsEditable);
-        Assert.Null(change);
-        Assert.Contains("cannot be edited", refusal);
-    }
-
-    [Theory]
-    [InlineData("- item\n  :: Demo.Card\n  text\n  ::\n")]
-    [InlineData("> quote\n>\n> :: Demo.Card\n> text\n> ::\n")]
-    [InlineData(":: {.ab}\nStyled.\n::\n")]
-    public void WhenTextThatCannotBeEditedIsRemoved_ThenTheChangeIsRefused(string source)
-    {
-        // Arrange
-        var page = MarkdownPageParser.Parse(source);
-
-        // Act
-        var change = MarkdownPageOperations.TryRemoveText(page, NoSubjects, TextAt(page, 1), out var refusal);
-
-        // Assert
-        Assert.Null(change);
-        Assert.Contains("cannot be edited", refusal);
+        Assert.Null(replaced);
+        Assert.Null(removed);
+        Assert.Contains("cannot be edited", replaceRefusal);
+        Assert.Contains("cannot be edited", removeRefusal);
     }
 
     [Fact]
@@ -832,18 +818,6 @@ public class MarkdownPageOperationsTests
         // Assert
         Assert.Null(change);
         Assert.Contains("would change other blocks", refusal);
-    }
-
-    [Fact]
-    public void WhenTheFenceOfANewWidgetIsAskedFor_ThenItIsTwoOnThePageAndOneMoreThanTheBlockAroundIt()
-    {
-        // Arrange
-        var page = MarkdownPageParser.Parse(":: Demo.Card\n::: Footer\n:::\n::\n");
-
-        // Act & Assert
-        Assert.Equal(2, MarkdownPageOperations.GetWidgetFenceLength(null));
-        Assert.Equal(3, MarkdownPageOperations.GetWidgetFenceLength(page.Blocks[0]));
-        Assert.Equal(4, MarkdownPageOperations.GetWidgetFenceLength(page.Blocks[0].Children[0]));
     }
 
     [Theory]
@@ -1067,14 +1041,17 @@ public class MarkdownPageOperationsTests
         Assert.Contains("without a closing line", refusal);
     }
 
-    [Fact]
-    public void WhenAMovedListWouldJoinTheListBeforeIt_ThenTheMoveIsRefused()
+    [Theory]
+    [InlineData("- a\n\n:: Demo.One\n::\n\n- b\n", 6, -1)]
+    [InlineData("- a\n\n:: Demo.One\n::\n\n- b\n", 1, 1)]
+    [InlineData("- x\n\n:: Demo.One\n::\n\n    code\n", 6, -1)]
+    public void WhenAMovedListOrCodeWouldJoinTheListNextToIt_ThenTheMoveIsRefused(string source, int line, int direction)
     {
         // Arrange
-        var page = MarkdownPageParser.Parse("- a\n\n:: Demo.One\n::\n\n- b\n");
+        var page = MarkdownPageParser.Parse(source);
 
         // Act
-        var change = MarkdownPageOperations.TryMoveText(page, NoSubjects, TextAt(page, 6), -1, out var refusal);
+        var change = MarkdownPageOperations.TryMoveText(page, NoSubjects, TextAt(page, line), direction, out var refusal);
 
         // Assert
         Assert.Null(change);
@@ -1129,34 +1106,6 @@ public class MarkdownPageOperationsTests
 
         // Assert
         Assert.Equal((false, false), directions);
-    }
-
-    [Fact]
-    public void WhenMovedCodeWouldContinueTheListBeforeIt_ThenTheMoveIsRefused()
-    {
-        // Arrange
-        var page = MarkdownPageParser.Parse("- x\n\n:: Demo.One\n::\n\n    code\n");
-
-        // Act
-        var change = MarkdownPageOperations.TryMoveText(page, NoSubjects, TextAt(page, 6), -1, out var refusal);
-
-        // Assert
-        Assert.Null(change);
-        Assert.Contains("would change other blocks", refusal);
-    }
-
-    [Fact]
-    public void WhenAMovedListWouldJoinTheListAfterIt_ThenTheMoveIsRefused()
-    {
-        // Arrange
-        var page = MarkdownPageParser.Parse("- a\n\n:: Demo.One\n::\n\n- b\n");
-
-        // Act
-        var change = MarkdownPageOperations.TryMoveText(page, NoSubjects, TextAt(page, 1), 1, out var refusal);
-
-        // Assert
-        Assert.Null(change);
-        Assert.Contains("would change other blocks", refusal);
     }
 
     [Fact]

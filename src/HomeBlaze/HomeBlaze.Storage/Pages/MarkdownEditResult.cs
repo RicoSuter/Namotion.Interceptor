@@ -18,9 +18,6 @@ public readonly record struct MarkdownEditResult(string? Refusal, IInterceptorSu
     /// <summary>Gets whether the change was written.</summary>
     public bool IsWritten => Refusal is null;
 
-    /// <summary>A change that was written and names no subject.</summary>
-    public static MarkdownEditResult Written => default;
-
     /// <summary>A change that was written, with the subject it names.</summary>
     public static MarkdownEditResult WrittenFor(IInterceptorSubject? subject) => new(null, subject);
 

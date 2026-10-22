@@ -454,7 +454,6 @@ namespace HomeBlaze.Storage.Pages
         public bool IsWritten { get; }
         public string? Refusal { get; init; }
         public Namotion.Interceptor.IInterceptorSubject? Subject { get; init; }
-        public static HomeBlaze.Storage.Pages.MarkdownEditResult Written { get; }
         public static HomeBlaze.Storage.Pages.MarkdownEditResult Refused(string refusal) { }
         public static HomeBlaze.Storage.Pages.MarkdownEditResult WrittenFor(Namotion.Interceptor.IInterceptorSubject? subject) { }
     }

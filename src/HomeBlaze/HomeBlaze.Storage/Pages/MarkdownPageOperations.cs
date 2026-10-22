@@ -80,38 +80,53 @@ internal static class MarkdownPageOperations
         }
 
         FindSiblings(page, block, out var parent);
-        var source = page.Source;
-        var lineEnding = MarkdownBlockWriter.GetLineEnding(source, block.HeadSpan.End);
-        var blockText = MarkdownBlockWriter.GetLines(source, block.Line, block.EndLine);
-        var standsApart = MarkdownBlockWriter.HasEmptyLineAround(source, block.Line, block.EndLine);
-
-        // Each step is aligned on its own, so that together they change nothing outside the cut and the inserted lines.
-        var cutSource = MarkdownBlockWriter.CutLines(source, block.Line, block.EndLine, out var cut);
-        var cutPage = MarkdownPageParser.Parse(cutSource);
-        var cutMap = MarkdownBlockAlignment.TryAlign(page, cutPage, cut, expectedInsertedBlockCount: 0, owner: null);
-        if (cutMap is null)
+        var lineEnding = MarkdownBlockWriter.GetLineEnding(page.Source, block.HeadSpan.End);
+        if (TryMoveLines(page, block.Line, block.EndLine, targetLine, lineEnding, parent, CountBlocks(block), block.Kind, out var insert) is not { } moved ||
+            FindFirstBlockFrom(moved.After, insert) is not { } movedBlock)
         {
             refusal = MoveRefusal;
             return null;
         }
 
-        var line = targetLine >= cut.RemovedEnd ? targetLine - cut.RemovedLineCount + cut.InsertedLineCount : targetLine;
-        var newSource = MarkdownBlockWriter.InsertMovedLines(cutSource, line, blockText, lineEnding, standsApart, out var insert);
-        var after = MarkdownPageParser.Parse(newSource);
-        var cutParent = parent is null ? null : cutPage.AllBlocks[cutMap[parent.Index]];
-        if (MarkdownBlockAlignment.TryAlign(cutPage, after, insert, CountBlocks(block), cutParent, block.Kind) is not { } insertMap ||
-            FindFirstBlockFrom(after, insert) is not { } moved)
-        {
-            refusal = MoveRefusal;
-            return null;
-        }
-
-        var subjects = ComposeSubjects(blockSubjects, cutMap, insertMap);
+        var subjects = ComposeSubjects(blockSubjects, moved.CutMap, moved.InsertMap);
 
         // The moved blocks are new to the alignment. Their text is the same, so their blocks are in the same order.
-        CarrySubjects(blockSubjects, block, moved, subjects);
+        CarrySubjects(blockSubjects, block, movedBlock, subjects);
         return new MarkdownStructureChange(
-            new MarkdownBlockWrite(after, subjects, [], HasInsertedOrRemovedBlocks: true), parent, moved.Index);
+            new MarkdownBlockWrite(moved.After, subjects, [], HasInsertedOrRemovedBlocks: true), parent, movedBlock.Index);
+    }
+
+    // Cuts the lines and inserts them before `targetLine` of the page before the move. Each step is aligned on its own, so
+    // that together they change nothing outside the cut and the inserted lines. Null when a step changes other blocks.
+    private static (MarkdownPage After, int[] CutMap, int[] InsertMap)? TryMoveLines(
+        MarkdownPage page,
+        int line,
+        int endLine,
+        int targetLine,
+        string lineEnding,
+        MarkdownBlock? owner,
+        int insertedBlockCount,
+        MarkdownBlockKind insertedKind,
+        out MarkdownLineEdit insert)
+    {
+        var source = page.Source;
+        var lines = MarkdownBlockWriter.GetLines(source, line, endLine);
+        var standsApart = MarkdownBlockWriter.HasEmptyLineAround(source, line, endLine);
+        var cutSource = MarkdownBlockWriter.CutLines(source, line, endLine, out var cut);
+        var cutPage = MarkdownPageParser.Parse(cutSource);
+        if (MarkdownBlockAlignment.TryAlign(page, cutPage, cut, expectedInsertedBlockCount: 0, owner: null) is not { } cutMap)
+        {
+            insert = default;
+            return null;
+        }
+
+        var insertLine = targetLine >= cut.RemovedEnd ? targetLine - cut.RemovedLineCount + cut.InsertedLineCount : targetLine;
+        var after = MarkdownPageParser.Parse(
+            MarkdownBlockWriter.InsertMovedLines(cutSource, insertLine, lines, lineEnding, standsApart, out insert));
+        var cutOwner = owner is null ? null : cutPage.AllBlocks[cutMap[owner.Index]];
+        return MarkdownBlockAlignment.TryAlign(cutPage, after, insert, insertedBlockCount, cutOwner, insertedKind) is { } insertMap
+            ? (after, cutMap, insertMap)
+            : null;
     }
 
     /// <summary>
@@ -131,12 +146,14 @@ internal static class MarkdownPageOperations
         int direction,
         out string? refusal)
     {
-        if (!CanEditText(page, textBlock, out refusal))
+        if (!CanEditText(textBlock, out refusal))
         {
             return null;
         }
 
-        if (FindTextMoveLine(page, textBlock, direction, out var joinsHtml) is not { } targetLine)
+        if (direction is not (-1 or 1) ||
+            GetTextMoveItems(page, textBlock, out var position) is not { } items ||
+            FindTextMoveLine(items, position, direction, out var joinsHtml) is not { } targetLine)
         {
             refusal = direction < 0 ? "The text has nothing before it to move past." : "The text has nothing after it to move past.";
             return null;
@@ -155,39 +172,22 @@ internal static class MarkdownPageOperations
             return null;
         }
 
-        var source = page.Source;
-        var lineEnding = MarkdownBlockWriter.GetLineEnding(source, MarkdownBlockWriter.GetLineStart(source, textBlock.Line));
-        var lines = MarkdownBlockWriter.GetLines(source, textBlock.Line, textBlock.EndLine);
-        var standsApart = MarkdownBlockWriter.HasEmptyLineAround(source, textBlock.Line, textBlock.EndLine);
-
-        // Each step is aligned on its own, as in TryMove.
-        var cutSource = MarkdownBlockWriter.CutLines(source, textBlock.Line, textBlock.EndLine, out var cut);
-        var cutPage = MarkdownPageParser.Parse(cutSource);
-        if (MarkdownBlockAlignment.TryAlign(page, cutPage, cut, expectedInsertedBlockCount: 0, owner: null) is not { } cutMap)
+        var lineEnding = MarkdownBlockWriter.GetLineEnding(page.Source, MarkdownBlockWriter.GetLineStart(page.Source, textBlock.Line));
+        if (TryMoveLines(page, textBlock.Line, textBlock.EndLine, targetLine, lineEnding, owner, 0, MarkdownBlockKind.Slot, out var insert) is not { } moved)
         {
             refusal = TextMoveRefusal;
             return null;
         }
 
-        var line = targetLine >= cut.RemovedEnd ? targetLine - cut.RemovedLineCount + cut.InsertedLineCount : targetLine;
-        var newSource = MarkdownBlockWriter.InsertMovedLines(cutSource, line, lines, lineEnding, standsApart, out var insert);
-        var after = MarkdownPageParser.Parse(newSource);
-        var cutOwner = owner is null ? null : cutPage.AllBlocks[cutMap[owner.Index]];
-        var movedLine = FindFirstTextLine(after, insert);
-        if (MarkdownBlockAlignment.TryAlign(cutPage, after, insert, expectedInsertedBlockCount: 0, cutOwner) is not { } insertMap)
-        {
-            refusal = TextMoveRefusal;
-            return null;
-        }
-
-        if (!IsSameText(page, textBlock, after, movedLine, insert))
+        var movedLine = FindFirstTextLine(moved.After, insert);
+        if (!IsSameText(page, textBlock, moved.After, movedLine, insert))
         {
             refusal = "The text would join the text around it.";
             return null;
         }
 
         return new MarkdownStructureChange(
-            new MarkdownBlockWrite(after, ComposeSubjects(blockSubjects, cutMap, insertMap), [], HasInsertedOrRemovedBlocks: false),
+            new MarkdownBlockWrite(moved.After, ComposeSubjects(blockSubjects, moved.CutMap, moved.InsertMap), [], HasInsertedOrRemovedBlocks: false),
             owner,
             ResultTextLine: movedLine);
     }
@@ -216,7 +216,7 @@ internal static class MarkdownPageOperations
     /// </summary>
     public static (bool CanMoveUp, bool CanMoveDown) GetTextMoveDirections(MarkdownPage page, MarkdownTextBlock textBlock)
     {
-        if (!CanEditText(page, textBlock, out _) || GetTextMoveItems(page, textBlock, out var position) is not { } items)
+        if (!CanEditText(textBlock, out _) || GetTextMoveItems(page, textBlock, out var position) is not { } items)
         {
             return default;
         }
@@ -228,15 +228,6 @@ internal static class MarkdownPageOperations
         FindTextMoveLine(items, position, direction, out var joinsHtml) is { } targetLine &&
         !joinsHtml &&
         CanInsertTextAt(page, textBlock.Owner, targetLine);
-
-    // The line of the page before the move before which TryMoveText inserts the text block, or null without an item there.
-    private static int? FindTextMoveLine(MarkdownPage page, MarkdownTextBlock textBlock, int direction, out bool joinsHtml)
-    {
-        joinsHtml = false;
-        return direction is -1 or 1 && GetTextMoveItems(page, textBlock, out var position) is { } items
-            ? FindTextMoveLine(items, position, direction, out joinsHtml)
-            : null;
-    }
 
     // Past a widget block, the text comes next to the text beyond it and joins its run, which raw HTML keeps as one text
     // block that cannot be edited. Text next to the text block is in its run already, so it holds no raw HTML.
@@ -611,7 +602,7 @@ internal static class MarkdownPageOperations
             return TryRemoveText(page, blockSubjects, textBlock, out refusal);
         }
 
-        if (!CanEditText(page, textBlock, out refusal))
+        if (!CanEditText(textBlock, out refusal))
         {
             return null;
         }
@@ -636,7 +627,7 @@ internal static class MarkdownPageOperations
     public static MarkdownStructureChange? TryRemoveText(
         MarkdownPage page, IReadOnlyDictionary<int, IInterceptorSubject> blockSubjects, MarkdownTextBlock textBlock, out string? refusal)
     {
-        if (!CanEditText(page, textBlock, out refusal))
+        if (!CanEditText(textBlock, out refusal))
         {
             return null;
         }
@@ -708,16 +699,12 @@ internal static class MarkdownPageOperations
     }
 
     // A text block that cannot be edited can hold blocks, such as an invalid block in a list item, which the change would drop
-    // without the alignment seeing it: the lines of the text block are all replaced or removed.
-    private static bool CanEditText(MarkdownPage page, MarkdownTextBlock textBlock, out string? refusal)
+    // without the alignment seeing it: the lines of the text block are all replaced or removed. No text block of a page with
+    // a lone carriage return can be edited, see MarkdownTextBlocks.Find.
+    private static bool CanEditText(MarkdownTextBlock textBlock, out string? refusal)
     {
-        if (!textBlock.IsEditable)
-        {
-            refusal = "The text cannot be edited as text.";
-            return false;
-        }
-
-        return CanInsertOrRemoveBlocks(page, out refusal);
+        refusal = textBlock.IsEditable ? null : "The text cannot be edited as text.";
+        return refusal is null;
     }
 
     // The new blocks of the text stand directly in the content and end on its lines, and every other block, as well as the
