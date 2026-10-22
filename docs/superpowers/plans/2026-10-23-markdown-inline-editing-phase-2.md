@@ -54,7 +54,7 @@
 - Modify `PageBlockActions.cs` (`CanEditText`, Task 15), `PageListSlot.cs` (`Find`, Task 17).
 - Modify `WidgetSelection.cs` (`SelectSubject`, Task 5), `SubjectComponent.razor` (Tasks 5, 10, 15), `SubjectComponent.razor.css` (Tasks 8, 9, 10).
 - Create `ITextBlockWidget.cs` (Task 15), `SelectionContainingWidgetBase.cs` (Task 17).
-- Modify `IInvisibleWidget.cs` doc (Task 8). Delete `SubjectRevealer.cs` (Task 10).
+- Delete `IInvisibleWidget.cs` (Task 8). Delete `SubjectRevealer.cs` (Task 10).
 - Modify `Components/BlockInsertLine.razor` (Tasks 9, 16), `Components/ValueMapWidget.razor`, `Components/ValueListWidget.razor`, `Components/ResponsiveWidget.razor` (Task 17), `Responsive.cs` (Task 18).
 
 **HomeBlaze (app) and HomeBlaze.AI**
@@ -2271,7 +2271,7 @@ The constructor takes `SubjectComponentRegistry componentRegistry` after `Subjec
 ```csharp
     public override PageBlockActions GetActions(IInterceptorSubject subject)
     {
-        var actions = _file.GetBlockActions(subject, _isInvisible);
+        var actions = _file.GetBlockActions(subject);
         return new PageBlockActions(actions.CanDelete, actions.CanMoveUp, actions.CanMoveDown);
     }
 
@@ -5383,7 +5383,7 @@ Replace the section "Editing the blocks of a page inline" of `pages.md`, from it
 ```markdown
 ### Editing the blocks of a page inline
 
-In "Inline" mode, a click selects a widget and shows its bar. Next to "Edit", the bar moves the block up or down, deletes it after asking, and adds an item to each list slot of the block, such as "Add Value" for a `ValueList` or "Add Tab" for a `TabLayout`. A move passes one item of the content around the block, a block or a block of text, and the text stays where it is. A widget that shows nothing on the viewed page, such as a `ValueMap`, is passed together with the next item, so that every move changes what the page shows. The rows of a `ValueList` and the cases of a `ValueMap` are blocks of their own and move among the rows or cases of their list. The rows of a list can be selected once the list or one of its rows is selected, so the first click selects the list and a further click selects a row. The cases of a selected `ValueMap` work in the same way, and the map offers "Add case" both in its bar and in its list of cases. A moved or inserted block stays selected, and every other block keeps its subject, so a running device keeps running.
+In "Inline" mode, a click selects a widget and shows its bar. Next to "Edit", the bar moves the block up or down, deletes it after asking, and adds an item to each list slot of the block, such as "Add Value" for a `ValueList` or "Add Tab" for a `TabLayout`. A move passes one item of the content around the block, a block or a block of text, and the text stays where it is. A widget that shows nothing on the viewed page, such as a `ValueMap`, shows a chip where its block stands while the page is edited inline, and a move passes such a chip like any other item. The rows of a `ValueList` and the cases of a `ValueMap` are blocks of their own and move among the rows or cases of their list. The rows of a list can be selected once the list or one of its rows is selected, so the first click selects the list and a further click selects a row. The cases of a selected `ValueMap` work in the same way, and the map offers "Add case" both in its bar and in its list of cases. A moved or inserted block stays selected, and every other block keeps its subject, so a running device keeps running.
 
 The text of a page is made of blocks as well: every paragraph, heading, list, table, quote and code block is one. A block of text can be selected once the content it stands in is at the selection, like a row of a list: on the page while nothing or another block of the page is selected, in a card once the card or a block in it is selected. Its bar has "Edit", which opens its Markdown in a dialog, and "Delete". Raw HTML and the text around it up to the next block, the text of a style block, footnotes and the text in a cell of a `GridLayout` or a node of a `CanvasLayout` are edited in the page editor.
 
