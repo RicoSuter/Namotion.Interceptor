@@ -293,6 +293,7 @@ public sealed partial class MarkdownContentParser
         CancellationToken cancellationToken)
     {
         var children = new Dictionary<string, IInterceptorSubject>();
+        var blockPosition = 0;
 
         for (var index = 0; index < segments.Count; index++)
         {
@@ -313,7 +314,8 @@ public sealed partial class MarkdownContentParser
                     break;
 
                 case BlockMarkdownSegment block:
-                    var (key, subject, error) = await CreateWidgetAsync(block, children, existingChildren, index, state, cancellationToken);
+                    var (key, subject, error) = await CreateWidgetAsync(
+                        block, children, existingChildren, blockPosition++, state, cancellationToken);
                     if (subject is null)
                     {
                         state.AddErrorBox();
@@ -348,7 +350,7 @@ public sealed partial class MarkdownContentParser
         BlockMarkdownSegment segment,
         Dictionary<string, IInterceptorSubject> children,
         IDictionary<string, IInterceptorSubject> existingChildren,
-        int index,
+        int blockPosition,
         ParseState state,
         CancellationToken cancellationToken)
     {
@@ -389,7 +391,7 @@ public sealed partial class MarkdownContentParser
         }
 
         // An id can equal the positional key of another block, for example #Card_3.
-        var key = MarkdownSubjectKeys.GetContentKey(head.Id, type, index);
+        var key = MarkdownSubjectKeys.GetContentKey(head.Id, type, blockPosition);
         if (children.ContainsKey(key))
         {
             return (null, null, new BlockError(block.Line, FormatUsedTwice(key)));

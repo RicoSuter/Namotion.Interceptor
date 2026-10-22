@@ -11,10 +11,10 @@ internal static class MarkdownSubjectKeys
 {
     /// <summary>
     /// Gets the key of a widget block in the children of a page or of a fragment: its #name, or the name of its type and
-    /// its position among the segments of that content.
+    /// its position among the blocks of that content. Text and expressions around the block do not count.
     /// </summary>
-    public static string GetContentKey(string? id, Type type, int index) =>
-        id ?? $"{type.Name}_{index.ToString(CultureInfo.InvariantCulture)}";
+    public static string GetContentKey(string? id, Type type, int blockPosition) =>
+        id ?? $"{type.Name}_{blockPosition.ToString(CultureInfo.InvariantCulture)}";
 
     /// <summary>
     /// Gets the key by which the value of a slot is reused: its #name, or its position among the blocks of the slot
@@ -77,18 +77,20 @@ internal static class MarkdownSubjectKeys
         Func<MarkdownBlock, IEnumerable<string>> getConfigurationNames,
         List<KeyedBlock> blocks)
     {
-        for (var index = 0; index < content.Count; index++)
+        var blockPosition = 0;
+        foreach (var item in content)
         {
-            if (content[index] is not BlockMarkdownSegment segment)
+            if (item is not BlockMarkdownSegment segment)
             {
                 continue;
             }
 
+            var position = blockPosition++;
             var block = segment.Block;
             var type = block is { Kind: MarkdownBlockKind.Widget, Head: { } head } ? findType(head.Name) : null;
             var key = type is not null
-                ? GetContentKey(block.Head!.Id, type, index)
-                : $"?{block.Kind}_{index.ToString(CultureInfo.InvariantCulture)}";
+                ? GetContentKey(block.Head!.Id, type, position)
+                : $"?{block.Kind}_{position.ToString(CultureInfo.InvariantCulture)}";
             var place = $"{path}/c:{key}<{type?.FullName}>";
             blocks.Add(new KeyedBlock(segment, type, place, Slot: null, ContentKey: type is null ? null : key, ContainerPath: path));
             if (type is not null)

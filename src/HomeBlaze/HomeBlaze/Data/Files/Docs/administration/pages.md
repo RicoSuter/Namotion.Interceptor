@@ -915,12 +915,12 @@ When the text of a page changes, the page is read again. A subject that is still
 ::
 ~~~~
 
-Add a sentence above both motors and save the page: the named motor keeps its speed, and the unnamed motor starts again at zero, because its position on the page changed.
+Add a block above both motors and save the page: the named motor keeps its speed, and the unnamed motor starts again at zero, because its position among the blocks changed. Text and expressions above it change nothing.
 
 The page knows a block by its key. The key is the `#name` of the block. A block without a name has its type and its position as key. The rule: a block keeps its subject when its key and its type are unchanged, no argument was removed, and the block around it kept its subject.
 
 - **With a name**: A subject with a `#name` is kept as long as its block keeps its name and its type and stays directly inside the same block, or directly on the page. Changing or adding an argument updates it.
-- **Without a name**: The position counts the pieces of content before the block at the same level, which is the page or the block around it: every block, every expression and every stretch of text between them is one piece. Adding or removing a block or an expression before the block creates its subject again. So does a first line of text before a block that had none.
+- **Without a name**: The position counts the blocks before the block at the same level, which is the page or the block around it. Adding or removing a block before it creates its subject again. Text and expressions do not count. A block that is moved, inserted or deleted in Inline mode leaves every other subject in place, see [Editing the blocks of a page inline](#editing-the-blocks-of-a-page-inline).
 - **Removed arguments**: When an argument, or a name at the top level of the `json` block, is removed, the subject is created again, so that the property gets its default value like after a restart.
 - **Nested blocks**: A subject inside another block is kept only when the block around it is kept. A named motor inside a card without a name is created again when the card is.
 - **Subjects in the `json` block**: A subject nested in a value of the `json` block is created again on every reload of the page. The block itself is kept, but its configuration is applied again, and that creates the subjects in it anew.

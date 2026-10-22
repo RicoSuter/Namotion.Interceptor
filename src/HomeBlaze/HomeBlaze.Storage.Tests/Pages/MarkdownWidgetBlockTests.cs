@@ -1,4 +1,5 @@
 using HomeBlaze.Storage.Internal;
+using HomeBlaze.Storage.Pages;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -47,6 +48,39 @@ public class MarkdownWidgetBlockTests
 
         // Assert
         Assert.IsType<TestLeaf>(page.Children["TestLeaf_0"]);
+    }
+
+    [Fact]
+    public async Task WhenTextIsAddedBeforeAnUnnamedBlock_ThenTheReloadKeepsItsSubject()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var page = await fixture.AddPageAsync("page.md", $":: {LeafType} Name=a\n::\n");
+        var leaf = page.Children["TestLeaf_0"];
+
+        // Act
+        await fixture.UpdatePageAsync(page, $"# Title\n\nIntro with {{{{ missing/Path }}}}.\n\n:: {LeafType} Name=a\n::\n");
+
+        // Assert
+        Assert.Same(leaf, page.Children["TestLeaf_0"]);
+    }
+
+    [Fact]
+    public async Task WhenTextIsAddedBeforeAnUnnamedWidgetInsideABlock_ThenTheReloadKeepsItsSubject()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var page = await fixture.AddPageAsync(
+            "page.md", $":: {TestTypeNames.Namespace}.TestPanel#panel\n::: {LeafType} Name=a\n:::\n::\n");
+        var fragment = (MarkdownFragment)((TestPanel)page.Children["panel"]).Content!;
+        var leaf = fragment.Children["TestLeaf_0"];
+
+        // Act
+        await fixture.UpdatePageAsync(
+            page, $":: {TestTypeNames.Namespace}.TestPanel#panel\nText before the leaf.\n\n::: {LeafType} Name=a\n:::\n::\n");
+
+        // Assert
+        Assert.Same(leaf, ((MarkdownFragment)((TestPanel)page.Children["panel"]).Content!).Children["TestLeaf_0"]);
     }
 
     [Fact]
@@ -349,7 +383,7 @@ public class MarkdownWidgetBlockTests
     }
 
     [Theory]
-    [InlineData(":: " + LeafType + "#TestLeaf_2\n::\n\n:: " + LeafType + "\n::")]
+    [InlineData(":: " + LeafType + "#TestLeaf_1\n::\n\n:: " + LeafType + "\n::")]
     [InlineData(":: " + LeafType + "\n::\n\n:: " + LeafType + "#TestLeaf_0\n::")]
     public async Task WhenIdEqualsAPositionalKey_ThenTheSecondBlockIsAnErrorBox(string content)
     {

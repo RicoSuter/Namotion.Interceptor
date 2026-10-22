@@ -436,67 +436,76 @@ public class MarkdownFileWriteTests : IDisposable
         Assert.Equal(content, ReadFile("Motors.md"));
     }
 
-    private const string PageWithUnnamedBlock = "# Motors\n\n:: HomeBlaze.Samples.Motor Name=Unnamed\n::\n\nAfter the motor.";
+    [Fact]
+    public async Task WhenTheNewTextIsNestedBeyondTheDepthLimit_ThenItIsRejected()
+    {
+        // Arrange
+        const string content = "# Motors\n\nText.";
+        WriteFile("Motors.md", content);
+        var storage = await ConnectAsync();
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Motors.md"]);
+
+        // Act & Assert
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => markdown.ReplaceTextAsync("Text.", new string('[', 4096), CancellationToken.None));
+        Assert.Equal(content, ReadFile("Motors.md"));
+    }
+
+    private const string PageWithUnnamedBlock ="# Motors\n\n:: HomeBlaze.Samples.Motor Name=Unnamed\n::\n\nAfter the motor.";
 
     [Theory]
     [InlineData("# Motors", "# Motors at {{ /Devices/Speed }}")]
     [InlineData("# Motors\n\n", "# Motors\n\nThe speed is {{ /Devices/Speed }}.\n\n")]
-    public async Task WhenAnExpressionIsAddedBeforeABlockWithoutAName_ThenItIsRejectedBecauseTheSubjectWouldStartAgain(string oldText, string newText)
+    public async Task WhenAnExpressionIsAddedBeforeABlockWithoutAName_ThenTheTextIsChangedAndTheSubjectStays(string oldText, string newText)
     {
         // Arrange
         WriteFile("Motors.md", PageWithUnnamedBlock);
         var storage = await ConnectAsync();
         var markdown = Assert.IsType<MarkdownFile>(storage.Children["Motors.md"]);
-
-        // Act & Assert
-        var exception = await Assert.ThrowsAsync<ArgumentException>(
-            () => markdown.ReplaceTextAsync(oldText, newText, CancellationToken.None));
-        Assert.StartsWith("The change adds or removes an expression, the first text, or text between two blocks before a block without a #name", exception.Message);
-        Assert.Equal(PageWithUnnamedBlock, ReadFile("Motors.md"));
-    }
-
-    [Theory]
-    [InlineData("#main", true)]
-    [InlineData("", false)]
-    public async Task WhenAnExpressionIsAddedBeforeACardWithAnUnnamedWidget_ThenOnlyAnUnnamedCardRefusesIt(string cardName, bool isAllowed)
-    {
-        // Arrange: the widget inside the card has no name, and its key counts from the content of the card.
-        var content = $"# Cards\n\n:: HomeBlaze.Components.Card{cardName} Title=Main\n::: HomeBlaze.Components.Widget Path=/Devices\n:::\n::\n";
-        WriteFile("Cards.md", content);
-        var storage = await ConnectAsync();
-        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Cards.md"]);
+        var motor = markdown.Children["Motor_0"];
 
         // Act
-        var exception = await Record.ExceptionAsync(
-            () => markdown.ReplaceTextAsync("# Cards", "# Cards at {{ /Devices/Speed }}", CancellationToken.None));
+        await markdown.ReplaceTextAsync(oldText, newText, CancellationToken.None);
 
         // Assert
-        if (isAllowed)
-        {
-            Assert.Null(exception);
-            Assert.Equal(content.Replace("# Cards", "# Cards at {{ /Devices/Speed }}"), ReadFile("Cards.md"));
-        }
-        else
-        {
-            Assert.StartsWith("The change adds or removes an expression", Assert.IsType<ArgumentException>(exception).Message);
-            Assert.Equal(content, ReadFile("Cards.md"));
-        }
+        Assert.Equal(PageWithUnnamedBlock.Replace(oldText, newText), ReadFile("Motors.md"));
+        Assert.Same(motor, markdown.Children["Motor_0"]);
     }
 
     [Fact]
-    public async Task WhenTheFirstTextIsAddedBeforeABlockWithoutAName_ThenItIsRejectedBecauseTheSubjectWouldStartAgain()
+    public async Task WhenAnExpressionIsAddedBeforeAnUnnamedCardWithAnUnnamedWidget_ThenBothKeepTheirSubjects()
+    {
+        // Arrange
+        const string content = "# Cards\n\n:: HomeBlaze.Components.Card Title=Main\n::: HomeBlaze.Components.Widget Path=/Devices\n:::\n::\n";
+        WriteFile("Cards.md", content);
+        var storage = await ConnectAsync();
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Cards.md"]);
+        var card = markdown.Children["Card_0"];
+
+        // Act
+        await markdown.ReplaceTextAsync("# Cards", "# Cards at {{ /Devices/Speed }}", CancellationToken.None);
+
+        // Assert
+        Assert.Equal(content.Replace("# Cards", "# Cards at {{ /Devices/Speed }}"), ReadFile("Cards.md"));
+        Assert.Same(card, markdown.Children["Card_0"]);
+    }
+
+    [Fact]
+    public async Task WhenTheFirstTextIsAddedBeforeABlockWithoutAName_ThenTheTextIsChangedAndTheSubjectStays()
     {
         // Arrange
         const string content = ":: HomeBlaze.Samples.Motor Name=Unnamed\n::\n\nAfter the motor.";
         WriteFile("Motors.md", content);
         var storage = await ConnectAsync();
         var markdown = Assert.IsType<MarkdownFile>(storage.Children["Motors.md"]);
+        var motor = markdown.Children["Motor_0"];
 
-        // Act & Assert
-        var exception = await Assert.ThrowsAsync<ArgumentException>(
-            () => markdown.ReplaceContentAsync("# Motors\n\n" + content, CancellationToken.None));
-        Assert.StartsWith("The change adds or removes an expression, the first text", exception.Message);
-        Assert.Equal(content, ReadFile("Motors.md"));
+        // Act
+        await markdown.ReplaceContentAsync("# Motors\n\n" + content, CancellationToken.None);
+
+        // Assert
+        Assert.Equal("# Motors\n\n" + content, ReadFile("Motors.md"));
+        Assert.Same(motor, markdown.Children["Motor_0"]);
     }
 
     [Theory]
