@@ -565,6 +565,41 @@ public class InlineTextEditingTests
     }
 
     [Fact]
+    public async Task WhenTheBodyTextOfACardThatIsNotSelectedIsDoubleClicked_ThenOnlyTheTextDialogOpensAndNoWordStaysSelected()
+    {
+        // Arrange: the first click of the double click selects the card, and the text is selectable only after that.
+        var page = await OpenPageInInlineModeAsync();
+        var text = page.GetCard("Text Card").GetByText("Card body text.", new() { Exact = true });
+        await Assertions.Expect(text).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Act
+        await text.DblClickAsync(new() { Force = true });
+
+        // Assert
+        await ExpectTextEditorValueAsync(page, "Card body text.");
+        await Assertions.Expect(page.GetByTestId("subject-edit-dialog-type")).ToHaveCountAsync(0);
+        await Assertions.Expect(page.GetByRole(AriaRole.Dialog)).ToHaveCountAsync(1);
+        Assert.Equal(string.Empty, await page.EvaluateAsync<string>("() => window.getSelection()?.toString() ?? ''"));
+    }
+
+    [Fact]
+    public async Task WhenALinkInATextBlockOfACardThatIsNotSelectedIsClicked_ThenTheCardIsSelectedAndThePageStays()
+    {
+        // Arrange
+        var page = await OpenPageInInlineModeAsync(PageName, Content.Replace("Card body text.", "Card body [link](https://example.com/).", StringComparison.Ordinal));
+        var link = page.GetCard("Text Card").GetByRole(AriaRole.Link, new() { Name = "link" });
+        await Assertions.Expect(link).ToBeVisibleAsync(new() { Timeout = Timeout });
+        var address = page.Url;
+
+        // Act
+        await link.ClickAsync(new() { Force = true });
+
+        // Assert
+        await Assertions.Expect(page.Locator(".subject-component-wrapper.selected:has(> [data-testid='card'])")).ToHaveCountAsync(1, new() { Timeout = Timeout });
+        Assert.Equal(address, page.Url);
+    }
+
+    [Fact]
     public async Task WhenATextBlockIsDoubleClickedInViewMode_ThenNoDialogOpens()
     {
         // Arrange

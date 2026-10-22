@@ -19,6 +19,10 @@
         var isSelectable = IsSelectable;
         var isSelected = isSelectable && ReferenceEquals(Selection?.Selected, this);
         var isRevealable = !isSelectable && Revealer is not null && Type == SubjectComponentType.Widget;
+        @* Text that is not selectable yet, such as in a card that is not selected, becomes selectable once it is selected.
+           A double click on it opens its own dialog rather than the one of the card, which the first click selected. Text
+           renders as a block only in Inline mode. *@
+        var opensOnDoubleClick = isSelectable || _isTextBlock;
         @* A page fills a container of definite height, such as the split editor's pane, and keeps its natural
            height elsewhere. *@
         <div class="@GetWrapperClass(isSelectable, isSelected, isRevealable, _isTextBlock)"
@@ -31,8 +35,8 @@
              @onpointerdown="@(isSelectable ? _pointerDownCallback : default)"
              @onclick="@(isSelectable ? _clickCallback : isRevealable ? _revealCallback : default)"
              @onclick:stopPropagation="@(isSelectable || isRevealable)"
-             @ondblclick="@(isSelectable ? _doubleClickCallback : default)"
-             @ondblclick:stopPropagation="@isSelectable"
+             @ondblclick="@(opensOnDoubleClick ? _doubleClickCallback : default)"
+             @ondblclick:stopPropagation="@opensOnDoubleClick"
              @onkeydown="@(isSelectable ? _keyDownCallback : default)"
              @onkeydown:stopPropagation="@isSelectable">
             @{

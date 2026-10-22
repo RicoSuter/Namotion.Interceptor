@@ -80,6 +80,24 @@
         }
     }, true);
 
+    // Capturing, so that it runs before the double click reaches the server. A control that a widget offers in edit mode, such
+    // as a tab, an Add button or an insert line, keeps a double click from the widget around it, which would open its edit
+    // dialog. A control that is a widget of its own has its own wrapper, closer than the control. Any other double click on a
+    // block opens its dialog, and the word that the browser selected with it would stay highlighted behind the dialog.
+    document.addEventListener('dblclick', event => {
+        if (!(event.target instanceof Element)) {
+            return;
+        }
+
+        const block = event.target.closest('.subject-component-wrapper');
+        const control = event.target.closest('.edit-mode-interactive');
+        if (control && block?.contains(control)) {
+            event.stopPropagation();
+        } else if (block?.matches('.selectable, .text-block') && !event.target.closest('input, textarea, [contenteditable]')) {
+            window.getSelection()?.removeAllRanges();
+        }
+    }, true);
+
     // Called once the widget that an edit selected rendered. An edit that replaced the element with the focus, such as the
     // moved widget or the button of its bar, left the focus on the body, and a keyboard user would start over from the top.
     window.widgetSelection = {

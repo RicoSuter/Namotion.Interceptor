@@ -108,13 +108,13 @@ public class WidgetSelectionTests
     [Fact]
     public async Task WhenAWidgetIsDoubleClicked_ThenItsEditDialogOpens()
     {
-        // Arrange
+        // Arrange: the title, because a double click on the text of the body opens the dialog of that text.
         var page = await OpenPageInInlineModeAsync();
-        var body = page.GetByText("Body of the selection card.");
+        var title = page.GetCard("Selection Card").GetByTestId("card-title");
         await Assertions.Expect(page.Locator(".subject-component-wrapper.selectable").First).ToBeVisibleAsync(new() { Timeout = Timeout });
 
         // Act
-        await body.DblClickAsync(new() { Force = true });
+        await title.DblClickAsync(new() { Force = true });
 
         // Assert
         var dialog = page.GetByRole(AriaRole.Dialog, new() { Name = "Edit Selection Card", Exact = true });

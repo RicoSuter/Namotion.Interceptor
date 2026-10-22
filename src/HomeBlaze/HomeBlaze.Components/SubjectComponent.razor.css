@@ -26,6 +26,17 @@
     pointer-events: auto;
 }
 
+/* A block of text that is not selectable yet, such as text in a card that is not selected, takes the pointer, so that a
+   double click opens its dialog (see SubjectComponent.razor). A click goes on to the widget around it, and its content
+   stays without the pointer, as the content of a selectable widget does, so that a link in it does not navigate. */
+.subject-component-wrapper.text-block {
+    pointer-events: auto;
+}
+
+.subject-component-wrapper.text-block > ::deep * {
+    pointer-events: none;
+}
+
 @media (hover: hover) {
     .subject-component-wrapper.selectable:not(.selected):hover:not(:has(.subject-component-wrapper.selectable:hover)) {
         outline: 1px solid rgba(var(--mud-palette-primary-rgb), 0.7);
