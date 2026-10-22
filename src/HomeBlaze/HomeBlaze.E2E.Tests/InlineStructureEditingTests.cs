@@ -260,7 +260,7 @@ public class InlineStructureEditingTests
         var chip = page.GetByTestId("invisible-widget-chip").Filter(new() { HasText = "structuremap" });
         await Assertions.Expect(chip).ToBeVisibleAsync(new() { Timeout = Timeout });
 
-        // Assert: neither a line of text nor a block of the content around the chips reaches into the chip.
+        // Assert: neither a line of text, nor a block, nor an insert line of the content around the chips reaches into the chip.
         var coveredContent = await chip.EvaluateAsync<string[]>(
             """
             chip => {
@@ -270,7 +270,7 @@ public class InlineStructureEditingTests
                 const overlaps = rectangle => rectangle.width > 0 && rectangle.height > 0 &&
                     rectangle.left < box.right && rectangle.right > box.left && rectangle.top < box.bottom && rectangle.bottom > box.top;
                 const covered = [];
-                for (const block of content.querySelectorAll(':scope > .subject-component-wrapper')) {
+                for (const block of content.querySelectorAll(':scope > :is(.subject-component-wrapper, .block-insert-line)')) {
                     if (overlaps(block.getBoundingClientRect())) {
                         covered.push(block.getAttribute('aria-label') ?? 'block');
                     }
@@ -327,6 +327,73 @@ public class InlineStructureEditingTests
 
         // Assert
         await Assertions.Expect(page.GetByTestId("invisible-widget-chip")).ToHaveCountAsync(0, new() { Timeout = Timeout });
+    }
+
+    [Fact]
+    public async Task WhenNothingIsSelected_ThenThePageHasInsertLinesAndOneInsertsAWidgetThere()
+    {
+        // Arrange
+        var page = await OpenPageInInlineModeAsync();
+        var lines = page.Locator(".markdown-content > [data-testid='block-insert-line']");
+        await Assertions.Expect(lines.First).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Act: the second line stands before the switch.
+        await lines.Nth(1).ClickAsync();
+        var dialog = page.GetByTestId("create-subject-dialog");
+        await dialog.GetByTestId("type-search-input").FillAsync("Alert");
+        await dialog.GetByTestId("type-row-alert").ClickAsync();
+
+        // The test id of the name field is on its input.
+        await dialog.GetByTestId("create-name-input").FillAsync("structurealert");
+        await page.GetByTestId("create-button").ClickAsync();
+
+        // Assert
+        await _fixture.WaitForDemoPageTextAsync(
+            PageName,
+            text => text.IndexOf("HomeBlaze.Components.Alert#structurealert", StringComparison.Ordinal) is var alert and >= 0 &&
+                    alert < text.IndexOf("HomeBlaze.Components.Switch", StringComparison.Ordinal),
+            "The alert was not inserted before the switch.");
+    }
+
+    [Fact]
+    public async Task WhenAWidgetIsSelected_ThenOnlyTheContentAroundItHasInsertLines()
+    {
+        // Arrange
+        var page = await OpenPageInInlineModeAsync();
+
+        // Act
+        await GetWrapperOf(page, "switch").SelectWidgetAsync();
+
+        // Assert: the switch stands on the page, so the page keeps its lines and no content inside a block has any.
+        await Assertions.Expect(page.Locator(".markdown-content > [data-testid='block-insert-line']").First).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(page.Locator(".markdown-fragment [data-testid='block-insert-line']")).ToHaveCountAsync(0);
+    }
+
+    [Fact]
+    public async Task WhenAListIsSelected_ThenTheContentOfItsRowsHasInsertLinesOnlyOnceARowIsSelected()
+    {
+        // Arrange
+        var page = await OpenPageInInlineModeAsync(Content.Replace(
+            "::: Value Path=structuremotor/TargetSpeed Label=\"Row A\"\n:::\n",
+            "::: Value Path=structuremotor/TargetSpeed Label=\"Row A\"\n"
+            + ":::: HomeBlaze.Components.Progress Path=structuremotor/TargetSpeed Minimum=0 Maximum=1600\n"
+            + "::::\n"
+            + ":::\n"));
+        var row = GetValueRowWrapper(page, "Row A");
+        var rowLines = page.Locator(".markdown-fragment [data-testid='block-insert-line']");
+
+        // Act
+        await GetValueListWrapper(page).SelectWidgetAsync();
+
+        // Assert: the rows become selectable with the selection of the list, and the content of a row belongs to its row.
+        await Assertions.Expect(row).ToHaveCountAsync(1, new() { Timeout = Timeout });
+        await Assertions.Expect(rowLines).ToHaveCountAsync(0, new() { Timeout = Timeout });
+
+        // Act
+        await row.SelectWidgetAsync();
+
+        // Assert: one line before the progress and one at the end.
+        await Assertions.Expect(rowLines).ToHaveCountAsync(2, new() { Timeout = Timeout });
     }
 
     private async Task<IPage> OpenPageInInlineModeAsync(string content = Content)

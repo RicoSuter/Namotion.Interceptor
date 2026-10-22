@@ -132,6 +132,9 @@ public class LayoutItemActionsTests
             await Assertions.Expect(buttons.Nth(index)).ToBeFocusedAsync(new() { Timeout = Timeout });
         }
 
+        // The content that holds the selected card has insert lines, and the one after the card comes before the buttons.
+        await page.Keyboard.PressAsync("Tab");
+        await Assertions.Expect(cell.GetByTestId("block-insert-line").Last.GetByRole(AriaRole.Button)).ToBeFocusedAsync(new() { Timeout = Timeout });
         await page.Keyboard.PressAsync("Tab");
 
         // Assert

@@ -3,14 +3,17 @@
 @using HomeBlaze.Components
 @using HomeBlaze.Components.Abstractions.Attributes
 @using HomeBlaze.Components.Abstractions.TimeZones
+@using HomeBlaze.Components.Components
 @using HomeBlaze.Services.Components
 @using HomeBlaze.Storage.Internal
 @using Namotion.Interceptor
 @inject ITimeZoneDisplay TimeZone
 @inject SubjectComponentRegistry ComponentRegistry
+@implements IDisposable
 
 @{
     var isEditingInline = IsEditing && Selection is not null;
+    var showsInsertLines = ShowsInsertLines();
 }
 @if (isEditingInline && Children is not null && HasInvisibleWidget())
 {
@@ -33,9 +36,18 @@
     }
     else if (segment.Widget != null && !(isEditingInline && IsInvisibleWidget(segment.Widget)))
     {
+        @if (showsInsertLines)
+        {
+            <BlockInsertLine OnInsert="@(() => StructureEditor!.InsertWidgetAsync(Content!, segment.Widget))" />
+        }
+
         @* Keyed, so that the state of a component stays with its subject when a reload inserts or removes a block. *@
         <SubjectComponent @key="segment.Widget" Subject="@segment.Widget" Type="SubjectComponentType.Widget" />
     }
+}
+@if (showsInsertLines)
+{
+    <BlockInsertLine OnInsert="@(() => StructureEditor!.InsertWidgetAsync(Content!, null))" />
 }
 
 @code {
@@ -54,6 +66,15 @@
 
     [CascadingParameter]
     public WidgetSelection? Selection { get; set; }
+
+    [CascadingParameter]
+    public IPageStructureEditor? StructureEditor { get; set; }
+
+    [CascadingParameter(Name = "ParentSubjectComponent")]
+    public SubjectComponent? Owner { get; set; }
+
+    private WidgetSelection? _subscribedSelection;
+    private bool _isAtSelection;
 
     private record RenderSegment(string? Html, IInterceptorSubject? Widget);
 
@@ -109,6 +130,77 @@
 
         return result;
     }
+
+    protected override void OnParametersSet()
+    {
+        // The lines follow the selection, which changes without new parameters.
+        var selection = StructureEditor is not null ? Selection : null;
+        if (!ReferenceEquals(selection, _subscribedSelection))
+        {
+            Unsubscribe();
+            _subscribedSelection = selection;
+            if (selection is not null)
+            {
+                selection.Changed += OnSelectionChanged;
+            }
+        }
+    }
+
+    private void OnSelectionChanged() => _ = UpdateAfterSelectionChangedAsync();
+
+    private async Task UpdateAfterSelectionChangedAsync()
+    {
+        // The change also changes which widgets can be selected, such as the rows of a selected list, and they learn it
+        // only with the render that follows it. The yield posts the rest after that render.
+        await Task.Yield();
+        if (_subscribedSelection is null)
+        {
+            return;
+        }
+
+        // Every content of the page is notified, and only one whose lines show or hide renders again.
+        var isAtSelection = IsAtSelection();
+        if (isAtSelection != _isAtSelection)
+        {
+            _isAtSelection = isAtSelection;
+            StateHasChanged();
+        }
+    }
+
+    // The content is at the selection when it is the page and nothing is selected, or when it is the content of
+    // the selected widget or the content that holds the selected widget directly.
+    private bool IsAtSelection()
+    {
+        if (StructureEditor is null || Content is null)
+        {
+            return false;
+        }
+
+        var contentOwner = Owner?.GetSelectableSelfOrAncestor();
+        var selected = Selection?.Selected;
+        return selected is null
+            ? contentOwner is null
+            : ReferenceEquals(selected, contentOwner) || ReferenceEquals(selected.SelectableAncestor, contentOwner);
+    }
+
+    // Runs once per render and remembers where the selection was for OnSelectionChanged. The editor is asked last, because
+    // whether the content belongs to the page is a scan of its blocks.
+    private bool ShowsInsertLines()
+    {
+        _isAtSelection = IsAtSelection();
+        return _isAtSelection && StructureEditor!.CanInsertInto(Content!);
+    }
+
+    private void Unsubscribe()
+    {
+        if (_subscribedSelection is not null)
+        {
+            _subscribedSelection.Changed -= OnSelectionChanged;
+            _subscribedSelection = null;
+        }
+    }
+
+    public void Dispose() => Unsubscribe();
 
     private bool HasInvisibleWidget()
     {

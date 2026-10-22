@@ -246,6 +246,8 @@ public class WidgetSelectionTests
         await Assertions.Expect(page.Locator(".subject-component-wrapper.selectable").First).ToBeVisibleAsync(new() { Timeout = Timeout });
 
         // Act: a click as a user makes it, at the middle of the control, which would toggle, set or invoke on a viewed page.
+        // The insert lines of the edited page push the lower controls below the window, where a click at a point is lost.
+        await control.ScrollIntoViewIfNeededAsync();
         var box = (await control.BoundingBoxAsync())!;
         await page.Mouse.ClickAsync(box.X + box.Width / 2, box.Y + box.Height / 2);
 
