@@ -195,17 +195,9 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
             newText => SaveTextAsync(() => _file.ReplaceTextBlockAsync(segment, text, newText, CancellationToken.None)));
     }
 
-    // The dialog shows a refusal and keeps the text, so that nothing that was typed is lost.
-    private async Task<string?> SaveTextAsync(Func<Task<MarkdownEditResult>> edit)
-    {
-        var result = await RunAsync(edit, reportsRefusal: false);
-        return result switch
-        {
-            null => "The page could not be saved.",
-            { IsWritten: false } refused => refused.Refusal,
-            _ => null
-        };
-    }
+    // The dialog shows why the text was not saved and keeps it, so that nothing that was typed is lost.
+    private async Task<string?> SaveTextAsync(Func<Task<MarkdownEditResult>> edit) =>
+        (await RunAsync(edit, reportsInSnackbar: false)).Refusal;
 
     // A dialog asked about the blocks as they were. A reload while it was open can have given an unnamed subject another
     // block, so the edit would hit a block the user did not choose. The same text means the same blocks.
@@ -222,8 +214,9 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
 
     // A write that the storage cannot make must not end the circuit: a file that another process holds open or that
     // may not be written, a storage that does not answer in time (a TimeoutException) or that is not connected (an
-    // InvalidOperationException, the base of the internal refusal of the storage). Null when the edit threw.
-    private async Task<MarkdownEditResult?> RunAsync(Func<Task<MarkdownEditResult>> edit, bool reportsRefusal = true)
+    // InvalidOperationException, the base of the internal refusal of the storage), which is then the refusal of the result.
+    // A caller that shows the refusal itself, such as a dialog, passes false for reportsInSnackbar.
+    private async Task<MarkdownEditResult> RunAsync(Func<Task<MarkdownEditResult>> edit, bool reportsInSnackbar = true)
     {
         MarkdownEditResult result;
         try
@@ -237,13 +230,18 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
                 exception,
                 "The structure edit of the page {Path} could not be saved",
                 _file.FullPath);
-            _snackbar.Add($"The page could not be saved. {exception.Message}", Severity.Error);
-            return null;
+            var failure = $"The page could not be saved. {exception.Message}";
+            if (reportsInSnackbar)
+            {
+                _snackbar.Add(failure, Severity.Error);
+            }
+
+            return MarkdownEditResult.Refused(failure);
         }
 
         if (!result.IsWritten)
         {
-            if (reportsRefusal)
+            if (reportsInSnackbar)
             {
                 _snackbar.Add($"The page was not changed. {result.Refusal}", Severity.Warning);
             }

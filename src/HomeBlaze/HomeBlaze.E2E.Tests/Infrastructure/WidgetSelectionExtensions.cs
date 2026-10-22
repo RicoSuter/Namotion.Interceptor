@@ -19,17 +19,17 @@ internal static class WidgetSelectionExtensions
     }
 
     /// <summary>
-    /// Clicks the element at <paramref name="position"/>, or its middle, which selects the innermost widget there, and returns
-    /// the bar with the actions of that widget.
+    /// Clicks the middle of the element, which selects the innermost widget there, and returns the bar with the
+    /// actions of that widget.
     /// </summary>
-    public static async Task<ILocator> SelectWidgetAsync(this ILocator element, Position? position = null)
+    public static async Task<ILocator> SelectWidgetAsync(this ILocator element)
     {
         // A click before the page has rendered in edit mode would not select anything.
         await Assertions.Expect(element.Page.Locator(".subject-component-wrapper.selectable").First).ToBeVisibleAsync(new() { Timeout = Timeout });
         await Assertions.Expect(element).ToBeVisibleAsync(new() { Timeout = Timeout });
 
         // Forced, because in edit mode the content of a widget takes no pointer input, so the click lands on the widget around it.
-        await element.ClickAsync(new() { Force = true, Position = position });
+        await element.ClickAsync(new() { Force = true });
 
         var actionBar = GetWidgetActionBar(element.Page);
         await Assertions.Expect(actionBar).ToBeVisibleAsync(new() { Timeout = Timeout });

@@ -14,6 +14,7 @@ public class InlineTextEditingTests
 {
     private const int Timeout = 30000;
     private const string PageName = "TextEditing.md";
+    private const string LayoutPageName = "TextLayout.md";
 
     // The server writes the page in its output folder, so a run that ends with a change of the page would change the
     // baseline of the next run if it were read from there.
@@ -31,6 +32,50 @@ public class InlineTextEditingTests
         + "::\n"
         + "\n"
         + "Last paragraph on the page.\n";
+
+    // Text and blocks in a card, a tab and a flow item, with a heading right before a block.
+    private const string LayoutContent =
+        "---\n"
+        + "title: Text Layout Demo\n"
+        + "---\n"
+        + "\n"
+        + "# Text Layout Demo\n"
+        + "\n"
+        + ":: HomeBlaze.Components.Card Title=\"Layout Card\"\n"
+        + "One line in the card.\n"
+        + "\n"
+        + "#### Heading in the card\n"
+        + "\n"
+        + "::: HomeBlaze.Components.Card Title=\"Inner Card\"\n"
+        + "Inner text.\n"
+        + ":::\n"
+        + "\n"
+        + "Last line in the card.\n"
+        + "::\n"
+        + "\n"
+        + ":: HomeBlaze.Components.TabLayout\n"
+        + "::: Tab Title=\"Layout Tab\"\n"
+        + "Text in the tab.\n"
+        + "\n"
+        + ":::: HomeBlaze.Components.Card Title=\"Tab Card\"\n"
+        + "In the tab card.\n"
+        + "::::\n"
+        + "\n"
+        + "Text at the end of the tab.\n"
+        + "::\n"
+        + "\n"
+        + ":: HomeBlaze.Components.FlowLayout MinWidth=300\n"
+        + "::: Item\n"
+        + "Text in the flow item.\n"
+        + "\n"
+        + ":::: HomeBlaze.Components.Card Title=\"Flow Card\"\n"
+        + "In the flow card.\n"
+        + "::::\n"
+        + "\n"
+        + "Text at the end of the flow item.\n"
+        + "::: Item\n"
+        + "Second item.\n"
+        + "::\n";
 
     private readonly PlaywrightFixture _fixture;
 
@@ -134,11 +179,100 @@ public class InlineTextEditingTests
         await Assertions.Expect(page.Locator(".markdown-text")).ToHaveCountAsync(0, new() { Timeout = Timeout });
     }
 
-    private async Task<IPage> OpenPageInInlineModeAsync()
+    [Fact]
+    public async Task WhenAOneLineParagraphInASelectedCardIsClickedInItsMiddle_ThenTheParagraphIsSelected()
     {
-        await _fixture.WriteDemoPageAsync(PageName, Content);
+        // Arrange
+        var page = await OpenPageInInlineModeAsync(LayoutPageName, LayoutContent);
+        await page.GetCard("Layout Card").Locator(".mud-card-header").First.SelectWidgetAsync();
+        var paragraph = GetTextWrapper(page, "One line in the card");
+        await Assertions.Expect(paragraph).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Act
+        await paragraph.ClickAsync(new() { Force = true });
+
+        // Assert
+        await Assertions.Expect(paragraph).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetByTestId("create-subject-dialog")).ToHaveCountAsync(0);
+    }
+
+    [Theory]
+    [InlineData("card")]
+    [InlineData("tab")]
+    [InlineData("flow item")]
+    [InlineData("page")]
+    public async Task WhenAContentIsAtTheSelection_ThenNoInsertButtonCoversABlockOfIt(string container)
+    {
+        // Arrange: the page has a paragraph right after its title.
+        var page = container == "page"
+            ? await OpenPageInInlineModeAsync()
+            : await OpenPageInInlineModeAsync(LayoutPageName, LayoutContent);
+
+        // Act: the content of a tab or a flow item is at the selection when its layout is selected, and the page when nothing
+        // is.
+        var (selectionTarget, fragment, lineCount) = container switch
+        {
+            "card" => (
+                page.GetCard("Layout Card").Locator(".mud-card-header").First,
+                page.GetCard("Layout Card").Locator(".mud-card-content > .subject-component-wrapper > .markdown-fragment").First,
+                5),
+            "tab" => (
+                page.GetByText("Text in the tab.", new() { Exact = true }),
+                page.GetByTestId("tab-panel").Locator(":scope > .subject-component-wrapper > .markdown-fragment"),
+                4),
+            "page" => (
+                null,
+                page.Locator(".markdown-content"),
+                5),
+            _ => (
+                page.GetByText("Second item.", new() { Exact = true }),
+                page.GetByTestId("flow-item").First.Locator(":scope > .subject-component-wrapper > .markdown-fragment"),
+                4)
+        };
+        if (selectionTarget is not null)
+        {
+            await selectionTarget.SelectWidgetAsync();
+        }
+
+        await Assertions.Expect(fragment.Locator(":scope > [data-testid='block-insert-line']")).ToHaveCountAsync(lineCount, new() { Timeout = Timeout });
+
+        // Assert
+        var findings = await fragment.EvaluateAsync<string[]>(
+            """
+            fragment => {
+                const findings = [];
+                const buttons = [...fragment.querySelectorAll(':scope > [data-testid=block-insert-line] button')];
+                const blocks = [...fragment.querySelectorAll(':scope > .subject-component-wrapper')]
+                    .filter(block => block.getBoundingClientRect().height > 0);
+                for (const button of buttons) {
+                    const box = button.getBoundingClientRect();
+                    if (box.height > 16.5) {
+                        findings.push(`${button.title} is ${box.height} pixels high`);
+                    }
+
+                    for (const block of blocks) {
+                        const other = block.getBoundingClientRect();
+                        const width = Math.min(box.right, other.right) - Math.max(box.left, other.left);
+                        const height = Math.min(box.bottom, other.bottom) - Math.max(box.top, other.top);
+                        if (width > 0.5 && height > 0.5) {
+                            findings.push(`${button.title} covers ${width}x${height} pixels of "${block.textContent.trim()}"`);
+                        }
+                    }
+                }
+
+                return findings;
+            }
+            """);
+        Assert.True(findings.Length == 0, string.Join("; ", findings));
+    }
+
+    private Task<IPage> OpenPageInInlineModeAsync() => OpenPageInInlineModeAsync(PageName, Content);
+
+    private async Task<IPage> OpenPageInInlineModeAsync(string pageName, string content)
+    {
+        await _fixture.WriteDemoPageAsync(pageName, content);
         var page = await _fixture.CreatePageAsync();
-        await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/{PageName}");
+        await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/{pageName}");
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
 
         // The edit menu is prerendered, and a click before the circuit is connected is lost.
@@ -147,13 +281,12 @@ public class InlineTextEditingTests
         return page;
     }
 
-    // Clicks the start of the text: the insert lines of a selected container center their buttons on the edges of its
-    // content, where they cover the middle of a single line of text. The bar of a widget that was selected before shows
-    // until the selection moves, so the wait for the selected text keeps a click on the bar from reaching that widget.
+    // The bar of a widget that was selected before shows until the selection moves, so the wait for the selected text keeps
+    // a click on the bar from reaching that widget.
     private static async Task<ILocator> SelectTextAsync(IPage page, string text)
     {
         var wrapper = GetTextWrapper(page, text);
-        var actionBar = await wrapper.SelectWidgetAsync(new Position { X = 8, Y = 8 });
+        var actionBar = await wrapper.SelectWidgetAsync();
         await Assertions.Expect(wrapper).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
         return actionBar;
     }

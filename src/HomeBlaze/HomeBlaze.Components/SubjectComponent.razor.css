@@ -262,8 +262,10 @@
 
 /* The line where a new block goes, between the blocks of the content that is edited. It takes no room, so that the content
    does not move when the selection shows or hides the lines, and margins collapse through it as if it were not there: its
-   bar is drawn over the gap above the block that follows and reaches over the edges of the blocks around it, so only its
-   button takes the pointer, and a click beside it still selects the block below it. */
+   bar is drawn in the middle of the gap above the block that follows. Only its button takes the pointer, and it is never
+   drawn over a block, so that a click anywhere on a block selects it: in a gap of 1rem it fits between the blocks, and
+   where the gap is smaller or the line is at an edge of its content, the page places it at the start of the line, beside
+   the content (see MarkdownFilePageComponent.razor.css of HomeBlaze.Storage.Blazor). */
 ::deep .block-insert-line {
     position: relative;
     height: 0;
@@ -296,12 +298,18 @@
     background: rgba(var(--mud-palette-primary-rgb), 0.7);
 }
 
-/* The button is 24 pixels high, so that the half of the bar that a line at the edge of a content reaches over the edge fits
-   into the 12 pixels of padding of a card (see MarkdownFilePageComponent.razor.css of HomeBlaze.Storage.Blazor). */
+/* The button is as high as the gap of 1rem between two blocks, which it fits into. */
 ::deep .block-insert-line-bar .mud-icon-button {
-    padding: 1px;
+    box-sizing: border-box;
+    width: 1rem;
+    height: 1rem;
+    padding: 0;
     background: var(--mud-palette-surface);
     pointer-events: auto;
+}
+
+::deep .block-insert-line-bar .mud-icon-button .mud-icon-root {
+    font-size: 0.75rem;
 }
 
 /* In the preview next to the editor, the widget that a click reveals in the editor. Its content is inert, so it never

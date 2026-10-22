@@ -289,11 +289,13 @@ public class SpacingLayoutTests
         await Assertions.Expect(textCell).ToHaveCSSAsync("overflow-clip-margin", "0px");
     }
 
-    [Fact]
-    public async Task WhenAHeadingStandsInACard_ThenItIsCloserToTheTextBelowThanToTheTextAbove()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenAHeadingStandsInACard_ThenItIsCloserToTheTextBelowThanToTheTextAbove(bool isInlineMode)
     {
         // Arrange
-        var page = await OpenPageAsync();
+        var page = await OpenPageAsync(isInlineMode);
         var card = page.GetCard("Heading Card");
         await Assertions.Expect(card.Locator("h4")).ToBeVisibleAsync(new() { Timeout = Timeout });
 
