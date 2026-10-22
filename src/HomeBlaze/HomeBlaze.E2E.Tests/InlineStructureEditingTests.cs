@@ -389,6 +389,24 @@ public class InlineStructureEditingTests
     }
 
     [Fact]
+    public async Task WhenAValueMapChipIsSelected_ThenItsOutlineFitsTheChip()
+    {
+        // Arrange
+        var page = await OpenPageInInlineModeAsync();
+        var chip = page.GetByTestId("invisible-widget-chip").Filter(new() { HasText = "structuremap" });
+        var wrapper = GetWrapperOf(page, "invisible-widget-chip");
+
+        // Act
+        await chip.SelectWidgetAsync();
+        await Assertions.Expect(wrapper).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
+
+        // Assert
+        var chipBox = await PageGeometry.GetBoxAsync(chip);
+        var wrapperBox = await PageGeometry.GetBoxAsync(wrapper);
+        Assert.True(wrapperBox.Width <= chipBox.Width + 4, $"The wrapper is {wrapperBox.Width} wide, the chip {chipBox.Width}.");
+    }
+
+    [Fact]
     public async Task WhenACaseInTheListOfAValueMapIsDeleted_ThenItIsRemovedFromThePage()
     {
         // Arrange

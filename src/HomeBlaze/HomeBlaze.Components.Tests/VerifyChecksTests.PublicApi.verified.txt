@@ -380,7 +380,6 @@ namespace HomeBlaze.Components
         protected void RaisePropertyChanged(string propertyName) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
     }
-    public interface IInvisibleWidget { }
     public interface IPropertyHistoryViewer
     {
         bool CanShow(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property);
@@ -1510,7 +1509,7 @@ namespace HomeBlaze.Components.Components
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
     }
     [HomeBlaze.Components.Abstractions.Attributes.SubjectComponent(HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType.Widget, typeof(HomeBlaze.Components.ValueMap?))]
-    public class ValueMapWidget : Microsoft.AspNetCore.Components.ComponentBase, HomeBlaze.Components.Abstractions.ISubjectComponent, HomeBlaze.Components.IInvisibleWidget, System.IDisposable
+    public class ValueMapWidget : Microsoft.AspNetCore.Components.ComponentBase, HomeBlaze.Components.Abstractions.ISubjectComponent, System.IDisposable
     {
         public ValueMapWidget() { }
         [Microsoft.AspNetCore.Components.CascadingParameter(Name="IsEditing")]

@@ -151,7 +151,7 @@ There is no separate selectable frame. The selection outline, the keyboard handl
 
 ### Chips of invisible widgets
 
-A widget component declares that it renders nothing (`IInvisibleWidget`). Today only `ValueMapWidget` does. In edit mode it renders a chip in place, where its block is. In view mode its wrapper is empty and hidden. A selected ValueMap opens the overlay with its cases below the chip.
+A widget that renders nothing on a viewed page, today only `ValueMapWidget`, renders a chip in place in edit mode, where its block is, and its wrapper is as wide as the chip. In view mode its wrapper is empty and hidden. A selected ValueMap opens the overlay with its cases below the chip.
 
 ### Collapsed Responsive content
 

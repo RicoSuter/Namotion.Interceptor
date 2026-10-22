@@ -1707,6 +1707,8 @@ git commit -m "feat: find the top-level text of every content of a page"
 
 ### Task 7: Move a block by cutting it and inserting it at the next insert point
 
+> Note: the `isSkipped` parameter of the move was later removed in Task 8; a chip is an item like any other, so a move passes it one step per chip.
+
 **Files:**
 - Modify: `src/HomeBlaze/HomeBlaze.Storage/Pages/MarkdownBlockWriter.cs:235-241` (and new helpers)
 - Modify: `src/HomeBlaze/HomeBlaze.Storage/Pages/MarkdownPageOperations.cs:41-134,233-246`
