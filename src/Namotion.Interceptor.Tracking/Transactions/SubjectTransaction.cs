@@ -59,9 +59,7 @@ public sealed class SubjectTransaction : IDisposable
     private int _isDisposed;
 
     // Handoff from Dispose to EndCommit: when Dispose runs mid-commit, EndCommit releases the exclusive lock
-    // once the commit finishes. The _isDisposed CAS and this handoff under _pendingChangesLock make the release
-    // happen exactly once; EndCommit clears the flag only defensively. Accessed only under _pendingChangesLock
-    // (no volatile needed; never read lock-free).
+    // once the commit finishes. Accessed only under _pendingChangesLock (no volatile needed; never read lock-free).
     private bool _disposeRequestedDuringCommit;
 
     // Written only by the committing thread as it enters and leaves a commit scope, and read only after
@@ -166,11 +164,6 @@ public sealed class SubjectTransaction : IDisposable
     /// Adds the transaction handlers of <paramref name="subjectContext"/> that are not registered on the transaction's
     /// context, when a subject of it is written and the transaction is about to capture the write.
     /// </summary>
-    /// <param name="subjectContext">The context of the written subject.</param>
-    /// <param name="subjectInterceptors">
-    /// The transaction interceptors <paramref name="subjectContext"/> resolves, as returned by its
-    /// <see cref="IInterceptorSubjectContext.GetServices{TInterface}"/>.
-    /// </param>
     /// <exception cref="InvalidOperationException">
     /// Thrown while a commit is in progress and <paramref name="subjectContext"/> adds handlers, like the capture
     /// would (see <see cref="TransactionHandlerSet.Include"/>).
@@ -538,14 +531,10 @@ public sealed class SubjectTransaction : IDisposable
                 commitTimeout,
                 context.GetServices<ITransactionHandler>());
         }
-        catch
+        catch when (locking == TransactionLocking.Exclusive)
         {
             // Resolving the handlers can throw, and no transaction exists yet to release the lock on dispose.
-            if (locking == TransactionLocking.Exclusive)
-            {
-                interceptor.ReleaseExclusiveTransactionLock();
-            }
-
+            interceptor.ReleaseExclusiveTransactionLock();
             throw;
         }
     }

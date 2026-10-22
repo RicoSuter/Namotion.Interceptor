@@ -47,7 +47,7 @@ public class ValidationInterceptor : IWriteInterceptor, ITransactionHandler
         List<Exception>? errors = null;
         IInterceptorSubjectContext? validatorsContext = null;
         var validators = ImmutableArray<IPropertyValidator>.Empty;
-        foreach (var change in changes)
+        foreach (ref readonly var change in changes)
         {
             var subjectContext = change.Property.Subject.Context;
             if (!ReferenceEquals(subjectContext, validatorsContext))
@@ -89,9 +89,8 @@ public class ValidationInterceptor : IWriteInterceptor, ITransactionHandler
     public override int GetHashCode() => GetType().GetHashCode();
 
     /// <summary>
-    /// Validates the new value of <paramref name="change"/> with the property type as the type argument when it is one
-    /// of the common value types listed in <see cref="IPropertyValidator.Validate{TProperty}"/>, so the value is not
-    /// boxed, and as <c>object</c> otherwise.
+    /// Validates the new value of <paramref name="change"/> with the property type as the type argument for common value
+    /// types, so the value is not boxed, and as <c>object</c> otherwise.
     /// </summary>
     private static string? ValidateNewValue(ImmutableArray<IPropertyValidator> validators, in SubjectPropertyChange change)
     {
@@ -119,8 +118,8 @@ public class ValidationInterceptor : IWriteInterceptor, ITransactionHandler
 
     /// <summary>
     /// Validates the new value of <paramref name="change"/> as <typeparamref name="TProperty"/>. Returns false without
-    /// validating when the change does not hold a <typeparamref name="TProperty"/>, for example when it was captured
-    /// through an untyped write.
+    /// validating when the new value is not a <typeparamref name="TProperty"/>: null, or a value of another type, which
+    /// only an untyped write can store.
     /// </summary>
     private static bool TryValidateAs<TProperty>(
         ImmutableArray<IPropertyValidator> validators,

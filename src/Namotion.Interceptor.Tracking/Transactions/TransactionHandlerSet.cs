@@ -21,9 +21,8 @@ internal struct TransactionHandlerSet
     // included, and the last handler array included. Written after _handlers with release semantics, so a reader that
     // skips on a hit also sees the included handlers.
     //
-    // The interceptor array identifies the subject context's handlers: subject contexts that resolve to the same
-    // context state get the same cached service arrays from it, and any change to the services they resolve installs
-    // a new state with new arrays. Only a non-empty array is a key: an empty one is shared by unrelated contexts.
+    // The interceptor array identifies the subject context's handlers, see IInterceptorSubjectContext.GetServices. It
+    // is never empty: it holds the transaction's interceptor.
     private SubjectTransactionInterceptor[]? _lastIncludedInterceptors;
     private ITransactionHandler[] _lastIncludedHandlers;
 
@@ -47,7 +46,7 @@ internal struct TransactionHandlerSet
     /// <param name="subjectContext">The context of the written subject.</param>
     /// <param name="subjectInterceptors">
     /// The transaction interceptors <paramref name="subjectContext"/> resolves, as returned by its
-    /// <see cref="IInterceptorSubjectContext.GetServices{TInterface}"/>.
+    /// <see cref="IInterceptorSubjectContext.GetServices{TInterface}"/>, including the transaction's interceptor.
     /// </param>
     /// <param name="transaction">The transaction the set belongs to.</param>
     /// <exception cref="InvalidOperationException">
@@ -60,8 +59,8 @@ internal struct TransactionHandlerSet
         ImmutableArray<SubjectTransactionInterceptor> subjectInterceptors,
         SubjectTransaction transaction)
     {
-        var interceptors = ImmutableCollectionsMarshal.AsArray(subjectInterceptors);
-        if (interceptors is not { Length: > 0 } || !ReferenceEquals(interceptors, Volatile.Read(ref _lastIncludedInterceptors)))
+        var interceptors = ImmutableCollectionsMarshal.AsArray(subjectInterceptors)!;
+        if (!ReferenceEquals(interceptors, Volatile.Read(ref _lastIncludedInterceptors)))
         {
             IncludeUncached(subjectContext, interceptors, transaction);
         }
@@ -70,7 +69,7 @@ internal struct TransactionHandlerSet
     [MethodImpl(MethodImplOptions.NoInlining)]
     private void IncludeUncached(
         IInterceptorSubjectContext subjectContext,
-        SubjectTransactionInterceptor[]? subjectInterceptors,
+        SubjectTransactionInterceptor[] subjectInterceptors,
         SubjectTransaction transaction)
     {
         var transactionContext = transaction.Context;
@@ -88,10 +87,7 @@ internal struct TransactionHandlerSet
             }
         }
 
-        if (subjectInterceptors is { Length: > 0 })
-        {
-            Volatile.Write(ref _lastIncludedInterceptors, subjectInterceptors);
-        }
+        Volatile.Write(ref _lastIncludedInterceptors, subjectInterceptors);
     }
 
     /// <summary>

@@ -559,12 +559,12 @@ public class TransactionValidationTests
     }
 
     [Theory]
-    [InlineData(TransactionValidationMode.Immediate, true, new[] { typeof(int), typeof(int), typeof(int) })]
-    [InlineData(TransactionValidationMode.Deferred, true, new[] { typeof(int), typeof(int) })]
-    [InlineData(TransactionValidationMode.Immediate, false, new[] { typeof(int), typeof(int) })]
-    [InlineData(TransactionValidationMode.Deferred, false, new[] { typeof(int) })]
+    [InlineData(TransactionValidationMode.Immediate, true, 3)]
+    [InlineData(TransactionValidationMode.Deferred, true, 2)]
+    [InlineData(TransactionValidationMode.Immediate, false, 2)]
+    [InlineData(TransactionValidationMode.Deferred, false, 1)]
     public async Task WhenValidValueIsCommitted_ThenValidatorIsCalledOncePerCaptureAndCheck(
-        TransactionValidationMode validationMode, bool withWriter, Type[] expectedTypeArguments)
+        TransactionValidationMode validationMode, bool withWriter, int expectedCallCount)
     {
         // Arrange
         var validator = new RecordingValidator();
@@ -589,10 +589,11 @@ public class TransactionValidationTests
         await transaction.CommitAsync(CancellationToken.None);
 
         // Assert
-        Assert.Equal(expectedTypeArguments, validator.Calls.Select(call => call.TypeArgument));
+        Assert.Equal(expectedCallCount, validator.Calls.Count);
         Assert.All(validator.Calls, call =>
         {
             Assert.Equal(nameof(Motor.MotorSpeed), call.Property);
+            Assert.Equal(typeof(int), call.TypeArgument);
             Assert.Equal(50, call.Value);
         });
         Assert.Equal(50, motor.MotorSpeed);
@@ -612,17 +613,10 @@ public class TransactionValidationTests
         [typeof(Guid)] = subject => subject.GuidValue = Guid.NewGuid()
     };
 
+    public static TheoryData<Type> CommonValueTypeProperties => new(CommonValueTypeWrites.Keys);
+
     [Theory]
-    [InlineData(typeof(int))]
-    [InlineData(typeof(long))]
-    [InlineData(typeof(double))]
-    [InlineData(typeof(float))]
-    [InlineData(typeof(decimal))]
-    [InlineData(typeof(bool))]
-    [InlineData(typeof(DateTime))]
-    [InlineData(typeof(DateTimeOffset))]
-    [InlineData(typeof(TimeSpan))]
-    [InlineData(typeof(Guid))]
+    [MemberData(nameof(CommonValueTypeProperties))]
     public async Task WhenPropertyTypeIsACommonValueType_ThenCommitCheckValidatesTheValueAsThatType(Type propertyType)
     {
         // Arrange
@@ -646,6 +640,36 @@ public class TransactionValidationTests
         var call = Assert.Single(validator.Calls);
         Assert.Equal(propertyType, call.TypeArgument);
         Assert.IsType(propertyType, call.Value);
+    }
+
+    [Theory]
+    [InlineData(5L)]
+    [InlineData(null)]
+    public async Task WhenUntypedWriteStoresValueOfAnotherType_ThenCommitCheckValidatesItAsObject(object? value)
+    {
+        // Arrange
+        var validator = new RecordingValidator();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithTransactions()
+            .WithPropertyValidation()
+            .WithService<IPropertyValidator>(() => validator);
+        var motor = new Motor(context);
+        validator.Calls.Clear();
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(
+            TransactionFailureHandling.Rollback, validationMode: TransactionValidationMode.Deferred);
+        new PropertyReference(motor, nameof(Motor.MotorSpeed)).SetPropertyValueWithInterception(
+            value, motor.MotorSpeed, static (_, _) => { });
+        await Record.ExceptionAsync(() => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Assert
+        var commitCheckCall = validator.Calls[0];
+        Assert.Equal(nameof(Motor.MotorSpeed), commitCheckCall.Property);
+        Assert.Equal(typeof(object), commitCheckCall.TypeArgument);
+        Assert.Equal(value, commitCheckCall.Value);
     }
 
     [Theory]

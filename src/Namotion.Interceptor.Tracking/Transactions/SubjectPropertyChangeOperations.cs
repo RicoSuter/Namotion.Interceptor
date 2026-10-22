@@ -284,7 +284,7 @@ internal static class SubjectPropertyChangeOperations
     internal static List<PropertyReference>? DetectChangeConflicts(ReadOnlySpan<SubjectPropertyChange> changes)
     {
         List<PropertyReference>? conflictingProperties = null;
-        foreach (var change in changes)
+        foreach (ref readonly var change in changes)
         {
             var currentValue = change.Property.Metadata.GetValue?.Invoke(change.Property.Subject);
             var capturedOldValue = change.GetOldValue<object?>();
