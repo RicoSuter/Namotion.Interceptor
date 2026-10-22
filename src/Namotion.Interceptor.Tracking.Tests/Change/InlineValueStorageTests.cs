@@ -32,6 +32,21 @@ public class InlineValueStorageTests
     }
 
     [Fact]
+    public void WhenTypeCannotBeStoredInline_ThenCreateAndReadThrow()
+    {
+        // Arrange
+        var storage = default(InlineValueStorage);
+
+        // Act & Assert
+        Assert.Throws<InvalidOperationException>(() => InlineValueStorage.Create("text"));
+        Assert.Throws<InvalidOperationException>(() => InlineValueStorage.Create(new LargeStruct(1, 2, 3)));
+        Assert.Throws<InvalidOperationException>(() => InlineValueStorage.Create(new StructWithReference(1, "text")));
+        Assert.Throws<InvalidOperationException>(() => storage.Read<string>());
+        Assert.Throws<InvalidOperationException>(() => storage.Read<LargeStruct>());
+        Assert.Throws<InvalidOperationException>(() => storage.Read<StructWithReference>());
+    }
+
+    [Fact]
     public void WhenReadingWithAnotherType_ThenNoValueIsReturned()
     {
         // Arrange

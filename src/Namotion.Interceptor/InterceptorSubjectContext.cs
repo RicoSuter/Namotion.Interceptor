@@ -24,6 +24,10 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     // each other cannot deadlock. No path takes a second _mutationLock; the only way to nest them
     // is a TryAddService factory or exists predicate that mutates a different context, which the
     // contract forbids for that reason.
+    //
+    // The one lock a query takes is a state's fill lock, the ContextState itself, while it stores a
+    // resolved service array. It is a leaf: nothing else locks a ContextState, and nothing under it
+    // calls into a context or user code, so it may be taken while holding _mutationLock.
 
     private const int MaximumRetainedTraversalSize = 1024;
 
@@ -977,8 +981,8 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         // function arrays below, an entry is canonical: a non-empty one belongs to this state alone,
         // so callers may key caches on its identity, while every empty result is the one array behind
         // ImmutableArray<T>.Empty, shared by all states, and is not to be keyed on. A fill must
-        // therefore never be lost to a concurrent growth, so fills and growths serialize on a
-        // per-state leaf lock, the state itself, while reads take no lock.
+        // therefore never be lost to a concurrent growth, so fills and growths serialize on the
+        // state's fill lock (see the lock order note at the top of the class), while reads take no lock.
         private object?[]? _serviceArrays;
 
         // Indexed by PropertyTypeIndex, grown by replacing the array. Only a context a chain ends
@@ -1047,8 +1051,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S2551", Justification = "ContextState is private and sealed and never escapes, so no other code can lock it; locking the instance gives a per-state leaf lock without a lock field or allocation.")]
         internal object GetOrSetServiceArray(int serviceTypeIndex, object services)
         {
-            // A per-state leaf lock: nothing else locks a ContextState, and nothing below calls into a
-            // context or user code, so it cannot take part in a lock cycle with the context locks.
+            // The state's fill lock, see the lock order note at the top of the class.
             lock (this)
             {
                 var current = _serviceArrays;
