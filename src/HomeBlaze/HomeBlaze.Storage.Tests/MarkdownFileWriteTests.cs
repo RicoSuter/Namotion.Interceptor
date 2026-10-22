@@ -21,6 +21,23 @@ public class MarkdownFileWriteTests : IDisposable
     private readonly List<FluentStorageContainer> _storages = [];
 
     [Fact]
+    public async Task WhenAWidgetIsInsertedIntoAPageOfTheStorage_ThenTheResultNamesTheSubjectOfItsBlock()
+    {
+        // Arrange
+        WriteFile("Cards.md", "# Cards\n");
+        var storage = await ConnectAsync();
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Cards.md"]);
+
+        // Act
+        var result = await markdown.InsertWidgetAsync(
+            markdown, null, new HomeBlaze.Components.Card { Title = "Added" }, "added", CancellationToken.None);
+
+        // Assert
+        Assert.True(result.IsWritten);
+        Assert.Same(markdown.Children["added"], result.Subject);
+    }
+
+    [Fact]
     public async Task WhenReplacingTheContent_ThenTheFileTheContentAndTheParsedChildrenAreUpdated()
     {
         // Arrange

@@ -332,4 +332,31 @@ public class MarkdownPageOperationsTests
         Assert.Null(change);
         Assert.Contains("would change other blocks", refusal);
     }
+
+    [Fact]
+    public void WhenAWidgetIsInserted_ThenTheChangeNamesItsBlock()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("intro\n\n:: Demo.One\n::\n");
+
+        // Act
+        var change = MarkdownPageOperations.TryInsertWidget(
+            page, NoSubjects, owner: null, before: page.Blocks[0], "Demo.New", null, "{}", out _);
+
+        // Assert
+        Assert.Equal(change!.Write.Page.Blocks[0].Index, change.ResultBlockIndex);
+    }
+
+    [Fact]
+    public void WhenASlotBlockIsAppended_ThenTheChangeNamesItsBlock()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("::Demo.List\n::: Value Label=A\n:::\n::\n");
+
+        // Act
+        var change = MarkdownPageOperations.TryAppendSlotBlock(page, NoSubjects, page.Blocks[0], "Value", "{}", out _);
+
+        // Assert
+        Assert.Equal(change!.Write.Page.Blocks[0].Children[1].Index, change.ResultBlockIndex);
+    }
 }

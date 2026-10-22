@@ -276,4 +276,19 @@ public class MarkdownStructureEditTests
         Assert.IsType<FileNotFoundException>(exception);
         Assert.False(await fixture.ExistsAsync("page.md"));
     }
+
+    [Fact]
+    public async Task WhenARowIsMoved_ThenTheResultNamesTheRow()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var page = await fixture.AddPageAsync("page.md", PanelPage);
+        var row = ((TestPanel)page.Children["panel"]).Rows[0];
+
+        // Act
+        var result = await page.MoveBlockAsync(row, 1, CancellationToken.None);
+
+        // Assert
+        Assert.Same(row, result.Subject);
+    }
 }

@@ -679,12 +679,27 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             }
 
             var publishRefusal = await PublishAndWriteAsync(snapshot, change.Write, change.ChangedBlock, StructureChangedRefusal);
-            return publishRefusal is null ? MarkdownEditResult.Written : MarkdownEditResult.Refused(publishRefusal);
+            return publishRefusal is null
+                ? MarkdownEditResult.WrittenFor(FindResultSubject(change))
+                : MarkdownEditResult.Refused(publishRefusal);
         }
         finally
         {
             EndWrite(write);
         }
+    }
+
+    // After the write: the read inside it has created the subject of a new block, when the storage read the file there.
+    // Without that read, the published snapshot still names a moved subject, because the edit carried it.
+    private IInterceptorSubject? FindResultSubject(MarkdownStructureChange change)
+    {
+        var snapshot = _parseResult;
+        if (snapshot.Page?.Source != change.Write.Page.Source)
+        {
+            return null;
+        }
+
+        return change.ResultBlockIndex >= 0 ? snapshot.BlockSubjects.GetValueOrDefault(change.ResultBlockIndex) : null;
     }
 
     // The block whose own subject the subject is. Unlike FindBlock, not the block that holds the subject in its

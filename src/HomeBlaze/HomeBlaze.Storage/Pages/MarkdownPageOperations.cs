@@ -7,7 +7,8 @@ namespace HomeBlaze.Storage.Pages;
 /// <param name="ChangedBlock">
 /// The block of the page before the change whose content changed, or null when the change is directly on the page.
 /// </param>
-internal sealed record MarkdownStructureChange(MarkdownBlockWrite Write, MarkdownBlock? ChangedBlock);
+/// <param name="ResultBlockIndex">The index in the page of <paramref name="Write"/> of the block that the change moved or inserted, or -1.</param>
+internal sealed record MarkdownStructureChange(MarkdownBlockWrite Write, MarkdownBlock? ChangedBlock, int ResultBlockIndex = -1);
 
 /// <summary>
 /// Removes, swaps and inserts whole blocks in the text of a page. Every change is checked with
@@ -101,10 +102,13 @@ internal static class MarkdownPageOperations
         var subjects = MapSubjects(blockSubjects, map);
         var secondLineCount = second.EndLine - second.Line + 1;
         var middleLineCount = second.Line - first.EndLine - 1;
-        CarrySubjects(blockSubjects, second, FindBlockAt(after, first.Line), subjects);
-        CarrySubjects(blockSubjects, first, FindBlockAt(after, first.Line + secondLineCount + middleLineCount), subjects);
+        var secondAfter = FindBlockAt(after, first.Line);
+        var firstAfter = FindBlockAt(after, first.Line + secondLineCount + middleLineCount);
+        CarrySubjects(blockSubjects, second, secondAfter, subjects);
+        CarrySubjects(blockSubjects, first, firstAfter, subjects);
 
-        return new MarkdownStructureChange(new MarkdownBlockWrite(after, subjects, [], HasInsertedOrRemovedBlocks: true), parent);
+        var moved = ReferenceEquals(block, second) ? secondAfter : firstAfter;
+        return new MarkdownStructureChange(new MarkdownBlockWrite(after, subjects, [], HasInsertedOrRemovedBlocks: true), parent, moved.Index);
     }
 
     /// <summary>
@@ -232,6 +236,20 @@ internal static class MarkdownPageOperations
 
     private static bool EndsAt(MarkdownPage page, int line, int endLine) => FindBlockAt(page, line).EndLine == endLine;
 
+    // The first block on the inserted lines, which is the new block: blocks are listed in the order of their head lines.
+    private static MarkdownBlock? FindFirstBlockFrom(MarkdownPage page, MarkdownLineEdit edit)
+    {
+        foreach (var block in page.AllBlocks)
+        {
+            if (block.Line >= edit.Line && block.Line < edit.InsertedEnd)
+            {
+                return block;
+            }
+        }
+
+        return null;
+    }
+
     private static MarkdownBlock FindBlockAt(MarkdownPage page, int line)
     {
         foreach (var block in page.AllBlocks)
@@ -309,7 +327,9 @@ internal static class MarkdownPageOperations
         }
 
         return new MarkdownStructureChange(
-            new MarkdownBlockWrite(after, MapSubjects(blockSubjects, map), [], HasInsertedOrRemovedBlocks: true), owner);
+            new MarkdownBlockWrite(after, MapSubjects(blockSubjects, map), [], HasInsertedOrRemovedBlocks: true),
+            owner,
+            FindFirstBlockFrom(after, edit)?.Index ?? -1);
     }
 
     /// <summary>
@@ -344,7 +364,9 @@ internal static class MarkdownPageOperations
         }
 
         return new MarkdownStructureChange(
-            new MarkdownBlockWrite(after, MapSubjects(blockSubjects, map), [], HasInsertedOrRemovedBlocks: true), owner);
+            new MarkdownBlockWrite(after, MapSubjects(blockSubjects, map), [], HasInsertedOrRemovedBlocks: true),
+            owner,
+            FindFirstBlockFrom(after, edit)?.Index ?? -1);
     }
 
     /// <summary>
