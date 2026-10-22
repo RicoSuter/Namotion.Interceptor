@@ -38,9 +38,14 @@ public class WidgetDocumentationPathTests : IClassFixture<AdministrationFolderFi
         var page = _folder.FindPage(pagePath);
 
         // Assert
-        var pathsToNothing = DocumentationFolderFixture.FindSubjects(page)
-            .OfType<RenderExpression>()
-            .SelectMany(expression => MarkdownExpressions.Parse(expression.Text, out _)?.Paths ?? [])
+        var expressions = DocumentationFolderFixture.FindSubjects(page).OfType<RenderExpression>().ToList();
+        var expressionsWithAnError = expressions
+            .Where(expression => expression.Error is not null)
+            .Select(expression => $"{pagePath}: the expression '{expression.Text}' does not parse: {expression.Error}");
+        Assert.Empty(expressionsWithAnError);
+
+        var pathsToNothing = expressions
+            .SelectMany(expression => MarkdownExpressions.Parse(expression.Text, out _)!.Paths)
             .Where(path => resolver.ResolveScopedProperty(path, PathStyle.Canonical, page) is null);
 
         Assert.Empty(pathsToNothing);
