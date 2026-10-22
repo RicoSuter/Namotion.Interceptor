@@ -88,7 +88,7 @@ namespace HomeBlaze.Storage.Files
         public string? Title { get; }
         public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
         public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
-        public System.Threading.Tasks.Task<HomeBlaze.Storage.Pages.MarkdownEditResult> AddSlotItemAsync(Namotion.Interceptor.IInterceptorSubject owner, string slotName, Namotion.Interceptor.IInterceptorSubject? item, System.Threading.CancellationToken cancellationToken) { }
+        public System.Threading.Tasks.Task<HomeBlaze.Storage.Pages.MarkdownEditResult> AddSlotItemAsync(Namotion.Interceptor.IInterceptorSubject owner, string slotName, Namotion.Interceptor.IInterceptorSubject item, System.Threading.CancellationToken cancellationToken) { }
         public System.Threading.Tasks.Task<HomeBlaze.Storage.Pages.MarkdownEditResult> AddTextToSlotAsync(Namotion.Interceptor.IInterceptorSubject owner, string? slotName, string text, System.Threading.CancellationToken cancellationToken) { }
         public System.Threading.Tasks.Task<HomeBlaze.Storage.Pages.MarkdownEditResult> AddWidgetToSlotAsync(Namotion.Interceptor.IInterceptorSubject owner, string? slotName, Namotion.Interceptor.IInterceptorSubject widget, string? name, System.Threading.CancellationToken cancellationToken) { }
         public bool CanInsertTextAt(Namotion.Interceptor.IInterceptorSubject content, Namotion.Interceptor.IInterceptorSubject? before) { }
@@ -495,8 +495,8 @@ namespace HomeBlaze.Storage.Pages
     }
     public sealed class MarkdownListSlot : System.IEquatable<HomeBlaze.Storage.Pages.MarkdownListSlot>
     {
-        public MarkdownListSlot(string Name, System.Type? ItemType) { }
-        public System.Type? ItemType { get; init; }
+        public MarkdownListSlot(string Name, System.Type ItemType) { }
+        public System.Type ItemType { get; init; }
         public string Name { get; init; }
     }
     public sealed class MarkdownPage

@@ -65,17 +65,45 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
             actions.CanDelete, actions.CanMoveUp, actions.CanMoveDown, CanEditText: subject is HtmlSegment && actions.CanDelete);
     }
 
-    public override IReadOnlyList<PageListSlot> GetListSlots(IInterceptorSubject owner)
+    // Two reads of the page, which a reload between them can answer from two versions. The bar renders again after every
+    // reload, as GetContentSlots reads the children of the page, and every add checks the page again.
+    public override IReadOnlyList<PageAddTarget> GetAddTargets(IInterceptorSubject owner) =>
+        CreateAddTargets(_file.GetContentSlots(owner), _file.GetListSlots(owner));
+
+    private static PageAddTarget[] CreateAddTargets(IReadOnlyList<MarkdownContentSlot> contentSlots, IReadOnlyList<MarkdownListSlot> listSlots)
     {
-        var slots = _file.GetListSlots(owner);
-        var result = new PageListSlot[slots.Count];
-        for (var index = 0; index < slots.Count; index++)
+        if (contentSlots.Count + listSlots.Count == 0)
         {
-            result[index] = new PageListSlot(slots[index].Name, slots[index].ItemType);
+            return [];
+        }
+
+        var result = new PageAddTarget[contentSlots.Count + listSlots.Count];
+        var index = 0;
+        foreach (var kind in (ReadOnlySpan<MarkdownContentSlotKind>)[MarkdownContentSlotKind.Default, MarkdownContentSlotKind.Named, MarkdownContentSlotKind.ListItem])
+        {
+            foreach (var slot in contentSlots)
+            {
+                if (slot.Kind == kind)
+                {
+                    result[index++] = new PageAddTarget(ToTargetKind(kind), slot.Name, null);
+                }
+            }
+        }
+
+        foreach (var slot in listSlots)
+        {
+            result[index++] = new PageAddTarget(PageAddTargetKind.ConfiguredItem, slot.Name, slot.ItemType);
         }
 
         return result;
     }
+
+    private static PageAddTargetKind ToTargetKind(MarkdownContentSlotKind kind) => kind switch
+    {
+        MarkdownContentSlotKind.Default => PageAddTargetKind.DefaultContent,
+        MarkdownContentSlotKind.Named => PageAddTargetKind.NamedContent,
+        _ => PageAddTargetKind.ContentItem
+    };
 
     public override string? GetBlockName(IInterceptorSubject subject) => _file.GetBlockName(subject);
 
@@ -126,61 +154,41 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
             ? _file.MoveTextBlockAsync(segment, direction, CancellationToken.None)
             : _file.MoveBlockAsync(subject, direction, CancellationToken.None));
 
-    public override async Task InsertWidgetAsync(IInterceptorSubject content, IInterceptorSubject? before)
-    {
-        var pageContent = _file.Content;
-        var result = await SubjectSetupDialog.ShowAsync(_dialogService, new SubjectSetupOptions
-        {
-            NameField = MarkdownBlockNames.CreateNameOptions(pageContent ?? string.Empty)
-        });
+    public override Task InsertWidgetAsync(IInterceptorSubject content, IInterceptorSubject? before) =>
+        CreateWidgetAsync((widget, name) => _file.InsertWidgetAsync(content, before, widget, name, CancellationToken.None));
 
+    public override Task AddWidgetAsync(IInterceptorSubject owner, PageAddTarget target) =>
+        CreateWidgetAsync((widget, name) => _file.AddWidgetToSlotAsync(owner, target.SlotName, widget, name, CancellationToken.None));
+
+    public override Task AddTextAsync(IInterceptorSubject owner, PageAddTarget target) =>
+        CreateTextAsync(
+            target.AddTextName ?? "Add text",
+            text => _file.AddTextToSlotAsync(owner, target.SlotName, text, CancellationToken.None));
+
+    public override async Task AddListItemAsync(IInterceptorSubject owner, PageAddTarget target)
+    {
+        if (target is not { SlotName: { } slotName, ItemType: { } itemType })
+        {
+            return;
+        }
+
+        var pageContent = _file.Content;
+        var result = await SubjectSetupDialog.ShowAsync(_dialogService, new SubjectSetupOptions { Type = itemType });
         if (result is null)
         {
             return;
         }
 
-        // Only the text of the subject goes into the page, and the reload creates the instance that lives on.
         try
         {
             if (IsUnchangedSince(pageContent))
             {
-                await RunAsync(() => _file.InsertWidgetAsync(content, before, result.Subject, result.Name, CancellationToken.None));
+                await RunAsync(() => _file.AddSlotItemAsync(owner, slotName, result.Subject, CancellationToken.None));
             }
         }
         finally
         {
             _subjectFactory.DiscardSubject(result.Subject);
-        }
-    }
-
-    public override async Task AddListItemAsync(IInterceptorSubject owner, PageListSlot slot)
-    {
-        var pageContent = _file.Content;
-        IInterceptorSubject? item = null;
-        if (slot.ItemType is { } itemType)
-        {
-            var result = await SubjectSetupDialog.ShowAsync(_dialogService, new SubjectSetupOptions { Type = itemType });
-            if (result is null)
-            {
-                return;
-            }
-
-            item = result.Subject;
-        }
-
-        try
-        {
-            if (IsUnchangedSince(pageContent))
-            {
-                await RunAsync(() => _file.AddSlotItemAsync(owner, slot.Name, item, CancellationToken.None));
-            }
-        }
-        finally
-        {
-            if (item is not null)
-            {
-                _subjectFactory.DiscardSubject(item);
-            }
         }
     }
 
@@ -211,12 +219,44 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
     public override bool CanInsertText(IInterceptorSubject content, IInterceptorSubject? before) =>
         _file.CanInsertTextAt(content, before);
 
-    public override async Task InsertTextAsync(IInterceptorSubject content, IInterceptorSubject? before)
+    public override Task InsertTextAsync(IInterceptorSubject content, IInterceptorSubject? before) =>
+        CreateTextAsync("Insert text", text => _file.InsertTextAsync(content, before, text, CancellationToken.None));
+
+    // Asks for a widget and its name, and writes it unless the page changed while the dialog was open.
+    private async Task CreateWidgetAsync(Func<IInterceptorSubject, string?, Task<MarkdownEditResult>> write)
+    {
+        var pageContent = _file.Content;
+        var result = await SubjectSetupDialog.ShowAsync(_dialogService, new SubjectSetupOptions
+        {
+            NameField = MarkdownBlockNames.CreateNameOptions(pageContent ?? string.Empty)
+        });
+
+        if (result is null)
+        {
+            return;
+        }
+
+        // Only the text of the subject goes into the page, and the reload creates the instance that lives on.
+        try
+        {
+            if (IsUnchangedSince(pageContent))
+            {
+                await RunAsync(() => write(result.Subject, result.Name));
+            }
+        }
+        finally
+        {
+            _subjectFactory.DiscardSubject(result.Subject);
+        }
+    }
+
+    // Asks for new text in an empty dialog, which shows a refusal and keeps the text.
+    private async Task CreateTextAsync(string title, Func<string, Task<MarkdownEditResult>> write)
     {
         var pageContent = _file.Content;
         await MarkdownTextDialog.ShowAsync(
             _dialogService,
-            "Insert text",
+            title,
             string.Empty,
             _isDarkMode(),
             async text =>
@@ -228,7 +268,7 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
                     return PageChangedWhileInsertingMessage;
                 }
 
-                var result = await RunAsync(() => _file.InsertTextAsync(content, before, text, CancellationToken.None), reportsInSnackbar: false);
+                var result = await RunAsync(() => write(text), reportsInSnackbar: false);
                 return result.Refusal;
             });
     }

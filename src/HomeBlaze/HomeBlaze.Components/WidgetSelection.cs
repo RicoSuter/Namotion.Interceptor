@@ -44,8 +44,8 @@ public sealed class WidgetSelection
 
     /// <summary>
     /// Selects the selectable widget of <paramref name="subject"/> among <paramref name="root"/> and the widgets inside it.
-    /// When there is none yet, such as for a block that a reload of the page has just created, the selection is cleared and
-    /// the first such widget that renders is selected.
+    /// When there is none yet, such as for a block that a reload of the page has just created, the selection stays until
+    /// the first such widget renders and is selected.
     /// </summary>
     public void SelectSubject(IInterceptorSubject subject, SubjectComponent root)
     {
@@ -55,7 +55,8 @@ public sealed class WidgetSelection
             return;
         }
 
-        Select(null);
+        // Kept rather than cleared: text in the content of a widget, such as the footer of a card, is selectable only while
+        // that widget or a block in it is selected, so it would never become selectable to take the selection.
         _pendingSubject = subject;
     }
 

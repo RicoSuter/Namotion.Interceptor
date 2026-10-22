@@ -19,12 +19,12 @@
                 <SubjectComponent @key="mapCase" Subject="@mapCase" Type="SubjectComponentType.Widget" />
             }
 
-            @if (StructureEditor is { } editor && PageListSlot.Find(editor.GetListSlots(map), "Case") is { } slot)
+            @if (StructureEditor is { } editor && PageAddTarget.Find(editor.GetAddTargets(map), "Case") is { } target)
             {
                 <MudButton Size="Size.Small"
                            StartIcon="@Icons.Material.Filled.Add"
                            Class="edit-mode-interactive"
-                           OnClick="@(() => editor.AddListItemAsync(map, slot))"
+                           OnClick="@(() => editor.AddListItemAsync(map, target))"
                            data-testid="add-case-button">Add case</MudButton>
             }
         </div>

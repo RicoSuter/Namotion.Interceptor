@@ -770,8 +770,9 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         before is HtmlSegment ? PageChangedRefusal : StructureChangedRefusal;
 
     /// <summary>
-    /// Appends a block to the list slot <paramref name="slotName"/> of the block of <paramref name="owner"/>: with the
-    /// configuration of <paramref name="item"/>, or empty for a slot whose blocks hold page content (null item).
+    /// Appends a block with the configuration of <paramref name="item"/> to the list slot <paramref name="slotName"/> of the
+    /// block of <paramref name="owner"/>, whose items have the type of <paramref name="item"/>. A slot whose blocks hold page
+    /// content gets a new block from <see cref="AddWidgetToSlotAsync"/> or <see cref="AddTextToSlotAsync"/>.
     /// </summary>
     /// <remarks>
     /// Refused when the file differs from the text the page last read, and the page then reads it, or when the page would
@@ -779,9 +780,10 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// </remarks>
     /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage or from within a write of this page.</exception>
     public Task<MarkdownEditResult> AddSlotItemAsync(
-        IInterceptorSubject owner, string slotName, IInterceptorSubject? item, CancellationToken cancellationToken)
+        IInterceptorSubject owner, string slotName, IInterceptorSubject item, CancellationToken cancellationToken)
     {
-        var configurationJson = item is null ? "{}" : MarkdownBlockConfiguration.Serialize(_serializer, item, block: null);
+        ArgumentNullException.ThrowIfNull(item);
+        var configurationJson = MarkdownBlockConfiguration.Serialize(_serializer, item, block: null);
         return EditStructureAsync(
             snapshot =>
             {
@@ -792,8 +794,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
                     return (null, NoBlockRefusal);
                 }
 
-                if (!SlotMap.For(owner.GetType()).Named.TryGetValue(slotName, out var slot) || !slot.IsList ||
-                    (item is null ? !slot.IsOpen : item.GetType() != slot.ValueType))
+                if (!SlotMap.For(owner.GetType()).Named.TryGetValue(slotName, out var slot) || !slot.IsList || slot.IsOpen ||
+                    item.GetType() != slot.ValueType)
                 {
                     return (null, $"The block has no list slot '{slotName}' for this item.");
                 }
@@ -961,7 +963,11 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             ContainedBlockCount: MarkdownPageOperations.CountBlocks(block) - 1);
     }
 
-    /// <summary>Gets the list slots of the block of <paramref name="owner"/>, none when it has no block on this page.</summary>
+    /// <summary>
+    /// Gets the list slots of configured items of the block of <paramref name="owner"/>, for <see cref="AddSlotItemAsync"/>,
+    /// none when it has no block on this page. A list slot whose blocks hold page content is one of
+    /// <see cref="GetContentSlots"/>.
+    /// </summary>
     public IReadOnlyList<MarkdownListSlot> GetListSlots(IInterceptorSubject owner)
     {
         var snapshot = _parseResult;
@@ -973,9 +979,9 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         var result = new List<MarkdownListSlot>();
         foreach (var slot in SlotMap.For(owner.GetType()).Slots)
         {
-            if (slot.IsList)
+            if (slot is { IsList: true, IsOpen: false })
             {
-                result.Add(new MarkdownListSlot(slot.Name, slot.IsOpen ? null : slot.ValueType));
+                result.Add(new MarkdownListSlot(slot.Name, slot.ValueType));
             }
         }
 

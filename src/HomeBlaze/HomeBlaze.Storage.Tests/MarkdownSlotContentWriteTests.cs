@@ -368,6 +368,29 @@ public class MarkdownSlotContentWriteTests : IDisposable
         Assert.Empty(markdown.GetContentSlots(new Card()));
     }
 
+    [Fact]
+    public async Task WhenTheSlotsOfWidgetsThatShipAreAskedFor_ThenTheContentSlotsAndTheSlotsOfConfiguredItemsAreApart()
+    {
+        // Arrange
+        var markdown = await LoadAsync(
+            CardPage + "\n" + FlowPage + "\n" + AlertPage +
+            "\n:: HomeBlaze.Components.TabLayout#tabs\n::: Tab Title=X\n:::\n::\n" +
+            "\n:: HomeBlaze.Components.Switch#switch\n::\n");
+        var card = markdown.Children["card"];
+        var flow = markdown.Children["flow"];
+        var tabs = markdown.Children["tabs"];
+        var alert = markdown.Children["alert"];
+        var toggle = markdown.Children["switch"];
+
+        // Act & Assert
+        Assert.Empty(markdown.GetListSlots(card));
+        Assert.Empty(markdown.GetListSlots(flow));
+        Assert.Equal([new MarkdownListSlot("Tab", typeof(Tab))], markdown.GetListSlots(tabs));
+        Assert.Empty(markdown.GetListSlots(alert));
+        Assert.Empty(markdown.GetListSlots(toggle));
+        Assert.Equal([new MarkdownContentSlot("Badge", MarkdownContentSlotKind.Named, false)], markdown.GetContentSlots(toggle));
+    }
+
     private async Task<MarkdownFile> LoadAsync(string content, string name = "Page.md")
     {
         WriteFile(name, content);

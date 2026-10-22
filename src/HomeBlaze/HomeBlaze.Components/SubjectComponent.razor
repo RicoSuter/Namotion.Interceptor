@@ -38,9 +38,9 @@
                 var structureEditor = isSelected ? StructureEditor : null;
                 var actions = structureEditor?.GetActions(Subject) ?? default;
                 var hasEditAction = isSelected && (actions.CanEditText || HasEditComponent);
-                var listSlots = structureEditor?.GetListSlots(Subject) ?? [];
+                var addTargets = structureEditor?.GetAddTargets(Subject) ?? [];
             }
-            @if (isSelected && (selectableParent != null || hasEditAction || actions.CanDelete || listSlots.Count > 0))
+            @if (isSelected && (selectableParent != null || hasEditAction || actions.CanDelete || addTargets.Count > 0))
             {
                 @* The anchor of the bar, see SubjectComponent.razor.css. *@
                 <div class="subject-action-bar-anchor">
@@ -54,7 +54,9 @@
                                 aria-label="Widget actions"
                                 data-testid="widget-action-bar">
                         @* Written here, so that it keeps the scope of this component in the provider of the popover. *@
-                        <div class="subject-action-bar-content">
+                        @* The bar renders in the provider of the popovers, outside the widget, and a double click in it must
+                           never open the edit dialog of the widget either. *@
+                        <div class="subject-action-bar-content" @ondblclick:stopPropagation="true">
                             @if (selectableParent != null)
                             {
                                 <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward"
@@ -88,15 +90,38 @@
                                                data-testid="move-down-button" />
                             }
 
-                            @foreach (var slot in listSlots)
+                            @* Only the selected widget renders its bar, so the names and lambdas below allocate for one widget. *@
+                            @if (addTargets is [{ AddItemName: { } onlyItemName } onlyTarget])
                             {
-                                @* Only the selected widget renders its bar, so the lambda allocates for one widget. *@
                                 <MudIconButton Icon="@Icons.Material.Filled.Add"
                                                Size="Size.Small"
-                                               title="@($"Add {slot.Name}")"
-                                               aria-label="@($"Add {slot.Name}")"
-                                               OnClick="@(() => structureEditor!.AddListItemAsync(Subject!, slot))"
-                                               data-testid="@($"add-slot-item-button-{slot.Name}")" />
+                                               title="@onlyItemName"
+                                               aria-label="@onlyItemName"
+                                               OnClick="@(() => structureEditor!.AddListItemAsync(Subject!, onlyTarget))"
+                                               data-testid="add-button" />
+                            }
+                            else if (addTargets.Count > 0)
+                            {
+                                var addMenuName = $"Add to {GetAccessibleName()}";
+                                <MudMenu Icon="@Icons.Material.Filled.Add"
+                                         Size="Size.Small"
+                                         Dense="true"
+                                         AriaLabel="@addMenuName"
+                                         title="@addMenuName"
+                                         data-testid="add-menu">
+                                    @foreach (var target in addTargets)
+                                    {
+                                        if (target.AddItemName is { } itemName)
+                                        {
+                                            <MudMenuItem OnClick="@(() => structureEditor!.AddListItemAsync(Subject!, target))">@(itemName)...</MudMenuItem>
+                                        }
+                                        else
+                                        {
+                                            <MudMenuItem OnClick="@(() => structureEditor!.AddWidgetAsync(Subject!, target))">@(target.AddWidgetName)...</MudMenuItem>
+                                            <MudMenuItem OnClick="@(() => structureEditor!.AddTextAsync(Subject!, target))">@(target.AddTextName)...</MudMenuItem>
+                                        }
+                                    }
+                                </MudMenu>
                             }
 
                             @if (hasEditAction)

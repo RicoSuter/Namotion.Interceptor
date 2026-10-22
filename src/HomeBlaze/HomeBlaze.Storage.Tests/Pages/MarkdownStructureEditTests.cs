@@ -97,23 +97,6 @@ public class MarkdownStructureEditTests
     }
 
     [Fact]
-    public async Task WhenAnItemIsAddedToAnOpenListSlot_ThenAnEmptyBlockIsWritten()
-    {
-        // Arrange
-        var fixture = await MarkdownPageFixture.CreateAsync();
-        var page = await fixture.AddPageAsync("page.md", PanelPage);
-        var panel = (TestPanel)page.Children["panel"];
-
-        // Act
-        var result = await page.AddSlotItemAsync(panel, "Item", null, CancellationToken.None);
-        var written = await fixture.ReadAsync("page.md");
-
-        // Assert
-        Assert.True(result.IsWritten);
-        Assert.Contains("::: Item\n:::\n::", written);
-    }
-
-    [Fact]
     public async Task WhenTheSubjectHasNoBlock_ThenTheEditIsRefusedAndTheFileIsUnchanged()
     {
         // Arrange
@@ -150,7 +133,7 @@ public class MarkdownStructureEditTests
     }
 
     [Fact]
-    public async Task WhenTheListSlotsAndTheNameOfABlockAreAskedFor_ThenTheyComeFromItsTypeAndItsHeadLine()
+    public async Task WhenTheListSlotsAndTheNameOfABlockAreAskedFor_ThenTheSlotsOfConfiguredItemsComeFromItsTypeAndTheNameFromItsHeadLine()
     {
         // Arrange
         var fixture = await MarkdownPageFixture.CreateAsync();
@@ -161,7 +144,7 @@ public class MarkdownStructureEditTests
         var slots = page.GetListSlots(panel);
 
         // Assert
-        Assert.Equal([new MarkdownListSlot("Row", typeof(TestRow)), new MarkdownListSlot("Item", null)], slots);
+        Assert.Equal([new MarkdownListSlot("Row", typeof(TestRow))], slots);
         Assert.Equal("panel", page.GetBlockName(panel));
         Assert.Null(page.GetBlockName(panel.Rows[0]));
         Assert.True(page.IsContentOfPage(page));
