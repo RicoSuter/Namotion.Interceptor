@@ -909,6 +909,17 @@ internal static class MarkdownPageOperations
         MarkdownBlock owner,
         string slotName,
         string configurationJson,
+        out string? refusal) =>
+        TryInsertSlotBlock(
+            page, blockSubjects, owner, slotName, configurationJson, MarkdownBlockWriter.GetSlotBlockPlacement(page, owner, slotName), out refusal);
+
+    private static MarkdownStructureChange? TryInsertSlotBlock(
+        MarkdownPage page,
+        IReadOnlyDictionary<int, IInterceptorSubject> blockSubjects,
+        MarkdownBlock owner,
+        string slotName,
+        string configurationJson,
+        MarkdownBlockPlacement placement,
         out string? refusal)
     {
         if (!CanInsertOrRemoveBlocks(page, out refusal))
@@ -916,7 +927,6 @@ internal static class MarkdownPageOperations
             return null;
         }
 
-        var placement = MarkdownBlockWriter.GetSlotBlockPlacement(page, owner, slotName);
         var text = MarkdownBlockWriter.Indent(
             MarkdownBlockWriter.CreateBlock(
                 slotName, null, configurationJson, placement.FenceLength, placement.LineEnding, placement.HasClosingLine),
@@ -940,6 +950,8 @@ internal static class MarkdownPageOperations
     /// Adds new content at the end of the slot <paramref name="slot"/> of <paramref name="owner"/>, through
     /// <paramref name="insert"/>: at the end of the default content, which is before the first slot block of the owner, at
     /// the end of the content of the block of a named slot, or in a new block of the slot when the slot has none or is a list.
+    /// A new block of a named slot goes before the first slot block of a slot that <paramref name="slots"/> declares after it,
+    /// and otherwise where <see cref="TryAppendSlotBlock"/> appends one.
     /// </summary>
     /// <returns>
     /// Null with a refusal when the owner has no closing line or a step would change other blocks of the page, or with the
@@ -949,6 +961,7 @@ internal static class MarkdownPageOperations
         MarkdownPage page,
         IReadOnlyDictionary<int, IInterceptorSubject> blockSubjects,
         MarkdownBlock owner,
+        SlotMap slots,
         SlotDefinition slot,
         MarkdownContentInsert insert,
         out string? refusal)
@@ -968,7 +981,20 @@ internal static class MarkdownPageOperations
 
         // An empty block of the slot first, into which the content then goes as into a block of the slot that exists. Each
         // step is aligned on its own, as in TryMove.
-        if (TryAppendSlotBlock(page, blockSubjects, owner, slot.Name, "{}", out refusal) is not { ResultBlockIndex: >= 0 } slotChange)
+        var placement = MarkdownBlockWriter.GetSlotBlockPlacement(page, owner, slot.Name);
+        if (!slot.IsList && FindFirstBlockOfLaterSlot(owner, slots, slot) is { } laterBlock)
+        {
+            // Written like that block, so that it ends before that block also without a closing line.
+            placement = placement with
+            {
+                Line = laterBlock.Line,
+                FenceLength = laterBlock.FenceLength,
+                HasClosingLine = laterBlock.HasClosingLine,
+                Indentation = MarkdownBlockWriter.GetIndentation(page.Source, laterBlock)
+            };
+        }
+
+        if (TryInsertSlotBlock(page, blockSubjects, owner, slot.Name, "{}", placement, out refusal) is not { ResultBlockIndex: >= 0 } slotChange)
         {
             refusal ??= $"Inserting a '{slot.Name}' block would change other blocks of the page.";
             return null;
@@ -984,6 +1010,23 @@ internal static class MarkdownPageOperations
         return change is null
             ? null
             : change with { Write = change.Write with { HasInsertedOrRemovedBlocks = true }, ChangedBlock = owner };
+    }
+
+    // The slot blocks are listed in the order of the text.
+    private static MarkdownBlock? FindFirstBlockOfLaterSlot(MarkdownBlock owner, SlotMap slots, SlotDefinition slot)
+    {
+        var position = slots.Slots.IndexOf(slot);
+        foreach (var child in owner.Children)
+        {
+            if (child.Kind == MarkdownBlockKind.Slot &&
+                slots.Named.TryGetValue(child.Head!.Name, out var childSlot) &&
+                slots.Slots.IndexOf(childSlot) > position)
+            {
+                return child;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>

@@ -86,6 +86,87 @@ public class MarkdownSlotContentWriteTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenAWidgetIsAddedToADefaultBodyBeforeASlotBlock_ThenItGoesBeforeTheSlotBlock()
+    {
+        // Arrange
+        var markdown = await LoadAsync(CardWithFooterPage);
+        var card = Assert.IsType<Card>(markdown.Children["card"]);
+        var bodyLeaf = ((MarkdownFragment)card.Content!).Children.Values.OfType<TestLeaf>().Single();
+
+        // Act
+        var result = await markdown.AddWidgetToSlotAsync(card, null, new TestLeaf { Name = "fresh" }, "added", CancellationToken.None);
+
+        // Assert
+        Assert.True(result.IsWritten);
+        Assert.Contains(
+            $"::: {LeafType}#bodyleaf Name=b\n:::\n\n::: {LeafType}#added Name=fresh\n:::\n\n::: Footer\n", ReadPage());
+        var leaves = ((MarkdownFragment)card.Content!).Children.Values.OfType<TestLeaf>().ToList();
+        Assert.Same(bodyLeaf, leaves[0]);
+        Assert.Same(leaves[1], result.Subject);
+        Assert.Same(card, markdown.Children["card"]);
+    }
+
+    [Fact]
+    public async Task WhenTextIsAddedToAnExistingNamedSlot_ThenItFollowsTheContentOfTheSlotBlock()
+    {
+        // Arrange
+        var markdown = await LoadAsync(CardWithFooterPage);
+        var card = Assert.IsType<Card>(markdown.Children["card"]);
+        var footer = card.Footer;
+        var footerLeaf = ((MarkdownFragment)footer!).Children.Values.OfType<TestLeaf>().Single();
+
+        // Act
+        var result = await markdown.AddTextToSlotAsync(card, "Footer", "Foot.", CancellationToken.None);
+
+        // Assert
+        Assert.True(result.IsWritten);
+        Assert.Contains($"::: Footer\n:::: {LeafType}#footerleaf Name=f\n::::\n\nFoot.\n\n:::\n::\n", ReadPage());
+        Assert.Same(footer, card.Footer);
+        Assert.Same(footerLeaf, ((MarkdownFragment)card.Footer!).Children.Values.OfType<TestLeaf>().Single());
+        Assert.Contains(Assert.IsType<HtmlSegment>(result.Subject), ((MarkdownFragment)card.Footer!).Children.Values);
+    }
+
+    [Fact]
+    public async Task WhenAMissingNamedSlotIsDeclaredBeforeASlotThatHasABlock_ThenItsNewBlockGoesBeforeThatBlock()
+    {
+        // Arrange
+        var markdown = await LoadAsync(CardWithFooterPage);
+        var card = Assert.IsType<Card>(markdown.Children["card"]);
+        var footer = card.Footer;
+
+        // Act
+        var result = await markdown.AddTextToSlotAsync(card, "HeaderRight", "Right.", CancellationToken.None);
+
+        // Assert
+        Assert.True(result.IsWritten);
+        Assert.Contains($":::\n::: HeaderRight\n\nRight.\n\n:::\n::: Footer\n:::: {LeafType}#footerleaf", ReadPage());
+        Assert.Same(footer, card.Footer);
+        Assert.Contains(Assert.IsType<HtmlSegment>(result.Subject), Assert.IsType<MarkdownFragment>(card.HeaderRight).Children.Values);
+    }
+
+    [Theory]
+    [InlineData($":: {LeafType}\n::", "A widget in this content needs at least 4 ':' characters.")]
+    [InlineData($"Foot.\n\n:::: {LeafType}#bodyleaf\n::::", "The name 'bodyleaf' is already used on this page.")]
+    public async Task WhenTheContentForAMissingNamedSlotIsRefused_ThenNothingIsWritten(string text, string refusal)
+    {
+        // Arrange
+        const string source = $"# Cards\n\n:: HomeBlaze.Components.Card#card Title=A\nBody.\n\n::: {LeafType}#bodyleaf Name=b\n:::\n::\n";
+        var markdown = await LoadAsync(source);
+        var card = Assert.IsType<Card>(markdown.Children["card"]);
+        var body = card.Content;
+
+        // Act
+        var result = await markdown.AddTextToSlotAsync(card, "Footer", text, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(refusal, result.Refusal);
+        Assert.Equal(source, ReadPage());
+        Assert.Equal(source, markdown.Content);
+        Assert.Same(body, card.Content);
+        Assert.Null(card.Footer);
+    }
+
+    [Fact]
     public async Task WhenContentIsAddedToADefaultBodyBeforeASlotBlock_ThenItGoesBeforeTheSlotBlock()
     {
         // Arrange

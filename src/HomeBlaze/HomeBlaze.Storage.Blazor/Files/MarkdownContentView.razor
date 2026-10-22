@@ -17,8 +17,9 @@
 }
 @if (showsInsertLines && segments.Count == 0)
 {
-    @* Empty content, such as a new item of a list, has a box to fill in place of its two lines, which would take no room. *@
-    <div class="content-placeholder" data-testid="content-placeholder">
+    @* Empty content, such as a new item of a list, has a box to fill in place of its two lines, which would take no room. A
+       double click on the box must not open the edit dialog of the widget around it. *@
+    <div class="content-placeholder edit-mode-interactive" data-testid="content-placeholder" @ondblclick:stopPropagation="true">
         <BlockInsertLine Label="@($"Insert into {contentName}")"
                          OnInsertWidget="@(() => StructureEditor!.InsertWidgetAsync(Content!, null))"
                          OnInsertText="@GetInsertTextCallback(null)" />

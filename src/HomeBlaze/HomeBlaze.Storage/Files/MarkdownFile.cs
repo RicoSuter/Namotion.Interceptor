@@ -863,22 +863,22 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
                     return (null, NoBlockRefusal);
                 }
 
-                if (FindContentSlot(owner.GetType(), slotName) is not { } slot)
+                var slots = SlotMap.For(owner.GetType());
+                if (FindContentSlot(slots, slotName) is not { } slot)
                 {
                     return (null, slotName is null
                         ? "The block has no default slot for content."
                         : $"The block has no slot '{slotName}' for content.");
                 }
 
-                return (MarkdownPageOperations.TryAddToSlot(page, snapshot.BlockSubjects, block, slot, insert, out var refusal), refusal);
+                return (MarkdownPageOperations.TryAddToSlot(page, snapshot.BlockSubjects, block, slots, slot, insert, out var refusal), refusal);
             },
             StructureChangedRefusal,
             cancellationToken);
 
     // The default slot when the name is null, and only a slot that takes page content: a slot of configured items takes none.
-    private static SlotDefinition? FindContentSlot(Type type, string? slotName)
+    private static SlotDefinition? FindContentSlot(SlotMap slots, string? slotName)
     {
-        var slots = SlotMap.For(type);
         var slot = slotName is null ? slots.Default : slots.Named.GetValueOrDefault(slotName);
         return slot is { IsOpen: true } ? slot : null;
     }
@@ -886,10 +886,15 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// <summary>
     /// Gets the slots of the block of <paramref name="owner"/> that take page content, in the order the type declares them,
     /// for <see cref="AddWidgetToSlotAsync"/> and <see cref="AddTextToSlotAsync"/>. None when it has no block on this page or
-    /// its block has no closing line.
+    /// its block has no closing line. <see cref="MarkdownContentSlot.Exists"/> tells whether the slot has a content subject
+    /// now; an add to a slot of <see cref="MarkdownContentSlotKind.ListItem"/> creates a new item whether or not it has any.
+    /// It reads the children of the page, so a component that renders it renders again after every reload.
     /// </summary>
     public IReadOnlyList<MarkdownContentSlot> GetContentSlots(IInterceptorSubject owner)
     {
+        // The snapshot is not tracked, as in GetBlockActions. Do not remove it, although its result is not used.
+        _ = Children;
+
         var snapshot = _parseResult;
         if (snapshot.Page is not { } page || FindOwnBlock(page, snapshot.BlockSubjects, owner) is not { HasClosingLine: true })
         {

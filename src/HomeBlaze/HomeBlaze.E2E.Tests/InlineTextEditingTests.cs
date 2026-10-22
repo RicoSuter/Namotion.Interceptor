@@ -246,6 +246,37 @@ public class InlineTextEditingTests
     }
 
     [Fact]
+    public async Task WhenThePlaceholderOfAnEmptyItemIsDoubleClicked_ThenNoDialogOpens()
+    {
+        // Arrange
+        var page = await OpenPageInInlineModeAsync(EmptyContentPageName, EmptyContent);
+        await page.GetByText("First item.", new() { Exact = true }).SelectWidgetAsync();
+        var button = page.GetByTestId("flow-item").Nth(1).GetByTestId("content-placeholder").GetByRole(AriaRole.Button);
+
+        // Act
+        await button.DblClickAsync();
+
+        // Assert: the dialog of new text, which the menu then opens, is the only one, and a dialog that the double click
+        // opened would have come first.
+        await ExpectOnlyTheTextDialogAfterAnInsertAsync(page, button);
+    }
+
+    [Fact]
+    public async Task WhenAnInsertLineInASelectedCardIsDoubleClicked_ThenNoDialogOpens()
+    {
+        // Arrange
+        var page = await OpenPageInInlineModeAsync();
+        await page.GetCard("Text Card").Locator(".mud-card-header").SelectWidgetAsync();
+        var button = page.GetCard("Text Card").GetByRole(AriaRole.Button, new() { Name = "Insert at the end of", Exact = false });
+
+        // Act
+        await button.DblClickAsync();
+
+        // Assert
+        await ExpectOnlyTheTextDialogAfterAnInsertAsync(page, button);
+    }
+
+    [Fact]
     public async Task WhenTextIsInsertedAtAnInsertLine_ThenItStandsThereInTheFileAndIsSelected()
     {
         // Arrange: the lines of the page stand before the title, the first paragraph, the card and the last paragraph.
@@ -608,6 +639,17 @@ public class InlineTextEditingTests
         var actionBar = await wrapper.SelectWidgetAsync();
         await Assertions.Expect(wrapper).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
         return actionBar;
+    }
+
+    // Opens the dialog of new text through the menu of the insert button. A dialog opened before, such as the edit dialog of
+    // the widget around the button, covers the button or stays beside the text dialog.
+    private static async Task ExpectOnlyTheTextDialogAfterAnInsertAsync(IPage page, ILocator insertButton)
+    {
+        await insertButton.ClickAsync();
+        await page.GetByTestId("insert-text-item").ClickAsync();
+        await ExpectTextEditorValueAsync(page, string.Empty);
+        await Assertions.Expect(page.GetByTestId("subject-edit-dialog-type")).ToHaveCountAsync(0);
+        await Assertions.Expect(page.GetByRole(AriaRole.Dialog)).ToHaveCountAsync(1);
     }
 
     private static ILocator GetTextWrapper(IPage page, string text) =>

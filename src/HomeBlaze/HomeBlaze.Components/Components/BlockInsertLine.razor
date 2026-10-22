@@ -1,8 +1,9 @@
 @* A place between the blocks of a page that is edited inline, where a new block or new text goes. It takes no room, so that
    the content does not move when lines show or hide with the selection; its bar is drawn over the gap above the block that
-   follows. A click on it must not reach the widget around it, which would take it for a click that selects the widget. The
-   menu opens in the provider of the popovers, outside the widget. *@
-<div class="block-insert-line edit-mode-interactive" data-testid="block-insert-line" @onclick:stopPropagation="true">
+   follows. A click on it must not reach the widget around it, which would take it for a click that selects the widget, nor
+   a double click, which would open the edit dialog of the widget. The menu opens in the provider of the popovers, outside
+   the widget. *@
+<div class="block-insert-line edit-mode-interactive" data-testid="block-insert-line" @onclick:stopPropagation="true" @ondblclick:stopPropagation="true">
     <div class="block-insert-line-bar">
         <MudMenu Icon="@Icons.Material.Filled.Add"
                  Size="Size.Small"
