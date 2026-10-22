@@ -42,16 +42,31 @@ public sealed class WorkspaceResolver
         "Workspaces");
 
     /// <summary>
-    /// Uses the folder itself as the data directory. An absent root configuration file is seeded on start.
+    /// Uses the folder itself as the data directory. An absent root configuration file is seeded on start,
+    /// which is why the folder then has to be empty.
     /// </summary>
     /// <exception cref="DirectoryNotFoundException">The folder does not exist.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The folder holds no root configuration file and is not empty.
+    /// </exception>
     public ResolvedWorkspace ResolveFullDataFolder(string folderPath)
     {
         var dataDirectory = NormalizeExistingDirectory(folderPath);
+        var rootConfigurationFile = Path.Combine(dataDirectory, RootConfigurationFileName);
+
+        // Seeding is gated on the root file being absent, not on the folder being empty, so a folder that
+        // already holds unrelated files would receive the whole seed and have its Files/Docs deleted and
+        // replaced on every start. Refused rather than confirmed, because that loss is silent and has no undo.
+        if (!File.Exists(rootConfigurationFile) && Directory.EnumerateFileSystemEntries(dataDirectory).Any())
+        {
+            throw new InvalidOperationException(
+                $"'{dataDirectory}' is not a HomeBlaze data folder and is not empty. Pick an empty folder to " +
+                "set up a new instance, or open this one as a folder of files instead.");
+        }
 
         return new ResolvedWorkspace
         {
-            RootConfigurationFile = Path.Combine(dataDirectory, RootConfigurationFileName),
+            RootConfigurationFile = rootConfigurationFile,
             DataDirectory = dataDirectory,
             SeedDirectory = _seedDirectory ?? string.Empty
         };

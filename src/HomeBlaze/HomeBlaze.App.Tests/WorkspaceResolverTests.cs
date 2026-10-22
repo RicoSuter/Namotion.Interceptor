@@ -44,6 +44,55 @@ public class WorkspaceResolverTests : IDisposable
     }
 
     [Fact]
+    public void WhenTheDataFolderHasOtherFilesAndNoRootFile_ThenItIsRefused()
+    {
+        // Arrange
+        var folder = Path.Combine(_root, "notes");
+        Directory.CreateDirectory(folder);
+        File.WriteAllText(Path.Combine(folder, "Page.md"), "# Page");
+        var resolver = CreateResolver();
+
+        // Act & Assert
+        // Accepting it would seed HomeBlaze's own files into the folder and delete its Files/Docs on start.
+        var exception = Assert.Throws<InvalidOperationException>(() => resolver.ResolveFullDataFolder(folder));
+        Assert.Contains("not empty", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WhenTheDataFolderHasARootFile_ThenOtherFilesDoNotRefuseIt()
+    {
+        // Arrange
+        var folder = Path.Combine(_root, "instance");
+        Directory.CreateDirectory(folder);
+        File.WriteAllText(Path.Combine(folder, "Root.json"), "{}");
+        File.WriteAllText(Path.Combine(folder, "Unrelated.md"), "# Unrelated");
+
+        // Act
+        var resolved = CreateResolver().ResolveFullDataFolder(folder);
+
+        // Assert
+        Assert.Equal(folder, resolved.DataDirectory);
+    }
+
+    [Fact]
+    public void WhenAFolderIsRefusedAsADataFolder_ThenItIsStillAcceptedAsAMarkdownFolder()
+    {
+        // Arrange
+        var folder = Path.Combine(_root, "notes");
+        Directory.CreateDirectory(folder);
+        File.WriteAllText(Path.Combine(folder, "Page.md"), "# Page");
+        var resolver = CreateResolver();
+
+        // Act
+        var resolved = resolver.ResolveMarkdownFolder(folder);
+
+        // Assert
+        // The refusal message points the user here, so this has to work for the same folder.
+        Assert.NotEqual(folder, resolved.DataDirectory);
+        Assert.Equal(string.Empty, resolved.SeedDirectory);
+    }
+
+    [Fact]
     public void WhenTheFolderIsAMarkdownFolder_ThenTheRootFileIsInAPrivateWorkspace()
     {
         // Arrange
