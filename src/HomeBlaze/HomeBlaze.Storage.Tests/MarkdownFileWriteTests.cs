@@ -265,6 +265,35 @@ public class MarkdownFileWriteTests : IDisposable
         Assert.DoesNotContain("HomeBlaze.Samples.Motor#second", written);
     }
 
+    [Fact]
+    public async Task WhenTheWriteOfAConfigurationFails_ThenTheExceptionPropagatesAndTheSubjectTakesTheFileAgain()
+    {
+        // Arrange
+        const string content = "# Motors\n\n:: HomeBlaze.Samples.Motor#motor Name=Motor TargetSpeed=1000\n::\n";
+        WriteFile("Motors.md", content);
+        PausableBlobStorage? client = null;
+        var storage = CreateStorage();
+        storage.ClientDecorator = inner => client = new PausableBlobStorage(inner);
+        await storage.ConnectAsync(CancellationToken.None);
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Motors.md"]);
+        var motor = Assert.IsType<Samples.Motor>(markdown.Children["motor"]);
+        var writeReached = client!.PauseNext(nameof(FluentStorage.Blobs.IBlobStorage.WriteAsync));
+
+        // Act
+        motor.TargetSpeed = 1500;
+        var failedWrite = markdown.WriteConfigurationAsync(motor, CancellationToken.None);
+        await writeReached;
+        client.FailHangingCall(new IOException("The share is gone."));
+        var failure = await Record.ExceptionAsync(() => failedWrite);
+
+        // Assert
+        Assert.IsType<IOException>(failure);
+        Assert.Same(motor, markdown.Children["motor"]);
+        Assert.Equal(1000, motor.TargetSpeed);
+        Assert.Equal(content, markdown.Content);
+        Assert.Equal(content, ReadFile("Motors.md"));
+    }
+
     private const string PageWithActiveContent = """
         # Motors
 

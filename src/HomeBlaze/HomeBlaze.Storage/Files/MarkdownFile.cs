@@ -466,6 +466,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// blocks would be inserted or removed while a reload runs or after one that failed, until the page has been
     /// read again, or when a reload changed the page while this one ran. When the page cannot keep the change, it is
     /// read again from its file before this returns, so the graph matches the text again unless that read fails.
+    /// When the storage fails the write, the page is read again in the same way and the exception propagates.
     /// Saves of one page run one after the other.
     /// </remarks>
     /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage, such as the
@@ -757,10 +758,16 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         {
             // Published ahead of the file, the next write would be computed from this one and save it after all. The
             // snapshot goes back only while no reload replaced it, and the read then takes in whatever the file holds,
-            // also the text of a write that gave up late, and applies the blocks that were forgotten above again.
+            // also the text of a write that gave up late. It applies the blocks that were forgotten above again, and
+            // the configurations of this write, which the graph holds but the file may not.
             if (ReferenceEquals(Interlocked.CompareExchange(ref _parseResult, snapshot, published), published))
             {
                 Content = previousContent;
+            }
+
+            foreach (var (writtenSubject, _) in write.Configurations)
+            {
+                _parser.ForgetAppliedConfiguration(writtenSubject);
             }
 
             try
