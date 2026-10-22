@@ -115,6 +115,49 @@ public class MarkdownFileWriteTests : IDisposable
         Assert.Same(first, markdown.Children["first"]);
     }
 
+    [Theory]
+    [InlineData("# Cards\n\nOld text.\n\n:: HomeBlaze.Components.Card#first Title=First\n::\n")]
+    [InlineData("# Cards\n\n:: HomeBlaze.Components.Card#first Title=First\n::\n\nOld text.\n")]
+    public async Task WhenTextWithACardReusesTheNameOfAnotherCard_ThenTheChangeIsRefusedAndTheCardKeepsItsSubject(string source)
+    {
+        // Arrange
+        WriteFile("Cards.md", source);
+        var storage = await ConnectAsync();
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Cards.md"]);
+        var first = markdown.Children["first"];
+        var segment = markdown.Children.Values.OfType<HtmlSegment>().Single(candidate => candidate.Html.Contains("Old text."));
+
+        // Act
+        var result = await markdown.ReplaceTextBlockAsync(
+            segment, "Old text.", ":: HomeBlaze.Components.Card#first Title=Copy\n::", CancellationToken.None);
+
+        // Assert
+        Assert.Equal("The name 'first' is already used on this page.", result.Refusal);
+        Assert.Equal(source, ReadFile("Cards.md"));
+        Assert.Same(first, markdown.Children["first"]);
+        Assert.Equal("First", Assert.IsType<HomeBlaze.Components.Card>(first).Title);
+    }
+
+    [Fact]
+    public async Task WhenTextWithAWidgetOfAnUnknownTypeIsWritten_ThenTheResultNamesTheTextAfterIt()
+    {
+        // Arrange
+        WriteFile("Notes.md", "# Notes\n\nOld text.\n");
+        var storage = await ConnectAsync();
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Notes.md"]);
+        var segment = markdown.Children.Values.OfType<HtmlSegment>().Single(candidate => candidate.Html.Contains("Old text."));
+
+        // Act
+        var result = await markdown.ReplaceTextBlockAsync(
+            segment, "Old text.", ":: Demo.Unknown\n::\n\nAfter the widget.", CancellationToken.None);
+
+        // Assert
+        Assert.True(result.IsWritten);
+        Assert.Equal("# Notes\n\n:: Demo.Unknown\n::\n\nAfter the widget.\n", ReadFile("Notes.md"));
+        var written = Assert.IsType<HtmlSegment>(result.Subject);
+        Assert.Contains("After the widget.", written.Html);
+    }
+
     [Fact]
     public async Task WhenTextInsideACardIsReplaced_ThenTheContentOfTheCardShowsTheNewText()
     {

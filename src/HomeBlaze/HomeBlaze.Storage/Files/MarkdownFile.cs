@@ -587,9 +587,10 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// <remarks>
     /// Refused when the segment starts no text block that can be edited any more or its text is no longer
     /// <paramref name="expectedText"/>, as <see cref="GetTextBlockText"/> returned it, when the new text holds a block that is
-    /// no widget block at its top level or a widget block with fewer fence characters than
-    /// <see cref="GetWidgetFenceLengthInText"/>, when the file differs from the text the page last read, and the page then
-    /// reads it, or when the page would be larger than <see cref="MaxContentSize"/> bytes.
+    /// no widget block at its top level, a widget block with fewer fence characters than
+    /// <see cref="GetWidgetFenceLengthInText"/>, an invalid block, or a widget block whose name a block of the page or another
+    /// block of the text already has, when the file differs from the text the page last read, and the page then reads it, or
+    /// when the page would be larger than <see cref="MaxContentSize"/> bytes.
     /// </remarks>
     /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage or from within a write of this page.</exception>
     public Task<MarkdownEditResult> ReplaceTextBlockAsync(
@@ -620,9 +621,10 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// become blocks of the content, and the page creates their subjects.
     /// </summary>
     /// <remarks>
-    /// Refused when the text holds a block that is no widget block at its top level or a widget block with fewer fence
-    /// characters than <see cref="GetWidgetFenceLengthInContent"/>, when the file differs from the text the page last read,
-    /// and the page then reads it, or when the page would be larger than <see cref="MaxContentSize"/> bytes.
+    /// Refused when the text holds a block that is no widget block at its top level, a widget block with fewer fence
+    /// characters than <see cref="GetWidgetFenceLengthInContent"/>, an invalid block, or a widget block whose name a block of
+    /// the page or another block of the text already has, when the file differs from the text the page last read, and the
+    /// page then reads it, or when the page would be larger than <see cref="MaxContentSize"/> bytes.
     /// </remarks>
     /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage or from within a write of this page.</exception>
     public Task<MarkdownEditResult> InsertTextAsync(
@@ -894,7 +896,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
 
     // After the write: the read inside it has created the subject of a new block and the segments of the text, when the
     // storage read the file there. Without that read, the published snapshot still names a moved subject, because the edit
-    // carried it, but has no text blocks.
+    // carried it, but has no text blocks. A new block without a subject, such as one of an unknown type, falls back to the
+    // text that the change wrote.
     private IInterceptorSubject? FindResultSubject(MarkdownStructureChange change)
     {
         var snapshot = _parseResult;
@@ -903,9 +906,9 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             return null;
         }
 
-        if (change.ResultBlockIndex >= 0)
+        if (change.ResultBlockIndex >= 0 && snapshot.BlockSubjects.GetValueOrDefault(change.ResultBlockIndex) is { } blockSubject)
         {
-            return snapshot.BlockSubjects.GetValueOrDefault(change.ResultBlockIndex);
+            return blockSubject;
         }
 
         if (change.ResultTextLine > 0)

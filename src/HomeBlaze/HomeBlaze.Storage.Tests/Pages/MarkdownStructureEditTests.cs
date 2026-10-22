@@ -415,6 +415,7 @@ public class MarkdownStructureEditTests
         Assert.Equal(3, page.GetWidgetFenceLengthInText(panelText));
         Assert.Equal(0, page.GetWidgetFenceLengthInText(new HtmlSegment("<p>elsewhere</p>")));
         Assert.Equal(2, page.GetWidgetFenceLengthInContent(page));
+        Assert.Equal(3, page.GetWidgetFenceLengthInContent(panel.Content!));
         Assert.Equal(4, page.GetWidgetFenceLengthInContent(panel.Rows[0].Content!));
         Assert.Equal(0, page.GetWidgetFenceLengthInContent(new MarkdownFragment()));
     }

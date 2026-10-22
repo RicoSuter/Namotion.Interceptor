@@ -845,4 +845,102 @@ public class MarkdownPageOperationsTests
         Assert.Equal(3, MarkdownPageOperations.GetWidgetFenceLength(page.Blocks[0]));
         Assert.Equal(4, MarkdownPageOperations.GetWidgetFenceLength(page.Blocks[0].Children[0]));
     }
+
+    [Theory]
+    [InlineData(":: Demo.Copy#first\n::")]
+    [InlineData(":: Demo.Outer\n::: Demo.Inner#first\n:::\n::")]
+    [InlineData(":: Demo.A#twice\n::\n\n:: Demo.B#twice\n::")]
+    public void WhenAWidgetInTextHasANameThatIsAlreadyUsed_ThenTheChangeIsRefusedNamingIt(string text)
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("Old.\n\n:: Demo.One#first\n::\n");
+        var name = text.Contains("#twice") ? "twice" : "first";
+
+        // Act
+        var change = MarkdownPageOperations.TryReplaceText(page, NoSubjects, TextAt(page, 1), text, out var refusal);
+
+        // Assert
+        Assert.Null(change);
+        Assert.Equal($"The name '{name}' is already used on this page.", refusal);
+    }
+
+    [Fact]
+    public void WhenInsertedTextHasAWidgetWithANameOfAnotherBlock_ThenTheInsertIsRefused()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse(":: Demo.Card#card\n::: Footer#footer\n:::\n::\n");
+
+        // Act
+        var change = MarkdownPageOperations.TryInsertText(
+            page, NoSubjects, null, InsertLine(page, null, page.Blocks[0]), ":: Demo.X#footer\n::", out var refusal);
+
+        // Assert
+        Assert.Null(change);
+        Assert.Equal("The name 'footer' is already used on this page.", refusal);
+    }
+
+    [Fact]
+    public void WhenTextHoldsAStyleBlockAtItsTopLevel_ThenTheChangeIsRefused()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("intro\n\nOld.\n\nafter\n");
+
+        // Act
+        var change = MarkdownPageOperations.TryReplaceText(page, NoSubjects, TextAt(page, 3), ":: {.note}\nStyled.\n::", out var refusal);
+
+        // Assert
+        Assert.Null(change);
+        Assert.Equal("Text can hold widgets, not style blocks.", refusal);
+    }
+
+    [Theory]
+    [InlineData(":: Demo.X Title=\"open\n::")]
+    [InlineData("- item\n\n  :: Demo.X\n  ::")]
+    [InlineData("> :: Demo.X\n> ::")]
+    [InlineData(":: Demo.X\n:::::\n::")]
+    public void WhenTextHoldsAnInvalidBlock_ThenTheChangeIsRefusedWithItsError(string text)
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("intro\n\nOld.\n\nafter\n");
+        var expected = MarkdownPageParser.Parse(text).AllBlocks.First(block => block.Kind == MarkdownBlockKind.Invalid).Error;
+
+        // Act
+        var change = MarkdownPageOperations.TryReplaceText(page, NoSubjects, TextAt(page, 3), text, out var refusal);
+
+        // Assert
+        Assert.NotNull(expected);
+        Assert.Null(change);
+        Assert.Equal(expected, refusal);
+    }
+
+    [Fact]
+    public void WhenTextHoldsAWidgetWithTextInsideAndTextAfterIt_ThenTheResultTextLineIsTheTextAfterIt()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("intro\n\nOld.\n\nafter\n");
+
+        // Act
+        var change = MarkdownPageOperations.TryReplaceText(
+            page, NoSubjects, TextAt(page, 3), ":: Demo.New\nInside.\n::\n\nAfter the widget.", out var refusal);
+
+        // Assert
+        Assert.Null(refusal);
+        Assert.Equal("intro\n\n:: Demo.New\nInside.\n::\n\nAfter the widget.\n\nafter\n", change!.Write.Page.Source);
+        Assert.Equal(7, change.ResultTextLine);
+        Assert.Equal(change.Write.Page.Blocks[0].Index, change.ResultBlockIndex);
+    }
+
+    [Fact]
+    public void WhenTextHoldsOnlyAWidget_ThenTheChangeNamesNoTextLine()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("intro\n\nOld.\n\nafter\n");
+
+        // Act
+        var change = MarkdownPageOperations.TryReplaceText(page, NoSubjects, TextAt(page, 3), ":: Demo.New\nInside.\n::", out var refusal);
+
+        // Assert
+        Assert.Null(refusal);
+        Assert.Equal(0, change!.ResultTextLine);
+    }
 }

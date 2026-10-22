@@ -19,6 +19,7 @@ internal sealed record MarkdownStructureChange(
 internal static class MarkdownPageOperations
 {
     private const string WidgetPartRefusal = "Text can hold widgets, not the parts of a widget.";
+    private const string StyleBlockRefusal = "Text can hold widgets, not style blocks.";
 
     /// <summary>Removes the block with everything in it.</summary>
     /// <returns>Null with a refusal when the change would change other blocks of the page.</returns>
@@ -429,7 +430,8 @@ internal static class MarkdownPageOperations
     /// </summary>
     /// <returns>
     /// Null with a refusal when the text block cannot be edited, the text holds a block that is no widget block at its top
-    /// level or a widget block with too short a fence, or the change would change other blocks of the page or the text around it.
+    /// level, a widget block with too short a fence, an invalid block or a name that a block of the page or of the text
+    /// already has, or the change would change other blocks of the page or the text around it.
     /// </returns>
     public static MarkdownStructureChange? TryReplaceText(
         MarkdownPage page, IReadOnlyDictionary<int, IInterceptorSubject> blockSubjects, MarkdownTextBlock textBlock, string text, out string? refusal)
@@ -447,7 +449,7 @@ internal static class MarkdownPageOperations
         var source = page.Source;
         var lineEnding = MarkdownBlockWriter.GetLineEnding(source, MarkdownBlockWriter.GetLineStart(source, textBlock.Line));
         var prepared = PrepareText(page, text, textBlock.Owner, lineEnding);
-        if (!TryCountWidgetBlocks(prepared, textBlock.Owner, out var blockCount, out refusal))
+        if (!TryCountWidgetBlocks(page, prepared, textBlock.Owner, out var blockCount, out refusal))
         {
             return null;
         }
@@ -487,8 +489,9 @@ internal static class MarkdownPageOperations
     /// widget blocks at the top level of the text become new blocks of the content.
     /// </summary>
     /// <returns>
-    /// Null with a refusal when the text is empty, holds a block that is no widget block at its top level or a widget block
-    /// with too short a fence, or the change would change other blocks of the page or the text around it.
+    /// Null with a refusal when the text is empty, holds a block that is no widget block at its top level, a widget block
+    /// with too short a fence, an invalid block or a name that a block of the page or of the text already has, or the change
+    /// would change other blocks of the page or the text around it.
     /// </returns>
     public static MarkdownStructureChange? TryInsertText(
         MarkdownPage page, IReadOnlyDictionary<int, IInterceptorSubject> blockSubjects, MarkdownBlock? owner, int line, string text, out string? refusal)
@@ -507,7 +510,7 @@ internal static class MarkdownPageOperations
         var source = page.Source;
         var lineEnding = MarkdownBlockWriter.GetLineEnding(source, MarkdownBlockWriter.GetLineStart(source, Math.Max(line - 1, 1)));
         var prepared = PrepareText(page, text, owner, lineEnding);
-        if (!TryCountWidgetBlocks(prepared, owner, out var blockCount, out refusal))
+        if (!TryCountWidgetBlocks(page, prepared, owner, out var blockCount, out refusal))
         {
             return null;
         }
@@ -572,13 +575,15 @@ internal static class MarkdownPageOperations
             new MarkdownBlockWrite(after, MapSubjects(blockSubjects, map), [], HasInsertedOrRemovedBlocks: hasNewBlocks),
             owner,
             hasNewBlocks ? FindFirstBlockFrom(after, edit)?.Index ?? -1 : -1,
-            FindFirstTextLine(newSource, edit));
+            FindFirstTextLine(after, edit));
     }
 
     // Counts the blocks of text that goes into the content of `owner`: every block at its top level must be a widget block
     // with a fence long enough to stand directly in that content, and the blocks inside them count as well. The text is
-    // parsed on its own, where a slot block or a closing line has no block around it and is an invalid block.
-    private static bool TryCountWidgetBlocks(string text, MarkdownBlock? owner, out int blockCount, out string? refusal)
+    // parsed on its own, where a slot block or a closing line has no block around it and is an invalid block. A name must
+    // be new to the page, as the parser gives a name to the first block that has it and makes every other one an error.
+    private static bool TryCountWidgetBlocks(
+        MarkdownPage page, string text, MarkdownBlock? owner, out int blockCount, out string? refusal)
     {
         blockCount = 0;
         refusal = null;
@@ -589,12 +594,13 @@ internal static class MarkdownPageOperations
             return true;
         }
 
+        var parsed = MarkdownPageParser.Parse(text);
         var minimumFenceLength = GetWidgetFenceLength(owner);
-        foreach (var block in MarkdownPageParser.Parse(text).Blocks)
+        foreach (var block in parsed.Blocks)
         {
             if (block.Kind != MarkdownBlockKind.Widget)
             {
-                refusal = WidgetPartRefusal;
+                refusal = GetBlockInTextRefusal(parsed, block);
                 return false;
             }
 
@@ -607,7 +613,59 @@ internal static class MarkdownPageOperations
             blockCount += CountBlocks(block);
         }
 
+        // Every block inside the widgets, at any depth. A style block is in no index and is no error.
+        HashSet<string>? names = null;
+        foreach (var block in parsed.AllBlocks)
+        {
+            if (block.Kind == MarkdownBlockKind.Invalid)
+            {
+                refusal = block.Error;
+                return false;
+            }
+
+            if (block.Head?.Id is { } name)
+            {
+                names ??= GetNames(page);
+                if (!names.Add(name))
+                {
+                    refusal = $"The name '{name}' is already used on this page.";
+                    return false;
+                }
+            }
+        }
+
         return true;
+    }
+
+    // Why a block that is no widget block cannot stand at the top level of text. A slot block and a closing line are parts of
+    // a widget that the text cannot reach, and every other invalid block has its own error.
+    private static string? GetBlockInTextRefusal(MarkdownPage parsed, MarkdownBlock block)
+    {
+        if (block.Kind == MarkdownBlockKind.Style)
+        {
+            return StyleBlockRefusal;
+        }
+
+        var headLine = parsed.Source.Substring(block.HeadSpan.Start, block.HeadSpan.Length);
+        var isClosingLine = headLine.AsSpan().Trim().Trim(MarkdownBlockFence.Character).IsEmpty;
+        return isClosingLine || (MarkdownBlockHead.TryParse(headLine, out var head, out _) && !head.IsWidget)
+            ? WidgetPartRefusal
+            : block.Error;
+    }
+
+    // The names of the blocks of the page, of every kind and at every depth.
+    private static HashSet<string> GetNames(MarkdownPage page)
+    {
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var block in page.AllBlocks)
+        {
+            if (block.Head?.Id is { } name)
+            {
+                names.Add(name);
+            }
+        }
+
+        return names;
     }
 
     // The text as lines of the page: its line endings, the indentation of its content, and no empty lines around it. The
@@ -624,10 +682,39 @@ internal static class MarkdownPageOperations
     private static string GetContentIndentation(MarkdownPage page, MarkdownBlock? owner) =>
         owner is null ? string.Empty : MarkdownBlockWriter.GetIndentation(page.Source, owner);
 
-    // The first line of the change that is not empty: where the new text starts.
-    private static int FindFirstTextLine(string source, MarkdownLineEdit edit)
+    // The first line of the change that is not empty and not in a new block: where the new text starts, or 0 when it has none.
+    // The blocks are ordered by their head lines, and a block inside a new block is skipped with it.
+    private static int FindFirstTextLine(MarkdownPage page, MarkdownLineEdit edit)
     {
-        for (var line = edit.Line; line < edit.InsertedEnd; line++)
+        var source = page.Source;
+        var line = edit.Line;
+        foreach (var block in page.AllBlocks)
+        {
+            if (block.Line < line)
+            {
+                continue;
+            }
+
+            if (block.Line >= edit.InsertedEnd)
+            {
+                break;
+            }
+
+            if (FindTextLine(source, line, block.Line) is var textLine and > 0)
+            {
+                return textLine;
+            }
+
+            line = block.EndLine + 1;
+        }
+
+        return FindTextLine(source, line, edit.InsertedEnd);
+    }
+
+    // The first line from `line` up to `end`, without it, that is not empty, or 0.
+    private static int FindTextLine(string source, int line, int end)
+    {
+        for (; line < end; line++)
         {
             if (!string.IsNullOrWhiteSpace(MarkdownBlockWriter.GetLines(source, line, line)))
             {
