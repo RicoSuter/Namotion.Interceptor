@@ -141,10 +141,20 @@ internal sealed class MarkdownPageStructureEditor : IPageStructureEditor
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or TimeoutException or InvalidOperationException)
         {
-            _logger.LogWarning(exception, "The structure edit of the page {Path} could not be saved", _file.FullPath);
+            _logger.Log(
+                IsStorageFailure(exception) ? LogLevel.Warning : LogLevel.Error,
+                exception,
+                "The structure edit of the page {Path} could not be saved",
+                _file.FullPath);
             _snackbar.Add($"The page could not be saved. {exception.Message}", Severity.Error);
         }
     }
+
+    // The refusal and the timeout of the storage are internal types of its assembly. Any other invalid operation or
+    // timeout is a defect, such as an edit called from within a write of the page.
+    private static bool IsStorageFailure(Exception exception) =>
+        exception is IOException or UnauthorizedAccessException ||
+        exception.GetType().Assembly == typeof(MarkdownFile).Assembly;
 
     private void Report(MarkdownEditResult result)
     {
