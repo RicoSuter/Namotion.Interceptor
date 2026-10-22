@@ -640,6 +640,7 @@ namespace HomeBlaze.Components
         public HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType Type { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
         public void Dispose() { }
+        public string GetAccessibleName() { }
         public HomeBlaze.Components.SubjectComponent? GetSelectableSelfOrAncestor() { }
         protected override System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender) { }
         protected override void OnInitialized() { }
@@ -1038,6 +1039,9 @@ namespace HomeBlaze.Components.Components
     public class BlockInsertLine : Microsoft.AspNetCore.Components.ComponentBase
     {
         public BlockInsertLine() { }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Label { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public Microsoft.AspNetCore.Components.EventCallback OnInsert { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }

@@ -260,30 +260,43 @@
     box-shadow: var(--mud-elevation-4);
 }
 
-/* The line where a new block goes, between the blocks of the content that is edited. */
+/* The line where a new block goes, between the blocks of the content that is edited. It takes no room, so that the content
+   does not move when the selection shows or hides the lines, and margins collapse through it as if it were not there: its
+   bar is drawn over the gap above the block that follows. */
 ::deep .block-insert-line {
+    position: relative;
+    height: 0;
+    z-index: 4;
+}
+
+::deep .block-insert-line-bar {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: -0.5rem;
+    transform: translateY(-50%);
     display: flex;
     align-items: center;
     gap: 6px;
-    margin: 4px 0;
     opacity: 0.5;
 }
 
-::deep .block-insert-line:hover,
-::deep .block-insert-line:focus-within {
+::deep .block-insert-line-bar:hover,
+::deep .block-insert-line-bar:focus-within {
     opacity: 1;
 }
 
-::deep .block-insert-line::before,
-::deep .block-insert-line::after {
+::deep .block-insert-line-bar::before,
+::deep .block-insert-line-bar::after {
     content: "";
     flex: 1;
     height: 1px;
     background: rgba(var(--mud-palette-primary-rgb), 0.7);
 }
 
-::deep .block-insert-line .mud-icon-button {
+::deep .block-insert-line-bar .mud-icon-button {
     padding: 2px;
+    background: var(--mud-palette-surface);
 }
 
 /* In the preview next to the editor, a click on a widget shows its block in the editor. Its content takes no pointer

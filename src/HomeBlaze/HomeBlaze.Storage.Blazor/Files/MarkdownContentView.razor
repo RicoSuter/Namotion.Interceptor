@@ -11,6 +11,8 @@
 
 @{
     var showsInsertLines = ShowsInsertLines();
+    var contentName = showsInsertLines ? GetContentName() : null;
+    var position = 0;
 }
 @foreach (var segment in GetRenderSegments())
 {
@@ -22,7 +24,9 @@
     {
         @if (showsInsertLines)
         {
-            <BlockInsertLine OnInsert="@(() => StructureEditor!.InsertWidgetAsync(Content!, segment.Widget))" />
+            position++;
+            <BlockInsertLine Label="@($"Insert at position {position} of {contentName}")"
+                             OnInsert="@(() => StructureEditor!.InsertWidgetAsync(Content!, segment.Widget))" />
         }
 
         @* Keyed, so that the state of a component stays with its subject when a reload inserts or removes a block. *@
@@ -31,7 +35,8 @@
 }
 @if (showsInsertLines)
 {
-    <BlockInsertLine OnInsert="@(() => StructureEditor!.InsertWidgetAsync(Content!, null))" />
+    <BlockInsertLine Label="@($"Insert at the end of {contentName}")"
+                     OnInsert="@(() => StructureEditor!.InsertWidgetAsync(Content!, null))" />
 }
 
 @code {
@@ -175,6 +180,10 @@
         _isAtSelection = IsAtSelection();
         return _isAtSelection && StructureEditor!.CanInsertInto(Content!);
     }
+
+    // The name of the content in the names of its insert lines: the name of the widget it belongs to, or the page.
+    private string GetContentName() =>
+        Owner?.GetSelectableSelfOrAncestor() is { } owner ? owner.GetAccessibleName() : "the page";
 
     private void Unsubscribe()
     {

@@ -97,3 +97,13 @@
     overflow-wrap: break-word;
 }
 
+/* An insert line in the row of a card footer stands between two blocks of the row and takes none of its gap. */
+.markdown-content ::deep .card-widget > .mud-card-actions > .subject-component-wrapper > .markdown-fragment > .block-insert-line {
+    margin: 0 -4px;
+}
+
+.markdown-content ::deep .card-widget > .mud-card-actions > .subject-component-wrapper > .markdown-fragment > .block-insert-line > .block-insert-line-bar {
+    right: auto;
+    top: 50%;
+    transform: translate(-50%, -50%);
+}

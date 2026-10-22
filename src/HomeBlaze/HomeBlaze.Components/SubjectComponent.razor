@@ -261,7 +261,8 @@
     private RegisteredSubjectProperty? _labelProperty;
     private RegisteredSubjectProperty? _pathProperty;
 
-    private string GetAccessibleName()
+    /// <summary>Gets the name that assistive technology reads for the widget: its title, its path or the name of its type.</summary>
+    public string GetAccessibleName()
     {
         if (SubjectNames.TryGetTitle(Subject!, _labelProperty) is { } title)
         {

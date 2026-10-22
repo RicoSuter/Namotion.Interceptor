@@ -474,8 +474,9 @@ public class InlineStructureEditingTests
     {
         // Arrange
         var page = await OpenPageInInlineModeAsync();
-        var lines = page.Locator(".markdown-content > [data-testid='block-insert-line']");
-        await Assertions.Expect(lines.First).ToBeVisibleAsync(new() { Timeout = Timeout });
+        // A line takes no room, so its button is what shows.
+        var lineButtons = page.Locator(".markdown-content > [data-testid='block-insert-line'] button");
+        await Assertions.Expect(lineButtons.First).ToBeVisibleAsync(new() { Timeout = Timeout });
 
         // Act
         var line = GetInsertLineBefore(GetWrapperOf(page, "switch"));
@@ -506,7 +507,7 @@ public class InlineStructureEditingTests
         var actionBar = await GetWrapperOf(page, "switch").SelectWidgetAsync();
 
         // Assert: the switch stands on the page, so the page keeps its lines and no content inside a block has any.
-        await Assertions.Expect(page.Locator(".markdown-content > [data-testid='block-insert-line']").First).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(page.Locator(".markdown-content > [data-testid='block-insert-line'] button").First).ToBeVisibleAsync(new() { Timeout = Timeout });
         await WaitForLinesAfterSelectionAsync(page, actionBar.GetByTestId("edit-subject-button"));
         await Assertions.Expect(page.Locator(".markdown-fragment [data-testid='block-insert-line']")).ToHaveCountAsync(0);
     }
@@ -638,6 +639,57 @@ public class InlineStructureEditingTests
         await Assertions.Expect(name).ToHaveCSSAsync("font-weight", "700");
     }
 
+    [Fact]
+    public async Task WhenACardIsSelected_ThenNoBlockOfThePageMoves()
+    {
+        // Arrange: the card has text, a widget and a footer, whose lines show only while the card is selected.
+        var content = Content
+            + "\n"
+            + ":: HomeBlaze.Components.Card Title=\"Layout Card\"\n"
+            + "Card text.\n"
+            + "\n"
+            + "::: HomeBlaze.Components.Progress Path=structuremotor/TargetSpeed Minimum=0 Maximum=1600\n"
+            + ":::\n"
+            + "::: Footer\n"
+            + ":::: HomeBlaze.Components.Switch Path=structuremotor/IsPowered\n"
+            + "::::\n"
+            + ":::\n"
+            + "::\n";
+        var page = await OpenPageInInlineModeAsync(content);
+        var card = page.GetCard("Layout Card");
+        await Assertions.Expect(card).ToBeVisibleAsync(new() { Timeout = Timeout });
+        var before = await GetBlockBoxesAsync(page);
+
+        // Act
+        await card.Locator(".mud-card-header").SelectWidgetAsync();
+        await Assertions.Expect(card.Locator("[data-testid='block-insert-line'] button").First).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Assert
+        var after = await GetBlockBoxesAsync(page);
+        Assert.Equal(before.Length, after.Length);
+        for (var index = 0; index < before.Length; index++)
+        {
+            Assert.InRange(after[index], before[index] - 0.5, before[index] + 0.5);
+        }
+    }
+
+    [Fact]
+    public async Task WhenInsertLinesAreShown_ThenEachHasANameOfItsOwn()
+    {
+        // Arrange
+        var page = await OpenPageInInlineModeAsync();
+        var buttons = page.Locator("[data-testid='block-insert-line'] button");
+        await Assertions.Expect(buttons.First).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Act
+        var labels = await buttons.EvaluateAllAsync<string[]>("buttons => buttons.map(button => button.getAttribute('aria-label'))");
+
+        // Assert
+        Assert.Equal(labels.Length, labels.Distinct().Count());
+        Assert.Contains("Insert at the end of the page", labels);
+        Assert.Contains("Insert at position 1 of the page", labels);
+    }
+
     private async Task<IPage> OpenPageInSplitModeAsync(string content = Content)
     {
         await _fixture.WriteDemoPageAsync(PageName, content);
@@ -719,4 +771,14 @@ public class InlineStructureEditingTests
         await line.GetByRole(AriaRole.Button).ClickAsync();
         await Assertions.Expect(page.GetByTestId("create-subject-dialog")).ToBeVisibleAsync(new() { Timeout = Timeout });
     }
+
+    // The top, left, width and height of every block and paragraph of the page, one after the other.
+    private static Task<double[]> GetBlockBoxesAsync(IPage page) =>
+        page.Locator(".markdown-content").EvaluateAsync<double[]>(
+            """
+            content => [...content.querySelectorAll('.subject-component-wrapper, p')].flatMap(element => {
+                const box = element.getBoundingClientRect();
+                return [box.top, box.left, box.width, box.height];
+            })
+            """);
 }

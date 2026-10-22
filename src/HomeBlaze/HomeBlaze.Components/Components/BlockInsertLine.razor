@@ -1,17 +1,24 @@
-@* A place between the blocks of a page that is edited inline, where a click inserts a new block. A click on it must not
-   reach the widget around it, which would take it for a click that selects the widget. *@
+@* A place between the blocks of a page that is edited inline, where a click inserts a new block. It takes no room, so that
+   the content does not move when lines show or hide with the selection; its bar is drawn over the gap above the block that
+   follows. A click on it must not reach the widget around it, which would take it for a click that selects the widget. *@
 <div class="block-insert-line edit-mode-interactive" data-testid="block-insert-line" @onclick:stopPropagation="true">
-    <MudIconButton Icon="@Icons.Material.Filled.Add"
-                   Size="Size.Small"
-                   Variant="Variant.Outlined"
-                   Color="Color.Primary"
-                   title="Insert block here"
-                   aria-label="Insert block here"
-                   OnClick="OnInsert" />
+    <div class="block-insert-line-bar">
+        <MudIconButton Icon="@Icons.Material.Filled.Add"
+                       Size="Size.Small"
+                       Variant="Variant.Outlined"
+                       Color="Color.Primary"
+                       title="@Label"
+                       aria-label="@Label"
+                       OnClick="OnInsert" />
+    </div>
 </div>
 
 @code {
     /// <summary>Raised when the line is clicked.</summary>
     [Parameter]
     public EventCallback OnInsert { get; set; }
+
+    /// <summary>The accessible name of the line, which tells it apart from the other lines of the page.</summary>
+    [Parameter, EditorRequired]
+    public string Label { get; set; } = string.Empty;
 }
