@@ -65,6 +65,49 @@ public class ResponsiveTests
         Assert.Equal(expected, Responsive.GetHiddenCssClasses(from, to));
     }
 
+    public static TheoryData<Breakpoint, Breakpoint> EveryRange()
+    {
+        var data = new TheoryData<Breakpoint, Breakpoint>();
+        for (var from = Breakpoint.Xs; from <= Breakpoint.Xxl; from++)
+        {
+            for (var to = from; to <= Breakpoint.Xxl; to++)
+            {
+                data.Add(from, to);
+            }
+        }
+
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(EveryRange))]
+    public void WhenTheHiddenClassesOfAnyRangeAreAskedFor_ThenTheyShowAnElementExactlyWhereTheContentIsHidden(Breakpoint from, Breakpoint to)
+    {
+        // Arrange: a class of a breakpoint applies from its lower edge, so a class is needed only where that changes.
+        string[] names = ["xs", "sm", "md", "lg", "xl", "xxl"];
+        string? expected = null;
+        if (from != Breakpoint.Xs || to != Breakpoint.Xxl)
+        {
+            var isShown = from > Breakpoint.Xs;
+            expected = isShown ? "d-block" : "d-none";
+            for (var breakpoint = 1; breakpoint < names.Length; breakpoint++)
+            {
+                var isContentHidden = breakpoint < (int)from || breakpoint > (int)to;
+                if (isContentHidden != isShown)
+                {
+                    expected += $" d-{names[breakpoint]}{(isContentHidden ? "-block" : "-none")}";
+                    isShown = isContentHidden;
+                }
+            }
+        }
+
+        // Act
+        var classes = Responsive.GetHiddenCssClasses(from, to);
+
+        // Assert
+        Assert.Equal(expected, classes);
+    }
+
     [Theory]
     [InlineData(Breakpoint.Xs, Breakpoint.Xs, "Xs only")]
     [InlineData(Breakpoint.Xs, Breakpoint.Md, "Up to Md")]

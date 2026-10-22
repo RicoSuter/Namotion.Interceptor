@@ -24,10 +24,11 @@ public partial class Responsive : IConfigurable, ITitleProvider
 
     private const int BreakpointCount = (int)Breakpoint.Xxl + 1;
 
-    // Declared before CssClassTable, whose initializer reads it.
+    // Declared before CssClassTables, whose initializer reads it.
     private static readonly string[] BreakpointNames = ["xs", "sm", "md", "lg", "xl", "xxl"];
 
-    private static readonly string[] CssClassTable = CreateCssClassTable();
+    // The classes of the content and of the element that stands where the content is hidden, by From and To.
+    private static readonly (string[] Shown, string?[] Hidden) CssClassTables = CreateCssClassTables();
 
     public Responsive()
     {
@@ -90,7 +91,7 @@ public partial class Responsive : IConfigurable, ITitleProvider
             return false;
         }
 
-        cssClasses = CssClassTable[(int)from * BreakpointCount + (int)to];
+        cssClasses = CssClassTables.Shown[(int)from * BreakpointCount + (int)to];
         error = null;
         return true;
     }
@@ -99,30 +100,8 @@ public partial class Responsive : IConfigurable, ITitleProvider
     /// Gets the MudBlazor display classes that show an element exactly at the widths where the content is hidden, or
     /// null when the content shows at every width. Both arguments must be valid, see <see cref="TryGetCssClasses"/>.
     /// </summary>
-    public static string? GetHiddenCssClasses(Breakpoint from, Breakpoint to)
-    {
-        if (from == Breakpoint.Xs && to == Breakpoint.Xxl)
-        {
-            return null;
-        }
-
-        // The element shows where the content is hidden. A class of a breakpoint applies from its lower edge, so a class
-        // is added only where that changes.
-        var builder = new System.Text.StringBuilder();
-        var isElementShown = IsHidden(0, from, to);
-        builder.Append(isElementShown ? "d-block" : "d-none");
-        for (var breakpoint = 1; breakpoint < BreakpointCount; breakpoint++)
-        {
-            var isContentHidden = IsHidden(breakpoint, from, to);
-            if (isContentHidden != isElementShown)
-            {
-                builder.Append(" d-").Append(BreakpointNames[breakpoint]).Append(isContentHidden ? "-block" : "-none");
-                isElementShown = isContentHidden;
-            }
-        }
-
-        return builder.ToString();
-    }
+    public static string? GetHiddenCssClasses(Breakpoint from, Breakpoint to) =>
+        CssClassTables.Hidden[(int)from * BreakpointCount + (int)to];
 
     /// <summary>Gets a short text for the widths that show the content, such as "Xs only" or "Lg and up".</summary>
     public static string GetRangeLabel(Breakpoint from, Breakpoint to) =>
@@ -135,24 +114,28 @@ public partial class Responsive : IConfigurable, ITitleProvider
 
     private static bool IsSingleBreakpoint(Breakpoint breakpoint) => breakpoint is >= Breakpoint.Xs and <= Breakpoint.Xxl;
 
-    private static bool IsHidden(int breakpoint, Breakpoint from, Breakpoint to) =>
-        breakpoint < (int)from || breakpoint > (int)to;
-
-    private static string[] CreateCssClassTable()
+    private static (string[] Shown, string?[] Hidden) CreateCssClassTables()
     {
-        var table = new string[BreakpointCount * BreakpointCount];
+        var shown = new string[BreakpointCount * BreakpointCount];
+        var hidden = new string?[BreakpointCount * BreakpointCount];
         for (var from = 0; from < BreakpointCount; from++)
         {
             for (var to = from; to < BreakpointCount; to++)
             {
                 // A display class of a breakpoint applies from its lower edge, so the content hides from the lower edge of
                 // the breakpoint after To. MudBlazor declares the classes of larger breakpoints later, so they win.
+                var index = from * BreakpointCount + to;
                 var show = from == 0 ? "d-block" : $"d-none d-{BreakpointNames[from]}-block";
                 var hide = to == BreakpointCount - 1 ? "" : $" d-{BreakpointNames[to + 1]}-none";
-                table[from * BreakpointCount + to] = $"responsive-widget {show}{hide}";
+                shown[index] = $"responsive-widget {show}{hide}";
+
+                // The element where the content is hidden takes the same classes the other way round.
+                var showElement = from == 0 ? "d-none" : $"d-block d-{BreakpointNames[from]}-none";
+                var hideElement = to == BreakpointCount - 1 ? "" : $" d-{BreakpointNames[to + 1]}-block";
+                hidden[index] = from == 0 && to == BreakpointCount - 1 ? null : showElement + hideElement;
             }
         }
 
-        return table;
+        return (shown, hidden);
     }
 }
