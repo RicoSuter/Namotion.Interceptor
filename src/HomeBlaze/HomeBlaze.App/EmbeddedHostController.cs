@@ -37,6 +37,10 @@ public sealed class EmbeddedHostController : IAsyncDisposable
             // Port zero: the operating system picks a free port, so two instances on different folders never
             // collide and nothing has to be configured.
             Urls = ["http://127.0.0.1:0"],
+
+            // MapStaticAssets() locates its manifest file by IHostEnvironment.ApplicationName, which otherwise
+            // defaults to this process's own entry assembly (HomeBlaze.App, or the test host). Pinning it to
+            // HomeBlaze finds the manifest HomeBlaze's own build produced, regardless of which process hosts it.
             CommandLineArguments = ["--applicationName=HomeBlaze"]
         };
 
