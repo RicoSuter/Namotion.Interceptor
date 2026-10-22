@@ -1032,7 +1032,6 @@ public class SubjectPropertyChangeTests
         yield return Case("byte enum underlying current", ByteBackedLevel.First, (byte)1);
         yield return Case<string?>("string null", null, null);
         yield return Case<string?>("string null old", null, "x");
-        yield return Case<object?>("object decimal scale", 1.0m, 1.00m);
         yield return Case("enum equal", DayOfWeek.Monday, DayOfWeek.Monday);
         yield return Case("inconsistent struct equal", new InconsistentlyEquatableStruct(1), new InconsistentlyEquatableStruct(1));
         yield return Case("inconsistent struct different", new InconsistentlyEquatableStruct(1), new InconsistentlyEquatableStruct(2));

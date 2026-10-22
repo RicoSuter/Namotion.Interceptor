@@ -594,7 +594,6 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
                 .OfType<TInterface>()
                 .ToArray();
 
-            // The empty result is the array behind ImmutableArray<T>.Empty, which an empty context returns too.
             return services.Length == 0
                 ? ImmutableCollectionsMarshal.AsArray(ImmutableArray<TInterface>.Empty)!
                 : services;
@@ -1037,7 +1036,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             // replaced array still finds what it holds. A missed entry costs one recomputation and a
             // locked lookup.
             var current = Volatile.Read(ref _serviceArrays);
-            return current is not null && serviceTypeIndex < current.Length
+            return current is not null && (uint)serviceTypeIndex < (uint)current.Length
                 ? current[serviceTypeIndex]
                 : null;
         }
@@ -1055,7 +1054,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
                 var current = _serviceArrays;
                 if (current is null || serviceTypeIndex >= current.Length)
                 {
-                    // Doubled rather than reallocated for each new service type.
+                    // Covers every service type indexed so far, and at least doubles an existing array.
                     var requiredLength = Math.Max(serviceTypeIndex, Volatile.Read(ref _lastServiceTypeIndex)) + 1;
                     var grown = new object?[Math.Max(requiredLength, (current?.Length ?? 0) * 2)];
                     current?.CopyTo(grown, 0);

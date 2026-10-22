@@ -32,21 +32,6 @@ public class InlineValueStorageTests
     }
 
     [Fact]
-    public void WhenNothingIsStored_ThenBoxedValueIsNull()
-    {
-        // Arrange
-        var storage = default(InlineValueStorage);
-
-        // Act
-        var boxed = storage.GetValueBoxed();
-
-        // Assert
-        Assert.Null(boxed);
-        Assert.True(storage.IsEmpty);
-        Assert.Null(storage.StoredType);
-    }
-
-    [Fact]
     public void WhenReadingWithAnotherType_ThenNoValueIsReturned()
     {
         // Arrange
@@ -65,18 +50,22 @@ public class InlineValueStorageTests
     }
 
     [Fact]
-    public void WhenNothingIsStored_ThenReadingAnyTypeReturnsNoValue()
+    public void WhenNothingIsStored_ThenNoValueIsReturned()
     {
         // Arrange
         var storage = default(InlineValueStorage);
 
         // Act
+        var boxed = storage.GetValueBoxed();
         var readAsString = storage.TryGetValue<string>(out var stringValue);
         var readAsLargeStruct = storage.TryGetValue<LargeStruct>(out var largeStructValue);
         var readAsStructWithReference = storage.TryGetValue<StructWithReference>(out var structWithReferenceValue);
         var readAsInt = storage.TryGetValue<int>(out var intValue);
 
         // Assert
+        Assert.True(storage.IsEmpty);
+        Assert.Null(storage.StoredType);
+        Assert.Null(boxed);
         Assert.False(readAsString);
         Assert.Null(stringValue);
         Assert.False(readAsLargeStruct);

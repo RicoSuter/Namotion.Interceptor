@@ -18,25 +18,26 @@ internal readonly struct InlineValueStorage
     [FieldOffset(16)] private readonly InlineValueOperations? _operations;
 
     /// <summary>
-    /// Gets whether no value is stored inline, which is the case for every value a change keeps in a boxed holder. Empty
-    /// storage without a boxed holder records a null string or reference.
+    /// Gets whether no value is stored.
     /// </summary>
     public bool IsEmpty => _operations is null;
 
     public Type? StoredType => _operations?.Type;
 
+    /// <summary>
+    /// Gets whether a <typeparamref name="TValue"/> can be stored inline: it holds no reference and fits in
+    /// <see cref="MaxSize"/> bytes. Other types belong in <see cref="BoxedValueHolder{T}"/>.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static bool CanStore<TValue>() =>
+        // The value fields are not GC-scanned, so a reference in them could dangle, and a larger write would overwrite
+        // the GC-tracked operations field. Both checks fold to JIT constants, so a guard on this costs nothing.
+        !RuntimeHelpers.IsReferenceOrContainsReferences<TValue>() && Unsafe.SizeOf<TValue>() <= MaxSize;
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static InlineValueStorage Create<TValue>(TValue value)
     {
-        // Memory-safety invariants: no references, neither TValue itself nor contained ones (the long
-        // fields below are not GC-scanned, so a hidden reference could dangle), and SizeOf <= MaxSize
-        // (a larger write would overwrite the GC-tracked operations field at offset 16). Such types
-        // belong in BoxedValueHolder. The IsValueType leg is redundant with IsReferenceOrContainsReferences
-        // and kept for symmetry with the caller's predicate. All checks fold to JIT constants: valid types
-        // pay nothing, an invalid caller fails fast in every configuration.
-        if (!typeof(TValue).IsValueType ||
-            RuntimeHelpers.IsReferenceOrContainsReferences<TValue>() ||
-            Unsafe.SizeOf<TValue>() > MaxSize)
+        if (!CanStore<TValue>())
         {
             ThrowUnsupportedType<TValue>();
         }
@@ -50,13 +51,10 @@ internal readonly struct InlineValueStorage
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool TryGetValue<TValue>(out TValue value)
     {
-        // Each stored type has exactly one operations instance, so identity is the type check. The legs before it
-        // repeat the guard of Create and fold to constants: a type Create rejects is never read, even from an empty
-        // storage, and a reference type does not touch the instance.
-        if (typeof(TValue).IsValueType &&
-            !RuntimeHelpers.IsReferenceOrContainsReferences<TValue>() &&
-            Unsafe.SizeOf<TValue>() <= MaxSize &&
-            ReferenceEquals(_operations, InlineValueOperations<TValue>.Instance))
+        // Each stored type has exactly one operations instance, so identity is the type check. The guards first keep a
+        // type that is never stored from touching the instance. IsValueType stays inline rather than in CanStore: the
+        // Native AOT scanner folds it here but not through a call, and would otherwise compile a reference instantiation.
+        if (typeof(TValue).IsValueType && CanStore<TValue>() && ReferenceEquals(_operations, InlineValueOperations<TValue>.Instance))
         {
             value = Read<TValue>();
             return true;
@@ -72,11 +70,7 @@ internal readonly struct InlineValueStorage
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public TValue Read<TValue>()
     {
-        // The guard of Create, folded to a constant: a type that cannot be stored inline fails fast instead of reading
-        // a reference out of untracked memory.
-        if (!typeof(TValue).IsValueType ||
-            RuntimeHelpers.IsReferenceOrContainsReferences<TValue>() ||
-            Unsafe.SizeOf<TValue>() > MaxSize)
+        if (!CanStore<TValue>())
         {
             ThrowUnsupportedType<TValue>();
         }
@@ -93,7 +87,7 @@ internal readonly struct InlineValueStorage
     /// </summary>
     public bool ValueEquals(object? value) => _operations?.ValueEquals(in this, value) ?? value is null;
 
-    // Kept out of Create so the (JIT-eliminated) guard does not bloat its inlined body.
+    // Kept out of the inlined callers so their (JIT-eliminated) guard does not bloat them.
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void ThrowUnsupportedType<TValue>() =>
         throw new InvalidOperationException(

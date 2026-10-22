@@ -102,29 +102,24 @@ public class ContextServiceCacheTests
     public void WhenNoServiceMatches_ThenContextsShareOneEmptyArray()
     {
         // Arrange: an empty array is the one result callers must not key caches on, because it is shared.
-        // An empty context, contexts with services but no match, and a context that also collects the services of a
+        // An empty context, a context with services but no match, and a context that also collects the services of a
         // fallback take different paths.
         var emptyContext = InterceptorSubjectContext.Create();
-        var firstContext = InterceptorSubjectContext.Create();
-        firstContext.AddService(new MarkerService());
-        var secondContext = InterceptorSubjectContext.Create();
-        secondContext.AddService(new MarkerService());
+        var noMatchContext = InterceptorSubjectContext.Create();
+        noMatchContext.AddService(new MarkerService());
         var fallbackContext = InterceptorSubjectContext.Create();
         fallbackContext.AddService(new MarkerService());
-        fallbackContext.AddFallbackContext(secondContext);
+        fallbackContext.AddFallbackContext(noMatchContext);
 
         // Act
         var emptyServices = emptyContext.GetServices<OtherMarkerService>();
-        var firstServices = firstContext.GetServices<OtherMarkerService>();
-        var secondServices = secondContext.GetServices<OtherMarkerService>();
+        var noMatchServices = noMatchContext.GetServices<OtherMarkerService>();
         var fallbackServices = fallbackContext.GetServices<OtherMarkerService>();
 
         // Assert
-        Assert.Empty(firstServices);
         var expected = ImmutableCollectionsMarshal.AsArray(ImmutableArray<OtherMarkerService>.Empty);
         Assert.Same(expected, ImmutableCollectionsMarshal.AsArray(emptyServices));
-        Assert.Same(expected, ImmutableCollectionsMarshal.AsArray(firstServices));
-        Assert.Same(expected, ImmutableCollectionsMarshal.AsArray(secondServices));
+        Assert.Same(expected, ImmutableCollectionsMarshal.AsArray(noMatchServices));
         Assert.Same(expected, ImmutableCollectionsMarshal.AsArray(fallbackServices));
     }
 

@@ -60,12 +60,9 @@ public readonly struct SubjectPropertyChange : IEquatable<SubjectPropertyChange>
         TValue newValue,
         long revision = 0)
     {
-        // Fast path: small ref-free value types stored inline - zero allocations. Structs containing
-        // references (e.g. ImmutableArray<T>) must be excluded: inline storage is not GC-scanned, so a
-        // contained reference could dangle. All checks fold to JIT-time constants (zero-cost guard).
-        if (typeof(TValue).IsValueType &&
-            !RuntimeHelpers.IsReferenceOrContainsReferences<TValue>() &&
-            Unsafe.SizeOf<TValue>() <= InlineValueStorage.MaxSize)
+        // Fast path: small ref-free value types stored inline - zero allocations. IsValueType stays inline, as in
+        // InlineValueStorage.TryGetValue, so the Native AOT scanner never compiles inline storage for a reference type.
+        if (typeof(TValue).IsValueType && InlineValueStorage.CanStore<TValue>())
         {
             return new SubjectPropertyChange(
                 property,
