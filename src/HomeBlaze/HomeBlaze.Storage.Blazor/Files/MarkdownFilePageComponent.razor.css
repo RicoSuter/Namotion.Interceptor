@@ -193,6 +193,33 @@
     transform: translate(-50%, -50%);
 }
 
+/* Empty content that is edited inline, such as a new item of a list, is a box with the button of its one insert line in the
+   middle, drawn in the color of the lines (see MarkdownContentView). Its line stands in the flow of the box and has no
+   strokes, unlike a line between blocks, which takes no room. */
+.markdown-content ::deep .content-placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 2.5rem;
+    min-height: 2.5rem;
+    border: 1px dashed rgba(var(--mud-palette-primary-rgb), 0.7);
+    border-radius: 4px;
+}
+
+.markdown-content ::deep .content-placeholder > .block-insert-line {
+    height: auto;
+}
+
+.markdown-content ::deep .content-placeholder > .block-insert-line > .block-insert-line-bar {
+    position: static;
+    transform: none;
+}
+
+.markdown-content ::deep .content-placeholder > .block-insert-line > .block-insert-line-bar::before,
+.markdown-content ::deep .content-placeholder > .block-insert-line > .block-insert-line-bar::after {
+    display: none;
+}
+
 /* A block of text that is edited inline stands in a wrapper (see MarkdownTextWidget). On the page the wrapper takes no
    margin, so that the margins of the text apply as on the viewed page. In a container the wrapper takes the margins of a
    block and of a heading from the rules above, which the text takes on the viewed page, and the text takes none. */

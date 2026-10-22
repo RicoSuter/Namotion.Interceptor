@@ -12,43 +12,57 @@
 @{
     var showsInsertLines = ShowsInsertLines();
     var contentName = showsInsertLines ? GetContentName() : null;
+    var segments = GetRenderSegments(groupsText: IsGroupingText());
     var position = 0;
 }
-@foreach (var segment in GetRenderSegments(groupsText: IsGroupingText()))
+@if (showsInsertLines && segments.Count == 0)
 {
-    var item = segment.Widget ?? segment.Start;
-    @if (showsInsertLines && item is not null)
+    @* Empty content, such as a new item of a list, has a box to fill in place of its two lines, which would take no room. *@
+    <div class="content-placeholder" data-testid="content-placeholder">
+        <BlockInsertLine Label="@($"Insert into {contentName}")"
+                         OnInsertWidget="@(() => StructureEditor!.InsertWidgetAsync(Content!, null))"
+                         OnInsertText="@GetInsertTextCallback(null)" />
+    </div>
+}
+else
+{
+    foreach (var segment in segments)
     {
-        position++;
-        <BlockInsertLine Label="@($"Insert at position {position} of {contentName}")"
-                         OnInsertWidget="@(() => StructureEditor!.InsertWidgetAsync(Content!, item))"
-                         OnInsertText="@GetInsertTextCallback(item)" />
+        var item = segment.Widget ?? segment.Start;
+        @if (showsInsertLines && item is not null)
+        {
+            position++;
+            <BlockInsertLine Label="@($"Insert at position {position} of {contentName}")"
+                             OnInsertWidget="@(() => StructureEditor!.InsertWidgetAsync(Content!, item))"
+                             OnInsertText="@GetInsertTextCallback(item)" />
+        }
+
+        @if (segment.Widget is not null)
+        {
+            @* Keyed, so that the state of a component stays with its subject when a reload inserts or removes a block. *@
+            <SubjectComponent @key="segment.Widget" Subject="@segment.Widget" Type="SubjectComponentType.Widget" />
+        }
+        else if (segment.Start is { Start: HtmlSegmentStart.Text } text)
+        {
+            @* A block of text is selectable like a row of a selected list: once its content is at the selection. *@
+            <SubjectComponent @key="text"
+                              Subject="@text"
+                              Type="SubjectComponentType.Widget"
+                              IsSelectionEnabled="@_isAtSelection"
+                              AdditionalParameters="@GetTextParameters(text, segment.Html!)" />
+        }
+        else if (segment.Html is not null)
+        {
+            @((MarkupString)segment.Html)
+        }
     }
 
-    @if (segment.Widget is not null)
+    if (showsInsertLines)
     {
-        @* Keyed, so that the state of a component stays with its subject when a reload inserts or removes a block. *@
-        <SubjectComponent @key="segment.Widget" Subject="@segment.Widget" Type="SubjectComponentType.Widget" />
+        <BlockInsertLine Label="@($"Insert at the end of {contentName}")"
+                         OnInsertWidget="@(() => StructureEditor!.InsertWidgetAsync(Content!, null))"
+                         OnInsertText="@GetInsertTextCallback(null)" />
     }
-    else if (segment.Start is { Start: HtmlSegmentStart.Text } text)
-    {
-        @* A block of text is selectable like a row of a selected list: once its content is at the selection. *@
-        <SubjectComponent @key="text"
-                          Subject="@text"
-                          Type="SubjectComponentType.Widget"
-                          IsSelectionEnabled="@_isAtSelection"
-                          AdditionalParameters="@GetTextParameters(text, segment.Html!)" />
-    }
-    else if (segment.Html is not null)
-    {
-        @((MarkupString)segment.Html)
-    }
-}
-@if (showsInsertLines)
-{
-    <BlockInsertLine Label="@($"Insert at the end of {contentName}")"
-                     OnInsertWidget="@(() => StructureEditor!.InsertWidgetAsync(Content!, null))"
-                     OnInsertText="@GetInsertTextCallback(null)" />
 }
 
 @code {

@@ -13,6 +13,14 @@ internal sealed record MarkdownStructureChange(
     MarkdownBlockWrite Write, MarkdownBlock? ChangedBlock, int ResultBlockIndex = -1, int ResultTextLine = 0);
 
 /// <summary>
+/// Inserts new content into the content of <paramref name="container"/> before the 1-based <paramref name="line"/> from
+/// <see cref="MarkdownPageOperations.GetInsertLine"/>, as <see cref="MarkdownPageOperations.TryInsertWidget"/> and
+/// <see cref="MarkdownPageOperations.TryInsertText"/> do.
+/// </summary>
+internal delegate MarkdownStructureChange? MarkdownContentInsert(
+    MarkdownPage page, IReadOnlyDictionary<int, IInterceptorSubject> blockSubjects, MarkdownBlock container, int line, out string? refusal);
+
+/// <summary>
 /// Removes, moves and inserts whole blocks in the text of a page. Every change is checked with
 /// <see cref="MarkdownBlockAlignment"/>, so that it does nothing to the blocks and the text it did not mean to change.
 /// </summary>
@@ -20,6 +28,7 @@ internal static class MarkdownPageOperations
 {
     private const string WidgetPartRefusal = "Text can hold widgets, not the parts of a widget.";
     private const string StyleBlockRefusal = "Text can hold widgets, not style blocks.";
+    private const string NoClosingLineRefusal = "Add the closing line of the block first.";
 
     /// <summary>Removes the block with everything in it.</summary>
     /// <returns>Null with a refusal when the change would change other blocks of the page.</returns>
@@ -925,6 +934,56 @@ internal static class MarkdownPageOperations
             new MarkdownBlockWrite(after, MapSubjects(blockSubjects, map), [], HasInsertedOrRemovedBlocks: true),
             owner,
             FindFirstBlockFrom(after, edit)?.Index ?? -1);
+    }
+
+    /// <summary>
+    /// Adds new content at the end of the slot <paramref name="slot"/> of <paramref name="owner"/>, through
+    /// <paramref name="insert"/>: at the end of the default content, which is before the first slot block of the owner, at
+    /// the end of the content of the block of a named slot, or in a new block of the slot when the slot has none or is a list.
+    /// </summary>
+    /// <returns>
+    /// Null with a refusal when the owner has no closing line or a step would change other blocks of the page, or with the
+    /// refusal of <paramref name="insert"/>.
+    /// </returns>
+    public static MarkdownStructureChange? TryAddToSlot(
+        MarkdownPage page,
+        IReadOnlyDictionary<int, IInterceptorSubject> blockSubjects,
+        MarkdownBlock owner,
+        SlotDefinition slot,
+        MarkdownContentInsert insert,
+        out string? refusal)
+    {
+        if (!owner.HasClosingLine)
+        {
+            refusal = NoClosingLineRefusal;
+            return null;
+        }
+
+        var slotBlock = slot.IsList ? null : MarkdownBlockWriter.GetSlotBlocks(owner, slot.Name).LastOrDefault();
+        if (slotBlock is not null || slot.IsDefault)
+        {
+            var container = slotBlock ?? owner;
+            return insert(page, blockSubjects, container, GetInsertLine(page, container, null), out refusal);
+        }
+
+        // An empty block of the slot first, into which the content then goes as into a block of the slot that exists. Each
+        // step is aligned on its own, as in TryMove.
+        if (TryAppendSlotBlock(page, blockSubjects, owner, slot.Name, "{}", out refusal) is not { ResultBlockIndex: >= 0 } slotChange)
+        {
+            refusal ??= $"Inserting a '{slot.Name}' block would change other blocks of the page.";
+            return null;
+        }
+
+        var slotPage = slotChange.Write.Page;
+        var newSlotBlock = slotPage.AllBlocks[slotChange.ResultBlockIndex];
+        var change = insert(
+            slotPage, slotChange.Write.BlockSubjects, newSlotBlock, GetInsertLine(slotPage, newSlotBlock, null), out refusal);
+
+        // The changed block is one of the page before both steps, and the new slot block is inserted even when the content
+        // inserts no block.
+        return change is null
+            ? null
+            : change with { Write = change.Write with { HasInsertedOrRemovedBlocks = true }, ChangedBlock = owner };
     }
 
     /// <summary>

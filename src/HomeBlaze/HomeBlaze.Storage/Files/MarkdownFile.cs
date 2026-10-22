@@ -805,6 +805,117 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     }
 
     /// <summary>
+    /// Adds a block for <paramref name="widget"/>, with its configuration and <paramref name="name"/> after <c>#</c>, at the
+    /// end of the content of the slot <paramref name="slotName"/> of the block of <paramref name="owner"/>, or of its default
+    /// slot when that is null, and saves the page. The content of the default slot ends before the first slot block of the
+    /// block. A named slot without a block gets one, and a list slot always gets a new block. The page then creates the
+    /// subject of the widget.
+    /// </summary>
+    /// <remarks>
+    /// Refused when the block has no slot of that name that takes page content or no closing line, when the file differs
+    /// from the text the page last read, and the page then reads it, or when the page would be larger than
+    /// <see cref="MaxContentSize"/> bytes.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage or from within a write of this page.</exception>
+    public Task<MarkdownEditResult> AddWidgetToSlotAsync(
+        IInterceptorSubject owner, string? slotName, IInterceptorSubject widget, string? name, CancellationToken cancellationToken)
+    {
+        var typeName = widget.GetType().FullName!;
+        var configurationJson = MarkdownBlockConfiguration.Serialize(_serializer, widget, block: null);
+        return AddToSlotAsync(
+            owner,
+            slotName,
+            (MarkdownPage page, IReadOnlyDictionary<int, IInterceptorSubject> subjects, MarkdownBlock container, int line, out string? refusal) =>
+                MarkdownPageOperations.TryInsertWidget(page, subjects, container, line, typeName, name, configurationJson, out refusal),
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// Adds <paramref name="text"/> at the end of the content of the slot <paramref name="slotName"/> of the block of
+    /// <paramref name="owner"/>, or of its default slot when that is null, where <see cref="AddWidgetToSlotAsync"/> adds a
+    /// widget, and saves the page. Complete widget blocks at the top level of the text become blocks of the content, as with
+    /// <see cref="InsertTextAsync"/>, and the page creates their subjects.
+    /// </summary>
+    /// <remarks>
+    /// Refused as <see cref="AddWidgetToSlotAsync"/> and <see cref="InsertTextAsync"/> are.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage or from within a write of this page.</exception>
+    public Task<MarkdownEditResult> AddTextToSlotAsync(
+        IInterceptorSubject owner, string? slotName, string text, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        return AddToSlotAsync(
+            owner,
+            slotName,
+            (MarkdownPage page, IReadOnlyDictionary<int, IInterceptorSubject> subjects, MarkdownBlock container, int line, out string? refusal) =>
+                MarkdownPageOperations.TryInsertText(page, subjects, container, line, text, out refusal),
+            cancellationToken);
+    }
+
+    private Task<MarkdownEditResult> AddToSlotAsync(
+        IInterceptorSubject owner, string? slotName, MarkdownContentInsert insert, CancellationToken cancellationToken) =>
+        EditStructureAsync(
+            snapshot =>
+            {
+                var page = snapshot.Page!;
+                if (FindOwnBlock(page, snapshot.BlockSubjects, owner) is not { } block)
+                {
+                    return (null, NoBlockRefusal);
+                }
+
+                if (FindContentSlot(owner.GetType(), slotName) is not { } slot)
+                {
+                    return (null, slotName is null
+                        ? "The block has no default slot for content."
+                        : $"The block has no slot '{slotName}' for content.");
+                }
+
+                return (MarkdownPageOperations.TryAddToSlot(page, snapshot.BlockSubjects, block, slot, insert, out var refusal), refusal);
+            },
+            StructureChangedRefusal,
+            cancellationToken);
+
+    // The default slot when the name is null, and only a slot that takes page content: a slot of configured items takes none.
+    private static SlotDefinition? FindContentSlot(Type type, string? slotName)
+    {
+        var slots = SlotMap.For(type);
+        var slot = slotName is null ? slots.Default : slots.Named.GetValueOrDefault(slotName);
+        return slot is { IsOpen: true } ? slot : null;
+    }
+
+    /// <summary>
+    /// Gets the slots of the block of <paramref name="owner"/> that take page content, in the order the type declares them,
+    /// for <see cref="AddWidgetToSlotAsync"/> and <see cref="AddTextToSlotAsync"/>. None when it has no block on this page or
+    /// its block has no closing line.
+    /// </summary>
+    public IReadOnlyList<MarkdownContentSlot> GetContentSlots(IInterceptorSubject owner)
+    {
+        var snapshot = _parseResult;
+        if (snapshot.Page is not { } page || FindOwnBlock(page, snapshot.BlockSubjects, owner) is not { HasClosingLine: true })
+        {
+            return [];
+        }
+
+        var result = new List<MarkdownContentSlot>();
+        foreach (var slot in SlotMap.For(owner.GetType()).Slots)
+        {
+            if (!slot.IsOpen)
+            {
+                continue;
+            }
+
+            var kind = slot.IsList ? MarkdownContentSlotKind.ListItem
+                : slot.IsDefault ? MarkdownContentSlotKind.Default
+                : MarkdownContentSlotKind.Named;
+            var value = slot.GetValue(owner);
+            var exists = value is Array values ? values.Length > 0 : value is not null;
+            result.Add(new MarkdownContentSlot(slot.IsDefault ? null : slot.Name, kind, exists));
+        }
+
+        return result;
+    }
+
+    /// <summary>
     /// Gets what the block of <paramref name="subject"/>, or the text block that a <see cref="HtmlSegment"/> starts, allows:
     /// all false when it has no block on this page, or the text block cannot be edited. It reads the children of the page, so
     /// a component that renders it renders again after every reload.

@@ -16,6 +16,7 @@ public class InlineTextEditingTests
     private const int Timeout = 30000;
     private const string PageName = "TextEditing.md";
     private const string LayoutPageName = "TextLayout.md";
+    private const string EmptyContentPageName = "EmptyContent.md";
     private const string TextEditorId = "markdown-text-editor";
 
     // The server writes the page in its output folder, so a run that ends with a change of the page would change the
@@ -111,6 +112,25 @@ public class InlineTextEditingTests
         + "\n"
         + "<div class=\"raw-html-block\">Raw HTML.</div>\n";
 
+    // An empty Alert, whose body has no content of its own, and an empty item of a flow.
+    private const string EmptyContent =
+        "---\n"
+        + "title: Empty Content Demo\n"
+        + "---\n"
+        + "\n"
+        + "# Empty Content Demo\n"
+        + "\n"
+        + ":: HomeBlaze.Components.Alert\n"
+        + "::\n"
+        + "\n"
+        + ":: HomeBlaze.Components.FlowLayout MinWidth=200\n"
+        + "::: Item\n"
+        + "First item.\n"
+        + ":::\n"
+        + "::: Item\n"
+        + ":::\n"
+        + "::\n";
+
     private readonly PlaywrightFixture _fixture;
 
     public InlineTextEditingTests(PlaywrightFixture fixture)
@@ -197,6 +217,32 @@ public class InlineTextEditingTests
         await Assertions.Expect(GetTextWrapper(page, "Last paragraph")).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
         await Assertions.Expect(page.GetWidgetActionBar().GetByTestId("move-up-button")).ToBeVisibleAsync(new() { Timeout = Timeout });
         await Assertions.Expect(page.GetWidgetActionBar().GetByTestId("move-down-button")).ToHaveCountAsync(0, new() { Timeout = Timeout });
+    }
+
+    [Fact]
+    public async Task WhenTextIsInsertedThroughThePlaceholderOfAnEmptyItem_ThenTheItemHoldsItAndThePlaceholderIsGone()
+    {
+        // Arrange: the text of the first item selects the flow, whose items then show their insert lines.
+        var page = await OpenPageInInlineModeAsync(EmptyContentPageName, EmptyContent);
+        await page.GetByText("First item.", new() { Exact = true }).SelectWidgetAsync();
+        var emptyItem = page.GetByTestId("flow-item").Nth(1);
+        var placeholder = emptyItem.GetByTestId("content-placeholder");
+        await Assertions.Expect(placeholder).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(emptyItem.GetByTestId("block-insert-line")).ToHaveCountAsync(1);
+
+        // Act
+        await placeholder.GetByRole(AriaRole.Button).ClickAsync();
+        await page.GetByTestId("insert-text-item").ClickAsync();
+        await SetTextEditorValueAsync(page, "Filled item.");
+        await page.GetByTestId("markdown-text-save").ClickAsync();
+
+        // Assert
+        await _fixture.WaitForDemoPageTextAsync(
+            EmptyContentPageName,
+            text => text.Contains("::: Item\n\nFilled item.\n\n:::\n::\n"),
+            "The text was not written into the empty item.");
+        await Assertions.Expect(emptyItem.GetByText("Filled item.", new() { Exact = true })).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetByTestId("content-placeholder")).ToHaveCountAsync(0, new() { Timeout = Timeout });
     }
 
     [Fact]
