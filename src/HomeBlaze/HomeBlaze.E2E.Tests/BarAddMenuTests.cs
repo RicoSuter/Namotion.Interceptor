@@ -132,7 +132,7 @@ public class BarAddMenuTests
     }
 
     [Fact]
-    public async Task WhenATabLayoutIsSelected_ThenItsPlusOpensTheSetupDialogOfATabWithoutAMenu()
+    public async Task WhenATabLayoutIsSelected_ThenItsPlusOpensTheSetupDialogOfATabWithoutAMenuAndTheLayoutStaysSelected()
     {
         // Arrange
         var page = await OpenPageInInlineModeAsync(ScratchPageName, CardAndTabsContent);
@@ -150,6 +150,10 @@ public class BarAddMenuTests
             ScratchPageName,
             text => text.Contains("First tab text.\n:::\n::: Tab Title=\"Second Tab\""),
             "The tab was not added.");
+        await Assertions.Expect(page.GetByTestId("tab-layout").GetByRole(AriaRole.Tab, new() { Name = "Second Tab" })).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // A tab has no widget of its own to select, so the layout keeps the selection.
+        await Assertions.Expect(page.Locator(".subject-component-wrapper.selected:has(> [data-testid='tab-layout'])")).ToHaveCountAsync(1, new() { Timeout = Timeout });
     }
 
     [Fact]

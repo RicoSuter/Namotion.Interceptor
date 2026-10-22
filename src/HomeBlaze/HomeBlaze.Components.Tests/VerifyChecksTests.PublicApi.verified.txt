@@ -505,7 +505,7 @@ namespace HomeBlaze.Components
     {
         protected PageStructureEditor() { }
         public abstract System.Threading.Tasks.Task AddListItemAsync(Namotion.Interceptor.IInterceptorSubject owner, HomeBlaze.Components.PageAddTarget target);
-        public abstract System.Threading.Tasks.Task AddTextAsync(Namotion.Interceptor.IInterceptorSubject owner, HomeBlaze.Components.PageAddTarget target);
+        public virtual System.Threading.Tasks.Task AddTextAsync(Namotion.Interceptor.IInterceptorSubject owner, HomeBlaze.Components.PageAddTarget target) { }
         public abstract System.Threading.Tasks.Task AddWidgetAsync(Namotion.Interceptor.IInterceptorSubject owner, HomeBlaze.Components.PageAddTarget target);
         public abstract bool CanInsertInto(Namotion.Interceptor.IInterceptorSubject content);
         public virtual bool CanInsertText(Namotion.Interceptor.IInterceptorSubject content, Namotion.Interceptor.IInterceptorSubject? before) { }

@@ -60,8 +60,9 @@
                                 aria-label="Widget actions"
                                 data-testid="widget-action-bar">
                         @* Written here, so that it keeps the scope of this component in the provider of the popover. *@
-                        @* The bar renders in the provider of the popovers, outside the widget, and a double click in it must
-                           never open the edit dialog of the widget either. *@
+                        @* The bar renders in the provider of the popovers, outside the widget, where a double click on it
+                           does not reach the widget. This guards the case where the bar renders inside the wrapper, so that a
+                           double click on it never opens the edit dialog of the widget. *@
                         <div class="subject-action-bar-content" @ondblclick:stopPropagation="true">
                             @if (selectableParent != null)
                             {

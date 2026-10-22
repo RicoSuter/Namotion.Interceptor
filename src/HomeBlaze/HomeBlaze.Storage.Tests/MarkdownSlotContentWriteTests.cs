@@ -313,6 +313,21 @@ public class MarkdownSlotContentWriteTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenAnItemIsAddedToAListSlotOfContentItems_ThenTheAddIsRefusedAndThePageIsUnchanged()
+    {
+        // Arrange: the items of a flow hold page content, which AddWidgetToSlotAsync and AddTextToSlotAsync add.
+        var markdown = await LoadAsync(FlowPage);
+        var flow = markdown.Children["flow"];
+
+        // Act
+        var result = await markdown.AddSlotItemAsync(flow, "Item", new TestLeaf { Name = "item" }, CancellationToken.None);
+
+        // Assert
+        Assert.Equal("The block has no list slot 'Item' for this item.", result.Refusal);
+        Assert.Equal(FlowPage, ReadPage());
+    }
+
+    [Fact]
     public async Task WhenTheBlockHasNoClosingLine_ThenTheAddIsRefusedAndTheFileIsUnchanged()
     {
         // Arrange

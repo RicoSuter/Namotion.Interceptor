@@ -4,8 +4,8 @@ namespace HomeBlaze.Components;
 
 /// <summary>
 /// Changes the blocks of the page that is edited in place. A page cascades it while it is edited inline, and the widgets
-/// show their structure actions only then. A member added later has a default that does nothing, so that an editor of
-/// another kind of page keeps working.
+/// show their structure actions only then. The members for blocks of text have defaults that do nothing, for an editor of a
+/// page without them.
 /// </summary>
 public abstract class PageStructureEditor
 {
@@ -45,9 +45,9 @@ public abstract class PageStructureEditor
 
     /// <summary>
     /// Asks for text, adds it to <paramref name="target"/> of <paramref name="owner"/>, a slot of content or of content items,
-    /// and selects it.
+    /// and selects it. Does nothing by default.
     /// </summary>
-    public abstract Task AddTextAsync(IInterceptorSubject owner, PageAddTarget target);
+    public virtual Task AddTextAsync(IInterceptorSubject owner, PageAddTarget target) => Task.CompletedTask;
 
     /// <summary>
     /// Asks for an item of <paramref name="target"/>, a slot of <see cref="PageAddTargetKind.ConfiguredItem"/>, appends it to
