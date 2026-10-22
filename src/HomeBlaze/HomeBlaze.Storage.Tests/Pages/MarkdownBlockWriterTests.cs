@@ -784,4 +784,27 @@ public class MarkdownBlockWriterTests
         // Assert
         Assert.Equal(expected, result);
     }
+
+    [Theory]
+    [InlineData("  a\n  b", "  ", "a\nb")]
+    [InlineData("  a\n\n b\nc", "  ", "a\n\n b\nc")]
+    [InlineData("a", "", "a")]
+    public void WhenIndentationIsRemoved_ThenOnlyLinesThatStartWithItLoseIt(string text, string indentation, string expected)
+    {
+        // Act
+        var result = MarkdownBlockWriter.RemoveIndentation(text, indentation);
+
+        // Assert
+        Assert.Equal(expected, result);
+    }
+
+    [Fact]
+    public void WhenTextWithEmptyLinesIsIndented_ThenTheEmptyLinesStayEmpty()
+    {
+        // Act
+        var result = MarkdownBlockWriter.Indent("a\r\n\r\n \r\nb", "  ", "\r\n");
+
+        // Assert
+        Assert.Equal("  a\r\n\r\n \r\n  b", result);
+    }
 }

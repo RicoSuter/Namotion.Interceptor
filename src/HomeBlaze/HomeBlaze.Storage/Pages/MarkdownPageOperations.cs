@@ -417,7 +417,10 @@ internal static class MarkdownPageOperations
     /// The text gets the line endings of the page and the indentation of its content, and an empty line keeps it apart from
     /// a line of text before or after it.
     /// </summary>
-    /// <returns>Null with a refusal when the change would change other blocks of the page or the text around it.</returns>
+    /// <returns>
+    /// Null with a refusal when the text block cannot be edited or the change would change other blocks of the page or the
+    /// text around it.
+    /// </returns>
     public static MarkdownStructureChange? TryReplaceText(
         MarkdownPage page, IReadOnlyDictionary<int, IInterceptorSubject> blockSubjects, MarkdownTextBlock textBlock, string text, out string? refusal)
     {
@@ -426,7 +429,7 @@ internal static class MarkdownPageOperations
             return TryRemoveText(page, blockSubjects, textBlock, out refusal);
         }
 
-        if (!CanInsertOrRemoveBlocks(page, out refusal))
+        if (!CanEditText(page, textBlock, out refusal))
         {
             return null;
         }
@@ -439,11 +442,14 @@ internal static class MarkdownPageOperations
     }
 
     /// <summary>Removes the lines of the text block so that the text around it stays apart as before.</summary>
-    /// <returns>Null with a refusal when the change would change other blocks of the page or the text around it.</returns>
+    /// <returns>
+    /// Null with a refusal when the text block cannot be edited or the change would change other blocks of the page or the
+    /// text around it.
+    /// </returns>
     public static MarkdownStructureChange? TryRemoveText(
         MarkdownPage page, IReadOnlyDictionary<int, IInterceptorSubject> blockSubjects, MarkdownTextBlock textBlock, out string? refusal)
     {
-        if (!CanInsertOrRemoveBlocks(page, out refusal))
+        if (!CanEditText(page, textBlock, out refusal))
         {
             return null;
         }
@@ -503,6 +509,19 @@ internal static class MarkdownPageOperations
         return previous is not { HasClosingLine: false };
     }
 
+    // A text block that cannot be edited can hold blocks, such as an invalid block in a list item, which the change would drop
+    // without the alignment seeing it: the lines of the text block are all replaced or removed.
+    private static bool CanEditText(MarkdownPage page, MarkdownTextBlock textBlock, out string? refusal)
+    {
+        if (!textBlock.IsEditable)
+        {
+            refusal = $"The text at line {textBlock.Line} cannot be edited as text.";
+            return false;
+        }
+
+        return CanInsertOrRemoveBlocks(page, out refusal);
+    }
+
     // The change of a text holds no block, and the Markdown document around it stays as it was.
     private static MarkdownStructureChange? AlignText(
         MarkdownPage page,
@@ -527,10 +546,13 @@ internal static class MarkdownPageOperations
             ResultTextLine: FindFirstTextLine(newSource, edit));
     }
 
-    // The text as lines of the page: its line endings, the indentation of its content, and no empty lines around it.
+    // The text as lines of the page: its line endings, the indentation of its content, and no empty lines around it. The
+    // white space that starts its first line of text stays, such as that of an indented code block.
     private static string PrepareText(MarkdownPage page, string text, MarkdownBlock? owner, string lineEnding)
     {
-        var lines = text.ReplaceLineEndings("\n").Trim('\n').TrimEnd();
+        var trimmed = text.ReplaceLineEndings("\n").AsSpan().TrimEnd();
+        var leadingWhiteSpace = trimmed[..(trimmed.Length - trimmed.TrimStart().Length)];
+        var lines = trimmed[(leadingWhiteSpace.LastIndexOf('\n') + 1)..].ToString();
         return MarkdownBlockWriter.Indent(lines.ReplaceLineEndings(lineEnding), GetContentIndentation(page, owner), lineEnding);
     }
 

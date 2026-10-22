@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using HomeBlaze.Services;
@@ -432,9 +433,35 @@ public static class MarkdownBlockWriter
         return false;
     }
 
-    /// <summary>Puts <paramref name="indentation"/> before every line of <paramref name="text"/>.</summary>
-    internal static string Indent(string text, string indentation, string lineEnding) =>
-        indentation.Length == 0 ? text : indentation + text.Replace(lineEnding, lineEnding + indentation);
+    /// <summary>Puts <paramref name="indentation"/> before every line of <paramref name="text"/> that is not empty or only white space.</summary>
+    internal static string Indent(string text, string indentation, string lineEnding)
+    {
+        if (indentation.Length == 0)
+        {
+            return text;
+        }
+
+        var builder = new StringBuilder(text.Length + indentation.Length * 4);
+        var remaining = text.AsSpan();
+        while (true)
+        {
+            var lineEnd = remaining.IndexOf(lineEnding);
+            var line = lineEnd < 0 ? remaining : remaining[..lineEnd];
+            if (!line.IsWhiteSpace())
+            {
+                builder.Append(indentation);
+            }
+
+            builder.Append(line);
+            if (lineEnd < 0)
+            {
+                return builder.ToString();
+            }
+
+            builder.Append(lineEnding);
+            remaining = remaining[(lineEnd + lineEnding.Length)..];
+        }
+    }
 
     // The offset of the first character of the 1-based line, or the length of the text for a line after the last one.
     internal static int GetLineStart(string source, int line)

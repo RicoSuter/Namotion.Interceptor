@@ -610,4 +610,119 @@ public class MarkdownPageOperationsTests
         // Assert
         Assert.Equal("Old.\nSecond line.", text);
     }
+
+    [Theory]
+    [InlineData("- item\n  :: Demo.Card\n  text\n  ::\n")]
+    [InlineData("> quote\n>\n> :: Demo.Card\n> text\n> ::\n")]
+    [InlineData(":: {.ab}\nStyled.\n::\n")]
+    public void WhenTextThatCannotBeEditedIsReplaced_ThenTheChangeIsRefused(string source)
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse(source);
+        var textBlock = TextAt(page, 1);
+
+        // Act
+        var change = MarkdownPageOperations.TryReplaceText(page, NoSubjects, textBlock, "New.", out var refusal);
+
+        // Assert
+        Assert.False(textBlock.IsEditable);
+        Assert.Null(change);
+        Assert.Contains("cannot be edited", refusal);
+    }
+
+    [Theory]
+    [InlineData("- item\n  :: Demo.Card\n  text\n  ::\n")]
+    [InlineData("> quote\n>\n> :: Demo.Card\n> text\n> ::\n")]
+    [InlineData(":: {.ab}\nStyled.\n::\n")]
+    public void WhenTextThatCannotBeEditedIsRemoved_ThenTheChangeIsRefused(string source)
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse(source);
+
+        // Act
+        var change = MarkdownPageOperations.TryRemoveText(page, NoSubjects, TextAt(page, 1), out var refusal);
+
+        // Assert
+        Assert.Null(change);
+        Assert.Contains("cannot be edited", refusal);
+    }
+
+    [Fact]
+    public void WhenTextIsRemoved_ThenTheTextAroundItStaysApart()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse(":: Demo.Card\na\n\nP\n\nb\n::\n");
+
+        // Act
+        var change = MarkdownPageOperations.TryRemoveText(page, NoSubjects, TextAt(page, 4), out var refusal);
+
+        // Assert
+        Assert.Null(refusal);
+        Assert.Equal(":: Demo.Card\na\n\nb\n::\n", change!.Write.Page.Source);
+        Assert.Same(page.Blocks[0], change.ChangedBlock);
+        Assert.False(change.Write.HasInsertedOrRemovedBlocks);
+    }
+
+    [Theory]
+    [InlineData("::")]
+    [InlineData("::: Demo.X\n:::")]
+    [InlineData("```json\n{ \"Title\": \"A\" }\n```")]
+    public void WhenReplacedTextWouldBeABlockOrTheConfigurationOfTheBlock_ThenTheChangeIsRefused(string text)
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse(":: Demo.Card\nOld.\n::\n");
+
+        // Act
+        var change = MarkdownPageOperations.TryReplaceText(page, NoSubjects, TextAt(page, 2), text, out var refusal);
+
+        // Assert
+        Assert.Null(change);
+        Assert.Contains("would change other blocks", refusal);
+    }
+
+    [Fact]
+    public void WhenTheTextOfAnIndentedBlockIsAskedForAndReplaced_ThenItIsWithoutAndWithTheIndentation()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("  :: Demo.Card\n  Old.\n  Second.\n  ::\n");
+        var textBlock = TextAt(page, 2);
+
+        // Act
+        var text = MarkdownPageOperations.GetText(page, textBlock);
+        var change = MarkdownPageOperations.TryReplaceText(page, NoSubjects, textBlock, "New.\n\n- item", out var refusal);
+
+        // Assert
+        Assert.Equal("Old.\nSecond.", text);
+        Assert.Null(refusal);
+        Assert.Equal("  :: Demo.Card\n  New.\n\n  - item\n  ::\n", change!.Write.Page.Source);
+    }
+
+    [Fact]
+    public void WhenTheReplacedTextHasEmptyLinesAroundIt_ThenTheyAreLeftOut()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("a\n\nOld.\n\nb\n");
+
+        // Act
+        var change = MarkdownPageOperations.TryReplaceText(page, NoSubjects, TextAt(page, 3), " \t\n  \nNew.\n \n", out var refusal);
+
+        // Assert
+        Assert.Null(refusal);
+        Assert.Equal("a\n\nNew.\n\nb\n", change!.Write.Page.Source);
+    }
+
+    [Fact]
+    public void WhenTextIsInsertedOnAPageWithWindowsLineEndings_ThenTheNewTextHasThem()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("intro\r\n\r\n:: Demo.One\r\n::\r\n");
+
+        // Act
+        var change = MarkdownPageOperations.TryInsertText(
+            page, NoSubjects, null, InsertLine(page, null, page.Blocks[0]), "One.\nTwo.", out var refusal);
+
+        // Assert
+        Assert.Null(refusal);
+        Assert.Equal("intro\r\n\r\nOne.\r\nTwo.\r\n\r\n:: Demo.One\r\n::\r\n", change!.Write.Page.Source);
+    }
 }
