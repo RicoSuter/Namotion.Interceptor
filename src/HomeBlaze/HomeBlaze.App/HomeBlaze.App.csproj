@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <IsPackable>false</IsPackable>
+        <RootNamespace>HomeBlaze.App</RootNamespace>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Photino.NET" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\HomeBlaze\HomeBlaze.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <EmbeddedResource Include="Resources\bootstrap.html" />
+    </ItemGroup>
+
+</Project>
