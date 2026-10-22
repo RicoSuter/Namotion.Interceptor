@@ -402,4 +402,123 @@ public class MarkdownStructureEditTests
         // Assert
         Assert.Equal("The block to insert before is not in this content.", result.Refusal);
     }
+
+    [Fact]
+    public async Task WhenAParagraphIsReplacedWithWhiteSpace_ThenItsBlockIsRemoved()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var page = await fixture.AddPageAsync("page.md", TextPage);
+
+        // Act
+        var result = await page.ReplaceTextBlockAsync(FindText(page, "Old text."), "Old text.", " \n ", CancellationToken.None);
+
+        // Assert
+        Assert.True(result.IsWritten);
+        Assert.Equal($"# Title\n\n:: {LeafType}#leaf\n::\n", await fixture.ReadAsync("page.md"));
+    }
+
+    [Fact]
+    public async Task WhenTheFileChangedBeforeAReplace_ThenTheRefusalSaysTheTextChanged()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var page = await fixture.AddPageAsync("page.md", TextPage);
+        var changed = TextPage + "\nexternal\n";
+        await fixture.WriteAsync("page.md", changed);
+
+        // Act
+        var result = await page.ReplaceTextBlockAsync(FindText(page, "Old text."), "Old text.", "New.", CancellationToken.None);
+
+        // Assert
+        Assert.Equal("The text changed since you opened it.", result.Refusal);
+        Assert.Equal(changed, await fixture.ReadAsync("page.md"));
+        Assert.Equal(changed, page.Content);
+    }
+
+    [Fact]
+    public async Task WhenTheFileChangedBeforeAnInsertBeforeText_ThenTheRefusalSaysThePageChanged()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var page = await fixture.AddPageAsync("page.md", TextPage);
+        var segment = FindText(page, "Old text.");
+        var changed = TextPage + "\nexternal\n";
+        await fixture.WriteAsync("page.md", changed);
+
+        // Act
+        var result = await page.InsertWidgetAsync(page, segment, new TestLeaf(), null, CancellationToken.None);
+
+        // Assert
+        Assert.Equal("The page changed since you opened it.", result.Refusal);
+        Assert.Equal(changed, await fixture.ReadAsync("page.md"));
+    }
+
+    [Fact]
+    public async Task WhenTheTextToInsertBeforeIsFromAnOlderRead_ThenTheInsertIsRefused()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var page = await fixture.AddPageAsync("page.md", TextPage);
+        var segment = FindText(page, "Old text.");
+        var changed = "Intro.\n\n" + TextPage;
+        await fixture.UpdatePageAsync(page, changed);
+
+        // Act
+        var result = await page.InsertTextAsync(page, segment, "New.", CancellationToken.None);
+
+        // Assert
+        Assert.Equal("The page changed since you opened it.", result.Refusal);
+        Assert.False(page.CanInsertTextAt(page, segment));
+        Assert.Equal(changed, await fixture.ReadAsync("page.md"));
+    }
+
+    [Fact]
+    public async Task WhenTheTextToInsertBeforeIsInAnotherContent_ThenTheInsertIsRefused()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var content = $"Intro.\n\n:: {PanelType}#panel\nInside.\n::\n";
+        var page = await fixture.AddPageAsync("page.md", content);
+        var panelContent = Assert.IsType<MarkdownFragment>(((TestPanel)page.Children["panel"]).Content);
+
+        // Act
+        var result = await page.InsertTextAsync(panelContent, FindText(page, "Intro."), "New.", CancellationToken.None);
+
+        // Assert
+        Assert.Equal("The block to insert before is not in this content.", result.Refusal);
+        Assert.Equal(content, await fixture.ReadAsync("page.md"));
+    }
+
+    [Fact]
+    public async Task WhenInsertedTextWouldMakeThePageTooLarge_ThenTheInsertIsRefusedAndTheFileIsUnchanged()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var content = "# Title\n\n" + new string('a', MarkdownFile.MaxContentSize - 20) + "\n";
+        var page = await fixture.AddPageAsync("page.md", content);
+
+        // Act
+        var result = await page.InsertTextAsync(page, null, "Text of more than ten bytes.", CancellationToken.None);
+
+        // Assert
+        Assert.StartsWith("The Markdown source would be ", result.Refusal);
+        Assert.Equal(content, await fixture.ReadAsync("page.md"));
+    }
+
+    [Fact]
+    public async Task WhenAnInsertedWidgetWouldMakeThePageTooLarge_ThenTheInsertIsRefusedAndTheFileIsUnchanged()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var content = "# Title\n\n" + new string('a', MarkdownFile.MaxContentSize - 20) + "\n";
+        var page = await fixture.AddPageAsync("page.md", content);
+
+        // Act
+        var result = await page.InsertWidgetAsync(page, null, new TestLeaf(), "leaf", CancellationToken.None);
+
+        // Assert
+        Assert.StartsWith("The Markdown source would be ", result.Refusal);
+        Assert.Equal(content, await fixture.ReadAsync("page.md"));
+    }
 }

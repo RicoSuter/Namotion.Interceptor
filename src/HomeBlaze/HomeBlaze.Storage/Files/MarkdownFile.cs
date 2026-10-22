@@ -72,6 +72,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     private const string StructureChangedRefusal = "The page changed while it was edited. Try again.";
     private const string NoBlockRefusal = "The subject has no block on the page.";
     private const string TextChangedRefusal = "The text changed since you opened it.";
+    private const string PageChangedRefusal = "The page changed since you opened it.";
+    private const string NotInContentRefusal = "The block to insert before is not in this content.";
 
     // The write of this page that the flow runs in, so that a write from inside it is refused instead of waiting
     // for _writeLock. Off the worker, the reload after a write, a refused write-back or a refused structure edit applies
@@ -507,13 +509,17 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     }
 
     /// <summary>Deletes the block of <paramref name="subject"/> with everything in it and saves the page.</summary>
-    /// <remarks>Refused when the file differs from the text the page last read; the page then reads it.</remarks>
+    /// <remarks>
+    /// Refused when the file differs from the text the page last read, and the page then reads it, or when the page would
+    /// be larger than <see cref="MaxContentSize"/> bytes.
+    /// </remarks>
     /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage or from within a write of this page.</exception>
     public Task<MarkdownEditResult> DeleteBlockAsync(IInterceptorSubject subject, CancellationToken cancellationToken) =>
         EditStructureAsync(
             snapshot => FindOwnBlock(snapshot.Page!, snapshot.BlockSubjects, subject) is { } block
                 ? (MarkdownPageOperations.TryRemove(snapshot.Page!, snapshot.BlockSubjects, block, out var refusal), refusal)
                 : (null, NoBlockRefusal),
+            StructureChangedRefusal,
             cancellationToken);
 
     /// <summary>
@@ -521,7 +527,10 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// item before it, or after the item after it, where an item is a widget block or a top-level block of text of that
     /// content, or for a slot block a block of the same slot. Saves the page.
     /// </summary>
-    /// <remarks>Refused when the file differs from the text the page last read; the page then reads it.</remarks>
+    /// <remarks>
+    /// Refused when the file differs from the text the page last read, and the page then reads it, or when the page would
+    /// be larger than <see cref="MaxContentSize"/> bytes.
+    /// </remarks>
     /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage or from within a write of this page.</exception>
     public Task<MarkdownEditResult> MoveBlockAsync(
         IInterceptorSubject subject, int direction, CancellationToken cancellationToken) =>
@@ -529,6 +538,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             snapshot => FindOwnBlock(snapshot.Page!, snapshot.BlockSubjects, subject) is { } block
                 ? (MarkdownPageOperations.TryMove(snapshot.Page!, snapshot.BlockSubjects, block, direction, out var refusal), refusal)
                 : (null, NoBlockRefusal),
+            StructureChangedRefusal,
             cancellationToken);
 
     /// <summary>
@@ -537,7 +547,10 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// a block of that content or the <see cref="HtmlSegment"/> of one of its text blocks, or after the content when that is
     /// null. The page then creates its own subject for it.
     /// </summary>
-    /// <remarks>Refused when the file differs from the text the page last read; the page then reads it.</remarks>
+    /// <remarks>
+    /// Refused when the file differs from the text the page last read, and the page then reads it, or when the page would
+    /// be larger than <see cref="MaxContentSize"/> bytes.
+    /// </remarks>
     /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage or from within a write of this page.</exception>
     public Task<MarkdownEditResult> InsertWidgetAsync(
         IInterceptorSubject content, IInterceptorSubject? before, IInterceptorSubject widget, string? name, CancellationToken cancellationToken)
@@ -549,6 +562,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
                 ? (MarkdownPageOperations.TryInsertWidget(
                     snapshot.Page!, snapshot.BlockSubjects, owner, line, typeName, name, configurationJson, out refusal), refusal)
                 : (null, refusal),
+            GetChangedPageRefusal(before),
             cancellationToken);
     }
 
@@ -558,6 +572,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// </summary>
     public string? GetTextBlockText(HtmlSegment segment)
     {
+        ArgumentNullException.ThrowIfNull(segment);
         var snapshot = _parseResult;
         return snapshot.Page is { } page && snapshot.TextBlocks.TryGetValue(segment, out var textBlock) && textBlock.IsEditable
             ? MarkdownPageOperations.GetText(page, textBlock)
@@ -570,13 +585,14 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// </summary>
     /// <remarks>
     /// Refused when the segment starts no text block that can be edited any more or its text is no longer
-    /// <paramref name="expectedText"/>, as <see cref="GetTextBlockText"/> returned it, and when the file differs from the
-    /// text the page last read; the page then reads it.
+    /// <paramref name="expectedText"/>, as <see cref="GetTextBlockText"/> returned it, when the file differs from the text the
+    /// page last read, and the page then reads it, or when the page would be larger than <see cref="MaxContentSize"/> bytes.
     /// </remarks>
     /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage or from within a write of this page.</exception>
     public Task<MarkdownEditResult> ReplaceTextBlockAsync(
         HtmlSegment segment, string expectedText, string newText, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(segment);
         ArgumentNullException.ThrowIfNull(expectedText);
         ArgumentNullException.ThrowIfNull(newText);
         var expected = expectedText.ReplaceLineEndings("\n");
@@ -591,6 +607,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
 
                 return (MarkdownPageOperations.TryReplaceText(snapshot.Page!, snapshot.BlockSubjects, textBlock, newText, out var refusal), refusal);
             },
+            TextChangedRefusal,
             cancellationToken);
     }
 
@@ -598,7 +615,10 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// Inserts <paramref name="text"/>, Markdown without blocks, into <paramref name="content"/> before <paramref name="before"/>,
     /// as <see cref="InsertWidgetAsync"/> places a widget, and saves the page.
     /// </summary>
-    /// <remarks>Refused when the file differs from the text the page last read; the page then reads it.</remarks>
+    /// <remarks>
+    /// Refused when the file differs from the text the page last read, and the page then reads it, or when the page would
+    /// be larger than <see cref="MaxContentSize"/> bytes.
+    /// </remarks>
     /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage or from within a write of this page.</exception>
     public Task<MarkdownEditResult> InsertTextAsync(
         IInterceptorSubject content, IInterceptorSubject? before, string text, CancellationToken cancellationToken)
@@ -608,6 +628,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             snapshot => TryGetInsertPoint(snapshot, content, before, out var owner, out var line, out var refusal)
                 ? (MarkdownPageOperations.TryInsertText(snapshot.Page!, snapshot.BlockSubjects, owner, line, text, out refusal), refusal)
                 : (null, refusal),
+            GetChangedPageRefusal(before),
             cancellationToken);
     }
 
@@ -646,9 +667,15 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         int? beforeLine = null;
         if (before is HtmlSegment segment)
         {
-            if (!snapshot.TextBlocks.TryGetValue(segment, out var textBlock) || !ReferenceEquals(textBlock.Owner, owner))
+            if (!snapshot.TextBlocks.TryGetValue(segment, out var textBlock))
             {
-                refusal = StructureChangedRefusal;
+                refusal = PageChangedRefusal;
+                return false;
+            }
+
+            if (!ReferenceEquals(textBlock.Owner, owner))
+            {
+                refusal = NotInContentRefusal;
                 return false;
             }
 
@@ -665,7 +692,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             MarkdownPageOperations.FindSiblings(page, beforeBlock, out var parent);
             if (!ReferenceEquals(parent, owner))
             {
-                refusal = "The block to insert before is not in this content.";
+                refusal = NotInContentRefusal;
                 return false;
             }
 
@@ -677,11 +704,18 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         return true;
     }
 
+    // A segment of text does not survive the read after a refusal, so a refusal that asks to try again would fail again.
+    private static string GetChangedPageRefusal(IInterceptorSubject? before) =>
+        before is HtmlSegment ? PageChangedRefusal : StructureChangedRefusal;
+
     /// <summary>
     /// Appends a block to the list slot <paramref name="slotName"/> of the block of <paramref name="owner"/>: with the
     /// configuration of <paramref name="item"/>, or empty for a slot whose blocks hold page content (null item).
     /// </summary>
-    /// <remarks>Refused when the file differs from the text the page last read; the page then reads it.</remarks>
+    /// <remarks>
+    /// Refused when the file differs from the text the page last read, and the page then reads it, or when the page would
+    /// be larger than <see cref="MaxContentSize"/> bytes.
+    /// </remarks>
     /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage or from within a write of this page.</exception>
     public Task<MarkdownEditResult> AddSlotItemAsync(
         IInterceptorSubject owner, string slotName, IInterceptorSubject? item, CancellationToken cancellationToken)
@@ -705,6 +739,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
 
                 return (MarkdownPageOperations.TryAppendSlotBlock(page, subjects, block, slotName, configurationJson, out var refusal), refusal);
             },
+            StructureChangedRefusal,
             cancellationToken);
     }
 
@@ -768,8 +803,10 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
                (snapshot.Page is { } page && MarkdownPageOperations.FindContentBlock(page, snapshot.BlockSubjects, content) is not null);
     }
 
+    // changedPageRefusal is the refusal when the file or the snapshot changed meanwhile.
     private async Task<MarkdownEditResult> EditStructureAsync(
         Func<MarkdownParseResult, (MarkdownStructureChange? Change, string? Refusal)> operation,
+        string changedPageRefusal,
         CancellationToken cancellationToken)
     {
         EnsureNotWithinWrite();
@@ -787,9 +824,9 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             // and would undo that change. The page is read now, so that a second try works on the file.
             if (await ReadSourceUnlockedAsync(cancellationToken) != page.Source)
             {
-                _parser.LogRefusedWrite(FullPath, StructureChangedRefusal);
+                _parser.LogRefusedWrite(FullPath, changedPageRefusal);
                 await ReloadAfterRefusalAsync(cancellationToken);
-                return MarkdownEditResult.Refused(StructureChangedRefusal);
+                return MarkdownEditResult.Refused(changedPageRefusal);
             }
 
             // The operations change only text, so a refusal leaves the graph as the snapshot has it.
@@ -800,7 +837,13 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
                 return MarkdownEditResult.Refused(refusal!);
             }
 
-            var publishRefusal = await PublishAndWriteAsync(snapshot, change.Write, change.ChangedBlock, StructureChangedRefusal);
+            if (MarkdownWriteRules.GetContentSizeRefusal(change.Write.Page.Source) is { } sizeRefusal)
+            {
+                _parser.LogRefusedWrite(FullPath, sizeRefusal);
+                return MarkdownEditResult.Refused(sizeRefusal);
+            }
+
+            var publishRefusal = await PublishAndWriteAsync(snapshot, change.Write, change.ChangedBlock, changedPageRefusal);
             return publishRefusal is null
                 ? MarkdownEditResult.WrittenFor(FindResultSubject(change))
                 : MarkdownEditResult.Refused(publishRefusal);

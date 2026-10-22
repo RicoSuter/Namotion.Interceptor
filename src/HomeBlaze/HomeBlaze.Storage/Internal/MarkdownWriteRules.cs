@@ -53,12 +53,19 @@ internal static partial class MarkdownWriteRules
     {
         ArgumentNullException.ThrowIfNull(content, parameterName);
 
-        var size = Encoding.UTF8.GetByteCount(content);
-        if (size > MarkdownFile.MaxContentSize)
+        if (GetContentSizeRefusal(content) is { } refusal)
         {
-            throw new ArgumentException(
-                $"The Markdown source would be {size} bytes, more than the limit of {MarkdownFile.MaxContentSize} bytes.", parameterName);
+            throw new ArgumentException(refusal, parameterName);
         }
+    }
+
+    /// <summary>Gets why the content is too large, larger than <see cref="MarkdownFile.MaxContentSize"/> bytes as UTF-8, or null.</summary>
+    public static string? GetContentSizeRefusal(string content)
+    {
+        var size = Encoding.UTF8.GetByteCount(content);
+        return size > MarkdownFile.MaxContentSize
+            ? $"The Markdown source would be {size} bytes, more than the limit of {MarkdownFile.MaxContentSize} bytes."
+            : null;
     }
 
     private const string ActiveContentMessage =

@@ -75,6 +75,65 @@ public class MarkdownFileWriteTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenTextIsInsertedIntoAPageOfTheStorage_ThenTheResultNamesTheSegmentOfTheText()
+    {
+        // Arrange
+        WriteFile("Notes.md", "# Notes\n\nOld text.\n");
+        var storage = await ConnectAsync();
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Notes.md"]);
+
+        // Act
+        var result = await markdown.InsertTextAsync(markdown, null, "Added text.", CancellationToken.None);
+
+        // Assert
+        Assert.Equal("# Notes\n\nOld text.\n\nAdded text.\n", ReadFile("Notes.md"));
+        var written = Assert.IsType<HtmlSegment>(result.Subject);
+        Assert.Contains("Added text.", written.Html);
+        Assert.Contains(written, markdown.Children.Values);
+    }
+
+    [Fact]
+    public async Task WhenTextInsideACardIsReplaced_ThenTheContentOfTheCardShowsTheNewText()
+    {
+        // Arrange
+        WriteFile("Cards.md", "# Cards\n\n:: HomeBlaze.Components.Card#card Title=A\nCard body.\n::\n");
+        var storage = await ConnectAsync();
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Cards.md"]);
+        var card = Assert.IsType<HomeBlaze.Components.Card>(markdown.Children["card"]);
+        var segment = Assert.IsType<MarkdownFragment>(card.Content).Children.Values.OfType<HtmlSegment>()
+            .Single(candidate => candidate.Html.Contains("Card body."));
+
+        // Act
+        var result = await markdown.ReplaceTextBlockAsync(segment, "Card body.", "Changed body.", CancellationToken.None);
+
+        // Assert
+        Assert.Equal("# Cards\n\n:: HomeBlaze.Components.Card#card Title=A\nChanged body.\n::\n", ReadFile("Cards.md"));
+        var content = Assert.IsType<MarkdownFragment>(card.Content);
+        Assert.Contains("Changed body.", Pages.MarkdownPageFixture.Html(content.Children));
+        Assert.DoesNotContain("Card body.", Pages.MarkdownPageFixture.Html(content.Children));
+        Assert.Contains(Assert.IsType<HtmlSegment>(result.Subject), content.Children.Values);
+    }
+
+    [Fact]
+    public async Task WhenTheTextOfAPageWithCarriageReturnsIsReplaced_ThenTheTextFromTheFileMatchesAndTheLineEndingsStay()
+    {
+        // Arrange
+        WriteFile("Notes.md", "# Notes\r\n\r\nFirst line\r\nsecond line.\r\n");
+        var storage = await ConnectAsync();
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Notes.md"]);
+        var segment = markdown.Children.Values.OfType<HtmlSegment>().Single(candidate => candidate.Html.Contains("First line"));
+        var expectedText = markdown.GetTextBlockText(segment);
+
+        // Act
+        var result = await markdown.ReplaceTextBlockAsync(segment, expectedText!, "New line\nnext line.", CancellationToken.None);
+
+        // Assert
+        Assert.Equal("First line\nsecond line.", expectedText);
+        Assert.True(result.IsWritten);
+        Assert.Equal("# Notes\r\n\r\nNew line\r\nnext line.\r\n", ReadFile("Notes.md"));
+    }
+
+    [Fact]
     public async Task WhenTheNewContentExceedsTheSizeLimit_ThenItIsRejectedAndTheFileIsUnchanged()
     {
         // Arrange
