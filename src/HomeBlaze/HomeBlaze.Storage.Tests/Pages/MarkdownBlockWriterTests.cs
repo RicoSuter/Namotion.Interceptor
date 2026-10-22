@@ -760,6 +760,8 @@ public class MarkdownBlockWriterTests
     [InlineData("B\n\nc\n", 1, 1, "c\n")]
     [InlineData("a\nB\nc\n", 2, 2, "a\n\nc\n")]
     [InlineData(":: X\nB\n::\n", 2, 2, ":: X\n::\n")]
+    [InlineData("a\n\nB", 3, 3, "a")]
+    [InlineData("a\nB", 2, 2, "a")]
     public void WhenLinesAreCut_ThenTheTextAroundThemStaysApartAsBefore(string source, int line, int endLine, string expected)
     {
         // Act

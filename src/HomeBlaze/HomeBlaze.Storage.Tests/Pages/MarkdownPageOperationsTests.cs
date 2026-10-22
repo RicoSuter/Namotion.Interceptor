@@ -197,6 +197,7 @@ public class MarkdownPageOperationsTests
     [Theory]
     [InlineData(":: Demo.Card\n::: Row\n:::: Demo.One\n::::\n:::\n::: Row\n:::\n::\n")]
     [InlineData(":: Demo.Card\n::: Demo.One\n:::\n::: Footer\n:::\n::\n")]
+    [InlineData(":: Demo.Card\n::: Demo.One\n:::\n::: Footer\n:::\ntrailing\n::\n")]
     public void WhenAWidgetIsAloneInItsContent_ThenItCannotMoveIntoAnotherSlotBlockOrOutOfItsOwner(string source)
     {
         // Arrange
@@ -212,15 +213,17 @@ public class MarkdownPageOperationsTests
         Assert.Null(MarkdownPageOperations.FindMoveLine(page, widget, -1, NoSkip));
     }
 
-    [Fact]
-    public void WhenTheLastBlockEndsTheTextWithoutALineEnding_ThenTheMoveKeepsTheTextEndingWithout()
+    [Theory]
+    [InlineData(0, 1)]
+    [InlineData(1, -1)]
+    public void WhenTheLastBlockEndsTheTextWithoutALineEnding_ThenTheMoveKeepsTheTextEndingWithout(int blockPosition, int direction)
     {
         // Arrange
         const string source = "x\n\n:: Demo.One\n::\n\n:: Demo.Two\n::";
         var page = MarkdownPageParser.Parse(source);
 
         // Act
-        var change = MarkdownPageOperations.TryMove(page, NoSubjects, page.Blocks[0], 1, NoSkip, out _);
+        var change = MarkdownPageOperations.TryMove(page, NoSubjects, page.Blocks[blockPosition], direction, NoSkip, out _);
 
         // Assert
         Assert.Equal("x\n\n:: Demo.Two\n::\n\n:: Demo.One\n::", change!.Write.Page.Source);

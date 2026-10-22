@@ -75,17 +75,20 @@ internal static class MarkdownPageOperations
         var cutSource = MarkdownBlockWriter.CutLines(source, block.Line, block.EndLine, out var cut);
         var cutPage = MarkdownPageParser.Parse(cutSource);
         var cutMap = MarkdownBlockAlignment.TryAlign(page, cutPage, cut, expectedInsertedBlockCount: 0, owner: null);
+        if (cutMap is null)
+        {
+            refusal = FormatMoveRefusal(block);
+            return null;
+        }
 
         var line = targetLine >= cut.RemovedEnd ? targetLine - cut.RemovedLineCount + cut.InsertedLineCount : targetLine;
         var newSource = MarkdownBlockWriter.InsertMovedLines(cutSource, line, blockText, lineEnding, standsApart, out var insert);
         var after = MarkdownPageParser.Parse(newSource);
-        var cutParent = parent is null ? null : FindBlockAt(cutPage, parent.Line);
-        var insertMap = cutMap is null
-            ? null
-            : MarkdownBlockAlignment.TryAlign(cutPage, after, insert, CountBlocks(block), cutParent, block.Kind);
-        if (cutMap is null || insertMap is null || FindFirstBlockFrom(after, insert) is not { } moved)
+        var cutParent = parent is null ? null : cutPage.AllBlocks[cutMap[parent.Index]];
+        if (MarkdownBlockAlignment.TryAlign(cutPage, after, insert, CountBlocks(block), cutParent, block.Kind) is not { } insertMap ||
+            FindFirstBlockFrom(after, insert) is not { } moved)
         {
-            refusal = $"Moving the block at line {block.Line} would change other blocks of the page.";
+            refusal = FormatMoveRefusal(block);
             return null;
         }
 
@@ -105,21 +108,30 @@ internal static class MarkdownPageOperations
             new MarkdownBlockWrite(after, subjects, [], HasInsertedOrRemovedBlocks: true), parent, moved.Index);
     }
 
+    private static string FormatMoveRefusal(MarkdownBlock block) =>
+        $"Moving the block at line {block.Line} would change other blocks of the page.";
+
     /// <summary>
     /// Gets the line of the page before the move before which <see cref="TryMove"/> inserts the block: the first line of the
     /// item before it, or the line after the item after it. Null when the block has no such item.
     /// </summary>
-    public static int? FindMoveLine(MarkdownPage page, MarkdownBlock block, int direction, Func<MarkdownBlock, bool> isSkipped)
-    {
-        if (direction is not (-1 or 1) ||
-            block.Kind is not (MarkdownBlockKind.Widget or MarkdownBlockKind.Slot) ||
-            FindSiblings(page, block, out var parent) is not { } siblings)
-        {
-            return null;
-        }
+    public static int? FindMoveLine(MarkdownPage page, MarkdownBlock block, int direction, Func<MarkdownBlock, bool> isSkipped) =>
+        direction is -1 or 1 && GetMoveItems(page, block, out var position) is { } items
+            ? FindMoveLine(items, position, direction, isSkipped)
+            : null;
 
-        var items = block.Kind == MarkdownBlockKind.Slot ? GetSlotItems(siblings, block.Head!.Name) : GetContentItems(page, siblings, parent);
-        var position = items.FindIndex(item => ReferenceEquals(item.Block, block));
+    /// <summary>
+    /// Gets whether <see cref="TryMove"/> can move the block up and down: whether
+    /// <see cref="FindMoveLine(MarkdownPage, MarkdownBlock, int, Func{MarkdownBlock, bool})"/> finds a line in each direction.
+    /// </summary>
+    public static (bool CanMoveUp, bool CanMoveDown) GetMoveDirections(
+        MarkdownPage page, MarkdownBlock block, Func<MarkdownBlock, bool> isSkipped) =>
+        GetMoveItems(page, block, out var position) is { } items
+            ? (FindMoveLine(items, position, -1, isSkipped) is not null, FindMoveLine(items, position, 1, isSkipped) is not null)
+            : default;
+
+    private static int? FindMoveLine(List<MoveItem> items, int position, int direction, Func<MarkdownBlock, bool> isSkipped)
+    {
         for (var index = position + direction; index >= 0 && index < items.Count; index += direction)
         {
             var item = items[index];
@@ -135,6 +147,29 @@ internal static class MarkdownPageOperations
     // A place that a moved block passes: a block, or text without a block, with its lines.
     private readonly record struct MoveItem(int Line, int EndLine, MarkdownBlock? Block);
 
+    // The items among which the block moves, with its position among them. Null when it is no widget or slot block.
+    private static List<MoveItem>? GetMoveItems(MarkdownPage page, MarkdownBlock block, out int position)
+    {
+        position = -1;
+        if (block.Kind is not (MarkdownBlockKind.Widget or MarkdownBlockKind.Slot) ||
+            FindSiblings(page, block, out var parent) is not { } siblings)
+        {
+            return null;
+        }
+
+        var items = block.Kind == MarkdownBlockKind.Slot ? GetSlotItems(siblings, block.Head!.Name) : GetContentItems(page, siblings, parent, block);
+        for (var index = 0; index < items.Count; index++)
+        {
+            if (ReferenceEquals(items[index].Block, block))
+            {
+                position = index;
+                return items;
+            }
+        }
+
+        return null;
+    }
+
     private static List<MoveItem> GetSlotItems(IReadOnlyList<MarkdownBlock> siblings, string slotName)
     {
         var items = new List<MoveItem>();
@@ -149,13 +184,35 @@ internal static class MarkdownPageOperations
         return items;
     }
 
-    // The widget blocks of the content and its text blocks, which also stand for its style and error blocks.
-    private static List<MoveItem> GetContentItems(MarkdownPage page, IReadOnlyList<MarkdownBlock> siblings, MarkdownBlock? owner)
+    // The widget blocks of the content and its text blocks, which also stand for its style and error blocks. Only those
+    // between the slot blocks around the block count, so that a widget never passes a slot block of its owner.
+    private static List<MoveItem> GetContentItems(
+        MarkdownPage page, IReadOnlyList<MarkdownBlock> siblings, MarkdownBlock? owner, MarkdownBlock block)
     {
+        var firstLine = 0;
+        var lastLine = int.MaxValue;
+        foreach (var sibling in siblings)
+        {
+            if (sibling.Kind != MarkdownBlockKind.Slot)
+            {
+                continue;
+            }
+
+            if (sibling.Line < block.Line)
+            {
+                firstLine = sibling.EndLine + 1;
+            }
+            else
+            {
+                lastLine = sibling.Line - 1;
+                break;
+            }
+        }
+
         var items = new List<MoveItem>();
         foreach (var sibling in siblings)
         {
-            if (sibling.Kind == MarkdownBlockKind.Widget)
+            if (sibling.Kind == MarkdownBlockKind.Widget && sibling.Line >= firstLine && sibling.Line <= lastLine)
             {
                 items.Add(new MoveItem(sibling.Line, sibling.EndLine, sibling));
             }
@@ -163,7 +220,7 @@ internal static class MarkdownPageOperations
 
         foreach (var textBlock in MarkdownTextBlocks.Find(page))
         {
-            if (ReferenceEquals(textBlock.Owner, owner))
+            if (ReferenceEquals(textBlock.Owner, owner) && textBlock.Line >= firstLine && textBlock.Line <= lastLine)
             {
                 items.Add(new MoveItem(textBlock.Line, textBlock.EndLine, null));
             }
@@ -282,19 +339,6 @@ internal static class MarkdownPageOperations
         }
 
         return null;
-    }
-
-    private static MarkdownBlock FindBlockAt(MarkdownPage page, int line)
-    {
-        foreach (var block in page.AllBlocks)
-        {
-            if (block.Line == line)
-            {
-                return block;
-            }
-        }
-
-        throw new InvalidOperationException($"The page has no block at line {line}.");
     }
 
     /// <summary>

@@ -615,11 +615,12 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             return default;
         }
 
-        var isBlockSkipped = ToBlockPredicate(snapshot.BlockSubjects, isSkipped);
+        var (canMoveUp, canMoveDown) = MarkdownPageOperations.GetMoveDirections(
+            page, block, ToBlockPredicate(snapshot.BlockSubjects, isSkipped));
         return new MarkdownBlockActions(
             CanDelete: true,
-            CanMoveUp: MarkdownPageOperations.FindMoveLine(page, block, -1, isBlockSkipped) is not null,
-            CanMoveDown: MarkdownPageOperations.FindMoveLine(page, block, 1, isBlockSkipped) is not null,
+            CanMoveUp: canMoveUp,
+            CanMoveDown: canMoveDown,
             ContainedBlockCount: MarkdownPageOperations.CountBlocks(block) - 1);
     }
 

@@ -253,7 +253,7 @@ public static class MarkdownBlockWriter
     /// Removes the lines from <paramref name="line"/> to <paramref name="endLine"/> so that the text around them stays apart
     /// as before. Between two lines of text one empty line stays (see <see cref="RemoveBlock"/>). Of the empty lines around
     /// them, the one after goes with them when the one before is empty too or they start the text, and the one before when
-    /// they end the text.
+    /// they end the text. When they end the text without a line ending, the text keeps ending without one.
     /// </summary>
     /// <remarks><paramref name="source"/> must have no lone carriage return, see <see cref="HasLoneCarriageReturn"/>.</remarks>
     internal static string CutLines(string source, int line, int endLine, out MarkdownLineEdit edit)
@@ -280,6 +280,12 @@ public static class MarkdownBlockWriter
         {
             start = previousStart;
             line--;
+        }
+
+        // The cut lines end the text without a line ending, so the line before them now ends it and gives up its own.
+        if (end == source.Length && start > 0 && source[^1] != '\n')
+        {
+            start -= start > 1 && source[start - 2] == '\r' ? 2 : 1;
         }
 
         edit = new MarkdownLineEdit(line, endLine - line + 1, 0);
