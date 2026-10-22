@@ -159,6 +159,25 @@ public class MarkdownFileWriteTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenATextBlockOfAPageOfTheStorageIsMoved_ThenTheResultNamesTheSegmentOfTheMovedText()
+    {
+        // Arrange
+        WriteFile("Notes.md", "# Notes\n\nFirst.\n\nSecond.\n");
+        var storage = await ConnectAsync();
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Notes.md"]);
+        var segment = markdown.Children.Values.OfType<HtmlSegment>().Single(candidate => candidate.Html.Contains("Second."));
+
+        // Act
+        var result = await markdown.MoveTextBlockAsync(segment, -1, CancellationToken.None);
+
+        // Assert
+        Assert.Equal("# Notes\n\nSecond.\n\nFirst.\n", ReadFile("Notes.md"));
+        var moved = Assert.IsType<HtmlSegment>(result.Subject);
+        Assert.Contains("Second.", moved.Html);
+        Assert.Contains(moved, markdown.Children.Values);
+    }
+
+    [Fact]
     public async Task WhenTextInsideACardIsReplaced_ThenTheContentOfTheCardShowsTheNewText()
     {
         // Arrange

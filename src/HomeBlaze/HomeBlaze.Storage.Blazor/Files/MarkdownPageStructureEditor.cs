@@ -60,15 +60,9 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
 
     public override PageBlockActions GetActions(IInterceptorSubject subject)
     {
-        if (subject is HtmlSegment segment)
-        {
-            return _file.GetTextBlockText(segment) is null
-                ? default
-                : new PageBlockActions(CanDelete: true, CanMoveUp: false, CanMoveDown: false, CanEditText: true);
-        }
-
         var actions = _file.GetBlockActions(subject);
-        return new PageBlockActions(actions.CanDelete, actions.CanMoveUp, actions.CanMoveDown);
+        return new PageBlockActions(
+            actions.CanDelete, actions.CanMoveUp, actions.CanMoveDown, CanEditText: subject is HtmlSegment && actions.CanDelete);
     }
 
     public override IReadOnlyList<PageListSlot> GetListSlots(IInterceptorSubject owner)
@@ -128,7 +122,9 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
     }
 
     public override async Task MoveAsync(IInterceptorSubject subject, int direction) =>
-        await RunAsync(() => _file.MoveBlockAsync(subject, direction, CancellationToken.None));
+        await RunAsync(() => subject is HtmlSegment segment
+            ? _file.MoveTextBlockAsync(segment, direction, CancellationToken.None)
+            : _file.MoveBlockAsync(subject, direction, CancellationToken.None));
 
     public override async Task InsertWidgetAsync(IInterceptorSubject content, IInterceptorSubject? before)
     {

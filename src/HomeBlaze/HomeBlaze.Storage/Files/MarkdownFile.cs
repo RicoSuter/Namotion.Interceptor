@@ -640,6 +640,27 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     }
 
     /// <summary>
+    /// Moves the text block that <paramref name="segment"/> starts one place up (-1) or down (1) among the content around it,
+    /// as <see cref="MoveBlockAsync"/> moves a block, and saves the page.
+    /// </summary>
+    /// <remarks>
+    /// Refused when the segment starts no text block that can be edited any more, when there is nothing to move past in the
+    /// direction, when the file differs from the text the page last read, and the page then reads it, or when the page would
+    /// be larger than <see cref="MaxContentSize"/> bytes.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage or from within a write of this page.</exception>
+    public Task<MarkdownEditResult> MoveTextBlockAsync(HtmlSegment segment, int direction, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(segment);
+        return EditStructureAsync(
+            snapshot => snapshot.TextBlocks.TryGetValue(segment, out var textBlock)
+                ? (MarkdownPageOperations.TryMoveText(snapshot.Page!, snapshot.BlockSubjects, textBlock, direction, out var refusal), refusal)
+                : (null, TextChangedRefusal),
+            TextChangedRefusal,
+            cancellationToken);
+    }
+
+    /// <summary>
     /// Gets whether text can go into <paramref name="content"/> before <paramref name="before"/>, or at its end: not right after
     /// a block without a closing line, which would take the text.
     /// </summary>
@@ -784,8 +805,9 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     }
 
     /// <summary>
-    /// Gets what the block of <paramref name="subject"/> allows, all false when it has no block on this page. It reads the
-    /// children of the page, so a component that renders it renders again after every reload.
+    /// Gets what the block of <paramref name="subject"/>, or the text block that a <see cref="HtmlSegment"/> starts, allows:
+    /// all false when it has no block on this page, or the text block cannot be edited. It reads the children of the page, so
+    /// a component that renders it renders again after every reload.
     /// </summary>
     public MarkdownBlockActions GetBlockActions(IInterceptorSubject subject)
     {
@@ -794,7 +816,23 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         _ = Children;
 
         var snapshot = _parseResult;
-        if (snapshot.Page is not { } page || FindOwnBlock(page, snapshot.BlockSubjects, subject) is not { } block)
+        if (snapshot.Page is not { } page)
+        {
+            return default;
+        }
+
+        if (subject is HtmlSegment segment)
+        {
+            if (!snapshot.TextBlocks.TryGetValue(segment, out var textBlock) || !textBlock.IsEditable)
+            {
+                return default;
+            }
+
+            var (canMoveTextUp, canMoveTextDown) = MarkdownPageOperations.GetTextMoveDirections(page, textBlock);
+            return new MarkdownBlockActions(CanDelete: true, CanMoveUp: canMoveTextUp, CanMoveDown: canMoveTextDown, ContainedBlockCount: 0);
+        }
+
+        if (FindOwnBlock(page, snapshot.BlockSubjects, subject) is not { } block)
         {
             return default;
         }

@@ -177,6 +177,29 @@ public class InlineTextEditingTests
     }
 
     [Fact]
+    public async Task WhenATextBlockIsMovedUpPastAWidgetAndDownAgain_ThenTheFileHasEachOrderAndTheTextStaysSelected()
+    {
+        // Arrange
+        var page = await OpenPageInInlineModeAsync();
+        var actionBar = await SelectTextAsync(page, "Last paragraph");
+
+        // Act
+        await actionBar.GetByTestId("move-up-button").ClickAsync();
+        await _fixture.WaitForDemoPageTextAsync(
+            PageName,
+            text => text.Contains("First paragraph on the page.\n\nLast paragraph on the page.\n\n:: HomeBlaze.Components.Card"),
+            "The text was not moved above the card.");
+        await Assertions.Expect(GetTextWrapper(page, "Last paragraph")).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
+        await page.GetWidgetActionBar().GetByTestId("move-down-button").ClickAsync();
+
+        // Assert
+        await _fixture.WaitForDemoPageTextAsync(PageName, text => text == Content, "The text was not moved below the card again.");
+        await Assertions.Expect(GetTextWrapper(page, "Last paragraph")).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetWidgetActionBar().GetByTestId("move-up-button")).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetWidgetActionBar().GetByTestId("move-down-button")).ToHaveCountAsync(0, new() { Timeout = Timeout });
+    }
+
+    [Fact]
     public async Task WhenTextIsInsertedAtAnInsertLine_ThenItStandsThereInTheFileAndIsSelected()
     {
         // Arrange: the lines of the page stand before the title, the first paragraph, the card and the last paragraph.

@@ -359,6 +359,62 @@ public class MarkdownStructureEditTests
     }
 
     [Fact]
+    public async Task WhenTextIsMovedDownPastAnUnnamedWidget_ThenTheFileHasTheNewOrderAndEveryWidgetKeepsItsSubject()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var page = await fixture.AddPageAsync("page.md", UnnamedLeavesPage);
+        var leafA = page.Children["TestLeaf_0"];
+        var leafB = page.Children["TestLeaf_1"];
+
+        // Act
+        var result = await page.MoveTextBlockAsync(FindText(page, "intro"), 1, CancellationToken.None);
+        await page.OnFileChangedAsync(CancellationToken.None);
+
+        // Assert
+        Assert.True(result.IsWritten);
+        Assert.Equal($":: {LeafType} Name=a\n::\n\nintro\n\n:: {LeafType} Name=b\n::\n", await fixture.ReadAsync("page.md"));
+        var leaves = page.Children.Values.OfType<TestLeaf>().ToList();
+        Assert.Same(leafA, leaves[0]);
+        Assert.Same(leafB, leaves[1]);
+    }
+
+    [Fact]
+    public async Task WhenTheActionsOfTextBlocksAreAskedFor_ThenTheyMoveAmongTheItemsOfTheirContent()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var page = await fixture.AddPageAsync("page.md", TextPage);
+
+        // Act
+        var title = page.GetBlockActions(FindText(page, "Title"));
+        var text = page.GetBlockActions(FindText(page, "Old text."));
+        var elsewhere = page.GetBlockActions(new HtmlSegment("<p>elsewhere</p>"));
+
+        // Assert
+        Assert.Equal(new MarkdownBlockActions(true, false, true, 0), title);
+        Assert.Equal(new MarkdownBlockActions(true, true, true, 0), text);
+        Assert.Equal(default, elsewhere);
+    }
+
+    [Fact]
+    public async Task WhenTheSegmentOfAMovedTextIsFromAnOlderRead_ThenTheMoveIsRefused()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var page = await fixture.AddPageAsync("page.md", TextPage);
+        var segment = FindText(page, "Old text.");
+        await fixture.UpdatePageAsync(page, "Intro.\n\n" + TextPage);
+
+        // Act
+        var result = await page.MoveTextBlockAsync(segment, -1, CancellationToken.None);
+
+        // Assert
+        Assert.Equal("The text changed since you opened it.", result.Refusal);
+        Assert.Equal("Intro.\n\n" + TextPage, await fixture.ReadAsync("page.md"));
+    }
+
+    [Fact]
     public async Task WhenTextIsInsertedBeforeABlockOrBeforeText_ThenItStandsThere()
     {
         // Arrange

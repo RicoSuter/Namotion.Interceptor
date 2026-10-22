@@ -943,4 +943,183 @@ public class MarkdownPageOperationsTests
         Assert.Null(refusal);
         Assert.Equal(0, change!.ResultTextLine);
     }
+
+    [Fact]
+    public void WhenTextIsMovedDownPastAWidget_ThenItStandsAfterTheWidgetAndEveryWidgetKeepsItsSubject()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("intro\n\n:: Demo.One\n::\n\n:: Demo.Two\n::\n");
+        var one = new TestLeaf();
+        var two = new TestLeaf();
+        var subjects = new Dictionary<int, IInterceptorSubject> { [0] = one, [1] = two };
+
+        // Act
+        var change = MarkdownPageOperations.TryMoveText(page, subjects, TextAt(page, 1), 1, out var refusal);
+
+        // Assert
+        Assert.Null(refusal);
+        Assert.Equal(":: Demo.One\n::\n\nintro\n\n:: Demo.Two\n::\n", change!.Write.Page.Source);
+        Assert.Equal(4, change.ResultTextLine);
+        Assert.Equal(-1, change.ResultBlockIndex);
+        Assert.False(change.Write.HasInsertedOrRemovedBlocks);
+        Assert.Null(change.ChangedBlock);
+        Assert.Same(one, change.Write.BlockSubjects[0]);
+        Assert.Same(two, change.Write.BlockSubjects[1]);
+    }
+
+    [Fact]
+    public void WhenTextIsMovedUpPastAnotherText_ThenTheTwoSwap()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("a\n\nb\n");
+
+        // Act
+        var change = MarkdownPageOperations.TryMoveText(page, NoSubjects, TextAt(page, 3), -1, out var refusal);
+
+        // Assert
+        Assert.Null(refusal);
+        Assert.Equal("b\n\na\n", change!.Write.Page.Source);
+        Assert.Equal(1, change.ResultTextLine);
+    }
+
+    [Fact]
+    public void WhenTextIsMovedPastAWidgetWithSlotBlocks_ThenItPassesTheWholeBlock()
+    {
+        // Arrange: a value map is such a widget, and a chip on the page.
+        var page = MarkdownPageParser.Parse("intro\n\n:: Demo.Map\n::: Case Value=A\n:::\n::\n");
+
+        // Act
+        var change = MarkdownPageOperations.TryMoveText(page, NoSubjects, TextAt(page, 1), 1, out var refusal);
+
+        // Assert
+        Assert.Null(refusal);
+        Assert.Equal(":: Demo.Map\n::: Case Value=A\n:::\n::\n\nintro\n", change!.Write.Page.Source);
+    }
+
+    [Fact]
+    public void WhenTextInACardIsMovedUpPastAWidget_ThenItStaysInTheCardAndNeverPassesTheFooter()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse(":: Demo.Card\n::: Demo.One\n:::\n\nbody\n::: Footer\nfooter\n:::\n::\n");
+        var body = TextAt(page, 5);
+
+        // Act
+        var bodyDirections = MarkdownPageOperations.GetTextMoveDirections(page, body);
+        var footerDirections = MarkdownPageOperations.GetTextMoveDirections(page, TextAt(page, 7));
+        var change = MarkdownPageOperations.TryMoveText(page, NoSubjects, body, -1, out var refusal);
+
+        // Assert
+        Assert.Equal((true, false), bodyDirections);
+        Assert.Equal((false, false), footerDirections);
+        Assert.Null(refusal);
+        Assert.Equal(":: Demo.Card\n\nbody\n\n::: Demo.One\n:::\n\n::: Footer\nfooter\n:::\n::\n", change!.Write.Page.Source);
+        Assert.Same(page.Blocks[0], change.ChangedBlock);
+        Assert.Equal(3, change.ResultTextLine);
+    }
+
+    [Theory]
+    [InlineData("a\n\n:: Demo.One\n::\n", 1, -1)]
+    [InlineData(":: Demo.Card\nbody\n::: Footer\n:::\n::\n", 2, 1)]
+    public void WhenThereIsNothingToMovePastInTheDirection_ThenTheMoveIsRefused(string source, int line, int direction)
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse(source);
+
+        // Act
+        var change = MarkdownPageOperations.TryMoveText(page, NoSubjects, TextAt(page, line), direction, out var refusal);
+
+        // Assert
+        Assert.Null(change);
+        Assert.Contains("has nothing", refusal);
+    }
+
+    [Fact]
+    public void WhenTextThatCannotBeEditedIsMoved_ThenTheMoveIsRefusedAndOffersNoDirection()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse(":: {.ab}\nStyled.\n::\n\nafter\n");
+        var textBlock = TextAt(page, 1);
+
+        // Act
+        var directions = MarkdownPageOperations.GetTextMoveDirections(page, textBlock);
+        var change = MarkdownPageOperations.TryMoveText(page, NoSubjects, textBlock, 1, out var refusal);
+
+        // Assert
+        Assert.Equal((false, false), directions);
+        Assert.Null(change);
+        Assert.Contains("cannot be edited", refusal);
+    }
+
+    [Fact]
+    public void WhenABlockWithoutClosingLineWouldTakeTheMovedText_ThenTheMoveIsRefusedAndNotOffered()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("text\n\n:: Demo.One\n\n:: Demo.Two\n::\n");
+        var textBlock = TextAt(page, 1);
+
+        // Act
+        var directions = MarkdownPageOperations.GetTextMoveDirections(page, textBlock);
+        var change = MarkdownPageOperations.TryMoveText(page, NoSubjects, textBlock, 1, out var refusal);
+
+        // Assert
+        Assert.Equal((false, false), directions);
+        Assert.Null(change);
+        Assert.Contains("without a closing line", refusal);
+    }
+
+    [Fact]
+    public void WhenAMovedListWouldJoinTheListBeforeIt_ThenTheMoveIsRefused()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("- a\n\n:: Demo.One\n::\n\n- b\n");
+
+        // Act
+        var change = MarkdownPageOperations.TryMoveText(page, NoSubjects, TextAt(page, 6), -1, out var refusal);
+
+        // Assert
+        Assert.Null(change);
+        Assert.Contains("would change other blocks", refusal);
+    }
+
+    [Fact]
+    public void WhenMovedCodeWouldContinueTheListBeforeIt_ThenTheMoveIsRefused()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("- x\n\n:: Demo.One\n::\n\n    code\n");
+
+        // Act
+        var change = MarkdownPageOperations.TryMoveText(page, NoSubjects, TextAt(page, 6), -1, out var refusal);
+
+        // Assert
+        Assert.Null(change);
+        Assert.Contains("would change other blocks", refusal);
+    }
+
+    [Fact]
+    public void WhenAMovedListWouldJoinTheListAfterIt_ThenTheMoveIsRefused()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("- a\n\n:: Demo.One\n::\n\n- b\n");
+
+        // Act
+        var change = MarkdownPageOperations.TryMoveText(page, NoSubjects, TextAt(page, 1), 1, out var refusal);
+
+        // Assert
+        Assert.Null(change);
+        Assert.Contains("would change other blocks", refusal);
+    }
+
+    [Fact]
+    public void WhenTextIsMovedOnAPageWithWindowsLineEndings_ThenTheMoveKeepsThem()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("a\r\n\r\nb\r\n");
+
+        // Act
+        var change = MarkdownPageOperations.TryMoveText(page, NoSubjects, TextAt(page, 3), -1, out var refusal);
+
+        // Assert
+        Assert.Null(refusal);
+        Assert.Equal("b\r\n\r\na\r\n", change!.Write.Page.Source);
+    }
 }

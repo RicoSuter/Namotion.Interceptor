@@ -1,6 +1,6 @@
 namespace HomeBlaze.Storage.Pages;
 
-/// <summary>What the block of a subject allows on its page, all false for a subject without a block.</summary>
+/// <summary>What the block of a subject, or a text block, allows on its page, all false for a subject without a block.</summary>
 /// <param name="CanDelete">Whether the subject has a block that can be deleted.</param>
 /// <param name="CanMoveUp">Whether the block can move past the item before it.</param>
 /// <param name="CanMoveDown">Whether the block can move past the item after it.</param>
