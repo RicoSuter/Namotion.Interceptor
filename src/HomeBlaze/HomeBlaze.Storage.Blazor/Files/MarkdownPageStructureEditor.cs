@@ -27,6 +27,7 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
     private readonly ISnackbar _snackbar;
     private readonly SubjectFactory _subjectFactory;
     private readonly ILogger _logger;
+    private readonly Func<bool> _isDarkMode;
 
     public MarkdownPageStructureEditor(
         MarkdownFile file,
@@ -35,7 +36,8 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
         IDialogService dialogService,
         ISnackbar snackbar,
         SubjectFactory subjectFactory,
-        ILogger logger)
+        ILogger logger,
+        Func<bool> isDarkMode)
     {
         _file = file;
         _selection = selection;
@@ -44,6 +46,7 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
         _snackbar = snackbar;
         _subjectFactory = subjectFactory;
         _logger = logger;
+        _isDarkMode = isDarkMode;
     }
 
     /// <summary>Gets the page whose blocks this editor changes.</summary>
@@ -196,6 +199,7 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
             _dialogService,
             "Edit text",
             text,
+            _isDarkMode(),
             async newText =>
             {
                 var result = await RunAsync(() => _file.ReplaceTextBlockAsync(segment, text, newText, CancellationToken.None), reportsInSnackbar: false);
@@ -218,6 +222,7 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
             _dialogService,
             "Insert text",
             string.Empty,
+            _isDarkMode(),
             async text =>
             {
                 // The place was chosen in the page as it was, and every later save is refused as well, so the message says

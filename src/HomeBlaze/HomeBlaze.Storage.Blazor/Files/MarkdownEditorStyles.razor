@@ -1,0 +1,24 @@
+@* The decorations of the module of MarkdownEditor.ModulePath. Every component with such an editor renders these, because
+   a dialog renders outside of the page and the page editor is not open in every mode. *@
+<style>
+    /* The colors of the block depths, as red, green and blue for rgb() and rgba(). */
+    .monaco-editor.vs-dark .block-color-0 { --block-color: 108, 166, 240; }
+    .monaco-editor.vs-dark .block-color-1 { --block-color: 79, 201, 164; }
+    .monaco-editor.vs-dark .block-color-2 { --block-color: 179, 157, 245; }
+    .monaco-editor.vs-dark .block-color-3 { --block-color: 238, 143, 181; }
+    .monaco-editor.vs-dark .block-color-4 { --block-color: 150, 200, 90; }
+    .monaco-editor.vs .block-color-0 { --block-color: 37, 99, 200; }
+    .monaco-editor.vs .block-color-1 { --block-color: 13, 140, 105; }
+    .monaco-editor.vs .block-color-2 { --block-color: 110, 80, 210; }
+    .monaco-editor.vs .block-color-3 { --block-color: 200, 60, 120; }
+    .monaco-editor.vs .block-color-4 { --block-color: 70, 130, 30; }
+
+    .monaco-editor .block-fence { color: rgb(var(--block-color)) !important; }
+    .monaco-editor .block-name { font-weight: bold; }
+    .monaco-editor .block-closing-label { color: rgb(var(--block-color)) !important; font-style: italic; opacity: 0.6; }
+    .monaco-editor .block-head { background-color: rgba(var(--block-color), 0.16); border-radius: 3px; }
+    .monaco-editor.vs .block-head { background-color: rgba(var(--block-color), 0.12); }
+
+    .monaco-editor .expression-decoration { background-color: rgba(224, 160, 80, 0.22); border-radius: 3px; }
+    .monaco-editor.vs .expression-decoration { background-color: rgba(210, 130, 20, 0.18); }
+</style>

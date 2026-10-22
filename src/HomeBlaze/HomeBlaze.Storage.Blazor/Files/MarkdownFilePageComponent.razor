@@ -65,6 +65,10 @@
     [CascadingParameter(Name = "IsEditing")]
     public bool IsEditing { get; set; }
 
+    // The dialogs render outside of the layout that cascades the mode, so they are given it.
+    [CascadingParameter(Name = "IsDarkMode")]
+    public bool IsDarkMode { get; set; } = true;
+
     private const string ModulePath = "./_content/HomeBlaze.Storage.Blazor/Files/MarkdownFilePageComponent.razor.js";
 
     [CascadingParameter]
@@ -93,7 +97,7 @@
                 _structureEditor.PageComponent != pageComponent)
             {
                 _structureEditor = new MarkdownPageStructureEditor(
-                    file, selection, pageComponent, DialogService, Snackbar, SubjectFactory, StructureEditorLogger);
+                    file, selection, pageComponent, DialogService, Snackbar, SubjectFactory, StructureEditorLogger, () => IsDarkMode);
             }
 
             return _structureEditor;

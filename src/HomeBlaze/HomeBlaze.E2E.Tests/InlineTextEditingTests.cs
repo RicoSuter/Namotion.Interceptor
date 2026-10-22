@@ -15,6 +15,7 @@ public class InlineTextEditingTests
     private const int Timeout = 30000;
     private const string PageName = "TextEditing.md";
     private const string LayoutPageName = "TextLayout.md";
+    private const string TextEditorId = "markdown-text-editor";
 
     // The server writes the page in its output folder, so a run that ends with a change of the page would change the
     // baseline of the next run if it were read from there.
@@ -125,9 +126,8 @@ public class InlineTextEditingTests
 
         // Act
         await actionBar.GetByTestId("edit-subject-button").ClickAsync();
-        var input = page.GetByTestId("markdown-text-input");
-        await Assertions.Expect(input).ToHaveValueAsync("First paragraph on the page.", new() { Timeout = Timeout });
-        await input.FillAsync("Changed *paragraph*.");
+        await ExpectTextEditorValueAsync(page, "First paragraph on the page.");
+        await SetTextEditorValueAsync(page, "Changed *paragraph*.");
         await page.GetByTestId("markdown-text-save").ClickAsync();
 
         // Assert
@@ -148,7 +148,7 @@ public class InlineTextEditingTests
 
         // Act
         await actionBar.GetByTestId("edit-subject-button").ClickAsync();
-        await page.GetByTestId("markdown-text-input").FillAsync("Changed body.");
+        await SetTextEditorValueAsync(page, "Changed body.");
         await page.GetByTestId("markdown-text-save").ClickAsync();
 
         // Assert
@@ -185,7 +185,7 @@ public class InlineTextEditingTests
         // Act
         await lineButton.ClickAsync();
         await page.GetByTestId("insert-text-item").ClickAsync();
-        await page.GetByTestId("markdown-text-input").FillAsync("Inserted text.");
+        await SetTextEditorValueAsync(page, "Inserted text.");
         await page.GetByTestId("markdown-text-save").ClickAsync();
 
         // Assert
@@ -203,20 +203,67 @@ public class InlineTextEditingTests
         var page = await OpenPageInInlineModeAsync();
         var actionBar = await SelectTextAsync(page, "Last paragraph");
         await actionBar.GetByTestId("edit-subject-button").ClickAsync();
-        var input = page.GetByTestId("markdown-text-input");
-        await Assertions.Expect(input).ToHaveValueAsync("Last paragraph on the page.", new() { Timeout = Timeout });
+        await ExpectTextEditorValueAsync(page, "Last paragraph on the page.");
         await _fixture.WriteDemoPageAsync(PageName, Content.Replace("Last paragraph on the page.", "Changed elsewhere."));
 
         // Act
-        await input.FillAsync("Mine.");
+        await SetTextEditorValueAsync(page, "Mine.");
         await page.GetByTestId("markdown-text-save").ClickAsync();
 
         // Assert
         await Assertions.Expect(page.GetByTestId("markdown-text-refusal")).ToContainTextAsync("Copy your text", new() { Timeout = Timeout });
-        await Assertions.Expect(input).ToHaveValueAsync("Mine.");
+        await ExpectTextEditorValueAsync(page, "Mine.");
         var text = (await _fixture.ReadFileAsync(_fixture.GetDemoPagePath(PageName))).Replace("\r\n", "\n");
         Assert.Contains("Changed elsewhere.", text);
         Assert.DoesNotContain("Mine.", text);
+    }
+
+    [Fact]
+    public async Task WhenTheTextDialogOpens_ThenItsEditorFillsTheDialogAndWhatIsTypedAtItsEndIsSavedWithControlS()
+    {
+        // Arrange
+        var page = await OpenPageInInlineModeAsync();
+        var actionBar = await SelectTextAsync(page, "First paragraph");
+
+        // Act
+        await actionBar.GetByTestId("edit-subject-button").ClickAsync();
+        await ExpectTextEditorValueAsync(page, "First paragraph on the page.");
+        await page.WaitForFunctionAsync(
+            $"() => blazorMonaco.editor.getEditor('{TextEditorId}', true)?.hasTextFocus() === true", null, new() { Timeout = Timeout });
+        await page.Keyboard.TypeAsync(" More.");
+        var editorHeight = (await page.GetByTestId("markdown-text-input").BoundingBoxAsync())!.Height;
+        var contentOverflow = await page.Locator(".mud-dialog-content").EvaluateAsync<double>("content => content.scrollHeight - content.clientHeight");
+        await page.Keyboard.PressAsync("ControlOrMeta+s");
+
+        // Assert
+        Assert.True(editorHeight > page.ViewportSize!.Height * 0.5, $"The editor is {editorHeight} pixels high in a window of {page.ViewportSize.Height}.");
+        Assert.True(contentOverflow <= 0, $"The content of the dialog scrolls by {contentOverflow} pixels.");
+        await _fixture.WaitForDemoPageTextAsync(
+            PageName,
+            text => text.Contains("# Text Editing Demo\n\nFirst paragraph on the page. More.\n\n:: HomeBlaze.Components.Card"),
+            "The typed text was not saved.");
+        await Assertions.Expect(page.GetByRole(AriaRole.Dialog)).ToHaveCountAsync(0, new() { Timeout = Timeout });
+    }
+
+    [Fact]
+    public async Task WhenEscapeIsPressedInTheTextEditor_ThenTheDialogClosesWithoutSaving()
+    {
+        // Arrange
+        var page = await OpenPageInInlineModeAsync();
+        var actionBar = await SelectTextAsync(page, "Last paragraph");
+        await actionBar.GetByTestId("edit-subject-button").ClickAsync();
+        await ExpectTextEditorValueAsync(page, "Last paragraph on the page.");
+        await page.WaitForFunctionAsync(
+            $"() => blazorMonaco.editor.getEditor('{TextEditorId}', true)?.hasTextFocus() === true", null, new() { Timeout = Timeout });
+        await page.Keyboard.TypeAsync(" Unsaved.");
+
+        // Act
+        await page.Keyboard.PressAsync("Escape");
+
+        // Assert
+        await Assertions.Expect(page.GetByRole(AriaRole.Dialog)).ToHaveCountAsync(0, new() { Timeout = Timeout });
+        var text = (await _fixture.ReadFileAsync(_fixture.GetDemoPagePath(PageName))).Replace("\r\n", "\n");
+        Assert.DoesNotContain("Unsaved.", text);
     }
 
     [Fact]
@@ -412,4 +459,28 @@ public class InlineTextEditingTests
 
     private static ILocator GetTextWrapper(IPage page, string text) =>
         page.Locator(".subject-component-wrapper.selectable:has(> .markdown-text)").Filter(new() { HasText = text });
+
+    // The dialog edits its text in Monaco, which has no input value, so the text is read and written through the editor.
+    private static async Task ExpectTextEditorValueAsync(IPage page, string expected)
+    {
+        try
+        {
+            await page.WaitForFunctionAsync(
+                $"expected => window.blazorMonaco?.editor.getEditor('{TextEditorId}', true)?.getValue() === expected",
+                expected,
+                new() { Timeout = Timeout });
+        }
+        catch (TimeoutException)
+        {
+            var actual = await page.EvaluateAsync<string?>($"() => window.blazorMonaco?.editor.getEditor('{TextEditorId}', true)?.getValue() ?? null");
+            Assert.Fail($"The text editor has {(actual is null ? "not opened" : $"the text '{actual}'")} and not '{expected}'.");
+        }
+    }
+
+    private static async Task SetTextEditorValueAsync(IPage page, string text)
+    {
+        await page.WaitForFunctionAsync(
+            $"() => window.blazorMonaco?.editor.getEditor('{TextEditorId}', true) != null", null, new() { Timeout = Timeout });
+        await page.EvaluateAsync($"text => blazorMonaco.editor.getEditor('{TextEditorId}').setValue(text)", text);
+    }
 }

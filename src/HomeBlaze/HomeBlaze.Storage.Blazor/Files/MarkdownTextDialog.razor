@@ -1,25 +1,31 @@
+@using BlazorMonaco
+@using BlazorMonaco.Editor
+@using HomeBlaze.Storage.Blazor.Models
+@using Microsoft.JSInterop
 @using MudBlazor
 
-@* The Markdown of a block of text in a field that grows with it. A refusal, such as text that changed meanwhile, shows here
-   and keeps what was typed. *@
-<MudDialog>
+@inject IJSRuntime JsRuntime
+
+@implements IAsyncDisposable
+
+@* The Markdown of a block of text in an editor that fills the dialog. A refusal, such as text that changed meanwhile, shows
+   above it and keeps what was typed. *@
+<MudDialog Class="markdown-text-dialog" ContentClass="markdown-text-dialog-content" DefaultFocus="DefaultFocus.None">
     <DialogContent>
         @if (_refusal is not null)
         {
             <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-2" data-testid="markdown-text-refusal">@_refusal</MudAlert>
         }
 
-        <MudTextField T="string"
-                      @bind-Value="_text"
-                      Label="Markdown"
-                      Variant="Variant.Outlined"
-                      Lines="6"
-                      Sizing="InputSizing.Auto"
-                      MaxLines="24"
-                      AutoFocus="true"
-                      Immediate="true"
-                      Class="markdown-text-field"
-                      data-testid="markdown-text-input" />
+        <div class="markdown-text-editor" data-testid="markdown-text-input">
+            <StandaloneCodeEditor @ref="_editor"
+                                  Id="@EditorId"
+                                  CssClass="markdown-text-editor-host"
+                                  ConstructionOptions="GetEditorOptions"
+                                  OnDidInit="OnEditorInitAsync"
+                                  OnDidChangeModelContent="OnContentChangedAsync"/>
+        </div>
+        <MarkdownEditorStyles/>
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="Cancel" data-testid="markdown-text-cancel">Cancel</MudButton>
@@ -28,37 +34,115 @@
 </MudDialog>
 
 <style>
-    .markdown-text-field textarea {
-        font-family: monospace;
+    /* As high as MudBlazor lets a dialog be, so that the editor gets what the title, a refusal and the actions leave. */
+    .mud-dialog.markdown-text-dialog {
+        height: calc(100vh - var(--mud-appbar-height));
+        height: calc(100dvh - var(--mud-appbar-height));
+    }
+
+    .markdown-text-dialog .markdown-text-dialog-content {
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+    }
+
+    .markdown-text-editor {
+        position: relative;
+        flex: 1 1 auto;
+        min-height: 120px;
+    }
+
+    .markdown-text-editor-host {
+        position: absolute;
+        inset: 0;
     }
 </style>
 
 @code {
+    private const string EditorId = "markdown-text-editor";
+
     [CascadingParameter]
     private IMudDialogInstance Dialog { get; set; } = default!;
 
-    /// <summary>The Markdown that the field starts with.</summary>
+    /// <summary>The Markdown that the editor starts with.</summary>
     [Parameter]
     public string Text { get; set; } = string.Empty;
+
+    /// <summary>Whether the editor shows in the colors of the dark mode.</summary>
+    [Parameter]
+    public bool IsDarkMode { get; set; } = true;
 
     /// <summary>Saves the text and returns why it was not saved, or null when it was.</summary>
     [Parameter]
     public Func<string, Task<string?>> Save { get; set; } = default!;
 
-    private string _text = string.Empty;
+    private StandaloneCodeEditor? _editor;
+    private Task<IJSObjectReference>? _moduleImport;
     private string? _refusal;
     private bool _isSaving;
+    private bool _isDisposed;
 
-    protected override void OnInitialized() => _text = Text;
+    private StandaloneEditorConstructionOptions GetEditorOptions(StandaloneCodeEditor editor)
+    {
+        var options = MarkdownEditor.CreateOptions(Text, IsDarkMode);
+        options.Minimap = new EditorMinimapOptions { Enabled = false };
+        return options;
+    }
+
+    private async Task OnEditorInitAsync()
+    {
+        if (_editor is null)
+            return;
+
+        // CtrlCmd is Command on a Mac and Control elsewhere.
+        await _editor.AddCommand((int)KeyMod.CtrlCmd | (int)KeyCode.KeyS, arguments => _ = SaveByKeyAsync());
+        if (await GetModuleAsync() is { } module)
+        {
+            await module.InvokeVoidAsync("focusEnd", EditorId);
+            await DecorateAsync(module);
+        }
+    }
+
+    private async Task OnContentChangedAsync(ModelContentChangedEvent change)
+    {
+        if (await GetModuleAsync() is { } module)
+        {
+            await DecorateAsync(module);
+        }
+    }
+
+    // The module drops records of a version that is no longer current, and the change that made it newer decorates again.
+    private async Task DecorateAsync(IJSObjectReference module)
+    {
+        if (await module.InvokeAsync<MarkdownEditorContent?>("getContent", EditorId) is not { } content || _isDisposed)
+            return;
+
+        var parsed = MarkdownDecorationParser.ParseDecorations(content.Text);
+        var decorations = BlockOutlineDecorations.Create(parsed.Regions, parsed.Outlines);
+        await module.InvokeVoidAsync("update", EditorId, content.Version, decorations.Values, decorations.Labels);
+    }
+
+    // Null once the dialog is disposed: the next text dialog gets the same editor id, and a late call would decorate its model.
+    private async ValueTask<IJSObjectReference?> GetModuleAsync()
+    {
+        if (_isDisposed)
+            return null;
+
+        var module = await (_moduleImport ??= JsRuntime.InvokeAsync<IJSObjectReference>("import", MarkdownEditor.ModulePath).AsTask());
+        return _isDisposed ? null : module;
+    }
 
     private void Cancel() => Dialog.Cancel();
 
     private async Task SaveAsync()
     {
+        if (_isSaving || _editor is null)
+            return;
+
         _isSaving = true;
         try
         {
-            _refusal = await Save(_text);
+            _refusal = await Save(await _editor.GetValue());
             if (_refusal is null)
             {
                 Dialog.Close(DialogResult.Ok(true));
@@ -70,15 +154,51 @@
         }
     }
 
+    // Monaco runs the command outside of an event handler of the dialog, so the save renders the dialog itself and hands a
+    // failure to the renderer the way an event handler would.
+    private async Task SaveByKeyAsync()
+    {
+        try
+        {
+            var save = SaveAsync();
+            StateHasChanged();
+            await save;
+            StateHasChanged();
+        }
+        catch (Exception exception)
+        {
+            await DispatchExceptionAsync(exception);
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _isDisposed = true;
+        if (_moduleImport is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await (await _moduleImport).DisposeAsync();
+        }
+        catch (Exception exception) when (exception is JSException or OperationCanceledException or JSDisconnectedException)
+        {
+            // The import failed or the circuit is gone, and there is no module to dispose.
+        }
+    }
+
     /// <summary>Shows the dialog until the text is saved or the dialog is canceled.</summary>
-    public static async Task ShowAsync(IDialogService dialogService, string title, string text, Func<string, Task<string?>> save)
+    public static async Task ShowAsync(IDialogService dialogService, string title, string text, bool isDarkMode, Func<string, Task<string?>> save)
     {
         var parameters = new DialogParameters<MarkdownTextDialog>
         {
             { dialog => dialog.Text, text },
+            { dialog => dialog.IsDarkMode, isDarkMode },
             { dialog => dialog.Save, save }
         };
-        var options = new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseOnEscapeKey = true };
+        var options = new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true, CloseOnEscapeKey = true };
         var reference = await dialogService.ShowAsync<MarkdownTextDialog>(title, parameters, options);
         await reference.Result;
     }

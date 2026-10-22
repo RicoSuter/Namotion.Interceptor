@@ -1,6 +1,6 @@
-// Decorations and folding ranges of the page editor. The component sends records of six numbers that
-// BlockOutlineDecorations.Create writes (Models/BlockOutlineDecorations.cs): kind, color, start line, start column,
-// end line, end column. The kinds below must stay equal to the constants there.
+// Decorations and folding ranges of the editors of Markdown, the page editor and the text dialog. The component sends
+// records of six numbers that BlockOutlineDecorations.Create writes (Models/BlockOutlineDecorations.cs): kind, color,
+// start line, start column, end line, end column. The kinds below must stay equal to the constants there.
 const SubjectBlock = 0;
 const Expression = 1;
 const Head = 2;
@@ -39,6 +39,23 @@ export function reveal(editorId, startLine, endLine) {
     const range = new monaco.Range(startLine, 1, endLine, model.getLineMaxColumn(endLine));
     editor.setSelection(range);
     editor.revealRangeInCenter(range);
+    editor.focus();
+}
+
+/**
+ * Places the cursor at the end of the text, scrolls it into view and gives the editor the focus.
+ * @param {string} editorId The id of the editor of BlazorMonaco.
+ */
+export function focusEnd(editorId) {
+    const editor = window.blazorMonaco.editor.getEditor(editorId, true);
+    const model = editor?.getModel();
+    if (!model || model.isDisposed()) {
+        return;
+    }
+
+    const lineNumber = model.getLineCount();
+    editor.setPosition({ lineNumber, column: model.getLineMaxColumn(lineNumber) });
+    editor.revealLine(lineNumber);
     editor.focus();
 }
 
