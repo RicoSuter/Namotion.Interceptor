@@ -67,8 +67,9 @@ public sealed class CycleStatistics
         foreach (var engine in _mutationEngines)
         {
             _logger.LogInformation(
-                "  {Name}: {Values:N0} value mutations, {Structural:N0} structural mutations, {FailedCommits:N0} failed commits",
-                engine.Name, engine.ValueMutationCount, engine.StructuralMutationCount, engine.FailedCommitCount);
+                "  {Name}: {Values:N0} value mutations, {Structural:N0} structural mutations, {Commits:N0} commits ({Conflicts:N0} conflicts, {SourceWriteFailures:N0} source write failures, {Unexpected:N0} unexpected failures)",
+                engine.Name, engine.ValueMutationCount, engine.StructuralMutationCount, engine.CommitCount,
+                engine.ConflictCommitCount, engine.SourceWriteFailedCommitCount, engine.UnexpectedFailedCommitCount);
         }
 
         foreach (var engine in _chaosEngines)
@@ -103,7 +104,11 @@ public sealed class CycleStatistics
                 StructuralMutations: totalStructuralMutations,
                 ChaosEvents: totalChaosEvents,
                 HeapMb: heapMb,
-                ProcessMb: processMb));
+                ProcessMb: processMb,
+                Commits: _mutationEngines.Sum(engine => engine.CommitCount),
+                ConflictCommits: _mutationEngines.Sum(engine => engine.ConflictCommitCount),
+                SourceWriteFailedCommits: _mutationEngines.Sum(engine => engine.SourceWriteFailedCommitCount),
+                UnexpectedFailedCommits: _mutationEngines.Sum(engine => engine.UnexpectedFailedCommitCount)));
 
             foreach (var engine in _chaosEngines)
             {

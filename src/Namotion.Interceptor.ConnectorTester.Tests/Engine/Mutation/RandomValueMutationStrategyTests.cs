@@ -1,13 +1,14 @@
 using Xunit;
+using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.Connectors;
-using Namotion.Interceptor.Connectors.Diagnostics;
-using Namotion.Interceptor.Connectors.Monitoring;
 using Namotion.Interceptor.ConnectorTester.Configuration;
 using Namotion.Interceptor.ConnectorTester.Engine;
 using Namotion.Interceptor.ConnectorTester.Engine.Mutation;
 using Namotion.Interceptor.ConnectorTester.Model;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Transactions;
 
 namespace Namotion.Interceptor.ConnectorTester.Tests.Engine.Mutation;
@@ -21,44 +22,6 @@ public class RandomValueMutationStrategyTests
             .WithRegistry()
             .WithParents()
             .WithLifecycle();
-
-    private static IInterceptorSubjectContext CreateTransactionContext()
-        => CreateContext().WithSourceTransactions();
-
-    /// <summary>
-    /// Fails every write, as a disconnected connector would under chaos. Mirrors
-    /// SubjectTransactionBenchmark.BenchmarkSource's minimal ISubjectSource shape.
-    /// </summary>
-    private sealed class FailingSource : ISubjectSource
-    {
-        public required IInterceptorSubject RootSubject { get; init; }
-
-        public int WriteBatchSize => 0;
-
-        public ValueTask<WriteResult> WriteChangesAsync(
-            ReadOnlyMemory<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> changes,
-            CancellationToken cancellationToken)
-            => new(WriteResult.Failure(changes, new InvalidOperationException("Source is not connected")));
-
-        public Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken)
-            => Task.FromResult<Action?>(null);
-
-        public SourceState State => SourceState.Synchronizing;
-
-        public DateTimeOffset StateChangeTime { get; } = DateTimeOffset.UtcNow;
-
-        public DateTimeOffset? LastSynchronizedAt => null;
-
-        public SourceDiagnostics Diagnostics { get; } = new(new SourceMetrics());
-
-        ConnectorDiagnostics ISubjectConnector.Diagnostics => Diagnostics;
-
-        public event EventHandler<SourceEvent>? StateChanged
-        {
-            add { }
-            remove { }
-        }
-    }
 
     [Fact]
     public async Task WhenCoordinatorIsPaused_ThenStrategyDoesNotMutate()
@@ -74,7 +37,8 @@ public class RandomValueMutationStrategyTests
 
         var strategy = new RandomValueMutationStrategy(
             graph, coordinator, context, counters,
-            new ParticipantConfiguration { Name = "test", ValueMutationRate = 1000, UseTransactions = false });
+            new ParticipantConfiguration { Name = "test", ValueMutationRate = 1000, UseTransactions = false },
+            NullLogger.Instance);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
 
@@ -100,7 +64,8 @@ public class RandomValueMutationStrategyTests
 
         var strategy = new RandomValueMutationStrategy(
             graph, coordinator, context, counters,
-            new ParticipantConfiguration { Name = "test", ValueMutationRate = 1000, UseTransactions = false });
+            new ParticipantConfiguration { Name = "test", ValueMutationRate = 1000, UseTransactions = false },
+            NullLogger.Instance);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
 
@@ -113,36 +78,73 @@ public class RandomValueMutationStrategyTests
     }
 
     [Fact]
-    public async Task WhenCommitFailsWithTransactionException_ThenStrategyKeepsRunningAndCountsFailedCommit()
+    public async Task WhenSourceWritesFail_ThenStrategyKeepsRunningAndCountsSourceWriteFailures()
     {
         // Arrange: every property is owned by a source that fails every write, as a disconnected
         // chaos target would, so each transaction's CommitAsync throws SubjectTransactionException.
-        var context = CreateTransactionContext();
+        var context = CreateContext().WithSourceTransactions();
         var root = new TestNode(context);
-        var source = new FailingSource { RootSubject = root };
-        new PropertyReference(root, nameof(TestNode.StringValue)).SetSource(source);
-        new PropertyReference(root, nameof(TestNode.DecimalValue)).SetSource(source);
-        new PropertyReference(root, nameof(TestNode.IntValue)).SetSource(source);
-        new PropertyReference(root, nameof(TestNode.LongValue)).SetSource(source);
+        FailingSource.AttachTo(root);
+        var (counters, strategy) = CreateTransactionStrategy(context, root);
+        using var cts = new CancellationTokenSource();
 
+        // Act
+        var run = strategy.RunAsync(cts.Token);
+        await AsyncTestHelpers.WaitUntilAsync(() => counters.SourceWriteFailedCommitCount >= 1, timeout: TimeSpan.FromSeconds(10));
+        await cts.CancelAsync();
+        await run;
+
+        // Assert
+        Assert.Equal(0, counters.UnexpectedFailedCommitCount);
+        Assert.True(counters.CommitCount >= counters.SourceWriteFailedCommitCount);
+        Assert.True(counters.ValueMutationCount >= 1);
+    }
+
+    [Fact]
+    public async Task WhenTransactionWriterThrows_ThenStrategyKeepsRunningAndCountsUnexpectedFailures()
+    {
+        // Arrange
+        var context = CreateContext().WithTransactions();
+        context.AddService<ITransactionWriter>(new ThrowingTransactionWriter());
+        var root = new TestNode(context);
+        var (counters, strategy) = CreateTransactionStrategy(context, root);
+        using var cts = new CancellationTokenSource();
+
+        // Act
+        var run = strategy.RunAsync(cts.Token);
+        await AsyncTestHelpers.WaitUntilAsync(() => counters.UnexpectedFailedCommitCount >= 1, timeout: TimeSpan.FromSeconds(10));
+        await cts.CancelAsync();
+        await run;
+
+        // Assert
+        Assert.Equal(0, counters.SourceWriteFailedCommitCount);
+        Assert.Equal(0, counters.ConflictCommitCount);
+    }
+
+    private static (MutationCounters Counters, RandomValueMutationStrategy Strategy) CreateTransactionStrategy(
+        IInterceptorSubjectContext context, TestNode root)
+    {
         var graph = new KnownNodeGraph();
         graph.Rebuild(root);
         var counters = new MutationCounters();
-        var coordinator = new TestCycleCoordinator();
-
         var strategy = new RandomValueMutationStrategy(
-            graph, coordinator, context, counters,
-            new ParticipantConfiguration { Name = "test", ValueMutationRate = 1000, UseTransactions = true });
+            graph, new TestCycleCoordinator(), context, counters,
+            new ParticipantConfiguration { Name = "test", ValueMutationRate = 1000, UseTransactions = true },
+            NullLogger.Instance);
+        return (counters, strategy);
+    }
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
+    /// <summary>
+    /// Throws from every source write, as a defective transaction writer would.
+    /// </summary>
+    private sealed class ThrowingTransactionWriter : ITransactionWriter
+    {
+        public ValueTask<SourceWriteResult> WriteToSourcesAsync(
+            Memory<SubjectPropertyChange> changes, TransactionRequirement requirement, CancellationToken cancellationToken)
+            => throw new NullReferenceException("Writer defect.");
 
-        // Act
-        try { await strategy.RunAsync(cts.Token); }
-        catch (OperationCanceledException) { }
-
-        // Assert: the strategy absorbed every failed commit instead of letting the exception
-        // escape RunAsync, and reports them through the dedicated counter.
-        Assert.True(counters.FailedCommitCount >= 1);
-        Assert.True(counters.ValueMutationCount >= 1);
+        public ValueTask<SourceRevertResult> RevertSourceWritesAsync(
+            IReadOnlyList<SubjectPropertyChange> written, object? revertState, CancellationToken cancellationToken)
+            => new(new SourceRevertResult([], []));
     }
 }

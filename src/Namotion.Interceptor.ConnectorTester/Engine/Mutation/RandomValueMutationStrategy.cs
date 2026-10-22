@@ -14,6 +14,8 @@ public sealed class RandomValueMutationStrategy : IValueMutationStrategy
     private readonly TestCycleCoordinator _coordinator;
     private readonly IInterceptorSubjectContext _context;
     private readonly MutationCounters _counters;
+    private readonly ILogger _logger;
+    private readonly string _participantName;
     private readonly bool _useTransactions;
     private readonly int _valueMutationRate;
     private readonly Random _random = new();
@@ -23,12 +25,15 @@ public sealed class RandomValueMutationStrategy : IValueMutationStrategy
         TestCycleCoordinator coordinator,
         IInterceptorSubjectContext context,
         MutationCounters counters,
-        ParticipantConfiguration participantConfiguration)
+        ParticipantConfiguration participantConfiguration,
+        ILogger logger)
     {
         _graph = graph;
         _coordinator = coordinator;
         _context = context;
         _counters = counters;
+        _logger = logger;
+        _participantName = participantConfiguration.Name;
         _useTransactions = participantConfiguration.UseTransactions;
         _valueMutationRate = participantConfiguration.ValueMutationRate;
     }
@@ -54,16 +59,15 @@ public sealed class RandomValueMutationStrategy : IValueMutationStrategy
                         _counters.IncrementValue();
                     }
 
+                    _counters.IncrementCommit();
                     try
                     {
                         await transaction.CommitAsync(cancellationToken);
                     }
-                    catch (SubjectTransactionException)
+                    catch (SubjectTransactionException exception)
                     {
-                        // Expected under chaos: a disconnected source fails the write, BestEffort
-                        // applies what it can, and the rest is reported back through the exception.
-                        // The mutations above are already counted; only the commit failure is new.
-                        _counters.IncrementFailedCommit();
+                        // Expected under chaos or not, see CommitFailureClassifier.
+                        CommitFailureClassifier.Record(exception, _counters, _logger, _participantName);
                     }
                 }
                 else

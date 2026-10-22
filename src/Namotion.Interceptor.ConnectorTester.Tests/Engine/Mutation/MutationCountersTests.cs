@@ -37,19 +37,24 @@ public class MutationCountersTests
     }
 
     [Fact]
-    public void WhenIncrementFailedCommitCalled_ThenFailedCommitCountIncreases()
+    public void WhenFailedCommitsAreCounted_ThenEachKindHasItsOwnCount()
     {
         // Arrange
         var counters = new MutationCounters();
 
         // Act
-        counters.IncrementFailedCommit();
-        counters.IncrementFailedCommit();
+        counters.IncrementCommit();
+        counters.IncrementFailedCommit(CommitFailureKind.Conflict);
+        counters.IncrementFailedCommit(CommitFailureKind.SourceWriteFailure);
+        counters.IncrementFailedCommit(CommitFailureKind.SourceWriteFailure);
+        counters.IncrementFailedCommit(CommitFailureKind.Unexpected);
 
         // Assert
-        Assert.Equal(2, counters.FailedCommitCount);
+        Assert.Equal(1, counters.CommitCount);
+        Assert.Equal(1, counters.ConflictCommitCount);
+        Assert.Equal(2, counters.SourceWriteFailedCommitCount);
+        Assert.Equal(1, counters.UnexpectedFailedCommitCount);
         Assert.Equal(0, counters.ValueMutationCount);
-        Assert.Equal(0, counters.StructuralMutationCount);
     }
 
     [Fact]
@@ -59,7 +64,10 @@ public class MutationCountersTests
         var counters = new MutationCounters();
         counters.IncrementValue();
         counters.IncrementStructural();
-        counters.IncrementFailedCommit();
+        counters.IncrementCommit();
+        counters.IncrementFailedCommit(CommitFailureKind.Conflict);
+        counters.IncrementFailedCommit(CommitFailureKind.SourceWriteFailure);
+        counters.IncrementFailedCommit(CommitFailureKind.Unexpected);
 
         // Act
         counters.Reset();
@@ -67,7 +75,10 @@ public class MutationCountersTests
         // Assert
         Assert.Equal(0, counters.ValueMutationCount);
         Assert.Equal(0, counters.StructuralMutationCount);
-        Assert.Equal(0, counters.FailedCommitCount);
+        Assert.Equal(0, counters.CommitCount);
+        Assert.Equal(0, counters.ConflictCommitCount);
+        Assert.Equal(0, counters.SourceWriteFailedCommitCount);
+        Assert.Equal(0, counters.UnexpectedFailedCommitCount);
     }
 
     [Fact]

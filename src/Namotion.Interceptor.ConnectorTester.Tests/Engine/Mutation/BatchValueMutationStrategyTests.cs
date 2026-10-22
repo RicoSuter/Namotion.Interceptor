@@ -1,14 +1,13 @@
 using Xunit;
+using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.Connectors;
-using Namotion.Interceptor.Connectors.Diagnostics;
-using Namotion.Interceptor.Connectors.Monitoring;
 using Namotion.Interceptor.ConnectorTester.Configuration;
 using Namotion.Interceptor.ConnectorTester.Engine;
 using Namotion.Interceptor.ConnectorTester.Engine.Mutation;
 using Namotion.Interceptor.ConnectorTester.Model;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
-using Namotion.Interceptor.Tracking.Transactions;
 
 namespace Namotion.Interceptor.ConnectorTester.Tests.Engine.Mutation;
 
@@ -22,44 +21,6 @@ public class BatchValueMutationStrategyTests
             .WithParents()
             .WithLifecycle();
 
-    private static IInterceptorSubjectContext CreateTransactionContext()
-        => CreateContext().WithSourceTransactions();
-
-    /// <summary>
-    /// Fails every write, as a disconnected connector would under chaos. Mirrors
-    /// SubjectTransactionBenchmark.BenchmarkSource's minimal ISubjectSource shape.
-    /// </summary>
-    private sealed class FailingSource : ISubjectSource
-    {
-        public required IInterceptorSubject RootSubject { get; init; }
-
-        public int WriteBatchSize => 0;
-
-        public ValueTask<WriteResult> WriteChangesAsync(
-            ReadOnlyMemory<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> changes,
-            CancellationToken cancellationToken)
-            => new(WriteResult.Failure(changes, new InvalidOperationException("Source is not connected")));
-
-        public Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken)
-            => Task.FromResult<Action?>(null);
-
-        public SourceState State => SourceState.Synchronizing;
-
-        public DateTimeOffset StateChangeTime { get; } = DateTimeOffset.UtcNow;
-
-        public DateTimeOffset? LastSynchronizedAt => null;
-
-        public SourceDiagnostics Diagnostics { get; } = new(new SourceMetrics());
-
-        ConnectorDiagnostics ISubjectConnector.Diagnostics => Diagnostics;
-
-        public event EventHandler<SourceEvent>? StateChanged
-        {
-            add { }
-            remove { }
-        }
-    }
-
     [Fact]
     public async Task WhenNodeCountIsZero_ThenStrategyReturnsImmediately()
     {
@@ -72,7 +33,8 @@ public class BatchValueMutationStrategyTests
             graph, coordinator, context, counters,
             new ParticipantConfiguration { Name = "test", ValueMutationRate = 1000, UseTransactions = false },
             numberOfBatches: 10,
-            participantIndex: 0);
+            participantIndex: 0,
+                NullLogger.Instance);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
 
@@ -118,7 +80,8 @@ public class BatchValueMutationStrategyTests
                 graph, coordinator, context, counters,
                 new ParticipantConfiguration { Name = "test", ValueMutationRate = 100, UseTransactions = false },
                 numberOfBatches: 1,    // one batch per second; batch size = 100.
-                participantIndex: 0);
+                participantIndex: 0,
+                NullLogger.Instance);
 
             using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(1500));
 
@@ -139,17 +102,13 @@ public class BatchValueMutationStrategyTests
     }
 
     [Fact]
-    public async Task WhenCommitFailsWithTransactionException_ThenStrategyKeepsRunningAndCountsFailedCommit()
+    public async Task WhenSourceWritesFail_ThenStrategyKeepsRunningAndCountsSourceWriteFailures()
     {
         // Arrange: every property is owned by a source that fails every write, as a disconnected
         // chaos target would, so each batch's CommitAsync throws SubjectTransactionException.
-        var context = CreateTransactionContext();
+        var context = CreateContext().WithSourceTransactions();
         var root = new TestNode(context);
-        var source = new FailingSource { RootSubject = root };
-        new PropertyReference(root, nameof(TestNode.StringValue)).SetSource(source);
-        new PropertyReference(root, nameof(TestNode.DecimalValue)).SetSource(source);
-        new PropertyReference(root, nameof(TestNode.IntValue)).SetSource(source);
-        new PropertyReference(root, nameof(TestNode.LongValue)).SetSource(source);
+        FailingSource.AttachTo(root);
 
         var graph = new KnownNodeGraph();
         graph.Rebuild(root);
@@ -158,18 +117,21 @@ public class BatchValueMutationStrategyTests
         var strategy = new BatchValueMutationStrategy(
             graph, coordinator, context, counters,
             new ParticipantConfiguration { Name = "test", ValueMutationRate = 100, UseTransactions = true },
-            numberOfBatches: 1,
-            participantIndex: 0);
-
-        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(1500));
+            numberOfBatches: 100,
+            participantIndex: 0,
+            NullLogger.Instance);
+        using var cts = new CancellationTokenSource();
 
         // Act
-        try { await strategy.RunAsync(cts.Token); }
+        var run = strategy.RunAsync(cts.Token);
+        await AsyncTestHelpers.WaitUntilAsync(() => counters.SourceWriteFailedCommitCount >= 1, timeout: TimeSpan.FromSeconds(10));
+        await cts.CancelAsync();
+        try { await run; }
         catch (OperationCanceledException) { }
 
-        // Assert: the strategy absorbed every failed commit instead of letting the exception
-        // escape RunAsync, and reports them through the dedicated counter.
-        Assert.True(counters.FailedCommitCount >= 1);
+        // Assert
+        Assert.Equal(0, counters.UnexpectedFailedCommitCount);
+        Assert.True(counters.CommitCount >= counters.SourceWriteFailedCommitCount);
         Assert.True(counters.ValueMutationCount >= 1);
     }
 }

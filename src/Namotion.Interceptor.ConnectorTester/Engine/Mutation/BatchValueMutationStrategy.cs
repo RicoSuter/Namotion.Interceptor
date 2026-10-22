@@ -21,6 +21,8 @@ public sealed class BatchValueMutationStrategy : IValueMutationStrategy
     private readonly TestCycleCoordinator _coordinator;
     private readonly IInterceptorSubjectContext _context;
     private readonly MutationCounters _counters;
+    private readonly ILogger _logger;
+    private readonly string _participantName;
     private readonly bool _useTransactions;
     private readonly int _valueMutationRate;
     private readonly int _numberOfBatches;
@@ -33,12 +35,15 @@ public sealed class BatchValueMutationStrategy : IValueMutationStrategy
         MutationCounters counters,
         ParticipantConfiguration participantConfiguration,
         int numberOfBatches,
-        int participantIndex)
+        int participantIndex,
+        ILogger logger)
     {
         _graph = graph;
         _coordinator = coordinator;
         _context = context;
         _counters = counters;
+        _logger = logger;
+        _participantName = participantConfiguration.Name;
         _useTransactions = participantConfiguration.UseTransactions;
         _valueMutationRate = participantConfiguration.ValueMutationRate;
         _numberOfBatches = numberOfBatches;
@@ -135,16 +140,15 @@ public sealed class BatchValueMutationStrategy : IValueMutationStrategy
             }
         }
 
+        _counters.IncrementCommit();
         try
         {
             await transaction.CommitAsync(cancellationToken);
         }
-        catch (SubjectTransactionException)
+        catch (SubjectTransactionException exception)
         {
-            // Expected under chaos: a disconnected source fails the write, BestEffort applies
-            // what it can, and the rest is reported back through the exception. MutateNode above
-            // already counted the batch's mutations; only the commit failure is new.
-            _counters.IncrementFailedCommit();
+            // Expected under chaos or not, see CommitFailureClassifier.
+            CommitFailureClassifier.Record(exception, _counters, _logger, _participantName);
         }
     }
 
