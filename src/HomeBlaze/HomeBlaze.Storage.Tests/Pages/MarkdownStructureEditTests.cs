@@ -1,3 +1,5 @@
+using HomeBlaze.Storage.Files;
+using HomeBlaze.Storage.Internal;
 using HomeBlaze.Storage.Pages;
 using static HomeBlaze.Storage.Tests.Pages.TestTypeNames;
 
@@ -12,6 +14,11 @@ public class MarkdownStructureEditTests
         $"intro\n\n:: {PanelType}#panel Title=P\n::: Row Label=A\n:::\n::: Row Label=B\n:::\n::\n\n:: {LeafType}#leaf Name=l\n::\n";
 
     private static readonly string UnnamedLeavesPage = $"intro\n\n:: {LeafType} Name=a\n::\n\n:: {LeafType} Name=b\n::\n";
+
+    private static readonly string TextPage = $"# Title\n\nOld text.\n\n:: {LeafType}#leaf\n::\n";
+
+    private static HtmlSegment FindText(MarkdownFile page, string text) =>
+        page.Children.Values.OfType<HtmlSegment>().Single(segment => segment.Start == HtmlSegmentStart.Text && segment.Html.Contains(text));
 
     [Fact]
     public async Task WhenABlockIsDeleted_ThenItsLinesAreRemovedFromTheFile()
@@ -290,5 +297,109 @@ public class MarkdownStructureEditTests
 
         // Assert
         Assert.Same(row, result.Subject);
+    }
+
+    [Fact]
+    public async Task WhenTheTextOfABlockOfTextIsAskedFor_ThenItIsItsMarkdown()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var page = await fixture.AddPageAsync("page.md", TextPage);
+
+        // Act & Assert
+        Assert.Equal("Old text.", page.GetTextBlockText(FindText(page, "Old text.")));
+        Assert.Equal("# Title", page.GetTextBlockText(FindText(page, "Title")));
+        Assert.Null(page.GetTextBlockText(new HtmlSegment("<p>elsewhere</p>")));
+    }
+
+    [Fact]
+    public async Task WhenAParagraphIsReplaced_ThenTheFileHasTheNewText()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var page = await fixture.AddPageAsync("page.md", TextPage);
+
+        // Act
+        var result = await page.ReplaceTextBlockAsync(FindText(page, "Old text."), "Old text.", "New *text*.", CancellationToken.None);
+
+        // Assert
+        Assert.True(result.IsWritten);
+        Assert.Equal($"# Title\n\nNew *text*.\n\n:: {LeafType}#leaf\n::\n", await fixture.ReadAsync("page.md"));
+    }
+
+    [Fact]
+    public async Task WhenTheTextChangedSinceItWasOpened_ThenTheReplaceIsRefused()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var page = await fixture.AddPageAsync("page.md", TextPage);
+
+        // Act
+        var result = await page.ReplaceTextBlockAsync(FindText(page, "Old text."), "Other text.", "New.", CancellationToken.None);
+
+        // Assert
+        Assert.Equal("The text changed since you opened it.", result.Refusal);
+        Assert.Equal(TextPage, await fixture.ReadAsync("page.md"));
+    }
+
+    [Fact]
+    public async Task WhenTheSegmentIsFromAnOlderRead_ThenTheReplaceIsRefused()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var page = await fixture.AddPageAsync("page.md", TextPage);
+        var segment = FindText(page, "Old text.");
+        await fixture.UpdatePageAsync(page, "Intro.\n\n" + TextPage);
+
+        // Act
+        var result = await page.ReplaceTextBlockAsync(segment, "Old text.", "New.", CancellationToken.None);
+
+        // Assert
+        Assert.Equal("The text changed since you opened it.", result.Refusal);
+    }
+
+    [Fact]
+    public async Task WhenTextIsInsertedBeforeABlockOrBeforeText_ThenItStandsThere()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var page = await fixture.AddPageAsync("page.md", TextPage);
+
+        // Act
+        await page.InsertTextAsync(page, page.Children["leaf"], "Before the leaf.", CancellationToken.None);
+        await page.OnFileChangedAsync(CancellationToken.None);
+        await page.InsertTextAsync(page, FindText(page, "Old text."), "Before the text.", CancellationToken.None);
+
+        // Assert
+        Assert.Equal(
+            $"# Title\n\nBefore the text.\n\nOld text.\n\nBefore the leaf.\n\n:: {LeafType}#leaf\n::\n",
+            await fixture.ReadAsync("page.md"));
+    }
+
+    [Fact]
+    public async Task WhenTheLastBlockHasNoClosingLine_ThenTextCannotBeInsertedAtTheEnd()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var page = await fixture.AddPageAsync("page.md", $"Intro.\n\n:: {LeafType}#leaf\n");
+
+        // Act & Assert
+        Assert.False(page.CanInsertTextAt(page, null));
+        Assert.True(page.CanInsertTextAt(page, page.Children["leaf"]));
+    }
+
+    [Fact]
+    public async Task WhenTheBlockToInsertBeforeIsNotInTheContent_ThenTheInsertIsRefused()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var page = await fixture.AddPageAsync("page.md", PanelPage);
+        var row = ((TestPanel)page.Children["panel"]).Rows[0];
+
+        // Act
+        var result = await page.InsertWidgetAsync(page, row, new TestLeaf(), null, CancellationToken.None);
+
+        // Assert
+        Assert.Equal("The block to insert before is not in this content.", result.Refusal);
     }
 }

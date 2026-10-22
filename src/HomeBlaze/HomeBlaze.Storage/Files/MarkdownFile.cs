@@ -71,6 +71,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     private const string ConfigurationChangedRefusal = "The page changed while the configuration was written; save again.";
     private const string StructureChangedRefusal = "The page changed while it was edited. Try again.";
     private const string NoBlockRefusal = "The subject has no block on the page.";
+    private const string TextChangedRefusal = "The text changed since you opened it.";
 
     // The write of this page that the flow runs in, so that a write from inside it is refused instead of waiting
     // for _writeLock. Off the worker, the reload after a write, a refused write-back or a refused structure edit applies
@@ -532,8 +533,9 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
 
     /// <summary>
     /// Inserts a block for <paramref name="widget"/>, with its configuration and <paramref name="name"/> after <c>#</c>,
-    /// into <paramref name="content"/>: this page or a fragment of one of its blocks. It goes before the block of
-    /// <paramref name="before"/>, or after the content when that is null. The page then creates its own subject for it.
+    /// into <paramref name="content"/>: this page or a fragment of one of its blocks. It goes before <paramref name="before"/>,
+    /// a block of that content or the <see cref="HtmlSegment"/> of one of its text blocks, or after the content when that is
+    /// null. The page then creates its own subject for it.
     /// </summary>
     /// <remarks>Refused when the file differs from the text the page last read; the page then reads it.</remarks>
     /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage or from within a write of this page.</exception>
@@ -543,26 +545,136 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         var typeName = widget.GetType().FullName!;
         var configurationJson = MarkdownBlockConfiguration.Serialize(_serializer, widget, block: null);
         return EditStructureAsync(
+            snapshot => TryGetInsertPoint(snapshot, content, before, out var owner, out var line, out var refusal)
+                ? (MarkdownPageOperations.TryInsertWidget(
+                    snapshot.Page!, snapshot.BlockSubjects, owner, line, typeName, name, configurationJson, out refusal), refusal)
+                : (null, refusal),
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// Gets the Markdown of the text block that <paramref name="segment"/> starts, without the indentation of its content and
+    /// with line feeds, or null when the segment starts no text block that can be edited.
+    /// </summary>
+    public string? GetTextBlockText(HtmlSegment segment)
+    {
+        var snapshot = _parseResult;
+        return snapshot.Page is { } page && snapshot.TextBlocks.TryGetValue(segment, out var textBlock) && textBlock.IsEditable
+            ? MarkdownPageOperations.GetText(page, textBlock)
+            : null;
+    }
+
+    /// <summary>
+    /// Replaces the text block that <paramref name="segment"/> starts with <paramref name="newText"/>, or removes it when that
+    /// is empty or white space, and saves the page.
+    /// </summary>
+    /// <remarks>
+    /// Refused when the segment starts no text block that can be edited any more or its text is no longer
+    /// <paramref name="expectedText"/>, as <see cref="GetTextBlockText"/> returned it, and when the file differs from the
+    /// text the page last read; the page then reads it.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage or from within a write of this page.</exception>
+    public Task<MarkdownEditResult> ReplaceTextBlockAsync(
+        HtmlSegment segment, string expectedText, string newText, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(expectedText);
+        ArgumentNullException.ThrowIfNull(newText);
+        var expected = expectedText.ReplaceLineEndings("\n");
+        return EditStructureAsync(
             snapshot =>
             {
-                var page = snapshot.Page!;
-                var subjects = snapshot.BlockSubjects;
-                MarkdownBlock? owner = null;
-                if (!ReferenceEquals(content, this) &&
-                    (owner = MarkdownPageOperations.FindContentBlock(page, subjects, content)) is null)
+                if (!snapshot.TextBlocks.TryGetValue(segment, out var textBlock) || !textBlock.IsEditable ||
+                    MarkdownPageOperations.GetText(snapshot.Page!, textBlock) != expected)
                 {
-                    return (null, "The content is not on this page.");
+                    return (null, TextChangedRefusal);
                 }
 
-                MarkdownBlock? beforeBlock = null;
-                if (before is not null && (beforeBlock = FindOwnBlock(page, subjects, before)) is null)
-                {
-                    return (null, NoBlockRefusal);
-                }
-
-                return (MarkdownPageOperations.TryInsertWidget(page, subjects, owner, MarkdownPageOperations.GetInsertLine(page, owner, beforeBlock?.Line), typeName, name, configurationJson, out var refusal), refusal);
+                return (MarkdownPageOperations.TryReplaceText(snapshot.Page!, snapshot.BlockSubjects, textBlock, newText, out var refusal), refusal);
             },
             cancellationToken);
+    }
+
+    /// <summary>
+    /// Inserts <paramref name="text"/>, Markdown without blocks, into <paramref name="content"/> before <paramref name="before"/>,
+    /// as <see cref="InsertWidgetAsync"/> places a widget, and saves the page.
+    /// </summary>
+    /// <remarks>Refused when the file differs from the text the page last read; the page then reads it.</remarks>
+    /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage or from within a write of this page.</exception>
+    public Task<MarkdownEditResult> InsertTextAsync(
+        IInterceptorSubject content, IInterceptorSubject? before, string text, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        return EditStructureAsync(
+            snapshot => TryGetInsertPoint(snapshot, content, before, out var owner, out var line, out var refusal)
+                ? (MarkdownPageOperations.TryInsertText(snapshot.Page!, snapshot.BlockSubjects, owner, line, text, out refusal), refusal)
+                : (null, refusal),
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// Gets whether text can go into <paramref name="content"/> before <paramref name="before"/>, or at its end: not right after
+    /// a block without a closing line, which would take the text.
+    /// </summary>
+    public bool CanInsertTextAt(IInterceptorSubject content, IInterceptorSubject? before)
+    {
+        var snapshot = _parseResult;
+        return snapshot.Page is { } page &&
+               TryGetInsertPoint(snapshot, content, before, out var owner, out var line, out _) &&
+               MarkdownPageOperations.CanInsertTextAt(page, owner, line);
+    }
+
+    // The block whose content `content` is, or null for the page, and the line before which new content goes: the first line
+    // of `before`, a block or a text block of that content, or the end of the content.
+    private bool TryGetInsertPoint(
+        MarkdownParseResult snapshot,
+        IInterceptorSubject content,
+        IInterceptorSubject? before,
+        out MarkdownBlock? owner,
+        out int line,
+        out string? refusal)
+    {
+        var page = snapshot.Page!;
+        owner = null;
+        line = 0;
+        if (!ReferenceEquals(content, this) &&
+            (owner = MarkdownPageOperations.FindContentBlock(page, snapshot.BlockSubjects, content)) is null)
+        {
+            refusal = "The content is not on this page.";
+            return false;
+        }
+
+        int? beforeLine = null;
+        if (before is HtmlSegment segment)
+        {
+            if (!snapshot.TextBlocks.TryGetValue(segment, out var textBlock) || !ReferenceEquals(textBlock.Owner, owner))
+            {
+                refusal = StructureChangedRefusal;
+                return false;
+            }
+
+            beforeLine = textBlock.Line;
+        }
+        else if (before is not null)
+        {
+            if (FindOwnBlock(page, snapshot.BlockSubjects, before) is not { } beforeBlock)
+            {
+                refusal = NoBlockRefusal;
+                return false;
+            }
+
+            MarkdownPageOperations.FindSiblings(page, beforeBlock, out var parent);
+            if (!ReferenceEquals(parent, owner))
+            {
+                refusal = "The block to insert before is not in this content.";
+                return false;
+            }
+
+            beforeLine = beforeBlock.Line;
+        }
+
+        line = MarkdownPageOperations.GetInsertLine(page, owner, beforeLine);
+        refusal = null;
+        return true;
     }
 
     /// <summary>
@@ -699,8 +811,9 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         }
     }
 
-    // After the write: the read inside it has created the subject of a new block, when the storage read the file there.
-    // Without that read, the published snapshot still names a moved subject, because the edit carried it.
+    // After the write: the read inside it has created the subject of a new block and the segments of the text, when the
+    // storage read the file there. Without that read, the published snapshot still names a moved subject, because the edit
+    // carried it, but has no text blocks.
     private IInterceptorSubject? FindResultSubject(MarkdownStructureChange change)
     {
         var snapshot = _parseResult;
@@ -709,7 +822,23 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             return null;
         }
 
-        return change.ResultBlockIndex >= 0 ? snapshot.BlockSubjects.GetValueOrDefault(change.ResultBlockIndex) : null;
+        if (change.ResultBlockIndex >= 0)
+        {
+            return snapshot.BlockSubjects.GetValueOrDefault(change.ResultBlockIndex);
+        }
+
+        if (change.ResultTextLine > 0)
+        {
+            foreach (var (segment, textBlock) in snapshot.TextBlocks)
+            {
+                if (textBlock.Line == change.ResultTextLine)
+                {
+                    return segment;
+                }
+            }
+        }
+
+        return null;
     }
 
     // The block whose own subject the subject is. Unlike FindBlock, not the block that holds the subject in its

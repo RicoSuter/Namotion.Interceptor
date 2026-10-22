@@ -56,6 +56,25 @@ public class MarkdownFileWriteTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenAParagraphOfAPageOfTheStorageIsReplaced_ThenTheResultNamesTheSegmentOfTheNewText()
+    {
+        // Arrange
+        WriteFile("Notes.md", "# Notes\n\nOld text.\n");
+        var storage = await ConnectAsync();
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Notes.md"]);
+        var segment = markdown.Children.Values.OfType<HtmlSegment>().Single(candidate => candidate.Html.Contains("Old text."));
+
+        // Act
+        var result = await markdown.ReplaceTextBlockAsync(segment, "Old text.", "New text.", CancellationToken.None);
+
+        // Assert
+        Assert.Equal("# Notes\n\nNew text.\n", ReadFile("Notes.md"));
+        var written = Assert.IsType<HtmlSegment>(result.Subject);
+        Assert.Contains("New text.", written.Html);
+        Assert.Contains(written, markdown.Children.Values);
+    }
+
+    [Fact]
     public async Task WhenTheNewContentExceedsTheSizeLimit_ThenItIsRejectedAndTheFileIsUnchanged()
     {
         // Arrange

@@ -89,6 +89,7 @@ namespace HomeBlaze.Storage.Files
         public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
         public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
         public System.Threading.Tasks.Task<HomeBlaze.Storage.Pages.MarkdownEditResult> AddSlotItemAsync(Namotion.Interceptor.IInterceptorSubject owner, string slotName, Namotion.Interceptor.IInterceptorSubject? item, System.Threading.CancellationToken cancellationToken) { }
+        public bool CanInsertTextAt(Namotion.Interceptor.IInterceptorSubject content, Namotion.Interceptor.IInterceptorSubject? before) { }
         public System.Threading.Tasks.Task<HomeBlaze.Storage.Pages.MarkdownEditResult> DeleteBlockAsync(Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken) { }
         public HomeBlaze.Storage.Pages.MarkdownBlockActions GetBlockActions(Namotion.Interceptor.IInterceptorSubject subject) { }
         public string? GetBlockName(Namotion.Interceptor.IInterceptorSubject subject) { }
@@ -96,6 +97,8 @@ namespace HomeBlaze.Storage.Files
         protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
         public System.Collections.Generic.IReadOnlyList<HomeBlaze.Storage.Pages.MarkdownListSlot> GetListSlots(Namotion.Interceptor.IInterceptorSubject owner) { }
         protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        public string? GetTextBlockText(HomeBlaze.Storage.Internal.HtmlSegment segment) { }
+        public System.Threading.Tasks.Task<HomeBlaze.Storage.Pages.MarkdownEditResult> InsertTextAsync(Namotion.Interceptor.IInterceptorSubject content, Namotion.Interceptor.IInterceptorSubject? before, string text, System.Threading.CancellationToken cancellationToken) { }
         public System.Threading.Tasks.Task<HomeBlaze.Storage.Pages.MarkdownEditResult> InsertWidgetAsync(Namotion.Interceptor.IInterceptorSubject content, Namotion.Interceptor.IInterceptorSubject? before, Namotion.Interceptor.IInterceptorSubject widget, string? name, System.Threading.CancellationToken cancellationToken) { }
         protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
         public bool IsContentOfPage(Namotion.Interceptor.IInterceptorSubject content) { }
@@ -112,6 +115,7 @@ namespace HomeBlaze.Storage.Files
         public System.Threading.Tasks.Task ReplaceContentAsync(string content, System.Threading.CancellationToken cancellationToken) { }
         [HomeBlaze.Abstractions.Attributes.Operation(Description="Replaces one exact, unique passage of the markdown source.", Icon="FindReplace", Title="Replace Text")]
         public System.Threading.Tasks.Task ReplaceTextAsync(string oldText, string newText, System.Threading.CancellationToken cancellationToken) { }
+        public System.Threading.Tasks.Task<HomeBlaze.Storage.Pages.MarkdownEditResult> ReplaceTextBlockAsync(HomeBlaze.Storage.Internal.HtmlSegment segment, string expectedText, string newText, System.Threading.CancellationToken cancellationToken) { }
         public string ResolveLink(string link) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
         public System.Threading.Tasks.Task WriteAsync(System.IO.Stream content, System.Threading.CancellationToken cancellationToken) { }
