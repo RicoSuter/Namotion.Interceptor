@@ -112,8 +112,9 @@ internal static class MarkdownPageOperations
     /// after it, where an item is a widget block or a text block between the slot blocks around the text block.
     /// </summary>
     /// <returns>
-    /// Null with a refusal when the text block cannot be edited, has no item in that direction, would go where a block without
-    /// a closing line takes it, or the change would change other blocks of the page or the moved text.
+    /// Null with a refusal when the text block cannot be edited, has no item in that direction, would go next to raw HTML or
+    /// where a block without a closing line takes it, or the change would change other blocks of the page or join the moved
+    /// text with the text around it.
     /// </returns>
     public static MarkdownStructureChange? TryMoveText(
         MarkdownPage page,
@@ -127,9 +128,15 @@ internal static class MarkdownPageOperations
             return null;
         }
 
-        if (FindTextMoveLine(page, textBlock, direction) is not { } targetLine)
+        if (FindTextMoveLine(page, textBlock, direction, out var joinsHtml) is not { } targetLine)
         {
             refusal = $"The text at line {textBlock.Line} has nothing {(direction < 0 ? "before" : "after")} it to move past.";
+            return null;
+        }
+
+        if (joinsHtml)
+        {
+            refusal = $"The text at line {textBlock.Line} would join the HTML next to it.";
             return null;
         }
 
@@ -159,10 +166,15 @@ internal static class MarkdownPageOperations
         var after = MarkdownPageParser.Parse(newSource);
         var cutOwner = owner is null ? null : cutPage.AllBlocks[cutMap[owner.Index]];
         var movedLine = FindFirstTextLine(after, insert);
-        if (MarkdownBlockAlignment.TryAlign(cutPage, after, insert, expectedInsertedBlockCount: 0, cutOwner) is not { } insertMap ||
-            !IsSameText(page, textBlock, after, movedLine, insert))
+        if (MarkdownBlockAlignment.TryAlign(cutPage, after, insert, expectedInsertedBlockCount: 0, cutOwner) is not { } insertMap)
         {
             refusal = FormatTextMoveRefusal(textBlock);
+            return null;
+        }
+
+        if (!IsSameText(page, textBlock, after, movedLine, insert))
+        {
+            refusal = $"The text at line {textBlock.Line} would join the text around it.";
             return null;
         }
 
@@ -176,8 +188,8 @@ internal static class MarkdownPageOperations
         $"Moving the text at line {textBlock.Line} would change other blocks of the page.";
 
     // The comparison of the document skips the inserted lines, so the moved text is checked on its own: one text block that
-    // can be edited, on the inserted lines, with the same Markdown. A neighbor that it joined, such as a list, starts before
-    // it or ends after the inserted lines.
+    // can be edited, on the inserted lines, with the same Markdown. A container before it that took it, such as a loose list
+    // or a footnote, starts before the inserted lines.
     private static bool IsSameText(MarkdownPage page, MarkdownTextBlock textBlock, MarkdownPage after, int movedLine, MarkdownLineEdit insert)
     {
         foreach (var candidate in MarkdownTextBlocks.Find(after))
@@ -195,27 +207,44 @@ internal static class MarkdownPageOperations
 
     /// <summary>
     /// Gets whether <see cref="TryMoveText"/> can move the text block up and down: whether it can be edited, has an item in
-    /// that direction, and no block without a closing line would take it there.
+    /// that direction, and neither raw HTML nor a block without a closing line would take it there.
     /// </summary>
     public static (bool CanMoveUp, bool CanMoveDown) GetTextMoveDirections(MarkdownPage page, MarkdownTextBlock textBlock)
     {
-        if (!textBlock.IsEditable || GetTextMoveItems(page, textBlock, out var position) is not { } items)
+        if (!CanEditText(page, textBlock, out _) || GetTextMoveItems(page, textBlock, out var position) is not { } items)
         {
             return default;
         }
 
-        return (CanMoveTextTo(page, textBlock, FindMoveLine(items, position, -1)),
-                CanMoveTextTo(page, textBlock, FindMoveLine(items, position, 1)));
+        return (CanMoveTextTo(page, textBlock, items, position, -1), CanMoveTextTo(page, textBlock, items, position, 1));
     }
 
-    private static bool CanMoveTextTo(MarkdownPage page, MarkdownTextBlock textBlock, int? line) =>
-        line is { } targetLine && CanInsertTextAt(page, textBlock.Owner, targetLine);
+    private static bool CanMoveTextTo(MarkdownPage page, MarkdownTextBlock textBlock, List<MoveItem> items, int position, int direction) =>
+        FindTextMoveLine(items, position, direction, out var joinsHtml) is { } targetLine &&
+        !joinsHtml &&
+        CanInsertTextAt(page, textBlock.Owner, targetLine);
 
     // The line of the page before the move before which TryMoveText inserts the text block, or null without an item there.
-    private static int? FindTextMoveLine(MarkdownPage page, MarkdownTextBlock textBlock, int direction) =>
-        direction is -1 or 1 && GetTextMoveItems(page, textBlock, out var position) is { } items
-            ? FindMoveLine(items, position, direction)
+    private static int? FindTextMoveLine(MarkdownPage page, MarkdownTextBlock textBlock, int direction, out bool joinsHtml)
+    {
+        joinsHtml = false;
+        return direction is -1 or 1 && GetTextMoveItems(page, textBlock, out var position) is { } items
+            ? FindTextMoveLine(items, position, direction, out joinsHtml)
             : null;
+    }
+
+    // Past a widget block, the text comes next to the text beyond it and joins its run, which raw HTML keeps as one text
+    // block that cannot be edited. Text next to the text block is in its run already, so it holds no raw HTML.
+    private static int? FindTextMoveLine(List<MoveItem> items, int position, int direction, out bool joinsHtml)
+    {
+        var line = FindMoveLine(items, position, direction);
+        var beyond = position + 2 * direction;
+        joinsHtml = line is not null &&
+                    items[position + direction].Block is not null &&
+                    beyond >= 0 && beyond < items.Count &&
+                    items[beyond].HoldsHtml;
+        return line;
+    }
 
     // The items among which the text block moves, with its position among them.
     private static List<MoveItem>? GetTextMoveItems(MarkdownPage page, MarkdownTextBlock textBlock, out int position)
@@ -263,8 +292,8 @@ internal static class MarkdownPageOperations
         return direction < 0 ? item.Line : item.EndLine + 1;
     }
 
-    // A place that a moved block passes: a block, or text without a block, with its lines.
-    private readonly record struct MoveItem(int Line, int EndLine, MarkdownBlock? Block);
+    // A place that a moved block passes: a block, or text without a block, with its lines and whether it holds raw HTML.
+    private readonly record struct MoveItem(int Line, int EndLine, MarkdownBlock? Block, bool HoldsHtml = false);
 
     // The items among which the block moves, with its position among them. Null when it is no widget or slot block.
     private static List<MoveItem>? GetMoveItems(MarkdownPage page, MarkdownBlock block, out int position)
@@ -341,7 +370,7 @@ internal static class MarkdownPageOperations
         {
             if (ReferenceEquals(textBlock.Owner, owner) && textBlock.Line >= firstLine && textBlock.Line <= lastLine)
             {
-                items.Add(new MoveItem(textBlock.Line, textBlock.EndLine, null));
+                items.Add(new MoveItem(textBlock.Line, textBlock.EndLine, null, textBlock.HoldsHtml));
             }
         }
 

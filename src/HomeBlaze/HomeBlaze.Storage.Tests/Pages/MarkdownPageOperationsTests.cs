@@ -1081,6 +1081,56 @@ public class MarkdownPageOperationsTests
         Assert.Contains("would change other blocks", refusal);
     }
 
+    [Theory]
+    [InlineData("- a\n\n- a2\n\n:: Demo.One\n::\n\n- b\n", 8, -1)]
+    [InlineData("- a\n\n  more\n\n:: Demo.One\n::\n\n  x\n", 8, -1)]
+    [InlineData("[^1]: note\n\n:: Demo.One\n::\n\n    code\n", 6, -1)]
+    public void WhenTheMovedTextWouldJoinTheTextBeforeIt_ThenTheMoveIsRefused(string source, int line, int direction)
+    {
+        // Arrange: the text before the moved text is a loose list, a loose list item or a footnote, which takes it.
+        var page = MarkdownPageParser.Parse(source);
+
+        // Act
+        var change = MarkdownPageOperations.TryMoveText(page, NoSubjects, TextAt(page, line), direction, out var refusal);
+
+        // Assert
+        Assert.Null(change);
+        Assert.Equal($"The text at line {line} would join the text around it.", refusal);
+    }
+
+    [Theory]
+    [InlineData("<!-- c -->\n\n:: Demo.One\n::\n\ntext\n", 6, -1)]
+    [InlineData("text\n\n:: Demo.One\n::\n\n<!-- c -->\n", 1, 1)]
+    [InlineData("text\n\n:: Demo.One\n::\n\n<div>x</div>\n\n:: Demo.Two\n::\n", 1, 1)]
+    public void WhenTheMovedTextWouldJoinRawHtml_ThenTheMoveIsRefusedAndNotOffered(string source, int line, int direction)
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse(source);
+        var textBlock = TextAt(page, line);
+
+        // Act
+        var directions = MarkdownPageOperations.GetTextMoveDirections(page, textBlock);
+        var change = MarkdownPageOperations.TryMoveText(page, NoSubjects, textBlock, direction, out var refusal);
+
+        // Assert
+        Assert.Equal((false, false), directions);
+        Assert.Null(change);
+        Assert.Equal($"The text at line {line} would join the HTML next to it.", refusal);
+    }
+
+    [Fact]
+    public void WhenThePageHasALoneCarriageReturn_ThenNoTextMoveIsOffered()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("x\rb\n\n:: Demo.One\n::\n");
+
+        // Act
+        var directions = MarkdownPageOperations.GetTextMoveDirections(page, TextAt(page, 1));
+
+        // Assert
+        Assert.Equal((false, false), directions);
+    }
+
     [Fact]
     public void WhenMovedCodeWouldContinueTheListBeforeIt_ThenTheMoveIsRefused()
     {

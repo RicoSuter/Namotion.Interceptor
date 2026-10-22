@@ -16,7 +16,8 @@ namespace HomeBlaze.Storage.Pages;
 /// Whether it can be edited as text: false for a run of content with raw HTML, a style block, an error, the footnotes, an
 /// old subject fence and a Markdig container with a block inside.
 /// </param>
-internal sealed record MarkdownTextBlock(Block FirstBlock, int Line, int EndLine, MarkdownBlock? Owner, bool IsEditable);
+/// <param name="HoldsHtml">Whether it is a run of content with raw HTML, which takes the text that comes next to it.</param>
+internal sealed record MarkdownTextBlock(Block FirstBlock, int Line, int EndLine, MarkdownBlock? Owner, bool IsEditable, bool HoldsHtml);
 
 /// <summary>Finds the text blocks of a page, see <see cref="MarkdownTextBlock"/>.</summary>
 internal static class MarkdownTextBlocks
@@ -86,13 +87,13 @@ internal static class MarkdownTextBlocks
 
         if (run.Exists(static block => block is HtmlBlock))
         {
-            result.Add(new MarkdownTextBlock(run[0], GetLine(run[0]), GetEndLine(page, run[^1]), owner, IsEditable: false));
+            result.Add(new MarkdownTextBlock(run[0], GetLine(run[0]), GetEndLine(page, run[^1]), owner, IsEditable: false, HoldsHtml: true));
             return;
         }
 
         foreach (var block in run)
         {
-            result.Add(new MarkdownTextBlock(block, GetLine(block), GetEndLine(page, block), owner, IsEditable(page, block)));
+            result.Add(new MarkdownTextBlock(block, GetLine(block), GetEndLine(page, block), owner, IsEditable(page, block), HoldsHtml: false));
         }
     }
 
