@@ -375,6 +375,8 @@ namespace HomeBlaze.Storage.Pages
         public bool IsWidget { get; }
         public string Name { get; init; }
         public string Format() { }
+        public static string GetReservedIdError(string id) { }
+        public static bool IsReservedId(string id) { }
         public static bool IsValidId(string id) { }
         public static bool TryParse(string line, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out HomeBlaze.Storage.Pages.MarkdownBlockHead? head, [System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out string? error) { }
     }
