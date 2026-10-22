@@ -27,6 +27,8 @@ public class MarkdownExpressionsTests
     [Theory]
     [InlineData("/Docs/My Page.md/Title", "/Docs/My%20Page.md/Title")]
     [InlineData("../My  Page.md/Title | raw", "../My%20%20Page.md/Title")]
+    [InlineData("/Docs/My Page.md/Items[Living Room]", "/Docs/My%20Page.md/Items[Living Room]")]
+    [InlineData("/Docs/My Page.md/Items[a b] | raw", "/Docs/My%20Page.md/Items[a b]")]
     public void WhenPathHasASpaceInASegment_ThenItIsReadPercentEncoded(string text, string path)
     {
         // Act
@@ -35,6 +37,17 @@ public class MarkdownExpressionsTests
         // Assert
         Assert.Null(error);
         Assert.Equal(path, expression!.SinglePath);
+    }
+
+    [Fact]
+    public void WhenPathWithASpaceHasAnUnknownPipe_ThenErrorNamesThePipe()
+    {
+        // Act
+        var expression = MarkdownExpressions.Parse("/Docs/My Page.md/Title | rounded", out var error);
+
+        // Assert
+        Assert.Null(expression);
+        Assert.Equal("Unknown pipe 'rounded'", error);
     }
 
     [Theory]

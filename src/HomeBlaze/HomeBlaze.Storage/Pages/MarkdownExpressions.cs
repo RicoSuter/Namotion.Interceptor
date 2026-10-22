@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Text;
 using HomeBlaze.Services.Expressions;
 
 namespace HomeBlaze.Storage.Pages;
@@ -66,8 +67,8 @@ public static class MarkdownExpressions
         return null;
     }
 
-    // The path before the last '|' outside brackets, with its spaces percent-encoded. Only a text that then parses as one
-    // path counts, so that a mistake in an expression keeps its own message.
+    // The path before the last '|' outside brackets, with its spaces outside brackets percent-encoded. Only a text that
+    // then parses as one path counts, so that a mistake in an expression keeps its own message.
     private static bool TryParseLegacyPath(string text, [NotNullWhen(true)] out ParsedExpression? expression)
     {
         expression = null;
@@ -78,8 +79,36 @@ public static class MarkdownExpressions
             return false;
         }
 
-        var encoded = path.Replace(" ", "%20", StringComparison.Ordinal) + (separator < 0 ? string.Empty : text[separator..]);
+        var encoded = EncodeSpacesOutsideBrackets(path) + (separator < 0 ? string.Empty : text[separator..]);
         return ParsedExpression.TryParse(encoded, out expression, out _) && expression.SinglePath is not null;
+    }
+
+    // A space inside a bracket key, such as "Living Room" in "[Living Room]", stays as written because the key is looked
+    // up that way.
+    private static string EncodeSpacesOutsideBrackets(string path)
+    {
+        var builder = new StringBuilder(path.Length + 16);
+        var depth = 0;
+        foreach (var character in path)
+        {
+            if (character == '[')
+            {
+                depth++;
+            }
+            else if (character == ']' && depth > 0)
+            {
+                depth--;
+            }
+            else if (character == ' ' && depth == 0)
+            {
+                builder.Append("%20");
+                continue;
+            }
+
+            builder.Append(character);
+        }
+
+        return builder.ToString();
     }
 
     // Text with an operator character, or with an operator or a keyword between spaces, is a mistake in an expression
