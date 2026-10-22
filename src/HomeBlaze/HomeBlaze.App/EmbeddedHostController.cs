@@ -14,6 +14,15 @@ public sealed class EmbeddedHostController : IAsyncDisposable
     /// </summary>
     private static readonly TimeSpan ShutdownTimeout = TimeSpan.FromSeconds(10);
 
+    /// <summary>
+    /// Application name the host runs under. MapStaticAssets resolves its manifest by
+    /// IHostEnvironment.ApplicationName, which otherwise defaults to this process's entry assembly, so it
+    /// would look for a HomeBlaze.App manifest (or a testhost one) that no project ever generates. Taken
+    /// from the assembly that does generate the manifest, so an assembly rename cannot silently break it.
+    /// </summary>
+    private static readonly string HostingApplicationName =
+        typeof(HomeBlazeWebApplication).Assembly.GetName().Name!;
+
     private WebApplication? _application;
 
     /// <summary>Services of the running host, or null before a successful start.</summary>
@@ -41,7 +50,7 @@ public sealed class EmbeddedHostController : IAsyncDisposable
             // MapStaticAssets() locates its manifest file by IHostEnvironment.ApplicationName, which otherwise
             // defaults to this process's own entry assembly (HomeBlaze.App, or the test host). Pinning it to
             // HomeBlaze finds the manifest HomeBlaze's own build produced, regardless of which process hosts it.
-            CommandLineArguments = ["--applicationName=HomeBlaze"]
+            CommandLineArguments = [$"--applicationName={HostingApplicationName}"]
         };
 
         var application = await HomeBlazeWebApplication.CreateAsync(options, cancellationToken);
