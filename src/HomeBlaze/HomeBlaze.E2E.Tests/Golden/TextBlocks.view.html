@@ -1,7 +1,9 @@
 <h1 id="golden-text" tabindex="-1">Golden Text</h1>
 <p>A paragraph with <em>emphasis</em>, <strong>strong text</strong>, <code>code</code> and a <a href="https://example.com">link</a>.
 A second line of the same paragraph.</p>
+<p>The target speed is 700 RPM, and a <a href="https://example.com/reference">reference link</a> stands next to it.</p>
 <h2 id="a-heading">A Heading</h2>
+<h2 id="a-setext-heading">A Setext Heading</h2>
 <ul>
 <li>First item</li>
 <li>Second item
@@ -14,11 +16,21 @@ A second line of the same paragraph.</p>
 <li>One</li>
 <li>Two</li>
 </ol>
+<p>A list that starts at three:</p>
+<ol start="3">
+<li>Three</li>
+<li>Four</li>
+</ol>
 <blockquote>
 <p>A quote
 on two lines.</p>
 </blockquote>
 <pre><code class="language-csharp">var answer = 42;
+</code></pre>
+<pre><code>A fenced block without a language.
+</code></pre>
+<p>An indented code block:</p>
+<pre><code>var indented = true;
 </code></pre>
 <div class="markdown-table">
 <table>
@@ -42,11 +54,16 @@ Raw HTML.
 </div>
 <p>Text with a footnote<a id="fnref:1" href="#fn:1" class="footnote-ref"><sup>1</sup></a>.</p>
 <div class="subject-component-wrapper" style="position: relative;"><div data-testid="card" class="mud-paper mud-paper-outlined mud-card card-widget place-filler" style=""><div class="mud-card-header mud-card-header-padding align-start"><div class="mud-card-header-content"><h6 data-testid="card-title" class="mud-typography mud-typography-h6">Golden Card</h6></div></div><div data-testid="card-content" class="mud-card-content mud-card-content-padding"><div class="subject-component-wrapper" style="position: relative;"><div class="markdown-fragment">
-<p>Text inside the card.</p>
+<p>Text inside the card with the target speed 700 RPM.</p>
 <ul>
 <li>A list inside the card</li>
 </ul>
 </div></div></div></div></div>
+<p>A paragraph directly before a card.</p>
+<div class="subject-component-wrapper" style="position: relative;"><div data-testid="card" class="mud-paper mud-paper-outlined mud-card card-widget place-filler" style=""><div class="mud-card-header mud-card-header-padding align-start"><div class="mud-card-header-content"><h6 data-testid="card-title" class="mud-typography mud-typography-h6">Adjacent Card</h6></div></div><div data-testid="card-content" class="mud-card-content mud-card-content-padding"><div class="subject-component-wrapper" style="position: relative;"><div class="markdown-fragment">
+<p>Text of the adjacent card.</p>
+</div></div></div></div></div>
+<p>A paragraph directly after a card.</p>
 <p>Closing paragraph.</p>
 <div class="footnotes">
 <hr>
