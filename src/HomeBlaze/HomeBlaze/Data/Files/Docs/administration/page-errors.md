@@ -31,6 +31,7 @@ The names, numbers and lines in the messages below are examples.
 | `The value of 'Title' has no closing quote.` | A value starts with a double quote and never ends | Add the closing double quote |
 | `Expected a space after the value of 'Title'.` | Something follows the closing double quote directly | Put a space between two arguments |
 | `The value of 'Title' contains a quote. Put the whole value in quotes.` | A value without quotes has a double quote in it | Put the value in double quotes and write `\"` for the double quote inside |
+| `'value' is reserved for expressions and cannot be the name of a block.` | A block named `#value` or `#subject` | Give the block another name, and change the paths that use it |
 
 ## Type Errors
 
@@ -76,11 +77,16 @@ The names, numbers and lines in the messages below are examples.
 
 ## Expression Errors
 
-An expression with a wrong format does not take a block down. The page shows the message in red in place of the value, and the rest of the page is shown as usual.
+An expression with a mistake does not take a block down. The page shows the message in red in place of the value, and the rest of the page is shown as usual.
 
 | Message | Cause | Fix |
 |---------|-------|-----|
-| `Unknown format 'rounded'` | The format after the pipe character of an expression is neither `display` nor `raw`, like `{{ motor/Speed \| rounded }}`, where the backslash is only needed inside a table. The message shows the format as written | Use `display` or `raw`, or write no format, see [Expression Formats](pages.md#expression-formats) |
+| `Unknown pipe 'rounded'` | The pipe after the pipe character of an expression is neither `display` nor `raw`, like `{{ motor/Speed \| rounded }}`, where the backslash is only needed inside a table. The message shows the pipe as written | Use `display` or `raw`, or write no pipe, see [Pipes](pages.md#pipes) |
+| `The pipe 'raw' takes no arguments` | A pipe of the text of a page with an argument after a colon, like `{{ motor/Speed \| raw:2 }}` | Remove the colon and the argument |
+| `expected ')' at position 16` | A mistake in an expression: a parenthesis, a quote, an operator or a value is missing or in the wrong place. The position counts the characters between the braces from 0 | Correct the expression at that position, see [Conditions](pages.md#conditions) |
+| `use '==' for equality at position 12` | A single `=` in a comparison | Write `==` |
+| `arithmetic is not supported at position 2` | `+`, `-`, `*` or `/` between two values | Show the values separately |
+| `'value' is not available in the text of a page` | The text of a page uses `value` or `subject`, which only a widget has | Write the path of the property |
 
 ## Value Widget Errors
 

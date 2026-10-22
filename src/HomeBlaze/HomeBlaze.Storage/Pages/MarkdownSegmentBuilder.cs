@@ -59,8 +59,9 @@ public static partial class MarkdownSegmentBuilder
     /// The search reads the text and not the rendered page, so it also returns an expression that
     /// <see cref="Build"/> does not turn into a segment: one in the front matter, in the content of an invalid
     /// block or on the head line of a block, and one whose braces enclose markdown markup or the border of a block.
-    /// A path with a character reference in it, such as <c>&amp;amp;</c>, is returned as written, while the
-    /// segment has the character.
+    /// An expression with a character reference in it, such as <c>&amp;amp;</c>, is returned as written. The segment
+    /// of an expression in running text keeps it as written too, while the segment of an expression in HTML that the
+    /// page writes has the character.
     /// </remarks>
     public static IEnumerable<MarkdownExpression> FindExpressions(MarkdownPage page)
     {
