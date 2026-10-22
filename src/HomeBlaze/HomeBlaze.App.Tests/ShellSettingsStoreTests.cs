@@ -44,7 +44,13 @@ public class ShellSettingsStoreTests : IDisposable
         var loaded = new ShellSettingsStore(FilePath).Load();
 
         // Assert
-        Assert.Equal(settings, loaded);
+        // Compared part by part on purpose. The generated record equality uses
+        // EqualityComparer<IReadOnlyList<ShellConnection>>.Default for Connections, which is reference
+        // equality, so whole-record equality can never hold across a round trip however correct the
+        // contents are. Asserting the parts compares the contents element by element instead.
+        Assert.Equal(settings.Connections, loaded.Connections);
+        Assert.Equal(settings.LastConnectionId, loaded.LastConnectionId);
+        Assert.Equal(settings.Window, loaded.Window);
     }
 
     [Fact]
