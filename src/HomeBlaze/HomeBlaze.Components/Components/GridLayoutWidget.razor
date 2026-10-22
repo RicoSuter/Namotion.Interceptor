@@ -54,7 +54,8 @@
         {
             <div class="grid-cell empty edit-mode-selected-interactive"
                  style="grid-row: @(row + 1); grid-column: @(col + 1);"
-                 @onclick="() => AddCellAt(row, col)">
+                 @onclick="() => AddCellAt(row, col)"
+                 @ondblclick:stopPropagation="true">
                 <MudIcon Icon="@Icons.Material.Filled.Add"
                          Color="Color.Default"
                          Class="add-icon" />

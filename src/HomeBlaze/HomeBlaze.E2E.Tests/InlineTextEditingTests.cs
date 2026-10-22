@@ -300,6 +300,55 @@ public class InlineTextEditingTests
     }
 
     [Fact]
+    public async Task WhenATextBlockIsDoubleClicked_ThenItsTextDialogOpens()
+    {
+        // Arrange
+        var page = await OpenPageInInlineModeAsync();
+        var wrapper = GetTextWrapper(page, "First paragraph");
+        await Assertions.Expect(wrapper).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Act
+        await wrapper.DblClickAsync(new() { Force = true });
+
+        // Assert
+        await ExpectTextEditorValueAsync(page, "First paragraph on the page.");
+    }
+
+    [Fact]
+    public async Task WhenATextBlockInASelectedCardIsDoubleClicked_ThenOnlyItsTextDialogOpens()
+    {
+        // Arrange: the text of a card body is selectable once the card is selected.
+        var page = await OpenPageInInlineModeAsync();
+        await page.GetCard("Text Card").Locator(".mud-card-header").SelectWidgetAsync();
+        var wrapper = GetTextWrapper(page, "Card body text");
+        await Assertions.Expect(wrapper).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Act
+        await wrapper.DblClickAsync(new() { Force = true });
+
+        // Assert: the dialog of the text opened, not the one of the card.
+        await ExpectTextEditorValueAsync(page, "Card body text.");
+        await Assertions.Expect(page.GetByTestId("subject-edit-dialog-type")).ToHaveCountAsync(0);
+        await Assertions.Expect(page.GetByRole(AriaRole.Dialog)).ToHaveCountAsync(1);
+    }
+
+    [Fact]
+    public async Task WhenATextBlockIsDoubleClickedInViewMode_ThenNoDialogOpens()
+    {
+        // Arrange
+        var page = await OpenPageInInlineModeAsync();
+        await page.SelectEditModeAsync("View", Timeout);
+        var paragraph = page.Locator("p").Filter(new() { HasText = "First paragraph" });
+        await Assertions.Expect(paragraph).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Act
+        await paragraph.DblClickAsync();
+
+        // Assert
+        await Assertions.Expect(page.GetByRole(AriaRole.Dialog)).ToHaveCountAsync(0);
+    }
+
+    [Fact]
     public async Task WhenThePageIsViewed_ThenItsTextIsNotWrapped()
     {
         // Arrange: in Inline mode the text blocks have wrappers of their own, which View mode does not render.

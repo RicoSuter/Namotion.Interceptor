@@ -106,6 +106,23 @@ public class WidgetSelectionTests
     }
 
     [Fact]
+    public async Task WhenAWidgetIsDoubleClicked_ThenItsEditDialogOpens()
+    {
+        // Arrange
+        var page = await OpenPageInInlineModeAsync();
+        var body = page.GetByText("Body of the selection card.");
+        await Assertions.Expect(page.Locator(".subject-component-wrapper.selectable").First).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Act
+        await body.DblClickAsync(new() { Force = true });
+
+        // Assert
+        var dialog = page.GetByRole(AriaRole.Dialog, new() { Name = "Edit Selection Card", Exact = true });
+        await Assertions.Expect(dialog).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(dialog.GetByTestId("subject-edit-dialog-type")).ToHaveTextAsync("HomeBlaze.Components.Card");
+    }
+
+    [Fact]
     public async Task WhenEscapeIsPressedInTheEditDialog_ThenTheWidgetStaysSelected()
     {
         // Arrange

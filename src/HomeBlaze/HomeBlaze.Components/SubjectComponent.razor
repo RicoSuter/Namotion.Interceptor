@@ -29,6 +29,8 @@
              @onpointerdown="@(isSelectable ? _pointerDownCallback : default)"
              @onclick="@(isSelectable ? _clickCallback : isRevealable ? _revealCallback : default)"
              @onclick:stopPropagation="@(isSelectable || isRevealable)"
+             @ondblclick="@(isSelectable ? _doubleClickCallback : default)"
+             @ondblclick:stopPropagation="@isSelectable"
              @onkeydown="@(isSelectable ? _keyDownCallback : default)"
              @onkeydown:stopPropagation="@isSelectable">
             @{
@@ -220,6 +222,7 @@
     // the browser.
     private EventCallback<PointerEventArgs> _pointerDownCallback;
     private EventCallback<MouseEventArgs> _clickCallback;
+    private EventCallback<MouseEventArgs> _doubleClickCallback;
     private EventCallback<KeyboardEventArgs> _keyDownCallback;
     private EventCallback<MouseEventArgs> _revealCallback;
     private EventCallback _selectParentCallback;
@@ -313,6 +316,7 @@
     {
         _pointerDownCallback = EventCallback.Factory.Create<PointerEventArgs>(this, OnPointerDown);
         _clickCallback = EventCallback.Factory.Create<MouseEventArgs>(this, OnClick);
+        _doubleClickCallback = EventCallback.Factory.Create<MouseEventArgs>(this, OnDoubleClickAsync);
         _keyDownCallback = EventCallback.Factory.Create<KeyboardEventArgs>(this, OnKeyDown);
         _selectParentCallback = EventCallback.Factory.Create(this, SelectParent);
         _editCallback = EventCallback.Factory.Create(this, OpenEditDialog);
@@ -426,11 +430,33 @@
         {
             Selection.Select(this);
         }
-        else if (HasEditComponent || StructureEditor?.GetActions(Subject!).CanEditText == true)
+        else if (HasEditAction)
         {
             await OpenEditDialog();
         }
     }
+
+    // The click that starts a double click selected the block already, unless it was a drag.
+    private async Task OnDoubleClickAsync(MouseEventArgs args)
+    {
+        if (Selection == null)
+        {
+            return;
+        }
+
+        if (!ReferenceEquals(Selection.Selected, this))
+        {
+            Selection.Select(this);
+        }
+
+        if (HasEditAction)
+        {
+            await OpenEditDialog();
+        }
+    }
+
+    // The condition of the Edit button in the bar.
+    private bool HasEditAction => HasEditComponent || StructureEditor?.GetActions(Subject!).CanEditText == true;
 
     protected override void OnParametersSet()
     {
