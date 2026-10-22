@@ -294,6 +294,7 @@ public static class MarkdownPageParser
         // Blocks have a parser of their own, so that a run of fence characters has one meaning only.
         builder.Extensions.TryRemove<CustomContainerExtension>();
         builder.Extensions.Add(new MarkdownBlockContainerExtension());
+        builder.Extensions.Add(new MarkdownExpressionExtension());
         return builder;
     }
 

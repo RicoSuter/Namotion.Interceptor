@@ -195,6 +195,7 @@ public class MarkdownExpressionFormatTests
     [Theory]
     [InlineData("{{ meter/Power > 1000 }}", "Yes")]
     [InlineData("{{ meter/IsOn and meter/Power > 2000 }}", "No")]
+    [InlineData("{{ meter/IsOn and meter/Power < 1000 }}", "No")]
     [InlineData("{{ meter/Missing > 1000 }}", "")]
     [InlineData("{{ meter/Power > 1000 | raw }}", "True")]
     public async Task WhenExpressionIsACondition_ThenTextIsYesNoOrEmpty(string text, string expected)

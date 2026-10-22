@@ -626,7 +626,7 @@ public class MarkdownSegmentBuilderTests
 
         // Act
         var segments = MarkdownSegmentBuilder.Split(
-            $"<p>Before</p><!--BLOCK:{token}:0--><p>Inside</p>", page, token);
+            $"<p>Before</p><!--BLOCK:{token}:0--><p>Inside</p>", page, token, []);
 
         // Assert
         Assert.Equal(2, segments.Count);
@@ -650,14 +650,15 @@ public class MarkdownSegmentBuilderTests
     }
 
     [Fact]
-    public void WhenBracesEncloseALiteralLessThanSign_ThenTheyAreShownAsWrittenAndAreNoSegment()
+    public void WhenBracesEncloseALiteralLessThanSign_ThenTheyAreAnExpressionWithIt()
     {
         // Act
         var segments = Build("Value {{ a < b }} now and {{ c/D }}");
 
         // Assert
-        Assert.Equal(new ExpressionMarkdownSegment("c/D"), Assert.Single(segments.OfType<ExpressionMarkdownSegment>()));
-        Assert.Contains("Value {{ a < b }} now and ", VisibleText(segments));
+        Assert.Equal(["a < b", "c/D"], segments.OfType<ExpressionMarkdownSegment>().Select(segment => segment.Text));
+        Assert.Contains("Value ", VisibleText(segments));
+        Assert.DoesNotContain("{{", VisibleText(segments));
     }
 
     [Theory]
@@ -754,6 +755,55 @@ public class MarkdownSegmentBuilderTests
         Assert.Contains("<code>Type.<wbr>Name</code>", html);
         Assert.Contains("<code>HomeBlaze.<wbr>Components.<wbr>Card</code>", html);
         Assert.Contains("<code>Subtitle</code>", html);
+    }
+
+    [Theory]
+    [InlineData("Power {{ a==1 or b==2 }} now", "a==1 or b==2")]
+    [InlineData("Power {{ a < 5 }} now", "a < 5")]
+    [InlineData("Power {{ a <= 5 && b }} now", "a <= 5 && b")]
+    [InlineData("Power {{ a == 'x' }} now", "a == 'x'")]
+    [InlineData("Power **{{ a > 5 }}** now", "a > 5")]
+    public void WhenExpressionHasOperators_ThenItsTextReachesTheSegmentAsWritten(string source, string text)
+    {
+        // Act
+        var segments = Build(source);
+
+        // Assert
+        Assert.Equal(new ExpressionMarkdownSegment(text), Assert.Single(segments.OfType<ExpressionMarkdownSegment>()));
+    }
+
+    [Fact]
+    public void WhenExpressionInATableCellHasPipes_ThenTheCellIsNotSplit()
+    {
+        // Act
+        var segments = Build("| A | B |\n|---|---|\n| {{ a | raw }} | {{ a || b }} |\n| {{ c \\| raw }} | z |");
+
+        // Assert
+        Assert.Equal(
+            ["a | raw", "a || b", "c \\| raw"],
+            segments.OfType<ExpressionMarkdownSegment>().Select(segment => segment.Text));
+        // Two body rows of two cells each: a '|' inside an expression split none of them.
+        Assert.Equal(4, System.Text.RegularExpressions.Regex.Matches(AllHtml(segments), "<td").Count);
+    }
+
+    [Fact]
+    public void WhenRawHtmlHasAnExpressionInAnAttribute_ThenItIsStillASegment()
+    {
+        // Act
+        var segments = Build("<span title=\"{{ a &lt; 5 }}\">{{ b }}</span>");
+
+        // Assert
+        Assert.Equal(["a < 5", "b"], segments.OfType<ExpressionMarkdownSegment>().Select(segment => segment.Text).Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public void WhenTextLooksLikeAMarker_ThenItIsNoExpression()
+    {
+        // Act
+        var segments = Build("<!--EXPR:00000000000000000000000000000000:0--> and {{ a }}");
+
+        // Assert
+        Assert.Equal(new ExpressionMarkdownSegment("a"), Assert.Single(segments.OfType<ExpressionMarkdownSegment>()));
     }
 
     // What a browser shows for the HTML: character references are decoded.
