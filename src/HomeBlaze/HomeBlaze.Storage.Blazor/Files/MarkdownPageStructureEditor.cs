@@ -69,12 +69,12 @@ internal sealed class MarkdownPageStructureEditor : IPageStructureEditor
         var confirmed = await _dialogService.ShowMessageBoxAsync("Delete block", message, yesText: "Delete", cancelText: "Cancel");
         if (confirmed == true)
         {
-            Report(await _file.DeleteBlockAsync(subject, CancellationToken.None));
+            await RunAsync(() => _file.DeleteBlockAsync(subject, CancellationToken.None));
         }
     }
 
-    public async Task MoveAsync(IInterceptorSubject subject, int direction) =>
-        Report(await _file.MoveBlockAsync(subject, direction, CancellationToken.None));
+    public Task MoveAsync(IInterceptorSubject subject, int direction) =>
+        RunAsync(() => _file.MoveBlockAsync(subject, direction, CancellationToken.None));
 
     public async Task InsertWidgetAsync(IInterceptorSubject content, IInterceptorSubject? before)
     {
@@ -91,7 +91,7 @@ internal sealed class MarkdownPageStructureEditor : IPageStructureEditor
         // Only the text of the subject goes into the page, and the reload creates the instance that lives on.
         try
         {
-            Report(await _file.InsertWidgetAsync(content, before, result.Subject, result.Name, CancellationToken.None));
+            await RunAsync(() => _file.InsertWidgetAsync(content, before, result.Subject, result.Name, CancellationToken.None));
         }
         finally
         {
@@ -115,7 +115,7 @@ internal sealed class MarkdownPageStructureEditor : IPageStructureEditor
 
         try
         {
-            Report(await _file.AddSlotItemAsync(owner, slot.Name, item, CancellationToken.None));
+            await RunAsync(() => _file.AddSlotItemAsync(owner, slot.Name, item, CancellationToken.None));
         }
         finally
         {
@@ -123,6 +123,19 @@ internal sealed class MarkdownPageStructureEditor : IPageStructureEditor
             {
                 _subjectFactory.DiscardSubject(item);
             }
+        }
+    }
+
+    // A write that the storage cannot make, such as a file that another process holds open, must not end the circuit.
+    private async Task RunAsync(Func<Task<MarkdownEditResult>> edit)
+    {
+        try
+        {
+            Report(await edit());
+        }
+        catch (IOException exception)
+        {
+            _snackbar.Add($"The page could not be saved. {exception.Message}", Severity.Error);
         }
     }
 

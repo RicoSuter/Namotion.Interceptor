@@ -222,7 +222,7 @@ public class PlaywrightFixture : IAsyncLifetime
     {
         var content = string.Empty;
         await RetryWhileFileIsHeldAsync(
-            () => content = File.ReadAllText(path),
+            () => content = ReadSharedText(path),
             $"The file {path} could not be read");
         return content;
     }
@@ -252,12 +252,20 @@ public class PlaywrightFixture : IAsyncLifetime
         return text;
     }
 
+    // The server creates the file without sharing, so a read that only shares reading would make its write fail.
+    private static string ReadSharedText(string path)
+    {
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
+    }
+
     // The server holds the file open while it reads it again after a write, and the poll tries a failed read again.
     private static bool TryReadFile(string path, out string text)
     {
         try
         {
-            text = File.ReadAllText(path);
+            text = ReadSharedText(path);
             return true;
         }
         catch (IOException)
