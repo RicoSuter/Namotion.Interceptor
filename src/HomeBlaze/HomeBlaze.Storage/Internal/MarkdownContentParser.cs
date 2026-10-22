@@ -183,9 +183,9 @@ public sealed partial class MarkdownContentParser
     internal void LogRefusedWrite(string path, string reason) =>
         _logger?.LogWarning("A change was not written to the page {Path}: {Reason}", path, reason);
 
-    /// <summary>Logs that the page could not be read again after a refused write.</summary>
+    /// <summary>Logs that the page could not be read again after a write that was refused or failed.</summary>
     internal void LogFailedReload(string path, Exception exception) =>
-        _logger?.LogWarning(exception, "Failed to reload the page {Path} after a refused write", path);
+        _logger?.LogWarning(exception, "Failed to reload the page {Path} after a write that was refused or failed", path);
 
     /// <summary>
     /// Renders markdown content by replacing each {{ path }} expression that

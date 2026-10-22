@@ -746,9 +746,35 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         }
 
         var content = write.Page.Source;
+        var previousContent = Content;
         Content = content;
 
-        await WriteUnlockedAsync(content);
+        try
+        {
+            await WriteUnlockedAsync(content);
+        }
+        catch
+        {
+            // Published ahead of the file, the next write would be computed from this one and save it after all. The
+            // snapshot goes back only while no reload replaced it, and the read then takes in whatever the file holds,
+            // also the text of a write that gave up late, and applies the blocks that were forgotten above again.
+            if (ReferenceEquals(Interlocked.CompareExchange(ref _parseResult, snapshot, published), published))
+            {
+                Content = previousContent;
+            }
+
+            try
+            {
+                await OnFileChangedAsync(CancellationToken.None);
+            }
+            catch (Exception exception)
+            {
+                _parser.LogFailedReload(FullPath, exception);
+            }
+
+            throw;
+        }
+
         return null;
     }
 

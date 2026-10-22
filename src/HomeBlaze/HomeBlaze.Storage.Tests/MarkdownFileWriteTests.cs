@@ -231,6 +231,40 @@ public class MarkdownFileWriteTests : IDisposable
         Assert.Equal(content, markdown.Content);
     }
 
+    [Fact]
+    public async Task WhenTheWriteOfAStructureEditFails_ThenThePageStillDescribesTheFileAndTheNextEditLeavesTheFailedOneOut()
+    {
+        // Arrange
+        const string content = "# Motors\n\n:: HomeBlaze.Samples.Motor#first Name=First\n::\n\n:: HomeBlaze.Samples.Motor#second Name=Second\n::\n";
+        WriteFile("Motors.md", content);
+        PausableBlobStorage? client = null;
+        var storage = CreateStorage();
+        storage.ClientDecorator = inner => client = new PausableBlobStorage(inner);
+        await storage.ConnectAsync(CancellationToken.None);
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Motors.md"]);
+        var first = markdown.Children["first"];
+        var second = markdown.Children["second"];
+        var writeReached = client!.PauseNext(nameof(FluentStorage.Blobs.IBlobStorage.WriteAsync));
+
+        // Act
+        var failedDelete = markdown.DeleteBlockAsync(first, CancellationToken.None);
+        await writeReached;
+        client.FailHangingCall(new IOException("The share is gone."));
+        var failure = await Record.ExceptionAsync(() => failedDelete);
+        var actionsAfterFailure = markdown.GetBlockActions(first);
+        var contentAfterFailure = markdown.Content;
+        var result = await markdown.DeleteBlockAsync(second, CancellationToken.None);
+
+        // Assert
+        Assert.IsType<IOException>(failure);
+        Assert.True(actionsAfterFailure.CanDelete);
+        Assert.Equal(content, contentAfterFailure);
+        Assert.True(result.IsWritten);
+        var written = ReadFile("Motors.md");
+        Assert.Contains("HomeBlaze.Samples.Motor#first", written);
+        Assert.DoesNotContain("HomeBlaze.Samples.Motor#second", written);
+    }
+
     private const string PageWithActiveContent = """
         # Motors
 
