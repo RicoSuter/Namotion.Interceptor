@@ -216,13 +216,13 @@ public class PlaywrightFixture : IAsyncLifetime
         => Path.Combine(ServerServices.GetRequiredService<RootManager>().DataDirectory, "TestData", relativePath);
 
     /// <summary>
-    /// Reads a file that the server may hold open, such as a page that it is loading again after a write.
+    /// Reads a file of the storage of the server between the writes of the server, so that the read cannot fail one.
     /// </summary>
     public async Task<string> ReadFileAsync(string path)
     {
         var content = string.Empty;
         await RetryWhileFileIsHeldAsync(
-            () => content = ReadSharedText(path),
+            () => content = ReadBetweenWritesOfServer(path),
             $"The file {path} could not be read");
         return content;
     }
@@ -252,20 +252,33 @@ public class PlaywrightFixture : IAsyncLifetime
         return text;
     }
 
-    // The server creates the file without sharing, so a read that only shares reading would make its write fail.
-    private static string ReadSharedText(string path)
+    // On the worker of the storage, which runs every write of the server. The server creates a file without sharing,
+    // which a file that is open for reading fails on Unix as well, whatever it shares, so a read beside a write would
+    // fail the write.
+    private string ReadBetweenWritesOfServer(string path)
     {
-        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-        using var reader = new StreamReader(stream);
-        return reader.ReadToEnd();
+        var connection = GetRoot().Connection;
+        var text = string.Empty;
+
+        // Run on the thread pool for the reason given in WriteDemoPageAsync.
+        Task.Run(() => FluentStorageContainer.RunOperationAsync(
+            connection,
+            _ =>
+            {
+                text = File.ReadAllText(path);
+                return Task.CompletedTask;
+            },
+            CancellationToken.None)).GetAwaiter().GetResult();
+
+        return text;
     }
 
-    // The server holds the file open while it reads it again after a write, and the poll tries a failed read again.
-    private static bool TryReadFile(string path, out string text)
+    // A write that the storage gave up on can still hold the file, and the poll tries a failed read again.
+    private bool TryReadFile(string path, out string text)
     {
         try
         {
-            text = ReadSharedText(path);
+            text = ReadBetweenWritesOfServer(path);
             return true;
         }
         catch (IOException)
