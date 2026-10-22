@@ -214,7 +214,13 @@
     color: var(--mud-palette-text-primary);
 }
 
+/* The cases of a selected value map overlay the content below its chip, so that the page does not move when they open.
+   The wrapper of the map is the containing block. */
 ::deep .value-map-cases {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    z-index: 6;
     display: flex;
     flex-direction: column;
     gap: 6px;

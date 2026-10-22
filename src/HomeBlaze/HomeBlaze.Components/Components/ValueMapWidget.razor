@@ -12,7 +12,7 @@
         <span>@(StructureEditor?.GetBlockName(map) ?? nameof(ValueMap))</span>
     </div>
 
-    @if (Owner?.ContainsSelection == true)
+    @if (_isShowingCases)
     {
         <div class="value-map-cases" data-testid="value-map-cases">
             @foreach (var mapCase in map.Cases)
@@ -49,6 +49,7 @@
     public SubjectComponent? Owner { get; set; }
 
     private WidgetSelection? _subscribedSelection;
+    private bool _isShowingCases;
 
     protected override void OnParametersSet()
     {
@@ -63,9 +64,20 @@
                 selection.Changed += OnSelectionChanged;
             }
         }
+
+        _isShowingCases = selection is not null && Owner?.ContainsSelection == true;
     }
 
-    private void OnSelectionChanged() => _ = InvokeAsync(StateHasChanged);
+    private void OnSelectionChanged()
+    {
+        // Every map of the page is notified, and only one whose list opens or closes renders again.
+        var isShowingCases = Owner?.ContainsSelection == true;
+        if (isShowingCases != _isShowingCases)
+        {
+            _isShowingCases = isShowingCases;
+            _ = InvokeAsync(StateHasChanged);
+        }
+    }
 
     private static PageListSlot? FindCaseSlot(IPageStructureEditor editor, ValueMap map)
     {

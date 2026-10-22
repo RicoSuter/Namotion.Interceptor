@@ -124,6 +124,70 @@ public class InlineStructureEditingTests
     }
 
     [Fact]
+    public async Task WhenThePageIsEditedInline_ThenTheChipCoversNoContent()
+    {
+        // Arrange & Act
+        var page = await OpenPageInInlineModeAsync();
+        var chip = page.GetByTestId("invisible-widget-chip").Filter(new() { HasText = "structuremap" });
+        await Assertions.Expect(chip).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Assert: neither a line of text nor a block of the content around the chips reaches into the chip.
+        var coveredContent = await chip.EvaluateAsync<string[]>(
+            """
+            chip => {
+                const box = chip.getBoundingClientRect();
+                const stack = chip.closest('.invisible-widget-stack');
+                const content = stack.parentElement;
+                const overlaps = rectangle => rectangle.width > 0 && rectangle.height > 0 &&
+                    rectangle.left < box.right && rectangle.right > box.left && rectangle.top < box.bottom && rectangle.bottom > box.top;
+                const covered = [];
+                for (const block of content.querySelectorAll(':scope > .subject-component-wrapper')) {
+                    if (overlaps(block.getBoundingClientRect())) {
+                        covered.push(block.getAttribute('aria-label') ?? 'block');
+                    }
+                }
+
+                const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT);
+                for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+                    if (stack.contains(node) || !node.textContent.trim()) {
+                        continue;
+                    }
+
+                    const range = document.createRange();
+                    range.selectNodeContents(node);
+                    for (const line of range.getClientRects()) {
+                        if (overlaps(line)) {
+                            covered.push(node.textContent.trim());
+                        }
+                    }
+                }
+
+                return covered;
+            }
+            """);
+        Assert.Empty(coveredContent);
+    }
+
+    [Fact]
+    public async Task WhenACaseInTheListOfAValueMapIsDeleted_ThenItIsRemovedFromThePage()
+    {
+        // Arrange
+        var page = await OpenPageInInlineModeAsync();
+        await page.GetByTestId("invisible-widget-chip").Filter(new() { HasText = "structuremap" }).SelectWidgetAsync();
+        var actionBar = await page.GetByTestId("value-map-cases").GetByTestId("value-map-case").SelectWidgetAsync();
+
+        // Act
+        await actionBar.GetByTestId("delete-block-button").ClickAsync();
+        await page.GetByRole(AriaRole.Dialog).GetByRole(AriaRole.Button, new() { Name = "Delete", Exact = true }).ClickAsync();
+
+        // Assert
+        await _fixture.WaitForDemoPageTextAsync(
+            PageName,
+            text => text.Contains("HomeBlaze.Components.ValueMap#structuremap") && !text.Contains("Case Value=Stopped"),
+            "The case was not deleted.");
+    }
+
+    [Fact]
     public async Task WhenThePageIsViewed_ThenNoChipIsShown()
     {
         // Arrange
