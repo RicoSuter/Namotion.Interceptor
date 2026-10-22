@@ -251,5 +251,29 @@ public class MarkdownStructureEditTests
         Assert.Equal("The page changed while it was edited. Try again.", result.Refusal);
         Assert.Equal(changed, await fixture.ReadAsync("page.md"));
         Assert.Equal(changed, page.Content);
+
+        // A second try works on the file that the page read after the refusal.
+        var retry = await page.DeleteBlockAsync(page.Children["leaf"], CancellationToken.None);
+        Assert.True(retry.IsWritten);
+        var written = await fixture.ReadAsync("page.md");
+        Assert.DoesNotContain("#leaf", written);
+        Assert.EndsWith("\nexternal\n", written);
+    }
+
+    [Fact]
+    public async Task WhenTheFileOfThePageWasDeleted_ThenTheStructureEditThrowsAnIOExceptionAndWritesNothing()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var page = await fixture.AddPageAsync("page.md", PanelPage);
+        var leaf = page.Children["leaf"];
+        await fixture.DeleteAsync("page.md");
+
+        // Act
+        var exception = await Record.ExceptionAsync(() => page.DeleteBlockAsync(leaf, CancellationToken.None));
+
+        // Assert
+        Assert.IsType<FileNotFoundException>(exception);
+        Assert.False(await fixture.ExistsAsync("page.md"));
     }
 }

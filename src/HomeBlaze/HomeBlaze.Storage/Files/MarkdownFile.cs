@@ -73,7 +73,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     private const string NoBlockRefusal = "The subject has no block on the page.";
 
     // The write of this page that the flow runs in, so that a write from inside it is refused instead of waiting
-    // for _writeLock. Off the worker, the reload after a write or a refused write-back applies configuration within the write.
+    // for _writeLock. Off the worker, the reload after a write, a refused write-back or a refused structure edit applies
+    // configuration within the write.
     private readonly AsyncLocal<WriteOfFlow?> _writeOfFlow = new();
 
     // Each access reads the current snapshot. Code that needs two of these together must take
@@ -155,9 +156,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
 
             // Limited like a call on the storage: the load runs on the storage worker, which a source that stalls
             // in the middle of the file would otherwise hold.
-            var timeProvider = (Storage as FluentStorageContainer)?.TimeProvider ?? TimeProvider.System;
             var reading = reader.ReadToEndAsync(cancellationToken);
-            await reading.WithStorageTimeoutAsync("reading", FullPath, timeProvider, cancellationToken);
+            await reading.WithStorageTimeoutAsync("reading", FullPath, StorageTimeProvider, cancellationToken);
             var content = await reading;
             var frontmatter = FrontmatterParser.Parse<MarkdownFrontmatter>(content);
 
@@ -190,7 +190,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             Content = content;
             Frontmatter = frontmatter;
 
-            // Without the flow of the caller, which is the worker of the storage or a refused write-back, as for
+            // Without the flow of the caller, which is the worker of the storage or a refused write, as for
             // every assignment to the tree: lifecycle handlers run here for a page that is in the tree.
             using (ExecutionContext.SuppressFlow())
             {
@@ -382,12 +382,19 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         ? new PageLayoutRules(_parser.FindType, path => _parser.ResolvesToSubject(path, this), _parser.FindLayoutError)
         : null;
 
-    // Reads from storage rather than Content, which lags behind an external edit until its file event arrives.
+    private TimeProvider StorageTimeProvider => (Storage as FluentStorageContainer)?.TimeProvider ?? TimeProvider.System;
+
+    // Reads from storage rather than Content, which lags behind an external edit until its file event arrives. Limited
+    // like a call on the storage, because the caller holds _writeLock, which a stalled read would otherwise keep.
     private async Task<string> ReadSourceUnlockedAsync(CancellationToken cancellationToken)
     {
-        await using var stream = await ReadAsync(cancellationToken);
+        // The client returns null for a file that is gone, although its signature does not say so.
+        await using var stream = await ReadAsync(cancellationToken)
+            ?? throw new FileNotFoundException($"'{FullPath}' is not in the storage.", FullPath);
         using var reader = new StreamReader(stream);
-        return await reader.ReadToEndAsync(cancellationToken);
+        var reading = reader.ReadToEndAsync(cancellationToken);
+        await reading.WithStorageTimeoutAsync("reading", FullPath, StorageTimeProvider, cancellationToken);
+        return await reading;
     }
 
     // Not cancelled once the content is decided: a cancelled reload after the write would leave the parse snapshot of
