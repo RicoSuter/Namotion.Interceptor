@@ -3,6 +3,7 @@ using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Components;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Internal;
+using HomeBlaze.Storage.Pages;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
@@ -39,8 +40,8 @@ public class WidgetDocumentationPathTests : IClassFixture<AdministrationFolderFi
         // Assert
         var pathsToNothing = DocumentationFolderFixture.FindSubjects(page)
             .OfType<RenderExpression>()
-            .Where(expression => resolver.ResolveScopedProperty(expression.Text, PathStyle.Canonical, page) is null)
-            .Select(expression => expression.Text);
+            .SelectMany(expression => MarkdownExpressions.Parse(expression.Text, out _)?.Paths ?? [])
+            .Where(path => resolver.ResolveScopedProperty(path, PathStyle.Canonical, page) is null);
 
         Assert.Empty(pathsToNothing);
     }
