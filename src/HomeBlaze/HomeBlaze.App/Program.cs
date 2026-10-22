@@ -13,6 +13,17 @@ internal static class Program
     private static WorkspaceLock? _workspaceLock;
 
     /// <summary>
+    /// Serializes everything that reads or replaces <see cref="_host"/> and <see cref="_workspaceLock"/>.
+    /// </summary>
+    /// <remarks>
+    /// A start suspends for seconds inside the host's own startup while the message loop keeps pumping, so a
+    /// second Open can arrive mid-flight. Without this gate it would dispose a controller whose host is not
+    /// published yet, which is a no-op, release the lock, and then start a second host on the same data
+    /// directory while the first keeps running unreachable and never stops.
+    /// </remarks>
+    private static readonly SemaphoreSlim ConnectionGate = new(1, 1);
+
+    /// <summary>
     /// Rolling log file for the embedded host. Deliberately under LocalApplicationData rather than beside
     /// the settings file: logs are machine-local and regenerable, and ApplicationData is the roaming profile
     /// on Windows, where rotating log files would bloat the profile and slow sign-in. This puts them next to
@@ -48,11 +59,7 @@ internal static class Program
             _window.SetIconFile(iconFile);
         }
 
-        if (settings.Window.Left is { } left && settings.Window.Top is { } top)
-        {
-            _window.MoveTo(left, top, allowOutsideWorkArea: false);
-        }
-        else
+        if (settings.Window.Left is null || settings.Window.Top is null)
         {
             _window.Center();
         }
@@ -77,12 +84,26 @@ internal static class Program
             ? null
             : settings.Connections.FirstOrDefault(connection => connection.Id == settings.LastConnectionId);
 
-        if (last is not null)
+        // Both of these need the native window to exist, so they run from the created handler rather than
+        // here. Registered once, because the handler is a single delegate property rather than an event.
+        var restoredLocation = settings.Window.Left is { } left && settings.Window.Top is { } top
+            ? new System.Drawing.Point(left, top)
+            : (System.Drawing.Point?)null;
+
+        _window.RegisterWindowCreatedHandler((_, _) =>
         {
-            // Started from the created handler rather than here: the window does not exist until the message
-            // loop runs, so navigating from this thread would race its creation.
-            _window.RegisterWindowCreatedHandler((_, _) => _ = OpenConnectionAsync(last));
-        }
+            if (restoredLocation is { } location)
+            {
+                // Not called before the window exists: on macOS 13 and earlier MoveTo reads MainMonitor,
+                // which throws until then, so a saved position would make every later start fail outright.
+                _window.MoveTo(location.X, location.Y, allowOutsideWorkArea: false);
+            }
+
+            if (last is not null)
+            {
+                _ = OpenConnectionAsync(last);
+            }
+        });
 
         _window
             .Load(new Uri(BootstrapScreen.Address))
@@ -105,7 +126,16 @@ internal static class Program
         {
             if (message == "shell:settings")
             {
-                await StopHostAsync();
+                await ConnectionGate.WaitAsync();
+                try
+                {
+                    await StopHostAsync();
+                }
+                finally
+                {
+                    ConnectionGate.Release();
+                }
+
                 _shell.Navigate(BootstrapScreen.Address);
                 return;
             }
@@ -125,6 +155,7 @@ internal static class Program
 
     private static async Task OpenConnectionAsync(ShellConnection connection)
     {
+        await ConnectionGate.WaitAsync();
         try
         {
             await StopHostAsync();
@@ -143,14 +174,28 @@ internal static class Program
                     ? _resolver.ResolveFullDataFolder(folderPath)
                     : _resolver.ResolveMarkdownFolder(folderPath);
 
-                if (!WorkspaceLock.TryAcquire(workspace.DataDirectory, out _workspaceLock))
+                // Held locally until the start succeeds. Assigning the field through the out parameter would
+                // publish a lock that a failure then leaves for someone else's StopHostAsync to release.
+                if (!WorkspaceLock.TryAcquire(workspace.DataDirectory, out var acquiredLock))
                 {
                     throw new InvalidOperationException(
                         $"'{folderPath}' is already open in another HomeBlaze window.");
                 }
 
-                _host = new EmbeddedHostController(DefaultLogFilePath);
-                address = await _host.StartAsync(workspace, CancellationToken.None);
+                var host = new EmbeddedHostController(DefaultLogFilePath);
+                try
+                {
+                    address = await host.StartAsync(workspace, CancellationToken.None);
+                }
+                catch
+                {
+                    await host.DisposeAsync();
+                    acquiredLock!.Dispose();
+                    throw;
+                }
+
+                _host = host;
+                _workspaceLock = acquiredLock;
             }
 
             var settings = _store.Load();
@@ -168,6 +213,10 @@ internal static class Program
             _bootstrap.SetError($"Could not open '{connection.Name}': {exception.Message}");
             _shell.Navigate(BootstrapScreen.Address);
         }
+        finally
+        {
+            ConnectionGate.Release();
+        }
     }
 
     private static async Task StopHostAsync()
@@ -184,12 +233,25 @@ internal static class Program
 
     private static bool OnWindowClosing(object sender, EventArgs e)
     {
-        var settings = _store.Load();
-        _store.Save(settings with { Window = _shell.GetWindowState() });
+        // A minimized window reports an off-screen position on Windows, around -32000, and MoveTo does not
+        // clamp negative coordinates. Persisting it would reopen the window where nobody can see it.
+        if (!_window.Minimized)
+        {
+            var settings = _store.Load();
+            _store.Save(settings with { Window = _shell.GetWindowState() });
+        }
 
         // Blocking here is acceptable only because the application is exiting: the host needs up to ten
         // seconds to stop the OPC UA server cleanly, and the process must not exit from under it.
-        StopHostAsync().GetAwaiter().GetResult();
+        ConnectionGate.Wait();
+        try
+        {
+            StopHostAsync().GetAwaiter().GetResult();
+        }
+        finally
+        {
+            ConnectionGate.Release();
+        }
 
         // False lets the window close; true would cancel it.
         return false;
