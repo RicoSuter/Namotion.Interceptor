@@ -11,7 +11,7 @@ namespace HomeBlaze.Storage.Pages;
 internal sealed record MarkdownStructureChange(MarkdownBlockWrite Write, MarkdownBlock? ChangedBlock, int ResultBlockIndex = -1);
 
 /// <summary>
-/// Removes, swaps and inserts whole blocks in the text of a page. Every change is checked with
+/// Removes, moves and inserts whole blocks in the text of a page. Every change is checked with
 /// <see cref="MarkdownBlockAlignment"/>, so that it does nothing to the blocks and the text it did not mean to change.
 /// </summary>
 internal static class MarkdownPageOperations
@@ -40,16 +40,23 @@ internal static class MarkdownPageOperations
     }
 
     /// <summary>
-    /// Swaps the block with the block next to it in <paramref name="direction"/> (-1 for up, 1 for down). The text
-    /// between the two stays where it is.
+    /// Moves the block one place in <paramref name="direction"/> (-1 for up, 1 for down): it is cut out and inserted before the
+    /// item before it, or after the item after it. An item is a widget block or a text block of the content of the block, or
+    /// for a slot block a block of the same slot. A block for which <paramref name="isSkipped"/> is true is passed over. The
+    /// text around the block stays where it is.
     /// </summary>
-    /// <returns>Null with a refusal when there is no such block or the change would change other blocks of the page.</returns>
+    /// <returns>Null with a refusal when there is no item in that direction or the change would change other blocks of the page.</returns>
     public static MarkdownStructureChange? TryMove(
-        MarkdownPage page, IReadOnlyDictionary<int, IInterceptorSubject> blockSubjects, MarkdownBlock block, int direction, out string? refusal)
+        MarkdownPage page,
+        IReadOnlyDictionary<int, IInterceptorSubject> blockSubjects,
+        MarkdownBlock block,
+        int direction,
+        Func<MarkdownBlock, bool> isSkipped,
+        out string? refusal)
     {
-        if (FindMoveTarget(page, block, direction) is not { } neighbor)
+        if (FindMoveLine(page, block, direction, isSkipped) is not { } targetLine)
         {
-            refusal = $"The block at line {block.Line} has no block of the same slot {(direction < 0 ? "before" : "after")} it.";
+            refusal = $"The block at line {block.Line} has nothing {(direction < 0 ? "before" : "after")} it to move past.";
             return null;
         }
 
@@ -59,82 +66,111 @@ internal static class MarkdownPageOperations
         }
 
         FindSiblings(page, block, out var parent);
-        var (first, second) = direction < 0 ? (neighbor, block) : (block, neighbor);
         var source = page.Source;
-        var lineEnding = MarkdownBlockWriter.GetLineEnding(source, first.HeadSpan.End);
-        var start = MarkdownBlockWriter.GetLineStart(source, first.Line);
-        var firstEnd = MarkdownBlockWriter.GetLineStart(source, first.EndLine + 1);
-        var secondStart = MarkdownBlockWriter.GetLineStart(source, second.Line);
-        var end = MarkdownBlockWriter.GetLineStart(source, second.EndLine + 1);
+        var lineEnding = MarkdownBlockWriter.GetLineEnding(source, block.HeadSpan.End);
+        var blockText = MarkdownBlockWriter.GetLines(source, block.Line, block.EndLine);
+        var standsApart = MarkdownBlockWriter.HasEmptyLineAround(source, block.Line, block.EndLine);
 
-        var firstText = source[start..firstEnd];
-        var middle = source[firstEnd..secondStart];
-        var secondText = source[secondStart..end];
+        // Each step is aligned on its own, so that together they change nothing outside the cut and the inserted lines.
+        var cutSource = MarkdownBlockWriter.CutLines(source, block.Line, block.EndLine, out var cut);
+        var cutPage = MarkdownPageParser.Parse(cutSource);
+        var cutMap = MarkdownBlockAlignment.TryAlign(page, cutPage, cut, expectedInsertedBlockCount: 0, owner: null);
 
-        // The second block can end the text without a line ending. It moves in front, so it gets one, and the first
-        // block that ends the text now gives up its own.
-        if (!secondText.EndsWith('\n'))
-        {
-            secondText += lineEnding;
-            firstText = firstText.TrimEnd('\n').TrimEnd('\r');
-        }
-
-        var newSource = string.Concat(source[..start], secondText, middle, firstText, source[end..]);
-        var lineCount = second.EndLine - first.Line + 1;
-        var edit = new MarkdownLineEdit(first.Line, lineCount, lineCount);
+        var line = targetLine >= cut.RemovedEnd ? targetLine - cut.RemovedLineCount + cut.InsertedLineCount : targetLine;
+        var newSource = MarkdownBlockWriter.InsertMovedLines(cutSource, line, blockText, lineEnding, standsApart, out var insert);
         var after = MarkdownPageParser.Parse(newSource);
-        var map = MarkdownBlockAlignment.TryAlign(
-            page, after, edit, CountBlocks(first) + CountBlocks(second), parent, block.Kind);
-
-        // The alignment skips the swapped lines, so a block without a closing line could have taken the text between.
-        var secondLineCountAfter = second.EndLine - second.Line + 1;
-        var middleLineCountAfter = second.Line - first.EndLine - 1;
-        var movedSecondLine = first.Line + secondLineCountAfter + middleLineCountAfter;
-        if (map is null ||
-            !EndsAt(after, first.Line, first.Line + secondLineCountAfter - 1) ||
-            !EndsAt(after, movedSecondLine, movedSecondLine + (first.EndLine - first.Line)))
+        var cutParent = parent is null ? null : FindBlockAt(cutPage, parent.Line);
+        var insertMap = cutMap is null
+            ? null
+            : MarkdownBlockAlignment.TryAlign(cutPage, after, insert, CountBlocks(block), cutParent, block.Kind);
+        if (cutMap is null || insertMap is null || FindFirstBlockFrom(after, insert) is not { } moved)
         {
             refusal = $"Moving the block at line {block.Line} would change other blocks of the page.";
             return null;
         }
 
-        // The swapped blocks are new to the alignment. Their text is the same, so their blocks are in the same order.
-        var subjects = MapSubjects(blockSubjects, map);
-        var secondLineCount = second.EndLine - second.Line + 1;
-        var middleLineCount = second.Line - first.EndLine - 1;
-        var secondAfter = FindBlockAt(after, first.Line);
-        var firstAfter = FindBlockAt(after, first.Line + secondLineCount + middleLineCount);
-        CarrySubjects(blockSubjects, second, secondAfter, subjects);
-        CarrySubjects(blockSubjects, first, firstAfter, subjects);
+        var subjects = new Dictionary<int, IInterceptorSubject>(blockSubjects.Count);
+        foreach (var (index, subject) in blockSubjects)
+        {
+            var cutIndex = cutMap[index];
+            if (cutIndex >= 0 && insertMap[cutIndex] >= 0)
+            {
+                subjects[insertMap[cutIndex]] = subject;
+            }
+        }
 
-        var moved = ReferenceEquals(block, second) ? secondAfter : firstAfter;
-        return new MarkdownStructureChange(new MarkdownBlockWrite(after, subjects, [], HasInsertedOrRemovedBlocks: true), parent, moved.Index);
+        // The moved blocks are new to the alignment. Their text is the same, so their blocks are in the same order.
+        CarrySubjects(blockSubjects, block, moved, subjects);
+        return new MarkdownStructureChange(
+            new MarkdownBlockWrite(after, subjects, [], HasInsertedOrRemovedBlocks: true), parent, moved.Index);
     }
 
     /// <summary>
-    /// Gets the block that <see cref="TryMove"/> swaps the block with: the block right next to it among the blocks of
-    /// the same parent, when it is of the same kind and, for a slot block, of the same slot. Otherwise null.
+    /// Gets the line of the page before the move before which <see cref="TryMove"/> inserts the block: the first line of the
+    /// item before it, or the line after the item after it. Null when the block has no such item.
     /// </summary>
-    public static MarkdownBlock? FindMoveTarget(MarkdownPage page, MarkdownBlock block, int direction)
+    public static int? FindMoveLine(MarkdownPage page, MarkdownBlock block, int direction, Func<MarkdownBlock, bool> isSkipped)
     {
         if (direction is not (-1 or 1) ||
             block.Kind is not (MarkdownBlockKind.Widget or MarkdownBlockKind.Slot) ||
-            FindSiblings(page, block, out _) is not { } siblings)
+            FindSiblings(page, block, out var parent) is not { } siblings)
         {
             return null;
         }
 
-        var position = IndexOf(siblings, block) + direction;
-        if (position < 0 || position >= siblings.Count)
+        var items = block.Kind == MarkdownBlockKind.Slot ? GetSlotItems(siblings, block.Head!.Name) : GetContentItems(page, siblings, parent);
+        var position = items.FindIndex(item => ReferenceEquals(item.Block, block));
+        for (var index = position + direction; index >= 0 && index < items.Count; index += direction)
         {
-            return null;
+            var item = items[index];
+            if (item.Block is not { } neighbor || !isSkipped(neighbor))
+            {
+                return direction < 0 ? item.Line : item.EndLine + 1;
+            }
         }
 
-        var neighbor = siblings[position];
-        return neighbor.Kind == block.Kind &&
-               (block.Kind == MarkdownBlockKind.Widget || neighbor.Head!.Name == block.Head!.Name)
-            ? neighbor
-            : null;
+        return null;
+    }
+
+    // A place that a moved block passes: a block, or text without a block, with its lines.
+    private readonly record struct MoveItem(int Line, int EndLine, MarkdownBlock? Block);
+
+    private static List<MoveItem> GetSlotItems(IReadOnlyList<MarkdownBlock> siblings, string slotName)
+    {
+        var items = new List<MoveItem>();
+        foreach (var sibling in siblings)
+        {
+            if (sibling.Kind == MarkdownBlockKind.Slot && sibling.Head!.Name == slotName)
+            {
+                items.Add(new MoveItem(sibling.Line, sibling.EndLine, sibling));
+            }
+        }
+
+        return items;
+    }
+
+    // The widget blocks of the content and its text blocks, which also stand for its style and error blocks.
+    private static List<MoveItem> GetContentItems(MarkdownPage page, IReadOnlyList<MarkdownBlock> siblings, MarkdownBlock? owner)
+    {
+        var items = new List<MoveItem>();
+        foreach (var sibling in siblings)
+        {
+            if (sibling.Kind == MarkdownBlockKind.Widget)
+            {
+                items.Add(new MoveItem(sibling.Line, sibling.EndLine, sibling));
+            }
+        }
+
+        foreach (var textBlock in MarkdownTextBlocks.Find(page))
+        {
+            if (ReferenceEquals(textBlock.Owner, owner))
+            {
+                items.Add(new MoveItem(textBlock.Line, textBlock.EndLine, null));
+            }
+        }
+
+        items.Sort(static (first, second) => first.Line.CompareTo(second.Line));
+        return items;
     }
 
     /// <summary>Counts the block and every block inside it, of every kind.</summary>
@@ -234,8 +270,6 @@ internal static class MarkdownPageOperations
         }
     }
 
-    private static bool EndsAt(MarkdownPage page, int line, int endLine) => FindBlockAt(page, line).EndLine == endLine;
-
     // The first block on the inserted lines, which is the new block: blocks are listed in the order of their head lines.
     private static MarkdownBlock? FindFirstBlockFrom(MarkdownPage page, MarkdownLineEdit edit)
     {
@@ -261,19 +295,6 @@ internal static class MarkdownPageOperations
         }
 
         throw new InvalidOperationException($"The page has no block at line {line}.");
-    }
-
-    private static int IndexOf(IReadOnlyList<MarkdownBlock> blocks, MarkdownBlock block)
-    {
-        for (var index = 0; index < blocks.Count; index++)
-        {
-            if (ReferenceEquals(blocks[index], block))
-            {
-                return index;
-            }
-        }
-
-        return -1;
     }
 
     /// <summary>

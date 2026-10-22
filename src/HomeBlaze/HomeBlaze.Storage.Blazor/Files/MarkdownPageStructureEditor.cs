@@ -1,6 +1,8 @@
 using HomeBlaze.Components;
+using HomeBlaze.Components.Abstractions.Attributes;
 using HomeBlaze.Components.Dialogs;
 using HomeBlaze.Services;
+using HomeBlaze.Services.Components;
 using HomeBlaze.Storage.Blazor.Models;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Pages;
@@ -21,7 +23,12 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
     private readonly IDialogService _dialogService;
     private readonly ISnackbar _snackbar;
     private readonly SubjectFactory _subjectFactory;
+    private readonly SubjectComponentRegistry _componentRegistry;
     private readonly ILogger _logger;
+
+    // The widgets that render nothing on a viewed page, which a move passes over. Created once, as a method group would
+    // allocate a delegate on every call.
+    private readonly Func<IInterceptorSubject, bool> _isInvisible;
 
     public MarkdownPageStructureEditor(
         MarkdownFile file,
@@ -30,6 +37,7 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
         IDialogService dialogService,
         ISnackbar snackbar,
         SubjectFactory subjectFactory,
+        SubjectComponentRegistry componentRegistry,
         ILogger logger)
     {
         _file = file;
@@ -38,7 +46,9 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
         _dialogService = dialogService;
         _snackbar = snackbar;
         _subjectFactory = subjectFactory;
+        _componentRegistry = componentRegistry;
         _logger = logger;
+        _isInvisible = IsInvisible;
     }
 
     /// <summary>Gets the page whose blocks this editor changes.</summary>
@@ -52,7 +62,7 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
 
     public override PageBlockActions GetActions(IInterceptorSubject subject)
     {
-        var actions = _file.GetBlockActions(subject);
+        var actions = _file.GetBlockActions(subject, _isInvisible);
         return new PageBlockActions(actions.CanDelete, actions.CanMoveUp, actions.CanMoveDown);
     }
 
@@ -97,7 +107,7 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
     }
 
     public override async Task MoveAsync(IInterceptorSubject subject, int direction) =>
-        await RunAsync(() => _file.MoveBlockAsync(subject, direction, CancellationToken.None));
+        await RunAsync(() => _file.MoveBlockAsync(subject, direction, _isInvisible, CancellationToken.None));
 
     public override async Task InsertWidgetAsync(IInterceptorSubject content, IInterceptorSubject? before)
     {
@@ -156,6 +166,10 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
             }
         }
     }
+
+    private bool IsInvisible(IInterceptorSubject subject) =>
+        _componentRegistry.GetComponent(subject.GetType(), SubjectComponentType.Widget)?.ComponentType is { } componentType &&
+        typeof(IInvisibleWidget).IsAssignableFrom(componentType);
 
     // A dialog asked about the blocks as they were. A reload while it was open can have given an unnamed subject another
     // block, so the edit would hit a block the user did not choose. The same text means the same blocks.

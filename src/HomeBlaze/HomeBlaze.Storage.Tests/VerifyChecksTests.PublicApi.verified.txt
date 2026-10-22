@@ -90,7 +90,7 @@ namespace HomeBlaze.Storage.Files
         public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
         public System.Threading.Tasks.Task<HomeBlaze.Storage.Pages.MarkdownEditResult> AddSlotItemAsync(Namotion.Interceptor.IInterceptorSubject owner, string slotName, Namotion.Interceptor.IInterceptorSubject? item, System.Threading.CancellationToken cancellationToken) { }
         public System.Threading.Tasks.Task<HomeBlaze.Storage.Pages.MarkdownEditResult> DeleteBlockAsync(Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken) { }
-        public HomeBlaze.Storage.Pages.MarkdownBlockActions GetBlockActions(Namotion.Interceptor.IInterceptorSubject subject) { }
+        public HomeBlaze.Storage.Pages.MarkdownBlockActions GetBlockActions(Namotion.Interceptor.IInterceptorSubject subject, System.Func<Namotion.Interceptor.IInterceptorSubject, bool>? isSkipped = null) { }
         public string? GetBlockName(Namotion.Interceptor.IInterceptorSubject subject) { }
         public Namotion.Interceptor.IInterceptorSubject? GetBlockSubject(int blockIndex) { }
         protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
@@ -99,7 +99,7 @@ namespace HomeBlaze.Storage.Files
         public System.Threading.Tasks.Task<HomeBlaze.Storage.Pages.MarkdownEditResult> InsertWidgetAsync(Namotion.Interceptor.IInterceptorSubject content, Namotion.Interceptor.IInterceptorSubject? before, Namotion.Interceptor.IInterceptorSubject widget, string? name, System.Threading.CancellationToken cancellationToken) { }
         protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
         public bool IsContentOfPage(Namotion.Interceptor.IInterceptorSubject content) { }
-        public System.Threading.Tasks.Task<HomeBlaze.Storage.Pages.MarkdownEditResult> MoveBlockAsync(Namotion.Interceptor.IInterceptorSubject subject, int direction, System.Threading.CancellationToken cancellationToken) { }
+        public System.Threading.Tasks.Task<HomeBlaze.Storage.Pages.MarkdownEditResult> MoveBlockAsync(Namotion.Interceptor.IInterceptorSubject subject, int direction, System.Func<Namotion.Interceptor.IInterceptorSubject, bool>? isSkipped, System.Threading.CancellationToken cancellationToken) { }
         public System.Threading.Tasks.Task OnFileChangedAsync(System.Threading.CancellationToken cancellationToken) { }
         protected void RaisePropertyChanged(string propertyName) { }
         public System.Threading.Tasks.Task<System.IO.Stream> ReadAsync(System.Threading.CancellationToken cancellationToken) { }

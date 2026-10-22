@@ -742,16 +742,30 @@ public class MarkdownBlockWriterTests
     }
 
     [Fact]
-    public void WhenTheTextOfABlockIsAskedFor_ThenItHasItsLinesWithoutTheLastLineEnding()
+    public void WhenLinesAreAskedFor_ThenTheyComeWithoutTheLastLineEnding()
     {
         // Arrange
-        const string source = "intro\n\n:: Demo.Card\n::: Row Label=A\n:::\n::\n\noutro\n";
-        var card = MarkdownPageParser.Parse(source).Blocks[0];
+        const string source = "intro\r\n\r\n:: Demo.Card\r\n::: Row Label=A\r\n:::\r\n::\r\n\r\noutro\r\n";
 
         // Act
-        var text = MarkdownBlockWriter.GetBlockText(source, card);
+        var text = MarkdownBlockWriter.GetLines(source, 3, 6);
 
         // Assert
-        Assert.Equal(":: Demo.Card\n::: Row Label=A\n:::\n::", text);
+        Assert.Equal(":: Demo.Card\r\n::: Row Label=A\r\n:::\r\n::", text);
+    }
+
+    [Theory]
+    [InlineData("a\n\nB\n\nc\n", 3, 3, "a\n\nc\n")]
+    [InlineData("a\n\nB\n", 3, 3, "a\n")]
+    [InlineData("B\n\nc\n", 1, 1, "c\n")]
+    [InlineData("a\nB\nc\n", 2, 2, "a\n\nc\n")]
+    [InlineData(":: X\nB\n::\n", 2, 2, ":: X\n::\n")]
+    public void WhenLinesAreCut_ThenTheTextAroundThemStaysApartAsBefore(string source, int line, int endLine, string expected)
+    {
+        // Act
+        var result = MarkdownBlockWriter.CutLines(source, line, endLine, out _);
+
+        // Assert
+        Assert.Equal(expected, result);
     }
 }

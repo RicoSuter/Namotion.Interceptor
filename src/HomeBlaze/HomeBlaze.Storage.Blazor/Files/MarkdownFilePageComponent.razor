@@ -5,6 +5,7 @@
 @using MudBlazor
 @using Namotion.Interceptor
 @using HomeBlaze.Services
+@using HomeBlaze.Services.Components
 @using Microsoft.Extensions.Logging
 @using Microsoft.JSInterop
 
@@ -15,6 +16,7 @@
 @inject IDialogService DialogService
 @inject ISnackbar Snackbar
 @inject SubjectFactory SubjectFactory
+@inject SubjectComponentRegistry ComponentRegistry
 @inject ILogger<MarkdownPageStructureEditor> StructureEditorLogger
 
 <CascadingValue Value="@IsEditing" Name="IsEditing">
@@ -93,7 +95,7 @@
                 _structureEditor.PageComponent != pageComponent)
             {
                 _structureEditor = new MarkdownPageStructureEditor(
-                    file, selection, pageComponent, DialogService, Snackbar, SubjectFactory, StructureEditorLogger);
+                    file, selection, pageComponent, DialogService, Snackbar, SubjectFactory, ComponentRegistry, StructureEditorLogger);
             }
 
             return _structureEditor;

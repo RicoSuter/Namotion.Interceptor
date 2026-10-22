@@ -99,7 +99,7 @@ public class InlineStructureEditingTests
     }
 
     [Fact]
-    public async Task WhenABlockIsMovedDown_ThenItSwapsWithTheNextBlockInTheFile()
+    public async Task WhenABlockIsMovedDown_ThenItGoesAfterTheNextBlockInTheFile()
     {
         // Arrange
         var page = await OpenPageInInlineModeAsync();
@@ -114,6 +114,44 @@ public class InlineStructureEditingTests
             text => text.IndexOf("HomeBlaze.Components.ValueList", StringComparison.Ordinal) <
                     text.IndexOf("HomeBlaze.Components.Switch", StringComparison.Ordinal),
             "The switch was not moved below the value list.");
+    }
+
+    [Fact]
+    public async Task WhenAWidgetIsMovedDownTwice_ThenItPassesTwoItemsAndStaysSelected()
+    {
+        // Arrange
+        var page = await OpenPageInInlineModeAsync();
+        var actionBar = await GetWrapperOf(page, "switch").SelectWidgetAsync();
+
+        // Act: the second move passes the map, which shows nothing on the viewed page, together with the Responsive block.
+        await actionBar.GetByTestId("move-down-button").ClickAsync();
+        await _fixture.WaitForDemoPageTextAsync(
+            PageName, text => IndexOf(text, "ValueList") < IndexOf(text, "Switch"), "The switch was not moved below the list.");
+        await page.GetWidgetActionBar().GetByTestId("move-down-button").ClickAsync();
+
+        // Assert
+        await _fixture.WaitForDemoPageTextAsync(
+            PageName,
+            text => IndexOf(text, "ValueMap#structuremap") < IndexOf(text, "Responsive") && IndexOf(text, "Responsive") < IndexOf(text, "Switch"),
+            "The switch was not moved below the Responsive block.");
+        await Assertions.Expect(GetWrapperOf(page, "switch")).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
+    }
+
+    [Fact]
+    public async Task WhenAListIsMovedDownBeforeAValueMap_ThenItPassesTheMapAndTheNextBlock()
+    {
+        // Arrange
+        var page = await OpenPageInInlineModeAsync();
+        var actionBar = await GetValueListWrapper(page).SelectWidgetAsync();
+
+        // Act
+        await actionBar.GetByTestId("move-down-button").ClickAsync();
+
+        // Assert
+        await _fixture.WaitForDemoPageTextAsync(
+            PageName,
+            text => IndexOf(text, "ValueMap#structuremap") < IndexOf(text, "Responsive") && IndexOf(text, "Responsive") < IndexOf(text, "ValueList"),
+            "The list did not pass the map and the Responsive block.");
     }
 
     [Fact]
@@ -162,15 +200,21 @@ public class InlineStructureEditingTests
         var actionBar = await GetWrapperOf(page, "switch").SelectWidgetAsync();
         await Assertions.Expect(actionBar.GetByTestId("move-up-button")).ToBeVisibleAsync(new() { Timeout = Timeout });
 
-        // Act
+        // Act: the second move passes the heading, which is the first item of the page.
         await actionBar.GetByTestId("move-up-button").ClickAsync();
-
-        // Assert
         await _fixture.WaitForDemoPageTextAsync(
             PageName,
             text => text.IndexOf("HomeBlaze.Components.Switch", StringComparison.Ordinal) <
                     text.IndexOf("HomeBlaze.Samples.Motor", StringComparison.Ordinal),
             "The switch was not moved above the motor.");
+        await page.GetWidgetActionBar().GetByTestId("move-up-button").ClickAsync();
+
+        // Assert
+        await _fixture.WaitForDemoPageTextAsync(
+            PageName,
+            text => text.IndexOf("HomeBlaze.Components.Switch", StringComparison.Ordinal) <
+                    text.IndexOf("# Structure Demo", StringComparison.Ordinal),
+            "The switch was not moved above the heading.");
         await Assertions.Expect(GetWrapperOf(page, "switch")).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
         await Assertions.Expect(page.GetWidgetActionBar().GetByTestId("move-up-button")).ToHaveCountAsync(0, new() { Timeout = Timeout });
         await Assertions.Expect(page.GetWidgetActionBar().GetByTestId("move-down-button")).ToBeVisibleAsync(new() { Timeout = Timeout });
@@ -653,6 +697,9 @@ public class InlineStructureEditingTests
         await Assertions.Expect(row).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
         return actionBar;
     }
+
+    private static int IndexOf(string text, string typeName) =>
+        text.IndexOf("HomeBlaze.Components." + typeName, StringComparison.Ordinal);
 
     private static ILocator GetValueListWrapper(IPage page) =>
         page.Locator(".subject-component-wrapper.selectable:has(> [data-testid='value-list'])");

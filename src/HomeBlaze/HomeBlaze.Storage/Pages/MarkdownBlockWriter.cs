@@ -232,12 +232,86 @@ public static class MarkdownBlockWriter
         return source.Length == 0 || source[^1] == '\n' ? lineFeedCount + 1 : lineFeedCount + 2;
     }
 
-    /// <summary>Gets the lines of the block from its head line to its last line, without the line ending of the last line.</summary>
-    internal static string GetBlockText(string source, MarkdownBlock block)
+    /// <summary>Gets the lines from <paramref name="line"/> to <paramref name="endLine"/>, without the line ending of the last one.</summary>
+    internal static string GetLines(string source, int line, int endLine)
     {
-        var start = GetLineStart(source, block.Line);
-        var end = GetLineStart(source, block.EndLine + 1);
+        var start = GetLineStart(source, line);
+        var end = GetLineStart(source, endLine + 1);
         return source[start..end].TrimEnd('\n').TrimEnd('\r');
+    }
+
+    /// <summary>Gets whether an empty line stands right before or right after the lines, as between blocks that stand apart.</summary>
+    internal static bool HasEmptyLineAround(string source, int line, int endLine)
+    {
+        var start = GetLineStart(source, line);
+        var end = GetLineStart(source, endLine + 1);
+        return (line > 1 && IsEmptyLine(source, GetLineStart(source, line - 1), start)) ||
+               (end < source.Length && IsEmptyLine(source, end, GetLineStart(source, endLine + 2)));
+    }
+
+    /// <summary>
+    /// Removes the lines from <paramref name="line"/> to <paramref name="endLine"/> so that the text around them stays apart
+    /// as before. Between two lines of text one empty line stays (see <see cref="RemoveBlock"/>). Of the empty lines around
+    /// them, the one after goes with them when the one before is empty too or they start the text, and the one before when
+    /// they end the text.
+    /// </summary>
+    /// <remarks><paramref name="source"/> must have no lone carriage return, see <see cref="HasLoneCarriageReturn"/>.</remarks>
+    internal static string CutLines(string source, int line, int endLine, out MarkdownLineEdit edit)
+    {
+        var start = GetLineStart(source, line);
+        var end = GetLineStart(source, endLine + 1);
+        var previousStart = GetLineStart(source, line - 1);
+        var nextEnd = GetLineStart(source, endLine + 2);
+
+        if (line > 1 && IsTextLine(source, previousStart, start) && IsTextLine(source, end, nextEnd))
+        {
+            edit = new MarkdownLineEdit(line, endLine - line + 1, 1);
+            return source.Remove(start, end - start).Insert(start, GetLineEnding(source, start));
+        }
+
+        var isEmptyBefore = line > 1 && IsEmptyLine(source, previousStart, start);
+        var isEmptyAfter = end < source.Length && IsEmptyLine(source, end, nextEnd);
+        if (isEmptyAfter && (isEmptyBefore || line == 1))
+        {
+            end = nextEnd;
+            endLine++;
+        }
+        else if (isEmptyBefore && end == source.Length)
+        {
+            start = previousStart;
+            line--;
+        }
+
+        edit = new MarkdownLineEdit(line, endLine - line + 1, 0);
+        return source.Remove(start, end - start);
+    }
+
+    /// <summary>
+    /// Inserts <paramref name="text"/>, lines that <see cref="CutLines"/> cut, before the 1-based <paramref name="line"/>. An
+    /// empty line separates them from a line before or after them that is not empty when they stood apart before
+    /// (<paramref name="standsApart"/>) or that line is text, which they would join otherwise.
+    /// </summary>
+    /// <remarks><paramref name="source"/> must have no lone carriage return, see <see cref="HasLoneCarriageReturn"/>.</remarks>
+    internal static string InsertMovedLines(
+        string source, int line, string text, string lineEnding, bool standsApart, out MarkdownLineEdit edit)
+    {
+        var lineStart = GetLineStart(source, line);
+        var nextLineStart = GetLineStart(source, line + 1);
+        if (line > 1)
+        {
+            var previousLineStart = GetLineStart(source, line - 1);
+            if (!IsEmptyLine(source, previousLineStart, lineStart) && (standsApart || IsTextLine(source, previousLineStart, lineStart)))
+            {
+                text = lineEnding + text;
+            }
+        }
+
+        if (!IsEmptyLine(source, lineStart, nextLineStart) && (standsApart || IsTextLine(source, lineStart, nextLineStart)))
+        {
+            text += lineEnding;
+        }
+
+        return InsertLines(source, line, text, lineEnding, out edit);
     }
 
     // Whether the line between the two offsets has nothing but white space. The text after the last line ending is a

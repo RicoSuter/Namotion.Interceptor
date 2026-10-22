@@ -7,6 +7,8 @@ public class MarkdownPageOperationsTests
 {
     private static readonly IReadOnlyDictionary<int, IInterceptorSubject> NoSubjects = new Dictionary<int, IInterceptorSubject>();
 
+    private static readonly Func<MarkdownBlock, bool> NoSkip = static _ => false;
+
     private const string Card = "intro\n\n:: Demo.Card\n::: Row Label=A\n:::\n::: Row Label=B\n:::\n::\n\noutro\n";
 
     [Fact]
@@ -33,7 +35,7 @@ public class MarkdownPageOperationsTests
     }
 
     [Fact]
-    public void WhenARowIsMovedDown_ThenItSwapsWithTheNextRowAndKeepsItsSubject()
+    public void WhenARowIsMovedDown_ThenItGoesAfterTheNextRowAndKeepsItsSubject()
     {
         // Arrange
         var page = MarkdownPageParser.Parse(Card);
@@ -42,7 +44,7 @@ public class MarkdownPageOperationsTests
         var subjects = new Dictionary<int, IInterceptorSubject> { [rowA.Index] = subjectA };
 
         // Act
-        var change = MarkdownPageOperations.TryMove(page, subjects, rowA, 1, out var refusal);
+        var change = MarkdownPageOperations.TryMove(page, subjects, rowA, 1, NoSkip, out var refusal);
 
         // Assert
         Assert.Null(refusal);
@@ -53,19 +55,161 @@ public class MarkdownPageOperationsTests
     }
 
     [Fact]
-    public void WhenAWidgetIsMovedUpPastText_ThenTheTextStaysBetweenThem()
+    public void WhenAWidgetIsMovedUpPastText_ThenItGoesBeforeTheTextAndTheTextStays()
     {
         // Arrange
         const string source = "a\n\n:: Demo.One\n::\n\ntext\n\n:: Demo.Two\n::\n";
         var page = MarkdownPageParser.Parse(source);
 
         // Act
-        var change = MarkdownPageOperations.TryMove(page, NoSubjects, page.Blocks[1], -1, out var refusal);
+        var change = MarkdownPageOperations.TryMove(page, NoSubjects, page.Blocks[1], -1, NoSkip, out var refusal);
 
         // Assert
         Assert.Null(refusal);
-        Assert.Equal("a\n\n:: Demo.Two\n::\n\ntext\n\n:: Demo.One\n::\n", change!.Write.Page.Source);
+        Assert.Equal("a\n\n:: Demo.One\n::\n\n:: Demo.Two\n::\n\ntext\n", change!.Write.Page.Source);
         Assert.Null(change.ChangedBlock);
+    }
+
+    [Theory]
+    [InlineData(0, -1)]
+    [InlineData(1, 1)]
+    public void WhenThereIsNoRowInTheDirection_ThenTheMoveIsRefused(int rowPosition, int direction)
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse(Card);
+
+        // Act
+        var change = MarkdownPageOperations.TryMove(page, NoSubjects, page.Blocks[0].Children[rowPosition], direction, NoSkip, out var refusal);
+
+        // Assert
+        Assert.Null(change);
+        Assert.Contains("has nothing", refusal);
+    }
+
+    [Fact]
+    public void WhenTheOnlyOtherSlotBlockIsOfAnotherSlot_ThenTheMoveIsRefused()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse(":: Demo.Card\n::: Row\n:::\n::: Item\n:::\n::\n");
+
+        // Act
+        var change = MarkdownPageOperations.TryMove(page, NoSubjects, page.Blocks[0].Children[0], 1, NoSkip, out _);
+
+        // Assert
+        Assert.Null(change);
+        Assert.Null(MarkdownPageOperations.FindMoveLine(page, page.Blocks[0].Children[0], 1, NoSkip));
+    }
+
+    [Fact]
+    public void WhenARowWithoutClosingLineIsMovedPastARow_ThenTheTextAfterTheOtherRowStaysThere()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse(":: Demo.Card\n::: Row Label=A\n:::\nbetween\n::: Row Label=B\nsecond\n::\n");
+
+        // Act
+        var change = MarkdownPageOperations.TryMove(page, NoSubjects, page.Blocks[0].Children[1], -1, NoSkip, out var refusal);
+
+        // Assert
+        Assert.Null(refusal);
+        Assert.Equal(":: Demo.Card\n::: Row Label=B\nsecond\n::: Row Label=A\n:::\nbetween\n::\n", change!.Write.Page.Source);
+    }
+
+    [Fact]
+    public void WhenAWidgetIsMovedDownPastASkippedWidget_ThenItPassesItAndTheNextWidget()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("intro\n\n:: Demo.One\n::\n\n:: Demo.Map\n::\n\n:: Demo.Two\n::\n");
+
+        // Act
+        var change = MarkdownPageOperations.TryMove(
+            page, NoSubjects, page.Blocks[0], 1, block => block.Head!.Name == "Demo.Map", out var refusal);
+
+        // Assert
+        Assert.Null(refusal);
+        Assert.Equal("intro\n\n:: Demo.Map\n::\n\n:: Demo.Two\n::\n\n:: Demo.One\n::\n", change!.Write.Page.Source);
+        Assert.Equal(change.Write.Page.Blocks[2].Index, change.ResultBlockIndex);
+    }
+
+    [Fact]
+    public void WhenAWidgetIsMovedUpPastAWidget_ThenItStandsBeforeItWithAnEmptyLineBetween()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("a\n\n:: Demo.One\n::\n\n:: Demo.Two\n::\n");
+
+        // Act
+        var change = MarkdownPageOperations.TryMove(page, NoSubjects, page.Blocks[1], -1, NoSkip, out var refusal);
+
+        // Assert
+        Assert.Null(refusal);
+        Assert.Equal("a\n\n:: Demo.Two\n::\n\n:: Demo.One\n::\n", change!.Write.Page.Source);
+    }
+
+    [Fact]
+    public void WhenAWidgetFollowsText_ThenItsMoveLineUpIsTheLineOfTheText()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("Text.\n\n:: Demo.One\n::\n");
+
+        // Act & Assert
+        Assert.Equal(1, MarkdownPageOperations.FindMoveLine(page, page.Blocks[0], -1, NoSkip));
+        Assert.Null(MarkdownPageOperations.FindMoveLine(page, page.Blocks[0], 1, NoSkip));
+    }
+
+    [Fact]
+    public void WhenThePageHasALoneCarriageReturn_ThenMovingIsRefused()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("a\r:: Demo.One\n::\n\n:: Demo.Two\n::\n");
+
+        // Act
+        var change = MarkdownPageOperations.TryMove(page, NoSubjects, page.Blocks[1], -1, NoSkip, out var refusal);
+
+        // Assert
+        Assert.Null(change);
+        Assert.Contains("carriage return", refusal);
+    }
+
+    [Theory]
+    [InlineData("- item\n\n  :: Demo.Inner\n  ::\n\n:: Demo.One\n::\n", ":: Demo.One\n::\n\n- item\n\n  :: Demo.Inner\n  ::\n")]
+    [InlineData("> quote\n> :: Demo.Inner\n> ::\n\n:: Demo.One\n::\n", ":: Demo.One\n::\n\n> quote\n> :: Demo.Inner\n> ::\n")]
+    [InlineData(":: {.ab}\n::: Demo.Inner\n:::\n::\n\n:: Demo.One\n::\n", ":: Demo.One\n::\n\n:: {.ab}\n::: Demo.Inner\n:::\n::\n")]
+    public void WhenAWidgetIsMovedPastAContainerThatHoldsABlock_ThenItPassesTheContainerAsOneItemAndTheBlockInsideStays(
+        string source, string expected)
+    {
+        // Arrange: a block inside a list item, a quote or a style block is an error block, which is no item of its own.
+        var page = MarkdownPageParser.Parse(source);
+        var inner = page.AllBlocks[0];
+
+        // Act
+        var change = MarkdownPageOperations.TryMove(page, NoSubjects, page.Blocks[^1], -1, NoSkip, out var refusal);
+        var moved = change!.Write.Page;
+        var back = MarkdownPageOperations.TryMove(moved, NoSubjects, moved.Blocks[0], 1, NoSkip, out _);
+
+        // Assert
+        Assert.Null(refusal);
+        Assert.Equal(expected, moved.Source);
+        Assert.Equal(source, back!.Write.Page.Source);
+        Assert.Equal(MarkdownBlockKind.Invalid, inner.Kind);
+        Assert.Null(MarkdownPageOperations.FindMoveLine(page, inner, -1, NoSkip));
+        Assert.Null(MarkdownPageOperations.FindMoveLine(page, inner, 1, NoSkip));
+    }
+
+    [Theory]
+    [InlineData(":: Demo.Card\n::: Row\n:::: Demo.One\n::::\n:::\n::: Row\n:::\n::\n")]
+    [InlineData(":: Demo.Card\n::: Demo.One\n:::\n::: Footer\n:::\n::\n")]
+    public void WhenAWidgetIsAloneInItsContent_ThenItCannotMoveIntoAnotherSlotBlockOrOutOfItsOwner(string source)
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse(source);
+        var widget = page.AllBlocks.Single(block => block.Head?.Name == "Demo.One");
+
+        // Act
+        var change = MarkdownPageOperations.TryMove(page, NoSubjects, widget, 1, NoSkip, out var refusal);
+
+        // Assert
+        Assert.Null(change);
+        Assert.Contains("has nothing", refusal);
+        Assert.Null(MarkdownPageOperations.FindMoveLine(page, widget, -1, NoSkip));
     }
 
     [Fact]
@@ -76,7 +220,7 @@ public class MarkdownPageOperationsTests
         var page = MarkdownPageParser.Parse(source);
 
         // Act
-        var change = MarkdownPageOperations.TryMove(page, NoSubjects, page.Blocks[0], 1, out _);
+        var change = MarkdownPageOperations.TryMove(page, NoSubjects, page.Blocks[0], 1, NoSkip, out _);
 
         // Assert
         Assert.Equal("x\n\n:: Demo.Two\n::\n\n:: Demo.One\n::", change!.Write.Page.Source);
@@ -90,7 +234,7 @@ public class MarkdownPageOperationsTests
         var page = MarkdownPageParser.Parse(source);
 
         // Act
-        var change = MarkdownPageOperations.TryMove(page, NoSubjects, page.Blocks[0].Children[1], -1, out var refusal);
+        var change = MarkdownPageOperations.TryMove(page, NoSubjects, page.Blocks[0].Children[1], -1, NoSkip, out var refusal);
 
         // Assert
         Assert.Null(refusal);
@@ -104,42 +248,12 @@ public class MarkdownPageOperationsTests
         var page = MarkdownPageParser.Parse(Card.Replace("\n", "\r\n"));
 
         // Act
-        var change = MarkdownPageOperations.TryMove(page, NoSubjects, page.Blocks[0].Children[0], 1, out _);
+        var change = MarkdownPageOperations.TryMove(page, NoSubjects, page.Blocks[0].Children[0], 1, NoSkip, out _);
 
         // Assert
         Assert.Equal(
             "intro\n\n:: Demo.Card\n::: Row Label=B\n:::\n::: Row Label=A\n:::\n::\n\noutro\n".Replace("\n", "\r\n"),
             change!.Write.Page.Source);
-    }
-
-    [Theory]
-    [InlineData(0, -1)]
-    [InlineData(1, 1)]
-    public void WhenThereIsNoSiblingInTheDirection_ThenTheMoveIsRefused(int rowPosition, int direction)
-    {
-        // Arrange
-        var page = MarkdownPageParser.Parse(Card);
-
-        // Act
-        var change = MarkdownPageOperations.TryMove(page, NoSubjects, page.Blocks[0].Children[rowPosition], direction, out var refusal);
-
-        // Assert
-        Assert.Null(change);
-        Assert.Contains("no block of the same slot", refusal);
-    }
-
-    [Fact]
-    public void WhenTheNeighborIsOfAnotherSlot_ThenTheMoveIsRefused()
-    {
-        // Arrange
-        var page = MarkdownPageParser.Parse(":: Demo.Card\n::: Row\n:::\n::: Item\n:::\n::\n");
-
-        // Act
-        var change = MarkdownPageOperations.TryMove(page, NoSubjects, page.Blocks[0].Children[0], 1, out _);
-
-        // Assert
-        Assert.Null(change);
-        Assert.Null(MarkdownPageOperations.FindMoveTarget(page, page.Blocks[0].Children[0], 1));
     }
 
     [Fact]
@@ -167,20 +281,6 @@ public class MarkdownPageOperationsTests
     }
 
     [Fact]
-    public void WhenTheTextBetweenTwoBlocksWouldGoToABlockWithoutClosingLine_ThenTheMoveIsRefused()
-    {
-        // Arrange
-        var page = MarkdownPageParser.Parse(":: Demo.Card\n::: Row Label=A\n:::\nbetween\n::: Row Label=B\nsecond\n::\n");
-
-        // Act
-        var change = MarkdownPageOperations.TryMove(page, NoSubjects, page.Blocks[0].Children[1], -1, out var refusal);
-
-        // Assert
-        Assert.Null(change);
-        Assert.Contains("would change other blocks", refusal);
-    }
-
-    [Fact]
     public void WhenAWidgetWithASlotChildIsMovedPastAnotherWidget_ThenEverySubjectFollowsItsBlock()
     {
         // Arrange
@@ -197,7 +297,7 @@ public class MarkdownPageOperationsTests
         };
 
         // Act
-        var change = MarkdownPageOperations.TryMove(page, subjects, widgetOne, 1, out var refusal);
+        var change = MarkdownPageOperations.TryMove(page, subjects, widgetOne, 1, NoSkip, out var refusal);
 
         // Assert
         Assert.Null(refusal);

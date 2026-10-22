@@ -516,15 +516,19 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             cancellationToken);
 
     /// <summary>
-    /// Swaps the block of <paramref name="subject"/> with the block of the same slot before it (<paramref name="direction"/>
-    /// -1) or after it (1) and saves the page. The text between the two blocks stays in place.
+    /// Moves the block of <paramref name="subject"/> one place up (-1) or down (1) among the content around it: before the
+    /// item before it, or after the item after it, where an item is a widget block or a top-level block of text of that
+    /// content, or for a slot block a block of the same slot. A block whose subject <paramref name="isSkipped"/> is true
+    /// for, such as a widget that renders nothing, is passed over. Saves the page.
     /// </summary>
     /// <remarks>Refused when the file differs from the text the page last read; the page then reads it.</remarks>
     /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage or from within a write of this page.</exception>
-    public Task<MarkdownEditResult> MoveBlockAsync(IInterceptorSubject subject, int direction, CancellationToken cancellationToken) =>
+    public Task<MarkdownEditResult> MoveBlockAsync(
+        IInterceptorSubject subject, int direction, Func<IInterceptorSubject, bool>? isSkipped, CancellationToken cancellationToken) =>
         EditStructureAsync(
             snapshot => FindOwnBlock(snapshot.Page!, snapshot.BlockSubjects, subject) is { } block
-                ? (MarkdownPageOperations.TryMove(snapshot.Page!, snapshot.BlockSubjects, block, direction, out var refusal), refusal)
+                ? (MarkdownPageOperations.TryMove(
+                    snapshot.Page!, snapshot.BlockSubjects, block, direction, ToBlockPredicate(snapshot.BlockSubjects, isSkipped), out var refusal), refusal)
                 : (null, NoBlockRefusal),
             cancellationToken);
 
@@ -595,10 +599,11 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     }
 
     /// <summary>
-    /// Gets what the block of <paramref name="subject"/> allows, all false when it has no block on this page. It reads the
-    /// children of the page, so a component that renders it renders again after every reload.
+    /// Gets what the block of <paramref name="subject"/> allows, all false when it has no block on this page. A block whose
+    /// subject <paramref name="isSkipped"/> is true for is passed over by a move, as in <see cref="MoveBlockAsync"/>. It reads
+    /// the children of the page, so a component that renders it renders again after every reload.
     /// </summary>
-    public MarkdownBlockActions GetBlockActions(IInterceptorSubject subject)
+    public MarkdownBlockActions GetBlockActions(IInterceptorSubject subject, Func<IInterceptorSubject, bool>? isSkipped = null)
     {
         // The snapshot is not tracked, and the bar of a selected widget that a move kept would show the buttons of its old
         // place. Do not remove it, although its result is not used.
@@ -610,12 +615,20 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             return default;
         }
 
+        var isBlockSkipped = ToBlockPredicate(snapshot.BlockSubjects, isSkipped);
         return new MarkdownBlockActions(
             CanDelete: true,
-            CanMoveUp: MarkdownPageOperations.FindMoveTarget(page, block, -1) is not null,
-            CanMoveDown: MarkdownPageOperations.FindMoveTarget(page, block, 1) is not null,
+            CanMoveUp: MarkdownPageOperations.FindMoveLine(page, block, -1, isBlockSkipped) is not null,
+            CanMoveDown: MarkdownPageOperations.FindMoveLine(page, block, 1, isBlockSkipped) is not null,
             ContainedBlockCount: MarkdownPageOperations.CountBlocks(block) - 1);
     }
+
+    // A block is skipped when it has a subject that the predicate skips.
+    private static Func<MarkdownBlock, bool> ToBlockPredicate(
+        IReadOnlyDictionary<int, IInterceptorSubject> blockSubjects, Func<IInterceptorSubject, bool>? isSkipped) =>
+        isSkipped is null
+            ? static _ => false
+            : block => blockSubjects.TryGetValue(block.Index, out var subject) && isSkipped(subject);
 
     /// <summary>Gets the list slots of the block of <paramref name="owner"/>, none when it has no block on this page.</summary>
     public IReadOnlyList<MarkdownListSlot> GetListSlots(IInterceptorSubject owner)
