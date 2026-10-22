@@ -1,35 +1,41 @@
 @using BlazorMonaco
 @using BlazorMonaco.Editor
 @using HomeBlaze.Storage.Blazor.Models
+@using Microsoft.AspNetCore.Components.Web
 @using Microsoft.JSInterop
 @using MudBlazor
 
 @inject IJSRuntime JsRuntime
+@inject IDialogService DialogService
 
 @implements IAsyncDisposable
 
 @* The Markdown of a block of text in an editor that fills the dialog. A refusal, such as text that changed meanwhile, shows
-   above it and keeps what was typed. *@
+   above it and keeps what was typed, and so does a close: Escape and Cancel ask before they discard a change. *@
 <MudDialog Class="markdown-text-dialog" ContentClass="markdown-text-dialog-content" DefaultFocus="DefaultFocus.None">
     <DialogContent>
-        @if (_refusal is not null)
-        {
-            <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-2" data-testid="markdown-text-refusal">@_refusal</MudAlert>
-        }
+        @* The dialog reports no Escape to its OnKeyDown, so the keys are handled here and on the buttons. The editor stops a
+           key that it uses, such as an Escape that closes its suggestions. *@
+        <div class="markdown-text-dialog-body" @onkeydown="_keyDownCallback">
+            @if (_refusal is not null)
+            {
+                <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-2" data-testid="markdown-text-refusal">@_refusal</MudAlert>
+            }
 
-        <div class="markdown-text-editor" data-testid="markdown-text-input">
-            <StandaloneCodeEditor @ref="_editor"
-                                  Id="@EditorId"
-                                  CssClass="markdown-text-editor-host"
-                                  ConstructionOptions="GetEditorOptions"
-                                  OnDidInit="OnEditorInitAsync"
-                                  OnDidChangeModelContent="OnContentChangedAsync"/>
+            <div class="markdown-text-editor" data-testid="markdown-text-input">
+                <StandaloneCodeEditor @ref="_editor"
+                                      Id="@EditorId"
+                                      CssClass="markdown-text-editor-host"
+                                      ConstructionOptions="GetEditorOptions"
+                                      OnDidInit="OnEditorInitAsync"
+                                      OnDidChangeModelContent="OnContentChangedAsync"/>
+            </div>
         </div>
         <MarkdownEditorStyles/>
     </DialogContent>
     <DialogActions>
-        <MudButton OnClick="Cancel" data-testid="markdown-text-cancel">Cancel</MudButton>
-        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="_isSaving" OnClick="SaveAsync" data-testid="markdown-text-save">Save</MudButton>
+        <MudButton Disabled="_isSaving" OnClick="CancelAsync" @onkeydown="_keyDownCallback" data-testid="markdown-text-cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="_isSaving" OnClick="SaveAsync" @onkeydown="_keyDownCallback" data-testid="markdown-text-save">Save</MudButton>
     </DialogActions>
 </MudDialog>
 
@@ -44,6 +50,10 @@
         display: flex;
         flex-direction: column;
         overflow: hidden;
+    }
+
+    .markdown-text-dialog-body {
+        display: contents;
     }
 
     .markdown-text-editor {
@@ -80,7 +90,14 @@
     private Task<IJSObjectReference>? _moduleImport;
     private string? _refusal;
     private bool _isSaving;
+    private bool _isCanceling;
     private bool _isDisposed;
+    private EventCallback<KeyboardEventArgs> _keyDownCallback;
+
+    protected override void OnInitialized()
+    {
+        _keyDownCallback = EventCallback.Factory.Create<KeyboardEventArgs>(this, OnKeyDownAsync);
+    }
 
     private StandaloneEditorConstructionOptions GetEditorOptions(StandaloneCodeEditor editor)
     {
@@ -147,11 +164,50 @@
         }
     }
 
-    private void Cancel() => Dialog.Cancel();
+    private Task OnKeyDownAsync(KeyboardEventArgs args) => args.Key == "Escape" ? CancelAsync() : Task.CompletedTask;
+
+    // Ignored while a save runs, so that the write is never dropped without the dialog showing its outcome.
+    private async Task CancelAsync()
+    {
+        if (_isSaving || _isCanceling || _editor is null || _isDisposed)
+            return;
+
+        _isCanceling = true;
+        try
+        {
+            string text;
+            try
+            {
+                text = await _editor.GetValue();
+            }
+            catch (Exception exception) when (exception is JSException or JSDisconnectedException)
+            {
+                // The editor is gone, and with it what was typed.
+                Dialog.Cancel();
+                return;
+            }
+
+            if (_isDisposed)
+                return;
+
+            if (IsUnchanged(text) ||
+                await DialogService.ShowMessageBoxAsync("Discard changes", "Discard your changes?", yesText: "Discard", cancelText: "Keep editing") == true)
+            {
+                Dialog.Cancel();
+            }
+        }
+        finally
+        {
+            _isCanceling = false;
+        }
+    }
+
+    private bool IsUnchanged(string text) =>
+        string.Equals(text.ReplaceLineEndings("\n"), Text.ReplaceLineEndings("\n"), StringComparison.Ordinal);
 
     private async Task SaveAsync()
     {
-        if (_isSaving || _editor is null || _isDisposed)
+        if (_isSaving || _isCanceling || _editor is null || _isDisposed)
             return;
 
         _isSaving = true;
@@ -227,7 +283,8 @@
             { dialog => dialog.IsDarkMode, isDarkMode },
             { dialog => dialog.Save, save }
         };
-        var options = new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true, CloseOnEscapeKey = true };
+        // Escape is handled by the dialog, which asks before it discards a change, and a click beside the dialog does nothing.
+        var options = new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true, CloseOnEscapeKey = false, BackdropClick = false };
         var reference = await dialogService.ShowAsync<MarkdownTextDialog>(title, parameters, options);
         await reference.Result;
     }

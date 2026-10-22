@@ -206,6 +206,13 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
             _isDarkMode(),
             async newText =>
             {
+                // Text saved as it was opened is not written: the write would still change the block, such as the indentation
+                // of a lazy line.
+                if (string.Equals(newText.ReplaceLineEndings("\n"), text.ReplaceLineEndings("\n"), StringComparison.Ordinal))
+                {
+                    return null;
+                }
+
                 var result = await RunAsync(() => _file.ReplaceTextBlockAsync(segment, text, newText, CancellationToken.None), reportsInSnackbar: false);
 
                 // The dialog keeps what was typed, but a save of it is refused again once the text changed, so the message

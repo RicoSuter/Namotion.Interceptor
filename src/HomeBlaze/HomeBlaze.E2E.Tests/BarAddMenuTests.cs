@@ -186,6 +186,7 @@ public class BarAddMenuTests
         await GetOpenMenuItem(page, "Add Item with text...").ClickAsync();
         await SetTextEditorValueAsync(page, "Never saved.");
         await page.GetByTestId("markdown-text-cancel").ClickAsync();
+        await page.GetByRole(AriaRole.Button, new() { Name = "Discard", Exact = true }).ClickAsync();
 
         // Assert
         await Assertions.Expect(page.GetByRole(AriaRole.Dialog)).ToHaveCountAsync(0, new() { Timeout = Timeout });
