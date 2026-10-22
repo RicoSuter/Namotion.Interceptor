@@ -185,6 +185,7 @@ public class SubjectPropertyChangeOperationsTests
         var conflicts = SubjectPropertyChangeOperations.DetectChangeConflicts(changes);
 
         // Assert
-        Assert.Equal(isConflict ? [property] : [], conflicts);
+        // No conflict may be reported as an empty list or as null.
+        Assert.Equal(isConflict ? [property] : [], conflicts ?? []);
     }
 }
