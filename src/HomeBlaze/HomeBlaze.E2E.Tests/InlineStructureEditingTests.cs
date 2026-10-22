@@ -648,6 +648,8 @@ public class InlineStructureEditingTests
             + ":: HomeBlaze.Components.Card Title=\"Layout Card\"\n"
             + "Card text.\n"
             + "\n"
+            + "### Card Heading\n"
+            + "\n"
             + "::: HomeBlaze.Components.Progress Path=structuremotor/TargetSpeed Minimum=0 Maximum=1600\n"
             + ":::\n"
             + "::: Footer\n"
@@ -688,6 +690,84 @@ public class InlineStructureEditingTests
         Assert.Equal(labels.Length, labels.Distinct().Count());
         Assert.Contains("Insert at the end of the page", labels);
         Assert.Contains("Insert at position 1 of the page", labels);
+    }
+
+    [Fact]
+    public async Task WhenTheEdgeOfABlockNextToAnInsertLineIsClicked_ThenTheBlockIsSelected()
+    {
+        // Arrange: nothing is selected, so the page shows its lines, whose bars reach over the edges of the blocks around
+        // them. The clicks are at the left, away from the buttons in the middle of the lines.
+        var page = await OpenPageInInlineModeAsync();
+        await Assertions.Expect(page.Locator(".markdown-content > [data-testid='block-insert-line'] button").First).ToBeVisibleAsync(new() { Timeout = Timeout });
+        var switchWrapper = GetWrapperOf(page, "switch");
+        var switchBox = (await switchWrapper.BoundingBoxAsync())!;
+
+        // Act
+        await page.Mouse.ClickAsync(switchBox.X + 8, switchBox.Y + 2);
+
+        // Assert
+        await Assertions.Expect(switchWrapper).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
+
+        // Act: the list stands right above the line before the value map.
+        var listWrapper = GetValueListWrapper(page);
+        var listBox = (await listWrapper.BoundingBoxAsync())!;
+        await page.Mouse.ClickAsync(listBox.X + 8, listBox.Y + listBox.Height - 2);
+
+        // Assert
+        await Assertions.Expect(listWrapper).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(" Height=180")]
+    public async Task WhenAWidgetInACardIsSelected_ThenTheFirstAndTheLastInsertLinesOfTheCardStayInsideIt(string size)
+    {
+        // Arrange: the content of the card starts and ends with a widget, so its first and its last line stand at its edges.
+        // A card with a height scrolls its content.
+        var page = await OpenPageInInlineModeAsync(Content + "\n:: HomeBlaze.Components.Card Title=\"Edge Card\"" + size + "\n" + TwoWidgets + "::\n\nText after.\n");
+        var card = page.GetCard("Edge Card");
+
+        // Act
+        var buttons = await SelectFirstWidgetAndGetInsertButtonsAsync(card);
+
+        // Assert
+        var cardBox = (await card.BoundingBoxAsync())!;
+        foreach (var button in new[] { buttons.First, buttons.Last })
+        {
+            var buttonBox = (await button.BoundingBoxAsync())!;
+            Assert.InRange(buttonBox.Y, cardBox.Y, cardBox.Y + cardBox.Height - buttonBox.Height);
+        }
+
+        var scrollRanges = await GetCardScrollRangesAsync(card);
+        Assert.Equal(new[] { 0, 0 }, scrollRanges);
+        Assert.True(await IsHitAtItsCenterAsync(buttons.First), "The first button is covered or cut off.");
+        Assert.True(await IsHitAtItsCenterAsync(buttons.Last), "The last button is covered or cut off.");
+    }
+
+    [Theory]
+    [InlineData(":: HomeBlaze.Components.TabLayout\n::: Tab Title=\"First\"\n" + TwoWidgetsInItem + ":::\n::\n", "[data-testid='tab-panel']")]
+    [InlineData(":: HomeBlaze.Components.TabLayout Position=Left\n::: Tab Title=\"First\"\n" + TwoWidgetsInItem + ":::\n::\n", "[data-testid='tab-panel']")]
+    [InlineData(":: HomeBlaze.Components.FlowLayout MinWidth=200\n::: Item\n" + TwoWidgetsInItem + ":::\n::\n", "[data-testid='flow-item']")]
+    public async Task WhenAWidgetInATabOrAFlowItemIsSelected_ThenTheFirstAndTheLastInsertLinesCanBeClickedAndNothingScrollsFurther(string block, string containerSelector)
+    {
+        // Arrange: the content of the container starts and ends with a widget, so its first and its last line stand at
+        // its edges.
+        var page = await OpenPageInInlineModeAsync(Content + "\n" + block + "\nText after.\n");
+        var container = page.Locator(containerSelector).First;
+        await Assertions.Expect(container).ToBeVisibleAsync(new() { Timeout = Timeout });
+        var rangesBefore = await GetScrollRangesAsync(container);
+
+        // Act
+        var buttons = await SelectFirstWidgetAndGetInsertButtonsAsync(container);
+
+        // Assert
+        Assert.True(await IsHitAtItsCenterAsync(buttons.First), "The first button is covered or cut off.");
+        Assert.True(await IsHitAtItsCenterAsync(buttons.Last), "The last button is covered or cut off.");
+
+        // The lines of the page hide with the selection, so the page can scroll less, never more.
+        var rangesAfter = await GetScrollRangesAsync(container);
+        Assert.Equal(rangesBefore.Length, rangesAfter.Length);
+        Assert.All(rangesAfter.Zip(rangesBefore), pair => Assert.True(pair.First <= pair.Second, $"A range grew from {pair.Second} to {pair.First}."));
     }
 
     private async Task<IPage> OpenPageInSplitModeAsync(string content = Content)
@@ -772,13 +852,64 @@ public class InlineStructureEditingTests
         await Assertions.Expect(page.GetByTestId("create-subject-dialog")).ToBeVisibleAsync(new() { Timeout = Timeout });
     }
 
-    // The top, left, width and height of every block and paragraph of the page, one after the other.
+    // The top, left, width and height of every block, paragraph and heading of the page, one after the other.
     private static Task<double[]> GetBlockBoxesAsync(IPage page) =>
         page.Locator(".markdown-content").EvaluateAsync<double[]>(
             """
-            content => [...content.querySelectorAll('.subject-component-wrapper, p')].flatMap(element => {
+            content => [...content.querySelectorAll('.subject-component-wrapper, p, h3')].flatMap(element => {
                 const box = element.getBoundingClientRect();
                 return [box.top, box.left, box.width, box.height];
             })
+            """);
+
+    // Two widgets, so that the content they are in starts and ends with a widget.
+    private const string TwoWidgets =
+        "::: HomeBlaze.Components.Switch Path=structuremotor/IsPowered\n:::\n"
+        + "::: HomeBlaze.Components.Progress Path=structuremotor/TargetSpeed Minimum=0 Maximum=1600\n:::\n";
+
+    private const string TwoWidgetsInItem =
+        ":::: HomeBlaze.Components.Switch Path=structuremotor/IsPowered\n::::\n"
+        + ":::: HomeBlaze.Components.Progress Path=structuremotor/TargetSpeed Minimum=0 Maximum=1600\n::::\n";
+
+    // Selects the first widget in the container, which shows the insert lines of the content it is in: one before each of
+    // the two widgets and one at the end.
+    private static async Task<ILocator> SelectFirstWidgetAndGetInsertButtonsAsync(ILocator container)
+    {
+        await container.Locator(".subject-component-wrapper.selectable").First.SelectWidgetAsync();
+        var buttons = container.Locator("[data-testid='block-insert-line'] button");
+        await Assertions.Expect(buttons).ToHaveCountAsync(3, new() { Timeout = Timeout });
+        return buttons;
+    }
+
+    // Whether a click at the center of the element reaches it, which it does not when it is covered or cut off.
+    private static Task<bool> IsHitAtItsCenterAsync(ILocator element) =>
+        element.EvaluateAsync<bool>(
+            """
+            element => {
+                element.scrollIntoView({ block: 'center' });
+                const box = element.getBoundingClientRect();
+                return element.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2));
+            }
+            """);
+
+    // How far the card and its content can scroll down.
+    private static Task<int[]> GetCardScrollRangesAsync(ILocator card) =>
+        card.EvaluateAsync<int[]>("card => [card, card.querySelector('.mud-card-content')].map(element => element.scrollHeight - element.clientHeight)");
+
+    // How far each element that scrolls can scroll, down and sideways: the element, the elements in it and around it, and
+    // the page.
+    private static Task<int[]> GetScrollRangesAsync(ILocator element) =>
+        element.EvaluateAsync<int[]>(
+            """
+            element => {
+                const ancestors = [];
+                for (let current = element.parentElement; current; current = current.parentElement) {
+                    ancestors.push(current);
+                }
+
+                return [element, ...element.querySelectorAll('*'), ...ancestors]
+                    .filter(current => current === document.scrollingElement || [getComputedStyle(current).overflowX, getComputedStyle(current).overflowY].some(overflow => overflow === 'auto' || overflow === 'scroll'))
+                    .flatMap(current => [current.scrollHeight - current.clientHeight, current.scrollWidth - current.clientWidth]);
+            }
             """);
 }

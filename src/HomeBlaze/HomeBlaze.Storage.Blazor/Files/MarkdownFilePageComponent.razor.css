@@ -35,13 +35,19 @@
 }
 
 /* A heading is closer to the text below it than to the block above it. A heading that ends the content keeps its 1rem,
-   which the box at the end cancels. */
+   which the box at the end cancels. An insert line between a heading and its block takes the closer distance as well, so
+   that the block does not move when the line shows. */
 .markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > :is(h1, h2, h3, h4, h5, h6):not(:last-child) {
     margin-bottom: 0.5rem;
 }
 
-.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > :is(h1, h2, h3, h4, h5, h6) + * {
+.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > :is(h1, h2, h3, h4, h5, h6) + *,
+.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > :is(h1, h2, h3, h4, h5, h6) + .block-insert-line + * {
     margin-top: 0.5rem;
+}
+
+.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > :is(h1, h2, h3, h4, h5, h6) + .block-insert-line:not(:last-child) {
+    margin-bottom: 0.5rem;
 }
 
 /* The boxes cancel exactly 1rem: a first or a last block with another outer margin would show the difference at the edge,
@@ -58,6 +64,28 @@
 
 .markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment::after {
     margin-top: -1rem;
+}
+
+/* Above the first and below the last block of a container there is no gap but the padding of the container. The bars of
+   the lines at these edges are centered on the edge of the content, in the padding, like the content of a card. The line at
+   the end takes back the margin that the rules above give it, which would put it 1rem below the content, where it would
+   widen what a scrolling container can scroll. */
+.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > .block-insert-line:last-child:not(:first-child) {
+    margin-top: -1rem;
+}
+
+.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > .block-insert-line:is(:first-child, :last-child) > .block-insert-line-bar {
+    top: 0;
+}
+
+/* A panel beside a tab bar clips and scrolls its content and has almost no padding, so there the bars of the lines at the
+   edges are drawn over the first and the last block. */
+.markdown-content ::deep .tab-layout-panel-beside > .subject-component-wrapper > .markdown-fragment > .block-insert-line:first-child:not(:last-child) > .block-insert-line-bar {
+    transform: none;
+}
+
+.markdown-content ::deep .tab-layout-panel-beside > .subject-component-wrapper > .markdown-fragment > .block-insert-line:last-child:not(:first-child) > .block-insert-line-bar {
+    transform: translateY(-100%);
 }
 
 /* The blocks of a card footer, such as buttons, stand in a row, and the footer padding is the space at its edges. */
@@ -97,7 +125,8 @@
     overflow-wrap: break-word;
 }
 
-/* An insert line in the row of a card footer stands between two blocks of the row and takes none of its gap. */
+/* An insert line in the row of a card footer stands between two blocks of the row and takes none of its gap: the margins
+   are half of the gap of the row above on each side and change with it. */
 .markdown-content ::deep .card-widget > .mud-card-actions > .subject-component-wrapper > .markdown-fragment > .block-insert-line {
     margin: 0 -4px;
 }
