@@ -12,6 +12,18 @@ internal static class Program
     private static EmbeddedHostController? _host;
     private static WorkspaceLock? _workspaceLock;
 
+    /// <summary>
+    /// Rolling log file for the embedded host. Deliberately under LocalApplicationData rather than beside
+    /// the settings file: logs are machine-local and regenerable, and ApplicationData is the roaming profile
+    /// on Windows, where rotating log files would bloat the profile and slow sign-in. This puts them next to
+    /// the workspaces, which are machine-local for the same reason.
+    /// </summary>
+    private static string DefaultLogFilePath => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "HomeBlaze",
+        "Logs",
+        "homeblaze-{Date}.log");
+
     [STAThread]
     private static void Main(string[] arguments)
     {
@@ -137,10 +149,7 @@ internal static class Program
                         $"'{folderPath}' is already open in another HomeBlaze window.");
                 }
 
-                _host = new EmbeddedHostController(Path.Combine(
-                    Path.GetDirectoryName(ShellSettingsStore.DefaultFilePath)!,
-                    "Logs",
-                    "homeblaze-{Date}.log"));
+                _host = new EmbeddedHostController(DefaultLogFilePath);
                 address = await _host.StartAsync(workspace, CancellationToken.None);
             }
 
