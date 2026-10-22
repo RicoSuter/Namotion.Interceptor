@@ -31,20 +31,11 @@
     {
         <div class="grid-cell @(IsEditing ? "editing" : "")" style="@GetCellStyle(cell)">
             <div class="grid-cell-content">
-                @if (IsEditing)
-                {
-                    @* The content of a cell fills it and the cell has buttons of its own, so it gets no insert lines. Only
-                       while edited, so that viewing adds no component or subscription per cell. *@
-                    <CascadingValue Value="@cell.Child" Name="PlaceContent">
-                        <SubjectComponent Subject="@cell.Child"
-                                          Type="SubjectComponentType.Widget" />
-                    </CascadingValue>
-                }
-                else
-                {
+                @* The content of a cell fills it and the cell has buttons of its own, so it gets no insert lines. *@
+                <CascadingValue Value="@cell.Child" Name="PlaceContent">
                     <SubjectComponent Subject="@cell.Child"
                                       Type="SubjectComponentType.Widget" />
-                }
+                </CascadingValue>
             </div>
             @* After the content, so that Tab reaches them right after a selected widget in the cell. *@
             @if (IsEditing)

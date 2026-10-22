@@ -63,22 +63,12 @@
                          @onmousemove:stopPropagation="@(!IsEditing)"
                          @onkeydown:stopPropagation="@(!IsEditing)">
                         <div class="canvas-node-content">
-                            @if (IsEditing)
-                            {
-                                @* The content of a node fills it and the node has buttons of its own, so it gets no insert
-                                   lines. Only while edited, so that viewing adds no component or subscription per node. *@
-                                <CascadingValue Value="@node.Child" Name="PlaceContent">
-                                    <SubjectComponent @ref="_nodeComponents[node]"
-                                                      Subject="@node.Child"
-                                                      Type="SubjectComponentType.Widget" />
-                                </CascadingValue>
-                            }
-                            else
-                            {
+                            @* The content of a node fills it and the node has buttons of its own, so it gets no insert lines. *@
+                            <CascadingValue Value="@node.Child" Name="PlaceContent">
                                 <SubjectComponent @ref="_nodeComponents[node]"
                                                   Subject="@node.Child"
                                                   Type="SubjectComponentType.Widget" />
-                            }
+                            </CascadingValue>
                         </div>
                         @* After the content, so that Tab reaches them right after a selected widget in the node. *@
                         @if (IsEditing)
