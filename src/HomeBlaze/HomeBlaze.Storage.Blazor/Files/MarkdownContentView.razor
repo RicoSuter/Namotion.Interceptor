@@ -36,7 +36,7 @@
                           Subject="@text"
                           Type="SubjectComponentType.Widget"
                           IsSelectionEnabled="@_isAtSelection"
-                          AdditionalParameters="@(new Dictionary<string, object?> { ["Html"] = segment.Html })" />
+                          AdditionalParameters="@GetTextParameters(text, segment.Html!)" />
     }
     else if (segment.Html is not null)
     {
@@ -78,6 +78,12 @@
 
     private WidgetSelection? _subscribedSelection;
     private bool _isAtSelection;
+
+    // The parameters of the widget of each block of text, kept while its markup stays the same, so that a render for another
+    // block, such as one for the change of an expression, renders that widget again only when its own markup changed. A
+    // reload replaces the children and all their segments, and with them these.
+    private Dictionary<HtmlSegment, Dictionary<string, object?>>? _textParameters;
+    private IDictionary<string, IInterceptorSubject>? _textParametersChildren;
 
     // Html is the markup of a stretch of HTML and expressions; Start is the segment that starts it as a text block or other
     // content, when the content groups its text; Widget is a block.
@@ -132,6 +138,25 @@
 
         AddMarkup(result, builder, start);
         return result;
+    }
+
+    private Dictionary<string, object?> GetTextParameters(HtmlSegment segment, string html)
+    {
+        if (!ReferenceEquals(_textParametersChildren, Children))
+        {
+            _textParameters?.Clear();
+            _textParametersChildren = Children;
+        }
+
+        _textParameters ??= [];
+        if (_textParameters.TryGetValue(segment, out var parameters) && string.Equals((string?)parameters["Html"], html, StringComparison.Ordinal))
+        {
+            return parameters;
+        }
+
+        parameters = new Dictionary<string, object?> { ["Html"] = html };
+        _textParameters[segment] = parameters;
+        return parameters;
     }
 
     // Adds the markup collected so far and empties the builder.

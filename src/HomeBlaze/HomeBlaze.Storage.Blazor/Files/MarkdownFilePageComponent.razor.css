@@ -81,7 +81,8 @@
 /* A line at an edge of a container, where the padding can be too small for the button or missing, and a line after a
    heading, where the gap is smaller than the button, place the button at the start of the line, left of the content, in
    the padding of the container or in the space around it. On the page, a line stands below the margin of the block before
-   it, which is smaller than the button after text, so the line after text or other content than a widget does as well. */
+   it, which is smaller than the button after text, so the line after text or other content than a widget does as well.
+   The rules up to the footer of a card repeat the list of these lines of a container, and change together. */
 .markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > :is(.block-insert-line:is(:first-child, :last-child), :is(h1, h2, h3, h4, h5, h6, .subject-component-wrapper:has(> .markdown-text > :is(h1, h2, h3, h4, h5, h6))) + .block-insert-line) > .block-insert-line-bar,
 .markdown-content > ::deep :is(.subject-component-wrapper:has(> .markdown-text), :not(.subject-component-wrapper, .block-insert-line)) + .block-insert-line > .block-insert-line-bar {
     left: -1rem;
@@ -93,7 +94,7 @@
 }
 
 /* A panel beside a tab bar clips and scrolls its content and has padding only at the side of the tab bar (see
-   GetPanelSpacing of TabLayoutWidget), so there the button of a line at an edge stays inside the content, beside the first
+   GetPanelClasses of TabLayoutWidget), so there the button of a line at an edge stays inside the content, beside the first
    and the last block, and stands at the end of the line when the tab bar is at the right. */
 .markdown-content ::deep .tab-layout-panel-beside > .subject-component-wrapper > .markdown-fragment > .block-insert-line:first-child:not(:last-child) > .block-insert-line-bar {
     transform: none;
@@ -103,17 +104,40 @@
     transform: translateY(-100%);
 }
 
-.markdown-content ::deep .tab-layout-panel-beside.pr-4 > .subject-component-wrapper > .markdown-fragment > :is(.block-insert-line:is(:first-child, :last-child), :is(h1, h2, h3, h4, h5, h6, .subject-component-wrapper:has(> .markdown-text > :is(h1, h2, h3, h4, h5, h6))) + .block-insert-line) > .block-insert-line-bar {
+.markdown-content ::deep .tab-layout-panel-bar-right > .subject-component-wrapper > .markdown-fragment > :is(.block-insert-line:is(:first-child, :last-child), :is(h1, h2, h3, h4, h5, h6, .subject-component-wrapper:has(> .markdown-text > :is(h1, h2, h3, h4, h5, h6))) + .block-insert-line) > .block-insert-line-bar {
     left: 0;
     right: -1rem;
 }
 
-.markdown-content ::deep .tab-layout-panel-beside.pr-4 > .subject-component-wrapper > .markdown-fragment > :is(.block-insert-line:is(:first-child, :last-child), :is(h1, h2, h3, h4, h5, h6, .subject-component-wrapper:has(> .markdown-text > :is(h1, h2, h3, h4, h5, h6))) + .block-insert-line) > .block-insert-line-bar::before {
+.markdown-content ::deep .tab-layout-panel-bar-right > .subject-component-wrapper > .markdown-fragment > :is(.block-insert-line:is(:first-child, :last-child), :is(h1, h2, h3, h4, h5, h6, .subject-component-wrapper:has(> .markdown-text > :is(h1, h2, h3, h4, h5, h6))) + .block-insert-line) > .block-insert-line-bar::before {
     display: block;
 }
 
-.markdown-content ::deep .tab-layout-panel-beside.pr-4 > .subject-component-wrapper > .markdown-fragment > :is(.block-insert-line:is(:first-child, :last-child), :is(h1, h2, h3, h4, h5, h6, .subject-component-wrapper:has(> .markdown-text > :is(h1, h2, h3, h4, h5, h6))) + .block-insert-line) > .block-insert-line-bar::after {
+.markdown-content ::deep .tab-layout-panel-bar-right > .subject-component-wrapper > .markdown-fragment > :is(.block-insert-line:is(:first-child, :last-child), :is(h1, h2, h3, h4, h5, h6, .subject-component-wrapper:has(> .markdown-text > :is(h1, h2, h3, h4, h5, h6))) + .block-insert-line) > .block-insert-line-bar::after {
     display: none;
+}
+
+/* A grid cell and a canvas node clip their content and have no padding, so in a layout or a Responsive there the button
+   at the start of a line stays inside the content, over the first pixels of the block beside it: at the top of the first
+   block, at the bottom of the last one. A tab keeps it in the padding between its content and its tab bar instead. */
+.markdown-content ::deep :is(.grid-cell-content, .canvas-node-content) :is(.layout-cell, .responsive-widget):not(.tab-layout-panel-beside) > .subject-component-wrapper > .markdown-fragment > :is(.block-insert-line:is(:first-child, :last-child), :is(h1, h2, h3, h4, h5, h6, .subject-component-wrapper:has(> .markdown-text > :is(h1, h2, h3, h4, h5, h6))) + .block-insert-line) > .block-insert-line-bar {
+    left: 0;
+}
+
+.markdown-content ::deep :is(.grid-cell-content, .canvas-node-content) :is(.layout-cell, .responsive-widget):not(.tab-layout-panel-beside) > .subject-component-wrapper > .markdown-fragment > .block-insert-line:first-child:not(:last-child) > .block-insert-line-bar {
+    transform: none;
+}
+
+.markdown-content ::deep :is(.grid-cell-content, .canvas-node-content) :is(.layout-cell, .responsive-widget):not(.tab-layout-panel-beside) > .subject-component-wrapper > .markdown-fragment > .block-insert-line:last-child:not(:first-child) > .block-insert-line-bar {
+    transform: translateY(-100%);
+}
+
+.markdown-content ::deep :is(.grid-cell-content, .canvas-node-content) :is(.tab-layout-panel):is(.tab-layout-panel-bar-top) > .subject-component-wrapper > .markdown-fragment > .block-insert-line:first-child:not(:last-child) > .block-insert-line-bar {
+    transform: translateY(-100%);
+}
+
+.markdown-content ::deep :is(.grid-cell-content, .canvas-node-content) :is(.tab-layout-panel):is(.tab-layout-panel-bar-bottom) > .subject-component-wrapper > .markdown-fragment > .block-insert-line:last-child:not(:first-child) > .block-insert-line-bar {
+    transform: none;
 }
 
 /* The blocks of a card footer, such as buttons, stand in a row, and the footer padding is the space at its edges. */
@@ -155,8 +179,11 @@
 
 /* An insert line in the row of a card footer stands between two blocks of the row and takes none of its gap: the margins
    are half of the gap of the row above on each side and change with it. The gap is narrower than the button, which stands
-   above the row, in the padding between the row and the body of the card. */
+   above the row, in the padding between the row and the body of the card: the line is as high as the row, so that its
+   top is the top of the row. */
 .markdown-content ::deep .card-widget > .mud-card-actions > .subject-component-wrapper > .markdown-fragment > .block-insert-line {
+    align-self: stretch;
+    height: auto;
     margin: 0 -4px;
 }
 

@@ -15,6 +15,8 @@ namespace HomeBlaze.Storage.Blazor.Files;
 internal sealed class MarkdownPageStructureEditor : PageStructureEditor
 {
     private const string ChangedWhileAskingMessage = "The page changed while the dialog was open. Try again.";
+    private const string TextChangedWhileEditingMessage =
+        "The text changed since you opened it. Copy your text, close the dialog and open the text again.";
 
     private readonly MarkdownFile _file;
     private readonly WidgetSelection _selection;
@@ -192,12 +194,17 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
             _dialogService,
             "Edit text",
             text,
-            newText => SaveTextAsync(() => _file.ReplaceTextBlockAsync(segment, text, newText, CancellationToken.None)));
-    }
+            async newText =>
+            {
+                var result = await RunAsync(() => _file.ReplaceTextBlockAsync(segment, text, newText, CancellationToken.None), reportsInSnackbar: false);
 
-    // The dialog shows why the text was not saved and keeps it, so that nothing that was typed is lost.
-    private async Task<string?> SaveTextAsync(Func<Task<MarkdownEditResult>> edit) =>
-        (await RunAsync(edit, reportsInSnackbar: false)).Refusal;
+                // The dialog keeps what was typed, but a save of it is refused again once the text changed, so the message
+                // says how to get it into the page.
+                return result.IsWritten || _file.GetTextBlockText(segment) == text
+                    ? result.Refusal
+                    : TextChangedWhileEditingMessage;
+            });
+    }
 
     // A dialog asked about the blocks as they were. A reload while it was open can have given an unnamed subject another
     // block, so the edit would hit a block the user did not choose. The same text means the same blocks.

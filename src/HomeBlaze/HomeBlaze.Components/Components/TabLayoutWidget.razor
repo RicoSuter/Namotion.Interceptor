@@ -26,7 +26,7 @@
             <MudTabPanel Tag="@tab"
                          Text="@tab.Title"
                          Icon="@MudBlazorIconResolver.ResolveOrNull(tab.Icon)">
-                <div class="tab-layout-panel layout-cell @GetPanelSpacing(position)" data-testid="tab-panel">
+                <div class="tab-layout-panel layout-cell @GetPanelClasses(position)" data-testid="tab-panel">
                     <SubjectComponent @key="tab" Subject="@tab.Content" Type="SubjectComponentType.Widget" />
                 </div>
             </MudTabPanel>
@@ -103,14 +103,15 @@
         return new Dictionary<string, object> { [nameof(MudTabs.Position)] = position };
     }
 
-    // The space between the tab bar and the content. A panel beside the tab bar clips what leaves it, so it
-    // also keeps a little room for the shadow of a card at its other edges.
-    private static string GetPanelSpacing(MudBlazor.Position position) => position switch
+    // The space between the tab bar and the content, and a class that names the side of the bar, which the styles of
+    // the content of a page use. A panel beside the tab bar clips what leaves it, so it also keeps a little room for the
+    // shadow of a card at its other edges.
+    private static string GetPanelClasses(MudBlazor.Position position) => position switch
     {
-        MudBlazor.Position.Left => "tab-layout-panel-beside pl-4 pr-1 pb-1",
-        MudBlazor.Position.Right => "tab-layout-panel-beside pr-4 pl-1 pb-1",
-        MudBlazor.Position.Bottom => "pb-4",
-        _ => "pt-4"
+        MudBlazor.Position.Left => "tab-layout-panel-beside tab-layout-panel-bar-left pl-4 pr-1 pb-1",
+        MudBlazor.Position.Right => "tab-layout-panel-beside tab-layout-panel-bar-right pr-4 pl-1 pb-1",
+        MudBlazor.Position.Bottom => "tab-layout-panel-bar-bottom pb-4",
+        _ => "tab-layout-panel-bar-top pt-4"
     };
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
