@@ -179,7 +179,7 @@
 
     /// <summary>Cascaded to the preview next to an editor, where a click reveals the widget in the editor.</summary>
     [CascadingParameter]
-    public SubjectRevealer? Revealer { get; set; }
+    public ISubjectRevealTarget? Revealer { get; set; }
 
     /// <summary>Gets whether the selected widget is this one or a widget inside it.</summary>
     public bool ContainsSelection

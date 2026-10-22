@@ -545,8 +545,8 @@ public class InlineStructureEditingTests
         var switchWrapper = page.Locator(".page-split-preview .subject-component-wrapper.revealable:has([data-testid='switch'])").Last;
         await Assertions.Expect(switchWrapper).ToBeVisibleAsync(new() { Timeout = Timeout });
 
-        // Act
-        await switchWrapper.ClickAsync(new() { Position = new() { X = 2, Y = 2 } });
+        // Act: forced, because the content of the preview is inert and the preview itself takes the click.
+        await switchWrapper.ClickAsync(new() { Position = new() { X = 2, Y = 2 }, Force = true });
 
         // Assert: the editor selects the block only after the round trip of the click, so the selection of the preview
         // would have arrived by then.
@@ -560,19 +560,35 @@ public class InlineStructureEditingTests
     {
         // Arrange
         var page = await OpenPageInSplitModeAsync();
-        var powerSwitch = page.Locator(".page-split-preview").GetByRole(AriaRole.Switch);
+        var powerSwitch = page.Locator(".page-split-preview").GetByRole(AriaRole.Switch, new() { IncludeHidden = true });
         await Assertions.Expect(powerSwitch).ToBeVisibleAsync(new() { Timeout = Timeout });
         var isCheckedBefore = await powerSwitch.IsCheckedAsync();
         var motor = (Motor)((MarkdownFile)_fixture.GetDemoFolder().Children[PageName]).Children["structuremotor"];
         var isPoweredBefore = motor.IsPowered;
 
-        // Act: forced, because the content of the widget takes no pointer input and the wrapper around it takes the click.
+        // Act: forced, because the content of the preview is inert and the preview itself takes the click.
         await powerSwitch.ClickAsync(new() { Force = true });
 
         // Assert: the editor selects the block after the round trip of the click, by which the toggle would have arrived.
         await WaitForEditorSelectionAsync(page, GetLineOf("HomeBlaze.Components.Switch"));
         Assert.Equal(isCheckedBefore, await powerSwitch.IsCheckedAsync());
         Assert.Equal(isPoweredBefore, motor.IsPowered);
+    }
+
+    [Fact]
+    public async Task WhenThePageIsSplit_ThenThePreviewIsInertAndItsControlsTakeNoFocus()
+    {
+        // Arrange
+        var page = await OpenPageInSplitModeAsync();
+        var powerSwitch = page.Locator(".page-split-preview [role='switch']").First;
+        await Assertions.Expect(powerSwitch).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Act
+        await powerSwitch.EvaluateAsync("element => element.focus()");
+
+        // Assert
+        await Assertions.Expect(page.Locator(".page-split-preview-content")).ToHaveAttributeAsync("inert", "");
+        Assert.False(await powerSwitch.EvaluateAsync<bool>("element => element === document.activeElement"));
     }
 
     [Fact]
@@ -586,12 +602,12 @@ public class InlineStructureEditingTests
             + ":: HomeBlaze.Components.Slider Path=structuremotor/TargetSpeed Minimum=0 Maximum=3000 Label=\"Preview slider\"\n"
             + "::\n");
         var page = await OpenPageInSplitModeAsync(content);
-        var slider = page.Locator(".page-split-preview").GetByRole(AriaRole.Slider, new() { Name = "Preview slider", Exact = true });
+        var slider = page.Locator(".page-split-preview").GetByRole(AriaRole.Slider, new() { Name = "Preview slider", Exact = true, IncludeHidden = true });
         await Assertions.Expect(slider).ToBeVisibleAsync(new() { Timeout = Timeout });
         var motor = (Motor)((MarkdownFile)_fixture.GetDemoFolder().Children[PageName]).Children["structuremotor"];
         var targetSpeedBefore = motor.TargetSpeed;
 
-        // Act: the pointer cannot reach the slider, but the keyboard can reach any control that is not disabled.
+        // Act: the content of the preview is inert, so the focus and the keys must not reach the slider.
         await slider.FocusAsync();
         await page.Keyboard.PressAsync("ArrowRight");
         await page.Keyboard.PressAsync("ArrowRight");
@@ -599,7 +615,7 @@ public class InlineStructureEditingTests
         // Assert: the editor selects the block after the round trip of the click, by which a write of the keys would
         // have arrived.
         await page.Locator(".page-split-preview .subject-component-wrapper.revealable:has([data-testid='switch'])").Last
-            .ClickAsync(new() { Position = new() { X = 2, Y = 2 } });
+            .ClickAsync(new() { Position = new() { X = 2, Y = 2 }, Force = true });
         await WaitForEditorSelectionAsync(page, GetLineOf(content, "HomeBlaze.Components.Switch"));
         Assert.Equal(targetSpeedBefore, motor.TargetSpeed);
         Assert.Equal(content, (await _fixture.ReadFileAsync(_fixture.GetDemoPagePath(PageName))).Replace("\r\n", "\n"));

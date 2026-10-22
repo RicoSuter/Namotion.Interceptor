@@ -13,6 +13,7 @@
 
 @inherits HomeBlazorComponentBase
 @implements IAsyncDisposable
+@implements ISubjectRevealTarget
 
 @inject SubjectComponentRegistry ComponentRegistry
 @inject SubjectPathResolver PathResolver
@@ -55,18 +56,21 @@ else
                     <StartContent>
                         <div class="page-split-preview" style="width: 100%; height: 100%; overflow-y: auto;">
                             @* The preview shows the saved page and never writes it, so that it cannot overwrite the
-                               unsaved text of the editor: its controls are disabled, also for the keyboard, which the
-                               pointer guard of the revealable widgets does not stop. A click on a widget reveals its
-                               block in the editor. *@
-                            <CascadingValue Value="false" Name="IsEditing">
-                                <CascadingValue Value="true" Name="IsReadOnly" IsFixed="true">
-                                    <CascadingValue Value="_revealer" IsFixed="true">
-                                        <SubjectComponent @key="_componentKey"
-                                                          Subject="@_subject"
-                                                          Type="SubjectComponentType.Page"/>
+                               unsaved text of the editor. Its content is inert, so that neither the pointer nor the
+                               keyboard reaches a control of any widget. Pages.razor.js passes a click on the preview to
+                               the widget under the pointer, which reveals its block in the editor. The controls that read
+                               IsReadOnly disable themselves as well. *@
+                            <div class="page-split-preview-content" style="height: 100%;" inert>
+                                <CascadingValue Value="false" Name="IsEditing">
+                                    <CascadingValue Value="true" Name="IsReadOnly" IsFixed="true">
+                                        <CascadingValue Value="@((ISubjectRevealTarget)this)" IsFixed="true">
+                                            <SubjectComponent @key="_componentKey"
+                                                              Subject="@_subject"
+                                                              Type="SubjectComponentType.Page"/>
+                                        </CascadingValue>
                                     </CascadingValue>
                                 </CascadingValue>
-                            </CascadingValue>
+                            </div>
                         </div>
                     </StartContent>
                     <EndContent>
@@ -191,7 +195,6 @@ else
     private HotKeysContext? _hotKeysContext;
 
     private readonly WidgetSelection _widgetSelection = new();
-    private SubjectRevealer? _revealer;
 
     private const string ModulePath = "./Components/Pages/Pages.razor.js";
     private ElementReference _pageHeadContent;
@@ -239,10 +242,10 @@ else
     protected override void OnInitialized()
     {
         _clearSelectionCallback = EventCallback.Factory.Create<MouseEventArgs>(_widgetSelection, _widgetSelection.Clear);
-        _revealer = new SubjectRevealer(RevealInEditorAsync);
     }
 
-    private Task<bool> RevealInEditorAsync(IInterceptorSubject subject) =>
+    /// <summary>Shows the block of the subject in the source editor of the Split mode and returns whether it found it.</summary>
+    public Task<bool> RevealAsync(IInterceptorSubject subject) =>
         _editPanel?.EditComponent is ISubjectRevealTarget target ? target.RevealAsync(subject) : Task.FromResult(false);
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -285,6 +288,11 @@ else
             if (editorBar is { } bar)
             {
                 _module ??= await JsRuntime.InvokeAsync<IJSObjectReference>("import", ModulePath);
+                if (mode == PageEditMode.Split)
+                {
+                    await _module.InvokeVoidAsync("forwardPreviewClicks");
+                }
+
                 _pageHeadFit = await _module.InvokeAsync<IJSObjectReference>("fitToEditorBar", _pageHeadContent, bar);
             }
         }

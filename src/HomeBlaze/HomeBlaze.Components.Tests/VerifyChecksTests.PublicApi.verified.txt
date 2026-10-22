@@ -628,7 +628,7 @@ namespace HomeBlaze.Components
         [Microsoft.AspNetCore.Components.Parameter]
         public bool IsSelectionEnabled { get; set; }
         [Microsoft.AspNetCore.Components.CascadingParameter]
-        public HomeBlaze.Components.SubjectRevealer? Revealer { get; set; }
+        public HomeBlaze.Components.ISubjectRevealTarget? Revealer { get; set; }
         public HomeBlaze.Components.SubjectComponent? SelectableAncestor { get; }
         [Microsoft.AspNetCore.Components.CascadingParameter]
         public HomeBlaze.Components.WidgetSelection? Selection { get; set; }
@@ -645,11 +645,6 @@ namespace HomeBlaze.Components
         protected override System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender) { }
         protected override void OnInitialized() { }
         protected override void OnParametersSet() { }
-    }
-    public sealed class SubjectRevealer
-    {
-        public SubjectRevealer(System.Func<Namotion.Interceptor.IInterceptorSubject, System.Threading.Tasks.Task<bool>> reveal) { }
-        public System.Threading.Tasks.Task<bool> RevealAsync(Namotion.Interceptor.IInterceptorSubject subject) { }
     }
     [HomeBlaze.Abstractions.Attributes.PageLayout]
     [HomeBlaze.Abstractions.Attributes.SubjectIcon("TableChart")]

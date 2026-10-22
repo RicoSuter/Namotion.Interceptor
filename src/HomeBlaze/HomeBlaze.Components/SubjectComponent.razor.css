@@ -304,9 +304,9 @@
     pointer-events: auto;
 }
 
-/* In the preview next to the editor, a click on a widget shows its block in the editor. Its content takes no pointer
-   input, because a control that writes a configuration property would write the page under the unsaved text of the
-   editor. A nested widget takes the pointer again and reveals its own block. */
+/* In the preview next to the editor, the content is inert (see Pages.razor), and a script finds the widget under a click
+   with elementFromPoint. The content of a revealable widget takes no pointer input, so that its wrapper is found; a nested
+   widget takes the pointer again and is found itself. */
 .subject-component-wrapper.revealable {
     pointer-events: auto;
 }
@@ -317,12 +317,4 @@
 
 .subject-component-wrapper.revealable > .subject-component-wrapper.revealable {
     pointer-events: auto;
-}
-
-@media (hover: hover) {
-    .subject-component-wrapper.revealable:hover:not(:has(.subject-component-wrapper.revealable:hover)) {
-        outline: 1px dashed rgba(var(--mud-palette-primary-rgb), 0.5);
-        outline-offset: 1px;
-        cursor: pointer;
-    }
 }
