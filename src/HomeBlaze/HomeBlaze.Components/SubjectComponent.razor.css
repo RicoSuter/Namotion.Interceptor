@@ -230,6 +230,12 @@
     color: var(--mud-palette-text-primary);
 }
 
+/* The content of a Responsive block that the page shows at every width while the block or a widget in it is selected. */
+::deep .responsive-widget-preview {
+    display: block;
+    opacity: 0.55;
+}
+
 /* The cases of a selected value map overlay the content below its chip, so that the page does not move when they open.
    The wrapper of the map is the containing block. */
 ::deep .value-map-cases {

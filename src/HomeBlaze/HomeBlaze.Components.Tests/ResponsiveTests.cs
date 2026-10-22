@@ -53,6 +53,29 @@ public class ResponsiveTests
         Assert.Equal(expected, error);
     }
 
+    [Theory]
+    [InlineData(Breakpoint.Xs, Breakpoint.Xxl, null)]
+    [InlineData(Breakpoint.Xs, Breakpoint.Xs, "d-none d-sm-block")]
+    [InlineData(Breakpoint.Sm, Breakpoint.Md, "d-block d-sm-none d-lg-block")]
+    [InlineData(Breakpoint.Lg, Breakpoint.Xxl, "d-block d-lg-none")]
+    [InlineData(Breakpoint.Xxl, Breakpoint.Xxl, "d-block d-xxl-none")]
+    public void WhenTheHiddenClassesAreAskedFor_ThenTheyShowAnElementExactlyWhereTheContentIsHidden(Breakpoint from, Breakpoint to, string? expected)
+    {
+        // Act & Assert
+        Assert.Equal(expected, Responsive.GetHiddenCssClasses(from, to));
+    }
+
+    [Theory]
+    [InlineData(Breakpoint.Xs, Breakpoint.Xs, "Xs only")]
+    [InlineData(Breakpoint.Xs, Breakpoint.Md, "Up to Md")]
+    [InlineData(Breakpoint.Lg, Breakpoint.Xxl, "Lg and up")]
+    [InlineData(Breakpoint.Sm, Breakpoint.Md, "Sm to Md")]
+    public void WhenTheRangeLabelIsAskedFor_ThenItNamesTheBreakpointsThatShowTheContent(Breakpoint from, Breakpoint to, string expected)
+    {
+        // Act & Assert
+        Assert.Equal(expected, Responsive.GetRangeLabel(from, to));
+    }
+
     [Fact]
     public void WhenResponsiveIsCreated_ThenItShowsItsContentAtAllWidthsInItsDefaultSlot()
     {

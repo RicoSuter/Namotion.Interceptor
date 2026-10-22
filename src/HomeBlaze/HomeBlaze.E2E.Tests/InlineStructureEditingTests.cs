@@ -330,6 +330,37 @@ public class InlineStructureEditingTests
     }
 
     [Fact]
+    public async Task WhenTheContentOfAResponsiveBlockIsHidden_ThenAChipShowsItAndSelectingItShowsTheContent()
+    {
+        // Arrange: the browser of the tests is wider than Xs, so the phone card is hidden.
+        var page = await OpenPageInInlineModeAsync();
+        var chip = page.GetByTestId("responsive-chip");
+        await Assertions.Expect(chip).ToContainTextAsync("Xs only", new() { Timeout = Timeout });
+
+        // Act
+        await chip.SelectWidgetAsync();
+
+        // Assert
+        await Assertions.Expect(page.Locator(".responsive-widget-preview").GetByText("Phone Card")).ToBeVisibleAsync(new() { Timeout = Timeout });
+    }
+
+    [Fact]
+    public async Task WhenTheContentOfAResponsiveBlockIsShownSelected_ThenAWidgetInItCanBeSelectedAndTheContentStaysShown()
+    {
+        // Arrange
+        var page = await OpenPageInInlineModeAsync();
+        await page.GetByTestId("responsive-chip").SelectWidgetAsync();
+        var card = page.Locator(".responsive-widget-preview .subject-component-wrapper.selectable").Filter(new() { HasText = "Phone Card" }).First;
+
+        // Act: a click on the title, because the text of the card is a widget of its own.
+        await card.GetByText("Phone Card").SelectWidgetAsync();
+
+        // Assert
+        await Assertions.Expect(card).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
+        await Assertions.Expect(page.Locator(".responsive-widget-preview").GetByText("Phone Card")).ToBeVisibleAsync(new() { Timeout = Timeout });
+    }
+
+    [Fact]
     public async Task WhenNothingIsSelected_ThenThePageHasInsertLinesAndOneInsertsAWidgetThere()
     {
         // Arrange
