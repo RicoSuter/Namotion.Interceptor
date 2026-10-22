@@ -5221,7 +5221,7 @@ public sealed record PageListSlot(string Name, Type? ItemType)
 
 `ValueListWidget.razor`: replace `@implements IDisposable` with `@inherits SelectionContainingWidgetBase`; delete the cascades `IsEditing`, `Selection`, `Owner`, the fields `_subscribedSelection` and `_containsSelection`, `OnParametersSet`, `OnSelectionChanged`, `FindValueSlot`, `Unsubscribe` and `Dispose`; keep `Subject` and `StructureEditor`. Use `ContainsSelection` where the markup used `_containsSelection`, and `PageListSlot.Find(editor.GetListSlots(list), "Value")` where it used `FindValueSlot(editor, list)`.
 
-`ValueMapWidget.razor`: the same, with `ContainsSelection` for `_isShowingCases` and `PageListSlot.Find(editor.GetListSlots(map), "Case")` for `FindCaseSlot(editor, map)`. Keep `@implements IInvisibleWidget`.
+`ValueMapWidget.razor`: the same, with `ContainsSelection` for `_isShowingCases` and `PageListSlot.Find(editor.GetListSlots(map), "Case")` for `FindCaseSlot(editor, map)`.
 
 `ResponsiveWidget.razor`: the same, with `ContainsSelection` for `_containsSelection`.
 
