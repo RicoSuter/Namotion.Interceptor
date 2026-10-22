@@ -170,7 +170,7 @@ At commit:
 
 ### Writing Validators for Transactions
 
-- **Arguments**: in both checks, the type parameter is the property type for `int`, `long`, `double`, `float`, `decimal`, `bool`, `DateTime`, `DateTimeOffset`, `TimeSpan` and `Guid`, so the check does not box these values, and `object` with the boxed value for every other type, including their nullable forms. `Origin` is the captured origin of the change. Rely on neither type argument: test the value (`context.Value is int speed`), not `typeof(TProperty)`.
+- **Arguments**: the type parameter is unspecified, so test the value (`context.Value is int speed`), not `typeof(TProperty)`. `Origin` is the captured origin of the change. As a performance detail, both checks currently pass the property type for `int`, `long`, `double`, `float`, `decimal`, `bool`, `DateTime`, `DateTimeOffset`, `TimeSpan` and `Guid`, so the check does not box these values, and `object` with the boxed value for every other type, including their nullable forms.
 - **Call count**: with source transactions, a value can be validated up to three times: when written in `Immediate` mode, in the commit check, and in the pre-apply check. Validators must be free of side effects.
 - **Errors**: each invalid property is reported as one `ValidationException` whose message joins the messages of all its errors. The individual `ValidationResult`s, including their member names, are not kept.
 - **Reads**: properties without a pending change are read from the landed model, and writes outside transactions can still change them before the apply. Validate a rule on every property it reads, and do not mutate a value object after writing it to a property.
