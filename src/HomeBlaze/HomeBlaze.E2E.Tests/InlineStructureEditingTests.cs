@@ -123,7 +123,7 @@ public class InlineStructureEditingTests
         var page = await OpenPageInInlineModeAsync();
         var actionBar = await GetWrapperOf(page, "switch").SelectWidgetAsync();
 
-        // Act: the second move passes the map, which shows nothing on the viewed page, together with the Responsive block.
+        // Act
         await actionBar.GetByTestId("move-down-button").ClickAsync();
         await _fixture.WaitForDemoPageTextAsync(
             PageName, text => IndexOf(text, "ValueList") < IndexOf(text, "Switch"), "The switch was not moved below the list.");
@@ -132,13 +132,13 @@ public class InlineStructureEditingTests
         // Assert
         await _fixture.WaitForDemoPageTextAsync(
             PageName,
-            text => IndexOf(text, "ValueMap#structuremap") < IndexOf(text, "Responsive") && IndexOf(text, "Responsive") < IndexOf(text, "Switch"),
-            "The switch was not moved below the Responsive block.");
+            text => IndexOf(text, "ValueMap#structuremap") < IndexOf(text, "Switch") && IndexOf(text, "Switch") < IndexOf(text, "Responsive"),
+            "The switch was not moved below the map.");
         await Assertions.Expect(GetWrapperOf(page, "switch")).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
     }
 
     [Fact]
-    public async Task WhenAListIsMovedDownBeforeAValueMap_ThenItPassesTheMapAndTheNextBlock()
+    public async Task WhenAListIsMovedDownPastTwoChips_ThenEachMovePassesOneChip()
     {
         // Arrange
         var page = await OpenPageInInlineModeAsync();
@@ -150,8 +150,15 @@ public class InlineStructureEditingTests
         // Assert
         await _fixture.WaitForDemoPageTextAsync(
             PageName,
-            text => IndexOf(text, "ValueMap#structuremap") < IndexOf(text, "Responsive") && IndexOf(text, "Responsive") < IndexOf(text, "ValueList"),
-            "The list did not pass the map and the Responsive block.");
+            text => IndexOf(text, "ValueMap#structuremap") < IndexOf(text, "ValueList") && IndexOf(text, "ValueList") < IndexOf(text, "Responsive"),
+            "The list did not pass the map alone.");
+
+        // Act
+        await page.GetWidgetActionBar().GetByTestId("move-down-button").ClickAsync();
+
+        // Assert
+        await _fixture.WaitForDemoPageTextAsync(
+            PageName, text => IndexOf(text, "Responsive") < IndexOf(text, "ValueList"), "The list did not pass the Responsive block.");
     }
 
     [Fact]

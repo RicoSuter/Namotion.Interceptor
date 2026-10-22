@@ -41,7 +41,7 @@ public class MarkdownStructureEditTests
         var panel = (TestPanel)page.Children["panel"];
 
         // Act
-        var result = await page.MoveBlockAsync(panel.Rows[0], 1, isSkipped: null, CancellationToken.None);
+        var result = await page.MoveBlockAsync(panel.Rows[0], 1, CancellationToken.None);
         var written = await fixture.ReadAsync("page.md");
         await page.OnFileChangedAsync(CancellationToken.None);
 
@@ -143,21 +143,6 @@ public class MarkdownStructureEditTests
     }
 
     [Fact]
-    public async Task WhenTheNextWidgetIsSkipped_ThenTheLeafCannotMoveDown()
-    {
-        // Arrange
-        var fixture = await MarkdownPageFixture.CreateAsync();
-        var page = await fixture.AddPageAsync("page.md", PanelPage + $"\n:: {LeafType}#hidden\n::\n");
-        var hidden = page.Children["hidden"];
-
-        // Act
-        var actions = page.GetBlockActions(page.Children["leaf"], subject => ReferenceEquals(subject, hidden));
-
-        // Assert
-        Assert.False(actions.CanMoveDown);
-    }
-
-    [Fact]
     public async Task WhenTheListSlotsAndTheNameOfABlockAreAskedFor_ThenTheyComeFromItsTypeAndItsHeadLine()
     {
         // Arrange
@@ -188,7 +173,7 @@ public class MarkdownStructureEditTests
         var rowB = panel.Rows[1];
 
         // Act
-        await page.MoveBlockAsync(rowA, 1, isSkipped: null, CancellationToken.None);
+        await page.MoveBlockAsync(rowA, 1, CancellationToken.None);
         await page.OnFileChangedAsync(CancellationToken.None);
 
         // Assert
@@ -301,7 +286,7 @@ public class MarkdownStructureEditTests
         var row = ((TestPanel)page.Children["panel"]).Rows[0];
 
         // Act
-        var result = await page.MoveBlockAsync(row, 1, isSkipped: null, CancellationToken.None);
+        var result = await page.MoveBlockAsync(row, 1, CancellationToken.None);
 
         // Assert
         Assert.Same(row, result.Subject);

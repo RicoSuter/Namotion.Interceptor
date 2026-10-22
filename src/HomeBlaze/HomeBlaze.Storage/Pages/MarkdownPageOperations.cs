@@ -42,8 +42,7 @@ internal static class MarkdownPageOperations
     /// <summary>
     /// Moves the block one place in <paramref name="direction"/> (-1 for up, 1 for down): it is cut out and inserted before the
     /// item before it, or after the item after it. An item is a widget block or a text block of the content of the block, or
-    /// for a slot block a block of the same slot. A block for which <paramref name="isSkipped"/> is true is passed over. The
-    /// text around the block stays where it is.
+    /// for a slot block a block of the same slot. The text around the block stays where it is.
     /// </summary>
     /// <returns>Null with a refusal when there is no item in that direction or the change would change other blocks of the page.</returns>
     public static MarkdownStructureChange? TryMove(
@@ -51,10 +50,9 @@ internal static class MarkdownPageOperations
         IReadOnlyDictionary<int, IInterceptorSubject> blockSubjects,
         MarkdownBlock block,
         int direction,
-        Func<MarkdownBlock, bool> isSkipped,
         out string? refusal)
     {
-        if (FindMoveLine(page, block, direction, isSkipped) is not { } targetLine)
+        if (FindMoveLine(page, block, direction) is not { } targetLine)
         {
             refusal = $"The block at line {block.Line} has nothing {(direction < 0 ? "before" : "after")} it to move past.";
             return null;
@@ -115,33 +113,30 @@ internal static class MarkdownPageOperations
     /// Gets the line of the page before the move before which <see cref="TryMove"/> inserts the block: the first line of the
     /// item before it, or the line after the item after it. Null when the block has no such item.
     /// </summary>
-    public static int? FindMoveLine(MarkdownPage page, MarkdownBlock block, int direction, Func<MarkdownBlock, bool> isSkipped) =>
+    public static int? FindMoveLine(MarkdownPage page, MarkdownBlock block, int direction) =>
         direction is -1 or 1 && GetMoveItems(page, block, out var position) is { } items
-            ? FindMoveLine(items, position, direction, isSkipped)
+            ? FindMoveLine(items, position, direction)
             : null;
 
     /// <summary>
     /// Gets whether <see cref="TryMove"/> can move the block up and down: whether
-    /// <see cref="FindMoveLine(MarkdownPage, MarkdownBlock, int, Func{MarkdownBlock, bool})"/> finds a line in each direction.
+    /// <see cref="FindMoveLine(MarkdownPage, MarkdownBlock, int)"/> finds a line in each direction.
     /// </summary>
-    public static (bool CanMoveUp, bool CanMoveDown) GetMoveDirections(
-        MarkdownPage page, MarkdownBlock block, Func<MarkdownBlock, bool> isSkipped) =>
+    public static (bool CanMoveUp, bool CanMoveDown) GetMoveDirections(MarkdownPage page, MarkdownBlock block) =>
         GetMoveItems(page, block, out var position) is { } items
-            ? (FindMoveLine(items, position, -1, isSkipped) is not null, FindMoveLine(items, position, 1, isSkipped) is not null)
+            ? (FindMoveLine(items, position, -1) is not null, FindMoveLine(items, position, 1) is not null)
             : default;
 
-    private static int? FindMoveLine(List<MoveItem> items, int position, int direction, Func<MarkdownBlock, bool> isSkipped)
+    private static int? FindMoveLine(List<MoveItem> items, int position, int direction)
     {
-        for (var index = position + direction; index >= 0 && index < items.Count; index += direction)
+        var index = position + direction;
+        if (index < 0 || index >= items.Count)
         {
-            var item = items[index];
-            if (item.Block is not { } neighbor || !isSkipped(neighbor))
-            {
-                return direction < 0 ? item.Line : item.EndLine + 1;
-            }
+            return null;
         }
 
-        return null;
+        var item = items[index];
+        return direction < 0 ? item.Line : item.EndLine + 1;
     }
 
     // A place that a moved block passes: a block, or text without a block, with its lines.
