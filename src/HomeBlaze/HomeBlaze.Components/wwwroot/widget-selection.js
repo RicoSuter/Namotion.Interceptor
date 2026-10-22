@@ -80,6 +80,17 @@
         }
     }, true);
 
+    // Called once the widget that an edit selected rendered. An edit that replaced the element with the focus, such as the
+    // moved widget or the button of its bar, left the focus on the body, and a keyboard user would start over from the top.
+    window.widgetSelection = {
+        restoreFocus: () => {
+            const active = document.activeElement;
+            if (!active || active === document.body) {
+                document.querySelector('.subject-component-wrapper.selected')?.focus();
+            }
+        }
+    };
+
     // The parent is selected next, so it takes the focus from the button, which goes away with the bar of the child.
     document.addEventListener('click', event => {
         if (!(event.target instanceof Element) || !event.target.closest('.subject-action-bar .select-parent-button')) {

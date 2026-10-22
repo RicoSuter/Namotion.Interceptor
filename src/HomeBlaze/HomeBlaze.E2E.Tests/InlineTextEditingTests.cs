@@ -178,6 +178,69 @@ public class InlineTextEditingTests
             text => text.Contains(":: HomeBlaze.Components.Card Title=\"Text Card\"\nChanged body.\n::\n") &&
                     text.Contains("\nFirst paragraph on the page.\n"),
             "The card body was not changed.");
+        await Assertions.Expect(GetTextWrapper(page, "Changed body.")).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
+    }
+
+    [Fact]
+    public async Task WhenATextBlockInACardIsMovedUp_ThenItStaysSelected()
+    {
+        // Arrange
+        var page = await OpenPageInInlineModeAsync(LayoutPageName, LayoutContent);
+        await page.GetCard("Layout Card").Locator(".mud-card-header").First.SelectWidgetAsync();
+        var actionBar = await SelectTextAsync(page, "Last line in the card");
+
+        // Act
+        await actionBar.GetByTestId("move-up-button").ClickAsync();
+
+        // Assert
+        await _fixture.WaitForDemoPageTextAsync(
+            LayoutPageName,
+            text => text.IndexOf("Last line in the card.", StringComparison.Ordinal) < text.IndexOf("Title=\"Inner Card\"", StringComparison.Ordinal),
+            "The text was not moved above the inner card.");
+        await Assertions.Expect(GetTextWrapper(page, "Last line in the card")).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
+    }
+
+    [Fact]
+    public async Task WhenTextIsInsertedAtAnInsertLineOfASelectedCard_ThenItIsSelected()
+    {
+        // Arrange
+        var page = await OpenPageInInlineModeAsync();
+        await page.GetCard("Text Card").Locator(".mud-card-header").SelectWidgetAsync();
+        var button = page.GetCard("Text Card").GetByRole(AriaRole.Button, new() { Name = "Insert at the end of", Exact = false });
+
+        // Act
+        await button.ClickAsync();
+        await page.GetByTestId("insert-text-item").ClickAsync();
+        await SetTextEditorValueAsync(page, "Inserted in the card.");
+        await page.GetByTestId("markdown-text-save").ClickAsync();
+
+        // Assert
+        await _fixture.WaitForDemoPageTextAsync(
+            PageName,
+            text => text.Contains("Card body text.\n\nInserted in the card.\n"),
+            "The text was not inserted into the card.");
+        await Assertions.Expect(GetTextWrapper(page, "Inserted in the card.")).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
+    }
+
+    [Fact]
+    public async Task WhenATextBlockIsMovedWithTheKeyboard_ThenTheMovedBlockHasTheFocus()
+    {
+        // Arrange: Tab goes from the selected block to the first button of its bar.
+        var page = await OpenPageInInlineModeAsync();
+        await SelectTextAsync(page, "Last paragraph");
+        await GetTextWrapper(page, "Last paragraph").FocusAsync();
+        await page.Keyboard.PressAsync("Tab");
+        await Assertions.Expect(page.GetWidgetActionBar().GetByTestId("move-up-button")).ToBeFocusedAsync(new() { Timeout = Timeout });
+
+        // Act
+        await page.Keyboard.PressAsync("Enter");
+
+        // Assert
+        await _fixture.WaitForDemoPageTextAsync(
+            PageName,
+            text => text.Contains("First paragraph on the page.\n\nLast paragraph on the page.\n\n:: HomeBlaze.Components.Card"),
+            "The text was not moved above the card.");
+        await Assertions.Expect(GetTextWrapper(page, "Last paragraph")).ToBeFocusedAsync(new() { Timeout = Timeout });
     }
 
     [Fact]

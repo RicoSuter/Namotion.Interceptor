@@ -1,8 +1,10 @@
 @using System.Runtime.CompilerServices
 @using HomeBlaze.Components.Dialogs
+@using Microsoft.JSInterop
 
 @inject SubjectComponentRegistry ComponentRegistry
 @inject IDialogService DialogService
+@inject IJSRuntime JSRuntime
 
 @* The widget below tracks its own reads, so a parent that renders again with the same parameters, as a page does for a change of an expression, renders neither this wrapper nor the widget. *@
 @inherits Namotion.Interceptor.Blazor.TrackedComponentBase
@@ -231,7 +233,7 @@
     public SubjectComponent? GetSelectableSelfOrAncestor() => IsSelectable ? this : SelectableAncestor;
 
     [CascadingParameter(Name = "ParentSubjectComponent")]
-    private SubjectComponent? ParentComponent { get; set; }
+    internal SubjectComponent? ParentComponent { get; set; }
 
     // A pointer that moved further than this between press and click dragged something, such as a node of a canvas.
     private const double MaximumClickDistance = 5;
@@ -276,8 +278,10 @@
         (ComponentRegistry.HasComponent(Subject.GetType(), SubjectComponentType.Edit) || Subject.HasConfigurationProperties());
 
     // Every block of a page is configurable, also one without configuration properties of its own, and a block of text is
-    // selectable as well. The content of a slot, such as the body of a card, and an expression in the text are not.
+    // selectable as well. The content of a slot, such as the body of a card, and an expression in the text are not. A
+    // disposed widget is not, so that the selection never falls back onto a widget that a render removed.
     internal bool IsSelectable =>
+        !_isDisposed &&
         IsEditing &&
         IsSelectionEnabled &&
         Type == SubjectComponentType.Widget &&
@@ -302,6 +306,9 @@
 
     // Whether the widget of the subject is a block of text of its page, which can be selected without a configuration.
     private bool _isTextBlock;
+
+    // Set first in Dispose: a render disposes a widget before the widgets inside it.
+    private bool _isDisposed;
 
     /// <summary>Gets the name that assistive technology reads for the widget: its title, its path or the name of its type.</summary>
     public string GetAccessibleName()
@@ -536,8 +543,17 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        // A reload creates the widget of an inserted block after the edit returned, see WidgetSelection.SelectSubject.
-        Selection?.OnRendered(this);
+        // A reload creates the widget of an inserted block after the edit returned, see WidgetSelection.SelectSubject. The
+        // focus is asked for first, so that it goes to the widget only once it rendered as selected.
+        if (Selection is { } selection)
+        {
+            if (selection.TakesFocus(this))
+            {
+                await RestoreFocusAsync();
+            }
+
+            selection.OnRendered(this);
+        }
 
         // Compared as the rendered object rather than as ISubjectComponent: the registry accepts any
         // component type, and a host that waits for this callback must also hear from one that is not
@@ -566,8 +582,22 @@
         await SubjectEditDialog.ShowAsync(DialogService, ComponentRegistry, Subject, SubjectEditDialog.GetTitle(null, title));
     }
 
+    // The edit replaced the element that had the focus, such as the moved block or the button of its bar, which leaves the
+    // focus on the body of the document.
+    private async Task RestoreFocusAsync()
+    {
+        try
+        {
+            await JSRuntime.InvokeVoidAsync("widgetSelection.restoreFocus");
+        }
+        catch (Exception exception) when (exception is JSException or JSDisconnectedException or TaskCanceledException)
+        {
+        }
+    }
+
     public void Dispose()
     {
+        _isDisposed = true;
         Selection?.Remove(this);
         ParentComponent?._childComponents?.Remove(this);
     }
