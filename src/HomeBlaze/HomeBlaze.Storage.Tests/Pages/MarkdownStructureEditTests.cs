@@ -377,6 +377,49 @@ public class MarkdownStructureEditTests
     }
 
     [Fact]
+    public async Task WhenTextWithAnUnnamedWidgetIsInsertedBeforeUnnamedWidgets_ThenTheyKeepTheirSubjects()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var page = await fixture.AddPageAsync("page.md", UnnamedLeavesPage);
+        var leafA = page.Children["TestLeaf_0"];
+        var leafB = page.Children["TestLeaf_1"];
+
+        // Act
+        var result = await page.InsertTextAsync(page, leafA, $"Text.\n\n:: {LeafType} Name=new\n::", CancellationToken.None);
+        await page.OnFileChangedAsync(CancellationToken.None);
+
+        // Assert
+        Assert.True(result.IsWritten);
+        Assert.Equal(
+            $"intro\n\nText.\n\n:: {LeafType} Name=new\n::\n\n:: {LeafType} Name=a\n::\n\n:: {LeafType} Name=b\n::\n",
+            await fixture.ReadAsync("page.md"));
+        var leaves = page.Children.Values.OfType<TestLeaf>().ToList();
+        Assert.Equal(["new", "a", "b"], leaves.Select(leaf => leaf.Name));
+        Assert.Same(leafA, leaves[1]);
+        Assert.Same(leafB, leaves[2]);
+    }
+
+    [Fact]
+    public async Task WhenTheFenceOfANewWidgetInTextIsAskedFor_ThenItIsOneMoreThanTheBlockAroundTheText()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var page = await fixture.AddPageAsync("page.md", $"intro\n\n:: {PanelType}#panel Title=P\nPanel text.\n::: Row Label=A\n:::\n::\n");
+        var panel = (TestPanel)page.Children["panel"];
+        var panelText = ((MarkdownFragment)panel.Content!).Children.Values.OfType<HtmlSegment>()
+            .Single(segment => segment.Html.Contains("Panel text."));
+
+        // Act & Assert
+        Assert.Equal(2, page.GetWidgetFenceLengthInText(FindText(page, "intro")));
+        Assert.Equal(3, page.GetWidgetFenceLengthInText(panelText));
+        Assert.Equal(0, page.GetWidgetFenceLengthInText(new HtmlSegment("<p>elsewhere</p>")));
+        Assert.Equal(2, page.GetWidgetFenceLengthInContent(page));
+        Assert.Equal(4, page.GetWidgetFenceLengthInContent(panel.Rows[0].Content!));
+        Assert.Equal(0, page.GetWidgetFenceLengthInContent(new MarkdownFragment()));
+    }
+
+    [Fact]
     public async Task WhenTheLastBlockHasNoClosingLine_ThenTextCannotBeInsertedAtTheEnd()
     {
         // Arrange

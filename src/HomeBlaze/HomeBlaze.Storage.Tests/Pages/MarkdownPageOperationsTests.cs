@@ -569,16 +569,14 @@ public class MarkdownPageOperationsTests
         Assert.Same(card, change.ChangedBlock);
     }
 
-    [Theory]
-    [InlineData("```")]
-    [InlineData("::: Demo.X\n:::")]
-    public void WhenInsertedTextWouldChangeTheRestOfThePageOrAddABlock_ThenTheInsertIsRefused(string text)
+    [Fact]
+    public void WhenInsertedTextWouldChangeTheRestOfThePage_ThenTheInsertIsRefused()
     {
         // Arrange
         var page = MarkdownPageParser.Parse("intro\n\n:: Demo.One\n::\n\nafter\n");
 
         // Act
-        var change = MarkdownPageOperations.TryInsertText(page, NoSubjects, null, 3, text, out var refusal);
+        var change = MarkdownPageOperations.TryInsertText(page, NoSubjects, null, 3, "```", out var refusal);
 
         // Assert
         Assert.Null(change);
@@ -663,17 +661,14 @@ public class MarkdownPageOperationsTests
         Assert.False(change.Write.HasInsertedOrRemovedBlocks);
     }
 
-    [Theory]
-    [InlineData("::")]
-    [InlineData("::: Demo.X\n:::")]
-    [InlineData("```json\n{ \"Title\": \"A\" }\n```")]
-    public void WhenReplacedTextWouldBeABlockOrTheConfigurationOfTheBlock_ThenTheChangeIsRefused(string text)
+    [Fact]
+    public void WhenReplacedTextWouldBeTheConfigurationOfTheBlock_ThenTheChangeIsRefused()
     {
         // Arrange
         var page = MarkdownPageParser.Parse(":: Demo.Card\nOld.\n::\n");
 
         // Act
-        var change = MarkdownPageOperations.TryReplaceText(page, NoSubjects, TextAt(page, 2), text, out var refusal);
+        var change = MarkdownPageOperations.TryReplaceText(page, NoSubjects, TextAt(page, 2), "```json\n{ \"Title\": \"A\" }\n```", out var refusal);
 
         // Assert
         Assert.Null(change);
@@ -724,5 +719,130 @@ public class MarkdownPageOperationsTests
         // Assert
         Assert.Null(refusal);
         Assert.Equal("intro\r\n\r\nOne.\r\nTwo.\r\n\r\n:: Demo.One\r\n::\r\n", change!.Write.Page.Source);
+    }
+
+    [Fact]
+    public void WhenAParagraphIsReplacedWithTextThatHoldsAWidget_ThenTheWidgetIsANewBlockAndTheChangeNamesIt()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("# Title\n\nOld text.\n\n:: Demo.One\n::\n");
+        var one = new TestLeaf();
+        var subjects = new Dictionary<int, IInterceptorSubject> { [page.Blocks[0].Index] = one };
+
+        // Act
+        var change = MarkdownPageOperations.TryReplaceText(
+            page, subjects, TextAt(page, 3), "Before.\n\n:: Demo.New Name=x\n::\n\nAfter.", out var refusal);
+
+        // Assert
+        Assert.Null(refusal);
+        Assert.Equal("# Title\n\nBefore.\n\n:: Demo.New Name=x\n::\n\nAfter.\n\n:: Demo.One\n::\n", change!.Write.Page.Source);
+        Assert.True(change.Write.HasInsertedOrRemovedBlocks);
+        Assert.Equal(change.Write.Page.Blocks[0].Index, change.ResultBlockIndex);
+        Assert.Same(one, Assert.Single(change.Write.BlockSubjects).Value);
+        Assert.Equal(change.Write.Page.Blocks[1].Index, Assert.Single(change.Write.BlockSubjects).Key);
+    }
+
+    [Fact]
+    public void WhenTextWithTwoWidgetsIsInserted_ThenBothAreNewBlocksAndTheChangeNamesTheFirst()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("intro\n\n:: Demo.One\n::\n");
+
+        // Act
+        var change = MarkdownPageOperations.TryInsertText(
+            page, NoSubjects, null, InsertLine(page, null, page.Blocks[0]), ":: Demo.A\n::\n\n:: Demo.B\n::", out var refusal);
+
+        // Assert
+        Assert.Null(refusal);
+        Assert.Equal("intro\n\n:: Demo.A\n::\n\n:: Demo.B\n::\n\n:: Demo.One\n::\n", change!.Write.Page.Source);
+        Assert.Equal(change.Write.Page.Blocks[0].Index, change.ResultBlockIndex);
+        Assert.True(change.Write.HasInsertedOrRemovedBlocks);
+    }
+
+    [Fact]
+    public void WhenTheTextOfACardIsReplacedWithAWidgetWithSlotBlocks_ThenTheWidgetStandsInTheCardWithThem()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse(":: Demo.Card\nOld.\n::\n");
+
+        // Act
+        var change = MarkdownPageOperations.TryReplaceText(
+            page, NoSubjects, TextAt(page, 2), "::: Demo.List\n:::: Row Label=A\n::::\n:::", out var refusal);
+
+        // Assert
+        Assert.Null(refusal);
+        Assert.Equal(":: Demo.Card\n::: Demo.List\n:::: Row Label=A\n::::\n:::\n::\n", change!.Write.Page.Source);
+        Assert.Equal(change.Write.Page.Blocks[0].Children[0].Index, change.ResultBlockIndex);
+        Assert.Same(page.Blocks[0], change.ChangedBlock);
+    }
+
+    [Theory]
+    [InlineData("::: Row Label=A\n:::")]
+    [InlineData("::")]
+    public void WhenTextHoldsASlotBlockOrAClosingLineAtItsTopLevel_ThenTheChangeIsRefused(string text)
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse(":: Demo.Card\nOld.\n::\n");
+
+        // Act
+        var change = MarkdownPageOperations.TryReplaceText(page, NoSubjects, TextAt(page, 2), text, out var refusal);
+
+        // Assert
+        Assert.Null(change);
+        Assert.Equal("Text can hold widgets, not the parts of a widget.", refusal);
+    }
+
+    [Fact]
+    public void WhenInsertedTextHoldsASlotBlock_ThenTheInsertIsRefused()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("intro\n\n:: Demo.One\n::\n\nafter\n");
+
+        // Act
+        var change = MarkdownPageOperations.TryInsertText(page, NoSubjects, null, 3, "::: Row\n:::", out var refusal);
+
+        // Assert
+        Assert.Null(change);
+        Assert.Equal("Text can hold widgets, not the parts of a widget.", refusal);
+    }
+
+    [Fact]
+    public void WhenAWidgetInTheTextOfACardHasNoMoreColonsThanTheCard_ThenTheChangeIsRefused()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse(":: Demo.Card\nOld.\n::\n");
+
+        // Act
+        var change = MarkdownPageOperations.TryReplaceText(page, NoSubjects, TextAt(page, 2), ":: Demo.X\n::", out var refusal);
+
+        // Assert
+        Assert.Null(change);
+        Assert.Equal("A widget in this content needs at least 3 ':' characters.", refusal);
+    }
+
+    [Fact]
+    public void WhenANewWidgetWithoutClosingLineWouldTakeTheTextAfterIt_ThenTheChangeIsRefused()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("intro\n\nOld.\n\nafter\n");
+
+        // Act
+        var change = MarkdownPageOperations.TryReplaceText(page, NoSubjects, TextAt(page, 3), ":: Demo.New", out var refusal);
+
+        // Assert
+        Assert.Null(change);
+        Assert.Contains("would change other blocks", refusal);
+    }
+
+    [Fact]
+    public void WhenTheFenceOfANewWidgetIsAskedFor_ThenItIsTwoOnThePageAndOneMoreThanTheBlockAroundIt()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse(":: Demo.Card\n::: Footer\n:::\n::\n");
+
+        // Act & Assert
+        Assert.Equal(2, MarkdownPageOperations.GetWidgetFenceLength(null));
+        Assert.Equal(3, MarkdownPageOperations.GetWidgetFenceLength(page.Blocks[0]));
+        Assert.Equal(4, MarkdownPageOperations.GetWidgetFenceLength(page.Blocks[0].Children[0]));
     }
 }

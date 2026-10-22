@@ -93,6 +93,29 @@ public class MarkdownFileWriteTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenTextWithACardReplacesAParagraph_ThenTheResultNamesTheNewCardAndTheOtherCardKeepsItsSubject()
+    {
+        // Arrange
+        WriteFile("Cards.md", "# Cards\n\nOld text.\n\n:: HomeBlaze.Components.Card#first Title=First\n::\n");
+        var storage = await ConnectAsync();
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Cards.md"]);
+        var first = markdown.Children["first"];
+        var segment = markdown.Children.Values.OfType<HtmlSegment>().Single(candidate => candidate.Html.Contains("Old text."));
+
+        // Act
+        var result = await markdown.ReplaceTextBlockAsync(
+            segment, "Old text.", "New text.\n\n:: HomeBlaze.Components.Card#added Title=Added\n::", CancellationToken.None);
+
+        // Assert
+        Assert.Equal(
+            "# Cards\n\nNew text.\n\n:: HomeBlaze.Components.Card#added Title=Added\n::\n\n:: HomeBlaze.Components.Card#first Title=First\n::\n",
+            ReadFile("Cards.md"));
+        Assert.Same(markdown.Children["added"], result.Subject);
+        Assert.Equal("Added", Assert.IsType<HomeBlaze.Components.Card>(result.Subject).Title);
+        Assert.Same(first, markdown.Children["first"]);
+    }
+
+    [Fact]
     public async Task WhenTextInsideACardIsReplaced_ThenTheContentOfTheCardShowsTheNewText()
     {
         // Arrange

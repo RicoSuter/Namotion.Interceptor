@@ -18,6 +18,8 @@ internal sealed record MarkdownStructureChange(
 /// </summary>
 internal static class MarkdownPageOperations
 {
+    private const string WidgetPartRefusal = "Text can hold widgets, not the parts of a widget.";
+
     /// <summary>Removes the block with everything in it.</summary>
     /// <returns>Null with a refusal when the change would change other blocks of the page.</returns>
     public static MarkdownStructureChange? TryRemove(
@@ -377,7 +379,7 @@ internal static class MarkdownPageOperations
         var siblings = owner?.Children ?? page.Blocks;
         var reference = siblings.FirstOrDefault(block => block.Kind == MarkdownBlockKind.Widget && block.Line >= line)
             ?? siblings.LastOrDefault(block => block.Kind == MarkdownBlockKind.Widget);
-        var fenceLength = reference?.FenceLength ?? (owner is null ? MarkdownBlockFence.MinimumLength : owner.FenceLength + 1);
+        var fenceLength = reference?.FenceLength ?? GetWidgetFenceLength(owner);
         var indentation = reference is not null ? MarkdownBlockWriter.GetIndentation(source, reference)
             : owner is not null ? MarkdownBlockWriter.GetIndentation(source, owner)
             : string.Empty;
@@ -404,6 +406,13 @@ internal static class MarkdownPageOperations
             FindFirstBlockFrom(after, edit)?.Index ?? -1);
     }
 
+    /// <summary>
+    /// Gets how many fence characters a widget block needs at least to stand directly in the content of
+    /// <paramref name="owner"/>, or of the page when it is null: one more than the owner, or the shortest fence on the page.
+    /// </summary>
+    public static int GetWidgetFenceLength(MarkdownBlock? owner) =>
+        owner is null ? MarkdownBlockFence.MinimumLength : owner.FenceLength + 1;
+
     /// <summary>Gets the Markdown of a text block: its lines without the indentation of its content, with line feeds.</summary>
     public static string GetText(MarkdownPage page, MarkdownTextBlock textBlock)
     {
@@ -415,11 +424,12 @@ internal static class MarkdownPageOperations
     /// <summary>
     /// Replaces the lines of the text block with <paramref name="text"/>, or removes them when it is empty or white space.
     /// The text gets the line endings of the page and the indentation of its content, and an empty line keeps it apart from
-    /// a line of text before or after it.
+    /// a line of text before or after it. Complete widget blocks at the top level of the text become new blocks of the
+    /// content.
     /// </summary>
     /// <returns>
-    /// Null with a refusal when the text block cannot be edited or the change would change other blocks of the page or the
-    /// text around it.
+    /// Null with a refusal when the text block cannot be edited, the text holds a block that is no widget block at its top
+    /// level or a widget block with too short a fence, or the change would change other blocks of the page or the text around it.
     /// </returns>
     public static MarkdownStructureChange? TryReplaceText(
         MarkdownPage page, IReadOnlyDictionary<int, IInterceptorSubject> blockSubjects, MarkdownTextBlock textBlock, string text, out string? refusal)
@@ -436,9 +446,14 @@ internal static class MarkdownPageOperations
 
         var source = page.Source;
         var lineEnding = MarkdownBlockWriter.GetLineEnding(source, MarkdownBlockWriter.GetLineStart(source, textBlock.Line));
-        var newSource = MarkdownBlockWriter.ReplaceLines(
-            source, textBlock.Line, textBlock.EndLine, PrepareText(page, text, textBlock.Owner, lineEnding), lineEnding, out var edit);
-        return AlignText(page, blockSubjects, newSource, edit, textBlock.Owner, $"Changing the text at line {textBlock.Line}", out refusal);
+        var prepared = PrepareText(page, text, textBlock.Owner, lineEnding);
+        if (!TryCountWidgetBlocks(prepared, textBlock.Owner, out var blockCount, out refusal))
+        {
+            return null;
+        }
+
+        var newSource = MarkdownBlockWriter.ReplaceLines(source, textBlock.Line, textBlock.EndLine, prepared, lineEnding, out var edit);
+        return AlignText(page, blockSubjects, newSource, edit, textBlock.Owner, blockCount, $"Changing the text at line {textBlock.Line}", out refusal);
     }
 
     /// <summary>Removes the lines of the text block so that the text around it stays apart as before.</summary>
@@ -468,9 +483,13 @@ internal static class MarkdownPageOperations
 
     /// <summary>
     /// Inserts <paramref name="text"/> into the content of <paramref name="owner"/>, or of the page when it is null, before
-    /// the 1-based <paramref name="line"/> from <see cref="GetInsertLine"/>, with empty lines around it like a block.
+    /// the 1-based <paramref name="line"/> from <see cref="GetInsertLine"/>, with empty lines around it like a block. Complete
+    /// widget blocks at the top level of the text become new blocks of the content.
     /// </summary>
-    /// <returns>Null with a refusal when the text is empty or the change would change other blocks of the page or the text around it.</returns>
+    /// <returns>
+    /// Null with a refusal when the text is empty, holds a block that is no widget block at its top level or a widget block
+    /// with too short a fence, or the change would change other blocks of the page or the text around it.
+    /// </returns>
     public static MarkdownStructureChange? TryInsertText(
         MarkdownPage page, IReadOnlyDictionary<int, IInterceptorSubject> blockSubjects, MarkdownBlock? owner, int line, string text, out string? refusal)
     {
@@ -487,8 +506,14 @@ internal static class MarkdownPageOperations
 
         var source = page.Source;
         var lineEnding = MarkdownBlockWriter.GetLineEnding(source, MarkdownBlockWriter.GetLineStart(source, Math.Max(line - 1, 1)));
-        var newSource = MarkdownBlockWriter.InsertBlockText(source, line, PrepareText(page, text, owner, lineEnding), lineEnding, out var edit);
-        return AlignText(page, blockSubjects, newSource, edit, owner, $"Inserting text at line {line}", out refusal);
+        var prepared = PrepareText(page, text, owner, lineEnding);
+        if (!TryCountWidgetBlocks(prepared, owner, out var blockCount, out refusal))
+        {
+            return null;
+        }
+
+        var newSource = MarkdownBlockWriter.InsertBlockText(source, line, prepared, lineEnding, out var edit);
+        return AlignText(page, blockSubjects, newSource, edit, owner, blockCount, $"Inserting text at line {line}", out refusal);
     }
 
     /// <summary>
@@ -522,28 +547,67 @@ internal static class MarkdownPageOperations
         return CanInsertOrRemoveBlocks(page, out refusal);
     }
 
-    // The change of a text holds no block, and the Markdown document around it stays as it was.
+    // The new blocks of the text stand directly in the content and end on its lines, and every other block, as well as the
+    // Markdown document around the text, stays as it was.
     private static MarkdownStructureChange? AlignText(
         MarkdownPage page,
         IReadOnlyDictionary<int, IInterceptorSubject> blockSubjects,
         string newSource,
         MarkdownLineEdit edit,
         MarkdownBlock? owner,
+        int insertedBlockCount,
         string description,
         out string? refusal)
     {
         var after = MarkdownPageParser.Parse(newSource);
-        if (MarkdownBlockAlignment.TryAlign(page, after, edit, expectedInsertedBlockCount: 0, owner) is not { } map)
+        if (MarkdownBlockAlignment.TryAlign(page, after, edit, insertedBlockCount, owner, MarkdownBlockKind.Widget) is not { } map)
         {
             refusal = $"{description} would change other blocks of the page.";
             return null;
         }
 
         refusal = null;
+        var hasNewBlocks = insertedBlockCount > 0;
         return new MarkdownStructureChange(
-            new MarkdownBlockWrite(after, MapSubjects(blockSubjects, map), [], HasInsertedOrRemovedBlocks: false),
+            new MarkdownBlockWrite(after, MapSubjects(blockSubjects, map), [], HasInsertedOrRemovedBlocks: hasNewBlocks),
             owner,
-            ResultTextLine: FindFirstTextLine(newSource, edit));
+            hasNewBlocks ? FindFirstBlockFrom(after, edit)?.Index ?? -1 : -1,
+            FindFirstTextLine(newSource, edit));
+    }
+
+    // Counts the blocks of text that goes into the content of `owner`: every block at its top level must be a widget block
+    // with a fence long enough to stand directly in that content, and the blocks inside them count as well. The text is
+    // parsed on its own, where a slot block or a closing line has no block around it and is an invalid block.
+    private static bool TryCountWidgetBlocks(string text, MarkdownBlock? owner, out int blockCount, out string? refusal)
+    {
+        blockCount = 0;
+        refusal = null;
+
+        // Every block starts with the fence character, and most text has none.
+        if (!text.Contains(MarkdownBlockFence.Character))
+        {
+            return true;
+        }
+
+        var minimumFenceLength = GetWidgetFenceLength(owner);
+        foreach (var block in MarkdownPageParser.Parse(text).Blocks)
+        {
+            if (block.Kind != MarkdownBlockKind.Widget)
+            {
+                refusal = WidgetPartRefusal;
+                return false;
+            }
+
+            if (block.FenceLength < minimumFenceLength)
+            {
+                refusal = $"A widget in this content needs at least {minimumFenceLength} '{MarkdownBlockFence.Character}' characters.";
+                return false;
+            }
+
+            blockCount += CountBlocks(block);
+        }
+
+        return true;
     }
 
     // The text as lines of the page: its line endings, the indentation of its content, and no empty lines around it. The
