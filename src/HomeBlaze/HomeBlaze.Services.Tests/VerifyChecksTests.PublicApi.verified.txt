@@ -337,6 +337,7 @@ namespace HomeBlaze.Services.Display
     }
     public static class StateUnitExtensions
     {
+        public static string FormatDisplayValue(object value, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone = null) { }
         public static string FormatPercent(decimal fraction) { }
         public static string FormatWithUnit(decimal value, HomeBlaze.Abstractions.Attributes.StateUnit unit) { }
         public static string GetPropertyDisplayValue(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, object? value, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone = null) { }
