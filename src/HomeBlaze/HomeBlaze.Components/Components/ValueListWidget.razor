@@ -1,5 +1,6 @@
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(ValueList))]
 @implements ISubjectComponent
+@implements IDisposable
 @inject SubjectPathResolver PathResolver
 @inject ITimeZoneDisplay TimeZone
 
@@ -26,11 +27,98 @@
     {
         var row = rows[index];
         var (path, reading, icon) = items[index];
-        <ValueListRow @key="row" Row="@row" Path="@path" Reading="@reading" Icon="@icon" AnyIcon="@anyIcon" />
+        if (IsEditing && Selection is not null)
+        {
+            @* Only while the page is edited inline, where a row is a widget of its own that can be selected. *@
+            <SubjectComponent @key="row"
+                              Subject="@row"
+                              Type="SubjectComponentType.Widget"
+                              AdditionalParameters="@(new Dictionary<string, object?> { ["Path"] = path, ["Reading"] = reading, ["Icon"] = icon, ["AnyIcon"] = anyIcon })" />
+        }
+        else
+        {
+            <ValueListRow @key="row" Row="@row" Path="@path" Reading="@reading" Icon="@icon" AnyIcon="@anyIcon" />
+        }
     }
 </MudList>
+@if (_isShowingAddButton && StructureEditor is { } editor && Subject is ValueList list && FindValueSlot(editor, list) is { } slot)
+{
+    @* Shown while the list or one of its rows is selected, and it takes the pointer in both cases. *@
+    <MudButton Size="Size.Small"
+               StartIcon="@Icons.Material.Filled.Add"
+               Class="edit-mode-interactive"
+               OnClick="@(() => editor.AddListItemAsync(list, slot))"
+               data-testid="add-value-button">Add value</MudButton>
+}
 
 @code {
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
+
+    [CascadingParameter(Name = "IsEditing")]
+    public bool IsEditing { get; set; }
+
+    [CascadingParameter]
+    public WidgetSelection? Selection { get; set; }
+
+    [CascadingParameter]
+    public IPageStructureEditor? StructureEditor { get; set; }
+
+    [CascadingParameter(Name = "ParentSubjectComponent")]
+    public SubjectComponent? Owner { get; set; }
+
+    private WidgetSelection? _subscribedSelection;
+    private bool _isShowingAddButton;
+
+    protected override void OnParametersSet()
+    {
+        // The button follows the selection, which changes without new parameters.
+        var selection = IsEditing ? Selection : null;
+        if (!ReferenceEquals(selection, _subscribedSelection))
+        {
+            Unsubscribe();
+            _subscribedSelection = selection;
+            if (selection is not null)
+            {
+                selection.Changed += OnSelectionChanged;
+            }
+        }
+
+        _isShowingAddButton = selection is not null && Owner?.ContainsSelection == true;
+    }
+
+    private void OnSelectionChanged()
+    {
+        // Every list of the page is notified, and only one whose button appears or disappears renders again.
+        var isShowingAddButton = Owner?.ContainsSelection == true;
+        if (isShowingAddButton != _isShowingAddButton)
+        {
+            _isShowingAddButton = isShowingAddButton;
+            _ = InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private static PageListSlot? FindValueSlot(IPageStructureEditor editor, ValueList list)
+    {
+        foreach (var slot in editor.GetListSlots(list))
+        {
+            if (slot.Name == "Value")
+            {
+                return slot;
+            }
+        }
+
+        return null;
+    }
+
+    private void Unsubscribe()
+    {
+        if (_subscribedSelection is not null)
+        {
+            _subscribedSelection.Changed -= OnSelectionChanged;
+            _subscribedSelection = null;
+        }
+    }
+
+    public void Dispose() => Unsubscribe();
 }

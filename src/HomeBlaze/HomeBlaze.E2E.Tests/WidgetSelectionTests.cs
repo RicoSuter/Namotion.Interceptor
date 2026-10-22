@@ -136,13 +136,14 @@ public class WidgetSelectionTests
         // Arrange
         var page = await OpenPageInInlineModeAsync();
         var wrapper = GetValueListWrapper(page, "Nested Row");
-        await Assertions.Expect(wrapper).ToBeVisibleAsync(new() { Timeout = Timeout });
+        var rowActionBar = await GetValueRowWrapper(page, "Nested Row").SelectWidgetAsync();
 
-        // Act
-        var actionBar = await wrapper.SelectWidgetAsync();
+        // Act: the row fills the list, so the list is selected as the parent of the row.
+        await rowActionBar.GetByTestId("select-parent-button").ClickAsync();
 
         // Assert
-        await Assertions.Expect(wrapper).ToHaveClassAsync(new Regex(@"\bselected\b"));
+        await Assertions.Expect(wrapper).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
+        var actionBar = page.GetWidgetActionBar();
         await Assertions.Expect(actionBar.GetByTestId("select-parent-button")).ToBeVisibleAsync();
         await Assertions.Expect(actionBar.GetByTestId("edit-subject-button")).ToHaveCountAsync(0);
 
@@ -161,10 +162,10 @@ public class WidgetSelectionTests
         // Arrange
         var page = await OpenPageInInlineModeAsync();
         var wrapper = GetValueListWrapper(page, "Top Level Row");
-        await Assertions.Expect(wrapper).ToBeVisibleAsync(new() { Timeout = Timeout });
+        var rowActionBar = await GetValueRowWrapper(page, "Top Level Row").SelectWidgetAsync();
 
-        // Act
-        await wrapper.ClickAsync(new() { Force = true });
+        // Act: the row fills the list, so the list is selected as the parent of the row.
+        await rowActionBar.GetByTestId("select-parent-button").ClickAsync();
 
         // Assert: the bar holds only the actions on the block of the page.
         await Assertions.Expect(wrapper).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
@@ -315,6 +316,10 @@ public class WidgetSelectionTests
 
     private static ILocator GetValueListWrapper(IPage page, string rowLabel) =>
         page.Locator(".subject-component-wrapper.selectable:has(> [data-testid='value-list'])")
+            .Filter(new() { HasText = rowLabel });
+
+    private static ILocator GetValueRowWrapper(IPage page, string rowLabel) =>
+        page.Locator(".subject-component-wrapper.selectable:has(> [data-testid='value-row'])")
             .Filter(new() { HasText = rowLabel });
 
     private Motor GetMotor() =>

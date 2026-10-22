@@ -200,6 +200,22 @@
     margin-bottom: 0;
 }
 
+::deep .value-list > .subject-component-wrapper:first-child > .value-list-item {
+    padding-top: 0;
+}
+
+::deep .value-list > .subject-component-wrapper:first-child > .value-list-item > .mud-list-item-text {
+    margin-top: 0;
+}
+
+::deep .value-list > .subject-component-wrapper:last-child > .value-list-item {
+    padding-bottom: 0;
+}
+
+::deep .value-list > .subject-component-wrapper:last-child > .value-list-item > .mud-list-item-text {
+    margin-bottom: 0;
+}
+
 /* A widget that shows nothing on a viewed page, shown while the page is edited inline. */
 ::deep .invisible-widget-chip {
     display: inline-flex;

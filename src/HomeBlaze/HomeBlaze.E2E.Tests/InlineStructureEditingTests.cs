@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using HomeBlaze.E2E.Tests.Infrastructure;
 using Microsoft.Playwright;
 
@@ -103,6 +104,42 @@ public class InlineStructureEditingTests
             text => text.IndexOf("HomeBlaze.Components.ValueList", StringComparison.Ordinal) <
                     text.IndexOf("HomeBlaze.Components.Switch", StringComparison.Ordinal),
             "The switch was not moved below the value list.");
+    }
+
+    [Fact]
+    public async Task WhenARowIsMovedDown_ThenTheRowsSwapInTheFile()
+    {
+        // Arrange
+        var page = await OpenPageInInlineModeAsync();
+        var row = page.Locator(".subject-component-wrapper.selectable:has(> [data-testid='value-row'])").Filter(new() { HasText = "Row A" });
+        var actionBar = await row.SelectWidgetAsync();
+
+        // Act
+        await actionBar.GetByTestId("move-down-button").ClickAsync();
+
+        // Assert
+        await _fixture.WaitForDemoPageTextAsync(
+            PageName,
+            text => text.IndexOf("Label=\"Row B\"", StringComparison.Ordinal) < text.IndexOf("Label=\"Row A\"", StringComparison.Ordinal),
+            "The rows were not swapped.");
+    }
+
+    [Fact]
+    public async Task WhenAValueIsAddedToASelectedList_ThenItsRowFollowsTheLastRow()
+    {
+        // Arrange
+        var page = await OpenPageInInlineModeAsync();
+        await SelectValueListAsync(page);
+
+        // Act
+        await page.GetByTestId("add-value-button").ClickAsync();
+        var dialog = page.GetByTestId("create-subject-dialog");
+        await dialog.GetByLabel("Label", new() { Exact = true }).FillAsync("Row C");
+        await page.GetByTestId("create-button").ClickAsync();
+
+        // Assert
+        await _fixture.WaitForDemoPageTextAsync(
+            PageName, text => text.Contains("Label=\"Row B\"\n:::\n::: Value Label=\"Row C\""), "The value was not added.");
     }
 
     [Fact]
@@ -241,6 +278,16 @@ public class InlineStructureEditingTests
         await page.WaitUntilInteractiveAsync(Timeout);
         await page.SwitchToInlineModeAsync();
         return page;
+    }
+
+    // The rows fill the list, so a click on the list selects a row, and the list is the parent of the row.
+    private static async Task SelectValueListAsync(IPage page)
+    {
+        var row = page.Locator(".subject-component-wrapper.selectable:has(> [data-testid='value-row'])").Filter(new() { HasText = "Row B" });
+        var actionBar = await row.SelectWidgetAsync();
+        await actionBar.GetByTestId("select-parent-button").ClickAsync();
+        var list = page.Locator(".subject-component-wrapper.selectable:has(> [data-testid='value-list'])");
+        await Assertions.Expect(list).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
     }
 
     // The innermost widget around the element with the test id.
