@@ -36,6 +36,48 @@ public class WidgetSelectionTests
     }
 
     [Fact]
+    public async Task WhenTheSubjectToSelectHasNoWidgetYet_ThenItIsPendingAndTheChangeIsRaised()
+    {
+        await using var renderer = new SelectionRenderer();
+        await renderer.Dispatcher.InvokeAsync(() =>
+        {
+            // Arrange: a widget that shows the subject, such as a tab layout that shows a new tab, learns it this way.
+            var selection = new WidgetSelection();
+            var page = renderer.CreateWidget(selection, type: SubjectComponentType.Page);
+            var subject = new PersistedDevice();
+            var changeCount = 0;
+            selection.Changed += () => changeCount++;
+
+            // Act
+            selection.SelectSubject(subject, page);
+
+            // Assert
+            Assert.Same(subject, selection.PendingSubject);
+            Assert.Equal(1, changeCount);
+        });
+    }
+
+    [Fact]
+    public async Task WhenAWidgetIsSelectedWhileASubjectIsPending_ThenNoSubjectIsPending()
+    {
+        await using var renderer = new SelectionRenderer();
+        await renderer.Dispatcher.InvokeAsync(() =>
+        {
+            // Arrange
+            var selection = new WidgetSelection();
+            var page = renderer.CreateWidget(selection, type: SubjectComponentType.Page);
+            var card = renderer.CreateWidget(selection, page);
+            selection.SelectSubject(new PersistedDevice(), page);
+
+            // Act
+            selection.Select(card);
+
+            // Assert
+            Assert.Null(selection.PendingSubject);
+        });
+    }
+
+    [Fact]
     public async Task WhenTheSelectedWidgetIsRemoved_ThenTheWidgetAroundItIsSelected()
     {
         await using var renderer = new SelectionRenderer();

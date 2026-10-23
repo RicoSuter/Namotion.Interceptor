@@ -22,10 +22,16 @@ public sealed class WidgetSelection
     public SubjectComponent? Selected { get; private set; }
 
     /// <summary>
-    /// Raised after the selection changed, for components that depend on where the selection is, such as a widget
-    /// that shows more while the selection is inside it.
+    /// Raised after the selection or the pending subject changed, for components that depend on where the selection is, such
+    /// as a widget that shows more while the selection is inside it.
     /// </summary>
     public event Action? Changed;
+
+    /// <summary>
+    /// Gets the subject that <see cref="SelectSubject"/> found no widget for yet, or null. A widget that shows the subject or
+    /// hides it, such as a tab layout with the subject as one of its tabs, can show it.
+    /// </summary>
+    internal IInterceptorSubject? PendingSubject => _pendingSubject;
 
     /// <summary>
     /// Selects the widget, or clears the selection when it is null.
@@ -59,6 +65,7 @@ public sealed class WidgetSelection
         // that widget or a block in it is selected, so it would never become selectable to take the selection.
         _pendingSubject = subject;
         _takesFocus = true;
+        Changed?.Invoke();
     }
 
     /// <summary>

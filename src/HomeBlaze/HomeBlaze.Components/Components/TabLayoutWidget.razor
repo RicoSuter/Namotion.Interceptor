@@ -72,8 +72,19 @@
     private bool _isSubscribed;
     private bool _isDisposed;
 
+    private WidgetSelection? _subscribedSelection;
+
+    // The pending subject of the selection whose tab was shown, so that it is shown once and the user can choose another.
+    private IInterceptorSubject? _shownPendingSubject;
+
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
+
+    [CascadingParameter(Name = "IsEditing")]
+    private bool IsEditing { get; set; }
+
+    [CascadingParameter]
+    private WidgetSelection? Selection { get; set; }
 
     private TabLayout? Layout => Subject as TabLayout;
 
@@ -114,6 +125,62 @@
         _ => "tab-layout-panel-bar-top pt-4"
     };
 
+    protected override void OnParametersSet()
+    {
+        // A tab that an add made the pending subject of the selection is shown, see ShowPendingTab.
+        var selection = IsEditing ? Selection : null;
+        if (!ReferenceEquals(selection, _subscribedSelection))
+        {
+            UnsubscribeSelection();
+            _subscribedSelection = selection;
+            if (selection is not null)
+            {
+                selection.Changed += OnSelectionChanged;
+            }
+        }
+    }
+
+    // The reload that adds a tab can render the layout before the selection learns the new tab, or after.
+    private void OnSelectionChanged()
+    {
+        if (ShowPendingTab(Layout?.Tabs ?? []))
+        {
+            _ = InvokeAsync(StateHasChanged);
+        }
+    }
+
+    // Makes the tab active that is the pending subject of the selection, such as a tab that was just added and has no widget
+    // of its own to select, once. Returns whether it did.
+    private bool ShowPendingTab(Tab[] tabs)
+    {
+        var pending = _subscribedSelection?.PendingSubject;
+        if (pending is null || ReferenceEquals(pending, _shownPendingSubject))
+        {
+            return false;
+        }
+
+        foreach (var tab in tabs)
+        {
+            if (ReferenceEquals(tab, pending))
+            {
+                _selectedTab = tab;
+                _shownPendingSubject = pending;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private void UnsubscribeSelection()
+    {
+        if (_subscribedSelection is not null)
+        {
+            _subscribedSelection.Changed -= OnSelectionChanged;
+            _subscribedSelection = null;
+        }
+    }
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         // Only a layout with its tabs at a side has to know the width of the window. It keeps listening once it
@@ -150,6 +217,7 @@
     public async ValueTask DisposeAsync()
     {
         _isDisposed = true;
+        UnsubscribeSelection();
         if (_isSubscribed)
         {
             await BrowserViewportService.UnsubscribeAsync(this);
@@ -158,6 +226,7 @@
 
     private int GetActivePanelIndex(Tab[] tabs)
     {
+        ShowPendingTab(tabs);
         for (var index = 0; index < tabs.Length; index++)
         {
             if (ReferenceEquals(tabs[index], _selectedTab))

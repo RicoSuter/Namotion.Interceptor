@@ -1459,6 +1459,7 @@ namespace HomeBlaze.Components.Components
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
         public System.Threading.Tasks.ValueTask DisposeAsync() { }
         protected override System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender) { }
+        protected override void OnParametersSet() { }
     }
     public class TileView : Microsoft.AspNetCore.Components.ComponentBase
     {
