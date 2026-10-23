@@ -254,10 +254,10 @@ internal sealed class DerivedPropertyData
         var liveCount = 0;
         for (var i = 0; i < newItems.Length; i++)
         {
+            // Data that vanished since TryAddNewUsedByProperties fetched it was removed by a detach.
             var dependencyData = newItems[i].TryGetDerivedPropertyData();
             if (dependencyData is null)
             {
-                newItems[liveCount++] = newItems[i];
                 continue;
             }
 

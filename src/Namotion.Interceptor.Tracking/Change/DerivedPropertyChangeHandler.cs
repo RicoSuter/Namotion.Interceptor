@@ -112,6 +112,14 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             usedBySnapshot = data.DetachAndSnapshotUsedBy(property);
         }
 
+        // A source's data is removed so that a derived property attached before it on re-attach
+        // registers on fresh data instead of skipping it as detached. A derived property keeps its
+        // data: its IsRecalculating and IsAttached guard recalculations still in flight.
+        if (!property.Metadata.IsDerived)
+        {
+            property.RemoveDerivedPropertyData(data);
+        }
+
         // Case 2: Remove this property from each dependent's RequiredProperties (outside lock).
         foreach (ref readonly var derivedProperty in usedBySnapshot.AsSpan())
         {
