@@ -795,7 +795,7 @@ namespace HomeBlaze.Components
     [System.ComponentModel.Category("Dashboard")]
     [System.ComponentModel.Description("Text, colour and icon per value, for value widgets")]
     [System.ComponentModel.DisplayName("Value map")]
-    public class ValueMap : HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    public class ValueMap : HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Services.Display.IValueMap, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
         public ValueMap() { }
         public ValueMap(Namotion.Interceptor.IInterceptorSubjectContext context) { }
@@ -806,8 +806,10 @@ namespace HomeBlaze.Components
         public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
         public System.Threading.Tasks.Task ApplyConfigurationAsync(System.Threading.CancellationToken cancellationToken = default) { }
         public HomeBlaze.Components.ValueMapCase? FindCase(string rawText) { }
+        public HomeBlaze.Components.ValueMapCase? FindCase(in HomeBlaze.Services.Display.ValueBinding binding, HomeBlaze.Services.SubjectPathResolver resolver) { }
         protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
         protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        public string? GetText(in HomeBlaze.Services.Display.ValueBinding binding, HomeBlaze.Services.SubjectPathResolver resolver, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone) { }
         protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
         protected void RaisePropertyChanged(string propertyName) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
@@ -829,12 +831,15 @@ namespace HomeBlaze.Components
         public string? TextColor { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public string? Value { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string? When { get; set; }
         public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
         public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
         public System.Threading.Tasks.Task ApplyConfigurationAsync(System.Threading.CancellationToken cancellationToken = default) { }
         public HomeBlaze.Components.ValueColor GetColor() { }
         protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
         protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        public string? GetText(in HomeBlaze.Services.Display.ValueBinding binding, HomeBlaze.Services.SubjectPathResolver resolver, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone) { }
         public HomeBlaze.Components.ValueColor GetTextColor() { }
         protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
         protected void RaisePropertyChanged(string propertyName) { }

@@ -158,7 +158,8 @@ public static class ValueReader
     /// <param name="map">The name or path of the map as written.</param>
     /// <param name="error">The widget argument error when the map leads nowhere or to no <see cref="ValueMap"/>, or
     /// when the <see cref="ValueMapCase.Color"/> or the <see cref="ValueMapCase.TextColor"/> of one of its cases is no
-    /// color, otherwise null.</param>
+    /// color, or when a case has a condition or a text with a mistake, or a case without Value and When is not the last one,
+    /// otherwise null.</param>
     public static ValueMap? ResolveMap(SubjectPathResolver resolver, IInterceptorSubject widget, string? map, out string? error)
     {
         error = null;
@@ -169,8 +170,10 @@ public static class ValueReader
 
         if (ResolveSubject(resolver, widget, map) is ValueMap valueMap)
         {
-            foreach (var valueCase in valueMap.Cases)
+            var cases = valueMap.Cases;
+            for (var index = 0; index < cases.Length; index++)
             {
+                var valueCase = cases[index];
                 if (!valueCase.IsColorValid())
                 {
                     error = ValueColor.GetError(valueCase.Color);
@@ -180,6 +183,18 @@ public static class ValueReader
                 if (!valueCase.IsTextColorValid())
                 {
                     error = ValueColor.GetError(valueCase.TextColor);
+                    return null;
+                }
+
+                if (valueCase.GetExpressionError() is { } expressionError)
+                {
+                    error = $"Case {index + 1}, {expressionError}";
+                    return null;
+                }
+
+                if (valueCase.IsDefault && index < cases.Length - 1)
+                {
+                    error = $"Case {index + 1} has no Value and no When, so it matches every value and the cases after it never match. Make it the last case.";
                     return null;
                 }
             }
