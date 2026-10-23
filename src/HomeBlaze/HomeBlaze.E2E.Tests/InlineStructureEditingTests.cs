@@ -681,26 +681,38 @@ public class InlineStructureEditingTests
     }
 
     [Theory]
-    [InlineData("# Structure Demo", "Structure Demo")]
-    [InlineData("A paragraph of the page.", "A paragraph of the page.")]
-    [InlineData("Text inside the card.", "Text inside the card.")]
-    public async Task WhenTextIsClickedInTheSplitPreview_ThenItShowsThatAClickRevealsItAndTheEditorSelectsItsLine(string line, string text)
+    [InlineData("Structure Demo")]
+    [InlineData("A paragraph of the page.")]
+    [InlineData("Text inside the card.")]
+    public async Task WhenThePointerIsOverTextInTheSplitPreview_ThenOnlyItsBlockShowsTheGreenOutlineOfText(string text)
     {
         // Arrange: the text of the card stands inside the card and its body, whose wrappers contain the pointer as well.
         var page = await OpenPageInSplitModeAsync(ContentWithText);
-        var block = page.Locator(".page-split-preview .subject-component-wrapper.revealable.text-block").Filter(new() { HasText = text });
+        var block = GetPreviewTextBlock(page, text);
         await Assertions.Expect(block).ToBeVisibleAsync(new() { Timeout = Timeout });
         var hovered = page.Locator(".page-split-preview .subject-component-wrapper.reveal-hover");
 
         // Act: forced, because the content of the preview is inert.
         await block.HoverAsync(new() { Force = true });
 
-        // Assert: text has the green outline of text in Inline mode.
+        // Assert
         await Assertions.Expect(block).ToHaveClassAsync(new Regex(@"\breveal-hover\b"), new() { Timeout = Timeout });
         await Assertions.Expect(hovered).ToHaveCountAsync(1);
         await Assertions.Expect(block).ToHaveCSSAsync("outline-color", await page.ResolveColorAsync("rgba(var(--mud-palette-success-rgb), 0.5)"));
+    }
 
-        // Act
+    [Theory]
+    [InlineData("# Structure Demo", "Structure Demo")]
+    [InlineData("A paragraph of the page.", "A paragraph of the page.")]
+    [InlineData("Text inside the card.", "Text inside the card.")]
+    public async Task WhenTextIsClickedInTheSplitPreview_ThenTheEditorSelectsItsLine(string line, string text)
+    {
+        // Arrange
+        var page = await OpenPageInSplitModeAsync(ContentWithText);
+        var block = GetPreviewTextBlock(page, text);
+        await Assertions.Expect(block).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Act: forced, because the content of the preview is inert.
         await block.ClickAsync(new() { Force = true });
 
         // Assert
@@ -712,7 +724,7 @@ public class InlineStructureEditingTests
     {
         // Arrange
         var page = await OpenPageInSplitModeAsync(ContentWithText);
-        var block = page.Locator(".page-split-preview .subject-component-wrapper.revealable.text-block").Filter(new() { HasText = "A paragraph of the page." });
+        var block = GetPreviewTextBlock(page, "A paragraph of the page.");
         await Assertions.Expect(block).ToBeVisibleAsync(new() { Timeout = Timeout });
         await page.EvaluateAsync(
             "line => monaco.editor.getEditors()[0].executeEdits('test', [{ range: new monaco.Range(line, 1, line, 1), text: 'Changed ' }])",
@@ -726,10 +738,22 @@ public class InlineStructureEditingTests
             .ToBeVisibleAsync(new() { Timeout = Timeout });
     }
 
+    [Fact]
+    public async Task WhenAPageIsShownInTheSplitPreview_ThenItsTitleLeavesNoRoomForTheButtonOfThePageMenu()
+    {
+        // Arrange
+        var page = await OpenPageInSplitModeAsync(ContentWithText);
+        var title = page.Locator(".page-split-preview h1");
+        await Assertions.Expect(title).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Act & Assert: the button stands above the editor in Split mode.
+        await Assertions.Expect(title).ToHaveCSSAsync("padding-right", "0px");
+    }
+
     [Theory]
     [InlineData("TextBlocks.md", "Closing paragraph.")]
     [InlineData("Spacing.md", "Text after the code table")]
-    public async Task WhenAPageIsShownInTheSplitPreview_ThenItsElementsStandWhereViewModeShowsThem(string pageName, string lastText)
+    public async Task WhenAPageIsShownInTheSplitPreview_ThenItsTextStandsWhereViewModeShowsIt(string pageName, string lastText)
     {
         // Arrange
         var page = await _fixture.CreatePageAsync();
@@ -738,21 +762,23 @@ public class InlineStructureEditingTests
         await page.WaitUntilInteractiveAsync(Timeout);
         var viewed = page.Locator(".markdown-content");
         await Assertions.Expect(viewed.GetByText(lastText, new() { Exact = false })).ToBeVisibleAsync(new() { Timeout = Timeout });
-        var viewedLayout = await GetLayoutAsync(viewed);
+        var viewedLayout = await GetTextLayoutAsync(viewed);
 
         // Act
         await page.SelectEditModeAsync("Split", Timeout);
         var previewed = page.Locator(".page-split-preview .markdown-content");
         await Assertions.Expect(previewed.GetByText(lastText, new() { Exact = false })).ToBeVisibleAsync(new() { Timeout = Timeout });
-        var previewedLayout = await GetLayoutAsync(previewed);
+        var previewedLayout = await GetTextLayoutAsync(previewed);
 
         // Assert
         Assert.Equal(viewedLayout.Select(box => box.Name), previewedLayout.Select(box => box.Name));
         for (var index = 0; index < viewedLayout.Length; index++)
         {
             var (expected, actual) = (viewedLayout[index], previewedLayout[index]);
-            Assert.True(Math.Abs(expected.Top - actual.Top) <= 1 && Math.Abs(expected.Height - actual.Height) <= 1,
-                $"Element {index} ({expected.Name} \"{expected.Text}\") stands at {actual.Top} with height {actual.Height} in the preview and at {expected.Top} with height {expected.Height} in View mode.");
+            Assert.True(
+                Math.Abs(expected.Top - actual.Top) <= 1 && Math.Abs(expected.Left - actual.Left) <= 1 &&
+                Math.Abs(expected.Width - actual.Width) <= 1 && Math.Abs(expected.Height - actual.Height) <= 1,
+                $"Element {index} ({expected.Name} \"{expected.Text}\") is ({actual.Left}, {actual.Top}, {actual.Width} x {actual.Height}) in the preview and ({expected.Left}, {expected.Top}, {expected.Width} x {expected.Height}) in View mode.");
         }
     }
 
@@ -973,20 +999,31 @@ public class InlineStructureEditingTests
 
     private static int GetLineOf(string content, string text) => content.Split('\n').ToList().FindIndex(line => line.Contains(text)) + 1;
 
-    // The box of every element of the content that shows, relative to the content, in document order. The wrappers that
-    // only the preview has around text are left out, as are the wrappers of widgets. The content gets the same width in
-    // both modes, so that its text breaks into the same lines.
-    private static Task<ElementBox[]> GetLayoutAsync(ILocator content) =>
+    // The block of text of the preview that contains the text.
+    private static ILocator GetPreviewTextBlock(IPage page, string text) =>
+        page.Locator(".page-split-preview .subject-component-wrapper.revealable.text-block").Filter(new() { HasText = text });
+
+    // The box of every block of text that shows, relative to the content, in document order: the elements of the page, of
+    // the content of a widget and of a block of text of the preview, without the wrappers of widgets and of text. The
+    // content gets the same width in both modes, so that its text breaks into the same lines.
+    private static Task<ElementBox[]> GetTextLayoutAsync(ILocator content) =>
         content.EvaluateAsync<ElementBox[]>(
             """
             content => {
                 content.style.width = '700px';
                 const origin = content.getBoundingClientRect();
-                return [...content.querySelectorAll('*')]
-                    .filter(element => !element.matches('.subject-component-wrapper, .markdown-text') && element.getClientRects().length > 0)
+                return [...content.querySelectorAll(':scope > *, .markdown-fragment > *, .markdown-text > *')]
+                    .filter(element => !element.matches('.subject-component-wrapper') && element.getClientRects().length > 0)
                     .map(element => {
                         const box = element.getBoundingClientRect();
-                        return { name: element.tagName, text: (element.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 40), top: box.top - origin.top, height: box.height };
+                        return {
+                            name: element.tagName,
+                            text: (element.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 40),
+                            top: box.top - origin.top,
+                            left: box.left - origin.left,
+                            width: box.width,
+                            height: box.height
+                        };
                     });
             }
             """);
@@ -999,6 +1036,10 @@ public class InlineStructureEditingTests
         public string Text { get; set; } = string.Empty;
 
         public double Top { get; set; }
+
+        public double Left { get; set; }
+
+        public double Width { get; set; }
 
         public double Height { get; set; }
     }

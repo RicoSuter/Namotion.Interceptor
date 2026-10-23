@@ -20,6 +20,15 @@
     display: none;
 }
 
+/* In the preview next to the editor, every block of text stands in a wrapper that a click reveals (see MarkdownContentView),
+   and the text stands where a viewed page shows it. The wrapper takes no margin, also as a block of a container, so that
+   the margins of its text collapse through it, and the rules below that space the text of a viewed page give the text in
+   the wrapper the same margins. */
+.markdown-content ::deep .subject-component-wrapper.revealable.text-block,
+.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper.revealable.text-block {
+    margin: 0;
+}
+
 /* The content of a container: a card body, a tab, an expansion panel, a layout cell, an alert or a Responsive. Its blocks
    and paragraphs are 1rem apart, and the padding of the container alone is the space at its edges. The two empty boxes
    cancel the outer margin of the first and of the last block in the collapsed margins, also when that block is hidden,
@@ -29,7 +38,8 @@
     display: flow-root;
 }
 
-.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > * {
+.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > *,
+.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper.revealable.text-block > .markdown-text > * {
     margin-top: 1rem;
     margin-bottom: 1rem;
 }
@@ -37,11 +47,16 @@
 /* A heading is closer to the text below it than to the block above it. A heading that ends the content keeps its 1rem,
    which the box at the end cancels. Edited inline, a heading stands in the wrapper of its block of text and keeps the 1rem
    of a block (see below). */
-.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > :is(h1, h2, h3, h4, h5, h6):not(:last-child) {
+.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > :is(h1, h2, h3, h4, h5, h6):not(:last-child),
+.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper.revealable.text-block > .markdown-text > :is(h1, h2, h3, h4, h5, h6):not(:last-child),
+.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper.revealable.text-block:not(:last-child) > .markdown-text > :is(h1, h2, h3, h4, h5, h6):last-child {
     margin-bottom: 0.5rem;
 }
 
-.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > :is(h1, h2, h3, h4, h5, h6) + * {
+.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > :is(h1, h2, h3, h4, h5, h6) + *,
+.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper.revealable.text-block > .markdown-text > :is(h1, h2, h3, h4, h5, h6) + *,
+.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper.revealable.text-block:has(> .markdown-text > :is(h1, h2, h3, h4, h5, h6):last-child) + .subject-component-wrapper.revealable.text-block > .markdown-text > :first-child,
+.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper.revealable.text-block:has(> .markdown-text > :is(h1, h2, h3, h4, h5, h6):last-child) + :not(.subject-component-wrapper.revealable.text-block) {
     margin-top: 0.5rem;
 }
 
@@ -79,7 +94,8 @@
     gap: 8px;
 }
 
-.markdown-content ::deep .card-widget > .mud-card-actions > .subject-component-wrapper > .markdown-fragment > * {
+.markdown-content ::deep .card-widget > .mud-card-actions > .subject-component-wrapper > .markdown-fragment > *,
+.markdown-content ::deep .card-widget > .mud-card-actions > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper.revealable.text-block > .markdown-text > * {
     margin: 0;
 }
 
@@ -163,33 +179,4 @@
 /* The title of a page that is edited inline makes room for the button of the page menu, as the title does above. */
 .markdown-content > ::deep .subject-component-wrapper:nth-child(1 of :has(> .markdown-text > h1)) > .markdown-text > h1 {
     padding-right: 3rem;
-}
-
-/* In the preview next to the editor, every block of text stands in a wrapper that a click reveals (see MarkdownContentView),
-   and the text stands where a viewed page shows it. The wrapper takes no margin, also as a block of a container, so that
-   the margins of its text collapse through it, and the rules below give the text in a container and in a card footer the
-   margins that the rules above give it on a viewed page. */
-.markdown-content ::deep .subject-component-wrapper.revealable.text-block,
-.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper.revealable.text-block {
-    margin: 0;
-}
-
-.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper.revealable.text-block > .markdown-text > * {
-    margin-top: 1rem;
-    margin-bottom: 1rem;
-}
-
-.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper.revealable.text-block > .markdown-text > :is(h1, h2, h3, h4, h5, h6):not(:last-child),
-.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper.revealable.text-block:not(:last-child) > .markdown-text > :is(h1, h2, h3, h4, h5, h6):last-child {
-    margin-bottom: 0.5rem;
-}
-
-.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper.revealable.text-block > .markdown-text > :is(h1, h2, h3, h4, h5, h6) + *,
-.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper.revealable.text-block:has(> .markdown-text > :is(h1, h2, h3, h4, h5, h6):last-child) + .subject-component-wrapper.revealable.text-block > .markdown-text > :first-child,
-.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper.revealable.text-block:has(> .markdown-text > :is(h1, h2, h3, h4, h5, h6):last-child) + :not(.subject-component-wrapper.revealable.text-block) {
-    margin-top: 0.5rem;
-}
-
-.markdown-content ::deep .card-widget > .mud-card-actions > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper.revealable.text-block > .markdown-text > * {
-    margin: 0;
 }
