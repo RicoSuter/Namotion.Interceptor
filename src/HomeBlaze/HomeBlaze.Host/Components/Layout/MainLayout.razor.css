@@ -76,7 +76,7 @@
 }
 
 ::deep .subject-action-bar[data-mudpopover-flip^="bottom"] {
-    margin-top: 4px;
+    margin-top: calc(4px + 1rem);
 }
 
 /* The menu button at the end of the app bar lines up with the edge like the drawer toggle at the start. */

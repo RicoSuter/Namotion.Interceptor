@@ -802,14 +802,13 @@ public class InlineStructureEditingTests
     [InlineData(":: HomeBlaze.Components.TabLayout\n::: Tab Title=\"First\"\n" + TwoWidgetsInItem + ":::\n::\n", "[data-testid='tab-panel']")]
     [InlineData(":: HomeBlaze.Components.TabLayout Position=Left\n::: Tab Title=\"First\"\n" + TwoWidgetsInItem + ":::\n::\n", "[data-testid='tab-panel']")]
     [InlineData(":: HomeBlaze.Components.TabLayout Position=Right\n::: Tab Title=\"First\"\n" + TwoWidgetsInItem + ":::\n::\n", "[data-testid='tab-panel']")]
-    [InlineData(":: HomeBlaze.Components.FlowLayout MinWidth=400\n::: Item\n" + TwoWidgetsInItem + ":::\n::\n", "[data-testid='flow-item']")]
-    [InlineData(":: HomeBlaze.Components.GridLayout Rows=1 Columns=2\n::: Cell Row=0 Column=0\n:::: HomeBlaze.Components.FlowLayout MinWidth=300\n::::: Item\n" + TwoWidgetsInNestedItem + "::\n", "[data-testid='flow-item']")]
-    [InlineData(":: HomeBlaze.Components.CanvasLayout MinHeight=300\n::: Node X=20 Y=20 Width=400 Height=250\n:::: HomeBlaze.Components.FlowLayout MinWidth=300\n::::: Item\n" + TwoWidgetsInNestedItem + "::\n", "[data-testid='flow-item']")]
+    [InlineData(":: HomeBlaze.Components.FlowLayout MinWidth=200\n::: Item\n" + TwoWidgetsInItem + ":::\n::\n", "[data-testid='flow-item']")]
+    [InlineData(":: HomeBlaze.Components.GridLayout Rows=1 Columns=2\n::: Cell Row=0 Column=0\n:::: HomeBlaze.Components.FlowLayout MinWidth=300\n::::: Item\n" + TwoWidgetsInNestedItem + ":::::\n::::\n:::\n::\n", "[data-testid='flow-item']")]
+    [InlineData(":: HomeBlaze.Components.CanvasLayout MinHeight=300\n::: Node X=20 Y=20 Width=400 Height=250\n:::: HomeBlaze.Components.FlowLayout MinWidth=300\n::::: Item\n" + TwoWidgetsInNestedItem + ":::::\n::::\n:::\n::\n", "[data-testid='flow-item']")]
     public async Task WhenAWidgetInATabOrAFlowItemIsSelected_ThenItsInsertButtonsAreCenteredOverNoBlockAndNothingScrollsFurther(string block, string containerSelector)
     {
         // Arrange: the content of the container starts and ends with a widget, so its first and its last line stand at
-        // its edges. A flow item is wide enough that the bar of the selected widget, above its right end, leaves the
-        // button in the middle of the line above it free.
+        // its edges.
         var page = await OpenPageInInlineModeAsync(Content + "\n" + block + "\nText after.\n");
         var container = page.Locator(containerSelector).First;
         await Assertions.Expect(container).ToBeVisibleAsync(new() { Timeout = Timeout });
@@ -829,6 +828,37 @@ public class InlineStructureEditingTests
         var rangesAfter = await GetScrollRangesAsync(container);
         Assert.Equal(rangesBefore.Length, rangesAfter.Length);
         Assert.All(rangesAfter.Zip(rangesBefore), pair => Assert.True(pair.First <= pair.Second, $"A range grew from {pair.Second} to {pair.First}."));
+    }
+
+    [Fact]
+    public async Task WhenAWidgetInACardIsSelectedOnAPhone_ThenItsBarCoversNeitherTheInsertButtonAboveItNorTheOneBelowIt()
+    {
+        // Arrange: on a phone the bar is wider than half of the card, so it reaches over the middle of the lines. The text
+        // after the card lets the page scroll the card up to the app bar.
+        var page = await OpenPageInInlineModeAsync(
+            Content + "\n:: HomeBlaze.Components.Card Title=\"Phone Card\"\n" + TwoWidgets
+            + "::: HomeBlaze.Components.Switch Path=structuremotor/IsPowered\n:::\n::\n\n"
+            + string.Concat(Enumerable.Repeat("Text after the card.\n\n", 40)),
+            new BrowserNewContextOptions { HasTouch = true, IsMobile = true, ViewportSize = new() { Width = 375, Height = 667 } });
+        var widget = GetWrapperOf(page, "progress");
+        var buttonAbove = GetInsertLineBefore(widget).GetByRole(AriaRole.Button);
+        var buttonBelow = widget.Locator("xpath=following-sibling::*[@data-testid='block-insert-line'][1]").GetByRole(AriaRole.Button);
+        var actionBar = await widget.SelectWidgetAsync();
+        await Assertions.Expect(buttonBelow).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Act
+        await widget.EvaluateAsync("widget => widget.scrollIntoView({ block: 'center' })");
+        await Assertions.Expect(actionBar).Not.ToHaveAttributeAsync("data-mudpopover-flip", new Regex("^bottom"), new() { Timeout = Timeout });
+        var isAboveHit = await IsHitWhereItStandsAsync(buttonAbove);
+
+        // The bar flips below the widget once the app bar leaves it no room above it.
+        await widget.EvaluateAsync("widget => window.scrollBy(0, widget.getBoundingClientRect().top - document.querySelector('.mud-appbar').getBoundingClientRect().bottom - 8)");
+        await Assertions.Expect(actionBar).ToHaveAttributeAsync("data-mudpopover-flip", new Regex("^bottom"), new() { Timeout = Timeout });
+        var isBelowHit = await IsHitWhereItStandsAsync(buttonBelow);
+
+        // Assert
+        Assert.True(isAboveHit, "The bar above the widget covers the button of the line above it.");
+        Assert.True(isBelowHit, "The flipped bar below the widget covers the button of the line below it.");
     }
 
     private async Task<IPage> OpenPageInSplitModeAsync(string content = Content)
@@ -863,10 +893,10 @@ public class InlineStructureEditingTests
             startLine,
             new() { Timeout = Timeout });
 
-    private async Task<IPage> OpenPageInInlineModeAsync(string content = Content)
+    private async Task<IPage> OpenPageInInlineModeAsync(string content = Content, BrowserNewContextOptions? contextOptions = null)
     {
         await _fixture.WriteDemoPageAsync(PageName, content);
-        var page = await _fixture.CreatePageAsync();
+        var page = await _fixture.CreatePageAsync(contextOptions);
         await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/{PageName}");
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
 
@@ -990,6 +1020,16 @@ public class InlineStructureEditingTests
                 }
 
                 return findings;
+            }
+            """);
+
+    // Whether a click at the center of the element reaches it where it stands, without scrolling it.
+    private static Task<bool> IsHitWhereItStandsAsync(ILocator element) =>
+        element.EvaluateAsync<bool>(
+            """
+            element => {
+                const box = element.getBoundingClientRect();
+                return element.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2));
             }
             """);
 

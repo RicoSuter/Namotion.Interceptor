@@ -69,10 +69,11 @@
 /* The bar sits above the top right corner of the selected widget and flips below the widget when there is no room.
    MudBlazor flips a popover only at the edges of the window, so the anchor reaches up by the height of the fixed app bar
    and the bar moves down by as much while it is not flipped (see the bar in MainLayout.razor.css of HomeBlaze.Host): the
-   bar flips once the app bar leaves it no room. */
+   bar flips once the app bar leaves it no room. Above and below its widget the bar leaves 1rem more, the gap where the
+   button of the insert line next to the widget stands, so that it never covers that button, also in a narrow content. */
 .subject-action-bar-anchor {
     position: absolute;
-    top: calc(-1 * var(--mud-appbar-height, 64px));
+    top: calc(-1 * var(--mud-appbar-height, 64px) - 1rem);
     right: 0;
     bottom: 0;
     left: 0;
