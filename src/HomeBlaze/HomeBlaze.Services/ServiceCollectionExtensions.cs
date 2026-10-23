@@ -1,3 +1,4 @@
+using HomeBlaze.Services.Clients;
 using Microsoft.Extensions.DependencyInjection;
 using HomeBlaze.Components.Abstractions.TimeZones;
 
@@ -30,6 +31,7 @@ public static class ServiceCollectionExtensions
         // which depends on the resolver.
         services.AddSingleton(sp => new SubjectPathResolver(() => sp.GetRequiredService<RootManager>().Root));
         services.AddSingleton<DeveloperModeService>();
+        services.AddSingleton(serviceProvider => new ClientConnectionService(serviceProvider.GetService<TimeProvider>() ?? TimeProvider.System));
         services.AddScoped<ITimeZoneDisplay, TimeZoneDisplayService>();
         services.AddHostedService(sp => sp.GetRequiredService<RootManager>());
 
