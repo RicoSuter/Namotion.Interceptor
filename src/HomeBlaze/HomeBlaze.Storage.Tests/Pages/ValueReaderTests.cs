@@ -66,6 +66,11 @@ public class ValueReaderTests
         ::: Case Color=Success
         ::
 
+        :: HomeBlaze.Components.ValueMap#pagepath
+        ::: Case When="meter/IsOn" Text="meter is on"
+        ::: Case Text="meter is off"
+        ::
+
         :: HomeBlaze.Components.ValueMap#defaultfirst
         ::: Case Text="always"
         ::: Case Value=true Text="never"
@@ -435,6 +440,20 @@ public class ValueReaderTests
 
         // Assert
         Assert.Equal(expected, reading.MapError);
+    }
+
+    [Fact]
+    public async Task WhenACasePathHasNoVariable_ThenItResolvesFromThePageThatHoldsTheMap()
+    {
+        // Arrange
+        var (resolver, page) = await AddPageAsync();
+
+        // Act
+        var reading = ValueReader.Read(resolver, page, "idle", "pagepath", null);
+
+        // Assert
+        Assert.Null(reading.MapError);
+        Assert.Equal("meter is on", reading.Text);
     }
 
     [Fact]
