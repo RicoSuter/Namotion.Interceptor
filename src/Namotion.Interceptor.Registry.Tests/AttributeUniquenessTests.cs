@@ -1,4 +1,6 @@
 using System.Reactive.Concurrency;
+using System.Text.Json;
+using Namotion.Interceptor.AspNetCore.Extensions;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Attributes;
@@ -254,6 +256,46 @@ public class AttributeUniquenessTests
 
         var attribute = Assert.Single(registered.TryGetProperty("Forward")!.Attributes);
         Assert.Equal("Forward_A", attribute.Name);
+    }
+
+    [Fact]
+    public void WhenADuplicateAttributeTargetIsWrittenAsJson_ThenOnlyTheRegisteredAttributeUsesTheAttributeKey()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var subject = new DuplicateAttributeTarget(context)
+        {
+            Forward_Enabled = true,
+            Forward_IsEnabled = false
+        };
+
+        var jsonSerializerOptions = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+
+        // Act
+        var json = subject.ToJsonObject(jsonSerializerOptions);
+
+        // Assert: Forward_Enabled provides the attribute, so Forward_IsEnabled is written under its own name.
+        Assert.True(json["forward@IsEnabled"]!.GetValue<bool>());
+        Assert.False(json["forward_IsEnabled"]!.GetValue<bool>());
+        Assert.False(json.ContainsKey("forward_Enabled"));
+    }
+
+    [Fact]
+    public void WhenADuplicateAttributeTargetHasJsonPaths_ThenOnlyTheRegisteredAttributeUsesTheAttributePath()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var subject = new DuplicateAttributeTarget(context);
+        var registered = subject.TryGetRegisteredSubject()!;
+        var jsonSerializerOptions = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+
+        // Act
+        var winnerPath = registered.TryGetProperty("Forward_Enabled")!.Reference.GetJsonPath(jsonSerializerOptions);
+        var loserPath = registered.TryGetProperty("Forward_IsEnabled")!.Reference.GetJsonPath(jsonSerializerOptions);
+
+        // Assert
+        Assert.Equal("forward@IsEnabled", winnerPath);
+        Assert.Equal("forward_IsEnabled", loserPath);
     }
 
     [Fact]
