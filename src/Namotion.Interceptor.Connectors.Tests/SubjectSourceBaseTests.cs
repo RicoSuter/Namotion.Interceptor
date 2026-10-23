@@ -1367,35 +1367,30 @@ public class SubjectSourceBaseTests
     [Fact]
     public async Task WhenTheSourceStopsWithRetryCapacityZero_ThenEveryOwnedWriteIsCounted()
     {
-        // Arrange
+        // Arrange: the listen never returns, so no processor consumes the owned write before the stop.
         var context = InterceptorSubjectContext.Create()
             .WithFullPropertyTracking()
             .WithRegistry();
         var subject = new Person(context);
-        var loadStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var releaseLoad = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var listenEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         using var source = new TestSubjectSource(
             subject,
             context,
             NullLogger.Instance,
             writeRetryQueueSize: 0)
         {
-            LoadInitialStateOverride = async _ =>
+            StartListeningOverride = async (_, cancellationToken) =>
             {
-                loadStarted.TrySetResult();
-                await releaseLoad.Task.ConfigureAwait(false);
+                listenEntered.TrySetResult();
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken).ConfigureAwait(false);
                 return null;
             }
         };
         new PropertyReference(subject, nameof(Person.FirstName)).SetSource(source);
 
         await source.StartAsync(CancellationToken.None);
-        await loadStarted.Task.WaitAsync(TestTimeout);
-        subject.FirstName = "owned-during-load";
-        releaseLoad.TrySetResult();
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => source.State == SourceState.Synchronized,
-            message: "The source did not finish its connect-window reconciliation.");
+        await listenEntered.Task.WaitAsync(TestTimeout);
+        subject.FirstName = "owned-during-listen";
 
         // Act
         await source.StopAsync(CancellationToken.None).WaitAsync(TestTimeout);
@@ -1507,19 +1502,13 @@ public class SubjectSourceBaseTests
         var olderRetryFinished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var currentTransportStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var firstNameAttempt = 0;
-        var sourceLifetimeToken = CancellationToken.None;
         using var source = new TestSubjectSource(
             subject,
             context,
             NullLogger.Instance,
             bufferTime: TimeSpan.FromMilliseconds(8))
         {
-            LoadInitialStateOverride = cancellationToken =>
-            {
-                sourceLifetimeToken = cancellationToken;
-                return Task.FromResult<Action?>(null);
-            },
-            WriteChangesOverride = async (changes, cancellationToken) =>
+            WriteChangesOverride = async (changes, _) =>
             {
                 var changeArray = changes.ToArray();
                 var firstNameChanges = changeArray
@@ -1549,11 +1538,7 @@ public class SubjectSourceBaseTests
                 {
                     warmupFenceWritten.TrySetResult();
                 }
-                if (cancellationToken != sourceLifetimeToken)
-                {
-                    warmupWritten.TrySetResult();
-                }
-
+                warmupWritten.TrySetResult();
                 return WriteResult.Success;
             }
         };
@@ -1565,13 +1550,14 @@ public class SubjectSourceBaseTests
         using var watchdog = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         using var watchdogRegistration = watchdog.Token.Register(() => releaseOlderRetry.TrySetResult());
         await source.StartAsync(CancellationToken.None);
+        // Re-written on each poll: a probe written before the connect-window reconcile is parked and sent
+        // by it. The fence write after the first delivery is what the connected processor sends.
         var probeValue = 0;
         await AsyncTestHelpers.WaitUntilAsync(() =>
         {
             subject.FirstName_MaxLength_Unit = "probe" + probeValue++;
             return warmupWritten.Task.IsCompleted;
-        }, message: "The warmup write did not reach the connected processor.");
-        await warmupWritten.Task.WaitAsync(TestTimeout);
+        }, message: "The warmup write did not reach the transport.");
         subject.FirstName_MaxLength = probeValue;
         await warmupFenceWritten.Task.WaitAsync(TestTimeout);
 
@@ -1629,19 +1615,13 @@ public class SubjectSourceBaseTests
         var deadlineWriteStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseDeadlineWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var deadlineWriteFinished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var sourceLifetimeToken = CancellationToken.None;
         using var source = new TestSubjectSource(
             subject,
             context,
             NullLogger.Instance,
             bufferTime: TimeSpan.FromMilliseconds(8))
         {
-            LoadInitialStateOverride = cancellationToken =>
-            {
-                sourceLifetimeToken = cancellationToken;
-                return Task.FromResult<Action?>(null);
-            },
-            WriteChangesOverride = async (changes, cancellationToken) =>
+            WriteChangesOverride = async (changes, _) =>
             {
                 var changeArray = changes.ToArray();
                 if (changeArray.Any(change => change.Property.Name == nameof(Person.FirstName)))
@@ -1654,11 +1634,7 @@ public class SubjectSourceBaseTests
                 {
                     warmupFenceWritten.TrySetResult();
                 }
-                if (cancellationToken != sourceLifetimeToken)
-                {
-                    warmupWritten.TrySetResult();
-                }
-
+                warmupWritten.TrySetResult();
                 return WriteResult.Success;
             }
         };
@@ -1670,13 +1646,14 @@ public class SubjectSourceBaseTests
         using var watchdog = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         using var watchdogRegistration = watchdog.Token.Register(() => releaseDeadlineWrite.TrySetResult());
         await source.StartAsync(CancellationToken.None);
+        // Re-written on each poll: a probe written before the connect-window reconcile is parked and sent
+        // by it. The fence write after the first delivery is what the connected processor sends.
         var probeValue = 0;
         await AsyncTestHelpers.WaitUntilAsync(() =>
         {
             subject.FirstName_MaxLength_Unit = "probe" + probeValue++;
             return warmupWritten.Task.IsCompleted;
-        }, message: "The warmup write did not reach the connected processor.");
-        await warmupWritten.Task.WaitAsync(TestTimeout);
+        }, message: "The warmup write did not reach the transport.");
         subject.FirstName_MaxLength = probeValue;
         await warmupFenceWritten.Task.WaitAsync(TestTimeout);
 
