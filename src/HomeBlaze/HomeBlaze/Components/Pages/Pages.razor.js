@@ -25,6 +25,12 @@ export function fitToEditorBar(content, bar) {
     };
 }
 
+// Whether the browser runs on a Mac, an iPad or an iPhone, whose shortcuts use the Command key instead of Control.
+export function isApplePlatform() {
+    const platform = navigator.userAgentData?.platform ?? navigator.platform ?? '';
+    return /mac|iphone|ipad|ipod/i.test(platform);
+}
+
 let isForwardingPreviewPointer = false;
 
 // Gets the innermost revealable widget of a preview at a point of the viewport, or null. Its content is inert, so the

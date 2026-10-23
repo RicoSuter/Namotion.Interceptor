@@ -85,7 +85,7 @@ else
                                     <span data-testid="save-button">
                                         <MudButton Color="Color.Primary"
                                                    OnClick="OnSaveClicked"
-                                                   Disabled="@(!_isEditPanelValid)">Save (Ctrl+S)</MudButton>
+                                                   Disabled="@(!_isEditPanelValid)">Save (@_saveShortcut)</MudButton>
                                     </span>
                                 </div>
                             </div>
@@ -107,7 +107,7 @@ else
                         <span data-testid="save-button">
                             <MudButton Color="Color.Primary"
                                        OnClick="OnSaveClicked"
-                                       Disabled="@(!_isEditPanelValid)">Save (Ctrl+S)</MudButton>
+                                       Disabled="@(!_isEditPanelValid)">Save (@_saveShortcut)</MudButton>
                         </span>
                     </div>
                 </div>
@@ -201,6 +201,9 @@ else
 
     private HotKeysContext? _hotKeysContext;
 
+    // The label of the save shortcut, which a Mac reads from its Command key once the page knows the platform.
+    private string _saveShortcut = "Ctrl+S";
+
     private readonly WidgetSelection _widgetSelection = new();
 
     private const string ModulePath = "./Components/Pages/Pages.razor.js";
@@ -276,9 +279,24 @@ else
         if (firstRender)
         {
             _hotKeysContext = HotKeys.CreateContext()
-                .Add(ModCode.Ctrl, Code.S, OnCtrlS, exclude: Exclude.None)
+                .Add(ModCode.Ctrl, Code.S, OnSaveShortcut, exclude: Exclude.None)
+                .Add(ModCode.Meta, Code.S, OnSaveShortcut, exclude: Exclude.None)
                 // Escape in a dialog belongs to the dialog, and the widget that the dialog edits stays selected.
                 .Add(Code.Escape, OnEscape, new HotKeyOptions { ExcludeSelector = ".mud-dialog-container, .mud-dialog-container *" });
+
+            try
+            {
+                _module ??= await JsRuntime.InvokeAsync<IJSObjectReference>("import", ModulePath);
+                if (await _module.InvokeAsync<bool>("isApplePlatform"))
+                {
+                    _saveShortcut = "Cmd+S";
+                    StateHasChanged();
+                }
+            }
+            catch (Exception exception) when (exception is JSDisconnectedException or JSException or TaskCanceledException)
+            {
+                // The circuit is gone, or the page was left while the call ran.
+            }
         }
 
         PageEditMode? mode = ShowEditor ? _editMode : null;
@@ -396,7 +414,7 @@ else
         }
     }
 
-    private async Task OnCtrlS()
+    private async Task OnSaveShortcut()
     {
         if (!ShowEditor || _editPanel is not { } editPanel)
         {

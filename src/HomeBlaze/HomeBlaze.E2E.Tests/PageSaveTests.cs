@@ -75,6 +75,66 @@ public class PageSaveTests
         }
     }
 
+    [Theory]
+    [InlineData("Control+s")]
+    [InlineData("Meta+s")]
+    public async Task WhenTheSaveShortcutIsPressedInTheSourceEditor_ThenThePageIsWritten(string shortcut)
+    {
+        // Arrange
+        var rootManager = _fixture.ServerServices.GetRequiredService<RootManager>();
+        var pageFilePath = GetPageFilePath(rootManager);
+        var originalContent = await _fixture.ReadFileAsync(pageFilePath);
+        var originalConfigurationTime = File.GetLastWriteTimeUtc(rootManager.ConfigurationPath);
+        var marker = $"Saved {Guid.NewGuid():N}";
+
+        try
+        {
+            var page = await _fixture.CreatePageAsync();
+            await page.GotoAsync($"{_fixture.ServerAddress}pages/{PagePath}");
+            await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+            await page.WaitUntilInteractiveAsync();
+
+            await page.SelectEditModeAsync("Source");
+
+            var editorContent = page.Locator(".monaco-editor .view-lines");
+            await Assertions.Expect(editorContent).ToBeVisibleAsync(new() { Timeout = 30000 });
+            await editorContent.ClickAsync();
+            await page.Keyboard.PressAsync("ControlOrMeta+End");
+            await page.Keyboard.TypeAsync(marker);
+            await Assertions.Expect(editorContent).ToContainTextAsync(marker, new() { Timeout = 30000 });
+
+            // Act
+            await page.Keyboard.PressAsync(shortcut);
+
+            // Assert
+            await Assertions.Expect(page.GetByText("Configuration saved.")).ToBeVisibleAsync(new() { Timeout = 30000 });
+            Assert.Contains(marker, await _fixture.ReadFileAsync(pageFilePath));
+        }
+        finally
+        {
+            await RestoreAsync(rootManager, originalContent, originalConfigurationTime);
+        }
+    }
+
+    [Fact]
+    public async Task WhenTheSourceEditorIsShown_ThenTheSaveButtonNamesTheShortcutOfThePlatform()
+    {
+        // Arrange
+        var page = await _fixture.CreatePageAsync();
+        await page.GotoAsync($"{_fixture.ServerAddress}pages/{PagePath}");
+        await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+        await page.WaitUntilInteractiveAsync();
+        var isApplePlatform = await page.EvaluateAsync<bool>(
+            "() => /mac|iphone|ipad|ipod/i.test(navigator.userAgentData?.platform ?? navigator.platform ?? '')");
+
+        // Act
+        await page.SelectEditModeAsync("Source");
+
+        // Assert
+        await Assertions.Expect(page.Locator("[data-testid='save-button'] button"))
+            .ToHaveTextAsync(isApplePlatform ? "Save (Cmd+S)" : "Save (Ctrl+S)", new() { Timeout = 30000 });
+    }
+
     [Fact]
     public async Task WhenEmbeddedSubjectIsSaved_ThenItIsWrittenThroughItsPage()
     {
