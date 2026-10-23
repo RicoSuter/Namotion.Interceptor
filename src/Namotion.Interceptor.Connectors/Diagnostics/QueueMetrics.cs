@@ -125,6 +125,8 @@ public sealed class QueueMetrics
 
     internal int? Capacity => Volatile.Read(ref _snapshot).Capacity;
 
+    internal bool IsRegistered => Volatile.Read(ref _snapshot).Active is not null;
+
     internal long TotalDropped => Volatile.Read(ref _snapshot).Accumulated;
 
     private static int SafeInvokeDepth(Func<int>? depth)

@@ -77,10 +77,8 @@ public partial class MqttServerLivenessTests
     [Fact]
     public async Task WhenTheBrokerIsListening_ThenItsOutboundChangeQueueIsRegisteredAsUnbounded()
     {
-        // Arrange: a buffer time that outlasts the test, so a captured change stays in the processor's
-        // queue instead of being flushed away before the depth can be read.
-        await using var server = CreateServer(bufferTime: TimeSpan.FromMinutes(5));
-        var root = (LivenessTestRoot)server.RootSubject;
+        // Arrange
+        await using var server = CreateServer();
 
         await server.StartAsync(CancellationToken.None);
         try
@@ -90,15 +88,9 @@ public partial class MqttServerLivenessTests
                 message: "The broker should report operational once it is listening.");
 
             // Act
-            // Re-written on each poll because the processor only captures changes once it is running.
-            var probeValue = 0;
             await AsyncTestHelpers.WaitUntilAsync(
-                () =>
-                {
-                    root.Name = "v" + probeValue++;
-                    return server.Diagnostics.OutboundChanges.Depth > 0;
-                },
-                message: "The outbound change queue never reported a depth, so it was never registered.");
+                () => server.Diagnostics.OutboundChanges.IsRegistered,
+                message: "The outbound change queue was never registered.");
 
             // Assert
             Assert.Null(server.Diagnostics.OutboundChanges.Capacity);
@@ -641,7 +633,6 @@ public partial class MqttServerLivenessTests
     }
 
     private static MqttSubjectServer CreateServer(
-        TimeSpan? bufferTime = null,
         int? port = null,
         TimeSpan? initialStateDelay = null,
         bool withLifecycle = false,
@@ -672,7 +663,7 @@ public partial class MqttServerLivenessTests
                 new MqttPathProviderMapper(new AttributeBasedPathProvider("mqtt", '/')),
                 new MqttAttributeMapper("mqtt")),
             ValueConverter = valueConverter ?? new JsonMqttValueConverter(),
-            BufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8),
+            BufferTime = TimeSpan.FromMilliseconds(8),
             InitialStateDelay = initialStateDelay ?? TimeSpan.FromMilliseconds(500)
         };
 

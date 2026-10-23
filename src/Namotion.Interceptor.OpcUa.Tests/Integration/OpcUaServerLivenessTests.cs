@@ -100,8 +100,7 @@ public class OpcUaServerLivenessTests
     [Fact]
     public async Task WhenTheServerIsServing_ThenItsOutboundChangeQueueIsRegisteredAsUnbounded()
     {
-        // Arrange: a buffer time that outlasts the test, so a captured change stays in the processor's
-        // queue instead of being flushed away before the depth can be read.
+        // Arrange
         var logger = new TestLogger(_output);
         using var port = await OpcUaTestPortPool.AcquireAsync();
 
@@ -109,8 +108,7 @@ public class OpcUaServerLivenessTests
         await server.StartAsync(
             createRoot: context => new LivenessTestRoot(context),
             baseAddress: port.BaseAddress,
-            certificateStoreBasePath: port.CertificateStoreBasePath,
-            bufferTime: TimeSpan.FromMinutes(5));
+            certificateStoreBasePath: port.CertificateStoreBasePath);
 
         var serverService = server.Server!;
 
@@ -121,15 +119,9 @@ public class OpcUaServerLivenessTests
                 message: "The server should report operational once it has started serving.");
 
             // Act
-            // Re-written on each poll because the processor only captures changes once it is running.
-            var probeValue = 0;
             await AsyncTestHelpers.WaitUntilAsync(
-                () =>
-                {
-                    server.Root!.Value = "v" + probeValue++;
-                    return serverService.Diagnostics.OutboundChanges.Depth > 0;
-                },
-                message: "The outbound change queue never reported a depth, so it was never registered.");
+                () => serverService.Diagnostics.OutboundChanges.IsRegistered,
+                message: "The outbound change queue was never registered.");
 
             // Assert
             Assert.Null(serverService.Diagnostics.OutboundChanges.Capacity);
