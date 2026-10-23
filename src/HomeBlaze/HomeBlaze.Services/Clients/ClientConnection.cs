@@ -31,8 +31,14 @@ public sealed class ClientConnection
         set => _cookieClientId = value;
     }
 
+    /// <summary>
+    /// When the circuit connected.
+    /// </summary>
     public DateTimeOffset ConnectedAt { get; }
 
+    /// <summary>
+    /// What the installation can do in the browser tab of this circuit.
+    /// </summary>
     public IClientConnectionCallbacks Callbacks { get; }
 
     /// <summary>
@@ -45,6 +51,9 @@ public sealed class ClientConnection
     /// </summary>
     public string? ClientName => _assignment?.ClientName;
 
+    /// <summary>
+    /// Sets the client this circuit belongs to, replacing both its id and name at once.
+    /// </summary>
     public void Assign(string clientId, string clientName) => _assignment = new Assignment(clientId, clientName);
 
     private sealed record Assignment(string ClientId, string ClientName);

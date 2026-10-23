@@ -44,7 +44,7 @@ public partial class HomeBlazeInstallation
                         configurations++;
                     }
                 }
-                else if (property.TryGetMethodMetadata() is { } method)
+                else if (TryGetMethod(property) is { } method)
                 {
                     if (method.Kind == MethodKind.Query)
                     {
@@ -65,5 +65,19 @@ public partial class HomeBlazeInstallation
         OperationCount = operations;
         QueryCount = queries;
         NotificationPublisherCount = publishers;
+    }
+
+    // Reads the value of interface and object typed properties, so the getter of any subject runs here; one that throws
+    // holds no method and must not stop the poll.
+    private static MethodMetadata? TryGetMethod(RegisteredSubjectProperty property)
+    {
+        try
+        {
+            return property.TryGetMethodMetadata();
+        }
+        catch (Exception)
+        {
+            return null;
+        }
     }
 }

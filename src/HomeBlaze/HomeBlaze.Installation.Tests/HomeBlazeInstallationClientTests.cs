@@ -3,6 +3,7 @@ using HomeBlaze.Installation.Tests.Testing;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Clients;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.Testing;
 using Xunit;
 
@@ -10,7 +11,7 @@ namespace HomeBlaze.Installation.Tests;
 
 public class HomeBlazeInstallationClientTests
 {
-    private readonly ClientConnectionService _connections = new(TimeProvider.System);
+    private readonly ClientConnectionService _connections = new(TimeProvider.System, NullLogger<ClientConnectionService>.Instance);
     private readonly TestRoot _root;
     private readonly HomeBlazeInstallation _installation;
 
@@ -183,6 +184,57 @@ public class HomeBlazeInstallationClientTests
         var client = Assert.Single(_installation.Clients);
         Assert.Equal("named1234567", client.Key);
         Assert.Equal("named1234567", client.Value.Id);
+        Assert.False(client.Value.IsConnected);
+    }
+
+    [Fact]
+    public async Task WhenAClientThatAReloadReplacedIsRenamedOrForgotten_ThenItThrowsAndNothingIsWritten()
+    {
+        // Arrange
+        var connection = _connections.Connect(null, new FakeClientCallbacks());
+        _installation.ReconcileClients();
+        var id = connection.ConnectionId;
+        var replaced = _installation.Clients[id];
+        await replaced.RenameAsync("Hall", CancellationToken.None);
+        var writtenCount = _root.Written.Count;
+        _installation.Clients = new Dictionary<string, HomeBlazeClient> { [id] = new() { Name = "Hall" } };
+        await _installation.ApplyConfigurationAsync(CancellationToken.None);
+
+        // Act & Assert
+        var renameException = await Assert.ThrowsAsync<InvalidOperationException>(() => replaced.RenameAsync("Kitchen", CancellationToken.None));
+        var forgetException = await Assert.ThrowsAsync<InvalidOperationException>(() => replaced.ForgetAsync(CancellationToken.None));
+        Assert.Equal("The client 'Hall' is not part of the installation.", renameException.Message);
+        Assert.Equal(renameException.Message, forgetException.Message);
+        Assert.Equal("Hall", replaced.Name);
+        Assert.Equal(writtenCount, _root.Written.Count);
+    }
+
+    [Fact]
+    public async Task WhenTheConfigurationIsSavedAndLoadedIntoANewInstallation_ThenTheNamedClientIsKeptAndTheAnonymousOneIsDropped()
+    {
+        // Arrange
+        var named = _connections.Connect(null, new FakeClientCallbacks());
+        var anonymous = _connections.Connect(null, new FakeClientCallbacks());
+        _installation.ReconcileClients();
+        await _installation.Clients[named.ConnectionId].RenameAsync("Hall", CancellationToken.None);
+        var typeProvider = new TypeProvider();
+        typeProvider.AddTypes([typeof(HomeBlazeInstallation), typeof(HomeBlazeClient)]);
+        var serializer = new ConfigurableSubjectSerializer(typeProvider, new ServiceCollection().BuildServiceProvider());
+        var json = serializer.Serialize(_installation);
+        var restartedRoot = new TestRoot(SubjectContextFactory.Create(new ServiceCollection()));
+        var restarted = HomeBlazeInstallationTests.CreateInstallation(HomeBlazeInstallationTests.CreateBuild());
+        restartedRoot.Installation = restarted;
+
+        // Act
+        serializer.UpdateConfiguration(restarted, json);
+        await restarted.ApplyConfigurationAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Contains(anonymous.ConnectionId, json);
+        var client = Assert.Single(restarted.Clients);
+        Assert.Equal(named.ConnectionId, client.Key);
+        Assert.Equal(named.ConnectionId, client.Value.Id);
+        Assert.Equal("Hall", client.Value.Name);
         Assert.False(client.Value.IsConnected);
     }
 

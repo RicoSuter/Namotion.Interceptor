@@ -16,7 +16,7 @@ namespace HomeBlaze.Services.Clients
     }
     public sealed class ClientConnectionService
     {
-        public ClientConnectionService(System.TimeProvider timeProvider) { }
+        public ClientConnectionService(System.TimeProvider timeProvider, Microsoft.Extensions.Logging.ILogger<HomeBlaze.Services.Clients.ClientConnectionService> logger) { }
         public System.Collections.Immutable.ImmutableArray<HomeBlaze.Services.Clients.ClientConnection> Connections { get; }
         public event System.Action? Changed;
         public HomeBlaze.Services.Clients.ClientConnection Connect(string? cookieClientId, HomeBlaze.Services.Clients.IClientConnectionCallbacks callbacks) { }

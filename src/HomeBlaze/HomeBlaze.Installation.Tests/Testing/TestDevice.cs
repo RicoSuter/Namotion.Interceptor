@@ -13,6 +13,12 @@ public partial class TestDevice : INotificationPublisher
     [State]
     public partial decimal? Temperature { get; set; }
 
+    // Not intercepted, so switching it re-evaluates nothing and only a later read of Reading throws.
+    public bool FailsToRead { get; set; }
+
+    [Derived]
+    public object? Reading => FailsToRead ? throw new InvalidOperationException("The device cannot be read.") : null;
+
     public TestDevice()
     {
         Label = string.Empty;

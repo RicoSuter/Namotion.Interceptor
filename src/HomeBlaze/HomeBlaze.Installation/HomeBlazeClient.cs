@@ -78,6 +78,7 @@ public partial class HomeBlazeClient :
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
 
         var installation = RequiredInstallation;
+        installation.ThrowIfNotPartOfInstallation(this);
         Name = name.Trim();
         await installation.WriteClientConfigurationAsync(cancellationToken);
     }
@@ -87,6 +88,7 @@ public partial class HomeBlazeClient :
     public async Task ForgetAsync(CancellationToken cancellationToken)
     {
         var installation = RequiredInstallation;
+        installation.ThrowIfNotPartOfInstallation(this);
         Name = string.Empty;
         await installation.WriteClientConfigurationAsync(cancellationToken);
     }

@@ -337,7 +337,7 @@ public partial class HomeBlazeInstallation : BackgroundService,
         try
         {
             _developerModeService.OnChange += RefreshDeveloperMode;
-            _clientConnectionService.Changed += ReconcileClients;
+            _clientConnectionService.Changed += OnClientConnectionsChanged;
             renameRegistration = _clientConnectionService.SetRenameHandler(RenameConnectionAsync);
 
             // Read after subscribing, so a change in between is not missed.
@@ -350,7 +350,7 @@ public partial class HomeBlazeInstallation : BackgroundService,
         finally
         {
             _developerModeService.OnChange -= RefreshDeveloperMode;
-            _clientConnectionService.Changed -= ReconcileClients;
+            _clientConnectionService.Changed -= OnClientConnectionsChanged;
             renameRegistration?.Dispose();
             Status = ServiceStatus.Stopped;
         }

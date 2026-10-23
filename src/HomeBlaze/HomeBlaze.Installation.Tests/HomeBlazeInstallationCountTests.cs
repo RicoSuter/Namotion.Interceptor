@@ -53,4 +53,28 @@ public class HomeBlazeInstallationCountTests
         Assert.Equal(queries + 1, installation.QueryCount);
         Assert.Equal(publishers + 1, installation.NotificationPublisherCount);
     }
+
+    [Fact]
+    public void WhenAGetterOfAnObjectTypedPropertyThrows_ThenThePollCompletesAndCountsTheRest()
+    {
+        // Arrange
+        var timeProvider = new TestTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+        var root = new TestRoot(SubjectContextFactory.Create(new ServiceCollection()));
+        var installation = HomeBlazeInstallationTests.CreateInstallation(HomeBlazeInstallationTests.CreateBuild(), timeProvider: timeProvider);
+        root.Installation = installation;
+        root.Device = new TestDevice();
+        installation.Poll();
+        var operations = installation.OperationCount;
+        var queries = installation.QueryCount;
+        root.Device.FailsToRead = true;
+        timeProvider.Advance(TimeSpan.FromMinutes(1));
+
+        // Act
+        installation.Poll();
+
+        // Assert
+        Assert.Equal(timeProvider.GetUtcNow(), installation.LastUpdated);
+        Assert.Equal(operations, installation.OperationCount);
+        Assert.Equal(queries, installation.QueryCount);
+    }
 }

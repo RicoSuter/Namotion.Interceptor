@@ -1,5 +1,6 @@
 using HomeBlaze.Abstractions.Messaging;
 using HomeBlaze.Services.Clients;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace HomeBlaze.Services.Tests.Clients;
 
@@ -9,7 +10,7 @@ public class ClientConnectionServiceTests
     public void WhenACircuitConnectsAndDisconnects_ThenTheSnapshotAndChangedFollow()
     {
         // Arrange
-        var service = new ClientConnectionService(TimeProvider.System);
+        var service = CreateService();
         var changes = 0;
         service.Changed += () => changes++;
 
@@ -42,7 +43,7 @@ public class ClientConnectionServiceTests
     public void WhenAConnectionIsAssigned_ThenItReportsTheClient()
     {
         // Arrange
-        var connection = new ClientConnectionService(TimeProvider.System).Connect(null, new NoCallbacks());
+        var connection = CreateService().Connect(null, new NoCallbacks());
 
         // Act
         connection.Assign("abc", "Kitchen");
@@ -56,7 +57,7 @@ public class ClientConnectionServiceTests
     public async Task WhenNoRenameHandlerIsSet_ThenRenamingThrows()
     {
         // Arrange
-        var service = new ClientConnectionService(TimeProvider.System);
+        var service = CreateService();
         var connection = service.Connect(null, new NoCallbacks());
 
         // Act & Assert
@@ -67,7 +68,7 @@ public class ClientConnectionServiceTests
     public async Task WhenARenameHandlerIsSetAndDisposed_ThenRenamingCallsItOnlyWhileSet()
     {
         // Arrange
-        var service = new ClientConnectionService(TimeProvider.System);
+        var service = CreateService();
         var connection = service.Connect(null, new NoCallbacks());
         string? renamed = null;
         var registration = service.SetRenameHandler((_, name, _) =>
@@ -84,6 +85,29 @@ public class ClientConnectionServiceTests
         Assert.Equal("Kitchen", renamed);
         await Assert.ThrowsAsync<InvalidOperationException>(() => service.RenameAsync(connection, "Hall", CancellationToken.None));
     }
+
+    [Fact]
+    public void WhenAChangedSubscriberThrows_ThenConnectAndDisconnectCompleteAndTheOtherSubscribersRun()
+    {
+        // Arrange
+        var service = CreateService();
+        var changes = 0;
+        service.Changed += () => throw new InvalidOperationException("The subscriber failed.");
+        service.Changed += () => changes++;
+
+        // Act
+        var connection = service.Connect(null, new NoCallbacks());
+        var connected = service.Connections;
+        service.Disconnect(connection);
+
+        // Assert
+        Assert.Equal(connection, Assert.Single(connected));
+        Assert.Empty(service.Connections);
+        Assert.Equal(2, changes);
+    }
+
+    private static ClientConnectionService CreateService() =>
+        new(TimeProvider.System, NullLogger<ClientConnectionService>.Instance);
 
     private sealed class NoCallbacks : IClientConnectionCallbacks
     {

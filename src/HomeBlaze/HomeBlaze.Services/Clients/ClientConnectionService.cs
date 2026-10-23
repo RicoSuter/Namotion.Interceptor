@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Security.Cryptography;
+using Microsoft.Extensions.Logging;
 
 namespace HomeBlaze.Services.Clients;
 
@@ -12,13 +13,15 @@ public sealed class ClientConnectionService
     private const int IdLength = 12;
 
     private readonly TimeProvider _timeProvider;
+    private readonly ILogger _logger;
     private readonly Lock _lock = new();
     private ImmutableArray<ClientConnection> _connections = [];
     private Func<ClientConnection, string, CancellationToken, Task>? _renameHandler;
 
-    public ClientConnectionService(TimeProvider timeProvider)
+    public ClientConnectionService(TimeProvider timeProvider, ILogger<ClientConnectionService> logger)
     {
         _timeProvider = timeProvider;
+        _logger = logger;
     }
 
     /// <summary>
@@ -36,7 +39,8 @@ public sealed class ClientConnectionService
     }
 
     /// <summary>
-    /// Raised after a circuit connected or disconnected, never while a lock is held.
+    /// Raised after a circuit connected or disconnected, never while a lock is held. A subscriber that throws is
+    /// logged and neither stops the other subscribers nor fails the connect or disconnect.
     /// </summary>
     public event Action? Changed;
 
@@ -45,6 +49,9 @@ public sealed class ClientConnectionService
     /// </summary>
     public static string CreateClientId() => RandomNumberGenerator.GetString(IdCharacters, IdLength);
 
+    /// <summary>
+    /// Adds an open circuit with a new random connection id and raises <see cref="Changed"/>.
+    /// </summary>
     public ClientConnection Connect(string? cookieClientId, IClientConnectionCallbacks callbacks)
     {
         var connection = new ClientConnection(CreateClientId(), cookieClientId, _timeProvider.GetUtcNow(), callbacks);
@@ -53,10 +60,13 @@ public sealed class ClientConnectionService
             _connections = _connections.Add(connection);
         }
 
-        Changed?.Invoke();
+        RaiseChanged();
         return connection;
     }
 
+    /// <summary>
+    /// Removes the circuit and raises <see cref="Changed"/>; does nothing for a circuit that is not open.
+    /// </summary>
     public void Disconnect(ClientConnection connection)
     {
         lock (_lock)
@@ -70,7 +80,7 @@ public sealed class ClientConnectionService
             _connections = connections;
         }
 
-        Changed?.Invoke();
+        RaiseChanged();
     }
 
     /// <summary>
@@ -101,6 +111,23 @@ public sealed class ClientConnectionService
         return handler is null
             ? throw new InvalidOperationException("No installation runs that could name this browser.")
             : handler(connection, name, cancellationToken);
+    }
+
+    private void RaiseChanged()
+    {
+        // Connect runs in the initialization of a circuit, so an escaping exception would fail the circuit after
+        // its connection was added, and Disconnect would never remove it.
+        foreach (var handler in Delegate.EnumerateInvocationList(Changed))
+        {
+            try
+            {
+                handler();
+            }
+            catch (Exception exception)
+            {
+                _logger.LogWarning(exception, "Handling a change of the client connections failed");
+            }
+        }
     }
 
     private void ClearRenameHandler(Func<ClientConnection, string, CancellationToken, Task> handler)

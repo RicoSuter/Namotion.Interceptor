@@ -94,11 +94,7 @@ public partial class HomeBlazeInstallation
         ArgumentNullException.ThrowIfNull(notification);
         ArgumentException.ThrowIfNullOrWhiteSpace(notification.Message);
 
-        // Read from the committed Clients, so a client that a reload replaced or removed cannot send anymore.
-        if (!Clients.TryGetValue(client.Id, out var current) || !ReferenceEquals(current, client))
-        {
-            throw new InvalidOperationException($"The client '{client.Title}' is not part of the installation.");
-        }
+        ThrowIfNotPartOfInstallation(client);
 
         var connections = _clientConnectionService.Connections.Where(connection => connection.ClientId == client.Id).ToArray();
         if (connections.Length == 0)
@@ -130,12 +126,37 @@ public partial class HomeBlazeInstallation
         return new NotificationResult { Id = Guid.NewGuid().ToString("N") };
     }
 
+    /// <summary>
+    /// Throws an <see cref="InvalidOperationException"/> unless the client is the one in <see cref="Clients"/> under its id.
+    /// </summary>
+    internal void ThrowIfNotPartOfInstallation(HomeBlazeClient client)
+    {
+        // Read from the committed Clients, so a client that a reload replaced or removed cannot act anymore.
+        if (!Clients.TryGetValue(client.Id, out var current) || !ReferenceEquals(current, client))
+        {
+            throw new InvalidOperationException($"The client '{client.Title}' is not part of the installation.");
+        }
+    }
+
     internal async Task WriteClientConfigurationAsync(CancellationToken cancellationToken)
     {
         var configurationWriter = this.TryGetFirstParent<IConfigurationWriter>();
         if (configurationWriter is null || !await configurationWriter.WriteConfigurationAsync(this, cancellationToken))
         {
             _logger.LogWarning("The client names of the installation were not saved and will be lost on restart");
+        }
+    }
+
+    private void OnClientConnectionsChanged()
+    {
+        // Runs inside Connect of a circuit that is initializing, which must not fail because of the installation.
+        try
+        {
+            ReconcileClients();
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "Updating the clients of the installation failed");
         }
     }
 
