@@ -53,7 +53,7 @@ public static partial class MarkdownSegmentBuilder
 
     /// <summary>
     /// Gets the expressions in the text of the page in document order: the text between two pairs of braces that
-    /// contains no brace. A brace inside markdown code neither opens nor closes one.
+    /// contains no brace. A brace inside markdown code neither opens nor closes one. The head line of a block and its json block are skipped.
     /// </summary>
     /// <remarks>
     /// The search reads the text and not the rendered page, so it also returns an expression that
