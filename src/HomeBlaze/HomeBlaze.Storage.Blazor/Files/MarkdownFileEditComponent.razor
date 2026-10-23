@@ -497,22 +497,24 @@ else
         return true;
     }
 
-    // Selects the lines of the text block, such as raw HTML, while the text up to its last line is saved.
+    // Selects the lines of the text block, such as raw HTML, while the text up to its last line is saved. The editor ends a
+    // line at a lone carriage return as well, as the parser of the page does, and keeps its own line endings.
     private async Task<bool> RevealTextBlockAsync(MarkdownFile file, StandaloneCodeEditor editor, HtmlSegment segment)
     {
         if (file.GetTextBlockLines(segment) is not (var line, var endLine))
         {
-            return false;
+            Snackbar.Add("The block moved. Select it again.", Severity.Warning);
+            return true;
         }
 
-        var savedText = file.Content ?? string.Empty;
+        var savedText = NormalizeLineEndings(file.Content ?? string.Empty);
         var savedEnd = 0;
         for (var current = 0; current < endLine && savedEnd >= 0; current++)
         {
             savedEnd = savedText.IndexOf('\n', savedEnd) is var lineFeed and >= 0 ? lineFeed + 1 : -1;
         }
 
-        var editorText = await editor.GetValue();
+        var editorText = NormalizeLineEndings(await editor.GetValue());
         var savedLength = savedEnd < 0 ? savedText.Length : savedEnd;
         if (!editorText.AsSpan().StartsWith(savedText.AsSpan(0, savedLength), StringComparison.Ordinal))
         {
@@ -528,6 +530,8 @@ else
         await module.InvokeVoidAsync("reveal", editor.Id, line, endLine);
         return true;
     }
+
+    private static string NormalizeLineEndings(string text) => text.Replace("\r\n", "\n").Replace('\r', '\n');
 
     // Null once the component is disposed: the next page editor gets the same editor id, and a late call would
     // decorate its model with this page.
