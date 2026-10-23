@@ -85,7 +85,7 @@ public partial class ValueMapCase : IConfigurable
     /// </summary>
     internal string? GetExpressionError()
     {
-        if (GetCondition().Error is { } conditionError)
+        if (GetCondition(When).Error is { } conditionError)
         {
             return $"When: {conditionError}";
         }
@@ -108,12 +108,13 @@ public partial class ValueMapCase : IConfigurable
             return false;
         }
 
-        if (string.IsNullOrEmpty(When))
+        var when = When;
+        if (string.IsNullOrEmpty(when))
         {
             return true;
         }
 
-        if (GetCondition().Expression is not { } condition)
+        if (GetCondition(when).Expression is not { } condition)
         {
             return false;
         }
@@ -140,9 +141,8 @@ public partial class ValueMapCase : IConfigurable
         return template.Render(ref context);
     }
 
-    private ParsedCondition GetCondition()
+    private ParsedCondition GetCondition(string? text)
     {
-        var text = When;
         var parsed = _parsedCondition;
         if (parsed is null || !string.Equals(parsed.Text, text, StringComparison.Ordinal))
         {

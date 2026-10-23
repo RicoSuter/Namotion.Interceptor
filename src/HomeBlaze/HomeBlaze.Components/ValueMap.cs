@@ -39,10 +39,17 @@ public partial class ValueMap : IConfigurable, ITitleProvider, IValueMap
     /// <param name="resolver">The resolver of the paths of the conditions.</param>
     public ValueMapCase? FindCase(in ValueBinding binding, SubjectPathResolver resolver)
     {
-        // Formatted once for all cases; the cases with a value compare it.
-        var rawText = binding.Value is null ? null : RawValueFormatter.Format(binding.Value);
+        // Formatted once, when the first case with a value needs it: formatting a number allocates a text.
+        string? rawText = null;
+        var isFormatted = false;
         foreach (var valueCase in Cases)
         {
+            if (!isFormatted && !string.IsNullOrEmpty(valueCase.Value))
+            {
+                rawText = binding.Value is null ? null : RawValueFormatter.Format(binding.Value);
+                isFormatted = true;
+            }
+
             if (valueCase.Matches(rawText, binding, resolver))
             {
                 return valueCase;

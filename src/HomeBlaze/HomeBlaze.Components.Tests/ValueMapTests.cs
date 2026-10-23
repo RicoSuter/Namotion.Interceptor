@@ -183,4 +183,28 @@ public class ValueMapTests
         // Assert
         Assert.Equal(0, allocated);
     }
+
+    [Fact]
+    public void WhenNoCaseHasAValue_ThenTheMatchOfANumberAllocatesNothing()
+    {
+        // Arrange
+        var map = new ValueMap
+        {
+            Cases = [new ValueMapCase { When = "value > 5000", Text = "high" }, new ValueMapCase { When = "value > 1000", Text = "medium" }]
+        };
+        var binding = new ValueBinding(null, 7400m, null);
+        map.FindCase(binding, Resolver);
+
+        // Act
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        for (var iteration = 0; iteration < 100; iteration++)
+        {
+            map.FindCase(binding, Resolver);
+        }
+
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        // Assert
+        Assert.Equal(0, allocated);
+    }
 }
