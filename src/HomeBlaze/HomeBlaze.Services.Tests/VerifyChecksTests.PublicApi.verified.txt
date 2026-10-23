@@ -336,6 +336,8 @@ namespace HomeBlaze.Services.Display
     {
         public const string MapPipe = "map";
         public static HomeBlaze.Services.Expressions.ExpressionValue ApplyFormat(string name, HomeBlaze.Services.Expressions.ExpressionValue input, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone) { }
+        public static HomeBlaze.Services.Expressions.ExpressionValue ApplyMap(HomeBlaze.Services.SubjectPathResolver resolver, Namotion.Interceptor.IInterceptorSubject scope, string mapName, HomeBlaze.Services.Expressions.ExpressionValue input, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone) { }
+        public static HomeBlaze.Services.Expressions.ExpressionValue ApplyPipe(string name, System.Collections.Immutable.ImmutableArray<string> arguments, HomeBlaze.Services.Expressions.ExpressionValue input, HomeBlaze.Services.SubjectPathResolver resolver, Namotion.Interceptor.IInterceptorSubject scope, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone) { }
         public static string? Check(HomeBlaze.Services.Expressions.ParsedExpression expression, HomeBlaze.Services.Display.ExpressionUse use) { }
         public static string ToText(HomeBlaze.Services.Expressions.ExpressionValue result, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone) { }
     }
@@ -344,6 +346,8 @@ namespace HomeBlaze.Services.Display
         PageText = 0,
         CaseText = 1,
         CaseCondition = 2,
+        WidgetText = 3,
+        WidgetTextWithoutPath = 4,
     }
     public interface IValueMap
     {

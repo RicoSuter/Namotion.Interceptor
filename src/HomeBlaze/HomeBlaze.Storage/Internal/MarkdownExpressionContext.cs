@@ -38,36 +38,7 @@ internal readonly struct MarkdownExpressionContext(
     public ExpressionValue ResolveVariable(string variable, string? memberPath) => ExpressionValue.Missing;
 
     public ExpressionValue ApplyPipe(string name, ImmutableArray<string> arguments, ExpressionValue input) =>
-        name.Equals(ExpressionDisplay.MapPipe, StringComparison.OrdinalIgnoreCase)
-            ? ApplyMap(arguments[0], input)
-            : ExpressionDisplay.ApplyFormat(name, input, timeZone);
-
-    // The name of the map resolves from the page, like the Map of a widget. A value without a matching case keeps its text.
-    private ExpressionValue ApplyMap(string mapName, ExpressionValue input)
-    {
-        IInterceptorSubject? map;
-        try
-        {
-            map = pathResolver.ResolveScopedSubject(mapName, PathStyle.Canonical, page);
-        }
-        catch
-        {
-            map = null;
-        }
-
-        if (map is not IValueMap valueMap)
-        {
-            return ExpressionValue.FromText($"Cannot resolve map: {mapName}");
-        }
-
-        if (valueMap.GetError() is { } error)
-        {
-            return ExpressionValue.FromText(error);
-        }
-
-        var binding = ValueBinding.FromExpressionValue(input);
-        return ExpressionValue.FromText(valueMap.GetText(binding, pathResolver, timeZone) ?? ToText(input));
-    }
+        ExpressionDisplay.ApplyPipe(name, arguments, input, pathResolver, page, timeZone);
 
     public string ToText(ExpressionValue result) => ExpressionDisplay.ToText(result, timeZone);
 }

@@ -26,6 +26,14 @@ public class ExpressionDisplayTests
     [InlineData("a/B | map:x:y", ExpressionUse.PageText, "The pipe 'map' takes the name of a value map, such as map:wallbox")]
     [InlineData("value > 1000 and subject/IsCharging", ExpressionUse.CaseCondition, null)]
     [InlineData("value | raw", ExpressionUse.CaseCondition, "A condition takes no pipes")]
+    [InlineData("subject/ChargingPower | map:wallbox | raw", ExpressionUse.WidgetText, null)]
+    [InlineData("value > 1000", ExpressionUse.WidgetText, null)]
+    [InlineData("value | rounded", ExpressionUse.WidgetText, "Unknown pipe 'rounded'")]
+    [InlineData("a/B | map", ExpressionUse.WidgetText, "The pipe 'map' takes the name of a value map, such as map:wallbox")]
+    [InlineData("a/B | map:onoff", ExpressionUse.WidgetTextWithoutPath, null)]
+    [InlineData("subject/Name", ExpressionUse.WidgetTextWithoutPath, "'subject' is not available in a widget without a Path")]
+    [InlineData("a/B == value", ExpressionUse.WidgetTextWithoutPath, "'value' is not available in a widget without a Path")]
+    [InlineData("a/B == value/X", ExpressionUse.WidgetTextWithoutPath, "'value' is not available in a widget without a Path")]
     public void WhenExpressionIsChecked_ThenItsPipesAndVariablesMustFitWhereItStands(string text, ExpressionUse use, string? expected)
     {
         // Act
