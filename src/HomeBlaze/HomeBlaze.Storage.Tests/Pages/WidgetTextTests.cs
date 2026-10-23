@@ -51,6 +51,7 @@ public class WidgetTextTests
     [InlineData("{{ subject | map:charging }}", "wallbox", "Charging 7.4 kW")]
     [InlineData("{{ subject/IsCharging and value > 1000 }}", "wallbox/ChargingPower", "Yes")]
     [InlineData("[{{ value }}]", "nothing/Here", "[]")]
+    [InlineData("{{ subject | map:charging }}", "nothing/Here", "Free")]
     public async Task WhenTextHasExpressions_ThenTheyShowTheValuesOfThePathAndThePage(string text, string? path, string expected)
     {
         // Arrange
@@ -68,6 +69,11 @@ public class WidgetTextTests
     [InlineData("{{ value > }}", "Label: expected a value after '>' at position 7")]
     [InlineData("{{ value | rounded }}", "Label: Unknown pipe 'rounded'")]
     [InlineData("Wallbox {{ value", "Label: '{{' is not closed at position 8")]
+    [InlineData("{{ value/ChargingPower }}", "Label: 'value' has no members: write subject/... to read a property of its subject")]
+    [InlineData("{{ value[0] }}", "Label: 'value' has no members: write subject/... to read a property of its subject")]
+    [InlineData("{{ subject/ }}", "Label: expected a name after 'subject/'")]
+    [InlineData("{{ subject//ChargingPower }}", "Label: a path after 'subject/' cannot start with '/'")]
+    [InlineData("{{ value | raw | map:charging }}", "Label: The pipe 'map' must be the first pipe")]
     public async Task WhenTextHasAMistake_ThenTheErrorNamesTheArgumentAndThereIsNoText(string text, string expected)
     {
         // Arrange

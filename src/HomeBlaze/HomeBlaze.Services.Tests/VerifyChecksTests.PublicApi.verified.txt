@@ -337,7 +337,6 @@ namespace HomeBlaze.Services.Display
         public const string MapPipe = "map";
         public const char PathSeparator = '/';
         public static Namotion.Interceptor.Expressions.ExpressionValue ApplyFormat(string name, Namotion.Interceptor.Expressions.ExpressionValue input, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone) { }
-        public static Namotion.Interceptor.Expressions.ExpressionValue ApplyMap(HomeBlaze.Services.SubjectPathResolver resolver, Namotion.Interceptor.IInterceptorSubject scope, string mapName, Namotion.Interceptor.Expressions.ExpressionValue input, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone) { }
         public static Namotion.Interceptor.Expressions.ExpressionValue ApplyPipe(string name, System.Collections.Immutable.ImmutableArray<string> arguments, Namotion.Interceptor.Expressions.ExpressionValue input, HomeBlaze.Services.SubjectPathResolver resolver, Namotion.Interceptor.IInterceptorSubject scope, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone) { }
         public static string? Check(Namotion.Interceptor.Expressions.ParsedExpression expression, HomeBlaze.Services.Display.ExpressionUse use) { }
         public static string ToText(Namotion.Interceptor.Expressions.ExpressionValue result, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone) { }

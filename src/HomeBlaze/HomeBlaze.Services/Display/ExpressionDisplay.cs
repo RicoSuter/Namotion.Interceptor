@@ -110,7 +110,7 @@ public static class ExpressionDisplay
     /// <param name="mapName">The name or path of the map.</param>
     /// <param name="input">The value, bound as <see cref="ValueBinding.FromExpressionValue"/> binds it.</param>
     /// <param name="timeZone">The time zone of the viewer for dates, or null for that of the server.</param>
-    public static ExpressionValue ApplyMap(
+    internal static ExpressionValue ApplyMap(
         SubjectPathResolver resolver,
         IInterceptorSubject scope,
         string mapName,
@@ -150,10 +150,21 @@ public static class ExpressionDisplay
             return "A condition takes no pipes";
         }
 
-        foreach (var pipe in expression.Pipes)
+        for (var index = 0; index < expression.Pipes.Length; index++)
         {
-            if (use != ExpressionUse.CaseText && pipe.Name.Equals(MapPipe, StringComparison.OrdinalIgnoreCase))
+            var pipe = expression.Pipes[index];
+            if (pipe.Name.Equals(MapPipe, StringComparison.OrdinalIgnoreCase))
             {
+                if (use == ExpressionUse.CaseText)
+                {
+                    return "The pipe 'map' cannot be used in the text of a case";
+                }
+
+                if (index > 0)
+                {
+                    return "The pipe 'map' must be the first pipe";
+                }
+
                 if (pipe.Arguments.Length != 1)
                 {
                     return "The pipe 'map' takes the name of a value map, such as map:wallbox";
@@ -181,15 +192,47 @@ public static class ExpressionDisplay
             _ => null
         };
 
-        if (placeWithoutVariables is not null)
+        foreach (var path in expression.Paths)
         {
-            foreach (var path in expression.Paths)
+            if (!ExpressionVariables.TryGetVariable(path, PathSeparator, out var variable, out var memberPath))
             {
-                if (ExpressionVariables.TryGetVariable(path, PathSeparator, out var variable))
-                {
-                    return $"'{variable}' is not available in {placeWithoutVariables}";
-                }
+                continue;
             }
+
+            if (placeWithoutVariables is not null)
+            {
+                return $"'{variable}' is not available in {placeWithoutVariables}";
+            }
+
+            if (GetVariablePathError(variable, memberPath) is { } pathError)
+            {
+                return pathError;
+            }
+        }
+
+        return null;
+    }
+
+    private static string? GetVariablePathError(string variable, string? memberPath)
+    {
+        if (memberPath is null)
+        {
+            return null;
+        }
+
+        if (variable == ExpressionVariables.Value)
+        {
+            return "'value' has no members: write subject/... to read a property of its subject";
+        }
+
+        if (memberPath.Length == 0)
+        {
+            return "expected a name after 'subject/'";
+        }
+
+        if (memberPath[0] == PathSeparator)
+        {
+            return "a path after 'subject/' cannot start with '/'";
         }
 
         return null;
