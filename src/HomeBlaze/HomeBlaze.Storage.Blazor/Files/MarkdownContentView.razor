@@ -103,6 +103,10 @@ else
     [CascadingParameter(Name = "PlaceContent")]
     private IInterceptorSubject? PlaceContent { get; set; }
 
+    // Cascaded to the preview next to the editor, where a click on a block of text reveals its lines in the editor.
+    [CascadingParameter]
+    private ISubjectRevealTarget? Revealer { get; set; }
+
     private WidgetSelection? _subscribedSelection;
     private bool _isAtSelection;
 
@@ -201,10 +205,13 @@ else
         }
     }
 
-    // Text is selectable in Inline mode, except in the content of a place.
-    private bool IsGroupingText() => IsEditing && Selection is not null && IsEditableContent;
+    // Text is a block of its own where it is selectable, in Inline mode, and in the preview next to the editor, where a click
+    // reveals it. The content of a place keeps its text as a viewed page does.
+    private bool IsGroupingText() => (Revealer is not null || (IsEditing && Selection is not null && StructureEditor is not null)) && IsBlockContent;
 
-    private bool IsEditableContent => StructureEditor is not null && Content is not null && !ReferenceEquals(Content, PlaceContent);
+    private bool IsEditableContent => StructureEditor is not null && IsBlockContent;
+
+    private bool IsBlockContent => Content is not null && !ReferenceEquals(Content, PlaceContent);
 
     protected override void OnParametersSet()
     {

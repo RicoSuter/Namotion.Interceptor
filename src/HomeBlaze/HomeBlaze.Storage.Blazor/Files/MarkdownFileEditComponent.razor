@@ -370,13 +370,14 @@ else
     }
 
     // Selects the lines of the text block, such as raw HTML, while the text up to its last line is saved. The editor ends a
-    // line at a lone carriage return as well, as the parser of the page does, and keeps its own line endings.
+    // line at a lone carriage return as well, as the parser of the page does, and keeps its own line endings. Text that is
+    // not of this page, such as in a widget of another page that a Widget block shows, is not found, so that the preview
+    // reveals the block around it.
     private async Task<bool> RevealTextBlockAsync(MarkdownFile file, MarkdownSourceEditor editor, HtmlSegment segment)
     {
         if (file.GetTextBlockLines(segment) is not (var line, var endLine))
         {
-            Snackbar.Add(MarkdownPageStructureEditor.MovedBlockMessage, Severity.Warning);
-            return true;
+            return false;
         }
 
         if (await editor.GetTextAsync() is not { } text)

@@ -310,3 +310,8 @@
     outline: 1px dashed rgba(var(--mud-palette-primary-rgb), 0.5);
     outline-offset: 1px;
 }
+
+/* A block of text is green, as in Inline mode. */
+.subject-component-wrapper.revealable.text-block.reveal-hover {
+    outline-color: rgba(var(--mud-palette-success-rgb), 0.5);
+}

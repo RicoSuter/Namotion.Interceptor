@@ -21,8 +21,8 @@
         var isRevealable = !isSelectable && Revealer is not null && Type == SubjectComponentType.Widget;
         @* Text that is not selectable yet, such as in a card that is not selected, becomes selectable once it is selected.
            A double click on it opens its own dialog rather than the one of the card, which the first click selected. Text
-           renders as a block only in Inline mode. *@
-        var opensOnDoubleClick = isSelectable || _isTextBlock;
+           renders as a block only in Inline mode and in the preview next to the editor, which a click reveals. *@
+        var opensOnDoubleClick = isSelectable || (_isTextBlock && !isRevealable);
         if (opensOnDoubleClick && !_doubleClickCallback.HasDelegate)
         {
             // Created once and only when first needed, so that a viewed page allocates none per widget.
@@ -309,12 +309,12 @@
         Selection != null &&
         (Subject is IConfigurable || _isTextBlock || HasEditComponent);
 
-    // Constant strings, so that rendering a wrapper allocates no class names. Text blocks are grouped only in Inline mode,
-    // so a viewed page never has the class text-block.
+    // Constant strings, so that rendering a wrapper allocates no class names. Text blocks are grouped only in Inline mode
+    // and in the preview next to the editor, so a viewed page never has the class text-block.
     internal static string GetWrapperClass(bool isSelectable, bool isSelected, bool isRevealable, bool isTextBlock) =>
         isSelected ? (isTextBlock ? "subject-component-wrapper selectable selected text-block" : "subject-component-wrapper selectable selected")
         : isSelectable ? (isTextBlock ? "subject-component-wrapper selectable text-block" : "subject-component-wrapper selectable")
-        : isRevealable ? "subject-component-wrapper revealable"
+        : isRevealable ? (isTextBlock ? "subject-component-wrapper revealable text-block" : "subject-component-wrapper revealable")
         : isTextBlock ? "subject-component-wrapper text-block"
         : "subject-component-wrapper";
 
