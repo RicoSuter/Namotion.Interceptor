@@ -390,14 +390,8 @@ public class OutboundDropCountingTests
         }
     }
 
-    private static TestSubjectSource CreateSource(Person person, IInterceptorSubjectContext context)
-    {
-        var source = new TestSubjectSource(person, context, NullLogger.Instance,
-            bufferTime: TimeSpan.FromMinutes(5));
-
-        new PropertyReference(person, nameof(Person.FirstName)).SetSource(source);
-        return source;
-    }
+    private static TestSubjectSource CreateSource(Person person, IInterceptorSubjectContext context) =>
+        new(person, context, NullLogger.Instance);
 
     private static Task WaitForOutboundChangeQueueRegistrationAsync(TestSubjectSource source) =>
         AsyncTestHelpers.WaitUntilAsync(

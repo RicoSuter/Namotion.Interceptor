@@ -633,7 +633,6 @@ public partial class MqttServerLivenessTests
     }
 
     private static MqttSubjectServer CreateServer(
-        TimeSpan? bufferTime = null,
         int? port = null,
         TimeSpan? initialStateDelay = null,
         bool withLifecycle = false,
@@ -664,7 +663,7 @@ public partial class MqttServerLivenessTests
                 new MqttPathProviderMapper(new AttributeBasedPathProvider("mqtt", '/')),
                 new MqttAttributeMapper("mqtt")),
             ValueConverter = valueConverter ?? new JsonMqttValueConverter(),
-            BufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8),
+            BufferTime = TimeSpan.FromMilliseconds(8),
             InitialStateDelay = initialStateDelay ?? TimeSpan.FromMilliseconds(500)
         };
 

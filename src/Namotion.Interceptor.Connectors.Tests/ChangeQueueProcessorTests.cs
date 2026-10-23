@@ -222,58 +222,6 @@ public class ChangeQueueProcessorTests
     }
 
     [Fact]
-    public async Task WhenFlushInProgress_ThenConcurrentFlushSkipsToAvoidContention()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext.Create();
-        context.WithRegistry();
-        context.WithPropertyChangeSubscriptions();
-
-        var subject = new Person(context);
-        var flushCount = 0;
-        var flushStarted = new TaskCompletionSource();
-        var allowFlush = new TaskCompletionSource();
-
-        var processor = new ChangeQueueProcessor(
-            source: null,
-            context: context,
-            propertyFilter: _ => true,
-            writeHandler: async (_, _) =>
-            {
-                Interlocked.Increment(ref flushCount);
-                flushStarted.TrySetResult();
-                await allowFlush.Task;
-            },
-            bufferTime: TimeSpan.FromMilliseconds(50),
-            maxQueueDepth: null,
-            logger: NullLogger.Instance,
-            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
-
-        // Act - enqueue and start first flush
-        var property = new PropertyReference(subject, nameof(Person.FirstName));
-        EnqueueChange(processor, property, null, "Value1");
-        subject.FirstName = "Value1";
-
-        var firstFlush = TriggerFlushAsync(processor);
-        await flushStarted.Task;
-
-        // Try second flush while first is blocked - should skip to avoid contention
-        // (changes will be picked up on next timer tick, not lost)
-        EnqueueChange(processor, property, "Value1", "Value2");
-        var secondFlush = TriggerFlushAsync(processor);
-
-        // Allow first flush to complete
-        allowFlush.TrySetResult();
-        await firstFlush;
-        await secondFlush;
-
-        processor.Dispose();
-
-        // Assert - only one flush executed (concurrent flush skipped, not blocked)
-        Assert.Equal(1, flushCount);
-    }
-
-    [Fact]
     public async Task WhenBoundedQueueOverflows_ThenOldestChangesAreDropped()
     {
         // Arrange
@@ -956,26 +904,26 @@ public class ChangeQueueProcessorTests
 
                 return ValueTask.CompletedTask;
             },
-            bufferTime: TimeSpan.FromMinutes(5),
+            bufferTime: TimeSpan.FromMilliseconds(10),
             maxQueueDepth: null,
             logger: NullLogger.Instance,
             deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
 
-        using var cancellation = new CancellationTokenSource();
-        var processing = processor.ProcessAsync(cancellation.Token);
-
-        // Act: nothing consumes the subscription between the write and the tick, so the filter runs only then.
+        // Captured by the processor's subscription before processing starts, while the filter rejects it.
         subject.FirstName = "written-while-rejected";
         Volatile.Write(ref accept, true);
-        TriggerDrain(processor);
-        await TriggerFlushAsync(processor);
+
+        // Act: nothing consumes the subscription before the first tick, so the filter runs only then.
+        using var cancellation = new CancellationTokenSource();
+        var processing = processor.ProcessAsync(cancellation.Token);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => !written.IsEmpty,
+            message: "The first tick should take the change and write it.");
+        await cancellation.CancelAsync();
+        await processing.WaitAsync(TestTimeout);
 
         // Assert
         Assert.Equal(["written-while-rejected"], written.ToArray());
-
-        // Cleanup
-        await cancellation.CancelAsync();
-        await processing.WaitAsync(TestTimeout);
     }
 
     [Fact]
@@ -1131,6 +1079,57 @@ public class ChangeQueueProcessorTests
         {
             releaseFilter.TrySetResult();
         }
+    }
+
+    [Fact]
+    public async Task WhenDisposedWhileProcessing_ThenTheTeardownDoesNotRunOnTheDisposingThread()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithRegistry()
+            .WithPropertyChangeSubscriptions();
+        var subject = new Person(context);
+        var filterEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFilter = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        using var processor = new ChangeQueueProcessor(
+            source: new object(),
+            context: context,
+            propertyFilter: _ =>
+            {
+                filterEntered.TrySetResult();
+                releaseFilter.Task.GetAwaiter().GetResult();
+                return true;
+            },
+            writeHandler: (_, _) => ValueTask.CompletedTask,
+            bufferTime: TimeSpan.FromMinutes(5),
+            maxQueueDepth: null,
+            logger: NullLogger.Instance,
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
+
+        // Lets the filter out even when nothing else does, so a regression fails instead of wedging.
+        using var watchdog = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var watchdogRegistration = watchdog.Token.Register(() => releaseFilter.TrySetResult());
+        using var cancellation = new CancellationTokenSource();
+        var processing = processor.ProcessAsync(cancellation.Token);
+        subject.FirstName = "left";
+
+        try
+        {
+            // Act: no tick runs before the dispose, so the teardown drain is the first to filter the change.
+            // Run inline, it would block this call in the filter until the watchdog.
+            await Task.Run(processor.Dispose).WaitAsync(TestTimeout);
+
+            // Assert: the teardown runs on, and is still blocked in the filter after Dispose returned.
+            await filterEntered.Task.WaitAsync(TestTimeout);
+            Assert.False(releaseFilter.Task.IsCompleted);
+        }
+        finally
+        {
+            releaseFilter.TrySetResult();
+        }
+
+        await processing.WaitAsync(TestTimeout);
     }
 
     [Fact]
@@ -1457,8 +1456,8 @@ public class ChangeQueueProcessorTests
         return (ConcurrentQueue<SubjectPropertyChange>)changesField!.GetValue(processor)!;
     }
 
-    // What a flush tick does before it flushes. Only for a buffer time no tick reaches during the test,
-    // since the drain is single consumer.
+    // What a flush tick does before it flushes. The drain is single consumer, so only while the test is
+    // the subscription's only consumer: a buffer time no tick reaches, and before the stop, which drains too.
     private static void TriggerDrain(ChangeQueueProcessor processor)
     {
         var drainMethod = typeof(ChangeQueueProcessor)
@@ -1469,9 +1468,9 @@ public class ChangeQueueProcessorTests
 
     private static async Task TriggerFlushAsync(ChangeQueueProcessor processor)
     {
-        // Use reflection to call the private TryFlushAsync method
+        // Use reflection to call the private FlushAsync method
         var tryFlushMethod = typeof(ChangeQueueProcessor)
-            .GetMethod("TryFlushAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            .GetMethod("FlushAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
 
         var task = (ValueTask)tryFlushMethod!.Invoke(processor, [CancellationToken.None])!;
         await task;
@@ -1712,7 +1711,7 @@ public class ChangeQueueProcessorTests
     public async Task WhenProcessingStopsWithBufferedChanges_ThenTheyAreStillWritten()
     {
         // Arrange: a buffer time no periodic tick reaches during the test, so the change is taken off the
-        // subscription and left in the processor buffer, where only the teardown drain can deliver it.
+        // subscription and left in the processor buffer, where only the final flush can deliver it.
         // Nothing else can recover it there: it is gone from the subscription a source would drain.
         var context = InterceptorSubjectContext.Create();
         context.WithRegistry();

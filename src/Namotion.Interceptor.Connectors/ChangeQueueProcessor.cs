@@ -37,13 +37,13 @@ public class ChangeQueueProcessor : IDisposable
     private readonly Func<CancellationToken, ValueTask>? _completionHandler;
     private readonly Func<int, bool>? _mergedDeliveryAdmission;
 
-    // Filled by the tick's drain while a flush may be emptying it, hence concurrent.
+    // Concurrent: the tick's drain fills it while the flush in flight takes from it, a canceled write
+    // requeues into it and Dispose empties it for terminal accounting.
     private readonly ConcurrentQueue<SubjectPropertyChange> _changes = new();
 
     private readonly int? _maxQueueDepth;
     private long _dropCount;
     private int _deliveryState;
-    private int _flushGate; // 0 = free, 1 = flushing
     private int _lifecycleState;
     private PeriodicTimer? _periodicTimer;
 
@@ -60,19 +60,20 @@ public class ChangeQueueProcessor : IDisposable
     public long DropCount => Interlocked.Read(ref _dropCount);
 
     /// <summary>
-    /// Gets the number of changes currently buffered. Approximate: read without a lock while the
-    /// pump is running. Counts changes taken off the subscription and not yet flushed, so it rises while
-    /// a write stays in flight across flush ticks; changes still waiting in the subscription for the
-    /// next tick are not included. Normally 0 on the immediate path, except while a cancelled delivery
-    /// is being handed to terminal accounting during teardown.
+    /// Gets the number of changes taken off the subscription and waiting for a flush. Approximate: read
+    /// without a lock while the pump is running. A tick hands what it takes to a flush at once unless one
+    /// is still writing, so this rises only while a write stays in flight across ticks. Not counted:
+    /// changes still waiting in the subscription for the next tick, and the batch a flush is writing.
+    /// Normally 0 on the immediate path, except while a cancelled delivery is being handed to terminal
+    /// accounting during teardown.
     /// </summary>
     public int QueueDepth => _changes.Count;
 
-    // Scratch state used only while holding the flush gate (single-threaded access)
+    // Scratch state of the one flush that runs at a time (single-threaded access)
     private readonly List<SubjectPropertyChange> _flushChanges = [];
     private ChangeMerger? _changeMerger;
 
-    // Reused by every flush: the flush gate admits one at a time.
+    // Reused by every flush: a tick starts one only after the previous one completed.
     private readonly LocalYield _flushYield = new();
 
     // Reusable single-item buffer for the no-buffer (immediate) path
@@ -208,9 +209,9 @@ public class ChangeQueueProcessor : IDisposable
     }
 
     // Rejects every unnamed value, not just zero: the delivery decision throws on an unknown rule from
-    // inside the flush, outside the try that wraps the write handler. The periodic loop's catch does
-    // catch it, but that catch sits outside the loop, so the loop never resumes and delivery ends for
-    // this processor's lifetime while the queue keeps filling.
+    // inside the flush, outside the try that wraps the write handler. The tick reports the failure and
+    // keeps going, but every later flush throws the same way and loses its batch, so delivery ends for
+    // this processor's lifetime.
     private static ChangeDeliveryRule ValidateRule(ChangeDeliveryRule rule)
     {
         if (rule is not (ChangeDeliveryRule.SourceValuesMayBeStale or ChangeDeliveryRule.SourceValuesAreSettled))
@@ -338,11 +339,12 @@ public class ChangeQueueProcessor : IDisposable
                             DrainSubscription();
 
                             // Not awaited, so the next tick still drains and bounds the queue while a slow
-                            // write is in flight; the flush gate keeps flushes from overlapping.
+                            // write is in flight. Started only once the previous flush completed, so
+                            // flushes never overlap.
                             if (pendingFlush.IsCompleted)
                             {
                                 ObserveFlush(pendingFlush, processingToken, ref flushFailureReported);
-                                pendingFlush = TryFlushAsync(processingToken);
+                                pendingFlush = FlushAsync(processingToken);
                             }
                         }
                     }
@@ -374,7 +376,9 @@ public class ChangeQueueProcessor : IDisposable
                 Interlocked.Exchange(ref _periodicTimer, null);
                 try
                 {
-                    // Before any await, so it cannot outlive ProcessAsync giving up at the teardown bound.
+                    // Before awaiting the flush in flight, which may be what holds up the stop. A drain
+                    // that outlives the teardown bound stops at its next change once ProcessAsync gives
+                    // up and disposes this processor.
                     if (drainAtTeardown)
                     {
                         DrainSubscription();
@@ -396,7 +400,8 @@ public class ChangeQueueProcessor : IDisposable
 
                     try
                     {
-                        await TryFlushAsync(teardownToken).ConfigureAwait(false);
+                        // The flush in flight was awaited above, so this one cannot overlap it.
+                        await FlushAsync(teardownToken).ConfigureAwait(false);
                     }
                     finally
                     {
@@ -502,8 +507,9 @@ public class ChangeQueueProcessor : IDisposable
 
                     _changes.Enqueue(change);
 
-                    // An upper bound on the queue's count, since the flush only removes from it, except when a
-                    // canceled flush requeues its batch at stop, which can leave the queue one batch over.
+                    // This drain's enqueues on top of the depth it started from: once a flush takes from the
+                    // queue it overestimates, which only costs an extra DropOverflow check. A canceled write
+                    // requeueing its batch at stop is not counted, so the queue can end that batch over.
                     if (++queued > bound)
                     {
                         droppedCount += DropOverflow(bound);
@@ -706,8 +712,8 @@ public class ChangeQueueProcessor : IDisposable
 
     /// <summary>
     /// Drops the oldest buffered changes until the queue is back within <paramref name="maxQueueDepth"/>,
-    /// incrementing <see cref="DropCount"/> for each, and returns how many it dropped. Best-effort: a
-    /// concurrent flush may drain the queue below the bound first, in which case fewer drops occur.
+    /// incrementing <see cref="DropCount"/> for each, and returns how many it dropped for the caller to
+    /// report to the drop handler. A flush taking from the queue meanwhile can leave fewer to drop.
     /// </summary>
     private long DropOverflow(int maxQueueDepth)
     {
@@ -721,22 +727,18 @@ public class ChangeQueueProcessor : IDisposable
         return droppedCount;
     }
 
+    // One at a time: the tick starts a flush only after the previous one completed, and teardown awaits
+    // the flush in flight before its final one.
     [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder))]
-    private async ValueTask TryFlushAsync(CancellationToken cancellationToken)
+    private async ValueTask FlushAsync(CancellationToken cancellationToken)
     {
-        // Fast, allocation-free try-enter
-        if (Interlocked.Exchange(ref _flushGate, 1) == 1)
-        {
-            return;
-        }
-
         // Whether the merger was handed a batch, which decides whether it has one to release below. Set
         // before the call rather than after, so a throw part-way through a merge still releases it.
         var merged = false;
 
         try
         {
-            // Drain the concurrent queue into the scratch buffer under exclusive flush
+            // Drain the concurrent queue into the scratch buffer
             _flushChanges.Clear();
             while (_changes.TryDequeue(out var change))
             {
@@ -768,26 +770,16 @@ public class ChangeQueueProcessor : IDisposable
         }
         finally
         {
-            try
-            {
-                // Clear buffers to allow GC of SubjectPropertyChange objects
-                _flushChanges.Clear();
+            // Clear buffers to allow GC of SubjectPropertyChange objects
+            _flushChanges.Clear();
 
-                if (merged && Volatile.Read(ref _lifecycleState) != DisposedState)
-                {
-                    // Only when there was a batch. An idle tick has nothing to release, and resetting
-                    // anyway would feed the merger a zero-width batch: at the default buffer time that is
-                    // roughly 125 of them a second, which drives its trim and shrink policies off how long
-                    // the source has been quiet rather than off how wide its flushes actually are.
-                    _changeMerger!.Reset();
-                }
-            }
-            finally
+            if (merged && Volatile.Read(ref _lifecycleState) != DisposedState)
             {
-                // Unconditionally, and after the cleanup rather than with it: a gate left at 1 makes every
-                // later flush return at the try-enter while the tick keeps filling the queue, so
-                // cleanup throwing would stop delivery permanently and grow the queue without bound.
-                Volatile.Write(ref _flushGate, 0);
+                // Only when there was a batch. An idle tick has nothing to release, and resetting
+                // anyway would feed the merger a zero-width batch: at the default buffer time that is
+                // roughly 125 of them a second, which drives its trim and shrink policies off how long
+                // the source has been quiet rather than off how wide its flushes actually are.
+                _changeMerger!.Reset();
             }
         }
     }
@@ -802,7 +794,6 @@ public class ChangeQueueProcessor : IDisposable
         {
             _ownedSubscription?.Dispose();
         }
-
 
         ReportTerminalDrops(CloseDeliveryAndDrain());
         if (previousState == IdleState)

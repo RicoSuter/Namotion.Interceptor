@@ -169,7 +169,7 @@ public class WebSocketServerLivenessTests
         Assert.Equal(TaskStatus.RanToCompletion, hostedTask.Status);
     }
 
-    private static WebSocketSubjectServer CreateServer(int port, TimeSpan? bufferTime = null)
+    private static WebSocketSubjectServer CreateServer(int port)
     {
         var context = InterceptorSubjectContext
             .Create()
@@ -181,7 +181,7 @@ public class WebSocketServerLivenessTests
             new WebSocketServerConfiguration
             {
                 Port = port,
-                BufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8)
+                BufferTime = TimeSpan.FromMilliseconds(8)
             },
             NullLogger<WebSocketSubjectServer>.Instance);
     }
