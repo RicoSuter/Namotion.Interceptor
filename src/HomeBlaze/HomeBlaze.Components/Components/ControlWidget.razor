@@ -12,14 +12,19 @@
 {
     // Read once per render and never kept: its render records the reads, so that it renders again when one changes.
     var path = control.Path;
-    var label = control.Label;
+    var label = _label.Render(control.Label, PathResolver, control, path, TimeZone, out var labelError);
     var minimum = control.Minimum;
     var maximum = control.Maximum;
     var map = control.Map;
     var property = ValueReader.ResolveProperty(PathResolver, control, path);
     var kind = ControlKindResolver.Resolve(property, minimum, maximum, out var sliderRange);
 
-    if (kind == ControlKind.OperationButton)
+    // The operation button, the switch and the slider ignore the map, so that their label error is the only one they can have.
+    if (labelError is not null && kind is ControlKind.OperationButton or ControlKind.Switch or ControlKind.Slider)
+    {
+        <WidgetArgumentError Message="@labelError" />
+    }
+    else if (kind == ControlKind.OperationButton)
     {
         <OperationButtonView Property="@property" Path="@path" Label="@label" />
     }
@@ -36,9 +41,11 @@
     {
         // A select and a value row show the map; one that cannot be resolved replaces the control, as it does every widget.
         var valueMap = ValueReader.ResolveMap(PathResolver, control, map, out var mapError);
-        if (mapError is not null)
+        // A widget shows one error: that of its map first, then that of its label.
+        var error = mapError ?? labelError;
+        if (error is not null)
         {
-            <WidgetArgumentError Message="@mapError" />
+            <WidgetArgumentError Message="@error" />
         }
         else if (kind == ControlKind.Select)
         {
@@ -63,6 +70,8 @@
 }
 
 @code {
+    private readonly WidgetText _label = new(nameof(Control.Label), ExpressionUse.WidgetText);
+
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
 }

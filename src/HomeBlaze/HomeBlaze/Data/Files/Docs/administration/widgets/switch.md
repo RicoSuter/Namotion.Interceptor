@@ -12,12 +12,12 @@ Turns a boolean on and off. It writes the property, or it invokes one operation 
 | Argument | Kind of value | Default | Meaning |
 |----------|---------------|---------|---------|
 | `Path` | Path (Boolean) | None | The [path](basics.md#paths) of the property whose value the switch shows. Without `On` and `Off` the switch writes this property |
-| `Label` | Text | From the property, see [Labels](basics.md#labels) | The label next to the switch |
+| `Label` | Text with values | From the property, see [Labels](basics.md#labels) | The label next to the switch, see [Text with Values](basics.md#text-with-values) |
 | `On` | Path (Operation) | None | The operation that turns the switch on. Set it together with `Off` |
 | `Off` | Path (Operation) | None | The operation that turns the switch off. Set it together with `On` |
 | `Kind` | `Switch` or `Tile` | `Switch` | `Switch` is a toggle switch with its label next to it. `Tile` is a tile that fills its place and is filled by the state, see [Tiles](#tiles) |
 | `Map` | Name or path of a `ValueMap` | None | The map that gives a state its color, icon and text, see [ValueMap](value-map.md). A tile is filled with the color of the matched case, a toggle switch takes it as its color |
-| `Subtitle` | Text | None | A second line below the label of a tile. Without it, a tile with a map shows the text of the value |
+| `Subtitle` | Text with values | None | A second line below the label of a tile, see [Text with Values](basics.md#text-with-values). Without it, a tile with a map shows the text of the value |
 | `Icon` | Text | None | The [icon](basics.md#icons) of a tile. The icon of a matched case replaces it |
 
 ## Slots

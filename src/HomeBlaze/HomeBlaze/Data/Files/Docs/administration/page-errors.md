@@ -92,11 +92,11 @@ An expression with a mistake does not take a block down. The page shows the mess
 | `expression is longer than 1000 characters at position 1000` | An expression is longer than 1000 characters. In a text with expressions between double braces, the position counts inside the braces of that expression | Shorten the expression, see [Expression Limits](pages.md#expression-limits) |
 | `expression is nested too deeply at position 32` | An expression nests more than 32 levels of parentheses and `not`. In a text with expressions between double braces, the position counts inside the braces of that expression | Flatten the expression, see [Expression Limits](pages.md#expression-limits) |
 
-A pipe `map` with a name that leads to no value map shows `Cannot resolve map: name` as the text of the expression, and a map with a mistake shows its message there, the messages of [Value Widget Errors](#value-widget-errors).
+A pipe `map` with a name that leads to no value map shows `Cannot resolve map: name` as the text of the expression, and a map with a mistake shows its message there, one of the map messages of [Value Widget Errors](#value-widget-errors).
 
 ## Value Widget Errors
 
-A map that cannot be found, or an argument that a widget cannot use, does not take a block down either. The widget shows the message in a small red alert in its place, without a line number, and the rest of the page is shown as usual.
+A map that cannot be found, or an argument that a widget cannot use, does not take a block down either. The widget shows the message in a small red alert in its place, without a line number, and the rest of the page is shown as usual. A widget shows one error at a time: that of its map or of its other arguments first, then that of its `Label` or `Title`, then that of its `Subtitle`.
 
 | Message | Cause | Fix |
 |---------|-------|-----|
@@ -112,6 +112,9 @@ A map that cannot be found, or an argument that a widget cannot use, does not ta
 | `Case 2, When: a path starts at the subject and cannot start with '/'` | A path in the condition or the text of the second case has two slashes after `subject`, like `subject//IsCharging` | Write one slash |
 | `Case 2, When: expression is longer than 1000 characters at position 1000` | The condition, or an expression in the text, of the second case is longer than 1000 characters, or nests more than 32 levels (`expression is nested too deeply`). The position of an expression in a text counts inside its braces | Shorten or flatten the expression, see [Expression Limits](pages.md#expression-limits) |
 | `Case 1 has no Value and no When, so it matches every value and the cases after it never match. Make it the last case.` | A default case stands before other cases | Move it to the end, or give it a `Value` or a `When` |
+| `Label: expected a value after '>' at position 7` | An expression in the `Label`, `Title` or `Subtitle` of a widget has a mistake, or a pipe other than `display`, `raw` and `map`. The message starts with the argument; the rest is that of an expression | Correct the expression, see [Text with Values](widgets/basics.md#text-with-values) |
+| `Title: 'subject' is not available in a widget without a Path` | The title or the subtitle of a card uses `value` or `subject`, which only a widget with a `Path` has | Write a path from the page, such as `../Pump/Status` |
+| `Label: 'value' has no members: write subject/... to read a property of its subject` | The text of a widget has a path into `value`, like `{{ value/IsCharging }}`. The messages about `subject/` and `subject//` above apply to the text of a widget too, with the name of the argument in front | Write `subject/` and the name of the property, like `{{ subject/IsCharging }}` |
 | `Set both On and Off, or neither` | A `Switch` has only one of `On` and `Off` | Set both, so that the switch invokes an operation per state, or remove both, so that it writes its property, see [Switch](widgets/switch.md) |
 | `On needs an operation without input: pump/SetTargetSpeed` | `On` of a `Switch` leads to an operation with a parameter that needs input. `Off` gives the same message with its own name. The message shows the path as written | Use an operation whose parameters need no input, see [Switch](widgets/switch.md) |
 | `Needs a range: set Minimum and Maximum` | A `Slider`, a `Gauge` or a `Progress` of a number finds no end of its range, neither in its arguments nor on its property, see [Ranges](widgets/basics.md#ranges) | Set `Minimum` and `Maximum` on the block |

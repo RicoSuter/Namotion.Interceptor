@@ -41,6 +41,7 @@ public partial class ValueMapCase : IConfigurable
     /// shows its value with the pipes <c>display</c> and <c>raw</c>. Without it the formatted value is shown.
     /// </summary>
     [Configuration]
+    [TextTemplate]
     public partial string? Text { get; set; }
 
     /// <summary>
@@ -119,7 +120,7 @@ public partial class ValueMapCase : IConfigurable
             return false;
         }
 
-        var context = new ValueMapCaseContext(resolver, this, binding, timeZone: null);
+        var context = new ValueBindingContext(resolver, this, binding, timeZone: null);
         return condition.EvaluateCondition(ref context) == true;
     }
 
@@ -137,7 +138,7 @@ public partial class ValueMapCase : IConfigurable
             return null;
         }
 
-        var context = new ValueMapCaseContext(resolver, this, binding, timeZone);
+        var context = new ValueBindingContext(resolver, this, binding, timeZone);
         return template.Render(ref context);
     }
 

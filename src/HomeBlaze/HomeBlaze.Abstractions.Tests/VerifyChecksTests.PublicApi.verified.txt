@@ -180,6 +180,11 @@ namespace HomeBlaze.Abstractions.Attributes
         Attribute = 2,
         Operation = 4,
     }
+    [System.AttributeUsage(System.AttributeTargets.Property)]
+    public sealed class TextTemplateAttribute : System.Attribute
+    {
+        public TextTemplateAttribute() { }
+    }
 }
 namespace HomeBlaze.Abstractions.Common
 {
