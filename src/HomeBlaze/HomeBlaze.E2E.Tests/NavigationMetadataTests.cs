@@ -653,4 +653,34 @@ public class NavigationMetadataTests
             await RestoreFileAsync(sidecarPath, originalSidecar);
         }
     }
+
+    [Fact]
+    public async Task WhenTheIconIsSavedRightAfterTyping_ThenItIsWritten()
+    {
+        // Arrange
+        var sidecarPath = _fixture.GetDemoPagePath("Motor.metadata.json");
+        var originalSidecar = File.Exists(sidecarPath) ? await File.ReadAllTextAsync(sidecarPath) : null;
+        try
+        {
+            var (page, pane) = await OpenPaneAsync("Demo/Motor");
+            await pane.GetByTestId("edit-metadata-button").ClickAsync();
+
+            // MudDialog puts its test id on its content, which does not hold the actions.
+            var dialog = page.Locator(".mud-dialog").Filter(new() { Has = page.GetByTestId("metadata-edit-dialog") });
+            await dialog.GetByTestId("metadata-icon").FillAsync("WaterDrop");
+
+            // Act - a click event alone, which keeps the focus in the field, so that the field passes the text on to its
+            // value only after its debounce interval.
+            await dialog.GetByTestId("metadata-save").DispatchEventAsync("click");
+            await Assertions.Expect(dialog).ToHaveCountAsync(0, new() { Timeout = PageLoadTimeout });
+
+            // Assert
+            using var sidecar = JsonDocument.Parse(await File.ReadAllTextAsync(sidecarPath));
+            Assert.Equal("WaterDrop", sidecar.RootElement.GetProperty("icon").GetString());
+        }
+        finally
+        {
+            await RestoreFileAsync(sidecarPath, originalSidecar);
+        }
+    }
 }
