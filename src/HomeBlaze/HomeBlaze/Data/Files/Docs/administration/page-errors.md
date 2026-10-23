@@ -81,12 +81,15 @@ An expression with a mistake does not take a block down. The page shows the mess
 
 | Message | Cause | Fix |
 |---------|-------|-----|
-| `Unknown pipe 'rounded'` | The pipe at the end of an expression is neither `display` nor `raw`, like `{{ motor/Speed \| rounded }}`. The message shows the pipe as written | Use `display` or `raw`, or write no pipe, see [Pipes](pages.md#pipes) |
+| `Unknown pipe 'rounded'` | The pipe at the end of an expression is none of `display`, `raw` and `map`, like `{{ motor/Speed \| rounded }}`. The message shows the pipe as written | Use `display`, `raw` or `map:name`, or write no pipe, see [Pipes](pages.md#pipes) |
 | `The pipe 'raw' takes no arguments` | A pipe with an argument after a colon, like `{{ motor/Speed \| raw:2 }}` | Remove the colon and the argument |
 | `expected ')' at position 16` | A mistake in an expression: a parenthesis, a quote, an operator or a value is missing or in the wrong place. The position counts the characters of the expression from 0 | Correct the expression at that position, see [Conditions](pages.md#conditions) |
 | `use '==' for equality at position 12` | A single `=` in a comparison | Write `==` |
 | `arithmetic is not supported at position 2` | `+`, `-`, `*` or `/` between two values | Show the values separately |
+| `The pipe 'map' takes the name of a value map, such as map:wallbox` | The pipe `map` without a name, or with more than one | Write `map:` and the name of the map |
 | `'value' is not available in the text of a page` | The text of a page uses `value` or `subject`, which are reserved for the values that widgets give their expressions | Write the path of the property |
+
+A pipe `map` with a name that leads to no value map shows `Cannot resolve map: name` as the text of the expression.
 
 ## Value Widget Errors
 
@@ -96,6 +99,9 @@ A map that cannot be found, or an argument that a widget cannot use, does not ta
 |---------|-------|-----|
 | `Cannot resolve map: motorstat` | The `Map` of a `ValueList` row, a `ValueTile`, an `Indicator`, a `Select`, a `Switch`, a `Control`, a `Gauge` or a `Column` of a `SubjectTable` leads to no subject, or to a subject that is no `ValueMap`. The message shows the map as written | Check the name or the path in `Map`. The name is that of the block of the map, and a map on another page is reached through that page, see [ValueMap](widgets/value-map.md) |
 | `Unknown color 'purple': use a theme color like Success or Surface 30%, or a CSS color like #ffffff80` | The `Color` or the `TextColor` of a case of the `ValueMap` that the widget refers to is neither a theme color nor a CSS color of an allowed form. Every widget with this map shows it, also while no value matches that case. The message shows the color as written | Use a theme color name or one of the CSS color forms that [Colors](widgets/basics.md#colors) lists, in double quotes, like `Color="#ffffff80"` |
+| `Case 2, When: expected a value after '>' at position 7` | The condition of the second case of the map has a mistake; the rest of the message is that of an expression. Every widget with this map shows it | Correct the condition, see [Conditions](widgets/value-map.md#conditions) |
+| `Case 2, Text: Unknown pipe 'rounded'` | The text of the second case has an expression with a mistake, or a pipe other than `display` and `raw` | Correct the expression in the text |
+| `Case 1 has no Value and no When, so it matches every value and the cases after it never match. Make it the last case.` | A default case stands before other cases | Move it to the end, or give it a `Value` or a `When` |
 | `Set both On and Off, or neither` | A `Switch` has only one of `On` and `Off` | Set both, so that the switch invokes an operation per state, or remove both, so that it writes its property, see [Switch](widgets/switch.md) |
 | `On needs an operation without input: pump/SetTargetSpeed` | `On` of a `Switch` leads to an operation with a parameter that needs input. `Off` gives the same message with its own name. The message shows the path as written | Use an operation whose parameters need no input, see [Switch](widgets/switch.md) |
 | `Needs a range: set Minimum and Maximum` | A `Slider`, a `Gauge` or a `Progress` of a number finds no end of its range, neither in its arguments nor on its property, see [Ranges](widgets/basics.md#ranges) | Set `Minimum` and `Maximum` on the block |

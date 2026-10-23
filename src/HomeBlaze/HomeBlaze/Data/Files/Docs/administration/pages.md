@@ -169,13 +169,15 @@ An expression shows the formatted value by default. A pipe after a `|` at the en
 | `{{ mymotor/Temperature }}` | The formatted value | `21.5°C` |
 | `{{ mymotor/Temperature \| display }}` | The formatted value, with the pipe written out | `21.5°C` |
 | `{{ mymotor/Temperature \| raw }}` | The raw value | `21.5` |
+| `{{ mymotor/Status \| map:motorstate }}` | The text of the matched case of the value map `motorstate`, see [ValueMap](widgets/value-map.md) | `Running` |
 
 Inside a markdown table an expression needs no escaping: its `|` belongs to the expression. A `\|` still works, as older pages write it, and the table above uses it.
 
 - **Formatted value**: The text that the property panel shows for the property. It has the unit of the property, scaled where the unit allows it: 1234 W shows as `1.23 kW`. A number has at most two decimals, a boolean shows `Yes` or `No`, and a date is written in the time zone of the viewer.
 - **Raw value**: The plain value with a dot as the decimal separator on every system, and a date as ISO 8601. It has no unit, no scaling and no rounding, which makes it the form for an HTML attribute and for CSS, where a unit or a `Yes` would be wrong.
 - **Missing value**: A value that is not set shows nothing in both forms.
-- **Unknown pipe**: A pipe other than `display` and `raw` shows `Unknown pipe 'name'` in place of the value. [Page Errors](page-errors.md#expression-errors) has the message.
+- **Map**: `map:name` gives the text of the first case of the value map with the name that matches the value, and the formatted value when no case matches or the case has no text. The name resolves like the `Map` of a widget. A name that leads to no map shows `Cannot resolve map: name`.
+- **Unknown pipe**: A pipe other than `display`, `raw` and `map` shows `Unknown pipe 'name'` in place of the value. [Page Errors](page-errors.md#expression-errors) has the message.
 
 A `style` attribute needs the raw value. In this sample the width of the bar is the speed of the conveyor in RPM divided by ten, in pixels:
 
@@ -190,6 +192,8 @@ An expression can compare values and combine the results. In the text of a page 
 ~~~~markdown
 The conveyor runs fast: {{ /Demo/Conveyor/CurrentSpeed > 500 }}.
 ~~~~
+
+With the pipe `map` a condition shows the text of a case instead, such as `{{ /Demo/Conveyor/CurrentSpeed > 500 | map:fastslow }}` with a map whose cases have `Value=True` and `Value=False`.
 
 - **Comparisons**: `==`, `!=`, `<`, `<=`, `>` and `>=` compare a value with a number, `true`, `false`, `null`, a text in quotes, or another path. A word without a slash after an operator is a text, such as the name of an enum value: `{{ mymotor/Status == Running }}`. A path to compare with has a slash in it, such as `mymotor/Speed`, `../Pump/Speed` or `/Demo/Pump/Speed`.
 - **Logic**: `and` (`&&`), `or` (`||`), `not` (`!`) and parentheses combine comparisons. A missing value makes a comparison unknown, and an unknown part makes the whole unknown unless the rest decides it: `false and unknown` is `false`.
@@ -218,7 +222,7 @@ The reader sees "Speed: 600 RPM", and the tooltip of the text shows the target s
 
 ### Expression Limits
 
-- **Pipes**: An expression has the pipes `display` and `raw`. Another unit, another number of decimals and arithmetic are not supported.
+- **Pipes**: An expression has the pipes `display`, `raw` and `map`. Another unit, another number of decimals and arithmetic are not supported.
 - **Single values**: An expression is made for text, numbers, yes or no, durations and times. For a property that holds a subject or a list of subjects, it shows a technical type name. A list of plain values is shown on one line with a space between the values. The form `raw` shows a technical type name for every list.
 - **No error for a wrong path**: An expression whose path leads to nothing shows nothing. Check the spelling of the path when a value is missing.
 - **Special characters in a name are percent-encoded**: A name with an operator character, a quote, a brace or a space is written percent-encoded in an expression. [Paths](paths.md) has the characters and examples. Inside HTML that you write, write `<` as `&lt;`.
@@ -989,7 +993,7 @@ Use these buttons with "Inline". In "Split", the editor next to the page does no
 
 ## Not Supported
 
-- More pipes for expressions than `display` and `raw`, like another unit or another number of decimals, and arithmetic in expressions.
+- More pipes for expressions than `display`, `raw` and `map`, like another unit or another number of decimals, and arithmetic in expressions.
 - Expressions in arguments. The value of an argument is fixed text.
 - Short names for types. A block always has the full type name.
 - A name for an `Item` of a `FlowLayout`, and with it a subject inside an item that survives a change of the items before it.
