@@ -217,7 +217,7 @@ public class SourceMonitor : ILifecycleHandler, IStartupCompletion
     /// <summary>
     /// Publishes under _lock, which is what keeps delivery ordered against a concurrent
     /// Register/Unregister/Subscribe. Cannot deadlock: Publish only enqueues onto a ConcurrentQueue
-    /// and at most schedules a Task.Run, never running a handler synchronously or calling back into
+    /// and at most queues a drain, never running a handler synchronously or calling back into
     /// anything that takes _lock.
     /// </summary>
     internal void PublishUnderLock(in SourceEvent sourceEvent)
