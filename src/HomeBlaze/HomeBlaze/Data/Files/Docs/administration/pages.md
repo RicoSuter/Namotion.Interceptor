@@ -191,7 +191,8 @@ An expression can compare values and combine the results. In the text of a page 
 The conveyor runs fast: {{ /Demo/Conveyor/CurrentSpeed > 500 }}.
 ~~~~
 
-- **Comparisons**: `==`, `!=`, `<`, `<=`, `>` and `>=` compare a value with a number, `true`, `false`, `null`, a text in quotes, or another path. A word without a slash after an operator is a text, such as the name of an enum value: `{{ mymotor/Status == Running }}`. A path to compare with has a slash in it, such as `mymotor/Speed`, `../Pump/Speed` or `/Demo/Pump/Speed`.
+- **Comparisons**: `==`, `!=`, `<`, `<=`, `>` and `>=` compare a value with a number, `true`, `false`, `null`, a text in quotes, or another path. A word after an operator is a path when it holds a slash or an index in brackets, such as `mymotor/Speed`, `../Pump/Speed`, `/Demo/Pump/Speed` or `/Devices[0]`. Any other word is a text, such as the name of an enum value: `{{ mymotor/Status == Running }}`.
+- **Missing values and `null`**: `== null` is true for a missing value and `!= null` is false, so neither is ever unknown. Any other operator with `null` is unknown.
 - **Logic**: `and` (`&&`), `or` (`||`), `not` (`!`) and parentheses combine comparisons. A missing value makes a comparison unknown, and an unknown part makes the whole unknown unless the rest decides it: `false and unknown` is `false`.
 - **Texts and enums** compare without regard to upper and lower case. A date compares with a text in ISO 8601, such as `'2026-10-01'`.
 - **No arithmetic**: `+`, `-`, `*` and `/` between values show an error. They are reserved, so that a later version can add arithmetic without changing what a page shows.
@@ -218,6 +219,7 @@ The reader sees "Speed: 600 RPM", and the tooltip of the text shows the target s
 
 ### Expression Limits
 
+- **Length and depth**: An expression is at most 1000 characters long and nests at most 32 levels. Each parenthesis counts as a level, and so does each `not` or `!`, so a chain of them reaches the limit. A longer or deeper expression shows an error in place of the value.
 - **Pipes**: An expression has the pipes `display` and `raw`. Another unit, another number of decimals and arithmetic are not supported.
 - **Single values**: An expression is made for text, numbers, yes or no, durations and times. For a property that holds a subject or a list of subjects, it shows a technical type name. A list of plain values is shown on one line with a space between the values. The form `raw` shows a technical type name for every list.
 - **No error for a wrong path**: An expression whose path leads to nothing shows nothing. Check the spelling of the path when a value is missing.
