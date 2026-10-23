@@ -1,0 +1,83 @@
+﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.Authorization.Tests")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace Namotion.Interceptor.Authorization
+{
+    public sealed class AuthorizationException : System.Exception
+    {
+        public AuthorizationException() { }
+        public AuthorizationException(string message) { }
+        public AuthorizationException(string message, System.Exception innerException) { }
+    }
+    public sealed class AuthorizationPolicy
+    {
+        public const string SystemRoleName = "System";
+        public System.Collections.Immutable.ImmutableArray<Namotion.Interceptor.Authorization.AuthorizationRole> Roles { get; }
+        public static Namotion.Interceptor.Authorization.AuthorizationPolicy DenyAll { get; }
+        public bool CanRead(Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject) { }
+        public bool CanRead(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty member) { }
+        public bool CanWrite(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty member) { }
+        public Namotion.Interceptor.Authorization.SubjectReadDecision Explain(Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject) { }
+        public Namotion.Interceptor.Authorization.PermissionDecision Explain(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty member, Namotion.Interceptor.Authorization.PermissionAction action) { }
+        public bool IsAllowed(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty member, Namotion.Interceptor.Authorization.PermissionAction action) { }
+        public static Namotion.Interceptor.Authorization.AuthorizationPolicy Compile(System.Collections.Generic.IReadOnlyCollection<Namotion.Interceptor.Authorization.AuthorizationRole> roles, System.Collections.Generic.IReadOnlyCollection<string> roleNames, System.Collections.Immutable.ImmutableArray<Namotion.Interceptor.Authorization.PermissionRule> systemDenyRules, System.Collections.Generic.IReadOnlyCollection<Namotion.Interceptor.Authorization.PermissionAction> knownActions, Namotion.Interceptor.Authorization.IMemberTagProvider tagProvider, Namotion.Interceptor.Registry.Paths.PathProviderBase pathProvider) { }
+    }
+    public sealed class AuthorizationRole : System.IEquatable<Namotion.Interceptor.Authorization.AuthorizationRole>
+    {
+        public AuthorizationRole() { }
+        public System.Collections.Immutable.ImmutableArray<Namotion.Interceptor.Authorization.PermissionRule> Allow { get; init; }
+        public System.Collections.Immutable.ImmutableArray<Namotion.Interceptor.Authorization.PermissionRule> Deny { get; init; }
+        public System.Collections.Immutable.ImmutableArray<string> Includes { get; init; }
+        public required string Name { get; init; }
+        public bool Equals(Namotion.Interceptor.Authorization.AuthorizationRole? other) { }
+        public override int GetHashCode() { }
+    }
+    public interface IMemberTagProvider
+    {
+        System.Collections.Generic.IReadOnlyCollection<string> GetTags(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty member);
+    }
+    [System.Text.Json.Serialization.JsonConverter(typeof(Namotion.Interceptor.Authorization.PermissionActionJsonConverter))]
+    public readonly struct PermissionAction : System.IEquatable<Namotion.Interceptor.Authorization.PermissionAction>
+    {
+        public static readonly Namotion.Interceptor.Authorization.PermissionAction Read;
+        public static readonly Namotion.Interceptor.Authorization.PermissionAction Write;
+        public PermissionAction(string name) { }
+        public string Name { get; }
+        public bool Equals(Namotion.Interceptor.Authorization.PermissionAction other) { }
+        public override int GetHashCode() { }
+        public override string ToString() { }
+    }
+    public sealed class PermissionActionJsonConverter : System.Text.Json.Serialization.JsonConverter<Namotion.Interceptor.Authorization.PermissionAction>
+    {
+        public PermissionActionJsonConverter() { }
+        public override Namotion.Interceptor.Authorization.PermissionAction Read(ref System.Text.Json.Utf8JsonReader reader, System.Type typeToConvert, System.Text.Json.JsonSerializerOptions options) { }
+        public override void Write(System.Text.Json.Utf8JsonWriter writer, Namotion.Interceptor.Authorization.PermissionAction value, System.Text.Json.JsonSerializerOptions options) { }
+    }
+    public readonly struct PermissionDecision : System.IEquatable<Namotion.Interceptor.Authorization.PermissionDecision>
+    {
+        public PermissionDecision(bool IsAllowed, Namotion.Interceptor.Authorization.AuthorizationRole? AllowedBy, Namotion.Interceptor.Authorization.PermissionRule? AllowedByRule, Namotion.Interceptor.Authorization.AuthorizationRole? DeniedBy, Namotion.Interceptor.Authorization.PermissionRule? DeniedByRule) { }
+        public Namotion.Interceptor.Authorization.AuthorizationRole? AllowedBy { get; init; }
+        public Namotion.Interceptor.Authorization.PermissionRule? AllowedByRule { get; init; }
+        public Namotion.Interceptor.Authorization.AuthorizationRole? DeniedBy { get; init; }
+        public Namotion.Interceptor.Authorization.PermissionRule? DeniedByRule { get; init; }
+        public bool IsAllowed { get; init; }
+    }
+    public sealed class PermissionRule : System.IEquatable<Namotion.Interceptor.Authorization.PermissionRule>
+    {
+        public PermissionRule() { }
+        public System.Collections.Immutable.ImmutableArray<Namotion.Interceptor.Authorization.PermissionAction> Actions { get; init; }
+        public System.Collections.Immutable.ImmutableArray<string> Members { get; init; }
+        public System.Collections.Immutable.ImmutableArray<string> Paths { get; init; }
+        public System.Collections.Immutable.ImmutableArray<string> Tags { get; init; }
+        public System.Collections.Immutable.ImmutableArray<string> Types { get; init; }
+        public bool Equals(Namotion.Interceptor.Authorization.PermissionRule? other) { }
+        public override int GetHashCode() { }
+    }
+    public readonly struct SubjectReadDecision : System.IEquatable<Namotion.Interceptor.Authorization.SubjectReadDecision>
+    {
+        public SubjectReadDecision(bool IsReadable, bool HasReadableMember, Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? DeniedProperty) { }
+        public Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? DeniedProperty { get; init; }
+        public bool HasReadableMember { get; init; }
+        public bool IsReadable { get; init; }
+    }
+}
