@@ -91,10 +91,8 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     {
         var property = change.Property;
 
-        // Skip properties without tracking data (never in the dependency graph, or already detached).
-        // Removing the data makes a later attach start from the first-attach state, so the
-        // order in which a subject's properties are attached again does not matter.
-        var data = property.TryRemoveDerivedPropertyData();
+        // Skip properties without tracking data (never participated in the dependency graph).
+        var data = property.TryGetDerivedPropertyData();
         if (data is null)
         {
             return;
@@ -112,6 +110,14 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             }
 
             usedBySnapshot = data.DetachAndSnapshotUsedBy(property);
+        }
+
+        // A source's data is removed so that a derived property attached before it on re-attach
+        // registers on fresh data instead of skipping it as detached. A derived property keeps its
+        // data: its IsRecalculating and IsAttached guard recalculations still in flight.
+        if (!property.Metadata.IsDerived)
+        {
+            property.RemoveDerivedPropertyData(data);
         }
 
         // Case 2: Remove this property from each dependent's RequiredProperties (outside lock).
@@ -215,14 +221,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         object? oldValue;
 
         // Phase 1: Acquire recalculation ownership (brief lock).
-        // TryGet, not Get: detach removes the data, and creating a fresh entry here would
-        // resurrect a detached property's used-by links from a stale used-by snapshot.
-        var data = derivedProperty.TryGetDerivedPropertyData();
-        if (data is null)
-        {
-            return;
-        }
-
+        var data = derivedProperty.GetDerivedPropertyData();
         lock (data)
         {
             if (data.IsRecalculating)
