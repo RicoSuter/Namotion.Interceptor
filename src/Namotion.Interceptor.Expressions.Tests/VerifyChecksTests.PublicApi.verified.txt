@@ -26,6 +26,7 @@ namespace Namotion.Interceptor.Expressions
         public const string Subject = "subject";
         public const string Value = "value";
         public static bool TryGetVariable(string path, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out string? variable) { }
+        public static bool TryGetVariable(string path, char pathSeparator, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out string? variable) { }
     }
     public interface IExpressionContext
     {
@@ -36,6 +37,7 @@ namespace Namotion.Interceptor.Expressions
     }
     public sealed class ParsedExpression
     {
+        public char PathSeparator { get; }
         public System.Collections.Immutable.ImmutableArray<string> Paths { get; }
         public System.Collections.Immutable.ImmutableArray<Namotion.Interceptor.Expressions.ExpressionPipe> Pipes { get; }
         public string? SinglePath { get; }
@@ -47,6 +49,7 @@ namespace Namotion.Interceptor.Expressions
         public Namotion.Interceptor.Expressions.ExpressionValue EvaluateWithoutPipes<TContext>(ref TContext context)
             where TContext :  struct, Namotion.Interceptor.Expressions.IExpressionContext { }
         public static bool TryParse(string text, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.Expressions.ParsedExpression? expression, [System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out string? error) { }
+        public static bool TryParse(string text, char pathSeparator, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.Expressions.ParsedExpression? expression, [System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out string? error) { }
     }
     public sealed class TextTemplate
     {

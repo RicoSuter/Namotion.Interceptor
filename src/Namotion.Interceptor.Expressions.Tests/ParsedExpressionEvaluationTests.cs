@@ -215,7 +215,7 @@ public class ParsedExpressionEvaluationTests
         var unknownResult = expression.Evaluate(ref unknown);
 
         // Assert
-        Assert.Equal(true, knownResult.Value);
+        Assert.True(knownResult.Value is true);
         Assert.True(unknownResult.IsMissing);
     }
 

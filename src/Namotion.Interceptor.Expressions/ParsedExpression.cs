@@ -6,13 +6,14 @@ namespace Namotion.Interceptor.Expressions;
 /// <summary>
 /// An expression parsed once: paths and literals, compared with <c>== != &lt; &lt;= &gt; &gt;=</c> and combined with
 /// <c>and</c> (<c>&amp;&amp;</c>), <c>or</c> (<c>||</c>), <c>not</c> (<c>!</c>) and parentheses, followed by pipes such as
-/// <c>| raw</c>. A bare word after an operator is text, as in the where filter of MCP. Arithmetic is rejected.
+/// <c>| raw</c>. A bare word after an operator is text unless it holds the path separator or an index. Arithmetic is rejected.
 /// </summary>
 public sealed class ParsedExpression
 {
-    internal ParsedExpression(string text, ExpressionNode body, ImmutableArray<ExpressionPipe> pipes, ImmutableArray<string> paths)
+    internal ParsedExpression(string text, char pathSeparator, ExpressionNode body, ImmutableArray<ExpressionPipe> pipes, ImmutableArray<string> paths)
     {
         Text = text;
+        PathSeparator = pathSeparator;
         Body = body;
         Pipes = pipes;
         Paths = paths;
@@ -20,6 +21,9 @@ public sealed class ParsedExpression
 
     /// <summary>The text the expression was parsed from.</summary>
     public string Text { get; }
+
+    /// <summary>The character between the segments of the paths of the expression.</summary>
+    public char PathSeparator { get; }
 
     /// <summary>The distinct paths the expression reads, in order of first appearance.</summary>
     public ImmutableArray<string> Paths { get; }
@@ -33,16 +37,29 @@ public sealed class ParsedExpression
     internal ExpressionNode Body { get; }
 
     /// <summary>
-    /// Parses the text. On failure the error reads <c>&lt;message&gt; at position &lt;zero-based index&gt;</c>.
+    /// Parses the text with paths written with <c>/</c>. On failure the error reads
+    /// <c>&lt;message&gt; at position &lt;zero-based index&gt;</c>.
     /// </summary>
     public static bool TryParse(
         string text,
+        [NotNullWhen(true)] out ParsedExpression? expression,
+        [NotNullWhen(false)] out string? error) =>
+        TryParse(text, '/', out expression, out error);
+
+    /// <summary>
+    /// Parses the text with paths whose segments the separator divides, such as <c>.</c>. A word after an operator is a
+    /// path when it holds the separator or an index, otherwise text. On failure the error reads
+    /// <c>&lt;message&gt; at position &lt;zero-based index&gt;</c>.
+    /// </summary>
+    public static bool TryParse(
+        string text,
+        char pathSeparator,
         [NotNullWhen(true)] out ParsedExpression? expression,
         [NotNullWhen(false)] out string? error)
     {
         try
         {
-            expression = new ExpressionParser(text).Parse();
+            expression = new ExpressionParser(text, pathSeparator).Parse();
             error = null;
             return true;
         }

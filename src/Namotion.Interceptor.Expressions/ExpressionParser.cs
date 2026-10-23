@@ -8,7 +8,7 @@ namespace Namotion.Interceptor.Expressions;
 /// Parses an expression by recursive descent. Throws a <see cref="FormatException"/> whose message reads
 /// <c>&lt;message&gt; at position &lt;zero-based index&gt;</c>.
 /// </summary>
-internal sealed class ExpressionParser(string text)
+internal sealed class ExpressionParser(string text, char pathSeparator)
 {
     internal const int MaximumExpressionLength = 1000;
     internal const int MaximumNestingDepth = 32;
@@ -56,7 +56,7 @@ internal sealed class ExpressionParser(string text)
             throw CreateError($"unexpected '{text[_position]}'");
         }
 
-        return new ParsedExpression(text, body, pipes, [.. _paths]);
+        return new ParsedExpression(text, pathSeparator, body, pipes, [.. _paths]);
     }
 
     private ExpressionNode ParseOr()
@@ -192,7 +192,7 @@ internal sealed class ExpressionParser(string text)
             _paths.Add(token);
         }
 
-        return new PathNode(token);
+        return new PathNode(token, pathSeparator);
     }
 
     private LiteralNode ParseNumber(string token, int start)
@@ -230,8 +230,8 @@ internal sealed class ExpressionParser(string text)
 
     private static bool IsNumber(string token) => IsNumberStart(token) && !token.Contains('/');
 
-    private static bool IsBareWord(string token) =>
-        token.AsSpan().IndexOfAny('/', '[') < 0 && !ExpressionVariables.TryGetVariable(token, out _);
+    private bool IsBareWord(string token) =>
+        token.AsSpan().IndexOfAny(pathSeparator, '[') < 0 && !ExpressionVariables.TryGetVariable(token, pathSeparator, out _);
 
     private (ComparisonOperator Operator, string Text)? ReadOperator()
     {

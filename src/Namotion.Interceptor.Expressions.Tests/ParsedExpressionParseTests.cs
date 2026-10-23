@@ -11,6 +11,61 @@ public class ParsedExpressionParseTests
     }
 
     [Theory]
+    [InlineData("subject.IsOn", "subject", "IsOn")]
+    [InlineData("subject.Device.IsOn", "subject", "Device.IsOn")]
+    [InlineData("subject", "subject", null)]
+    [InlineData("subject[0]", "subject", "[0]")]
+    public void WhenSeparatorIsADot_ThenAVariableEndsAtTheDot(string text, string expectedVariable, string? expectedMemberPath)
+    {
+        // Act
+        Assert.True(ParsedExpression.TryParse(text, '.', out var expression, out var error), error);
+        var context = new RecordingContext();
+        expression.Evaluate(ref context);
+
+        // Assert
+        Assert.Equal(expectedVariable, context.Variable);
+        Assert.Equal(expectedMemberPath, context.MemberPath);
+    }
+
+    [Theory]
+    [InlineData("Temperature > Limits.Maximum", '.', true)]
+    [InlineData("Temperature > Limits.Maximum", '/', false)]
+    [InlineData("Temperature > Limits/Maximum", '/', true)]
+    [InlineData("Temperature > 1.5", '.', false)]
+    public void WhenSeparatorIsGiven_ThenAWordAfterAnOperatorWithTheSeparatorIsAPath(string text, char separator, bool isPath)
+    {
+        // Act
+        Assert.True(ParsedExpression.TryParse(text, separator, out var expression, out var error), error);
+
+        // Assert
+        Assert.Equal(isPath ? 2 : 1, expression.Paths.Length);
+    }
+
+    [Fact]
+    public void WhenNoSeparatorIsGiven_ThenItIsTheSlash()
+    {
+        // Act
+        Assert.True(ParsedExpression.TryParse("subject/IsOn", out var expression, out _));
+
+        // Assert
+        Assert.Equal('/', expression.PathSeparator);
+    }
+
+    [Theory]
+    [InlineData("subject.Power", '.', "subject")]
+    [InlineData("value", '.', "value")]
+    [InlineData("subject/Power", '.', null)]
+    [InlineData("subjects.Power", '.', null)]
+    public void WhenPathStartsWithAVariableAndTheSeparator_ThenItIsThatVariable(string path, char separator, string? expected)
+    {
+        // Act
+        ExpressionVariables.TryGetVariable(path, separator, out var variable);
+
+        // Assert
+        Assert.Equal(expected, variable);
+    }
+
+    [Theory]
     [InlineData("motor/Speed", "motor/Speed")]
     [InlineData("  /Demo/Conveyor/CurrentSpeed  ", "/Demo/Conveyor/CurrentSpeed")]
     [InlineData("../notes-v2.md/motorstate", "../notes-v2.md/motorstate")]
@@ -167,5 +222,24 @@ public class ParsedExpressionParseTests
     {
         // Act & Assert
         Parse(text);
+    }
+
+    private struct RecordingContext : IExpressionContext
+    {
+        public string? Variable;
+        public string? MemberPath;
+
+        public ExpressionValue ResolvePath(string path) => ExpressionValue.Missing;
+
+        public ExpressionValue ResolveVariable(string variable, string? memberPath)
+        {
+            Variable = variable;
+            MemberPath = memberPath;
+            return ExpressionValue.Missing;
+        }
+
+        public ExpressionValue ApplyPipe(string name, System.Collections.Immutable.ImmutableArray<string> arguments, ExpressionValue input) => input;
+
+        public string ToText(ExpressionValue result) => string.Empty;
     }
 }
