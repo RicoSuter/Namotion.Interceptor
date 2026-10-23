@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <title>HomeBlaze</title>
+    <style>
+        :root { color-scheme: dark; }
+        body { font-family: system-ui, sans-serif; background: #2a2b32; color: #e8e8ea; margin: 0; padding: 2rem; }
+        h1 { font-size: 1.3rem; font-weight: 600; margin: 0 0 1.5rem; }
+        h2 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.08em; color: #9a9aa4; margin: 2rem 0 0.75rem; }
+        button { font: inherit; background: #3a3b44; color: inherit; border: 1px solid #4a4b55; border-radius: 6px; padding: 0.55rem 0.9rem; cursor: pointer; }
+        button:hover { background: #454651; border-color: #5a5b66; }
+        button.primary { background: #1f6feb; border-color: #1f6feb; }
+        input { font: inherit; background: #1f2026; color: inherit; border: 1px solid #4a4b55; border-radius: 6px; padding: 0.55rem 0.7rem; width: 100%; box-sizing: border-box; }
+        ul { list-style: none; padding: 0; margin: 0; }
+        li { display: flex; align-items: center; gap: 0.75rem; padding: 0.6rem 0.75rem; border: 1px solid #3a3b44; border-radius: 6px; margin-bottom: 0.5rem; }
+        li .meta { flex: 1; min-width: 0; }
+        li .name { font-weight: 500; }
+        li .detail { font-size: 0.8rem; color: #9a9aa4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .row { display: flex; gap: 0.5rem; align-items: center; }
+        .error { background: #4a1f24; border: 1px solid #8a3a44; border-radius: 6px; padding: 0.75rem; margin-bottom: 1.5rem; }
+        .hint { font-size: 0.8rem; color: #9a9aa4; margin-top: 0.5rem; }
+        .empty { color: #9a9aa4; font-size: 0.9rem; }
+    </style>
+</head>
+<body>
+<h1>HomeBlaze</h1>
+<div id="error" class="error" style="display: none"></div>
+
+<h2>Saved connections</h2>
+<ul id="connections"></ul>
+<p id="empty" class="empty" style="display: none">No connections yet. Add one below.</p>
+
+<h2>Connect to a running instance</h2>
+<div class="row">
+    <input id="url" type="url" placeholder="http://homeblaze.local:8080/" />
+    <button id="add-url">Add</button>
+</div>
+
+<h2>Open a folder on this computer</h2>
+<div class="row">
+    <button id="add-data-folder" class="primary">HomeBlaze data folder</button>
+    <button id="add-file-folder">Folder of files</button>
+</div>
+<p class="hint">
+    A <strong>data folder</strong> holds a complete instance, and an empty one is set up on first start.
+    A <strong>folder of files</strong> is mounted as is: HomeBlaze keeps its own database and settings
+    elsewhere and writes nothing into the folder except what you edit.
+</p>
+
+<script>
+    const send = message => window.external.sendMessage(JSON.stringify(message));
+
+    function render(state) {
+        const list = document.getElementById('connections');
+        list.textContent = '';
+        document.getElementById('empty').style.display = state.connections.length ? 'none' : 'block';
+
+        for (const connection of state.connections) {
+            const item = document.createElement('li');
+
+            const meta = document.createElement('div');
+            meta.className = 'meta';
+            const name = document.createElement('div');
+            name.className = 'name';
+            name.textContent = connection.name;
+            const detail = document.createElement('div');
+            detail.className = 'detail';
+            detail.textContent = connection.detail;
+            meta.append(name, detail);
+
+            const open = document.createElement('button');
+            open.className = 'primary';
+            open.textContent = 'Open';
+            open.onclick = () => send({ type: 'open', id: connection.id });
+
+            const remove = document.createElement('button');
+            remove.textContent = 'Remove';
+            remove.onclick = () => send({ type: 'remove', id: connection.id });
+
+            item.append(meta, open, remove);
+            list.append(item);
+        }
+
+        const error = document.getElementById('error');
+        error.style.display = state.error ? 'block' : 'none';
+        error.textContent = state.error ?? '';
+    }
+
+    document.getElementById('add-url').onclick = () => {
+        const url = document.getElementById('url').value.trim();
+        if (url) send({ type: 'add-remote', url });
+    };
+    document.getElementById('add-data-folder').onclick = () => send({ type: 'add-folder', kind: 'FullDataFolder' });
+    document.getElementById('add-file-folder').onclick = () => send({ type: 'add-folder', kind: 'MarkdownFolder' });
+
+    window.external.receiveMessage(raw => render(JSON.parse(raw)));
+    send({ type: 'ready' });
+</script>
+</body>
+</html>
