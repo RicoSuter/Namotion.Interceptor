@@ -116,13 +116,17 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
         var changedTimestamp = context.WriteTimestampForPublishing;
         var receivedTimestamp = SubjectChangeContext.Current.ReceivedTimestamp;
 
+        // Equality can run user code, so resolve it before taking the transaction lock, same as the origin above.
+        var restoresLandedValue = EqualityComparer<TProperty>.Default.Equals(context.CurrentValue, context.NewValue);
+
         if (transaction.TryCaptureChange(
                 context.Property,
                 resolvedOrigin,
                 changedTimestamp,
                 receivedTimestamp,
                 context.CurrentValue,
-                context.NewValue))
+                context.NewValue,
+                restoresLandedValue))
         {
             return;
         }

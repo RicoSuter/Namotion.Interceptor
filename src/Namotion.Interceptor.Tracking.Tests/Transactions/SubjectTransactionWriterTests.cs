@@ -380,12 +380,18 @@ public class SubjectTransactionWriterTests
     {
         public int WriteCalls { get; private set; }
 
+        public List<string> WrittenPropertyNames { get; } = [];
+
         public ValueTask<SourceWriteResult> WriteToSourcesAsync(
             Memory<SubjectPropertyChange> changes,
             TransactionRequirement requirement,
             CancellationToken cancellationToken)
         {
             WriteCalls++;
+            foreach (var change in changes.Span)
+            {
+                WrittenPropertyNames.Add(change.Property.Name);
+            }
             return new(new SourceWriteResult([], [], [], RevertState: null));
         }
 
@@ -424,4 +430,75 @@ public class SubjectTransactionWriterTests
         Assert.Equal("John", person.FirstName);
     }
 
+    [Fact]
+    public async Task WhenAllPendingChangesAreWrittenBack_ThenCommitCallsNoWriterAndPublishesNothing()
+    {
+        // Arrange
+        var changes = new List<SubjectPropertyChange>();
+        var writer = new NonMarkingTransactionWriter();
+        var context = CreateTransactionContext();
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(changes.Add);
+        context.AddService<ITransactionWriter>(writer);
+
+        var person = new Person(context) { FirstName = "Ann", LastName = "Smith" };
+        changes.Clear();
+
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "Bob";
+        person.LastName = "Jones";
+        person.FirstName = "Ann";
+        person.LastName = "Smith";
+
+        // Act
+        var pendingBeforeCommit = transaction.GetPendingChanges();
+        var firstNameInsideTransaction = person.FirstName;
+        var lastNameInsideTransaction = person.LastName;
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Empty(pendingBeforeCommit);
+        Assert.Equal("Ann", firstNameInsideTransaction);
+        Assert.Equal("Smith", lastNameInsideTransaction);
+        Assert.Equal(0, writer.WriteCalls);
+        Assert.Empty(changes);
+        Assert.Equal("Ann", person.FirstName);
+        Assert.Equal("Smith", person.LastName);
+    }
+
+    [Fact]
+    public async Task WhenCommitIsRetriedAfterConflict_ThenCancelledChangeStaysCancelled()
+    {
+        // Arrange
+        var changes = new List<SubjectPropertyChange>();
+        var writer = new NonMarkingTransactionWriter();
+        var context = CreateTransactionContext();
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(changes.Add);
+        context.AddService<ITransactionWriter>(writer);
+
+        var person = new Person(context) { FirstName = "Ann" };
+        changes.Clear();
+
+        using var transaction = await context.BeginTransactionAsync(
+            TransactionFailureHandling.BestEffort,
+            TransactionLocking.Optimistic,
+            conflictBehavior: TransactionConflictBehavior.FailOnConflict);
+        person.FirstName = "Bob";
+        person.FirstName = "Ann";
+        person.LastName = "Smith";
+
+        await RunWithoutAsyncLocalFlowAsync(() => person.LastName = "External");
+        await Assert.ThrowsAsync<SubjectTransactionConflictException>(
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+        await RunWithoutAsyncLocalFlowAsync(() => person.LastName = null);
+        changes.Clear();
+
+        // Act
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal([nameof(Person.LastName)], writer.WrittenPropertyNames);
+        Assert.DoesNotContain(changes, c => c.Property.Name == nameof(Person.FirstName));
+        Assert.Equal("Ann", person.FirstName);
+        Assert.Equal("Smith", person.LastName);
+    }
 }

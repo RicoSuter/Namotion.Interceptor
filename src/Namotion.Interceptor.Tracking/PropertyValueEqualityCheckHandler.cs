@@ -1,5 +1,7 @@
-﻿using Namotion.Interceptor.Attributes;
+using System.Runtime.CompilerServices;
+using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
+using Namotion.Interceptor.Tracking.Transactions;
 
 namespace Namotion.Interceptor.Tracking;
 
@@ -13,9 +15,19 @@ public class PropertyValueEqualityCheckHandler : IWriteInterceptor
     /// <inheritdoc />
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
-        if (!EqualityComparer<TProperty>.Default.Equals(context.CurrentValue, context.NewValue))
+        if (!EqualityComparer<TProperty>.Default.Equals(context.CurrentValue, context.NewValue) ||
+            IsWriteBackOfPendingChange(context.Property))
         {
             next(ref context);
         }
+    }
+
+    // CurrentValue is the landed value, so inside a transaction a write back to it must still reach the
+    // transaction, which cancels the pending change, instead of being dropped as unchanged.
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IsWriteBackOfPendingChange(PropertyReference property)
+    {
+        return SubjectTransaction.HasActiveTransaction &&
+            SubjectTransaction.HasPendingChangeInCurrentTransaction(property);
     }
 }
