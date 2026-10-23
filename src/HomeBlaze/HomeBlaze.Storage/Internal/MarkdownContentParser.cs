@@ -5,6 +5,7 @@ using HomeBlaze.Abstractions;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Pages;
+using Markdig.Extensions.Footnotes;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -355,18 +356,71 @@ public sealed partial class MarkdownContentParser
     {
         var start = textBlock is null ? HtmlSegmentStart.None
             : textBlock.IsEditable ? HtmlSegmentStart.Text
+            : ShowsSomething(html) ? HtmlSegmentStart.Source
             : HtmlSegmentStart.Other;
+        var kind = textBlock is null ? null : GetKind(textBlock);
 
         // The index is part of the key because the same HTML can occur several times.
         var key = $"{HtmlKeyPrefix}{index}_{ComputeHash(html)}";
-        var segment = existingChildren.TryGetValue(key, out var existing) && existing is HtmlSegment reused && reused.Start == start
+        var segment = existingChildren.TryGetValue(key, out var existing) && existing is HtmlSegment reused &&
+                      reused.Start == start && reused.Kind == kind
             ? reused
-            : new HtmlSegment(html, start);
+            : new HtmlSegment(html, start, kind);
         children[key] = segment;
         if (textBlock is not null)
         {
             state.AddTextBlock(segment, textBlock);
         }
+    }
+
+    // The kind of a text block that cannot be edited as text, see HtmlSegment.Kind. A list or a quote with a block inside is
+    // named by the kind of its first element.
+    private static string? GetKind(MarkdownTextBlock textBlock) => textBlock switch
+    {
+        { IsEditable: true } => null,
+        { HoldsHtml: true } => "HTML",
+        { FirstBlock: FootnoteGroup } => "Footnotes",
+        { FirstBlock: MarkdownBlockContainer { IsStyle: true } } => "Style",
+        { FirstBlock: MarkdownBlockContainer } => "Error",
+        _ => MarkdownSegmentBuilder.IsOldSubjectFence(textBlock.FirstBlock) ? "Error" : null
+    };
+
+    // Whether the markup shows anything besides white space, comments, and script and style elements, any of which hides the
+    // rest of the markup when it is not closed. The markup of a text block ends at its first expression, whose value shows.
+    private static bool ShowsSomething(string html)
+    {
+        var rest = html.AsSpan();
+        while (true)
+        {
+            rest = rest.TrimStart();
+            if (rest.IsEmpty)
+            {
+                return false;
+            }
+
+            var endMarker = rest.StartsWith("<!--", StringComparison.Ordinal) ? "-->"
+                : IsStartTag(rest, "script") ? "</script>"
+                : IsStartTag(rest, "style") ? "</style>"
+                : null;
+            if (endMarker is null)
+            {
+                return true;
+            }
+
+            var end = rest.IndexOf(endMarker, StringComparison.OrdinalIgnoreCase);
+            if (end < 0)
+            {
+                return false;
+            }
+
+            rest = rest[(end + endMarker.Length)..];
+        }
+
+        static bool IsStartTag(ReadOnlySpan<char> markup, string name) =>
+            markup.Length > name.Length + 1 &&
+            markup[0] == '<' &&
+            markup[1..].StartsWith(name, StringComparison.OrdinalIgnoreCase) &&
+            !char.IsAsciiLetterOrDigit(markup[name.Length + 1]);
     }
 
     private async Task<(string? Key, IInterceptorSubject? Subject, BlockError? Error)> CreateWidgetAsync(

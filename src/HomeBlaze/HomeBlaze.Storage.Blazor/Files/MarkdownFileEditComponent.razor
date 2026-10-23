@@ -135,6 +135,10 @@ else
     private int _contentChangeCount;
     private DecorationRegion? _activeRegion;
     private Task? _decorationRefresh;
+
+    // Set once the editor has its text, before which a reveal waits in _pendingReveal.
+    private bool _isEditorReady;
+    private IInterceptorSubject? _pendingReveal;
     private bool _isDecorationRefreshRequested;
 
     public bool IsValid => true;
@@ -167,6 +171,13 @@ else
     {
         // Apply initial decorations
         await RefreshDecorationsAsync();
+
+        _isEditorReady = true;
+        if (_pendingReveal is { } subject)
+        {
+            _pendingReveal = null;
+            await RevealAsync(subject);
+        }
     }
 
     private void OnCursorPositionChanged(CursorPositionChangedEvent e)
@@ -443,9 +454,21 @@ else
 
     public async Task<bool> RevealAsync(IInterceptorSubject subject)
     {
-        if (_editor is null || File is null || _isDisposed)
+        if (File is null || _isDisposed)
         {
             return false;
+        }
+
+        // The page can ask as soon as it switched to the editor, which reads its text and decorations afterwards.
+        if (!_isEditorReady || _editor is null)
+        {
+            _pendingReveal = subject;
+            return true;
+        }
+
+        if (subject is HtmlSegment segment)
+        {
+            return await RevealTextBlockAsync(File, _editor, segment);
         }
 
         var region = _decorationRegions.FirstOrDefault(
@@ -471,6 +494,38 @@ else
 
         var endLine = _outlines.FirstOrDefault(outline => outline.StartLine == region.StartLine)?.EndLine ?? region.EndLine;
         await module.InvokeVoidAsync("reveal", _editor.Id, region.StartLine, endLine);
+        return true;
+    }
+
+    // Selects the lines of the text block, such as raw HTML, while the text up to its last line is saved.
+    private async Task<bool> RevealTextBlockAsync(MarkdownFile file, StandaloneCodeEditor editor, HtmlSegment segment)
+    {
+        if (file.GetTextBlockLines(segment) is not (var line, var endLine))
+        {
+            return false;
+        }
+
+        var savedText = file.Content ?? string.Empty;
+        var savedEnd = 0;
+        for (var current = 0; current < endLine && savedEnd >= 0; current++)
+        {
+            savedEnd = savedText.IndexOf('\n', savedEnd) is var lineFeed and >= 0 ? lineFeed + 1 : -1;
+        }
+
+        var editorText = await editor.GetValue();
+        var savedLength = savedEnd < 0 ? savedText.Length : savedEnd;
+        if (!editorText.AsSpan().StartsWith(savedText.AsSpan(0, savedLength), StringComparison.Ordinal))
+        {
+            Snackbar.Add("Save the page to find the text in the editor. The text up to it has changes that are not saved.", Severity.Warning);
+            return true;
+        }
+
+        if (await GetModuleAsync() is not { } module)
+        {
+            return false;
+        }
+
+        await module.InvokeVoidAsync("reveal", editor.Id, line, endLine);
         return true;
     }
 

@@ -58,6 +58,12 @@ public abstract class PageStructureEditor
     /// <summary>Asks for the new text of the text block <paramref name="subject"/>, saves it and selects it. Does nothing by default.</summary>
     public virtual Task EditTextAsync(IInterceptorSubject subject) => Task.CompletedTask;
 
+    /// <summary>
+    /// Switches the page to an editor of its source and shows the lines of the block of <paramref name="subject"/> there, for
+    /// content that cannot be edited inline. Does nothing by default.
+    /// </summary>
+    public virtual Task EditInSourceAsync(IInterceptorSubject subject) => Task.CompletedTask;
+
     /// <summary>Gets whether text can be inserted into <paramref name="content"/> before <paramref name="before"/>, or at its end. False by default.</summary>
     public virtual bool CanInsertText(IInterceptorSubject content, IInterceptorSubject? before) => false;
 

@@ -46,7 +46,7 @@
                 var hasEditAction = isSelected && (actions.CanEditText || HasEditComponent);
                 var addTargets = structureEditor?.GetAddTargets(Subject) ?? [];
             }
-            @if (isSelected && (selectableParent != null || hasEditAction || actions.CanDelete || addTargets.Count > 0))
+            @if (isSelected && (selectableParent != null || hasEditAction || actions.CanEditInSource || actions.CanDelete || addTargets.Count > 0))
             {
                 @* The anchor of the bar, see SubjectComponent.razor.css. *@
                 <div class="subject-action-bar-anchor">
@@ -140,6 +140,17 @@
                                                aria-label="Edit"
                                                OnClick="_editCallback"
                                                data-testid="edit-subject-button" />
+                            }
+
+                            @if (actions.CanEditInSource)
+                            {
+                                <MudIconButton Icon="@Icons.Material.Filled.Code"
+                                               Size="Size.Small"
+                                               Color="Color.Success"
+                                               title="Edit in Source"
+                                               aria-label="Edit in Source"
+                                               OnClick="_editCallback"
+                                               data-testid="edit-in-source-button" />
                             }
 
                             @if (actions.CanDelete)
@@ -512,7 +523,7 @@
             }
 
             _textBlockName = _isTextBlock && AdditionalParameters?.GetValueOrDefault(ITextBlockWidget.HtmlParameterName) is string html
-                ? TextBlockNames.Describe(html)
+                ? TextBlockNames.Describe(html, AdditionalParameters.GetValueOrDefault(ITextBlockWidget.KindParameterName) as string)
                 : null;
             _previousSubject = Subject;
             _previousAdditionalParameters = AdditionalParameters;
@@ -571,7 +582,7 @@
 
         if (_isTextBlock && StructureEditor is { } editor)
         {
-            await editor.EditTextAsync(Subject);
+            await (editor.GetActions(Subject).CanEditInSource ? editor.EditInSourceAsync(Subject) : editor.EditTextAsync(Subject));
             return;
         }
 

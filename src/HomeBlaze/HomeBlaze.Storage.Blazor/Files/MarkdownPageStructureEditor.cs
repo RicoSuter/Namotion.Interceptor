@@ -33,12 +33,14 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
         MarkdownFile file,
         WidgetSelection selection,
         SubjectComponent pageComponent,
+        ISubjectRevealTarget? sourceEditor,
         IDialogService dialogService,
         ISnackbar snackbar,
         SubjectFactory subjectFactory,
         ILogger logger,
         Func<bool> isDarkMode)
     {
+        SourceEditor = sourceEditor;
         _file = file;
         _selection = selection;
         _pageComponent = pageComponent;
@@ -58,12 +60,24 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
     /// <summary>Gets the widget of the page, inside which the editor finds the widget to select.</summary>
     public SubjectComponent PageComponent => _pageComponent;
 
+    /// <summary>Gets the page, which switches to an editor of its source to show the lines of a block, or null.</summary>
+    public ISubjectRevealTarget? SourceEditor { get; }
+
     public override PageBlockActions GetActions(IInterceptorSubject subject)
     {
         var actions = _file.GetBlockActions(subject);
         return new PageBlockActions(
-            actions.CanDelete, actions.CanMoveUp, actions.CanMoveDown, CanEditText: subject is HtmlSegment && actions.CanDelete);
+            actions.CanDelete,
+            actions.CanMoveUp,
+            actions.CanMoveDown,
+            CanEditText: subject is HtmlSegment && actions.CanDelete,
+            CanEditInSource: subject is HtmlSegment { Start: HtmlSegmentStart.Source } && SourceEditor is not null);
     }
+
+    public override Task EditInSourceAsync(IInterceptorSubject subject) =>
+        subject is HtmlSegment { Start: HtmlSegmentStart.Source } && SourceEditor is { } sourceEditor
+            ? sourceEditor.RevealAsync(subject)
+            : Task.CompletedTask;
 
     // Two reads of the page, which a reload between them can answer from two versions. The bar renders again after every
     // reload, as GetContentSlots reads the children of the page, and every add checks the page again.

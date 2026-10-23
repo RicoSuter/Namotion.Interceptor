@@ -37,7 +37,7 @@ public class InlineTextEditingTests
         + "Last paragraph on the page.\n";
 
     // Text and blocks in a card, a tab and a flow item, with a heading right before a block, in a flow and a tab that fill grid
-    // cells, in the footer of a card, and raw HTML, which cannot be edited as text.
+    // cells, in the footer of a card, and raw HTML.
     private const string LayoutContent =
         "---\n"
         + "title: Text Layout Demo\n"
@@ -111,6 +111,24 @@ public class InlineTextEditingTests
         + "::\n"
         + "\n"
         + "<div class=\"raw-html-block\">Raw HTML.</div>\n";
+
+    // Raw HTML that shows something between two paragraphs, and an HTML comment, which shows nothing.
+    private const string RawHtmlPageName = "RawHtml.md";
+
+    private const string RawHtmlContent =
+        "---\n"
+        + "title: Raw HTML Demo\n"
+        + "---\n"
+        + "\n"
+        + "# Raw HTML Demo\n"
+        + "\n"
+        + "Paragraph before the HTML.\n"
+        + "\n"
+        + "<div class=\"visible-html-block\">Visible HTML.</div>\n"
+        + "\n"
+        + "<!-- A comment shows nothing. -->\n"
+        + "\n"
+        + "Paragraph after the HTML.\n";
 
     // An empty Alert, whose body has no content of its own, and an empty item of a flow.
     private const string EmptyContent =
@@ -803,18 +821,75 @@ public class InlineTextEditingTests
     }
 
     [Fact]
-    public async Task WhenTextCannotBeEditedAsText_ThenItIsNotASelectableBlock()
+    public async Task WhenRawHtmlStandsBetweenParagraphs_ThenTheParagraphsCanBeEdited()
     {
         // Arrange
-        var page = await OpenPageInInlineModeAsync(LayoutPageName, LayoutContent);
+        var page = await OpenPageInInlineModeAsync(RawHtmlPageName, RawHtmlContent);
+        await SelectTextAsync(page, "Paragraph before the HTML");
+        var actionBar = await SelectTextAsync(page, "Paragraph after the HTML");
 
         // Act
-        var rawHtml = page.Locator(".raw-html-block");
-        await Assertions.Expect(rawHtml).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await actionBar.GetByTestId("edit-subject-button").ClickAsync();
+        await ExpectTextEditorValueAsync(page, "Paragraph after the HTML.");
+        await SetTextEditorValueAsync(page, "Changed after the HTML.");
+        await page.GetByTestId("markdown-text-save").ClickAsync();
 
         // Assert
-        await Assertions.Expect(page.Locator(".markdown-text:has(.raw-html-block)")).ToHaveCountAsync(0);
-        await Assertions.Expect(page.Locator(".subject-component-wrapper.selectable:has(.raw-html-block)")).ToHaveCountAsync(0);
+        await _fixture.WaitForDemoPageTextAsync(
+            RawHtmlPageName,
+            text => text.EndsWith("<div class=\"visible-html-block\">Visible HTML.</div>\n\n<!-- A comment shows nothing. -->\n\nChanged after the HTML.\n", StringComparison.Ordinal),
+            "The paragraph after the HTML was not changed.");
+    }
+
+    [Fact]
+    public async Task WhenRawHtmlThatShowsSomethingIsSelected_ThenItsBarHasOnlyEditInSource()
+    {
+        // Arrange
+        var page = await OpenPageInInlineModeAsync(RawHtmlPageName, RawHtmlContent);
+        var wrapper = GetTextWrapper(page, "Visible HTML.");
+
+        // Act
+        var actionBar = await SelectTextAsync(page, "Visible HTML.");
+
+        // Assert
+        await Assertions.Expect(wrapper).ToHaveAttributeAsync("aria-label", "HTML: Visible HTML.");
+        await Assertions.Expect(wrapper).ToHaveClassAsync(new Regex(@"\btext-block\b"));
+        await Assertions.Expect(actionBar.GetByTestId("edit-in-source-button")).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(actionBar.Locator("button")).ToHaveCountAsync(1);
+
+        // The comment shows nothing and is no block to select.
+        await Assertions.Expect(page.Locator(".subject-component-wrapper.text-block")).ToHaveCountAsync(4);
+    }
+
+    [Fact]
+    public async Task WhenEditInSourceIsClicked_ThenTheSplitModeShowsTheLinesOfTheHtmlInTheEditor()
+    {
+        // Arrange
+        var page = await OpenPageInInlineModeAsync(RawHtmlPageName, RawHtmlContent);
+        var actionBar = await SelectTextAsync(page, "Visible HTML.");
+
+        // Act
+        await actionBar.GetByTestId("edit-in-source-button").ClickAsync();
+
+        // Assert
+        await Assertions.Expect(page.GetByTestId("edit-splitter")).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await WaitForPageEditorSelectionAsync(page, GetLineOf(RawHtmlContent, "visible-html-block"));
+    }
+
+    [Fact]
+    public async Task WhenRawHtmlThatShowsSomethingIsDoubleClicked_ThenTheSplitModeShowsItsLinesInTheEditor()
+    {
+        // Arrange
+        var page = await OpenPageInInlineModeAsync(RawHtmlPageName, RawHtmlContent);
+        var wrapper = GetTextWrapper(page, "Visible HTML.");
+        await Assertions.Expect(wrapper).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Act
+        await wrapper.DblClickAsync(new() { Force = true });
+
+        // Assert
+        await Assertions.Expect(page.GetByTestId("edit-splitter")).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await WaitForPageEditorSelectionAsync(page, GetLineOf(RawHtmlContent, "visible-html-block"));
     }
 
     private Task<IPage> OpenPageInInlineModeAsync() => OpenPageInInlineModeAsync(PageName, Content);
@@ -852,6 +927,16 @@ public class InlineTextEditingTests
         await Assertions.Expect(page.GetByTestId("subject-edit-dialog-type")).ToHaveCountAsync(0);
         await Assertions.Expect(page.GetByRole(AriaRole.Dialog)).ToHaveCountAsync(1);
     }
+
+    // The 1-based line of the content that contains the text.
+    private static int GetLineOf(string content, string text) => content.Split('\n').ToList().FindIndex(line => line.Contains(text)) + 1;
+
+    // The page editor of the Split mode is the only Monaco editor while no text dialog is open.
+    private static Task WaitForPageEditorSelectionAsync(IPage page, int startLine) =>
+        page.WaitForFunctionAsync(
+            "line => monaco.editor.getEditors()[0]?.getSelection()?.startLineNumber === line",
+            startLine,
+            new() { Timeout = Timeout });
 
     private static ILocator GetTextWrapper(IPage page, string text) =>
         page.Locator(".subject-component-wrapper.selectable:has(> .markdown-text)").Filter(new() { HasText = text });

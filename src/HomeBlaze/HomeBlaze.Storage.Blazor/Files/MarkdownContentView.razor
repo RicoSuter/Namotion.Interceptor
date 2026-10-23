@@ -29,8 +29,10 @@ else
 {
     foreach (var segment in segments)
     {
+        @* Content that shows nothing, such as an HTML comment, has no line before it, which would stand where the line after
+           it stands. *@
         var item = segment.Widget ?? segment.Start;
-        @if (showsInsertLines && item is not null)
+        @if (showsInsertLines && item is not null && segment.Start?.Start != HtmlSegmentStart.Other)
         {
             position++;
             <BlockInsertLine Label="@($"Insert at position {position} of {contentName}")"
@@ -43,9 +45,10 @@ else
             @* Keyed, so that the state of a component stays with its subject when a reload inserts or removes a block. *@
             <SubjectComponent @key="segment.Widget" Subject="@segment.Widget" Type="SubjectComponentType.Widget" />
         }
-        else if (segment.Start is { Start: HtmlSegmentStart.Text } text)
+        else if (segment.Start is { Start: HtmlSegmentStart.Text or HtmlSegmentStart.Source } text)
         {
-            @* A block of text is selectable like a row of a selected list: once its content is at the selection. *@
+            @* A block of text is selectable like a row of a selected list: once its content is at the selection. So is content
+               that cannot be edited as text but shows something, which is edited in the source. *@
             <SubjectComponent @key="text"
                               Subject="@text"
                               Type="SubjectComponentType.Widget"
@@ -172,6 +175,11 @@ else
         }
 
         parameters = new Dictionary<string, object?> { [ITextBlockWidget.HtmlParameterName] = html };
+        if (segment.Kind is { } kind)
+        {
+            parameters[ITextBlockWidget.KindParameterName] = kind;
+        }
+
         _textParameters[segment] = parameters;
         return parameters;
     }

@@ -78,6 +78,10 @@
     [CascadingParameter(Name = "ParentSubjectComponent")]
     public SubjectComponent? PageComponent { get; set; }
 
+    // The page around this one in Inline mode, which shows content that cannot be edited inline in its source editor.
+    [CascadingParameter(Name = ISubjectRevealTarget.SourceEditorName)]
+    public ISubjectRevealTarget? SourceEditor { get; set; }
+
     private MarkdownPageStructureEditor? _structureEditor;
 
     private MarkdownFile? File => Subject as MarkdownFile;
@@ -94,10 +98,10 @@
 
             // A navigation to another page keeps this component and gives it the other file.
             if (_structureEditor is null || _structureEditor.File != file || _structureEditor.Selection != selection ||
-                _structureEditor.PageComponent != pageComponent)
+                _structureEditor.PageComponent != pageComponent || _structureEditor.SourceEditor != SourceEditor)
             {
                 _structureEditor = new MarkdownPageStructureEditor(
-                    file, selection, pageComponent, DialogService, Snackbar, SubjectFactory, StructureEditorLogger, () => IsDarkMode);
+                    file, selection, pageComponent, SourceEditor, DialogService, Snackbar, SubjectFactory, StructureEditorLogger, () => IsDarkMode);
             }
 
             return _structureEditor;

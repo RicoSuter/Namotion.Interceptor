@@ -495,8 +495,9 @@ namespace HomeBlaze.Components
     }
     public readonly struct PageBlockActions : System.IEquatable<HomeBlaze.Components.PageBlockActions>
     {
-        public PageBlockActions(bool CanDelete, bool CanMoveUp, bool CanMoveDown, bool CanEditText = false) { }
+        public PageBlockActions(bool CanDelete, bool CanMoveUp, bool CanMoveDown, bool CanEditText = false, bool CanEditInSource = false) { }
         public bool CanDelete { get; init; }
+        public bool CanEditInSource { get; init; }
         public bool CanEditText { get; init; }
         public bool CanMoveDown { get; init; }
         public bool CanMoveUp { get; init; }
@@ -510,6 +511,7 @@ namespace HomeBlaze.Components
         public abstract bool CanInsertInto(Namotion.Interceptor.IInterceptorSubject content);
         public virtual bool CanInsertText(Namotion.Interceptor.IInterceptorSubject content, Namotion.Interceptor.IInterceptorSubject? before) { }
         public abstract System.Threading.Tasks.Task DeleteAsync(Namotion.Interceptor.IInterceptorSubject subject);
+        public virtual System.Threading.Tasks.Task EditInSourceAsync(Namotion.Interceptor.IInterceptorSubject subject) { }
         public virtual System.Threading.Tasks.Task EditTextAsync(Namotion.Interceptor.IInterceptorSubject subject) { }
         public abstract HomeBlaze.Components.PageBlockActions GetActions(Namotion.Interceptor.IInterceptorSubject subject);
         public abstract System.Collections.Generic.IReadOnlyList<HomeBlaze.Components.PageAddTarget> GetAddTargets(Namotion.Interceptor.IInterceptorSubject owner);

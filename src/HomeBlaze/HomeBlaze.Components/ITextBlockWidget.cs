@@ -9,4 +9,10 @@ public interface ITextBlockWidget
 {
     /// <summary>The name of the parameter that holds the markup of the block.</summary>
     const string HtmlParameterName = "Html";
+
+    /// <summary>
+    /// The name of the optional parameter that holds the kind of a block that cannot be edited as text, such as HTML, which
+    /// names it in place of the kind of its first element.
+    /// </summary>
+    const string KindParameterName = "Kind";
 }

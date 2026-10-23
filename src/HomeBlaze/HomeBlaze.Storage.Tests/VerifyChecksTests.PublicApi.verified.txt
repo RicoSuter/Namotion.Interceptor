@@ -100,6 +100,10 @@ namespace HomeBlaze.Storage.Files
         protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
         public System.Collections.Generic.IReadOnlyList<HomeBlaze.Storage.Pages.MarkdownListSlot> GetListSlots(Namotion.Interceptor.IInterceptorSubject owner) { }
         protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
+                "Line",
+                "EndLine"})]
+        public System.ValueTuple<int, int>? GetTextBlockLines(HomeBlaze.Storage.Internal.HtmlSegment segment) { }
         public string? GetTextBlockText(HomeBlaze.Storage.Internal.HtmlSegment segment) { }
         public int GetWidgetFenceLengthInContent(Namotion.Interceptor.IInterceptorSubject content) { }
         public int GetWidgetFenceLengthInText(HomeBlaze.Storage.Internal.HtmlSegment segment) { }
@@ -272,8 +276,9 @@ namespace HomeBlaze.Storage.Internal
     [System.ComponentModel.DisplayName("Text")]
     public class HtmlSegment : Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
-        public HtmlSegment(string html, HomeBlaze.Storage.Internal.HtmlSegmentStart start = 0) { }
+        public HtmlSegment(string html, HomeBlaze.Storage.Internal.HtmlSegmentStart start = 0, string? kind = null) { }
         public string Html { get; }
+        public string? Kind { get; }
         public HomeBlaze.Storage.Internal.HtmlSegmentStart Start { get; }
         public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
         public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
@@ -288,6 +293,7 @@ namespace HomeBlaze.Storage.Internal
         None = 0,
         Text = 1,
         Other = 2,
+        Source = 3,
     }
     public sealed class MarkdownContentParser
     {

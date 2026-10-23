@@ -18,10 +18,17 @@ public partial class HtmlSegment
     /// <summary>What the HTML starts among the top-level content of its page or block.</summary>
     public HtmlSegmentStart Start { get; }
 
-    public HtmlSegment(string html, HtmlSegmentStart start = HtmlSegmentStart.None)
+    /// <summary>
+    /// The kind of the content that cannot be edited as text which the HTML starts, such as HTML, Style, Error or Footnotes, or
+    /// null when the kind of its first element names it.
+    /// </summary>
+    public string? Kind { get; }
+
+    public HtmlSegment(string html, HtmlSegmentStart start = HtmlSegmentStart.None, string? kind = null)
     {
         Html = html;
         Start = start;
+        Kind = kind;
     }
 }
 
@@ -34,6 +41,12 @@ public enum HtmlSegmentStart
     /// <summary>A text block that can be edited, such as a paragraph, a heading, a list or a table.</summary>
     Text,
 
-    /// <summary>Other content that cannot be edited as text, such as raw HTML, a style block or an error.</summary>
-    Other
+    /// <summary>Other content that cannot be edited as text and shows nothing, such as an HTML comment.</summary>
+    Other,
+
+    /// <summary>
+    /// Content that cannot be edited as text but shows something, such as raw HTML, a style block, an error or the footnotes,
+    /// which is edited in the source of the page.
+    /// </summary>
+    Source
 }

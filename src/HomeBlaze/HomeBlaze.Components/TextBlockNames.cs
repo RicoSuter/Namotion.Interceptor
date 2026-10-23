@@ -9,10 +9,13 @@ internal static class TextBlockNames
     private const int MaxLength = 40;
     private const string Ellipsis = "...";
 
-    /// <summary>Gets a name such as "Heading: Motor Status", at most 40 characters long.</summary>
-    public static string Describe(string html)
+    /// <summary>
+    /// Gets a name such as "Heading: Motor Status", at most 40 characters long, with <paramref name="kind"/> in place of the
+    /// kind of the first element when it is given.
+    /// </summary>
+    public static string Describe(string html, string? kind = null)
     {
-        var kind = GetKind(html);
+        kind ??= GetKind(html);
         var text = GetText(html);
         if (text.Length == 0)
         {

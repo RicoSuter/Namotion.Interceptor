@@ -647,6 +647,34 @@ public class MarkdownWidgetBlockTests
         var starts = page.Children.Values.OfType<HtmlSegment>()
             .Select(segment => segment.Start)
             .Where(start => start != HtmlSegmentStart.None);
-        Assert.Equal([HtmlSegmentStart.Text, HtmlSegmentStart.Text, HtmlSegmentStart.Other, HtmlSegmentStart.Text], starts);
+        Assert.Equal([HtmlSegmentStart.Text, HtmlSegmentStart.Text, HtmlSegmentStart.Source, HtmlSegmentStart.Text], starts);
+    }
+
+    [Fact]
+    public async Task WhenAPageHasContentThatCannotBeEditedInline_ThenWhatShowsSomethingStartsASourceSegmentNamedByItsKind()
+    {
+        // Arrange: a closing line that closes no block is an error block of one line.
+        var fixture = await MarkdownPageFixture.CreateAsync();
+
+        // Act
+        var page = await fixture.AddPageAsync(
+            "page.md",
+            "Text[^1].\n\n<!-- note -->\n\n<div>raw</div>\n\n<script>let a;</script>\n\n:: {.ab}\nStyled.\n::\n\n::\n\n[^1]: The footnote.\n");
+
+        // Assert
+        var starts = page.Children.Values.OfType<HtmlSegment>()
+            .Where(segment => segment.Start != HtmlSegmentStart.None)
+            .Select(segment => (segment.Start, segment.Kind));
+        Assert.Equal(
+            [
+                (HtmlSegmentStart.Text, null),
+                (HtmlSegmentStart.Other, "HTML"),
+                (HtmlSegmentStart.Source, "HTML"),
+                (HtmlSegmentStart.Other, "HTML"),
+                (HtmlSegmentStart.Source, "Style"),
+                (HtmlSegmentStart.Source, "Error"),
+                (HtmlSegmentStart.Source, "Footnotes")
+            ],
+            starts);
     }
 }

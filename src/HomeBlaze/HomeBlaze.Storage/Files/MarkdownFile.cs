@@ -581,6 +581,16 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     }
 
     /// <summary>
+    /// Gets the first and the last 1-based line of the text block that <paramref name="segment"/> starts, also of one that
+    /// cannot be edited, or null when the segment starts no text block of this page.
+    /// </summary>
+    public (int Line, int EndLine)? GetTextBlockLines(HtmlSegment segment)
+    {
+        ArgumentNullException.ThrowIfNull(segment);
+        return _parseResult.TextBlocks.TryGetValue(segment, out var textBlock) ? (textBlock.Line, textBlock.EndLine) : null;
+    }
+
+    /// <summary>
     /// Replaces the text block that <paramref name="segment"/> starts with <paramref name="newText"/>, or removes it when that
     /// is empty or white space, and saves the page. Complete widget blocks at the top level of the new text become blocks of
     /// the content, and the page creates their subjects.

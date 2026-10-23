@@ -296,6 +296,20 @@ public class MarkdownStructureEditTests
     }
 
     [Fact]
+    public async Task WhenTheLinesOfATextBlockAreAskedFor_ThenTheyAreItsFirstAndLastLineAlsoForTextThatCannotBeEdited()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var page = await fixture.AddPageAsync("page.md", "# Title\n\n<div>\nraw\n</div>\n\nOld text.\n");
+        var html = page.Children.Values.OfType<HtmlSegment>().Single(segment => segment.Html.Contains("raw"));
+
+        // Act & Assert
+        Assert.Equal((3, 5), page.GetTextBlockLines(html));
+        Assert.Equal((7, 7), page.GetTextBlockLines(FindText(page, "Old text.")));
+        Assert.Null(page.GetTextBlockLines(new HtmlSegment("<p>elsewhere</p>")));
+    }
+
+    [Fact]
     public async Task WhenThePageHasALoneCarriageReturn_ThenItsTextHasNoMarkdownAndAllowsNothing()
     {
         // Arrange

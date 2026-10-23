@@ -21,4 +21,14 @@ public class TextBlockNamesTests
         // Act & Assert
         Assert.Equal(expected, TextBlockNames.Describe(html));
     }
+
+    [Theory]
+    [InlineData("<div class=\"note\">Raw <b>HTML</b>.</div>\n", "HTML", "HTML: Raw HTML.")]
+    [InlineData("<div class=\"ab\">\n<p>Styled.</p>\n</div>\n", "Style", "Style: Styled.")]
+    [InlineData("<img src=\"a.png\">", "HTML", "HTML")]
+    public void WhenTheKindOfATextBlockIsGiven_ThenTheNameHasThatKindAndTheFirstWords(string html, string kind, string expected)
+    {
+        // Act & Assert
+        Assert.Equal(expected, TextBlockNames.Describe(html, kind));
+    }
 }
