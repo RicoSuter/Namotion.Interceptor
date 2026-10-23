@@ -1171,95 +1171,31 @@ public class ChangeQueueProcessorTests
     }
 
     [Fact]
-    public async Task WhenThePropertyFilterThrowsOnATick_ThenProcessingFaultsAndWhatWasTakenIsStillWritten()
+    public async Task WhenThePropertyFilterThrowsOnATick_ThenProcessingFaultsWithThatException()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create()
             .WithRegistry()
             .WithPropertyChangeSubscriptions();
         var subject = new Person(context);
-        var written = new ConcurrentQueue<string>();
 
         using var processor = new ChangeQueueProcessor(
             source: new object(),
             context: context,
-            propertyFilter: property => property.Name == nameof(Person.LastName) ? throw new FilterException() : true,
-            writeHandler: (changes, _) =>
-            {
-                foreach (var change in changes.ToArray())
-                {
-                    written.Enqueue(change.Property.Name);
-                }
-
-                return ValueTask.CompletedTask;
-            },
+            propertyFilter: _ => throw new FilterException(),
+            writeHandler: (_, _) => ValueTask.CompletedTask,
             bufferTime: TimeSpan.FromMilliseconds(10),
             maxQueueDepth: null,
             logger: NullLogger.Instance,
             deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
 
-        // Queued before processing starts, so the first tick takes both into one batch and throws on the
-        // second. Another change stays queued, so a teardown drain would throw again.
-        subject.FirstName = "taken";
-        subject.LastName = "throws";
-        subject.LastName = "left";
-
-        // Act & Assert
         using var cancellation = new CancellationTokenSource(TestTimeout);
-        await Assert.ThrowsAsync<FilterException>(() => processor.ProcessAsync(cancellation.Token));
-        Assert.Equal([nameof(Person.FirstName)], written.ToArray());
-    }
-
-    [Fact]
-    public async Task WhenATickTakesMoreThanTheBoundStraightIntoAFlush_ThenTheOldestAreDropped()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext.Create()
-            .WithRegistry()
-            .WithPropertyChangeSubscriptions();
-        var subject = new Person(context);
-        var written = new ConcurrentQueue<string>();
-        long reportedDrops = 0;
-
-        using var processor = new ChangeQueueProcessor(
-            source: new object(),
-            context: context,
-            propertyFilter: _ => true,
-            writeHandler: (changes, _) =>
-            {
-                foreach (var change in changes.ToArray())
-                {
-                    written.Enqueue(change.Property.Name);
-                }
-
-                return ValueTask.CompletedTask;
-            },
-            bufferTime: TimeSpan.FromMilliseconds(10),
-            maxQueueDepth: 2,
-            logger: NullLogger.Instance,
-            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale,
-            dropHandler: count => Interlocked.Add(ref reportedDrops, count));
-
-        // Queued before processing starts, so the first tick, with no flush in flight, takes all four
-        // straight into one batch.
-        subject.FirstName = "a";
-        subject.LastName = "b";
-        subject.FirstName_MaxLength_Unit = "c";
-        subject.FirstName_MaxLength++;
-
-        // Act
-        using var cancellation = new CancellationTokenSource();
         var processing = processor.ProcessAsync(cancellation.Token);
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => written.Count == 2,
-            message: "The two newest changes should be written.");
-        await cancellation.CancelAsync();
-        await processing.WaitAsync(TestTimeout);
 
-        // Assert
-        Assert.Equal([nameof(Person.FirstName_MaxLength_Unit), nameof(Person.FirstName_MaxLength)], written.ToArray());
-        Assert.Equal(2, processor.DropCount);
-        Assert.Equal(2, Interlocked.Read(ref reportedDrops));
+        // Act & Assert: a second change is still queued, so a teardown drain would throw again.
+        subject.FirstName = "first";
+        subject.LastName = "second";
+        await Assert.ThrowsAsync<FilterException>(() => processing);
     }
 
     [Fact]

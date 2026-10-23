@@ -335,23 +335,14 @@ public class ChangeQueueProcessor : IDisposable
                         while (Volatile.Read(ref _lifecycleState) != DisposedState &&
                                await periodicTimer.WaitForNextTickAsync(processingToken).ConfigureAwait(false))
                         {
+                            DrainSubscription();
+
+                            // Not awaited, so the next tick still drains and bounds the queue while a slow
+                            // write is in flight; the flush gate keeps flushes from overlapping.
                             if (pendingFlush.IsCompleted)
                             {
                                 ObserveFlush(pendingFlush, processingToken, ref flushFailureReported);
-                                pendingFlush = default;
-                            }
-
-                            // Not awaited, so the next tick still drains and bounds the queue while a slow
-                            // write is in flight. With no flush in flight, the subscription goes straight
-                            // into the flush's batch instead of through the buffered queue.
-                            if (pendingFlush.IsCompleted && TryEnterFlushGate())
-                            {
-                                CollectFlushBatch(takeSubscription: true);
-                                pendingFlush = FlushCollectedAsync(processingToken);
-                            }
-                            else
-                            {
-                                DrainSubscription();
+                                pendingFlush = TryFlushAsync(processingToken);
                             }
                         }
                     }
@@ -465,7 +456,8 @@ public class ChangeQueueProcessor : IDisposable
 
     /// <summary>
     /// Moves the changes queued on the subscription into the buffered queue, applying the filters and the
-    /// queue bound.
+    /// queue bound. Takes at most what was queued when it started, so a producer outpacing it cannot keep
+    /// a tick from reaching its flush.
     /// </summary>
     private void DrainSubscription()
     {
@@ -475,20 +467,52 @@ public class ChangeQueueProcessor : IDisposable
             return;
         }
 
-        var queued = _maxQueueDepth is null ? 0 : _changes.Count;
+        // Once ProcessAsync gives up at the teardown bound it disposes this processor and returns, and the
+        // owner of an external subscription may start draining it again: a second consumer.
+        var stopWhenDisposed = _ownedSubscription is null;
+        var maxQueueDepth = _maxQueueDepth;
+        var queued = maxQueueDepth is null ? 0 : _changes.Count;
         var droppedCount = 0L;
         try
         {
-            while (TryTakeFromSubscription(ref remaining, out var change))
+            while (remaining-- > 0)
             {
-                _changes.Enqueue(change);
-
-                // An upper bound on the queue's count, since the flush only removes from it, except when a
-                // canceled flush requeues its batch at stop, which can leave the queue one batch over.
-                if (_maxQueueDepth is int bound && ++queued > bound)
+                if (stopWhenDisposed && Volatile.Read(ref _lifecycleState) == DisposedState)
                 {
-                    droppedCount += DropOverflow(bound);
-                    queued = _changes.Count;
+                    break;
+                }
+
+                if (!_subscription.TryDequeueImmediate(out var change))
+                {
+                    break;
+                }
+
+                if (!ShouldDeliver(in change))
+                {
+                    continue;
+                }
+
+                if (maxQueueDepth is int bound)
+                {
+                    // A bounded queue drops its oldest entries on overflow, so keep superseded changes out of it.
+                    if (!ChangeDeliveryFilter.IsCurrent(in change, _deliveryRule))
+                    {
+                        continue;
+                    }
+
+                    _changes.Enqueue(change);
+
+                    // An upper bound on the queue's count, since the flush only removes from it, except when a
+                    // canceled flush requeues its batch at stop, which can leave the queue one batch over.
+                    if (++queued > bound)
+                    {
+                        droppedCount += DropOverflow(bound);
+                        queued = _changes.Count;
+                    }
+                }
+                else
+                {
+                    _changes.Enqueue(change);
                 }
             }
         }
@@ -499,39 +523,6 @@ public class ChangeQueueProcessor : IDisposable
                 InvokeDropHandler(droppedCount);
             }
         }
-    }
-
-    /// <summary>
-    /// Takes the next change from the subscription that passes the filters, out of at most
-    /// <paramref name="remaining"/>: a drain takes no more than was queued when it started, so a producer
-    /// outpacing it cannot keep a tick from reaching its flush.
-    /// </summary>
-    private bool TryTakeFromSubscription(ref int remaining, out SubjectPropertyChange change)
-    {
-        while (remaining-- > 0)
-        {
-            // Once ProcessAsync gives up at the teardown bound it disposes this processor and returns, and
-            // the owner of an external subscription may start draining it again: a second consumer.
-            if (_ownedSubscription is null && Volatile.Read(ref _lifecycleState) == DisposedState)
-            {
-                break;
-            }
-
-            if (!_subscription.TryDequeueImmediate(out change))
-            {
-                break;
-            }
-
-            // A bounded queue drops its oldest entries on overflow, so keep superseded changes out of it.
-            if (ShouldDeliver(in change) &&
-                (_maxQueueDepth is null || ChangeDeliveryFilter.IsCurrent(in change, _deliveryRule)))
-            {
-                return true;
-            }
-        }
-
-        change = default;
-        return false;
     }
 
     // Observes a completed flush once. A cancellation is the stop that the loop is about to observe.
@@ -730,79 +721,28 @@ public class ChangeQueueProcessor : IDisposable
         return droppedCount;
     }
 
-    private ValueTask TryFlushAsync(CancellationToken cancellationToken)
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder))]
+    private async ValueTask TryFlushAsync(CancellationToken cancellationToken)
     {
-        if (!TryEnterFlushGate())
-        {
-            return default;
-        }
-
-        CollectFlushBatch(takeSubscription: false);
-        return FlushCollectedAsync(cancellationToken);
-    }
-
-    // Fast, allocation-free try-enter. Whoever enters fills the batch and hands it to FlushCollectedAsync,
-    // which releases the gate.
-    private bool TryEnterFlushGate() => Interlocked.Exchange(ref _flushGate, 1) == 0;
-
-    /// <summary>
-    /// Fills the flush's batch, under the flush gate, from the buffered queue and then, when
-    /// <paramref name="takeSubscription"/> is set, straight from the subscription with the filters and the
-    /// queue bound applied. A filter that throws leaves the batch in the buffered queue, releases the gate
-    /// and rethrows, so the processing loop faults as it does for a throwing drain.
-    /// </summary>
-    private void CollectFlushBatch(bool takeSubscription)
-    {
-        _flushChanges.Clear();
-        while (_changes.TryDequeue(out var change))
-        {
-            _flushChanges.Add(change);
-        }
-
-        var remaining = takeSubscription ? _subscription.Count : 0;
-        if (remaining == 0)
+        // Fast, allocation-free try-enter
+        if (Interlocked.Exchange(ref _flushGate, 1) == 1)
         {
             return;
         }
 
-        try
-        {
-            while (TryTakeFromSubscription(ref remaining, out var change))
-            {
-                _flushChanges.Add(change);
-            }
-        }
-        catch
-        {
-            // Nothing else fills the queue while the gate is held by a tick, so this keeps their order.
-            foreach (var change in _flushChanges)
-            {
-                _changes.Enqueue(change);
-            }
-
-            _flushChanges.Clear();
-            Volatile.Write(ref _flushGate, 0);
-            throw;
-        }
-
-        if (_maxQueueDepth is int bound && _flushChanges.Count > bound)
-        {
-            var droppedCount = _flushChanges.Count - bound;
-            _flushChanges.RemoveRange(0, droppedCount);
-            Interlocked.Add(ref _dropCount, droppedCount);
-            InvokeDropHandler(droppedCount);
-        }
-    }
-
-    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder))]
-    private async ValueTask FlushCollectedAsync(CancellationToken cancellationToken)
-    {
         // Whether the merger was handed a batch, which decides whether it has one to release below. Set
         // before the call rather than after, so a throw part-way through a merge still releases it.
         var merged = false;
 
         try
         {
+            // Drain the concurrent queue into the scratch buffer under exclusive flush
+            _flushChanges.Clear();
+            while (_changes.TryDequeue(out var change))
+            {
+                _flushChanges.Add(change);
+            }
+
             if (_flushChanges.Count == 0)
             {
                 return;
