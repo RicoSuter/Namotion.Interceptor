@@ -19,6 +19,7 @@
 @inject SubjectPathResolver PathResolver
 @inject HotKeys HotKeys
 @inject IJSRuntime JsRuntime
+@inject PageEditModeChoice EditModeChoice
 @inject ITimeZoneDisplay TimeZone
 
 <PageTitle>@_title - HomeBlaze</PageTitle>
@@ -228,14 +229,6 @@ else
     // The subject that "Edit in Source" shows once the edit panel of the Split mode it switched to is ready.
     private IInterceptorSubject? _pendingReveal;
 
-    private enum PageEditMode
-    {
-        View, // Read-only rendered page
-        Split, // Page on left, Monaco editor on right
-        Source, // Full Monaco editor only
-        Inline // View with inline editing on widgets
-    }
-
     private bool IsEditing => _editMode != PageEditMode.View;
     private bool ShowEditor => _editMode is PageEditMode.Split or PageEditMode.Source;
 
@@ -346,7 +339,7 @@ else
     protected override void OnParametersSet()
     {
         LoadSubject();
-        SetEditMode(PageEditMode.View);
+        SetEditMode(GetStartMode());
     }
 
     private void LoadSubject()
@@ -378,6 +371,15 @@ else
             SubjectComponentType.Edit);
 
         return hasEditComponent || _subject.HasConfigurationProperties();
+    }
+
+    private PageEditMode GetStartMode() =>
+        EditModeChoice.Mode != PageEditMode.View && CanEdit() ? EditModeChoice.Mode : PageEditMode.View;
+
+    private void ChooseEditMode(PageEditMode mode)
+    {
+        EditModeChoice.Mode = mode;
+        SetEditMode(mode);
     }
 
     private void SetEditMode(PageEditMode mode)
@@ -488,22 +490,22 @@ else
             <MudDivider />
             <MudMenuItem Icon="@Icons.Material.Filled.Visibility"
                          IconColor="@(_editMode == PageEditMode.View ? Color.Primary : Color.Default)"
-                         OnClick="@(() => SetEditMode(PageEditMode.View))">
+                         OnClick="@(() => ChooseEditMode(PageEditMode.View))">
                 View
             </MudMenuItem>
             <MudMenuItem Icon="@Icons.Material.Filled.VerticalSplit"
                          IconColor="@(_editMode == PageEditMode.Split ? Color.Primary : Color.Default)"
-                         OnClick="@(() => SetEditMode(PageEditMode.Split))">
+                         OnClick="@(() => ChooseEditMode(PageEditMode.Split))">
                 Split
             </MudMenuItem>
             <MudMenuItem Icon="@Icons.Material.Filled.Code"
                          IconColor="@(_editMode == PageEditMode.Source ? Color.Primary : Color.Default)"
-                         OnClick="@(() => SetEditMode(PageEditMode.Source))">
+                         OnClick="@(() => ChooseEditMode(PageEditMode.Source))">
                 Source
             </MudMenuItem>
             <MudMenuItem Icon="@Icons.Material.Filled.Edit"
                          IconColor="@(_editMode == PageEditMode.Inline ? Color.Primary : Color.Default)"
-                         OnClick="@(() => SetEditMode(PageEditMode.Inline))">
+                         OnClick="@(() => ChooseEditMode(PageEditMode.Inline))">
                 Inline
             </MudMenuItem>
         </MudMenu>
