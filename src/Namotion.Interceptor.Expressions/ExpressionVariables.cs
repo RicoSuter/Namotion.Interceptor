@@ -18,7 +18,19 @@ public static class ExpressionVariables
     {
         var end = path.AsSpan().IndexOfAny('/', '[');
         var first = end < 0 ? path.AsSpan() : path.AsSpan(0, end);
-        variable = first is Value ? Value : first is Subject ? Subject : null;
+        if (first is Value)
+        {
+            variable = Value;
+        }
+        else if (first is Subject)
+        {
+            variable = Subject;
+        }
+        else
+        {
+            variable = null;
+        }
+
         return variable is not null;
     }
 }

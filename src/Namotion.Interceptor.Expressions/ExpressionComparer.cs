@@ -28,26 +28,86 @@ internal static class ExpressionComparer
         return CompareOrdered(left, right, rightInstant, isEquality) ?? -CompareOrdered(right, left, leftInstant, isEquality);
     }
 
-    private static int? CompareOrdered(object value, object other, DateTimeOffset? otherInstant, bool isEquality) => (value, other) switch
+    private static int? CompareOrdered(object value, object other, DateTimeOffset? otherInstant, bool isEquality) => value switch
     {
-        (bool boolean, bool otherBoolean) when isEquality => boolean == otherBoolean ? 0 : 1,
-        (Enum enumValue, string name) when isEquality =>
-            string.Equals(GetEnumName(enumValue), name, StringComparison.OrdinalIgnoreCase) ? 0 : 1,
-        (Enum enumValue, Enum otherEnum) when enumValue.GetType() == otherEnum.GetType() => enumValue.CompareTo(otherEnum),
-        (string text, string otherText) => isEquality
-            ? string.Equals(text, otherText, StringComparison.OrdinalIgnoreCase) ? 0 : 1
-            : string.CompareOrdinal(text, otherText),
-        (DateTimeOffset instant, string) => otherInstant is { } literalInstant ? instant.CompareTo(literalInstant) : null,
-        (DateTime dateTime, string) => otherInstant is { } literalInstant ? ToInstant(dateTime).CompareTo(literalInstant) : null,
-        (DateTimeOffset instant, DateTimeOffset otherDate) => instant.CompareTo(otherDate),
-        (DateTime dateTime, DateTime otherDateTime) => ToInstant(dateTime).CompareTo(ToInstant(otherDateTime)),
+        bool boolean => CompareBoolean(boolean, other, isEquality),
+        Enum enumValue => CompareEnum(enumValue, other, isEquality),
+        string text => CompareText(text, other, isEquality),
+        DateTimeOffset instant => CompareInstant(instant, other, otherInstant),
+        DateTime dateTime => CompareDateTime(dateTime, other, otherInstant),
         // Widening a float to double would make 0.1f differ from the literal 0.1.
-        (float single, double number) => single.CompareTo((float)number),
-        (double number, float single) => ((float)number).CompareTo(single),
-        _ when IsNumber(value) && IsNumber(other) =>
-            Convert.ToDouble(value, CultureInfo.InvariantCulture).CompareTo(Convert.ToDouble(other, CultureInfo.InvariantCulture)),
-        _ => null
+        float single when other is double number => single.CompareTo((float)number),
+        double number when other is float single => ((float)number).CompareTo(single),
+        _ => CompareNumber(value, other)
     };
+
+    private static int? CompareBoolean(bool boolean, object other, bool isEquality)
+    {
+        if (isEquality && other is bool otherBoolean)
+        {
+            return boolean == otherBoolean ? 0 : 1;
+        }
+
+        return null;
+    }
+
+    private static int? CompareEnum(Enum enumValue, object other, bool isEquality)
+    {
+        if (other is string name)
+        {
+            return isEquality ? CompareEquality(GetEnumName(enumValue), name) : null;
+        }
+
+        if (other is Enum otherEnum && enumValue.GetType() == otherEnum.GetType())
+        {
+            return enumValue.CompareTo(otherEnum);
+        }
+
+        return null;
+    }
+
+    private static int? CompareText(string text, object other, bool isEquality)
+    {
+        if (other is not string otherText)
+        {
+            return null;
+        }
+
+        return isEquality ? CompareEquality(text, otherText) : string.CompareOrdinal(text, otherText);
+    }
+
+    private static int CompareEquality(string text, string otherText) =>
+        string.Equals(text, otherText, StringComparison.OrdinalIgnoreCase) ? 0 : 1;
+
+    private static int? CompareInstant(DateTimeOffset instant, object other, DateTimeOffset? otherInstant)
+    {
+        if (other is string)
+        {
+            return otherInstant is { } literalInstant ? instant.CompareTo(literalInstant) : null;
+        }
+
+        return other is DateTimeOffset otherDate ? instant.CompareTo(otherDate) : null;
+    }
+
+    private static int? CompareDateTime(DateTime dateTime, object other, DateTimeOffset? otherInstant)
+    {
+        if (other is string)
+        {
+            return otherInstant is { } literalInstant ? ToInstant(dateTime).CompareTo(literalInstant) : null;
+        }
+
+        return other is DateTime otherDateTime ? ToInstant(dateTime).CompareTo(ToInstant(otherDateTime)) : null;
+    }
+
+    private static int? CompareNumber(object value, object other)
+    {
+        if (!IsNumber(value) || !IsNumber(other))
+        {
+            return null;
+        }
+
+        return Convert.ToDouble(value, CultureInfo.InvariantCulture).CompareTo(Convert.ToDouble(other, CultureInfo.InvariantCulture));
+    }
 
     // The cached name of a defined value, so a comparison does not allocate; ToString only for flag combinations and
     // undefined values.
@@ -55,7 +115,11 @@ internal static class ExpressionComparer
         Enum.GetName(enumValue.GetType(), enumValue) ?? enumValue.ToString();
 
     private static bool IsNumber(object value) =>
-        value is byte or sbyte or short or ushort or int or uint or long or ulong or float or double or decimal;
+        value is float or double or decimal || IsSignedInteger(value) || IsUnsignedInteger(value);
+
+    private static bool IsSignedInteger(object value) => value is sbyte or short or int or long;
+
+    private static bool IsUnsignedInteger(object value) => value is byte or ushort or uint or ulong;
 
     private static bool IsNaN(object value) =>
         (value is double number && double.IsNaN(number)) || (value is float single && float.IsNaN(single));

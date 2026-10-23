@@ -19,10 +19,18 @@ internal sealed class PathNode : ExpressionNode
         {
             Variable = variable;
             // Split once here, so that an evaluation allocates no part of the path.
-            MemberPath = path.Length == variable.Length
-                ? null
-                : path[variable.Length] == '/' ? path[(variable.Length + 1)..] : path[variable.Length..];
+            MemberPath = GetMemberPath(path, variable.Length);
         }
+    }
+
+    private static string? GetMemberPath(string path, int variableLength)
+    {
+        if (path.Length == variableLength)
+        {
+            return null;
+        }
+
+        return path[variableLength] == '/' ? path[(variableLength + 1)..] : path[variableLength..];
     }
 
     public string Path { get; }
