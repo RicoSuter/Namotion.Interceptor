@@ -91,6 +91,9 @@ public class ParsedExpressionParseTests
     [InlineData('!')]
     [InlineData('<')]
     [InlineData('>')]
+    [InlineData('+')]
+    [InlineData('-')]
+    [InlineData('*')]
     public void WhenSeparatorCannotBeUsed_ThenParsingThrows(char separator)
     {
         // Act & Assert
@@ -233,6 +236,58 @@ public class ParsedExpressionParseTests
         Assert.False(success);
         Assert.Null(expression);
         Assert.Equal(expectedError, error);
+    }
+
+    [Theory]
+    [InlineData("Power > 5/2", '.', "invalid number '5/2' at position 8")]
+    [InlineData("Power > 1.5.2", '.', "invalid number '1.5.2' at position 8")]
+    [InlineData("Power > 5/2", ':', "invalid number '5/2' at position 8")]
+    [InlineData("Power > 1.5", '.', null)]
+    [InlineData("Power > 1.5", '/', null)]
+    [InlineData("Power > 1.5", ':', null)]
+    public void WhenTokenStartsLikeANumber_ThenItIsANumberUnlessItHoldsTheSeparator(string text, char separator, string? expectedError)
+    {
+        // Act
+        var success = ParsedExpression.TryParse(text, separator, out var expression, out var error);
+
+        // Assert
+        Assert.Equal(expectedError is null, success);
+        Assert.Equal(expectedError, error);
+        if (expression is not null)
+        {
+            Assert.Equal(["Power"], expression.Paths.ToArray());
+        }
+    }
+
+    [Theory]
+    [InlineData("Power > 5/2", '/')]
+    [InlineData("Power > 5:2", ':')]
+    [InlineData("Power > -5/2", '/')]
+    public void WhenTokenStartsLikeANumberAndHoldsTheSeparator_ThenItIsAPath(string text, char separator)
+    {
+        // Act
+        var success = ParsedExpression.TryParse(text, separator, out var expression, out var error);
+
+        // Assert
+        Assert.True(success, error);
+        Assert.Equal(2, expression!.Paths.Length);
+    }
+
+    [Theory]
+    [InlineData(1000, true)]
+    [InlineData(1001, false)]
+    public void WhenExpressionIsAtOrOverTheLengthLimit_ThenOnlyTheLongerOneFails(int length, bool expectedSuccess)
+    {
+        // Arrange
+        var text = "a == '" + new string('x', length - 7) + "'";
+
+        // Act
+        var success = ParsedExpression.TryParse(text, '/', out _, out var error);
+
+        // Assert
+        Assert.Equal(length, text.Length);
+        Assert.Equal(expectedSuccess, success);
+        Assert.Equal(expectedSuccess ? null : "expression is longer than 1000 characters at position 1000", error);
     }
 
     [Fact]

@@ -232,7 +232,7 @@ public static class ExpressionDisplay
 
         if (memberPath[0] == PathSeparator)
         {
-            return "a path after 'subject/' cannot start with '/'";
+            return "a path starts at the subject and cannot start with '/'";
         }
 
         return null;

@@ -184,6 +184,95 @@ public class ParsedExpressionEvaluationTests
         Assert.Equal(expected, result);
     }
 
+    [Theory]
+    [InlineData("room/First < room/Second", true)]
+    [InlineData("room/Second < room/First", false)]
+    [InlineData("room/First == room/First", true)]
+    [InlineData("room/First >= room/Second", false)]
+    public void WhenBothValuesAreOfTheSameEnum_ThenTheyAreOrderedByTheirValues(string text, bool? expected)
+    {
+        // Arrange
+        var values = new Dictionary<string, object?> { ["room/First"] = DayOfWeek.Monday, ["room/Second"] = DayOfWeek.Friday };
+
+        // Act
+        var result = EvaluateCondition(text, values);
+
+        // Assert
+        Assert.Equal(expected, result);
+    }
+
+    [Fact]
+    public void WhenValuesAreOfDifferentEnums_ThenTheyHaveNoOrder()
+    {
+        // Arrange
+        var values = new Dictionary<string, object?> { ["room/Day"] = DayOfWeek.Monday, ["room/Kind"] = DateTimeKind.Utc };
+
+        // Act
+        var result = EvaluateCondition("room/Day < room/Kind", values);
+
+        // Assert
+        Assert.Null(result);
+    }
+
+    [Theory]
+    [InlineData("room/Earlier < room/Later", true)]
+    [InlineData("room/Later < room/Earlier", false)]
+    [InlineData("room/Earlier == room/Same", true)]
+    public void WhenBothValuesAreDateTimes_ThenTheyAreOrderedByTheirInstants(string text, bool? expected)
+    {
+        // Arrange
+        var values = new Dictionary<string, object?>
+        {
+            ["room/Earlier"] = new DateTime(2026, 10, 1, 12, 0, 0, DateTimeKind.Utc),
+            ["room/Same"] = new DateTime(2026, 10, 1, 12, 0, 0, DateTimeKind.Unspecified),
+            ["room/Later"] = new DateTime(2026, 10, 2, 12, 0, 0, DateTimeKind.Utc)
+        };
+
+        // Act
+        var result = EvaluateCondition(text, values);
+
+        // Assert
+        Assert.Equal(expected, result);
+    }
+
+    [Theory]
+    [InlineData("room/Earlier < room/Later", true)]
+    [InlineData("room/Later < room/Earlier", false)]
+    [InlineData("room/Earlier == room/Same", true)]
+    public void WhenBothValuesAreDateTimeOffsets_ThenTheyAreOrderedByTheirInstants(string text, bool? expected)
+    {
+        // Arrange
+        var values = new Dictionary<string, object?>
+        {
+            ["room/Earlier"] = new DateTimeOffset(2026, 10, 1, 12, 0, 0, TimeSpan.Zero),
+            ["room/Same"] = new DateTimeOffset(2026, 10, 1, 14, 0, 0, TimeSpan.FromHours(2)),
+            ["room/Later"] = new DateTimeOffset(2026, 10, 1, 13, 0, 0, TimeSpan.Zero)
+        };
+
+        // Act
+        var result = EvaluateCondition(text, values);
+
+        // Assert
+        Assert.Equal(expected, result);
+    }
+
+    [Theory]
+    [InlineData("room/Double == room/Float", true)]
+    [InlineData("room/Float == room/Double", true)]
+    [InlineData("room/Double <= room/Float", true)]
+    [InlineData("room/Double > room/Float", false)]
+    public void WhenADoubleIsComparedWithAFloat_ThenTheDoubleIsNarrowedToAFloat(string text, bool? expected)
+    {
+        // Arrange
+        var values = new Dictionary<string, object?> { ["room/Double"] = 0.1, ["room/Float"] = 0.1f };
+
+        // Act
+        var result = EvaluateCondition(text, values);
+
+        // Assert
+        Assert.Equal(expected, result);
+    }
+
     [Fact]
     public void WhenExpressionHasPipes_ThenTheyApplyInOrderToTheValue()
     {

@@ -68,7 +68,7 @@ public sealed class ParsedExpression
 
     internal static void ValidatePathSeparator(char pathSeparator)
     {
-        if (char.IsLetterOrDigit(pathSeparator) || char.IsWhiteSpace(pathSeparator) || "'\"[](){}|&=!<>".Contains(pathSeparator))
+        if (char.IsLetterOrDigit(pathSeparator) || char.IsWhiteSpace(pathSeparator) || "'\"[](){}|&=!<>+-*".Contains(pathSeparator))
         {
             throw new ArgumentException($"The path separator '{pathSeparator}' cannot be used in an expression.", nameof(pathSeparator));
         }

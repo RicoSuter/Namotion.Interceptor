@@ -228,7 +228,9 @@ internal sealed class ExpressionParser(string text, char pathSeparator)
 
     private static bool IsArithmeticToken(string token) => token is "+" or "-" or "*" or "/";
 
-    private static bool IsNumber(string token) => IsNumberStart(token) && !token.Contains('/');
+    // With '.' as separator a dot is the decimal point of a number, so only the other separators make a token a path.
+    private bool IsNumber(string token) =>
+        IsNumberStart(token) && (pathSeparator == '.' || !token.Contains(pathSeparator));
 
     private bool IsBareWord(string token) =>
         token.AsSpan().IndexOfAny(pathSeparator, '[') < 0 && !ExpressionVariables.TryGetVariable(token, pathSeparator, out _);
