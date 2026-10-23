@@ -1,7 +1,7 @@
-using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Namotion.Interceptor.Cache;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Ordering;
@@ -24,12 +24,18 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     // each other cannot deadlock. No path takes a second _mutationLock; the only way to nest them
     // is a TryAddService factory or exists predicate that mutates a different context, which the
     // contract forbids for that reason.
+    //
+    // The one lock a query takes is a state's fill lock, the ContextState itself, while it stores a
+    // resolved service array. It is a leaf: nothing else locks a ContextState, and nothing under it
+    // calls into a context or user code, so it may be taken while holding _mutationLock.
 
     private const int MaximumRetainedTraversalSize = 1024;
 
     // Declared before the marker so that a future change to marker construction cannot observe
     // its zero-initialized value.
     private static int _lastPropertyTypeIndex = -1;
+
+    private static int _lastServiceTypeIndex = -1;
 
     // Recorded on a state whose chain was proven cyclic, so a context on the loop pays one walk
     // per state rather than one per query. A context merely leading into a loop records nothing
@@ -49,6 +55,16 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     {
         // ReSharper disable once StaticMemberInGenericType
         internal static readonly int Value = Interlocked.Increment(ref _lastPropertyTypeIndex);
+    }
+
+    /// <summary>
+    /// A dense index per queried service type, so a resolved service array is found by indexing
+    /// an array instead of hashing a <see cref="Type"/>, see <see cref="PropertyTypeIndex{TProperty}"/>.
+    /// </summary>
+    private static class ServiceTypeIndex<TInterface>
+    {
+        // ReSharper disable once StaticMemberInGenericType
+        internal static readonly int Value = Interlocked.Increment(ref _lastServiceTypeIndex);
     }
 
     [ThreadStatic]
@@ -562,28 +578,29 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             return ImmutableArray<TInterface>.Empty;
         }
 
-        var serviceCache = state.GetServiceCache();
-        if (serviceCache.TryGetValue(typeof(TInterface), out var cachedServices))
-        {
-            return (ImmutableArray<TInterface>)cachedServices;
-        }
+        var serviceTypeIndex = ServiceTypeIndex<TInterface>.Value;
+        var services = state.TryGetServiceArray(serviceTypeIndex)
+            ?? state.GetOrSetServiceArray(serviceTypeIndex, ComputeServices<TInterface>(state));
 
-        var services = ComputeServices<TInterface>(state);
-
-        // The two-argument GetOrAdd canonicalizes racing computations without a closure allocation.
-        return (ImmutableArray<TInterface>)serviceCache.GetOrAdd(typeof(TInterface), services);
+        // The entry at this index is only ever a TInterface[], so the checked cast is skipped.
+        Debug.Assert(services is TInterface[], "A service type index was shared by two service types.");
+        return ImmutableCollectionsMarshal.AsImmutableArray(Unsafe.As<TInterface[]>(services));
     }
 
-    private ImmutableArray<TInterface> ComputeServices<TInterface>(ContextState state)
+    private TInterface[] ComputeServices<TInterface>(ContextState state)
     {
         var visited = _serviceQueryVisited ?? [];
         // Service equality callbacks can reenter lookup, so an active walk must own its set.
         _serviceQueryVisited = null;
         try
         {
-            return CollectServices(typeof(TInterface), this, state, visited)
+            var services = CollectServices(typeof(TInterface), this, state, visited)
                 .OfType<TInterface>()
-                .ToImmutableArray();
+                .ToArray();
+
+            return services.Length == 0
+                ? ImmutableCollectionsMarshal.AsArray(ImmutableArray<TInterface>.Empty)!
+                : services;
         }
         finally
         {
@@ -956,10 +973,17 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         // it disagreeing with them.
         internal readonly InterceptorSubjectContext? DelegationTarget;
 
-        // Caches belong to the state that produced them, created lazily via CAS. A topology change
-        // publishes a new state, so a late insert lands in a state no later query pins.
-        private ConcurrentDictionary<Type, object>? _serviceCache; // stores ImmutableArray<T> boxed
+        // Caches belong to the state that produced them. A topology change publishes a new state, so
+        // a late insert lands in a state no later query pins. This one is set once via CAS.
         private Delegate? _methodInvocationFunction;
+
+        // Indexed by ServiceTypeIndex, each entry the TInterface[] of an ImmutableArray. Unlike the
+        // function arrays below, an entry is canonical: a non-empty one belongs to this state alone,
+        // so callers may key caches on its identity, while every empty result is the one array behind
+        // ImmutableArray<T>.Empty, shared by all states, and is not to be keyed on. A fill must
+        // therefore never be lost to a concurrent growth, so fills and growths serialize on the
+        // state's fill lock (see the lock order note at the top of the class), while reads take no lock.
+        private object?[]? _serviceArrays;
 
         // Indexed by PropertyTypeIndex, grown by replacing the array. Only a context a chain ends
         // on ever fills these, since everything above it resolves to that context.
@@ -1010,16 +1034,47 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        internal ConcurrentDictionary<Type, object> GetServiceCache()
+        internal object? TryGetServiceArray(int serviceTypeIndex)
         {
-            return Volatile.Read(ref _serviceCache) ?? InitializeServiceCache();
+            // An entry is written once and carried into every grown array, so a reader of a
+            // replaced array still finds what it holds. A missed entry costs one recomputation and a
+            // locked lookup.
+            var current = Volatile.Read(ref _serviceArrays);
+            return current is not null && (uint)serviceTypeIndex < (uint)current.Length
+                ? current[serviceTypeIndex]
+                : null;
         }
 
-        private ConcurrentDictionary<Type, object> InitializeServiceCache()
+        /// <summary>
+        /// Stores <paramref name="services"/> unless the entry is already filled, and returns the entry.
+        /// </summary>
+        [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S2551", Justification = "ContextState is private and sealed and never escapes, so no other code can lock it; locking the instance gives a per-state leaf lock without a lock field or allocation.")]
+        internal object GetOrSetServiceArray(int serviceTypeIndex, object services)
         {
-            // The CAS keeps one canonical dictionary when two readers race the first use.
-            var created = new ConcurrentDictionary<Type, object>();
-            return Interlocked.CompareExchange(ref _serviceCache, created, null) ?? created;
+            // The state's fill lock, see the lock order note at the top of the class.
+            lock (this)
+            {
+                var current = _serviceArrays;
+                if (current is null || serviceTypeIndex >= current.Length)
+                {
+                    // Covers every service type indexed so far, and at least doubles an existing array.
+                    var requiredLength = Math.Max(serviceTypeIndex, Volatile.Read(ref _lastServiceTypeIndex)) + 1;
+                    var grown = new object?[Math.Max(requiredLength, (current?.Length ?? 0) * 2)];
+                    current?.CopyTo(grown, 0);
+                    current = grown;
+                    Volatile.Write(ref _serviceArrays, current);
+                }
+
+                var existing = current[serviceTypeIndex];
+                if (existing is not null)
+                {
+                    return existing;
+                }
+
+                // Release: the array's elements are visible before a lock-free reader sees it.
+                Volatile.Write(ref current[serviceTypeIndex], services);
+                return services;
+            }
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

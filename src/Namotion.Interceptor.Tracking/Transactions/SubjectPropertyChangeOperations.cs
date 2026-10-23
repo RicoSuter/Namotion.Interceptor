@@ -256,9 +256,7 @@ internal static class SubjectPropertyChangeOperations
         foreach (var change in changes)
         {
             var currentValue = change.Property.Metadata.GetValue?.Invoke(change.Property.Subject);
-            var capturedOldValue = change.GetOldValue<object?>();
-
-            if (!Equals(currentValue, capturedOldValue))
+            if (!change.OldValueEquals(currentValue))
             {
                 conflictingProperties ??= [];
                 conflictingProperties.Add(change.Property);

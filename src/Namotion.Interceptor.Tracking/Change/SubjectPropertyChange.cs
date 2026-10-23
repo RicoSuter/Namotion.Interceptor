@@ -60,12 +60,9 @@ public readonly struct SubjectPropertyChange : IEquatable<SubjectPropertyChange>
         TValue newValue,
         long revision = 0)
     {
-        // Fast path: small ref-free value types stored inline - zero allocations. Structs containing
-        // references (e.g. ImmutableArray<T>) must be excluded: inline storage is not GC-scanned, so a
-        // contained reference could dangle. All checks fold to JIT-time constants (zero-cost guard).
-        if (typeof(TValue).IsValueType &&
-            !RuntimeHelpers.IsReferenceOrContainsReferences<TValue>() &&
-            Unsafe.SizeOf<TValue>() <= InlineValueStorage.MaxSize)
+        // Fast path: small ref-free value types stored inline - zero allocations. IsValueType stays inline, as in
+        // InlineValueStorage.TryGetValue, so the Native AOT scanner never compiles inline storage for a reference type.
+        if (typeof(TValue).IsValueType && InlineValueStorage.CanStore<TValue>())
         {
             return new SubjectPropertyChange(
                 property,
@@ -172,6 +169,13 @@ public readonly struct SubjectPropertyChange : IEquatable<SubjectPropertyChange>
     public bool TryGetOldValue<TValue>(out TValue value) =>
         TryGetValue(_oldValueStorage, _oldBoxedHolder, out value);
 
+    /// <summary>
+    /// Returns <c>object.Equals(value, GetOldValue&lt;object?&gt;())</c> without boxing an inline-stored old value of
+    /// a common value type.
+    /// </summary>
+    internal bool OldValueEquals(object? value) =>
+        _oldBoxedHolder is null ? _oldValueStorage.ValueEquals(value) : Equals(value, GetOldValue<object?>());
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool TryGetNewValue<TValue>(out TValue value) =>
         TryGetValue(_newValueStorage, _newBoxedHolder, out value);
@@ -228,21 +232,15 @@ public readonly struct SubjectPropertyChange : IEquatable<SubjectPropertyChange>
             return true;
         }
 
-        // Support casting to object (will box the value)
+        // Support casting to object (will box the value); an empty storage was a null string/reference
         if (typeof(TValue) == typeof(object))
         {
-            // If no inline storage was used, this was a null string/reference
-            if (storage.StoredType == null)
-            {
-                value = default!;
-                return true;
-            }
             value = (TValue)storage.GetValueBoxed()!;
             return true;
         }
 
         // Handle null strings: no inline storage was used
-        if (typeof(TValue) == typeof(string) && storage.StoredType == null)
+        if (typeof(TValue) == typeof(string) && storage.IsEmpty)
         {
             value = default!;
             return true;
