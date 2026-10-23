@@ -115,16 +115,7 @@ Give a principal whose roles fail to compile `AuthorizationPolicy.DenyAll`, whic
 
 A compiled policy is immutable and safe to share across threads. Selectors are checked cheapest first: action, member glob, tags, type, path. A path rule is the expensive one: when one is reached for a member, the subject's paths are enumerated once per call; `CanRead(subject)` does this once for the subject's members and once for each link on the way to a root that reaches a path rule.
 
-Measured with `AuthorizationBenchmark` (2050 subjects, 24 rules) on one machine:
-
-| Question | Time | Allocated |
-|---|---|---|
-| A read decided by a tag rule | about 23 ns | nothing |
-| `CanRead(subject)`, no path rule applies to `read` | about 150 ns | nothing |
-| A write where the deny rules have only path selectors | about 0.38 µs | about 420 B |
-| A browse-shaped pass over all subjects and their members | about 0.5 ms | - |
-
-The write is expensive although no deny rule matches: the subject's paths have to be enumerated to prove that none does. A deny rule that has only `Paths` is evaluated against every member of every subject that gets that far, so give a path deny rule another selector (a type, a member glob or a tag) when you can, and put path rules where they are needed rather than in a reusable base role.
+A write checked against deny rules with paths is expensive although no deny rule matches: the subject's paths have to be enumerated to prove that none does. Measured numbers are in the [design](../../../docs/design/authorization.md#performance). A deny rule that has only `Paths` is evaluated against every member of every subject that gets that far, so give a path deny rule another selector (a type, a member glob or a tag) when you can, and put path rules where they are needed rather than in a reusable base role.
 
 Apart from paths, evaluation allocates nothing, with these exceptions: matching a member glob against an attribute builds its `Property@Attribute` name, the first evaluation of a type rule for a subject type caches the type's names, and `CanRead(subject)` allocates a visited set when a subject on the way has several parents or the chain is more than 32 levels deep.
 

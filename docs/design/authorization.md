@@ -128,7 +128,7 @@ A principal whose roles fail to compile gets `AuthorizationPolicy.DenyAll`, neve
 
 The include closure is resolved recursively; the depth cap of 64 turns a pathological include chain into a compile error with the role's name instead of a stack overflow. Roles reached through several includes, as in a diamond, are resolved once. `Roles` on the policy lists the closure in resolution order, included roles first, which is also the order of the rules and of `Explain`.
 
-`PermissionRule` and `AuthorizationRole` are records with value equality over their arrays: element by element and in order, role names and includes ignoring case like name resolution, actions ignoring case, selector values exactly. An application can therefore tell whether a role really changed before recompiling, and tests can compare rules. Order counts because it decides which rule `Explain` reports.
+`PermissionRule` and `AuthorizationRole` are records with value equality over their arrays: element by element and in order, role names, includes, actions and tags ignoring case like resolution and matching, the other selector values exactly. An application can therefore tell whether a role really changed before recompiling, and tests can compare rules. Order counts because it decides which rule `Explain` reports.
 
 ## Performance
 

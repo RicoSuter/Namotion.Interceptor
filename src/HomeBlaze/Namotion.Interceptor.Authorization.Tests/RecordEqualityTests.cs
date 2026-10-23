@@ -51,6 +51,21 @@ public class RecordEqualityTests
     }
 
     [Fact]
+    public void WhenTagsDifferOnlyInCase_ThenRulesAreEqual()
+    {
+        // Arrange
+        var first = new PermissionRule { Tags = ["secret"], Actions = [PermissionAction.Read] };
+        var second = new PermissionRule { Tags = ["SECRET"], Actions = [PermissionAction.Read] };
+
+        // Act
+        var equal = first.Equals(second);
+
+        // Assert
+        Assert.True(equal);
+        Assert.Equal(first.GetHashCode(), second.GetHashCode());
+    }
+
+    [Fact]
     public void WhenASelectorValueDiffers_ThenRulesAreNotEqual()
     {
         // Arrange
