@@ -93,7 +93,7 @@ A pipe `map` with a name that leads to no value map shows `Cannot resolve map: n
 
 ## Value Widget Errors
 
-A map that cannot be found, or an argument that a widget cannot use, does not take a block down either. The widget shows the message in a small red alert in its place, without a line number, and the rest of the page is shown as usual. A widget shows one error at a time: that of its map first, then that of its `Label` or `Title`, then that of its `Subtitle`.
+A map that cannot be found, or an argument that a widget cannot use, does not take a block down either. The widget shows the message in a small red alert in its place, without a line number, and the rest of the page is shown as usual. A widget shows one error at a time: that of its map or of its other arguments first, then that of its `Label` or `Title`, then that of its `Subtitle`.
 
 | Message | Cause | Fix |
 |---------|-------|-----|
