@@ -5,13 +5,22 @@
     <meta charset="utf-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
     <base href="/"/>
-    <link href="https://fonts.googleapis.com/css?family=Roboto:300,400,500,700&display=swap" rel="stylesheet"/>
+    <link href=@Assets["fonts/roboto/roboto.css"] rel="stylesheet"/>
     <link href=@Assets["_content/MudBlazor/MudBlazor.min.css"] rel="stylesheet"/>
     <link href="_content/CodeBeam.MudBlazor.Extensions/MudExtensions.min.css" rel="stylesheet"/>
     <link href=@Assets["HomeBlaze.styles.css"] rel="stylesheet"/>
     <link href=@Assets["app.css"] rel="stylesheet"/>
     <ImportMap/>
     <link rel="icon" type="image/ico" href="favicon.ico"/>
+    @* Installable as a web app that opens without the browser UI. Not fingerprinted: an installed app keeps these URLs. *@
+    <link rel="manifest" href="manifest.webmanifest" crossorigin="use-credentials"/>
+    <link rel="apple-touch-icon" href="icons/apple-touch-icon.png"/>
+    <meta name="theme-color" content="#1f1f25"/>
+    <meta name="mobile-web-app-capable" content="yes"/>
+    <meta name="apple-mobile-web-app-capable" content="yes"/>
+    <meta name="apple-mobile-web-app-title" content="HomeBlaze"/>
+    @* Black and not translucent, so the page starts below the status bar and needs no safe area insets. *@
+    <meta name="apple-mobile-web-app-status-bar-style" content="black"/>
     <HeadOutlet @rendermode="InteractiveServer"/>
 </head>
 

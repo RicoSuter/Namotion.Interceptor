@@ -22,7 +22,12 @@ public class AgentMarkdownRendererTests
     [InlineData("[click](JavaScript:alert(1))")]
     [InlineData("[click](data:text/html;base64,PHNjcmlwdD4=)")]
     [InlineData("[click](vbscript:msgbox)")]
-    [InlineData("[click](/pages/Devices)")]
+    [InlineData("[click](pages/Devices)")]
+    [InlineData("[click](../Devices)")]
+    [InlineData("[click](//evil.example/x)")]
+    [InlineData("[click](/\\evil.example/x)")]
+    [InlineData("[click](/&#x2F;evil.example/x)")]
+    [InlineData("[click](/&#09;/evil.example/x)")]
     [InlineData("[click][target]\n\n[target]: javascript:alert(1)")]
     [InlineData("[click](&#106;avascript:alert(1))")]
     [InlineData("[click](&#x6A;avascript:alert(1))")]
@@ -42,7 +47,8 @@ public class AgentMarkdownRendererTests
         Assert.DoesNotContain("<a", html);
         Assert.DoesNotContain("script:", html, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("data:", html);
-        Assert.DoesNotContain("/pages/", html);
+        Assert.DoesNotContain("evil.example", html);
+        Assert.DoesNotContain("Devices", html);
     }
 
     [Theory]
@@ -74,6 +80,22 @@ public class AgentMarkdownRendererTests
         Assert.Contains($"href=\"{expectedUrl}\"", html);
         Assert.Contains("rel=\"noopener noreferrer nofollow\"", html);
         Assert.Contains("target=\"_blank\"", html);
+    }
+
+    [Theory]
+    [InlineData("[devices](/browser/Devices)", "/browser/Devices")]
+    [InlineData("[page](/pages/Demo/Dashboard.md?tab=1#top)", "/pages/Demo/Dashboard.md?tab=1#top")]
+    [InlineData("[home](/)", "/")]
+    [InlineData("[spaced](</pages/My Page.md>)", "/pages/My%20Page.md")]
+    public void WhenLinkTargetIsAPathOfTheApplication_ThenLinkOpensInTheSameTab(string markdown, string expectedUrl)
+    {
+        // Act
+        var html = AgentMarkdownRenderer.ToHtml(markdown);
+
+        // Assert
+        Assert.Contains($"href=\"{expectedUrl}\"", html);
+        Assert.DoesNotContain("target=", html);
+        Assert.DoesNotContain("rel=", html);
     }
 
     [Fact]

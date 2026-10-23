@@ -1,4 +1,5 @@
 using System.Reflection;
+using HomeBlaze.Abstractions.Attributes;
 using Namotion.Interceptor;
 
 namespace HomeBlaze.Abstractions.Metadata;
@@ -81,6 +82,11 @@ public class MethodMetadata
     public bool RequiresConfirmation { get; init; }
 
     /// <summary>
+    /// The targets the method is excluded from, from its <see cref="ExcludeFromAttribute"/>; none by default.
+    /// </summary>
+    public ExclusionTarget ExcludedFrom { get; init; }
+
+    /// <summary>
     /// The method's parameter descriptors.
     /// </summary>
     public MethodParameter[] Parameters { get; init; } = [];
@@ -90,6 +96,11 @@ public class MethodMetadata
     /// For <c>Task&lt;T&gt;</c> return types this is <c>T</c>.
     /// </summary>
     public Type? ResultType { get; init; }
+
+    /// <summary>
+    /// Gets whether the method is excluded from any of the given targets.
+    /// </summary>
+    public bool IsExcludedFrom(ExclusionTarget target) => (ExcludedFrom & target) != 0;
 
     /// <summary>
     /// Invokes the method on the bound subject with the provided user-input parameters.
@@ -109,19 +120,15 @@ public class MethodMetadata
         if (result is Task task)
         {
             await task.ConfigureAwait(false);
-            if (ResultType != null)
-            {
-                var taskType = task.GetType();
-                if (taskType.IsGenericType && taskType.GetGenericTypeDefinition() == typeof(Task<>))
-                {
-                    return taskType.GetProperty("Result")?.GetValue(task);
-                }
-            }
-            return null;
+            return ResultType != null ? GetTaskResult(task) : null;
         }
 
         return result;
     }
+
+    // An async method returns a subclass of Task<T> (its state machine box); GetProperty finds the inherited Result.
+    private static object? GetTaskResult(Task task) =>
+        task.GetType().GetProperty("Result")?.GetValue(task);
 
     private object?[] ResolveParameters(
         object?[]? userParameters,

@@ -1,7 +1,6 @@
 ---
 title: Paths
 navTitle: Paths
-position: 7
 ---
 
 # Paths

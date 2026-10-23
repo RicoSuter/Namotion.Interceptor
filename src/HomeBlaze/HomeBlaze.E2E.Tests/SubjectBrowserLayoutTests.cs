@@ -1,7 +1,7 @@
 using System.Text.RegularExpressions;
 using HomeBlaze.Abstractions;
 using HomeBlaze.E2E.Tests.Infrastructure;
-using HomeBlaze.Host.Components.Browser;
+using HomeBlaze.E2E.Tests.Models;
 using HomeBlaze.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Playwright;
@@ -323,21 +323,21 @@ public class SubjectBrowserLayoutTests
     }
 
     [Fact]
-    public async Task WhenASubjectHasChildrenAndMethods_ThenTheMethodsPrecedeTheChildren()
+    public async Task WhenASubjectHasChildrenAndMethods_ThenTheChildrenPrecedeTheMethods()
     {
         // Act
         var page = await OpenAsync("browser", 1280, 720, paneCount: 1);
 
         // Assert
-        var methodsPrecedeChildren = await page.EvaluateAsync<bool>("""
+        var childrenPrecedeMethods = await page.EvaluateAsync<bool>("""
             () => {
                 const pane = document.querySelector("#scrollContainer [data-testid='subject-pane']");
                 const firstChild = pane.querySelector('.mud-list-item');
                 const method = [...pane.querySelectorAll('button')].find(button => button.textContent.includes('Create'));
-                return (method.compareDocumentPosition(firstChild) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+                return (firstChild.compareDocumentPosition(method) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
             }
             """);
-        Assert.True(methodsPrecedeChildren);
+        Assert.True(childrenPrecedeMethods);
     }
 
     [Fact]
@@ -416,6 +416,54 @@ public class SubjectBrowserLayoutTests
             // Assert
             await page.WaitForURLAsync("**/browser/Demo/Motor", new() { Timeout = PageLoadTimeout });
             await WaitUntilSettledAsync(page, paneCount: 3);
+        }
+        finally
+        {
+            _fixture.RemoveSubjectFromRoot(name, subject);
+        }
+    }
+
+    [Fact]
+    public async Task WhenAPathHasTheIntegerKeyOfADictionaryEntry_ThenThePaneOfTheEntryOpens()
+    {
+        // Arrange
+        var (name, subject) = await _fixture.AddSubjectToRootAsync<IntKeyedChildrenSubject>();
+        try
+        {
+            var entry = _fixture.ServerServices.GetRequiredService<SubjectFactory>().CreateSubject<PlainConfigurableSubject>();
+            entry.Website = new Uri("https://example.com/entry-three");
+            subject.Items = new Dictionary<int, PlainConfigurableSubject> { [3] = entry };
+
+            // Act
+            var page = await OpenAsync($"browser/{name}/Items/3", 1280, 720, paneCount: 3);
+
+            // Assert
+            await Assertions.Expect(ValueRow(LastPane(page), "Website").Locator("[data-testid='subject-pane-value-text']"))
+                .ToHaveTextAsync("https://example.com/entry-three", new() { Timeout = PageLoadTimeout });
+        }
+        finally
+        {
+            _fixture.RemoveSubjectFromRoot(name, subject);
+        }
+    }
+
+    [Fact]
+    public async Task WhenAPathHasTheIntegerKeyOfAnInlinePathsEntry_ThenThePaneOfTheEntryOpens()
+    {
+        // Arrange
+        var (name, subject) = await _fixture.AddSubjectToRootAsync<IntKeyedInlineChildrenSubject>();
+        try
+        {
+            var entry = _fixture.ServerServices.GetRequiredService<SubjectFactory>().CreateSubject<PlainConfigurableSubject>();
+            entry.Website = new Uri("https://example.com/inline-entry-three");
+            subject.Items = new Dictionary<int, PlainConfigurableSubject> { [3] = entry };
+
+            // Act
+            var page = await OpenAsync($"browser/{name}/3", 1280, 720, paneCount: 3);
+
+            // Assert
+            await Assertions.Expect(ValueRow(LastPane(page), "Website").Locator("[data-testid='subject-pane-value-text']"))
+                .ToHaveTextAsync("https://example.com/inline-entry-three", new() { Timeout = PageLoadTimeout });
         }
         finally
         {
@@ -503,6 +551,37 @@ public class SubjectBrowserLayoutTests
         }
     }
 
+    [Fact]
+    public async Task WhenTheCopyButtonWasClickedAndThePointerLeavesTheRow_ThenTheButtonHidesUntilTheKeyboardFocusesIt()
+    {
+        // Arrange
+        var (name, subject) = await _fixture.AddPlainSubjectToRootAsync();
+        try
+        {
+            subject.LinkedPath = "/Missing/First";
+            var page = await OpenAsync($"browser/{name}", 1280, 720, paneCount: 2,
+                new() { Permissions = ["clipboard-read", "clipboard-write"] });
+            var row = ValueRow(LastPane(page), "LinkedPath");
+            var copy = row.Locator("[data-testid='subject-pane-value-copy']");
+            await row.HoverAsync();
+            await copy.ClickAsync();
+
+            // Act - the button keeps the focus of the click.
+            await page.Mouse.MoveAsync(0, 0);
+
+            // Assert
+            await Assertions.Expect(copy).ToHaveCSSAsync("opacity", "0", new() { Timeout = PageLoadTimeout });
+            await page.Keyboard.PressAsync("Shift+Tab");
+            await page.Keyboard.PressAsync("Tab");
+            await Assertions.Expect(copy).ToBeFocusedAsync();
+            await Assertions.Expect(copy).ToHaveCSSAsync("opacity", "1");
+        }
+        finally
+        {
+            _fixture.RemoveSubjectFromRoot(name, subject);
+        }
+    }
+
     [Theory]
     [InlineData(1280, 720, false)]
     [InlineData(390, 844, true)] // A phone: narrower than the sm breakpoint of MudBlazor.
@@ -558,7 +637,7 @@ public class SubjectBrowserLayoutTests
         await WaitForRowLayoutAsync(page, isStacked);
         await page.WaitForFunctionAsync(
             "name => document.cookie.includes(`${name}=`)",
-            PropertyRowLayoutInitializer.CookieName,
+            "homeblaze.rowlayout",
             new() { Timeout = PageLoadTimeout });
 
         // Act
@@ -568,6 +647,28 @@ public class SubjectBrowserLayoutTests
         await page.WaitForFunctionAsync(SubjectBrowserPage.IsInteractive, null, new() { Timeout = PageLoadTimeout });
         await WaitUntilSettledAsync(page, paneCount: 3);
         await WaitForRowLayoutAsync(page, isStacked);
+    }
+
+    [Fact]
+    public async Task WhenTheBrowserIsLeftAndOpenedAgain_ThenTheChosenRowLayoutIsKept()
+    {
+        // Arrange
+        var page = await OpenAsync(MotorPath, 1280, 720, paneCount: 3);
+        await ChooseRowLayoutAsync(page, "row-layout-stacked");
+        await WaitForRowLayoutAsync(page, isStacked: true);
+
+        // Act
+        // A route no page claims, as where the home page redirects to depends on the pages other tests leave behind.
+        await page.EvaluateAsync("() => Blazor.navigateTo('/no-page-here')");
+        await Assertions.Expect(page.GetByRole(AriaRole.Alert).Filter(new() { HasText = "nothing at this address" }))
+            .ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
+        await Assertions.Expect(page.Locator("#scrollContainer")).ToHaveCountAsync(0, new() { Timeout = PageLoadTimeout });
+        await page.EvaluateAsync("path => Blazor.navigateTo(path)", $"/{MotorPath}");
+        await page.WaitForFunctionAsync(SubjectBrowserPage.IsInteractive, null, new() { Timeout = PageLoadTimeout });
+        await WaitUntilSettledAsync(page, paneCount: 3);
+
+        // Assert
+        await WaitForRowLayoutAsync(page, isStacked: true);
     }
 
     [Fact]

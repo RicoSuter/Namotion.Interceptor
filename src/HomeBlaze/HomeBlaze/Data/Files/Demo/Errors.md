@@ -1,7 +1,6 @@
 ---
 title: Errors Demo
 navTitle: Errors Demo
-position: 10
 ---
 
 # Errors Demo

@@ -65,12 +65,13 @@ public class DisplayWidgetTests
         // Assert
         var gauge = GetGauge(page, "Gauge Target");
         await Assertions.Expect(gauge.GetByTestId("value-text")).ToHaveTextAsync("1000", new() { Timeout = Timeout });
-        await Assertions.Expect(gauge).ToHaveAttributeAsync("role", "meter");
-        await Assertions.Expect(gauge).ToHaveAttributeAsync("aria-valuenow", "1000");
-        await Assertions.Expect(gauge).ToHaveAttributeAsync("aria-valuemin", "0");
-        await Assertions.Expect(gauge).ToHaveAttributeAsync("aria-valuemax", "2000");
-        await Assertions.Expect(gauge).ToHaveAttributeAsync("aria-label", "Gauge Target");
-        await Assertions.Expect(gauge).ToHaveAttributeAsync("data-percent", "50");
+        var meter = gauge.GetByTestId("gauge-meter");
+        await Assertions.Expect(meter).ToHaveAttributeAsync("role", "meter");
+        await Assertions.Expect(meter).ToHaveAttributeAsync("aria-valuenow", "1000");
+        await Assertions.Expect(meter).ToHaveAttributeAsync("aria-valuemin", "0");
+        await Assertions.Expect(meter).ToHaveAttributeAsync("aria-valuemax", "2000");
+        await Assertions.Expect(meter).ToHaveAttributeAsync("aria-label", "Gauge Target");
+        await Assertions.Expect(meter).ToHaveAttributeAsync("data-percent", "50");
     }
 
     [Fact]
@@ -82,9 +83,10 @@ public class DisplayWidgetTests
         // Assert
         var gauge = GetGauge(page, "Gauge Missing");
         await Assertions.Expect(gauge.GetByTestId("value-missing")).ToHaveTextAsync(MissingText, new() { Timeout = Timeout });
-        await Assertions.Expect(gauge).Not.ToHaveAttributeAsync("aria-valuenow", new Regex(".*"));
-        await Assertions.Expect(gauge).Not.ToHaveAttributeAsync("data-percent", new Regex(".*"));
-        await Assertions.Expect(gauge).ToHaveAttributeAsync("role", "group");
+        var meter = gauge.GetByTestId("gauge-meter");
+        await Assertions.Expect(meter).Not.ToHaveAttributeAsync("aria-valuenow", new Regex(".*"));
+        await Assertions.Expect(meter).Not.ToHaveAttributeAsync("data-percent", new Regex(".*"));
+        await Assertions.Expect(meter).ToHaveAttributeAsync("role", "group");
     }
 
     [Fact]

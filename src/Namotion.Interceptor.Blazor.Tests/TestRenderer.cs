@@ -39,6 +39,7 @@ internal sealed class TestRenderer : Renderer
 
     private volatile bool _holdAcknowledgements;
     private int _unacknowledgedBatchCount;
+    private int _activeRenderCount;
     private int _deferredRenderRequests;
     private int _batchCount;
 
@@ -93,6 +94,13 @@ internal sealed class TestRenderer : Renderer
     /// <summary>Gets the number of batches the client has not acknowledged yet.</summary>
     public int UnacknowledgedBatchCount => Volatile.Read(ref _unacknowledgedBatchCount);
 
+    /// <summary>Gets whether no render or acknowledgement is in progress and the client has acknowledged every batch.</summary>
+    /// <remarks>
+    /// Evaluate it after a condition on what rendered: a component renders before its batch counts as unacknowledged, so
+    /// <see cref="UnacknowledgedBatchCount"/> alone can be zero while that batch is still on its way.
+    /// </remarks>
+    public bool IsSettled => Volatile.Read(ref _activeRenderCount) == 0 && UnacknowledgedBatchCount == 0;
+
     public async Task<TComponent> RenderAsync<TComponent>(Dictionary<string, object?> parameters)
         where TComponent : IComponent, new()
     {
@@ -130,7 +138,15 @@ internal sealed class TestRenderer : Renderer
             return;
         }
 
-        base.ProcessPendingRender();
+        Interlocked.Increment(ref _activeRenderCount);
+        try
+        {
+            base.ProcessPendingRender();
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _activeRenderCount);
+        }
     }
 
     protected override Task UpdateDisplayAsync(in RenderBatch renderBatch)
@@ -182,6 +198,20 @@ internal sealed class TestRenderer : Renderer
             return;
         }
 
+        // Until the deferred render below has rendered, a batch count of zero does not mean that nothing renders.
+        Interlocked.Increment(ref _activeRenderCount);
+        try
+        {
+            AcknowledgeAndRenderDeferred(lastBatch);
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _activeRenderCount);
+        }
+    }
+
+    private void AcknowledgeAndRenderDeferred(TaskCompletionSource? lastBatch)
+    {
         // Completing a batch runs its OnAfterRender, which can render a new batch that must wait for its own acknowledgement.
         var batchCount = _unacknowledgedBatches.Count;
         for (var index = 0; index < batchCount; index++)

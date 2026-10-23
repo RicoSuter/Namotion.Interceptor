@@ -9,13 +9,17 @@ namespace HomeBlaze.AI.Blazor;
 
 /// <summary>
 /// Renders untrusted agent output from Markdown to HTML that is safe to insert into the page: raw HTML is escaped,
-/// links with a target other than an absolute http, https or mailto URL are reduced to their text, and images are
+/// links with a target other than an absolute http, https or mailto URL, which opens in a new tab, or a path of this
+/// application such as <c>/browser/Devices</c>, which opens in the same tab, are reduced to their text, and images are
 /// rendered as links so nothing loads without a click. Markdown that Markdig refuses, such as elements nested beyond
 /// its depth limit, is shown as encoded text instead.
 /// </summary>
 internal static class AgentMarkdownRenderer
 {
     private static readonly MarkdownPipeline Pipeline = CreatePipeline();
+
+    // A base that no address leaves unless it names a host of its own, which TryGetApplicationPath then rejects.
+    private static readonly Uri ApplicationRoot = new("https://application.invalid/");
 
     /// <summary>Converts Markdown to sanitized HTML, or to the encoded text with its line breaks kept when Markdig refuses it.</summary>
     public static string ToHtml(string markdown)
@@ -119,6 +123,12 @@ internal static class AgentMarkdownRenderer
         }
 
         link.GetDynamicUrl = null;
+        if (TryGetApplicationPath(link.Url) is { } path)
+        {
+            link.Url = path;
+            return;
+        }
+
         if (TryGetSafeUrl(link.Url) is not { } url)
         {
             UnwrapLink(link);
@@ -166,6 +176,25 @@ internal static class AgentMarkdownRenderer
 
         // The normalized form is rendered, so a browser cannot read the original text as a different target.
         return uri.AbsoluteUri;
+    }
+
+    /// <summary>
+    /// Gets a path of this application, such as <c>/browser/Devices?tab=1#top</c>, in its normalized form, or null for
+    /// anything else. Only a path from the root counts: <c>//host</c> and <c>/\host</c> lead to another site in a
+    /// browser, a relative path would depend on the address of the chat, and a control character could be dropped by the
+    /// browser into one of these.
+    /// </summary>
+    private static string? TryGetApplicationPath(string? url)
+    {
+        var path = url?.Trim();
+        if (path is not ['/', ..] || path is [_, '/' or '\\', ..] || path.Any(char.IsControl))
+        {
+            return null;
+        }
+
+        return Uri.TryCreate(ApplicationRoot, path, out var uri) && uri.Host == ApplicationRoot.Host
+            ? uri.PathAndQuery + uri.Fragment
+            : null;
     }
 
     private static bool IsAllowedScheme(Uri uri) =>

@@ -8,7 +8,7 @@ namespace HomeBlaze.Storage.Internal;
 /// Rendered directly without a component wrapper to allow split HTML tags.
 /// </summary>
 [InterceptorSubject]
-[ExcludeFromBrowsing]
+[ExcludeFrom(ExclusionTarget.All)]
 public partial class HtmlSegment
 {
     public string Html { get; }

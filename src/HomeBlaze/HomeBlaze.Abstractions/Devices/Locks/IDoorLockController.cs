@@ -15,18 +15,21 @@ public interface IDoorLockController
     /// Locks the door.
     /// </summary>
     [Operation]
+    [Category("Lock")]
     Task LockAsync(CancellationToken cancellationToken);
 
     /// <summary>
     /// Unlocks the door.
     /// </summary>
     [Operation(RequiresConfirmation = true)]
+    [Category("Lock")]
     Task UnlockAsync(CancellationToken cancellationToken);
 
     /// <summary>
     /// Toggles the lock state. Default implementation checks IDoorLockState.LockState.
     /// </summary>
     [Operation(RequiresConfirmation = true)]
+    [Category("Lock")]
     async Task ToggleLockAsync(CancellationToken cancellationToken)
     {
         if (this is IDoorLockState { LockState: DoorLockState.Locked })

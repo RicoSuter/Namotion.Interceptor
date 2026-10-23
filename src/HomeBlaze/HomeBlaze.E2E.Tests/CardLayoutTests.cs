@@ -119,7 +119,7 @@ public class CardLayoutTests
     [InlineData("Grid Card", ".grid-cell-content", true)]
     [InlineData("Canvas Card", ".canvas-node-content", false)]
     [InlineData("Canvas Card", ".canvas-node-content", true)]
-    public async Task WhenACardIsInAGridCellOrACanvasNode_ThenItFillsItWithoutAFrameOfItsOwn(string title, string container, bool isInlineMode)
+    public async Task WhenACardIsInAGridCellOrACanvasNode_ThenItFillsItWithItsOwnOutline(string title, string container, bool isInlineMode)
     {
         // Arrange
         var page = await OpenPageAsync();
@@ -135,23 +135,12 @@ public class CardLayoutTests
         }
 
         // Assert
-        var measures = await card.EvaluateAsync<double[]>(
-            """
-            (card, container) => {
-                const style = getComputedStyle(card);
-                return [
-                    card.getBoundingClientRect().height,
-                    card.closest(container).getBoundingClientRect().height,
-                    parseFloat(style.borderTopWidth),
-                    style.boxShadow === 'none' ? 0 : 1
-                ];
-            }
-            """,
+        var heights = await card.EvaluateAsync<double[]>(
+            "(card, container) => [card.getBoundingClientRect().height, card.closest(container).getBoundingClientRect().height]",
             container);
-        Assert.True(measures[1] > 100, $"The container is {measures[1]} pixels high.");
-        Assert.Equal(measures[1], measures[0], 1.0);
-        Assert.Equal(0, measures[2]);
-        Assert.Equal(0, measures[3]);
+        Assert.True(heights[1] > 100, $"The container is {heights[1]} pixels high.");
+        Assert.Equal(heights[1], heights[0], 1.0);
+        await Assertions.Expect(card).ToHaveCSSAsync("border-top-width", "1px");
     }
 
     [Theory]

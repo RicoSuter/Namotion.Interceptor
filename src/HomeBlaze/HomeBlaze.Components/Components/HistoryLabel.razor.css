@@ -1,0 +1,23 @@
+/* A button that looks like the text around it. It shows an underline only under the pointer, so that a page of labels
+   stays calm. */
+.history-label-button {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: inherit;
+    cursor: pointer;
+}
+
+@media (hover: hover) {
+    .history-label-button:hover {
+        text-decoration: underline;
+        text-underline-offset: 3px;
+    }
+}
+
+.history-label-button:focus-visible {
+    outline: 2px solid currentColor;
+    outline-offset: 2px;
+}

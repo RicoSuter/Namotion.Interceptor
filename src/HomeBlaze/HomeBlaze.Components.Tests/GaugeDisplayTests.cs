@@ -212,11 +212,11 @@ public class GaugeDisplayTests
     {
         // Act
         var pixels = GaugeDisplay.GetPixelSize(size);
-        var style = GaugeDisplay.GetRingStyle(size);
+        var style = GaugeDisplay.GetSizeStyle(size);
 
         // Assert
         Assert.Equal(expected, pixels);
-        Assert.Equal($"width: {expected}px; height: {expected}px;", style);
+        Assert.Equal($"--gauge-size: {expected}px;", style);
     }
 
     [Theory]

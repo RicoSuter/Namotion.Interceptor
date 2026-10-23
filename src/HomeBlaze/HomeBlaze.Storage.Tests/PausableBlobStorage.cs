@@ -20,6 +20,7 @@ internal sealed class PausableBlobStorage(IBlobStorage inner) : IBlobStorage
     private string? _pausedOperation;
     private string? _blockedOperation;
     private Action? _afterNextListing;
+    private Exception? _deleteFailure;
     private int _pausedStreamNumber;
     private int _callCount;
     private int _openedStreamCount;
@@ -94,6 +95,11 @@ internal sealed class PausableBlobStorage(IBlobStorage inner) : IBlobStorage
     /// </summary>
     public void FailHangingCall(Exception exception) => _released.TrySetException(exception);
 
+    /// <summary>
+    /// Makes the next delete fail after it has deleted, as a storage does whose answer is lost.
+    /// </summary>
+    public void FailNextDeleteAfterItRan(Exception exception) => Volatile.Write(ref _deleteFailure, exception);
+
     public async Task<IReadOnlyCollection<Blob>> ListAsync(ListOptions? options = null, CancellationToken cancellationToken = default)
     {
         await ArriveAsync(nameof(ListAsync));
@@ -126,6 +132,10 @@ internal sealed class PausableBlobStorage(IBlobStorage inner) : IBlobStorage
     {
         await ArriveAsync(nameof(DeleteAsync));
         await inner.DeleteAsync(fullPaths, cancellationToken);
+        if (Interlocked.Exchange(ref _deleteFailure, null) is { } failure)
+        {
+            throw failure;
+        }
     }
 
     public async Task<IReadOnlyCollection<bool>> ExistsAsync(IEnumerable<string> fullPaths, CancellationToken cancellationToken = default)

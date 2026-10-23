@@ -1,7 +1,6 @@
 ---
 title: Blocks Demo
 navTitle: Blocks Demo
-position: 6
 ---
 
 # Blocks Demo

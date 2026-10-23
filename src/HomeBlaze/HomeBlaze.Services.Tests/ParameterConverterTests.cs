@@ -1,4 +1,6 @@
+using System.Text.Json.Serialization;
 using HomeBlaze.Abstractions.Attributes;
+using Namotion.Interceptor.Attributes;
 
 namespace HomeBlaze.Services.Tests;
 
@@ -284,4 +286,350 @@ public class ParameterConverterTests
         // Assert
         Assert.False(success);
     }
+
+    [Theory]
+    [InlineData(typeof(TestMessage), true, true)]
+    [InlineData(typeof(TestEnvelope), false, true)]
+    [InlineData(typeof(TestCollidingMessage), false, true)]
+    [InlineData(typeof(List<int>), false, true)]
+    [InlineData(typeof(int[]), false, true)]
+    [InlineData(typeof(string), false, false)]
+    [InlineData(typeof(int), false, false)]
+    [InlineData(typeof(object), false, false)]
+    [InlineData(typeof(IDisposable), false, false)]
+    [InlineData(typeof(Action), false, false)]
+    [InlineData(typeof(TestInterceptorSubject), false, false)]
+    public void WhenTypeIsClassified_ThenItIsASupportedObjectOrAJsonObjectAsExpected(Type type, bool expectedSupportedObject, bool expectedJsonObject)
+    {
+        // Act
+        var isSupportedObject = ParameterConverter.IsSupportedObject(type);
+        var isJsonObject = ParameterConverter.IsJsonObject(type);
+
+        // Assert
+        Assert.Equal(expectedSupportedObject, isSupportedObject);
+        Assert.Equal(expectedJsonObject, isJsonObject);
+    }
+
+    [Fact]
+    public void WhenTypeIsByRefPointerByRefLikeOrOpenGeneric_ThenItIsNotEnterable()
+    {
+        // Arrange
+        Type[] types =
+        [
+            typeof(int).MakeByRefType(),
+            typeof(int).MakePointerType(),
+            typeof(Span<int>),
+            typeof(List<>),
+            typeof(List<>).GetGenericArguments()[0]
+        ];
+
+        // Act & Assert
+        Assert.All(types, type =>
+        {
+            Assert.False(ParameterConverter.IsSupported(type));
+            Assert.False(ParameterConverter.IsSupportedObject(type));
+            Assert.False(ParameterConverter.IsJsonObject(type));
+            Assert.Empty(ParameterConverter.GetObjectMembers(type));
+        });
+    }
+
+    [Fact]
+    public void WhenGettingObjectMembers_ThenRequiredIsDescribed()
+    {
+        // Act
+        var members = ParameterConverter.GetObjectMembers(typeof(TestMessage));
+
+        // Assert
+        Assert.Equal(["Text", "Title", "Level", "Count"], members.Select(member => member.Name));
+        Assert.True(members[0].IsRequired);
+        Assert.False(members[2].IsRequired);
+    }
+
+    [Theory]
+    [InlineData(null, TestLevel.Normal)]
+    [InlineData("High", TestLevel.High)]
+    public void WhenCreatingObjectFromInputs_ThenMembersAreConvertedAndDefaultsKept(string? levelInput, TestLevel expectedLevel)
+    {
+        // Arrange
+        var inputs = new Dictionary<string, string?> { ["Text"] = "Hello", ["Level"] = levelInput, ["Count"] = "3" };
+
+        // Act
+        var success = ParameterConverter.TryCreateObject(typeof(TestMessage), inputs, out var value, out var error);
+
+        // Assert
+        Assert.True(success, error);
+        var message = Assert.IsType<TestMessage>(value);
+        Assert.Equal("Hello", message.Text);
+        Assert.Null(message.Title);
+        Assert.Equal(expectedLevel, message.Level);
+        Assert.Equal(3, message.Count);
+    }
+
+    [Fact]
+    public void WhenRequiredMemberHasNoInput_ThenCreatingFails()
+    {
+        // Act
+        var success = ParameterConverter.TryCreateObject(typeof(TestMessage), new Dictionary<string, string?>(), out var value, out var error);
+
+        // Assert
+        Assert.False(success);
+        Assert.Null(value);
+        Assert.Equal("Text is required", error);
+    }
+
+    [Fact]
+    public void WhenBoolMemberHasNoInput_ThenItKeepsItsDefault()
+    {
+        // Act
+        var success = ParameterConverter.TryCreateObject(typeof(TestSoundMessage), new Dictionary<string, string?>(), out var value, out var error);
+
+        // Assert
+        Assert.True(success, error);
+        Assert.True(Assert.IsType<TestSoundMessage>(value).Sound);
+    }
+
+    [Fact]
+    public void WhenRecordIsPositional_ThenConstructorParametersWithoutDefaultAreRequired()
+    {
+        // Act
+        var members = ParameterConverter.GetObjectMembers(typeof(TestCommand));
+
+        // Assert
+        Assert.Equal(["Target", "Level", "Mode"], members.Select(member => member.Name));
+        Assert.Equal([true, true, false], members.Select(member => member.IsRequired));
+    }
+
+    [Fact]
+    public void WhenPositionalRecordHasNoInputs_ThenCreatingFails()
+    {
+        // Act
+        var success = ParameterConverter.TryCreateObject(typeof(TestCommand), new Dictionary<string, string?>(), out var value, out var error);
+
+        // Assert
+        Assert.False(success);
+        Assert.Null(value);
+        Assert.Equal("Target is required", error);
+    }
+
+    [Fact]
+    public void WhenPositionalRecordParameterWithDefaultHasNoInput_ThenItKeepsItsDefault()
+    {
+        // Arrange
+        var inputs = new Dictionary<string, string?> { ["Target"] = "Lamp", ["Level"] = "2" };
+
+        // Act
+        var success = ParameterConverter.TryCreateObject(typeof(TestCommand), inputs, out var value, out var error);
+
+        // Assert
+        Assert.True(success, error);
+        Assert.Equal(new TestCommand("Lamp", 2), value);
+    }
+
+    [Fact]
+    public void WhenMemberIsSetOnlyThroughTheConstructor_ThenItIsListedAndBound()
+    {
+        // Arrange
+        var inputs = new Dictionary<string, string?> { ["A"] = "Hello" };
+
+        // Act
+        var members = ParameterConverter.GetObjectMembers(typeof(TestConstructorMessage));
+        var success = ParameterConverter.TryCreateObject(typeof(TestConstructorMessage), inputs, out var value, out var error);
+
+        // Assert
+        Assert.Equal(["A"], members.Select(member => member.Name));
+        Assert.True(success, error);
+        Assert.Equal("Hello", Assert.IsType<TestConstructorMessage>(value).A);
+    }
+
+    [Fact]
+    public void WhenMemberInputIsInvalid_ThenCreatingFails()
+    {
+        // Arrange
+        var inputs = new Dictionary<string, string?> { ["Text"] = "Hello", ["Count"] = "many" };
+
+        // Act
+        var success = ParameterConverter.TryCreateObject(typeof(TestMessage), inputs, out _, out var error);
+
+        // Assert
+        Assert.False(success);
+        Assert.Equal("Invalid value for Count", error);
+    }
+
+    [Fact]
+    public void WhenParsingValidJson_ThenObjectIsCreatedWithAnyNameCase()
+    {
+        // Act
+        var success = ParameterConverter.TryParseJson("""{"text":"Hi","inner":{"value":2}}""", typeof(TestEnvelope), isNullable: false, out var value, out var error);
+
+        // Assert
+        Assert.True(success, error);
+        var envelope = Assert.IsType<TestEnvelope>(value);
+        Assert.Equal("Hi", envelope.Text);
+        Assert.Equal(2, envelope.Inner!.Value);
+    }
+
+    [Theory]
+    [InlineData("{not json")]
+    [InlineData("""{"text":"Hi","sound":"siren"}""")]
+    [InlineData("""{"text":"Hi","level":1}""")]
+    public void WhenParsingInvalidJson_ThenErrorIsReturned(string json)
+    {
+        // Act
+        var success = ParameterConverter.TryParseJson(json, typeof(TestMessage), isNullable: false, out var value, out var error);
+
+        // Assert
+        Assert.False(success);
+        Assert.Null(value);
+        Assert.False(string.IsNullOrEmpty(error));
+    }
+
+    [Theory]
+    [InlineData("  ", false, false)]
+    [InlineData("  ", true, true)]
+    [InlineData("null", false, false)]
+    [InlineData("null", true, true)]
+    public void WhenJsonIsBlankOrNull_ThenOnlyANullableParameterAcceptsIt(string json, bool isNullable, bool expectedSuccess)
+    {
+        // Act
+        var success = ParameterConverter.TryParseJson(json, typeof(TestEnvelope), isNullable, out var value, out var error);
+
+        // Assert
+        Assert.Equal(expectedSuccess, success);
+        Assert.Null(value);
+        Assert.Equal(expectedSuccess ? null : "This field is required", error);
+    }
+
+    [Fact]
+    public void WhenMemberHasJsonPropertyName_ThenInputBindsByJsonName()
+    {
+        // Arrange
+        var inputs = new Dictionary<string, string?> { ["display_name"] = "Hello" };
+
+        // Act
+        var success = ParameterConverter.TryCreateObject(typeof(TestRenamedMessage), inputs, out var value, out var error);
+
+        // Assert
+        Assert.True(success, error);
+        Assert.Equal("Hello", Assert.IsType<TestRenamedMessage>(value).DisplayName);
+    }
+
+    [Fact]
+    public void WhenCreatingObjectWithNaNInput_ThenDoubleMemberIsSetToNaN()
+    {
+        // Arrange
+        var inputs = new Dictionary<string, string?> { ["Value"] = "NaN" };
+
+        // Act
+        var success = ParameterConverter.TryCreateObject(typeof(TestDoubleMessage), inputs, out var value, out var error);
+
+        // Assert
+        Assert.True(success, error);
+        Assert.True(double.IsNaN(Assert.IsType<TestDoubleMessage>(value).Value));
+    }
+
+    [Fact]
+    public void WhenSetterThrowsArgumentException_ThenParsingFailsWithExceptionMessage()
+    {
+        // Act
+        var success = ParameterConverter.TryParseJson("""{"text":""}""", typeof(TestThrowingMessage), isNullable: false, out var value, out var error);
+
+        // Assert
+        Assert.False(success);
+        Assert.Null(value);
+        Assert.Equal("Text must not be empty", error);
+    }
+
+    [Fact]
+    public void WhenMemberNamesCollide_ThenParsingFailsWithExceptionMessage()
+    {
+        // Act
+        var success = ParameterConverter.TryParseJson("{}", typeof(TestCollidingMessage), isNullable: false, out var value, out var error);
+
+        // Assert
+        Assert.False(success);
+        Assert.Null(value);
+        Assert.False(string.IsNullOrEmpty(error));
+    }
+
+    public sealed record TestMessage
+    {
+        public required string Text { get; init; }
+
+        public string? Title { get; init; }
+
+        public TestLevel Level { get; init; } = TestLevel.Normal;
+
+        public int? Count { get; init; }
+    }
+
+    public sealed record TestSoundMessage
+    {
+        public bool Sound { get; init; } = true;
+    }
+
+    public sealed record TestCommand(string Target, int Level, string Mode = "Auto");
+
+    public sealed class TestConstructorMessage
+    {
+        public TestConstructorMessage(string a)
+        {
+            A = a;
+        }
+
+        public string A { get; }
+    }
+
+    public enum TestLevel
+    {
+        Normal,
+        High
+    }
+
+    public sealed class TestEnvelope
+    {
+        public string? Text { get; set; }
+
+        public TestInner? Inner { get; set; }
+    }
+
+    public sealed class TestInner
+    {
+        public int Value { get; set; }
+    }
+
+    public sealed class TestRenamedMessage
+    {
+        [JsonPropertyName("display_name")]
+        public string DisplayName { get; set; } = string.Empty;
+    }
+
+    public sealed class TestDoubleMessage
+    {
+        public double Value { get; set; }
+    }
+
+    public sealed class TestCollidingMessage
+    {
+        [JsonPropertyName("text")]
+        public string? First { get; set; }
+
+        [JsonPropertyName("text")]
+        public string? Second { get; set; }
+    }
+
+    public sealed class TestThrowingMessage
+    {
+        private string _text = string.Empty;
+
+        public string Text
+        {
+            get => _text;
+            set => _text = value.Length > 0 ? value : throw new ArgumentException("Text must not be empty");
+        }
+    }
+}
+
+[InterceptorSubject]
+public partial class TestInterceptorSubject
+{
 }

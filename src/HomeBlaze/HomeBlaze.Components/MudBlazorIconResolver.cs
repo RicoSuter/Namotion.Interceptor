@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+using System.Collections.Frozen;
 using System.Reflection;
 using MudBlazor;
 
@@ -9,25 +9,18 @@ namespace HomeBlaze.Components;
 /// </summary>
 public static class MudBlazorIconResolver
 {
-    private static readonly ConcurrentDictionary<string, string> IconCache = new();
+    // Built once rather than filled per request, as the names come from users and agents.
+    private static readonly FrozenDictionary<string, string> FilledIcons = typeof(Icons.Material.Filled)
+        .GetFields(BindingFlags.Public | BindingFlags.Static)
+        .Where(field => field.FieldType == typeof(string))
+        .ToFrozenDictionary(field => field.Name, field => (string)field.GetValue(null)!, StringComparer.Ordinal);
 
     /// <summary>
     /// Resolves an icon name to the Material filled icon of that name, or to the article icon
     /// when the name is null, empty or unknown.
     /// </summary>
     public static string Resolve(string? iconName)
-    {
-        if (string.IsNullOrEmpty(iconName))
-        {
-            return Icons.Material.Filled.Article;
-        }
-
-        return IconCache.GetOrAdd(iconName, name =>
-        {
-            var field = typeof(Icons.Material.Filled).GetField(name, BindingFlags.Public | BindingFlags.Static);
-            return field?.GetValue(null) as string ?? Icons.Material.Filled.Article;
-        });
-    }
+        => iconName is not null && FilledIcons.TryGetValue(iconName, out var icon) ? icon : Icons.Material.Filled.Article;
 
     /// <summary>
     /// Resolves an icon name like <see cref="Resolve"/>, but to null when the name is null or empty,

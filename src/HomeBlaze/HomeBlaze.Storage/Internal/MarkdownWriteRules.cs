@@ -3,9 +3,11 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
+using HomeBlaze.Services.Metadata;
 using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Pages;
+using Markdig;
 using Markdig.Extensions.Abbreviations;
 using Markdig.Extensions.Mathematics;
 using Markdig.Renderers.Html;
@@ -106,11 +108,21 @@ internal static partial class MarkdownWriteRules
         EnsureActiveContentUnchanged(oldPage, layout is null ? null : AnalyzeLayout(oldPage, layout), newSource, parameterName, layout);
     }
 
+    /// <summary>
+    /// Ensures that the source, read with <paramref name="pipeline"/>, holds no block and none of the
+    /// <see cref="MarkdownFile.ActiveContent"/>, as <see cref="EnsureActiveContentUnchanged(string, string, string, PageLayoutRules?)"/>
+    /// with an empty old source.
+    /// </summary>
+    /// <exception cref="ArgumentException">The source holds a block or such content.</exception>
+    internal static void EnsureNoActiveContent(string source, MarkdownPipeline pipeline, string parameterName)
+        => EnsureActiveContentUnchanged(MarkdownPageParser.Parse(string.Empty), null, source, parameterName, layout: null, pipeline);
+
     private static void EnsureActiveContentUnchanged(
-        MarkdownPage oldPage, LayoutAnalysis? oldAnalysis, string newSource, string parameterName, PageLayoutRules? layout)
+        MarkdownPage oldPage, LayoutAnalysis? oldAnalysis, string newSource, string parameterName, PageLayoutRules? layout,
+        MarkdownPipeline? pipeline = null)
     {
         var oldContent = GetActiveContent(oldPage, layout, oldAnalysis);
-        var newPage = MarkdownPageParser.Parse(newSource);
+        var newPage = MarkdownPageParser.Parse(newSource, pipeline ?? MarkdownPageParser.Pipeline);
         var newContent = GetActiveContent(newPage, layout, layout is null ? null : AnalyzeLayout(newPage, layout));
 
         if (layout is not null)
@@ -605,9 +617,7 @@ internal static partial class MarkdownWriteRules
         }
 
         var scheme = new string(url.AsSpan(0, colon).ToArray().Where(character => !char.IsWhiteSpace(character) && !char.IsControl(character)).ToArray());
-        return scheme.Equals("http", StringComparison.OrdinalIgnoreCase) ||
-               scheme.Equals("https", StringComparison.OrdinalIgnoreCase) ||
-               scheme.Equals("mailto", StringComparison.OrdinalIgnoreCase);
+        return MetadataLink.IsAllowedScheme(scheme);
     }
 
     // Whether every item of the new list has its own occurrence in the old list.
