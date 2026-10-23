@@ -29,7 +29,7 @@ The installation widget shows the version, channel and build, an available relea
 
 Every open browser tab is a client in `Clients` while it is open, shown as `Anonymous client`. To keep a browser, open the menu at the right end of the app bar and choose `Name this browser`, or call `Rename` on its client. A named client is saved in `Servers/Installation.json`, the browser remembers it in a cookie for a year, and all its tabs belong to it. It stays in the list while the browser is closed, with `IsConnected` false. `Forget` removes the name again.
 
-A client receives notifications like any other notification target, for example from an automation or an AI agent: it shows them as a dialog in its open tabs. A notification with the `Emergency` priority stays until its button is clicked. When none of its tabs is open, sending fails and nothing is kept for later, so name the browsers that should receive notifications, such as a wall tablet.
+A client receives notifications like any other notification target, for example from an automation or an AI agent: it shows them as a dialog in its open tabs. A notification with the `Emergency` priority stays until its button is clicked. When none of its tabs is open, sending fails and nothing is kept for later, so name the browsers that should receive notifications, such as a wall tablet. A tab whose connection dropped still counts as open until the server gives up on it, by default after about 3 minutes, so sending to it in that time succeeds and the notification shows only if the tab reconnects before then.
 
 ## Update check
 
