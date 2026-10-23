@@ -6,10 +6,13 @@ namespace HomeBlaze.Services.Display;
 /// <summary>Where an expression stands, which decides the pipes and variables it may use.</summary>
 public enum ExpressionUse
 {
-    /// <summary>The text of a page: the pipes <c>display</c> and <c>raw</c>, and no variable.</summary>
+    /// <summary>The text of a page: the pipes <c>display</c>, <c>raw</c> and <c>map</c>, and no variable.</summary>
     PageText,
 
-    /// <summary>The text of a case of a value map: the pipes <c>display</c> and <c>raw</c>, and the variables.</summary>
+    /// <summary>
+    /// The text of a case of a value map: the pipes <c>display</c> and <c>raw</c>, and the variables. It may not use
+    /// <c>map</c>, so that a map cannot reach itself through the text of its cases.
+    /// </summary>
     CaseText,
 
     /// <summary>The condition of a case of a value map: no pipe, and the variables.</summary>
@@ -26,6 +29,9 @@ public static class ExpressionDisplay
 
     /// <summary>The pipe that writes a value the same way on every system.</summary>
     internal const string RawPipe = "raw";
+
+    /// <summary>The pipe that applies a value map to the value, <c>map:name</c>, in the text of a page.</summary>
+    public const string MapPipe = "map";
 
     /// <summary>
     /// Gets the text that shows a result: the text of a pipe as it is, otherwise the value formatted for display with the
@@ -50,7 +56,7 @@ public static class ExpressionDisplay
             : StateUnitExtensions.FormatDisplayValue(value, timeZone);
     }
 
-    /// <summary>Applies the pipe <see cref="DisplayPipe"/> or <see cref="RawPipe"/>, which <see cref="Check"/> accepted.</summary>
+    /// <summary>Applies the pipe <c>display</c> or <c>raw</c>, which <see cref="Check"/> accepted.</summary>
     public static ExpressionValue ApplyFormat(string name, ExpressionValue input, ITimeZoneDisplay? timeZone) =>
         ExpressionValue.FromText(name.Equals(RawPipe, StringComparison.OrdinalIgnoreCase)
             ? input.IsText ? (string)input.Value! : RawValueFormatter.Format(input.Value)
@@ -66,6 +72,16 @@ public static class ExpressionDisplay
 
         foreach (var pipe in expression.Pipes)
         {
+            if (use == ExpressionUse.PageText && pipe.Name.Equals(MapPipe, StringComparison.OrdinalIgnoreCase))
+            {
+                if (pipe.Arguments.Length != 1)
+                {
+                    return "The pipe 'map' takes the name of a value map, such as map:wallbox";
+                }
+
+                continue;
+            }
+
             if (!pipe.Name.Equals(DisplayPipe, StringComparison.OrdinalIgnoreCase) &&
                 !pipe.Name.Equals(RawPipe, StringComparison.OrdinalIgnoreCase))
             {

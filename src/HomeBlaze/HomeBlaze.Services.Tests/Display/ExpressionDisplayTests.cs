@@ -20,6 +20,10 @@ public class ExpressionDisplayTests
     [InlineData("subject/Power > 1", ExpressionUse.PageText, "'subject' is not available in the text of a page")]
     [InlineData("subject/Power | raw", ExpressionUse.CaseText, null)]
     [InlineData("value | map:x", ExpressionUse.CaseText, "Unknown pipe 'map'")]
+    [InlineData("a/B | map:onoff", ExpressionUse.PageText, null)]
+    [InlineData("a/B > 1 | map:onoff | raw", ExpressionUse.PageText, null)]
+    [InlineData("a/B | map", ExpressionUse.PageText, "The pipe 'map' takes the name of a value map, such as map:wallbox")]
+    [InlineData("a/B | map:x:y", ExpressionUse.PageText, "The pipe 'map' takes the name of a value map, such as map:wallbox")]
     [InlineData("value > 1000 and subject/IsCharging", ExpressionUse.CaseCondition, null)]
     [InlineData("value | raw", ExpressionUse.CaseCondition, "A condition takes no pipes")]
     public void WhenExpressionIsChecked_ThenItsPipesAndVariablesMustFitWhereItStands(string text, ExpressionUse use, string? expected)

@@ -334,6 +334,7 @@ namespace HomeBlaze.Services.Display
 {
     public static class ExpressionDisplay
     {
+        public const string MapPipe = "map";
         public static HomeBlaze.Services.Expressions.ExpressionValue ApplyFormat(string name, HomeBlaze.Services.Expressions.ExpressionValue input, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone) { }
         public static string? Check(HomeBlaze.Services.Expressions.ParsedExpression expression, HomeBlaze.Services.Display.ExpressionUse use) { }
         public static string ToText(HomeBlaze.Services.Expressions.ExpressionValue result, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone) { }

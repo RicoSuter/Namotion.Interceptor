@@ -191,8 +191,8 @@ public sealed partial class MarkdownContentParser
     /// <summary>
     /// Renders markdown content by replacing each {{ path }} expression that
     /// <see cref="MarkdownSegmentBuilder.FindExpressions"/> finds with its resolved value as the page shows it: also
-    /// one in the front matter, on the head line of a block or in an invalid block, which the page itself does not
-    /// evaluate. An expression with an error, and one inside markdown code, is kept as written, and everything
+    /// one in the front matter or in an invalid block, which the page itself does not evaluate; an expression in the
+    /// arguments of a block is left as written, because the widget evaluates it. An expression with an error, and one inside markdown code, is kept as written, and everything
     /// else stays as written. Only a displayable property is shown (<see cref="SubjectRegistryExtensions.IsDisplayable"/>).
     /// Uses the same resolution semantics as <see cref="RenderExpression"/> (in the scope of the markdown file).
     /// </summary>

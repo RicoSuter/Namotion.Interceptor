@@ -17,6 +17,19 @@ public class MarkdownSegmentBuilderTests
         }));
 
     [Fact]
+    public void WhenBlockArgumentHasAnExpression_ThenItIsNoExpressionOfThePageText()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse(":: Demo.Card Title=\"{{ subject/Name }}\"\n```json\n{ \"Footer\": \"{{ a/B }}\" }\n```\n::\n\nText {{ c/D }}");
+
+        // Act
+        var found = MarkdownSegmentBuilder.FindExpressions(page).Select(expression => expression.Text).ToArray();
+
+        // Assert
+        Assert.Equal(["c/D"], found);
+    }
+
+    [Fact]
     public void WhenPageHasFrontmatterAndExpression_ThenFrontmatterIsDroppedAndPathIsTrimmed()
     {
         // Act

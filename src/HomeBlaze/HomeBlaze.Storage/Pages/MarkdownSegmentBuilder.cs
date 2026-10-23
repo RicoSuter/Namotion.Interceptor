@@ -58,7 +58,7 @@ public static partial class MarkdownSegmentBuilder
     /// <remarks>
     /// The search reads the text and not the rendered page, so it also returns an expression that
     /// <see cref="Build"/> does not turn into a segment: one in the front matter, in the content of an invalid
-    /// block or on the head line of a block, and one whose braces enclose markdown markup or the border of a block.
+    /// block, and one whose braces enclose markdown markup or the border of a block.
     /// An expression with a character reference in it, such as <c>&amp;amp;</c>, is returned as written, except one
     /// in HTML that the page writes: its text has the character, like its segment, and one whose character
     /// is a brace is skipped. The segment of an expression in running text keeps it as written.
@@ -68,6 +68,11 @@ public static partial class MarkdownSegmentBuilder
         var source = page.Source;
         foreach (Match match in SourceExpressionRegex().Matches(HideBracesInCode(page)))
         {
+            if (IsInBlockArguments(page, match.Index))
+            {
+                continue;
+            }
+
             var group = match.Groups[1];
             var text = source.Substring(group.Index, group.Length);
 
@@ -84,6 +89,22 @@ public static partial class MarkdownSegmentBuilder
             yield return new MarkdownExpression(new MarkdownSpan(match.Index, match.Length), text);
         }
     }
+
+    // The head line and the json block of a block hold its arguments, whose expressions the widget evaluates itself.
+    private static bool IsInBlockArguments(MarkdownPage page, int position)
+    {
+        foreach (var block in page.AllBlocks)
+        {
+            if (IsInside(block.HeadSpan, position) || (block.ConfigurationSpan is { } configuration && IsInside(configuration, position)))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsInside(MarkdownSpan span, int position) => position >= span.Start && position < span.End;
 
     /// <summary>Gets the text of the page with every brace inside markdown code replaced. All offsets stay the same.</summary>
     private static string HideBracesInCode(MarkdownPage page)
