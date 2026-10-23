@@ -90,7 +90,10 @@ public static class ValueReader
         var value = binding.Value;
         if (matched is null && value is null)
         {
-            return new ValueReading(binding.Property, null, MissingText, ValueColor.Default, null, mapError);
+            return new ValueReading(binding.Property, null, MissingText, ValueColor.Default, null, mapError)
+            {
+                Subject = binding.Subject
+            };
         }
 
         return new ValueReading(
@@ -102,7 +105,8 @@ public static class ValueReader
             mapError)
         {
             TextColor = matched?.GetTextColor() ?? ValueColor.Default,
-            HasCase = matched is not null
+            HasCase = matched is not null,
+            Subject = binding.Subject
         };
     }
 

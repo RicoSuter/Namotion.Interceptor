@@ -119,7 +119,7 @@ public partial class ValueMapCase : IConfigurable
             return false;
         }
 
-        var context = new ValueMapCaseContext(resolver, this, binding, timeZone: null);
+        var context = new ValueBindingContext(resolver, this, binding, timeZone: null);
         return condition.EvaluateCondition(ref context) == true;
     }
 
@@ -137,7 +137,7 @@ public partial class ValueMapCase : IConfigurable
             return null;
         }
 
-        var context = new ValueMapCaseContext(resolver, this, binding, timeZone);
+        var context = new ValueBindingContext(resolver, this, binding, timeZone);
         return template.Render(ref context);
     }
 

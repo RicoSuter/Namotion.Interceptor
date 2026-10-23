@@ -860,12 +860,14 @@ namespace HomeBlaze.Components
     public sealed class ValueReading : System.IEquatable<HomeBlaze.Components.ValueReading>
     {
         public ValueReading(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? Property, object? Value, string Text, HomeBlaze.Components.ValueColor Color, string? Icon, string? MapError) { }
+        public HomeBlaze.Services.Display.ValueBinding Binding { get; }
         public HomeBlaze.Components.ValueColor Color { get; init; }
         public bool HasCase { get; init; }
         public string? Icon { get; init; }
         public bool IsMissing { get; }
         public string? MapError { get; init; }
         public Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? Property { get; init; }
+        public Namotion.Interceptor.IInterceptorSubject? Subject { get; init; }
         public string Text { get; init; }
         public HomeBlaze.Components.ValueColor TextColor { get; init; }
         public object? Value { get; init; }
@@ -976,6 +978,12 @@ namespace HomeBlaze.Components
         public HomeBlaze.Components.SubjectComponent? Selected { get; }
         public void Clear() { }
         public void Select(HomeBlaze.Components.SubjectComponent? component) { }
+    }
+    public sealed class WidgetText
+    {
+        public WidgetText(string argumentName, HomeBlaze.Services.Display.ExpressionUse use) { }
+        public string? Render(string? text, HomeBlaze.Services.SubjectPathResolver resolver, Namotion.Interceptor.IInterceptorSubject widget, in HomeBlaze.Services.Display.ValueBinding binding, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone, out string? error) { }
+        public string? Render(string? text, HomeBlaze.Services.SubjectPathResolver resolver, Namotion.Interceptor.IInterceptorSubject widget, string? path, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone, out string? error) { }
     }
     public class _Imports
     {
