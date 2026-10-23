@@ -5,7 +5,7 @@ namespace Namotion.Interceptor.Authorization;
 /// <summary>
 /// An action a rule allows or denies, identified by a name compared ignoring case. The library defines
 /// <see cref="Read"/> and <see cref="Write"/>; an application defines the others it needs and passes all of
-/// them as the known actions of <c>AuthorizationPolicy.Compile</c>.
+/// them as the known actions of <see cref="AuthorizationPolicy.Compile"/>.
 /// </summary>
 [JsonConverter(typeof(PermissionActionJsonConverter))]
 public readonly record struct PermissionAction

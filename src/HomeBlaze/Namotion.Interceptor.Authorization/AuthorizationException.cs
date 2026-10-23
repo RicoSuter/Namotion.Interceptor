@@ -1,6 +1,6 @@
 namespace Namotion.Interceptor.Authorization;
 
-/// <summary>Thrown by <c>AuthorizationPolicy.Compile</c> when the roles cannot be compiled; the message names the role and the problem.</summary>
+/// <summary>Thrown by <see cref="AuthorizationPolicy.Compile"/> when the roles cannot be compiled; the message names the role and the problem.</summary>
 public sealed class AuthorizationException : Exception
 {
     public AuthorizationException()

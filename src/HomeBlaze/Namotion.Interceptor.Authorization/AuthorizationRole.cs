@@ -8,7 +8,7 @@ namespace Namotion.Interceptor.Authorization;
 /// </summary>
 public sealed record AuthorizationRole
 {
-    /// <summary>Gets the name, unique among the roles of a policy ignoring case. <c>AuthorizationPolicy.SystemRoleName</c> is reserved.</summary>
+    /// <summary>Gets the name, unique among the roles of a policy ignoring case. <see cref="AuthorizationPolicy.SystemRoleName"/> is reserved.</summary>
     public required string Name { get; init; }
 
     /// <summary>Gets the names of the included roles.</summary>
