@@ -6,12 +6,12 @@ public class ParsedExpressionEvaluationTests
 {
     private static bool? EvaluateCondition(string text, Dictionary<string, object?> values)
     {
-        Assert.True(ParsedExpression.TryParse(text, out var expression, out var error), error);
+        Assert.True(ParsedExpression.TryParse(text, '/', out var expression, out var error), error);
         var context = new TestExpressionContext(values);
         return expression.EvaluateCondition(ref context);
     }
 
-    // The rows of SubjectFilterExpressionTests in Namotion.Interceptor.Mcp.Tests, which every valid where text must keep.
+    // The rows a filter host relies on.
     [Theory]
     [InlineData("Temperature > 20", true)]
     [InlineData("Temperature < 20", false)]
@@ -188,7 +188,7 @@ public class ParsedExpressionEvaluationTests
     public void WhenExpressionHasPipes_ThenTheyApplyInOrderToTheValue()
     {
         // Arrange
-        Assert.True(ParsedExpression.TryParse("Name | upper:a | upper:b", out var expression, out _));
+        Assert.True(ParsedExpression.TryParse("Name | upper:a | upper:b", '/', out var expression, out _));
         var context = new TestExpressionContext(new Dictionary<string, object?> { ["Name"] = "kitchen" });
 
         // Act
@@ -205,7 +205,7 @@ public class ParsedExpressionEvaluationTests
     public void WhenComparisonIsEvaluatedAsValue_ThenItIsABooleanOrMissing()
     {
         // Arrange
-        Assert.True(ParsedExpression.TryParse("Power > 1000", out var expression, out _));
+        Assert.True(ParsedExpression.TryParse("Power > 1000", '/', out var expression, out _));
         var known = new TestExpressionContext(new Dictionary<string, object?> { ["Power"] = 7400m });
         var unknown = new TestExpressionContext(new Dictionary<string, object?>());
 
@@ -223,7 +223,7 @@ public class ParsedExpressionEvaluationTests
     {
         // Arrange
         Assert.True(ParsedExpression.TryParse(
-            "IsPluggedIn and not IsCharging and Power > 1000 and Day == Monday", out var expression, out _));
+            "IsPluggedIn and not IsCharging and Power > 1000 and Day == Monday", '/', out var expression, out _));
         var context = new TestExpressionContext(new Dictionary<string, object?>
         {
             ["IsPluggedIn"] = true,

@@ -30,11 +30,19 @@ public sealed class TextTemplate
     /// Parses the text. On failure the error is that of the first expression that does not parse, with the position inside
     /// its braces, or <c>'{{' is not closed at position &lt;n&gt;</c>.
     /// </summary>
+    /// <param name="text">The text.</param>
+    /// <param name="pathSeparator">The character between the segments of the paths of its expressions.</param>
+    /// <param name="template">The template, or null.</param>
+    /// <param name="error">The error, or null.</param>
+    /// <exception cref="ArgumentException">The separator cannot be used in an expression, see <see cref="ParsedExpression.TryParse"/>.</exception>
     public static bool TryParse(
         string text,
+        char pathSeparator,
         [NotNullWhen(true)] out TextTemplate? template,
         [NotNullWhen(false)] out string? error)
     {
+        ParsedExpression.ValidatePathSeparator(pathSeparator);
+
         var parts = ImmutableArray.CreateBuilder<object>();
         var expressions = ImmutableArray.CreateBuilder<ParsedExpression>();
         var position = 0;
@@ -60,7 +68,7 @@ public sealed class TextTemplate
                 return false;
             }
 
-            if (!ParsedExpression.TryParse(text[(open + 2)..close].Trim(), out var expression, out error))
+            if (!ParsedExpression.TryParse(text[(open + 2)..close].Trim(), pathSeparator, out var expression, out error))
             {
                 template = null;
                 return false;

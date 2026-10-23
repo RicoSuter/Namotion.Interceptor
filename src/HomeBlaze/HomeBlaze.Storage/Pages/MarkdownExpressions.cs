@@ -22,7 +22,7 @@ public static class MarkdownExpressions
             ? text.Replace(@"\|", "|", StringComparison.Ordinal)
             : text;
 
-        if (!ParsedExpression.TryParse(unescaped, out var expression, out error))
+        if (!ParsedExpression.TryParse(unescaped, ExpressionDisplay.PathSeparator, out var expression, out error))
         {
             // The error of the expression stays, unless the text is an old path with a space.
             if (!TryParseLegacyPath(unescaped, out expression))
@@ -48,7 +48,7 @@ public static class MarkdownExpressions
         }
 
         var encoded = EncodeSpacesOutsideBrackets(path) + (separator < 0 ? string.Empty : text[separator..]);
-        return ParsedExpression.TryParse(encoded, out expression, out _) && expression.SinglePath is not null;
+        return ParsedExpression.TryParse(encoded, ExpressionDisplay.PathSeparator, out expression, out _) && expression.SinglePath is not null;
     }
 
     // A space inside a bracket key, such as "Living Room" in "[Living Room]", stays as written because the key is looked

@@ -106,7 +106,7 @@ public class WidgetDocumentationPathTests : IClassFixture<AdministrationFolderFi
         (string PropertyName, string Text) template, IInterceptorSubject subject, SubjectPathResolver resolver)
     {
         var name = $"{subject.GetType().Name}.{template.PropertyName}={template.Text}";
-        if (!TextTemplate.TryParse(template.Text, out var parsed, out var error))
+        if (!TextTemplate.TryParse(template.Text, ExpressionDisplay.PathSeparator, out var parsed, out var error))
         {
             yield return $"{name}: {error}";
             yield break;
@@ -130,7 +130,7 @@ public class WidgetDocumentationPathTests : IClassFixture<AdministrationFolderFi
 
             foreach (var path in expression.Paths)
             {
-                if (ExpressionVariables.TryGetVariable(path, out var variable))
+                if (ExpressionVariables.TryGetVariable(path, ExpressionDisplay.PathSeparator, out var variable))
                 {
                     if (variable == ExpressionVariables.Subject && subject is not (Card or ValueMapCase) &&
                         path.StartsWith("subject/", StringComparison.Ordinal))

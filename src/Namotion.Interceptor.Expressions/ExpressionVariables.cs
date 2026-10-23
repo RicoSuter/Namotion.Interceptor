@@ -13,10 +13,6 @@ public static class ExpressionVariables
     /// <summary>The subject of that value: the owner of its property, or the subject that a path to a subject leads to.</summary>
     public const string Subject = "subject";
 
-    /// <summary>Gets whether the first segment of a path written with <c>/</c> is a variable, and which one.</summary>
-    public static bool TryGetVariable(string path, [NotNullWhen(true)] out string? variable) =>
-        TryGetVariable(path, '/', out variable);
-
     /// <summary>Gets whether the first segment of the path is a variable, and which one.</summary>
     /// <param name="path">The path.</param>
     /// <param name="pathSeparator">The character between the segments of the path.</param>

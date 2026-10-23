@@ -38,27 +38,20 @@ public sealed class ParsedExpression
     internal ExpressionNode Body { get; }
 
     /// <summary>
-    /// Parses the text with paths written with <c>/</c>. On failure the error reads
-    /// <c>&lt;message&gt; at position &lt;zero-based index&gt;</c>.
-    /// </summary>
-    public static bool TryParse(
-        string text,
-        [NotNullWhen(true)] out ParsedExpression? expression,
-        [NotNullWhen(false)] out string? error) =>
-        TryParse(text, '/', out expression, out error);
-
-    /// <summary>
     /// Parses the text with paths whose segments the separator divides, such as <c>.</c>. A word after an operator is text,
     /// such as the name of an enum value, unless it holds the separator or an index or is the variable <c>value</c> or
     /// <c>subject</c>, which are paths. On failure the error reads
     /// <c>&lt;message&gt; at position &lt;zero-based index&gt;</c>.
     /// </summary>
+    /// <exception cref="ArgumentException">The separator is white space, a letter, a digit, a quote, a bracket, or one of <c>| &amp; = ! &lt; &gt;</c>.</exception>
     public static bool TryParse(
         string text,
         char pathSeparator,
         [NotNullWhen(true)] out ParsedExpression? expression,
         [NotNullWhen(false)] out string? error)
     {
+        ValidatePathSeparator(pathSeparator);
+
         try
         {
             expression = new ExpressionParser(text, pathSeparator).Parse();
@@ -70,6 +63,14 @@ public sealed class ParsedExpression
             expression = null;
             error = exception.Message;
             return false;
+        }
+    }
+
+    internal static void ValidatePathSeparator(char pathSeparator)
+    {
+        if (char.IsLetterOrDigit(pathSeparator) || char.IsWhiteSpace(pathSeparator) || "'\"[](){}|&=!<>".Contains(pathSeparator))
+        {
+            throw new ArgumentException($"The path separator '{pathSeparator}' cannot be used in an expression.", nameof(pathSeparator));
         }
     }
 

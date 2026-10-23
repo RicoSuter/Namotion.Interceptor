@@ -39,6 +39,9 @@ public enum ExpressionUse
 /// </summary>
 public static class ExpressionDisplay
 {
+    /// <summary>The character between the segments of the paths in the expressions of pages.</summary>
+    public const char PathSeparator = '/';
+
     /// <summary>The pipe that formats a value as the property panel shows it. It is the default.</summary>
     internal const string DisplayPipe = "display";
 
@@ -182,7 +185,7 @@ public static class ExpressionDisplay
         {
             foreach (var path in expression.Paths)
             {
-                if (ExpressionVariables.TryGetVariable(path, out var variable))
+                if (ExpressionVariables.TryGetVariable(path, PathSeparator, out var variable))
                 {
                     return $"'{variable}' is not available in {placeWithoutVariables}";
                 }

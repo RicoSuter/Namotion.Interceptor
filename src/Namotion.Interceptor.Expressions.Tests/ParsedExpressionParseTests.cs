@@ -7,7 +7,7 @@ public class ParsedExpressionParseTests
 {
     private static ParsedExpression Parse(string text)
     {
-        Assert.True(ParsedExpression.TryParse(text, out var expression, out var error), error);
+        Assert.True(ParsedExpression.TryParse(text, '/', out var expression, out var error), error);
         return expression;
     }
 
@@ -58,14 +58,46 @@ public class ParsedExpressionParseTests
         Assert.True(result);
     }
 
-    [Fact]
-    public void WhenNoSeparatorIsGiven_ThenItIsTheSlash()
+    [Theory]
+    [InlineData('/')]
+    [InlineData('.')]
+    [InlineData(':')]
+    [InlineData('\\')]
+    public void WhenSeparatorIsValid_ThenItIsEchoedAndSeparatesThePath(char separator)
     {
         // Act
-        Assert.True(ParsedExpression.TryParse("subject/IsOn", out var expression, out _));
+        Assert.True(ParsedExpression.TryParse($"a{separator}b == 1", separator, out var expression, out var error), error);
 
         // Assert
-        Assert.Equal('/', expression.PathSeparator);
+        Assert.Equal(separator, expression.PathSeparator);
+        Assert.Equal([$"a{separator}b"], expression.Paths.ToArray());
+    }
+
+    [Theory]
+    [InlineData(' ')]
+    [InlineData('a')]
+    [InlineData('7')]
+    [InlineData('\'')]
+    [InlineData('"')]
+    [InlineData('[')]
+    [InlineData(']')]
+    [InlineData('(')]
+    [InlineData(')')]
+    [InlineData('{')]
+    [InlineData('}')]
+    [InlineData('|')]
+    [InlineData('&')]
+    [InlineData('=')]
+    [InlineData('!')]
+    [InlineData('<')]
+    [InlineData('>')]
+    public void WhenSeparatorCannotBeUsed_ThenParsingThrows(char separator)
+    {
+        // Act & Assert
+        var parseException = Assert.Throws<ArgumentException>(() => ParsedExpression.TryParse("a", separator, out _, out _));
+        Assert.Equal("pathSeparator", parseException.ParamName);
+        var templateException = Assert.Throws<ArgumentException>(() => TextTemplate.TryParse("a {{ b }}", separator, out _, out _));
+        Assert.Equal("pathSeparator", templateException.ParamName);
     }
 
     [Theory]
@@ -195,7 +227,7 @@ public class ParsedExpressionParseTests
     public void WhenExpressionIsInvalid_ThenErrorHasMessageAndPosition(string text, string expectedError)
     {
         // Act
-        var success = ParsedExpression.TryParse(text, out var expression, out var error);
+        var success = ParsedExpression.TryParse(text, '/', out var expression, out var error);
 
         // Assert
         Assert.False(success);
@@ -210,7 +242,7 @@ public class ParsedExpressionParseTests
         var text = "a == " + new string('1', 1000);
 
         // Act
-        var success = ParsedExpression.TryParse(text, out _, out var error);
+        var success = ParsedExpression.TryParse(text, '/', out _, out var error);
 
         // Assert
         Assert.False(success);
@@ -224,7 +256,7 @@ public class ParsedExpressionParseTests
         var text = new string('(', 33) + "a" + new string(')', 33);
 
         // Act
-        var success = ParsedExpression.TryParse(text, out _, out var error);
+        var success = ParsedExpression.TryParse(text, '/', out _, out var error);
 
         // Assert
         Assert.False(success);
@@ -238,7 +270,7 @@ public class ParsedExpressionParseTests
         var text = new string('!', 40) + "a";
 
         // Act
-        var success = ParsedExpression.TryParse(text, out _, out var error);
+        var success = ParsedExpression.TryParse(text, '/', out _, out var error);
 
         // Assert
         Assert.False(success);

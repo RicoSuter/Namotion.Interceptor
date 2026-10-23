@@ -100,7 +100,7 @@ internal static class ExpressionEvaluator
     private static bool? Compare<TContext>(ComparisonNode node, ref TContext context)
         where TContext : struct, IExpressionContext
     {
-        // A comparison with the literal null tests for a missing value and is never unknown.
+        // == and != with the literal null test for a missing value and are never unknown; other operators with null are unknown.
         if (node.Left is LiteralNode { Value: null })
         {
             return CompareWithMissing(node.Operator, node.Right, ref context);
