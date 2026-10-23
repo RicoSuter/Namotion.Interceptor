@@ -2,6 +2,7 @@
 @using HomeBlaze.Services.Display
 @inject PropertyWriter Writer
 @inject SubjectPathResolver PathResolver
+@inject ITimeZoneDisplay TimeZone
 
 @{
     // Read once per render and never kept: its render records the reads, so that it renders again when one changes.
@@ -49,7 +50,7 @@ else
                         {
                             <MudIcon Icon="@icon" Color="@iconColor.Theme" Style="@iconColor.Style" Size="Size.Small" />
                         }
-                        <span>@(mapCase?.GetText(binding, PathResolver, null) ?? name)</span>
+                        <span>@(mapCase?.GetText(binding, PathResolver, TimeZone) ?? name)</span>
                     </div>
                 </MudSelectItem>
             }
@@ -122,7 +123,7 @@ else
 
         var property = Property;
         var binding = new ValueBinding(property, name, property?.Subject);
-        return Map?.FindCase(binding, PathResolver)?.GetText(binding, PathResolver, null) ?? name;
+        return Map?.FindCase(binding, PathResolver)?.GetText(binding, PathResolver, TimeZone) ?? name;
     }
 
     private void Choose(string? name)
