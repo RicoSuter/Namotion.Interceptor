@@ -76,6 +76,15 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
             newValue);
 
         ExecuteInterceptedWrite(ref context, writeValue);
+        // Compared on the entry values, which is what a leading equality check sees. NewValue is
+        // publicly settable, so reading it after the chain would let an interceptor that rewrites it
+        // to the current value and then declines look like an accepted no-op.
+        if (context.IsObserved && !context.IsWritten &&
+            EqualityComparer<TProperty>.Default.Equals(currentValue, newValue))
+        {
+            context.ReportEqualityAccepted();
+        }
+
         return context.IsWritten;
     }
 

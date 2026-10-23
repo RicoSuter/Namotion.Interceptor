@@ -6,19 +6,18 @@ namespace Namotion.Interceptor.Tracking.Transactions;
 public enum TransactionFailureHandling
 {
     /// <summary>
-    /// Best-effort mode: Apply successful changes to the local model, rollback failed ones.
-    /// For each property, if the source write succeeds but local apply fails, the source is rolled back
-    /// to maintain per-property consistency. A <see cref="SubjectTransactionException"/> is thrown containing all failures.
+    /// Best-effort mode: Apply successful changes to the local model, restore failed ones.
+    /// If local apply fails, attempts to restore any local mutation and successful source write for that
+    /// property. A <see cref="SubjectTransactionException"/> reports apply and restore failures.
     /// This maximizes successful writes but may result in partial updates across properties.
     /// </summary>
     BestEffort,
 
     /// <summary>
-    /// Rollback mode: Attempt to revert successful source writes on failure.
-    /// If any source write fails, attempts to write the original values back to sources that succeeded.
-    /// If revert also fails, both the original failure and revert failures are reported.
-    /// No changes are applied to the local model on failure.
-    /// This mode provides the strongest consistency guarantee between in-memory state and external sources.
+    /// Rollback mode: Attempt to restore all local mutations and successful source writes on failure.
+    /// If any source write fails, local replay is skipped. If local replay fails, mutated properties are
+    /// restored in reverse order before source writes are reverted. A <see cref="SubjectTransactionException"/>
+    /// reports the original failure and any restore failures; restoration is not guaranteed when it also fails.
     /// </summary>
     Rollback
 }
