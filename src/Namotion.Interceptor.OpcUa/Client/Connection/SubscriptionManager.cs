@@ -275,18 +275,21 @@ internal class SubscriptionManager : IAsyncDisposable
     }
 
     /// <summary>
-    /// Replaces the tracked subscriptions with the ones the reconnected session holds. A subscription
-    /// the server accepted for transfer is the same object as before, one it refused is a fresh
-    /// clone, so only the subscriptions missing from the new set are dropped.
+    /// Replaces the tracked subscriptions with the ones the reconnected session holds. Subscriptions
+    /// already tracked are left as they are; the ones missing from the new set are unhooked and dropped.
     /// </summary>
     public void UpdateTransferredSubscriptions(IReadOnlyCollection<Subscription> transferredSubscriptions)
     {
-        var oldSubscriptions = _subscriptions.Keys.ToArray();
+        var oldSubscriptions = _subscriptions.Keys;
         foreach (var subscription in transferredSubscriptions)
         {
-            subscription.FastDataChangeCallback -= OnFastDataChange;
-            subscription.FastDataChangeCallback += OnFastDataChange;
-            TryAddSubscription(subscription);
+            if (TryAddSubscription(subscription))
+            {
+                // A subscription the SDK recreated is a clone that carries the original's callback,
+                // so hooking without unhooking first would deliver its notifications twice.
+                subscription.FastDataChangeCallback -= OnFastDataChange;
+                subscription.FastDataChangeCallback += OnFastDataChange;
+            }
         }
 
         var removedCount = 0;
@@ -302,7 +305,7 @@ internal class SubscriptionManager : IAsyncDisposable
             removedCount++;
         }
 
-        _logger.LogInformation("Updated subscription manager with {Count} transferred subscriptions (removed {OldCount} old)",
+        _logger.LogInformation("Reconnected session holds {Count} subscriptions, dropped {RemovedCount} previous ones.",
             transferredSubscriptions.Count, removedCount);
     }
 

@@ -63,62 +63,30 @@ public class SubscriptionManagerDiagnosticsTests
     }
 
     [Fact]
-    public async Task WhenTheSdkTransfersTheSameSubscriptionObjects_ThenTheyStayTrackedAndHooked()
+    public async Task WhenTheSdkTransfersSubscriptions_ThenAcceptedOnesStayHookedAndARefusedOneIsReplacedByItsClone()
     {
-        // Arrange - after a successful transfer the SDK moves the original Subscription objects into
-        // the new session, so the transferred set is the set already held.
+        // Arrange - the SDK hands back an accepted subscription as the same object and a refused one
+        // as a clone that already carries the callback.
         var configuration = CreateConfiguration();
         await using var source = CreateClientSource(configuration: configuration);
         var propertyWriter = new SubjectPropertyWriter(source, NullLogger.Instance);
-        await using var manager = CreateManager(
-            source,
-            propertyWriter,
-            configuration,
-            new ConcurrentQueue<Exception>());
-        var firstSubscription = new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions());
-        var secondSubscription = new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions());
-        manager.UpdateTransferredSubscriptions([firstSubscription, secondSubscription]);
+        await using var manager = CreateManager(source, propertyWriter, configuration, new ConcurrentQueue<Exception>());
+        var acceptedSubscription = new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions());
+        var refusedSubscription = new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions());
+        manager.UpdateTransferredSubscriptions([acceptedSubscription, refusedSubscription]);
+        var recreatedSubscription = new Subscription(refusedSubscription, copyEventHandlers: true);
 
         // Act
-        manager.UpdateTransferredSubscriptions([firstSubscription, secondSubscription]);
+        manager.UpdateTransferredSubscriptions([acceptedSubscription, recreatedSubscription]);
 
         // Assert
         Assert.Equal(2, manager.SubscriptionCount);
-        Assert.Contains(firstSubscription, manager.Subscriptions);
-        Assert.Contains(secondSubscription, manager.Subscriptions);
-        Assert.NotNull(firstSubscription.FastDataChangeCallback);
-        Assert.NotNull(secondSubscription.FastDataChangeCallback);
-    }
-
-    [Fact]
-    public async Task WhenOnlySomeSubscriptionsTransfer_ThenTheRecreatedOneReplacesItsOriginal()
-    {
-        // Arrange - a subscription the server refused to transfer comes back as a freshly created
-        // clone, while the others are the original objects.
-        var configuration = CreateConfiguration();
-        await using var source = CreateClientSource(configuration: configuration);
-        var propertyWriter = new SubjectPropertyWriter(source, NullLogger.Instance);
-        await using var manager = CreateManager(
-            source,
-            propertyWriter,
-            configuration,
-            new ConcurrentQueue<Exception>());
-        var keptSubscription = new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions());
-        var replacedSubscription = new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions());
-        var replacementSubscription = new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions());
-        manager.UpdateTransferredSubscriptions([keptSubscription, replacedSubscription]);
-
-        // Act
-        manager.UpdateTransferredSubscriptions([keptSubscription, replacementSubscription]);
-
-        // Assert
-        Assert.Equal(2, manager.SubscriptionCount);
-        Assert.Contains(keptSubscription, manager.Subscriptions);
-        Assert.Contains(replacementSubscription, manager.Subscriptions);
-        Assert.DoesNotContain(replacedSubscription, manager.Subscriptions);
-        Assert.NotNull(keptSubscription.FastDataChangeCallback);
-        Assert.NotNull(replacementSubscription.FastDataChangeCallback);
-        Assert.Null(replacedSubscription.FastDataChangeCallback);
+        Assert.Contains(acceptedSubscription, manager.Subscriptions);
+        Assert.Contains(recreatedSubscription, manager.Subscriptions);
+        Assert.DoesNotContain(refusedSubscription, manager.Subscriptions);
+        Assert.Single(acceptedSubscription.FastDataChangeCallback!.GetInvocationList());
+        Assert.Single(recreatedSubscription.FastDataChangeCallback!.GetInvocationList());
+        Assert.Null(refusedSubscription.FastDataChangeCallback);
     }
 
     [Fact]
