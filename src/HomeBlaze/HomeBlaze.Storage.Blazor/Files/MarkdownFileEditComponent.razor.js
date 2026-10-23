@@ -55,11 +55,33 @@ export function own(editorId) {
 }
 
 /**
- * Starts to remember whether the text area of an editor had the focus, before which it has no cursor of the user.
- * @param {HTMLTextAreaElement} element The text area.
+ * Disposes the editor that has the id now together with its model and forgets it.
+ * @param {string} editorId The id of the editor of BlazorMonaco.
  */
-export function watchTextArea(element) {
-    element?.addEventListener('focus', () => focusedTextAreas.add(element), { once: true });
+export function disposeEditor(editorId) {
+    own(editorId).dispose();
+}
+
+/**
+ * Starts to remember whether the text area of an editor had the focus, before which it has no cursor of the user, and
+ * calls RequestSaveFromTextAreaAsync of the editor for Ctrl+S, or Cmd+S on a Mac.
+ * @param {HTMLTextAreaElement} element The text area.
+ * @param {object | null} editor The reference to the .NET object of the editor, or null when it does not save.
+ */
+export function watchTextArea(element, editor) {
+    if (!element) {
+        return;
+    }
+
+    element.addEventListener('focus', () => focusedTextAreas.add(element), { once: true });
+    if (editor) {
+        element.addEventListener('keydown', event => {
+            if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 's') {
+                event.preventDefault();
+                editor.invokeMethodAsync('RequestSaveFromTextAreaAsync').catch(() => { });
+            }
+        });
+    }
 }
 
 /**

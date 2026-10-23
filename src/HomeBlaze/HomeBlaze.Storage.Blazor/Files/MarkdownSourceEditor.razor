@@ -4,6 +4,7 @@
 @using HomeBlaze.Services
 @using HomeBlaze.Storage.Blazor.Models
 @using HomeBlaze.Storage.Pages
+@using Microsoft.AspNetCore.Components.Web
 @using Microsoft.JSInterop
 @using MudBlazor
 @using Namotion.Interceptor
@@ -55,6 +56,7 @@ else
     private string _editorId = string.Empty;
     private StandaloneCodeEditor? _editor;
     private IJSObjectReference? _editorHandle;
+    private DotNetObjectReference<MarkdownSourceEditor>? _reference;
     private ElementReference _textArea;
     private Task<IJSObjectReference>? _moduleImport;
     private bool _isDisposed;
@@ -141,9 +143,7 @@ else
     [Parameter]
     public EventCallback Initialized { get; set; }
 
-    /// <summary>
-    /// Raised by Ctrl+S, or Cmd+S on a Mac, in the Monaco editor. Without a handler the editor does not take the keys.
-    /// </summary>
+    /// <summary>Raised by Ctrl+S, or Cmd+S on a Mac, in the editor. Without a handler the editor does not take the keys.</summary>
     [Parameter]
     public EventCallback SaveRequested { get; set; }
 
@@ -156,9 +156,11 @@ else
     protected override void OnInitialized()
     {
         _editorId = EditorId ?? $"markdown-source-editor-{Interlocked.Increment(ref _editorCount)}";
-        _contentChangedCallback = EventCallback.Factory.Create<ModelContentChangedEvent>(NonRenderingReceiver.Instance, OnContentChangedAsync);
-        _cursorPositionChangedCallback = EventCallback.Factory.Create<CursorPositionChangedEvent>(NonRenderingReceiver.Instance, OnCursorPositionChangedAsync);
-        _textAreaInputCallback = EventCallback.Factory.Create<ChangeEventArgs>(NonRenderingReceiver.Instance, OnTextAreaInputAsync);
+        // The constructor and not EventCallback.Factory, which takes the component that the method belongs to as the
+        // receiver, and the component renders after every call.
+        _contentChangedCallback = new EventCallback<ModelContentChangedEvent>(NonRenderingReceiver.Instance, (Func<ModelContentChangedEvent, Task>)OnContentChangedAsync);
+        _cursorPositionChangedCallback = new EventCallback<CursorPositionChangedEvent>(NonRenderingReceiver.Instance, (Func<CursorPositionChangedEvent, Task>)OnCursorPositionChangedAsync);
+        _textAreaInputCallback = new EventCallback<ChangeEventArgs>(NonRenderingReceiver.Instance, (Func<ChangeEventArgs, Task>)OnTextAreaInputAsync);
     }
 
     private StandaloneEditorConstructionOptions GetEditorOptions(StandaloneCodeEditor editor)
@@ -187,6 +189,9 @@ else
             _text = InitialText;
             _hasWindowsLineEndings = usesTextArea && MarkdownBlockWriter.GetLineEnding(InitialText) == "\r\n";
             _usesTextArea = usesTextArea;
+
+            // The editor takes the theme of the color mode from its options, so no theme is set before it exists.
+            _previousDarkMode = IsDarkMode;
             StateHasChanged();
             return;
         }
@@ -234,7 +239,7 @@ else
     {
         if (await GetModuleAsync() is { } module)
         {
-            await module.InvokeVoidAsync("watchTextArea", _textArea);
+            await WatchTextAreaAsync(module);
             if (FocusesEnd)
             {
                 await module.InvokeVoidAsync("focusTextAreaEnd", _textArea);
@@ -244,6 +249,33 @@ else
         await RefreshDecorationsAsync();
         await Initialized.InvokeAsync();
     }
+
+    // A dispose while the text area is watched would miss the reference, so it is let go here then.
+    private async Task WatchTextAreaAsync(IJSObjectReference module)
+    {
+        var reference = SaveRequested.HasDelegate ? DotNetObjectReference.Create(this) : null;
+        try
+        {
+            await module.InvokeVoidAsync("watchTextArea", _textArea, reference);
+        }
+        catch
+        {
+            reference?.Dispose();
+            throw;
+        }
+
+        if (_isDisposed)
+        {
+            reference?.Dispose();
+            return;
+        }
+
+        _reference = reference;
+    }
+
+    /// <summary>Called by the module for Ctrl+S, or Cmd+S on a Mac, in the text area.</summary>
+    [JSInvokable]
+    public Task RequestSaveFromTextAreaAsync() => RequestSaveAsync();
 
     // A dispose while the editor is taken would miss the handle, so the editor is disposed here then.
     private async Task OwnEditorAsync(IJSObjectReference module)
@@ -258,8 +290,8 @@ else
         _editorHandle = editorHandle;
     }
 
-    // Monaco runs the command outside of an event of a component. The callback renders its receiver as an event would, and a
-    // failure goes to the renderer the way the failure of an event handler does.
+    // Monaco and the module of the text area ask for the save outside of an event of a component. The callback renders its
+    // receiver as an event would, and a failure goes to the renderer the way the failure of an event handler does.
     private async Task RequestSaveAsync()
     {
         try
@@ -388,10 +420,11 @@ else
     }
 
     /// <summary>
-    /// Asks for a new widget with the setup dialog and writes its block into the text before the line of the cursor, or at
-    /// the end without a cursor: after the json block of the block around that line, inside it with one fence character
-    /// more, and with at least <see cref="MinimumFenceLength"/> fence characters. The configured subject is discarded, so
-    /// that only its text lives on.
+    /// Asks for a new widget with the setup dialog and writes its block into the text before the line of the cursor: after
+    /// the json block of the block around that line, inside it with one fence character more, and with at least
+    /// <see cref="MinimumFenceLength"/> fence characters. Monaco has its cursor on the first line until it had the focus, and
+    /// a text area that never had the focus takes the block at the end. The configured subject is discarded, so that only
+    /// its text lives on.
     /// </summary>
     /// <returns>The new text, which the editor shows, or null when nothing was created.</returns>
     public async Task<string?> CreateAsync()
@@ -565,6 +598,12 @@ else
             {
                 await DisposeEditorAsync(_editorHandle);
             }
+            else if (_usesTextArea == false && _moduleImport is { IsCompletedSuccessfully: true } moduleImport)
+            {
+                // Disposed between the creation of the editor and its handle. The call goes out in this dispose, before a
+                // render that can create another editor with the same id.
+                await moduleImport.Result.InvokeVoidAsync("disposeEditor", _editorId);
+            }
 
             if (_moduleImport is not null)
             {
@@ -574,6 +613,10 @@ else
         catch (Exception exception) when (exception is JSException or OperationCanceledException or JSDisconnectedException)
         {
             // The import failed or the circuit is gone, and there is nothing to dispose.
+        }
+        finally
+        {
+            _reference?.Dispose();
         }
     }
 

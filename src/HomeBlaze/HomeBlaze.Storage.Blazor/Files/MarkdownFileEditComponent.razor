@@ -122,6 +122,10 @@ else
     private int _contentChangeCount;
     private DecorationRegion? _activeRegion;
 
+    // The dirty state that IsDirtyChanged reported last. Its handler renders the panel around the editor, so it is raised
+    // when the state flips and not for every typed character.
+    private bool _reportedIsDirty;
+
     // Set once the editor has its text, before which a reveal waits in _pendingReveal.
     private bool _isEditorReady;
     private IInterceptorSubject? _pendingReveal;
@@ -139,7 +143,8 @@ else
 
     protected override void OnParametersSet()
     {
-        // Once per file, so that a render does not allocate a delegate for the editor.
+        // Once per file and not in every render. The other parameters of the editor are created in each render, which is
+        // rare: when the dirty state flips and when the cursor enters or leaves a region.
         if (!ReferenceEquals(_getBlockSubject?.Target, File))
         {
             _getBlockSubject = File is { } file ? file.GetBlockSubject : null;
@@ -161,7 +166,7 @@ else
     private void OnTextChanged(string text)
     {
         SetCurrentContent(text);
-        IsDirtyChanged?.Invoke(IsDirty);
+        ReportIsDirty();
     }
 
     private async Task OnEditButtonClick()
@@ -315,7 +320,7 @@ else
         await File!.WriteAsync(content, CancellationToken.None);
         await _sourceEditor!.RefreshDecorationsAsync();
         _originalContent = content;
-        IsDirtyChanged?.Invoke(false);
+        ReportIsDirty();
     }
 
     public async Task<bool> RevealAsync(IInterceptorSubject subject)
@@ -430,6 +435,16 @@ else
         // The storage reloads the file as part of the write, so the regions get the subjects of the saved page.
         await _sourceEditor.RefreshDecorationsAsync();
 
-        IsDirtyChanged?.Invoke(IsDirty);
+        ReportIsDirty();
+    }
+
+    private void ReportIsDirty()
+    {
+        var isDirty = IsDirty;
+        if (isDirty != _reportedIsDirty)
+        {
+            _reportedIsDirty = isDirty;
+            IsDirtyChanged?.Invoke(isDirty);
+        }
     }
 }
