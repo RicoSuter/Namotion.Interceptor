@@ -130,11 +130,19 @@ public class MarkdownTextNextToHtmlTests
         var directionsAfter = MarkdownPageOperations.GetTextMoveDirections(page, TextAt(page, afterLine));
         var changeAfter = MarkdownPageOperations.TryMoveText(page, NoSubjects, TextAt(page, afterLine), -1, out var refusalAfter);
 
-        // Assert
+        // Assert: HTML that shows nothing moves with the text after it.
         Assert.Equal((false, true), directionsBefore);
         Assert.Equal((true, false), directionsAfter);
-        AssertHtmlIsKept(changeBefore, refusalBefore, html, $"{html}\n\nBefore.\n\nAfter.\n");
-        AssertHtmlIsKept(changeAfter, refusalAfter, html, $"Before.\n\nAfter.\n\n{html}\n");
+        if (TextAt(page, 3).ShowsNothing)
+        {
+            AssertHtmlIsKept(changeBefore, refusalBefore, html, $"{html}\n\nAfter.\n\nBefore.\n");
+            AssertHtmlIsKept(changeAfter, refusalAfter, html, $"{html}\n\nAfter.\n\nBefore.\n");
+        }
+        else
+        {
+            AssertHtmlIsKept(changeBefore, refusalBefore, html, $"{html}\n\nBefore.\n\nAfter.\n");
+            AssertHtmlIsKept(changeAfter, refusalAfter, html, $"Before.\n\nAfter.\n\n{html}\n");
+        }
     }
 
     [Theory]
@@ -159,8 +167,16 @@ public class MarkdownTextNextToHtmlTests
         AssertHtmlIsKept(changeAfter, refusalChangeAfter, html, $"Before.\n{html}\n\n{ChangedText}\n");
         AssertHtmlIsKept(removeBefore, refusalRemoveBefore, html, $"{html}\nAfter.\n");
         AssertHtmlIsKept(removeAfter, refusalRemoveAfter, html, $"Before.\n{html}\n");
-        AssertHtmlIsKept(moveBefore, refusalMoveBefore, html, $"{html}\n\nBefore.\n\nAfter.\n");
-        AssertHtmlIsKept(moveAfter, refusalMoveAfter, html, $"Before.\n\nAfter.\n\n{html}\n");
+        if (TextAt(page, 2).ShowsNothing)
+        {
+            AssertHtmlIsKept(moveBefore, refusalMoveBefore, html, $"{html}\nAfter.\n\nBefore.\n");
+            AssertHtmlIsKept(moveAfter, refusalMoveAfter, html, $"{html}\nAfter.\n\nBefore.\n");
+        }
+        else
+        {
+            AssertHtmlIsKept(moveBefore, refusalMoveBefore, html, $"{html}\n\nBefore.\n\nAfter.\n");
+            AssertHtmlIsKept(moveAfter, refusalMoveAfter, html, $"Before.\n\nAfter.\n\n{html}\n");
+        }
     }
 
     [Theory]
@@ -283,5 +299,108 @@ public class MarkdownTextNextToHtmlTests
         Assert.False(directions.CanMoveUp);
         Assert.Null(change);
         Assert.Equal("The text would join the HTML next to it.", refusal);
+    }
+
+    // Raw HTML that leaves an element open up to the end of its run takes text that goes after it, before the end of the run.
+    [Theory]
+    [InlineData("Before.\n\n<div>\n\nInside.\n", "end of the page")]
+    [InlineData("Before.\n\n<div>\n\nInside.\n\n:: Demo.One\n::\n", "before the widget")]
+    [InlineData(":: Demo.Card\nBefore.\n\n<div>\n\nInside.\n::\n", "end of the card")]
+    public void WhenTextWouldGoAfterHtmlThatStaysOpen_ThenNoInsertOrMoveIsOfferedAndBothAreRefused(string source, string place)
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse(source);
+        var owner = place == "end of the card" ? page.Blocks[0] : null;
+        var line = place == "before the widget" ? page.Blocks[0].Line : MarkdownPageOperations.GetInsertLine(page, owner, null);
+        var before = MarkdownTextBlocks.Find(page).First(textBlock => textBlock.IsEditable);
+
+        // Act
+        var canInsert = MarkdownPageOperations.CanInsertTextAt(page, owner, line);
+        var insert = MarkdownPageOperations.TryInsertText(page, NoSubjects, owner, line, ChangedText, out var insertRefusal);
+        var directions = MarkdownPageOperations.GetTextMoveDirections(page, before);
+        var move = MarkdownPageOperations.TryMoveText(page, NoSubjects, before, 1, out var moveRefusal);
+
+        // Assert
+        Assert.False(canInsert);
+        Assert.Null(insert);
+        Assert.Equal("The text would join the HTML before it.", insertRefusal);
+        Assert.Equal((false, false), directions);
+        Assert.Null(move);
+        Assert.Equal("The text would join the HTML next to it.", moveRefusal);
+    }
+
+    [Fact]
+    public void WhenChangedTextWouldLeaveAnElementOpenOverTheTextAfterIt_ThenTheChangeIsRefused()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("Before.\n\nAfter.\n");
+
+        // Act
+        var change = MarkdownPageOperations.TryReplaceText(page, NoSubjects, TextAt(page, 1), "<div>", out var refusal);
+
+        // Assert
+        Assert.Null(change);
+        Assert.Equal("Changing the text would change other blocks of the page.", refusal);
+    }
+
+    [Fact]
+    public void WhenRawHtmlThatClosesWhatItOpensIsInserted_ThenItIsATextBlockOfItsOwn()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("Before.\n\nAfter.\n");
+
+        // Act
+        var change = MarkdownPageOperations.TryInsertText(page, NoSubjects, null, 3, "<div>x</div>", out var refusal);
+
+        // Assert
+        Assert.Null(refusal);
+        Assert.Equal("Before.\n\n<div>x</div>\n\nAfter.\n", change!.Write.Page.Source);
+        Assert.Equal(3, change.ResultTextLine);
+    }
+
+    [Theory]
+    [InlineData("Before.\n<!-- c -->\nAfter.\n", 3, -1, "<!-- c -->\nAfter.\n\nBefore.\n")]
+    [InlineData("Before.\n<!-- c -->\nAfter.\n", 1, 1, "<!-- c -->\nAfter.\n\nBefore.\n")]
+    [InlineData("Text.\n\n<!-- sample: live -->\n```\ncode\n```\n", 1, 1, "<!-- sample: live -->\n```\ncode\n```\n\nText.\n")]
+    [InlineData("Text.\n\n<!-- sample: live -->\n```\ncode\n```\n", 4, -1, "<!-- sample: live -->\n```\ncode\n```\n\nText.\n")]
+    public void WhenTextIsMovedNextToHtmlThatShowsNothing_ThenTheHtmlMovesWithTheBlockAfterIt(string source, int line, int direction, string expected)
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse(source);
+
+        // Act
+        var change = MarkdownPageOperations.TryMoveText(page, NoSubjects, TextAt(page, line), direction, out var refusal);
+
+        // Assert
+        Assert.Null(refusal);
+        Assert.Equal(expected, change!.Write.Page.Source);
+        Assert.Equal(expected.Split('\n').ToList().IndexOf(source.Split('\n')[line - 1]) + 1, change.ResultTextLine);
+    }
+
+    [Fact]
+    public void WhenHtmlThatShowsNothingEndsTheContent_ThenTheTextBeforeItHasNothingToMovePast()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("Text.\n\n<!-- end -->\n");
+
+        // Act
+        var directions = MarkdownPageOperations.GetTextMoveDirections(page, TextAt(page, 1));
+
+        // Assert
+        Assert.Equal((false, false), directions);
+    }
+
+    [Fact]
+    public void WhenAWidgetIsMovedWithHtmlThatShowsNothingBeforeIt_ThenTheHtmlMovesWithIt()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("Text.\n\n<!-- note -->\n\n:: Demo.One\n::\n");
+
+        // Act
+        var change = MarkdownPageOperations.TryMove(page, NoSubjects, page.Blocks[0], -1, out var refusal);
+
+        // Assert
+        Assert.Null(refusal);
+        Assert.Equal("<!-- note -->\n\n:: Demo.One\n::\n\nText.\n", change!.Write.Page.Source);
     }
 }

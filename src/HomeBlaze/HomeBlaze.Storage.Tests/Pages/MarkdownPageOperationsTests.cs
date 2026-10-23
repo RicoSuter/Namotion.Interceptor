@@ -1076,8 +1076,8 @@ public class MarkdownPageOperationsTests
     }
 
     [Theory]
-    [InlineData("<!-- c -->\n\n:: Demo.One\n::\n\ntext\n", 6, -1)]
-    [InlineData("text\n\n:: Demo.One\n::\n\n<!-- c -->\n", 1, 1)]
+    [InlineData("<div>x</div>\n\n:: Demo.One\n::\n\ntext\n", 6, -1)]
+    [InlineData("text\n\n:: Demo.One\n::\n\n<div>x</div>\n", 1, 1)]
     [InlineData("text\n\n:: Demo.One\n::\n\n<div>x</div>\n\n:: Demo.Two\n::\n", 1, 1)]
     public void WhenTheMovedTextWouldJoinRawHtml_ThenTheMoveIsRefusedAndNotOffered(string source, int line, int direction)
     {

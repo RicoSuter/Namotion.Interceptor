@@ -951,6 +951,29 @@ public class InlineTextEditingTests
     }
 
     [Fact]
+    public async Task WhenTextIsInsertedRightBeforeTheBlockAfterAComment_ThenItGoesBeforeTheComment()
+    {
+        // Arrange: the comment has an insert line before it and none after it.
+        var page = await OpenPageInInlineModeAsync(RawHtmlPageName, RawHtmlContent);
+        var lines = page.Locator(".markdown-content > [data-testid='block-insert-line']");
+        await Assertions.Expect(lines).ToHaveCountAsync(5, new() { Timeout = Timeout });
+        var lineBeforeParagraph = GetTextWrapper(page, "Paragraph after the HTML")
+            .Locator("xpath=preceding-sibling::div[@data-testid='block-insert-line'][1]");
+
+        // Act
+        await lineBeforeParagraph.GetByRole(AriaRole.Button).ClickAsync();
+        await page.GetByTestId("insert-text-item").ClickAsync();
+        await SetTextEditorValueAsync(page, "Inserted text.");
+        await page.GetByTestId("markdown-text-save").ClickAsync();
+
+        // Assert
+        await _fixture.WaitForDemoPageTextAsync(
+            RawHtmlPageName,
+            text => text.Contains("Visible HTML.</div>\n\nInserted text.\n\n<!-- A comment shows nothing. -->\n\nParagraph after the HTML.\n", StringComparison.Ordinal),
+            "The text was not inserted before the comment.");
+    }
+
+    [Fact]
     public async Task WhenEditInSourceIsClicked_ThenTheSplitModeShowsTheLinesOfTheHtmlInTheEditor()
     {
         // Arrange

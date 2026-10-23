@@ -98,6 +98,13 @@ public sealed class MarkdownPage
 
     internal MarkdownDocument Document { get; }
 
+    // Created on first use. A page is read from several threads, and two that create them at once create equal ones.
+    private MarkdownTextBlock[]? _textBlocks;
+
+    /// <summary>Gets the text blocks of the page, which <paramref name="create"/> makes once, see <see cref="MarkdownTextBlocks"/>.</summary>
+    internal IReadOnlyList<MarkdownTextBlock> GetTextBlocks(Func<MarkdownPage, MarkdownTextBlock[]> create) =>
+        Volatile.Read(ref _textBlocks) ?? Interlocked.CompareExchange(ref _textBlocks, create(this), null) ?? _textBlocks!;
+
     /// <summary>
     /// Gets whether the offset into <see cref="Source"/> lies inside markdown code: a fenced code block
     /// with its fence lines, an indented code block, or an inline code span with its backticks.

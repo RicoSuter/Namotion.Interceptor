@@ -356,8 +356,8 @@ public sealed partial class MarkdownContentParser
     {
         var start = textBlock is null ? HtmlSegmentStart.None
             : textBlock.IsEditable ? HtmlSegmentStart.Text
-            : ShowsSomething(html) ? HtmlSegmentStart.Source
-            : HtmlSegmentStart.Other;
+            : textBlock.ShowsNothing ? HtmlSegmentStart.Other
+            : HtmlSegmentStart.Source;
         var kind = textBlock is null ? null : GetKind(textBlock);
 
         // The index is part of the key because the same HTML can occur several times.
@@ -384,44 +384,6 @@ public sealed partial class MarkdownContentParser
         { FirstBlock: MarkdownBlockContainer } => "Error",
         _ => MarkdownSegmentBuilder.IsOldSubjectFence(textBlock.FirstBlock) ? "Error" : null
     };
-
-    // Whether the markup shows anything besides white space, comments, and script and style elements, any of which hides the
-    // rest of the markup when it is not closed. The markup of a text block ends at its first expression, whose value shows.
-    private static bool ShowsSomething(string html)
-    {
-        var rest = html.AsSpan();
-        while (true)
-        {
-            rest = rest.TrimStart();
-            if (rest.IsEmpty)
-            {
-                return false;
-            }
-
-            var endMarker = rest.StartsWith("<!--", StringComparison.Ordinal) ? "-->"
-                : IsStartTag(rest, "script") ? "</script>"
-                : IsStartTag(rest, "style") ? "</style>"
-                : null;
-            if (endMarker is null)
-            {
-                return true;
-            }
-
-            var end = rest.IndexOf(endMarker, StringComparison.OrdinalIgnoreCase);
-            if (end < 0)
-            {
-                return false;
-            }
-
-            rest = rest[(end + endMarker.Length)..];
-        }
-
-        static bool IsStartTag(ReadOnlySpan<char> markup, string name) =>
-            markup.Length > name.Length + 1 &&
-            markup[0] == '<' &&
-            markup[1..].StartsWith(name, StringComparison.OrdinalIgnoreCase) &&
-            !char.IsAsciiLetterOrDigit(markup[name.Length + 1]);
-    }
 
     private async Task<(string? Key, IInterceptorSubject? Subject, BlockError? Error)> CreateWidgetAsync(
         BlockMarkdownSegment segment,

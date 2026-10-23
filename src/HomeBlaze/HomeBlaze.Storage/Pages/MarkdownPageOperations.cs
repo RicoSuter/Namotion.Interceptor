@@ -68,7 +68,9 @@ internal static class MarkdownPageOperations
         int direction,
         out string? refusal)
     {
-        if (FindMoveLine(page, block, direction) is not { } targetLine)
+        if (direction is not (-1 or 1) ||
+            GetMoveItems(page, block, out var position) is not { } items ||
+            FindMoveLine(items, position, direction) is not { } targetLine)
         {
             refusal = direction < 0 ? "The block has nothing before it to move past." : "The block has nothing after it to move past.";
             return null;
@@ -81,7 +83,7 @@ internal static class MarkdownPageOperations
 
         FindSiblings(page, block, out var parent);
         var lineEnding = MarkdownBlockWriter.GetLineEnding(page.Source, block.HeadSpan.End);
-        if (TryMoveLines(page, block.Line, block.EndLine, targetLine, lineEnding, parent, CountBlocks(block), block.Kind, out var insert) is not { } moved ||
+        if (TryMoveLines(page, items[position].Line, block.EndLine, targetLine, lineEnding, parent, CountBlocks(block), block.Kind, out var insert) is not { } moved ||
             FindFirstBlockFrom(moved.After, insert) is not { } movedBlock)
         {
             refusal = MoveRefusal;
@@ -166,20 +168,28 @@ internal static class MarkdownPageOperations
         }
 
         var owner = textBlock.Owner;
+        if (IsAfterOpenHtml(page, owner, targetLine))
+        {
+            refusal = "The text would join the HTML next to it.";
+            return null;
+        }
+
         if (!CanInsertTextAt(page, owner, targetLine))
         {
             refusal = "Moving the text would put it into a block without a closing line.";
             return null;
         }
 
-        var lineEnding = MarkdownBlockWriter.GetLineEnding(page.Source, MarkdownBlockWriter.GetLineStart(page.Source, textBlock.Line));
-        if (TryMoveLines(page, textBlock.Line, textBlock.EndLine, targetLine, lineEnding, owner, 0, MarkdownBlockKind.Slot, out var insert) is not { } moved)
+        // HTML that shows nothing before the text, such as a comment that names it, moves with it.
+        var line = items[position].Line;
+        var lineEnding = MarkdownBlockWriter.GetLineEnding(page.Source, MarkdownBlockWriter.GetLineStart(page.Source, line));
+        if (TryMoveLines(page, line, textBlock.EndLine, targetLine, lineEnding, owner, 0, MarkdownBlockKind.Slot, out var insert) is not { } moved)
         {
             refusal = TextMoveRefusal;
             return null;
         }
 
-        var movedLine = FindFirstTextLine(moved.After, insert);
+        var movedLine = FindFirstTextLine(moved.After, insert) + textBlock.Line - line;
         if (!IsSameText(page, textBlock, moved.After, movedLine, insert))
         {
             refusal = "The text would join the text around it.";
@@ -231,7 +241,7 @@ internal static class MarkdownPageOperations
 
     // Past a widget block, the text comes next to the text beyond it, and raw HTML there can take it, such as an element that
     // the HTML leaves open up to the widget block. Past raw HTML in its own run, the text goes beyond the HTML that closes what
-    // it opens, and the checks of the move refuse a move that changes the HTML.
+    // it opens, or into HTML that leaves something open up to the end of the run, which IsAfterOpenHtml finds.
     private static int? FindTextMoveLine(List<MoveItem> items, int position, int direction, out bool joinsHtml)
     {
         var line = FindMoveLine(items, position, direction);
@@ -249,7 +259,7 @@ internal static class MarkdownPageOperations
         var items = GetContentItems(page, textBlock.Owner?.Children ?? page.Blocks, textBlock.Owner, textBlock.Line);
         for (position = 0; position < items.Count; position++)
         {
-            if (items[position].Block is null && items[position].Line == textBlock.Line)
+            if (items[position].Block is null && items[position].OwnLine == textBlock.Line)
             {
                 return items;
             }
@@ -289,8 +299,12 @@ internal static class MarkdownPageOperations
         return direction < 0 ? item.Line : item.EndLine + 1;
     }
 
-    // A place that a moved block passes: a block, or text without a block, with its lines and whether it holds raw HTML.
-    private readonly record struct MoveItem(int Line, int EndLine, MarkdownBlock? Block, bool HoldsHtml = false);
+    // A place that a moved block passes: a block, or text without a block, with its lines and whether it holds raw HTML. Its
+    // first line is OwnLine, or the line of HTML that shows nothing before it and moves with it.
+    private readonly record struct MoveItem(int Line, int EndLine, MarkdownBlock? Block, bool HoldsHtml = false, bool ShowsNothing = false)
+    {
+        public int OwnLine { get; init; } = Line;
+    }
 
     // The items among which the block moves, with its position among them. Null when it is no widget or slot block.
     private static List<MoveItem>? GetMoveItems(MarkdownPage page, MarkdownBlock block, out int position)
@@ -367,11 +381,27 @@ internal static class MarkdownPageOperations
         {
             if (ReferenceEquals(textBlock.Owner, owner) && textBlock.Line >= firstLine && textBlock.Line <= lastLine)
             {
-                items.Add(new MoveItem(textBlock.Line, textBlock.EndLine, null, textBlock.HoldsHtml));
+                items.Add(new MoveItem(textBlock.Line, textBlock.EndLine, null, textBlock.HoldsHtml, textBlock.ShowsNothing));
             }
         }
 
         items.Sort(static (first, second) => first.Line.CompareTo(second.Line));
+
+        // HTML that shows nothing, such as a comment that names the block after it, moves with the item after it, and a move
+        // past it would change nothing that shows. At the end of the content it stays where it is.
+        for (var index = items.Count - 1; index >= 0; index--)
+        {
+            if (items[index].ShowsNothing)
+            {
+                if (index + 1 < items.Count)
+                {
+                    items[index + 1] = items[index + 1] with { Line = items[index].Line };
+                }
+
+                items.RemoveAt(index);
+            }
+        }
+
         return items;
     }
 
@@ -669,6 +699,12 @@ internal static class MarkdownPageOperations
             return null;
         }
 
+        if (IsAfterOpenHtml(page, owner, line))
+        {
+            refusal = "The text would join the HTML before it.";
+            return null;
+        }
+
         var source = page.Source;
         var lineEnding = MarkdownBlockWriter.GetLineEnding(source, MarkdownBlockWriter.GetLineStart(source, Math.Max(line - 1, 1)));
         var prepared = PrepareText(page, text, owner, lineEnding);
@@ -696,7 +732,41 @@ internal static class MarkdownPageOperations
             }
         }
 
-        return previous is not { HasClosingLine: false };
+        return previous is not { HasClosingLine: false } && !IsAfterOpenHtml(page, owner, line);
+    }
+
+    // Whether the content of `owner` has raw HTML before the line that leaves something open up to the end of its run, which
+    // takes text that goes there. The HTML ends where a widget or slot block ends the run.
+    private static bool IsAfterOpenHtml(MarkdownPage page, MarkdownBlock? owner, int line)
+    {
+        MarkdownTextBlock? last = null;
+        foreach (var textBlock in MarkdownTextBlocks.Find(page))
+        {
+            if (textBlock.Line >= line)
+            {
+                break;
+            }
+
+            if (ReferenceEquals(textBlock.Owner, owner))
+            {
+                last = textBlock;
+            }
+        }
+
+        if (last is not { LeavesHtmlOpen: true })
+        {
+            return false;
+        }
+
+        foreach (var sibling in owner?.Children ?? page.Blocks)
+        {
+            if (sibling.Kind is MarkdownBlockKind.Widget or MarkdownBlockKind.Slot && sibling.Line > last.Line && sibling.Line < line)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     // A text block that cannot be edited can hold blocks, such as an invalid block in a list item, which the change would drop
@@ -721,7 +791,9 @@ internal static class MarkdownPageOperations
         out string? refusal)
     {
         var after = MarkdownPageParser.Parse(newSource);
-        if (MarkdownBlockAlignment.TryAlign(page, after, edit, insertedBlockCount, owner, MarkdownBlockKind.Widget) is not { } map)
+        var textLine = FindFirstTextLine(after, edit);
+        if (MarkdownBlockAlignment.TryAlign(page, after, edit, insertedBlockCount, owner, MarkdownBlockKind.Widget) is not { } map ||
+            (textLine > 0 && !StandsApart(after, edit, textLine)))
         {
             refusal = alignmentRefusal;
             return null;
@@ -733,7 +805,25 @@ internal static class MarkdownPageOperations
             new MarkdownBlockWrite(after, MapSubjects(blockSubjects, map), [], HasInsertedOrRemovedBlocks: hasNewBlocks),
             owner,
             hasNewBlocks ? FindFirstBlockFrom(after, edit)?.Index ?? -1 : -1,
-            FindFirstTextLine(after, edit));
+            textLine);
+    }
+
+    // The comparison of the document skips the new lines, which raw HTML can join with the text around them while every
+    // block keeps its own text: no text block from before the change takes the new text, and none of the new text takes the
+    // text after it.
+    private static bool StandsApart(MarkdownPage after, MarkdownLineEdit edit, int textLine)
+    {
+        foreach (var textBlock in MarkdownTextBlocks.Find(after))
+        {
+            if (textBlock.Line < edit.Line
+                    ? textBlock.EndLine >= textLine
+                    : textBlock.Line < edit.InsertedEnd && textBlock.EndLine >= edit.InsertedEnd)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     // Counts the blocks of text that goes into the content of `owner`: every block at its top level must be a widget block

@@ -1,6 +1,7 @@
 using Markdig.Extensions.Footnotes;
 using Markdig.Extensions.Yaml;
 using Markdig.Syntax;
+using Markdig.Syntax.Inlines;
 
 namespace HomeBlaze.Storage.Pages;
 
@@ -21,16 +22,31 @@ namespace HomeBlaze.Storage.Pages;
 /// or up to the end of the run of content between two widget or slot blocks when none does. Raw HTML can take the text that
 /// comes next to it.
 /// </param>
-internal sealed record MarkdownTextBlock(Block FirstBlock, int Line, int EndLine, MarkdownBlock? Owner, bool IsEditable, bool HoldsHtml);
+/// <param name="LeavesHtmlOpen">
+/// Whether it holds raw HTML that leaves an element or a construct, such as a comment, open up to the end of its run, which
+/// takes text that goes after it in the run.
+/// </param>
+/// <param name="ShowsNothing">Whether it is raw HTML that shows nothing, such as a comment.</param>
+internal sealed record MarkdownTextBlock(
+    Block FirstBlock,
+    int Line,
+    int EndLine,
+    MarkdownBlock? Owner,
+    bool IsEditable,
+    bool HoldsHtml,
+    bool LeavesHtmlOpen = false,
+    bool ShowsNothing = false);
 
 /// <summary>Finds the text blocks of a page, see <see cref="MarkdownTextBlock"/>.</summary>
 internal static class MarkdownTextBlocks
 {
     /// <summary>
     /// Gets the text blocks of the page and of every widget and slot block, ordered by line. Content that renders nothing,
-    /// such as empty lines, link reference definitions and the front matter, has none.
+    /// such as empty lines, link reference definitions and the front matter, has none. The page keeps them.
     /// </summary>
-    public static List<MarkdownTextBlock> Find(MarkdownPage page)
+    public static IReadOnlyList<MarkdownTextBlock> Find(MarkdownPage page) => page.GetTextBlocks(Create);
+
+    private static MarkdownTextBlock[] Create(MarkdownPage page)
     {
         var result = new List<MarkdownTextBlock>();
         AddContent(page, page.Document, owner: null, result);
@@ -47,7 +63,7 @@ internal static class MarkdownTextBlocks
             }
         }
 
-        return result;
+        return result.ToArray();
     }
 
     // Finds the widget and slot blocks at every depth, also inside a list or a style block, and adds their content. The
@@ -101,51 +117,141 @@ internal static class MarkdownTextBlocks
         AddRun(page, run, owner, result);
     }
 
-    // Every block of the run is a text block of its own, and raw HTML as well, which cannot be edited as text. Raw HTML can
-    // open an element in one block and close it in a later one, so a block that leaves an element open keeps the blocks up to
-    // the one that closes it in its text block: rendered on their own, the element would end in the first one.
+    // Every block of the run is a text block of its own, and raw HTML as well, which cannot be edited as text. HTML can open
+    // an element in one block and close it in a later one, so a block that leaves an element open keeps the blocks up to the
+    // one that closes it in its text block: rendered on their own, the element would end in the first one. A construct that
+    // is not closed, such as a comment, keeps the rest of the run.
     private static void AddRun(MarkdownPage page, List<Block> run, MarkdownBlock? owner, List<MarkdownTextBlock> result)
     {
+        var source = page.Source;
         List<string>? openElements = null;
         for (var index = 0; index < run.Count; index++)
         {
             var block = run[index];
-            if (block is not HtmlBlock html)
+            openElements?.Clear();
+            var isUnterminated = ReadElements(source, block, ref openElements);
+            if (block is not HtmlBlock && !isUnterminated && openElements is not { Count: > 0 })
             {
                 result.Add(new MarkdownTextBlock(block, GetLine(block), GetEndLine(page, block), owner, IsEditable(page, block), HoldsHtml: false));
                 continue;
             }
 
-            openElements ??= [];
-            openElements.Clear();
-            ReadElements(page.Source, html, openElements);
-            while (openElements.Count > 0 && index + 1 < run.Count)
+            while ((isUnterminated || openElements is { Count: > 0 }) && index + 1 < run.Count)
             {
-                if (run[++index] is HtmlBlock next)
-                {
-                    ReadElements(page.Source, next, openElements);
-                }
+                isUnterminated |= ReadElements(source, run[++index], ref openElements);
             }
 
-            result.Add(new MarkdownTextBlock(block, GetLine(block), GetEndLine(page, run[index]), owner, IsEditable: false, HoldsHtml: true));
+            var leavesHtmlOpen = isUnterminated || openElements is { Count: > 0 };
+
+            // The source of raw HTML is the markup that it renders.
+            var start = Math.Clamp(block.Span.Start, 0, source.Length);
+            var end = Math.Clamp(run[index].Span.End + 1, start, source.Length);
+            var showsNothing = block is HtmlBlock && !ShowsSomething(source.AsSpan(start, end - start));
+            result.Add(new MarkdownTextBlock(
+                block, GetLine(block), GetEndLine(page, run[index]), owner, IsEditable: false, HoldsHtml: true, leavesHtmlOpen, showsNothing));
         }
     }
 
-    // Reads the tags of the raw HTML of the block into the names of the open elements, much as a browser does: a start tag
-    // opens an element, and an end tag closes the last open element of its name together with the ones opened after it.
-    // Comments, the other markup that starts with <! or <?, void elements, self-closing tags and the text of script, style,
-    // textarea and title elements open none.
-    private static void ReadElements(string source, HtmlBlock block, List<string> openElements)
+    /// <summary>
+    /// Gets whether the markup shows anything besides white space, comments, other markup that starts with &lt;! or &lt;?,
+    /// which a browser reads as a comment up to the next '&gt;', and script and style elements, any of which hides the rest of
+    /// the markup when it is not closed.
+    /// </summary>
+    internal static bool ShowsSomething(ReadOnlySpan<char> html)
     {
-        var start = Math.Clamp(block.Span.Start, 0, source.Length);
-        var html = source.AsSpan(start, Math.Clamp(block.Span.End + 1, start, source.Length) - start);
+        var rest = html;
+        while (true)
+        {
+            rest = rest.TrimStart();
+            if (rest.IsEmpty)
+            {
+                return false;
+            }
+
+            var endMarker = rest.StartsWith("<!--", StringComparison.Ordinal) ? "-->"
+                : rest.Length > 1 && rest[0] == '<' && rest[1] is '!' or '?' ? ">"
+                : IsStartTag(rest, "script") ? "</script>"
+                : IsStartTag(rest, "style") ? "</style>"
+                : null;
+            if (endMarker is null)
+            {
+                return true;
+            }
+
+            var end = rest.IndexOf(endMarker, StringComparison.OrdinalIgnoreCase);
+            if (end < 0)
+            {
+                return false;
+            }
+
+            rest = rest[(end + endMarker.Length)..];
+        }
+
+        static bool IsStartTag(ReadOnlySpan<char> markup, string name) =>
+            markup.Length > name.Length + 1 &&
+            markup[0] == '<' &&
+            markup[1..].StartsWith(name, StringComparison.OrdinalIgnoreCase) &&
+            !char.IsAsciiLetterOrDigit(markup[name.Length + 1]);
+    }
+
+    // Reads the HTML of the block into the names of the open elements: the source of raw HTML, and the tags of inline HTML,
+    // also in a list or a quote, but not code. A block of the page closes what opens in it. Returns whether a construct is
+    // not closed, which takes the rest of the run.
+    private static bool ReadElements(string source, Block block, ref List<string>? openElements)
+    {
+        switch (block)
+        {
+            case MarkdownBlockContainer:
+                return false;
+
+            case HtmlBlock:
+            {
+                var start = Math.Clamp(block.Span.Start, 0, source.Length);
+                var end = Math.Clamp(block.Span.End + 1, start, source.Length);
+                return ReadTags(source.AsSpan(start, end - start), ref openElements);
+            }
+
+            case LeafBlock { Inline: { } inline }:
+            {
+                var isUnterminated = false;
+                foreach (var html in inline.Descendants<HtmlInline>())
+                {
+                    isUnterminated |= ReadTags(html.Tag.AsSpan(), ref openElements);
+                }
+
+                return isUnterminated;
+            }
+
+            case ContainerBlock container:
+            {
+                var isUnterminated = false;
+                foreach (var child in container)
+                {
+                    isUnterminated |= ReadElements(source, child, ref openElements);
+                }
+
+                return isUnterminated;
+            }
+
+            default:
+                return false;
+        }
+    }
+
+    // Reads the tags into the names of the open elements, much as a browser does: a start tag opens an element, also one
+    // that ends with "/>", which a browser ignores except on void elements, and an end tag closes the last open element of
+    // its name together with the ones opened after it. Comments, the other markup that starts with <! or <?, void elements
+    // and the text of script, style, textarea and title elements open none. Returns whether a comment, a declaration, a tag
+    // or such an element is not closed, which a browser lets take the rest of the markup.
+    private static bool ReadTags(ReadOnlySpan<char> html, ref List<string>? openElements)
+    {
         var index = 0;
         while (index < html.Length)
         {
             var tagStart = html[index..].IndexOf('<');
             if (tagStart < 0)
             {
-                break;
+                return false;
             }
 
             index += tagStart;
@@ -155,7 +261,7 @@ internal static class MarkdownTextBlocks
                 var commentEnd = rest[4..].IndexOf("-->", StringComparison.Ordinal);
                 if (commentEnd < 0)
                 {
-                    break;
+                    return true;
                 }
 
                 index += 4 + commentEnd + 3;
@@ -168,7 +274,7 @@ internal static class MarkdownTextBlocks
                 var declarationEnd = rest.IndexOf('>');
                 if (declarationEnd < 0)
                 {
-                    break;
+                    return true;
                 }
 
                 index += declarationEnd + 1;
@@ -193,7 +299,7 @@ internal static class MarkdownTextBlocks
             var tagEnd = FindTagEnd(rest, nameEnd);
             if (tagEnd < 0)
             {
-                break;
+                return true;
             }
 
             index += tagEnd + 1;
@@ -204,31 +310,33 @@ internal static class MarkdownTextBlocks
 
             if (isEndTag)
             {
-                for (var open = openElements.Count - 1; open >= 0; open--)
+                for (var open = (openElements?.Count ?? 0) - 1; open >= 0; open--)
                 {
-                    if (name.Equals(openElements[open], StringComparison.OrdinalIgnoreCase))
+                    if (name.Equals(openElements![open], StringComparison.OrdinalIgnoreCase))
                     {
                         openElements.RemoveRange(open, openElements.Count - open);
                         break;
                     }
                 }
-            }
-            else if (rest[tagEnd - 1] != '/')
-            {
-                openElements.Add(name.ToString());
-                if (IsRawTextElement(name))
-                {
-                    // Up to its end tag, which the loop reads next.
-                    var endTag = FindEndTag(html[index..], name);
-                    if (endTag < 0)
-                    {
-                        break;
-                    }
 
-                    index += endTag;
+                continue;
+            }
+
+            (openElements ??= []).Add(name.ToString());
+            if (IsRawTextElement(name))
+            {
+                // Up to its end tag, which the loop reads next.
+                var endTag = FindEndTag(html[index..], name);
+                if (endTag < 0)
+                {
+                    return true;
                 }
+
+                index += endTag;
             }
         }
+
+        return false;
     }
 
     // The offset of the '>' that ends the tag, past quoted attribute values, or -1.

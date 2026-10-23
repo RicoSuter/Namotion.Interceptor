@@ -14,6 +14,7 @@
     var contentName = showsInsertLines ? GetContentName() : null;
     var segments = GetRenderSegments(groupsText: IsGroupingText());
     var position = 0;
+    var followsHiddenContent = false;
 }
 @if (showsInsertLines && segments.Count == 0)
 {
@@ -29,10 +30,16 @@ else
 {
     foreach (var segment in segments)
     {
-        @* Content that shows nothing, such as an HTML comment, has no line before it, which would stand where the line after
-           it stands. *@
+        @* Content that shows nothing, such as an HTML comment, has no line after it, which would stand where the line before
+           it stands, so that new content never goes between a comment and the block that it names. *@
         var item = segment.Widget ?? segment.Start;
-        @if (showsInsertLines && item is not null && segment.Start?.Start != HtmlSegmentStart.Other)
+        var isAfterHiddenContent = followsHiddenContent;
+        if (item is not null)
+        {
+            followsHiddenContent = segment.Start?.Start == HtmlSegmentStart.Other;
+        }
+
+        @if (showsInsertLines && item is not null && !isAfterHiddenContent)
         {
             position++;
             <BlockInsertLine Label="@($"Insert at position {position} of {contentName}")"
@@ -61,7 +68,7 @@ else
         }
     }
 
-    if (showsInsertLines)
+    if (showsInsertLines && !followsHiddenContent)
     {
         <BlockInsertLine Label="@($"Insert at the end of {contentName}")"
                          OnInsertWidget="@(() => StructureEditor!.InsertWidgetAsync(Content!, null))"

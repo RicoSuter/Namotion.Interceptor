@@ -153,7 +153,7 @@ public static partial class MarkdownSegmentBuilder
             renderer.ObjectRenderers.Replace<HtmlTableRenderer>(scrollableRenderer);
         }
 
-        List<MarkdownTextBlock>? textBlocks = null;
+        IReadOnlyList<MarkdownTextBlock>? textBlocks = null;
         if (markTextBlocks)
         {
             textBlocks = MarkdownTextBlocks.Find(page);

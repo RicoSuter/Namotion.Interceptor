@@ -99,6 +99,59 @@ public class MarkdownTextBlocksTests
             textBlocks.Select(textBlock => (textBlock.Line, textBlock.EndLine, textBlock.IsEditable, textBlock.HoldsHtml)));
     }
 
+    // Each case keeps text in an element that a browser leaves open, so the text up to the end of the run is one text block
+    // that cannot be edited and leaves the HTML open. HtmlGroupingTests of the E2E tests compare this with a browser.
+    [Theory]
+    [InlineData("<div/>\n\nInside.\n")]
+    [InlineData("<a name=\"x\"/>\n\nInside.\n")]
+    [InlineData("<custom-x/>\n\nInside.\n")]
+    [InlineData("<div>x</div> <!-- open\n\nInside.\n")]
+    [InlineData("<div title=\"open>\n\nInside.\n")]
+    [InlineData("<div></div><!DOCTYPE\n\nInside.\n")]
+    [InlineData("Text with <b>bold\n\nInside.\n")]
+    [InlineData("- An item with <b>bold\n\nInside.\n")]
+    public void WhenHtmlLeavesSomethingOpenUpToTheEndOfTheRun_ThenTheRunFromItIsOneTextBlockThatLeavesTheHtmlOpen(string source)
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse(source + "\n:: Demo.One\n::\n\nAfter.\n");
+
+        // Act
+        var textBlocks = MarkdownTextBlocks.Find(page);
+
+        // Assert
+        Assert.Equal(
+            [(1, 3, false, true, true), (8, 8, true, false, false)],
+            textBlocks.Select(textBlock => (textBlock.Line, textBlock.EndLine, textBlock.IsEditable, textBlock.HoldsHtml, textBlock.LeavesHtmlOpen)));
+    }
+
+    [Theory]
+    [InlineData("Text with `<div>` in code.\n\nInside.\n")]
+    [InlineData("Text with <b>bold</b> and <br> inline.\n\nInside.\n")]
+    public void WhenInlineHtmlClosesWhatItOpens_ThenTheTextAroundItCanBeEdited(string source)
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse(source);
+
+        // Act
+        var textBlocks = MarkdownTextBlocks.Find(page);
+
+        // Assert
+        Assert.Equal([(1, 1, true), (3, 3, true)], textBlocks.Select(textBlock => (textBlock.Line, textBlock.EndLine, textBlock.IsEditable)));
+    }
+
+    [Fact]
+    public void WhenRawHtmlShowsNothing_ThenItsTextBlockSaysSo()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("<!-- c -->\n\n<script>let a;</script>\n\n<div>x</div>\n");
+
+        // Act
+        var textBlocks = MarkdownTextBlocks.Find(page);
+
+        // Assert
+        Assert.Equal([true, true, false], textBlocks.Select(textBlock => textBlock.ShowsNothing));
+    }
+
     [Fact]
     public void WhenAnElementOfRawHtmlIsNotClosedBeforeAWidget_ThenItsTextBlockEndsWithTheRun()
     {
