@@ -406,7 +406,7 @@ namespace HomeBlaze.Storage.Pages
     }
     public static class MarkdownExpressions
     {
-        public static HomeBlaze.Services.Expressions.ParsedExpression? Parse(string text, out string? error) { }
+        public static Namotion.Interceptor.Expressions.ParsedExpression? Parse(string text, out string? error) { }
     }
     [Namotion.Interceptor.Attributes.InterceptorSubject]
     public class MarkdownFragment : Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged

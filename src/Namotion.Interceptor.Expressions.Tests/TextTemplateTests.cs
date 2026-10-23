@@ -1,13 +1,13 @@
 using System.Collections.Immutable;
-using HomeBlaze.Services.Expressions;
+using Namotion.Interceptor.Expressions;
 
-namespace HomeBlaze.Services.Tests.Expressions;
+namespace Namotion.Interceptor.Expressions.Tests;
 
 public class TextTemplateTests
 {
     private static string Render(string text, Dictionary<string, object?> values)
     {
-        Assert.True(TextTemplate.TryParse(text, out var template, out var error), error);
+        Assert.True(TextTemplate.TryParse(text, '/', out var template, out var error), error);
         var context = new TestExpressionContext(values);
         return template.Render(ref context);
     }
@@ -37,7 +37,7 @@ public class TextTemplateTests
     public void WhenTemplateIsParsed_ThenItListsItsExpressions()
     {
         // Act
-        Assert.True(TextTemplate.TryParse("{{ a }} and {{ b/C > 1 }}", out var template, out _));
+        Assert.True(TextTemplate.TryParse("{{ a }} and {{ b/C > 1 }}", '/', out var template, out _));
 
         // Assert
         Assert.Equal(["a", "b/C > 1"], template.Expressions.Select(expression => expression.Text).ToArray());
@@ -50,7 +50,7 @@ public class TextTemplateTests
     public void WhenTemplateIsInvalid_ThenErrorSaysWhat(string text, string expectedError)
     {
         // Act
-        var success = TextTemplate.TryParse(text, out var template, out var error);
+        var success = TextTemplate.TryParse(text, '/', out var template, out var error);
 
         // Assert
         Assert.False(success);
@@ -64,11 +64,11 @@ public class TextTemplateTests
     [InlineData("subject/IsCharging", "subject|IsCharging")]
     [InlineData("subject/Session/Energy", "subject|Session/Energy")]
     [InlineData("subject[0]", "subject|[0]")]
-    [InlineData("valueMap/Power", "path:valueMap/Power")]
+    [InlineData("values/Power", "path:values/Power")]
     public void WhenPathStartsWithAVariable_ThenTheContextGetsTheVariableAndTheRest(string path, string expected)
     {
         // Arrange
-        Assert.True(ParsedExpression.TryParse(path, out var expression, out _));
+        Assert.True(ParsedExpression.TryParse(path, '/', out var expression, out _));
         var calls = new List<string>();
         var context = new RecordingContext(calls);
 
@@ -83,7 +83,7 @@ public class TextTemplateTests
     public void WhenPlainTextIsRenderedAgain_ThenNoBytesAreAllocated()
     {
         // Arrange
-        Assert.True(TextTemplate.TryParse("plain text", out var template, out _));
+        Assert.True(TextTemplate.TryParse("plain text", '/', out var template, out _));
         var context = new TestExpressionContext([]);
         template.Render(ref context);
 

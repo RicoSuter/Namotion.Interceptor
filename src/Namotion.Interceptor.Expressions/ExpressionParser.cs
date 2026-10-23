@@ -1,13 +1,14 @@
+using System.Buffers;
 using System.Collections.Immutable;
 using System.Globalization;
 
-namespace HomeBlaze.Services.Expressions;
+namespace Namotion.Interceptor.Expressions;
 
 /// <summary>
 /// Parses an expression by recursive descent. Throws a <see cref="FormatException"/> whose message reads
 /// <c>&lt;message&gt; at position &lt;zero-based index&gt;</c>.
 /// </summary>
-internal sealed class ExpressionParser(string text)
+internal sealed class ExpressionParser(string text, char pathSeparator)
 {
     internal const int MaximumExpressionLength = 1000;
     internal const int MaximumNestingDepth = 32;
@@ -26,6 +27,8 @@ internal sealed class ExpressionParser(string text)
         ("<", ComparisonOperator.Less),
         (">", ComparisonOperator.Greater)
     ];
+
+    private static readonly SearchValues<char> DelimiterSymbols = SearchValues.Create("()\"'|&=!<>");
 
     private readonly List<string> _paths = [];
     private int _position;
@@ -53,7 +56,7 @@ internal sealed class ExpressionParser(string text)
             throw CreateError($"unexpected '{text[_position]}'");
         }
 
-        return new ParsedExpression(text, body, pipes, [.. _paths]);
+        return new ParsedExpression(text, pathSeparator, body, pipes, [.. _paths]);
     }
 
     private ExpressionNode ParseOr()
@@ -118,16 +121,7 @@ internal sealed class ExpressionParser(string text)
         var character = text[_position];
         if (character == '(')
         {
-            EnterNesting(start);
-            _position++;
-            var node = ParseOr();
-            if (!TryConsumeSymbol(")"))
-            {
-                throw CreateError("expected ')'");
-            }
-
-            _nestingDepth--;
-            return node;
+            return ParseGroup(start);
         }
 
         if (character is '"' or '\'')
@@ -135,29 +129,85 @@ internal sealed class ExpressionParser(string text)
             return new LiteralNode(ReadString(character));
         }
 
+        return ParseWord(start, operatorText);
+    }
+
+    private ExpressionNode ParseGroup(int start)
+    {
+        EnterNesting(start);
+        _position++;
+        var node = ParseOr();
+        if (!TryConsumeSymbol(")"))
+        {
+            throw CreateError("expected ')'");
+        }
+
+        _nestingDepth--;
+        return node;
+    }
+
+    private ExpressionNode ParseWord(int start, string? operatorText)
+    {
         var token = ReadToken();
         if (token.Length == 0)
         {
             throw CreateError(ExpectedValue(operatorText));
         }
 
-        if (token is "+" or "-" or "*" or "/")
+        if (IsArithmeticToken(token))
         {
             _position = start;
             throw CreateError("arithmetic is not supported");
         }
 
-        if (IsNumberStart(token) && !token.Contains('/'))
+        if (IsNumber(token))
         {
-            if (!double.TryParse(token, NumberStyles.Float, CultureInfo.InvariantCulture, out var number))
-            {
-                _position = start;
-                throw CreateError($"invalid number '{token}'");
-            }
-
-            return new LiteralNode(number);
+            return ParseNumber(token, start);
         }
 
+        if (TryCreateKeywordLiteral(token) is { } literal)
+        {
+            return literal;
+        }
+
+        if (IsOperatorKeyword(token))
+        {
+            _position = start;
+            throw CreateError(ExpectedValue(operatorText));
+        }
+
+        return CreateWordNode(token, operatorText);
+    }
+
+    private ExpressionNode CreateWordNode(string token, string? operatorText)
+    {
+        // A bare word after an operator is text, such as the name of an enum value.
+        if (operatorText is not null && IsBareWord(token))
+        {
+            return new LiteralNode(token);
+        }
+
+        if (!_paths.Contains(token))
+        {
+            _paths.Add(token);
+        }
+
+        return new PathNode(token, pathSeparator);
+    }
+
+    private LiteralNode ParseNumber(string token, int start)
+    {
+        if (!double.TryParse(token, NumberStyles.Float, CultureInfo.InvariantCulture, out var number))
+        {
+            _position = start;
+            throw CreateError($"invalid number '{token}'");
+        }
+
+        return new LiteralNode(number);
+    }
+
+    private static LiteralNode? TryCreateKeywordLiteral(string token)
+    {
         if (token.Equals("true", StringComparison.OrdinalIgnoreCase))
         {
             return new LiteralNode(True);
@@ -168,32 +218,22 @@ internal sealed class ExpressionParser(string text)
             return new LiteralNode(False);
         }
 
-        if (token.Equals("null", StringComparison.OrdinalIgnoreCase))
-        {
-            return new LiteralNode(null);
-        }
-
-        if (token.Equals("and", StringComparison.OrdinalIgnoreCase) ||
-            token.Equals("or", StringComparison.OrdinalIgnoreCase) ||
-            token.Equals("not", StringComparison.OrdinalIgnoreCase))
-        {
-            _position = start;
-            throw CreateError(ExpectedValue(operatorText));
-        }
-
-        // A bare word after an operator is text, such as the name of an enum value, as in the where filter of MCP.
-        if (operatorText is not null && token.AsSpan().IndexOfAny('/', '[') < 0 && !ExpressionVariables.TryGetVariable(token, out _))
-        {
-            return new LiteralNode(token);
-        }
-
-        if (!_paths.Contains(token))
-        {
-            _paths.Add(token);
-        }
-
-        return new PathNode(token);
+        return token.Equals("null", StringComparison.OrdinalIgnoreCase) ? new LiteralNode(null) : null;
     }
+
+    private static bool IsOperatorKeyword(string token) =>
+        token.Equals("and", StringComparison.OrdinalIgnoreCase) ||
+        token.Equals("or", StringComparison.OrdinalIgnoreCase) ||
+        token.Equals("not", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsArithmeticToken(string token) => token is "+" or "-" or "*" or "/";
+
+    // With '.' as separator a dot is the decimal point of a number, so only the other separators make a token a path.
+    private bool IsNumber(string token) =>
+        IsNumberStart(token) && (pathSeparator == '.' || !token.Contains(pathSeparator));
+
+    private bool IsBareWord(string token) =>
+        token.AsSpan().IndexOfAny(pathSeparator, '[') < 0 && !ExpressionVariables.TryGetVariable(token, pathSeparator, out _);
 
     private (ComparisonOperator Operator, string Text)? ReadOperator()
     {
@@ -302,7 +342,7 @@ internal sealed class ExpressionParser(string text)
         return text.Substring(start + 1, end - start - 1);
     }
 
-    // An operator of arithmetic stands alone between operands. Inside a token such as "value-map.md" it is part of a name.
+    // An operator of arithmetic stands alone between operands. Inside a token such as "notes-v2.md" it is part of a name.
     private void ThrowIfArithmetic()
     {
         if (_position < text.Length &&
@@ -358,7 +398,7 @@ internal sealed class ExpressionParser(string text)
         var end = _position + keyword.Length;
         if (end > text.Length ||
             string.Compare(text, _position, keyword, 0, keyword.Length, StringComparison.OrdinalIgnoreCase) != 0 ||
-            (end < text.Length && !char.IsWhiteSpace(text[end]) && text[end] != '('))
+            !EndsKeyword(end))
         {
             return false;
         }
@@ -366,6 +406,9 @@ internal sealed class ExpressionParser(string text)
         _position = end;
         return true;
     }
+
+    private bool EndsKeyword(int end) =>
+        end >= text.Length || char.IsWhiteSpace(text[end]) || text[end] == '(';
 
     private void EnterNesting(int position)
     {
@@ -385,15 +428,17 @@ internal sealed class ExpressionParser(string text)
     }
 
     private static bool IsDelimiter(char character) =>
-        char.IsWhiteSpace(character) || character is '(' or ')' or '"' or '\'' or '|' or '&' or '=' or '!' or '<' or '>';
+        char.IsWhiteSpace(character) || DelimiterSymbols.Contains(character);
 
     // A digit, or a sign or a dot followed by a digit. "../x" and "./x" are paths.
     private static bool IsNumberStart(string token)
     {
         var unsigned = token[0] is '-' or '+' ? token.AsSpan(1) : token.AsSpan();
-        return unsigned.Length > 0 &&
-            (char.IsAsciiDigit(unsigned[0]) || (unsigned[0] == '.' && unsigned.Length > 1 && char.IsAsciiDigit(unsigned[1])));
+        return unsigned.Length > 0 && StartsWithNumber(unsigned);
     }
+
+    private static bool StartsWithNumber(ReadOnlySpan<char> value) =>
+        char.IsAsciiDigit(value[0]) || (value[0] == '.' && value.Length > 1 && char.IsAsciiDigit(value[1]));
 
     private static string ExpectedValue(string? operatorText) =>
         operatorText is null ? "expected a value" : $"expected a value after '{operatorText}'";

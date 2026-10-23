@@ -1,6 +1,6 @@
 using System.Collections.Immutable;
 
-namespace HomeBlaze.Services.Expressions;
+namespace Namotion.Interceptor.Expressions;
 
 /// <summary>
 /// What the host of an expression supplies for one evaluation. Implemented by a struct, which the evaluator takes by
@@ -19,8 +19,8 @@ public interface IExpressionContext
     /// or a path that leads nowhere, gives <see cref="ExpressionValue.Missing"/> and does not throw.
     /// </summary>
     /// <param name="variable"><see cref="ExpressionVariables.Value"/> or <see cref="ExpressionVariables.Subject"/>.</param>
-    /// <param name="memberPath">The rest of the path after the variable and its slash, such as <c>IsCharging</c> for
-    /// <c>subject/IsCharging</c>, or null for the variable alone.</param>
+    /// <param name="memberPath">The rest of the path after the variable and its separator, such as <c>IsCharging</c> for
+    /// <c>subject/IsCharging</c> with the separator <c>/</c>, or null for the variable alone.</param>
     ExpressionValue ResolveVariable(string variable, string? memberPath);
 
     /// <summary>Applies a pipe that the host accepted when it checked the expression.</summary>

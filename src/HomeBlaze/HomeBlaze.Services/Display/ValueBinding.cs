@@ -1,5 +1,5 @@
 using HomeBlaze.Abstractions;
-using HomeBlaze.Services.Expressions;
+using Namotion.Interceptor.Expressions;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry.Abstractions;
 

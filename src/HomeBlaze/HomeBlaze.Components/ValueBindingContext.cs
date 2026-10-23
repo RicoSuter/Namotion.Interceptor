@@ -3,7 +3,7 @@ using HomeBlaze.Abstractions;
 using HomeBlaze.Components.Abstractions.TimeZones;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Display;
-using HomeBlaze.Services.Expressions;
+using Namotion.Interceptor.Expressions;
 using Namotion.Interceptor;
 
 namespace HomeBlaze.Components;

@@ -1,5 +1,5 @@
 using HomeBlaze.Services.Display;
-using HomeBlaze.Services.Expressions;
+using Namotion.Interceptor.Expressions;
 using HomeBlaze.Services.Lifecycle;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;

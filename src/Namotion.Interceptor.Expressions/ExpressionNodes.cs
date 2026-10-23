@@ -1,6 +1,6 @@
 using System.Globalization;
 
-namespace HomeBlaze.Services.Expressions;
+namespace Namotion.Interceptor.Expressions;
 
 internal abstract class ExpressionNode;
 
@@ -12,16 +12,14 @@ internal sealed class LiteralNode(object? value) : ExpressionNode
 
 internal sealed class PathNode : ExpressionNode
 {
-    public PathNode(string path)
+    public PathNode(string path, char pathSeparator)
     {
         Path = path;
-        if (ExpressionVariables.TryGetVariable(path, out var variable))
+        // Split once here, so that an evaluation allocates no part of the path.
+        if (ExpressionVariables.TryGetVariable(path, pathSeparator, out var variable, out var memberPath))
         {
             Variable = variable;
-            // Split once here, so that an evaluation allocates no part of the path.
-            MemberPath = path.Length == variable.Length
-                ? null
-                : path[variable.Length] == '/' ? path[(variable.Length + 1)..] : path[variable.Length..];
+            MemberPath = memberPath;
         }
     }
 
@@ -30,7 +28,7 @@ internal sealed class PathNode : ExpressionNode
     /// <summary>The variable the path starts with, or null.</summary>
     public string? Variable { get; }
 
-    /// <summary>The rest of the path after the variable and its slash, or null for the variable alone or a path without one.</summary>
+    /// <summary>The rest of the path after the variable and its separator, or null for the variable alone or a path without one.</summary>
     public string? MemberPath { get; }
 }
 

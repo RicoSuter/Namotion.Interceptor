@@ -1,6 +1,6 @@
 using Namotion.Interceptor.Registry.Abstractions;
 
-namespace HomeBlaze.Services.Expressions;
+namespace Namotion.Interceptor.Expressions;
 
 /// <summary>
 /// The result of evaluating an expression or a part of it: a value, the property it was read from, and whether it is
@@ -44,6 +44,13 @@ public readonly struct ExpressionValue
     public static ExpressionValue FromText(string text) => new(text, null, true);
 
     /// <summary>Creates the result of a condition: true, false, or missing for unknown.</summary>
-    public static ExpressionValue FromBoolean(bool? value) =>
-        value is { } boolean ? new ExpressionValue(boolean ? True : False, null, false) : Missing;
+    public static ExpressionValue FromBoolean(bool? value)
+    {
+        if (value is not { } boolean)
+        {
+            return Missing;
+        }
+
+        return new ExpressionValue(boolean ? True : False, null, false);
+    }
 }

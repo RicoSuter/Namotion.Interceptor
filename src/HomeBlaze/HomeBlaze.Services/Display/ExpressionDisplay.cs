@@ -1,7 +1,7 @@
 using System.Collections.Immutable;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Components.Abstractions.TimeZones;
-using HomeBlaze.Services.Expressions;
+using Namotion.Interceptor.Expressions;
 using Namotion.Interceptor;
 
 namespace HomeBlaze.Services.Display;
@@ -39,6 +39,9 @@ public enum ExpressionUse
 /// </summary>
 public static class ExpressionDisplay
 {
+    /// <summary>The character between the segments of the paths in the expressions of pages.</summary>
+    public const char PathSeparator = '/';
+
     /// <summary>The pipe that formats a value as the property panel shows it. It is the default.</summary>
     internal const string DisplayPipe = "display";
 
@@ -191,7 +194,7 @@ public static class ExpressionDisplay
 
         foreach (var path in expression.Paths)
         {
-            if (!ExpressionVariables.TryGetVariable(path, out var variable))
+            if (!ExpressionVariables.TryGetVariable(path, PathSeparator, out var variable, out var memberPath))
             {
                 continue;
             }
@@ -201,7 +204,7 @@ public static class ExpressionDisplay
                 return $"'{variable}' is not available in {placeWithoutVariables}";
             }
 
-            if (GetVariablePathError(path, variable) is { } pathError)
+            if (GetVariablePathError(variable, memberPath) is { } pathError)
             {
                 return pathError;
             }
@@ -210,10 +213,9 @@ public static class ExpressionDisplay
         return null;
     }
 
-    private static string? GetVariablePathError(string path, string variable)
+    private static string? GetVariablePathError(string variable, string? memberPath)
     {
-        var rest = path.AsSpan(variable.Length);
-        if (rest.IsEmpty)
+        if (memberPath is null)
         {
             return null;
         }
@@ -223,17 +225,14 @@ public static class ExpressionDisplay
             return "'value' has no members: write subject/... to read a property of its subject";
         }
 
-        if (rest[0] == '/')
+        if (memberPath.Length == 0)
         {
-            if (rest.Length == 1)
-            {
-                return "expected a name after 'subject/'";
-            }
+            return "expected a name after 'subject/'";
+        }
 
-            if (rest[1] == '/')
-            {
-                return "a path starts at the subject and cannot start with '/'";
-            }
+        if (memberPath[0] == PathSeparator)
+        {
+            return "a path starts at the subject and cannot start with '/'";
         }
 
         return null;

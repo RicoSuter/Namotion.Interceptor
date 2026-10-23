@@ -1,7 +1,7 @@
 using HomeBlaze.Components.Abstractions.TimeZones;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Display;
-using HomeBlaze.Services.Expressions;
+using Namotion.Interceptor.Expressions;
 using Namotion.Interceptor;
 
 namespace HomeBlaze.Components;
@@ -107,7 +107,7 @@ public sealed class WidgetText
 
     private ParsedText Parse(string text)
     {
-        if (!TextTemplate.TryParse(text, out var template, out var error))
+        if (!TextTemplate.TryParse(text, ExpressionDisplay.PathSeparator, out var template, out var error))
         {
             return new ParsedText(text, null, $"{_argumentName}: {error}");
         }

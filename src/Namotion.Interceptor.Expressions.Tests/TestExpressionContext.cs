@@ -1,7 +1,7 @@
 using System.Collections.Immutable;
-using HomeBlaze.Services.Expressions;
+using Namotion.Interceptor.Expressions;
 
-namespace HomeBlaze.Services.Tests.Expressions;
+namespace Namotion.Interceptor.Expressions.Tests;
 
 /// <summary>
 /// Resolves a path, a variable included, to the value the dictionary has for its text; the pipe "upper" writes the text in

@@ -1,5 +1,5 @@
 using HomeBlaze.Services.Display;
-using HomeBlaze.Services.Expressions;
+using Namotion.Interceptor.Expressions;
 
 namespace HomeBlaze.Services.Tests.Display;
 
@@ -7,7 +7,7 @@ public class ExpressionDisplayTests
 {
     private static string? Check(string text, ExpressionUse use)
     {
-        Assert.True(ParsedExpression.TryParse(text, out var expression, out var error), error);
+        Assert.True(ParsedExpression.TryParse(text, ExpressionDisplay.PathSeparator, out var expression, out var error), error);
         return ExpressionDisplay.Check(expression, use);
     }
 

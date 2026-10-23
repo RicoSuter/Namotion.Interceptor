@@ -1,18 +1,17 @@
-using HomeBlaze.Services.Expressions;
+using Namotion.Interceptor.Expressions;
 
-namespace HomeBlaze.Services.Tests.Expressions;
+namespace Namotion.Interceptor.Expressions.Tests;
 
 public class ParsedExpressionEvaluationTests
 {
     private static bool? EvaluateCondition(string text, Dictionary<string, object?> values)
     {
-        Assert.True(ParsedExpression.TryParse(text, out var expression, out var error), error);
+        Assert.True(ParsedExpression.TryParse(text, '/', out var expression, out var error), error);
         var context = new TestExpressionContext(values);
         return expression.EvaluateCondition(ref context);
     }
 
-    // The rows of SubjectFilterExpressionTests in Namotion.Interceptor.Mcp.Tests, which every valid where text must keep.
-    // "Device != null" is left out: MCP hides a property that holds a subject, which is a rule of its host.
+    // The rows a filter host relies on.
     [Theory]
     [InlineData("Temperature > 20", true)]
     [InlineData("Temperature < 20", false)]
@@ -61,7 +60,7 @@ public class ParsedExpressionEvaluationTests
     [InlineData("FloatValue == 0.1", true)]
     [InlineData("FloatValue < 0.2", true)]
     [InlineData("FloatValue > 0.1", false)]
-    public void WhenWhereTextOfMcpIsEvaluated_ThenItMatchesAsInMcp(string text, bool expected)
+    public void WhenConditionComparesValues_ThenTheComparerRulesApply(string text, bool expected)
     {
         // Arrange
         var values = new Dictionary<string, object?>
@@ -145,7 +144,7 @@ public class ParsedExpressionEvaluationTests
         Assert.Equal(expected, result);
     }
 
-    // A path on the right needs a slash; a bare word there is text, as in MCP where.
+    // A path on the right needs a slash; a bare word there is text, such as the name of an enum value.
     [Theory]
     [InlineData("meter/Power > meter/Maximum", false)]
     [InlineData("0.1 == meter/Float", true)]
@@ -185,11 +184,100 @@ public class ParsedExpressionEvaluationTests
         Assert.Equal(expected, result);
     }
 
+    [Theory]
+    [InlineData("room/First < room/Second", true)]
+    [InlineData("room/Second < room/First", false)]
+    [InlineData("room/First == room/First", true)]
+    [InlineData("room/First >= room/Second", false)]
+    public void WhenBothValuesAreOfTheSameEnum_ThenTheyAreOrderedByTheirValues(string text, bool? expected)
+    {
+        // Arrange
+        var values = new Dictionary<string, object?> { ["room/First"] = DayOfWeek.Monday, ["room/Second"] = DayOfWeek.Friday };
+
+        // Act
+        var result = EvaluateCondition(text, values);
+
+        // Assert
+        Assert.Equal(expected, result);
+    }
+
+    [Fact]
+    public void WhenValuesAreOfDifferentEnums_ThenTheyHaveNoOrder()
+    {
+        // Arrange
+        var values = new Dictionary<string, object?> { ["room/Day"] = DayOfWeek.Monday, ["room/Kind"] = DateTimeKind.Utc };
+
+        // Act
+        var result = EvaluateCondition("room/Day < room/Kind", values);
+
+        // Assert
+        Assert.Null(result);
+    }
+
+    [Theory]
+    [InlineData("room/Earlier < room/Later", true)]
+    [InlineData("room/Later < room/Earlier", false)]
+    [InlineData("room/Earlier == room/Same", true)]
+    public void WhenBothValuesAreDateTimes_ThenTheyAreOrderedByTheirInstants(string text, bool? expected)
+    {
+        // Arrange
+        var values = new Dictionary<string, object?>
+        {
+            ["room/Earlier"] = new DateTime(2026, 10, 1, 12, 0, 0, DateTimeKind.Utc),
+            ["room/Same"] = new DateTime(2026, 10, 1, 12, 0, 0, DateTimeKind.Unspecified),
+            ["room/Later"] = new DateTime(2026, 10, 2, 12, 0, 0, DateTimeKind.Utc)
+        };
+
+        // Act
+        var result = EvaluateCondition(text, values);
+
+        // Assert
+        Assert.Equal(expected, result);
+    }
+
+    [Theory]
+    [InlineData("room/Earlier < room/Later", true)]
+    [InlineData("room/Later < room/Earlier", false)]
+    [InlineData("room/Earlier == room/Same", true)]
+    public void WhenBothValuesAreDateTimeOffsets_ThenTheyAreOrderedByTheirInstants(string text, bool? expected)
+    {
+        // Arrange
+        var values = new Dictionary<string, object?>
+        {
+            ["room/Earlier"] = new DateTimeOffset(2026, 10, 1, 12, 0, 0, TimeSpan.Zero),
+            ["room/Same"] = new DateTimeOffset(2026, 10, 1, 14, 0, 0, TimeSpan.FromHours(2)),
+            ["room/Later"] = new DateTimeOffset(2026, 10, 1, 13, 0, 0, TimeSpan.Zero)
+        };
+
+        // Act
+        var result = EvaluateCondition(text, values);
+
+        // Assert
+        Assert.Equal(expected, result);
+    }
+
+    [Theory]
+    [InlineData("room/Double == room/Float", true)]
+    [InlineData("room/Float == room/Double", true)]
+    [InlineData("room/Double <= room/Float", true)]
+    [InlineData("room/Double > room/Float", false)]
+    public void WhenADoubleIsComparedWithAFloat_ThenTheDoubleIsNarrowedToAFloat(string text, bool? expected)
+    {
+        // Arrange
+        var values = new Dictionary<string, object?> { ["room/Double"] = 0.1, ["room/Float"] = 0.1f };
+
+        // Act
+        var result = EvaluateCondition(text, values);
+
+        // Assert
+        Assert.Equal(expected, result);
+    }
+
     [Fact]
     public void WhenExpressionHasPipes_ThenTheyApplyInOrderToTheValue()
     {
         // Arrange
-        Assert.True(ParsedExpression.TryParse("Name | upper:a | upper:b", out var expression, out _));
+        Assert.True(ParsedExpression.TryParse("Name | upper:a | upper:b", '/', out var expression, out _));
         var context = new TestExpressionContext(new Dictionary<string, object?> { ["Name"] = "kitchen" });
 
         // Act
@@ -206,7 +294,7 @@ public class ParsedExpressionEvaluationTests
     public void WhenComparisonIsEvaluatedAsValue_ThenItIsABooleanOrMissing()
     {
         // Arrange
-        Assert.True(ParsedExpression.TryParse("Power > 1000", out var expression, out _));
+        Assert.True(ParsedExpression.TryParse("Power > 1000", '/', out var expression, out _));
         var known = new TestExpressionContext(new Dictionary<string, object?> { ["Power"] = 7400m });
         var unknown = new TestExpressionContext(new Dictionary<string, object?>());
 
@@ -215,7 +303,7 @@ public class ParsedExpressionEvaluationTests
         var unknownResult = expression.Evaluate(ref unknown);
 
         // Assert
-        Assert.Equal(true, knownResult.Value);
+        Assert.True(knownResult.Value is true);
         Assert.True(unknownResult.IsMissing);
     }
 
@@ -224,7 +312,7 @@ public class ParsedExpressionEvaluationTests
     {
         // Arrange
         Assert.True(ParsedExpression.TryParse(
-            "IsPluggedIn and not IsCharging and Power > 1000 and Day == Monday", out var expression, out _));
+            "IsPluggedIn and not IsCharging and Power > 1000 and Day == Monday", '/', out var expression, out _));
         var context = new TestExpressionContext(new Dictionary<string, object?>
         {
             ["IsPluggedIn"] = true,

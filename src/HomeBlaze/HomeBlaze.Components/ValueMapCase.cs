@@ -3,7 +3,7 @@ using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Components.Abstractions.TimeZones;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Display;
-using HomeBlaze.Services.Expressions;
+using Namotion.Interceptor.Expressions;
 using Namotion.Interceptor.Attributes;
 
 namespace HomeBlaze.Components;
@@ -200,7 +200,7 @@ public partial class ValueMapCase : IConfigurable
                 return new ParsedCondition(text, null, null);
             }
 
-            if (!ParsedExpression.TryParse(text, out var expression, out var error))
+            if (!ParsedExpression.TryParse(text, ExpressionDisplay.PathSeparator, out var expression, out var error))
             {
                 return new ParsedCondition(text, null, error);
             }
@@ -220,7 +220,7 @@ public partial class ValueMapCase : IConfigurable
                 return new ParsedText(text, null, null);
             }
 
-            if (!TextTemplate.TryParse(text, out var template, out var error))
+            if (!TextTemplate.TryParse(text, ExpressionDisplay.PathSeparator, out var template, out var error))
             {
                 return new ParsedText(text, null, error);
             }
