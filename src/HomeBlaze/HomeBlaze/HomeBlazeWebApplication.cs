@@ -55,7 +55,16 @@ public static class HomeBlazeWebApplication
         HomeBlazeWebApplicationOptions options,
         CancellationToken cancellationToken)
     {
-        var builder = WebApplication.CreateBuilder([.. options.CommandLineArguments]);
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+        {
+            Args = [.. options.CommandLineArguments],
+            ContentRootPath = options.ContentRootPath,
+        });
+
+        if (options.UseBuildStaticWebAssets)
+        {
+            builder.WebHost.UseStaticWebAssets();
+        }
 
         var overrides = new Dictionary<string, string?>();
         if (options.RootConfigurationFile is not null)

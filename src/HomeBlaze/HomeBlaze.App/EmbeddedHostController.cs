@@ -59,6 +59,12 @@ public sealed class EmbeddedHostController : IAsyncDisposable
             // HomeBlaze finds the manifest HomeBlaze's own build produced, regardless of which process hosts it.
             CommandLineArguments = [$"--applicationName={HostingApplicationName}"],
 
+            // The working directory is wherever the app was launched from, so the web root is anchored to the
+            // install folder, where a publish puts wwwroot. A build has no wwwroot there and maps the files
+            // back to their project folders instead, which the Development environment alone would do.
+            ContentRootPath = AppContext.BaseDirectory,
+            UseBuildStaticWebAssets = true,
+
             LogFilePath = _logFilePath,
         };
 

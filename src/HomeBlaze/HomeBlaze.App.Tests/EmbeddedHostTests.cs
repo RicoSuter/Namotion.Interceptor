@@ -42,6 +42,28 @@ public class EmbeddedHostTests : IDisposable
         Assert.True(response.IsSuccessStatusCode, $"/health returned {response.StatusCode}");
     }
 
+    [Theory]
+    [InlineData("/app.css")]
+    [InlineData("/_content/MudBlazor/MudBlazor.min.css")]
+    [InlineData("/_framework/blazor.web.js")]
+    public async Task WhenStarted_ThenStaticAssetsHaveContent(string path)
+    {
+        // Arrange
+        var folder = CreateFullDataFolder("instance");
+        await using var controller = new EmbeddedHostController();
+        var address = await controller.StartAsync(CreateResolver().ResolveFullDataFolder(folder), CancellationToken.None);
+        using var client = new HttpClient { BaseAddress = new Uri(address) };
+
+        // Act
+        var response = await client.GetAsync(path);
+        var content = await response.Content.ReadAsByteArrayAsync();
+
+        // Assert
+        // The endpoint answers 200 even when no file stands behind it, so only the length shows it was served.
+        Assert.True(response.IsSuccessStatusCode, $"{path} returned {response.StatusCode}");
+        Assert.NotEmpty(content);
+    }
+
     [Fact]
     public async Task WhenStartedOnAFullDataFolder_ThenTheDataDirectoryIsThatFolder()
     {

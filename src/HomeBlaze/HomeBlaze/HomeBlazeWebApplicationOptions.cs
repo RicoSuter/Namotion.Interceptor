@@ -23,6 +23,16 @@ public sealed record HomeBlazeWebApplicationOptions
     /// <summary>File to append logs to, or null to leave logging as configured.</summary>
     public string? LogFilePath { get; init; }
 
+    /// <summary>Content root, under which the web root is <c>wwwroot</c>. Null keeps the working directory.</summary>
+    public string? ContentRootPath { get; init; }
+
+    /// <summary>
+    /// Serves static web assets from the project folders they were built in, as the Development environment
+    /// does, whenever the build output holds the manifest that maps them. Published output holds no such
+    /// manifest, so there it has no effect.
+    /// </summary>
+    public bool UseBuildStaticWebAssets { get; init; }
+
     /// <summary>Addresses to bind. Empty keeps whatever the configuration specifies.</summary>
     public IReadOnlyList<string> Urls { get; init; } = [];
 

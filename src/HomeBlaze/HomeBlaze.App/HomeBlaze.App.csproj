@@ -18,4 +18,14 @@
         <EmbeddedResource Include="Resources\bootstrap.html" />
     </ItemGroup>
 
+    <!-- The SDK publishes static web assets only for the project being published, and HomeBlaze is a reference
+         here, so its wwwroot and endpoints manifest would be missing and every asset would be served empty.
+         Running HomeBlaze's own publish steps for them gives the same layout a server publish has.
+         PublishDir is made absolute because a relative one would resolve against HomeBlaze's folder. -->
+    <Target Name="PublishHomeBlazeStaticWebAssets" AfterTargets="Publish">
+        <MSBuild Projects="..\HomeBlaze\HomeBlaze.csproj"
+                 Targets="StaticWebAssetsPrepareForPublish;CopyStaticWebAssetsToPublishDirectory"
+                 Properties="Configuration=$(Configuration);PublishDir=$([System.IO.Path]::GetFullPath('$(PublishDir)'))" />
+    </Target>
+
 </Project>
