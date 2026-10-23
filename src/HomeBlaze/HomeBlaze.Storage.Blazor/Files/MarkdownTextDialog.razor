@@ -28,7 +28,7 @@
                                       CssClass="markdown-text-editor-host"
                                       ConstructionOptions="GetEditorOptions"
                                       OnDidInit="OnEditorInitAsync"
-                                      OnDidChangeModelContent="OnContentChangedAsync"/>
+                                      OnDidChangeModelContent="_contentChangedCallback"/>
             </div>
         </div>
         <MarkdownEditorStyles/>
@@ -93,8 +93,16 @@
     private IJSObjectReference? _escapeWatch;
     private string? _refusal;
     private bool _isSaving;
+
+    // Raised for every typed character. The decorations go to the editor, and the dialog has nothing to render for them.
+    private EventCallback<ModelContentChangedEvent> _contentChangedCallback;
     private bool _isCanceling;
     private bool _isDisposed;
+
+    protected override void OnInitialized()
+    {
+        _contentChangedCallback = EventCallback.Factory.Create<ModelContentChangedEvent>(new NonRenderingReceiver(), OnContentChangedAsync);
+    }
 
     private StandaloneEditorConstructionOptions GetEditorOptions(StandaloneCodeEditor editor)
     {
@@ -169,7 +177,17 @@
             return;
 
         var reference = DotNetObjectReference.Create(this);
-        var escapeWatch = await module.InvokeAsync<IJSObjectReference>("watchEscape", _body, reference);
+        IJSObjectReference escapeWatch;
+        try
+        {
+            escapeWatch = await module.InvokeAsync<IJSObjectReference>("watchEscape", _body, reference);
+        }
+        catch
+        {
+            reference.Dispose();
+            throw;
+        }
+
         if (_isDisposed)
         {
             await escapeWatch.InvokeVoidAsync("dispose");
@@ -310,6 +328,12 @@
         {
             _reference?.Dispose();
         }
+    }
+
+    // Runs a callback without rendering the component that created it.
+    private sealed class NonRenderingReceiver : IHandleEvent
+    {
+        public Task HandleEventAsync(EventCallbackWorkItem callback, object? argument) => callback.InvokeAsync(argument);
     }
 
     /// <summary>Shows the dialog until the text is saved or the dialog is canceled.</summary>
