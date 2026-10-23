@@ -11,6 +11,8 @@ Temperature > 20 and not (Mode == Away)
 Charging {{ subject/ChargingPower }} kW
 ```
 
+The paths of these samples are written with `/` as the separator.
+
 The package has no opinion on where values come from. The host resolves paths and variables, applies pipes and turns results into text; the language decides how to parse an expression, how to combine and compare values, and what is unknown. The [MCP server](mcp.md#filtering-by-value) is one host: its `search` tool filters subjects with it.
 
 ## Grammar
@@ -26,12 +28,12 @@ operand    := literal | path | '(' or ')'
 literal    := number | "text" | 'text' | true | false | null
 ```
 
-- **Keywords** (`and`, `or`, `not`, `true`, `false`, `null`) are read without regard to case. A keyword ends at white space or a parenthesis, so a path such as `note/Text` is not `not`.
+- **Keywords** (`and`, `or`, `not`, `true`, `false`, `null`) are read without regard to case. `and`, `or` and `not` end at white space, an opening parenthesis or the end of the text, so a path such as `note/Text` is not `not`; `true`, `false` and `null` are whole tokens.
 - **Equality** is `==`. A single `=` is an error with the hint `use '==' for equality`.
 - **Both sides** of a comparison may be paths, such as `Power > MaximumPower`.
 - **Bare operands**: an operand without a comparison is a condition. It is true only when its value is the boolean `true`. Any other value is false, and a missing value is unknown. So when `Device` holds a subject, `Device` is false and `not Device` is true; test for a missing value with `Device == null` instead.
-- **Literals**: a number is a token that starts with a digit, or with a sign or a dot followed by a digit, and holds no `/`; it is read as `double` in the invariant culture. A text is in double or single quotes and has no escapes.
-- **A bare word after an operator is text**, such as the name of an enum value in `Mode == Away`, unless it holds the path separator or an index (`Device.Mode`, `Devices[a]`) or is a variable, see [Paths and variables](#paths-and-variables). Elsewhere, a word is a path.
+- **Literals**: a number is a token that starts with a digit, or with a sign or a dot followed by a digit, and holds no `/`; it is read as `double` in the invariant culture. So when the separator is `.`, a word that starts with a digit is a number and a path segment cannot start with a digit. A text is in double or single quotes and has no escapes.
+- **A bare word after an operator is text**, such as the name of an enum value in `Mode == Away`, unless it holds the path separator or an index (`Device.Mode`, `Devices[a].Mode`) or is a variable, see [Paths and variables](#paths-and-variables). Elsewhere, a word is a path.
 - **A path token** ends at white space, a parenthesis, a quote, or one of `| & = ! < >`. Inside brackets everything up to the closing `]` belongs to the token, so a key may hold any of these characters.
 - **Arithmetic is reserved**: `+`, `-`, `*` and `/` standing alone between operands, such as `a - b`, are rejected with `arithmetic is not supported`, so a later version can add arithmetic without changing what an expression means. A sign before a number is part of the number, and these characters inside a path token are part of the path.
 - **Limits**: an expression is at most 1000 characters long and nests at most 32 levels, counting parentheses and each `not`.
@@ -39,13 +41,13 @@ literal    := number | "text" | 'text' | true | false | null
 
 ## Paths and variables
 
-A path is written in the syntax of the host: its segments are divided by a separator character, and a segment may carry an index in brackets, such as `Devices[a].IsOn`. The parser needs the separator to tell a bare word from a path:
+A path is written in the syntax of the host: its segments are divided by a separator character, and a segment may carry an index in brackets, such as `Devices[a].IsOn`. Indexes are always written with `[` and `]`, whatever the separator. The parser needs the separator to tell a bare word from a path, so every parse names it, and `ParsedExpression.PathSeparator` echoes it:
 
 ```csharp
 ParsedExpression.TryParse(text, '.', out var expression, out var error);
 ```
 
-The overload without a separator uses `/`. `ParsedExpression.Paths` lists the distinct paths of an expression in order of first appearance, and `SinglePath` is the path of an expression that is nothing but one path. How a path resolves is up to the host. When it comes from the [registry](registry.md#path-syntax), the host can resolve it with a path provider.
+The separator cannot be white space, a letter, a digit, a quote, a bracket or one of `| & = ! < >`, and `TryParse` throws an `ArgumentException` for such a character. `ParsedExpression.Paths` lists the distinct paths of an expression in order of first appearance, and `SinglePath` is the path of an expression that is nothing but one path. How a path resolves is up to the host. When it comes from the [registry](registry.md#path-syntax), the host can resolve it with a path provider.
 
 Two names are variables with a meaning the host gives them:
 
@@ -71,9 +73,9 @@ An expression is evaluated as a condition with three values: true, false and unk
 
 Two values that are not null compare by these rules, in the class `ExpressionComparer`:
 
-- **Numbers** of any numeric type compare numerically. A `float` is compared with a number literal as a `float`, so a value of `0.1f` equals the literal `0.1`.
+- **Numbers** of any numeric type compare numerically. A `float` compares with any `double`, such as a literal, as a `float`, so a value of `0.1f` equals the literal `0.1`.
 - **NaN** never compares: the comparison is unknown.
-- **Enums** compare with an enum of the same type by order, and with a text by name without regard to case, for `==` and `!=` only.
+- **Enums** compare with a text by name without regard to case, for `==` and `!=` only. Two values of the same enum type compare by order with every operator.
 - **Texts** compare without regard to case for `==` and `!=`, and by ordinal order for `<`, `<=`, `>` and `>=`.
 - **Dates**: a `DateTime` or `DateTimeOffset` compares with a text literal in ISO 8601. A text without an offset is read as UTC, and so is a `DateTime` without a kind.
 - **Booleans** compare with booleans for `==` and `!=` only.
@@ -98,7 +100,7 @@ if (!ParsedExpression.TryParse("Temperature > 20 and not (Mode == Away)", '.', o
 
 Console.WriteLine(condition.EvaluateCondition(ref context)); // True
 
-if (!TextTemplate.TryParse("It is {{ Temperature }} degrees in {{ Mode }} mode.", out var template, out error))
+if (!TextTemplate.TryParse("It is {{ Temperature }} degrees in {{ Mode }} mode.", '.', out var template, out error))
 {
     Console.WriteLine(error);
     return;
@@ -129,11 +131,11 @@ readonly struct DictionaryContext(IReadOnlyDictionary<string, object?> values) :
 
 `ExpressionValue` carries the `Value`, the registered `Property` it was read from, if any, so that a host can format it with the unit or the source of the property, and `IsText` for a value that is already the text to show. Create one with `FromProperty`, `FromValue`, `FromText` or `FromBoolean`.
 
-A `TextTemplate` is a text with expressions between double braces. It is parsed once with `TextTemplate.TryParse` and written with `Render`, which asks the context for the text of each expression with `ToText`. A text without `{{` is plain text, braces cannot be escaped, and paths in a template are written with `/`. An error is that of the first expression that does not parse, or `'{{' is not closed at position <n>`.
+A `TextTemplate` is a text with expressions between double braces. It is parsed once with `TextTemplate.TryParse` and written with `Render`, which asks the context for the text of each expression with `ToText`. A text without `{{` is plain text, braces cannot be escaped, and the paths of its expressions use the separator given to `TryParse`. An error is that of the first expression that does not parse, with a position that counts inside the braces of that expression, from its first character that is no white space, or `'{{' is not closed at position <n>`, which counts in the whole text.
 
 ## Pipes
 
-A pipe after an expression, such as `Power | format:N1`, passes the result on to a function of the host. A pipe has a name and arguments divided by colons. An argument is a literal or a word, or a text in quotes, and is passed to the host as written. Pipes apply left to right, and `|` is not `||`.
+A pipe after an expression, such as `Power | format:N1`, passes the result on to a function of the host. A pipe has a name and arguments divided by colons. An argument is a literal or a word, or a text in quotes, and is passed to the host without its quotes. Pipes apply left to right, and `|` is not `||`.
 
 The language does not know any pipe. `ParsedExpression.Pipes` lists them, so a host can refuse an unknown one when it checks the expression, and `Evaluate` calls `IExpressionContext.ApplyPipe` for each of them. A host that evaluates conditions, such as a filter, rejects pipes, because a condition has no text to format.
 
