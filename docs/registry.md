@@ -361,10 +361,6 @@ Sensors['Kitchen [north]'].Temperature
 - A key is quoted when its text is empty, starts with `'` or contains `]`: `Sensors['Kitchen [north]']`, `Sensors['''quoted']`, `Sensors['']`. Every other key is written as is.
 - A path `TryGetPath` writes resolves back to the same entry for collection positions and string, integer, `Guid` and enum keys. For other key types it does when the key's text is unique within its dictionary, otherwise the first entry with that text wins (for example the keys `5` and `"5"` in a `Dictionary<object, T>`, `DateTime` keys that differ below one second, or custom keys without a `ToString` override).
 
-#### Every path of a subject
-
-`TryGetPath` follows the first parent at every level, so a subject reachable through several parents gets one of its paths. `subject.TryGetPaths(pathProvider, paths, maxPaths)` writes one path per chain of parents up to a subject without parents, in parent order, and skips chains that return to a subject already on them. It returns false when a chain cannot be written, for example because a property on it is excluded by `IsPropertyIncluded`, when more than `maxPaths` (default 64) chains exist, or when the search takes more than 64 parent links per allowed path, which bounds the work in a densely connected parent graph; the paths that could be written are still added.
-
 #### Reading keys
 
 - A collection reads a position in canonical form: `[1]`, not `[01]` or `[+1]`. A position outside the collection resolves to no subject; `TryGetPropertyFromPath` still returns it as the key of the last segment (see below).

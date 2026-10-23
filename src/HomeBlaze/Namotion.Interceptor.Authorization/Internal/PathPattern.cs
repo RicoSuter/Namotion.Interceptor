@@ -4,7 +4,8 @@ namespace Namotion.Interceptor.Authorization.Internal;
 
 /// <summary>
 /// A compiled path pattern. It matches a path when it matches the whole path or a prefix of it, which is how a
-/// rule on a subject also applies to everything below it.
+/// rule on a subject also applies to everything below it. A pattern segment matches a link in any spelling the link
+/// carries.
 /// </summary>
 internal sealed class PathPattern
 {
@@ -49,7 +50,7 @@ internal sealed class PathPattern
     private static bool HasOuterWhitespace(string text)
         => text.Length > 0 && (char.IsWhiteSpace(text[0]) || char.IsWhiteSpace(text[^1]));
 
-    public bool Matches(List<(string segment, string? index)> path)
+    public bool Matches(PathLink[] path)
     {
         // Backtracking to the last ** suffices: ** matches any segments, every other pattern segment exactly one,
         // and a used-up pattern matches whatever path remains.
@@ -65,12 +66,12 @@ internal sealed class PathPattern
                 afterLastAnySegments = ++patternIndex;
                 pathAtLastAnySegments = pathIndex;
             }
-            else if (pathIndex < path.Count && _segments[patternIndex].Matches(path[pathIndex]))
+            else if (pathIndex < path.Length && _segments[patternIndex].Matches(path[pathIndex]))
             {
                 patternIndex++;
                 pathIndex++;
             }
-            else if (afterLastAnySegments >= 0 && pathAtLastAnySegments < path.Count)
+            else if (afterLastAnySegments >= 0 && pathAtLastAnySegments < path.Length)
             {
                 patternIndex = afterLastAnySegments;
                 pathIndex = ++pathAtLastAnySegments;
@@ -86,8 +87,15 @@ internal sealed class PathPattern
 
     private readonly record struct Segment(string Name, string? Index, bool IsAnySegments)
     {
-        public bool Matches((string segment, string? index) pathSegment)
-            => Glob.IsMatch(Name, pathSegment.segment) &&
-               (Index is null || (pathSegment.index is not null && Glob.IsMatch(Index, pathSegment.index)));
+        // The explicit spelling names the property and optionally its index; the bare spelling of an [InlinePaths]
+        // key is a name only, so a segment with an index never matches it.
+        public bool Matches(in PathLink link)
+            => MatchesExplicit(link) || (link.BareKey is not null && Index is null && Glob.IsMatch(Name, link.BareKey));
+
+        private bool MatchesExplicit(in PathLink link)
+            => link.Segment is not null && Glob.IsMatch(Name, link.Segment) && MatchesIndex(link.Index);
+
+        private bool MatchesIndex(string? index)
+            => Index is null || (index is not null && Glob.IsMatch(Index, index));
     }
 }

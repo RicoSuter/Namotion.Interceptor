@@ -36,10 +36,66 @@ public class PathPatternTests
         // Arrange
         var provider = SlashPathProvider.Instance;
         var compiled = PathPattern.Parse(pattern, provider, "Test");
-        Assert.True(provider.TryParsePath(path, out var segments, out _));
+        var links = ToLinks(provider, path);
 
         // Act
-        var result = compiled.Matches(segments);
+        var result = compiled.Matches(links);
+
+        // Assert
+        Assert.Equal(expected, result);
+    }
+
+    [Theory]
+    [InlineData("/Security/FullReader", true)]
+    [InlineData("/Security/Roles[FullReader]", true)]
+    [InlineData("/Security/Roles", true)]
+    [InlineData("/Security/Roles[Full*]", true)]
+    [InlineData("/Security/Full*", true)]
+    [InlineData("/Security/FullReader[x]", false)]
+    [InlineData("/Security/Other", false)]
+    [InlineData("/Security/Roles[Other]", false)]
+    public void WhenPatternIsMatchedAgainstAnInlineKeyWithBothSpellings_ThenEitherSpellingMatches(string pattern, bool expected)
+    {
+        // Arrange
+        var compiled = PathPattern.Parse(pattern, SlashPathProvider.Instance, "Test");
+        PathLink[] links = [new("Security", null, null), new("Roles", "FullReader", "FullReader")];
+
+        // Act
+        var result = compiled.Matches(links);
+
+        // Assert
+        Assert.Equal(expected, result);
+    }
+
+    [Theory]
+    [InlineData("/Security/Roles[Wifi]", true)]
+    [InlineData("/Security/Roles", true)]
+    [InlineData("/Security/Wifi", false)]
+    public void WhenPatternIsMatchedAgainstAnInlineKeyShadowedByAProperty_ThenOnlyTheExplicitSpellingMatches(string pattern, bool expected)
+    {
+        // Arrange
+        var compiled = PathPattern.Parse(pattern, SlashPathProvider.Instance, "Test");
+        PathLink[] links = [new("Security", null, null), new("Roles", "Wifi", null)];
+
+        // Act
+        var result = compiled.Matches(links);
+
+        // Assert
+        Assert.Equal(expected, result);
+    }
+
+    [Theory]
+    [InlineData("/Security/FullReader", true)]
+    [InlineData("/Security/Roles[FullReader]", false)]
+    [InlineData("/Security/Roles", false)]
+    public void WhenPatternIsMatchedAgainstAnInlineKeyWhoseExplicitFormIsShadowed_ThenOnlyTheBareSpellingMatches(string pattern, bool expected)
+    {
+        // Arrange
+        var compiled = PathPattern.Parse(pattern, SlashPathProvider.Instance, "Test");
+        PathLink[] links = [new("Security", null, null), new(null, "FullReader", "FullReader")];
+
+        // Act
+        var result = compiled.Matches(links);
 
         // Assert
         Assert.Equal(expected, result);
@@ -60,5 +116,11 @@ public class PathPatternTests
         // Assert
         Assert.Contains("Reader", exception.Message);
         Assert.Contains(expectedMessagePart, exception.Message);
+    }
+
+    private static PathLink[] ToLinks(PathProviderBase provider, string path)
+    {
+        Assert.True(provider.TryParsePath(path, out var segments, out _));
+        return segments.Select(segment => new PathLink(segment.segment, segment.index, null)).ToArray();
     }
 }

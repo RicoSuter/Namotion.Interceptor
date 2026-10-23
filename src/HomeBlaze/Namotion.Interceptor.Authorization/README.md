@@ -53,7 +53,7 @@ Patterns are parsed with the registry's path parser of the `PathProviderBase` gi
 
 Paths select subjects, never members; `Members` selects those.
 
-- A pattern is matched against the canonical path the provider writes for the subject, with the provider's segment names and `[InlinePaths]` keys as it writes them, not against other spellings the provider would also resolve.
+- A pattern matches the spellings the path provider writes plus the bare key of an `[InlinePaths]` entry, so `/Security/FullReader` and `/Security/Roles[FullReader]` both match and `/Security/Roles` covers every key. A provider that also resolves other spellings, such as names in another case, is matched only in the spelling it writes. A key the reader only resolves in one spelling, because another property's segment shadows the other, is matched in that spelling.
 - Segment text is taken as written, and a segment name or index with leading or trailing whitespace, such as `/Home/ Kitchen`, fails compilation; a quoted key may contain inner spaces, as in `/Rooms['Living Room']`.
 - A pattern written with another provider's separator never matches: under a `.`-separated provider `.Home/Kitchen` is the single segment `Home/Kitchen`. For such a provider a pattern starts with `.`, as in `.Home.Kitchen`.
 - Quoting a key does not make `*` literal: `Machines['CNC*']` is still a glob.
@@ -113,7 +113,7 @@ Give a principal whose roles fail to compile `AuthorizationPolicy.DenyAll`, whic
 
 ## Performance and threading
 
-A compiled policy is immutable and safe to share across threads. Selectors are checked cheapest first: action, member glob, tags, type, path. A path rule is the expensive one: when one is reached for a member, the subject's paths are enumerated and parsed once per call; `CanRead(subject)` does this once for the subject's members and once for each link on the way to a root that reaches a path rule.
+A compiled policy is immutable and safe to share across threads. Selectors are checked cheapest first: action, member glob, tags, type, path. A path rule is the expensive one: when one is reached for a member, the subject's paths are enumerated once per call; `CanRead(subject)` does this once for the subject's members and once for each link on the way to a root that reaches a path rule.
 
 Measured with `AuthorizationBenchmark` (2050 subjects, about 30 rules) on one machine:
 

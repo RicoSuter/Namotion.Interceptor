@@ -122,4 +122,58 @@ public class PathSelectorTests
         Assert.False(policy.CanRead(Member(kitchen.Sensor!, nameof(Sensor.Temperature))));
         Assert.False(policy.CanRead(Member(home.Rooms["Bedroom"].Lights["Lamp"], nameof(Light.IsOn))));
     }
+
+    [Theory]
+    [InlineData("/Areas[Garage]")]
+    [InlineData("/Garage")]
+    [InlineData("/Areas")]
+    public void WhenDenyNamesAnInlineKeyInEitherSpelling_ThenItsSubjectsAreDenied(string deniedPath)
+    {
+        // Arrange
+        var home = Create();
+        var door = AddArea(home, "Garage");
+        var policy = Compile(Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, paths: [deniedPath])]));
+
+        // Act & Assert
+        Assert.False(policy.CanRead(Member(door, nameof(Light.Brightness))));
+        Assert.True(policy.CanRead(Member(home.Rooms["Kitchen"].Lights["Ceiling"], nameof(Light.Brightness))));
+    }
+
+    [Fact]
+    public void WhenAllowNamesAnInlineKeyBare_ThenOnlyItsSubjectsAreAllowed()
+    {
+        // Arrange
+        var home = Create();
+        var door = AddArea(home, "Garage");
+        var policy = Compile(Role("Reader", allow: [Rule(Read, paths: ["/Garage"])]));
+
+        // Act & Assert
+        Assert.True(policy.CanRead(Member(door, nameof(Light.Brightness))));
+        Assert.False(policy.CanRead(Member(home.Rooms["Kitchen"].Lights["Ceiling"], nameof(Light.Brightness))));
+    }
+
+    [Fact]
+    public void WhenAnInlineKeyIsShadowedByAProperty_ThenTheBareSpellingNamesTheProperty()
+    {
+        // Arrange
+        var home = Create();
+        var door = AddArea(home, "Wifi");
+        var bare = Compile(Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, paths: ["/Wifi"])]));
+        var explicitForm = Compile(Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, paths: ["/Areas[Wifi]"])]));
+
+        // Act & Assert
+        Assert.False(bare.CanRead(Member(home.Wifi!, nameof(Wifi.Ssid))));
+        Assert.True(bare.CanRead(Member(door, nameof(Light.Brightness))));
+        Assert.False(explicitForm.CanRead(Member(door, nameof(Light.Brightness))));
+        Assert.True(explicitForm.CanRead(Member(home.Wifi!, nameof(Wifi.Ssid))));
+    }
+
+    // Adds a room with a Door light to Home.Areas under the key and returns the light.
+    private static Light AddArea(Home home, string key)
+    {
+        var door = new Light();
+        var room = new Room { Lights = new Dictionary<string, Light> { ["Door"] = door } };
+        home.Areas = new Dictionary<string, Room> { [key] = room };
+        return door;
+    }
 }

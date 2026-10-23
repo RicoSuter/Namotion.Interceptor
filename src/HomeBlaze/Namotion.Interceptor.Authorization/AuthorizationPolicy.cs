@@ -22,7 +22,7 @@ public sealed class AuthorizationPolicy
     private const int MaxPaths = 64;
 
     // The root's single empty path; PathPattern.Matches does not mutate it, so it is shared.
-    private static readonly List<(string segment, string? index)>[] RootPaths = [[]];
+    private static readonly PathLink[][] RootPaths = [[]];
 
     private static readonly TypeNameCache TypeNames = new();
 
@@ -182,7 +182,7 @@ public sealed class AuthorizationPolicy
         return null;
     }
 
-    // Selectors are checked cheapest first; the paths are written and parsed once per evaluation and only when a rule with paths gets that far.
+    // Selectors are checked cheapest first; the paths are enumerated once per evaluation and only when a rule with paths gets that far.
     private bool Matches(CompiledRule rule, ulong bit, bool isDeny, ref MatchContext context)
         => (rule.Actions & bit) != 0 && MatchesMemberSelectors(rule, ref context) && MatchesPaths(rule.Paths, isDeny, ref context);
 
@@ -263,9 +263,9 @@ public sealed class AuthorizationPolicy
         return false;
     }
 
-    // Every path of the subject; the root has the single empty path. Incomplete when a path could not be written or parsed,
-    // more than MaxPaths exist, or the subject has parents but no path was found.
-    private List<(string segment, string? index)>[] GetPaths(RegisteredSubject subject, out bool isComplete)
+    // Every path of the subject; the root has the single empty path. Incomplete when a path could not be written, more
+    // than MaxPaths exist, or the subject has parents but no path was found.
+    private PathLink[][] GetPaths(RegisteredSubject subject, out bool isComplete)
     {
         if (subject.Parents.Length == 0)
         {
@@ -273,32 +273,12 @@ public sealed class AuthorizationPolicy
             return RootPaths;
         }
 
-        var written = new List<string>();
-        isComplete = subject.TryGetPaths(_pathProvider!, written, MaxPaths) && written.Count > 0;
-
-        var paths = new List<(string segment, string? index)>[written.Count];
-        var count = 0;
-        foreach (var path in written)
-        {
-            if (_pathProvider!.TryParsePath(path, out var segments, out _))
-            {
-                paths[count++] = segments;
-            }
-            else
-            {
-                isComplete = false;
-            }
-        }
-
-        if (count < paths.Length)
-        {
-            Array.Resize(ref paths, count);
-        }
-
-        return paths;
+        var paths = new List<PathLink[]>();
+        isComplete = SubjectPaths.TryGetPaths(subject, _pathProvider!, paths, MaxPaths) && paths.Count > 0;
+        return [.. paths];
     }
 
-    private static bool AnyPathMatches(PathPattern[] patterns, List<(string segment, string? index)>[] paths)
+    private static bool AnyPathMatches(PathPattern[] patterns, PathLink[][] paths)
     {
         foreach (var pattern in patterns)
         {
@@ -317,7 +297,7 @@ public sealed class AuthorizationPolicy
     // The paths belong to the subject, not the member, so they are carried from member to member and written at most once.
     private bool HasReadableMember(RegisteredSubject subject)
     {
-        List<(string segment, string? index)>[]? paths = null;
+        PathLink[][]? paths = null;
         var pathsComplete = false;
         var pathsComputed = false;
         foreach (var member in subject.Properties)
@@ -372,7 +352,7 @@ public sealed class AuthorizationPolicy
         public readonly RegisteredSubjectProperty Member = member;
         public string? MemberName;
         public IReadOnlyCollection<string>? Tags;
-        public List<(string segment, string? index)>[]? Paths;
+        public PathLink[][]? Paths;
         public bool PathsComplete;
         public bool PathsComputed;
     }
