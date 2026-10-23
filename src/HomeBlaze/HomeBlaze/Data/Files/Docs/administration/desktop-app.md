@@ -13,6 +13,10 @@ HomeBlaze also ships as a native desktop app for Windows, Linux and macOS. It op
 
 Point the app at a HomeBlaze instance that runs elsewhere, by its address, and the window behaves like a browser tab open to that address. Or let the app run HomeBlaze itself: it starts HomeBlaze in the background and opens the window on it. A locally run instance listens only on this computer, so nothing else on the network can reach it, which matters because HomeBlaze itself has no login.
 
+## Links to other sites
+
+The window always stays on HomeBlaze. A link to another site, including one that would open a new tab, opens in your default browser instead, and an email link opens your mail program. Like the settings shortcut below, this needs the HomeBlaze instance shown in the window to support it, so with an older remote instance such a link still opens inside the window, and restarting the app is the way back.
+
 ## Choosing a folder
 
 Running HomeBlaze locally needs a folder to keep its data in. The key difference between the two kinds you can choose: a data folder is a complete, self-contained instance you can move or back up as a unit, while a folder of files stays exactly as it is, because HomeBlaze keeps its own database and settings elsewhere.

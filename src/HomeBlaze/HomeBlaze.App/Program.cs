@@ -124,6 +124,18 @@ internal static class Program
     {
         try
         {
+            if (message.StartsWith(ExternalLinks.MessagePrefix, StringComparison.Ordinal))
+            {
+                // A rejected URL is dropped, and a failed open is traced inside OpenInBackground, so neither
+                // reaches the catch below, which would throw the user out of the instance onto settings.
+                if (ExternalLinks.TryParseMessage(message, out var uri))
+                {
+                    ExternalLinks.OpenInBackground(uri);
+                }
+
+                return;
+            }
+
             if (message == "shell:settings")
             {
                 await ConnectionGate.WaitAsync();
