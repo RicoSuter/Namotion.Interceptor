@@ -4,10 +4,20 @@
    its nodes, takes the pointer back with the class edit-mode-interactive, and one that the widget offers only once it
    is selected, like the empty cells of a grid that add a widget, with edit-mode-selected-interactive. */
 .subject-component-wrapper.selectable {
+    /* The color of the outlines as r, g, b, and the color of the selected outline, which dark mode lightens. The rules of
+       the dark mode and of the bar, which takes the same colors, are in MainLayout.razor.css of HomeBlaze.Host. */
+    --selection-rgb: var(--mud-palette-primary-rgb);
+    --selection-strong: var(--mud-palette-primary);
     pointer-events: auto;
     cursor: pointer;
-    outline: 1px dashed rgba(var(--mud-palette-primary-rgb), 0.35);
+    outline: 1px dashed rgba(var(--selection-rgb), 0.35);
     outline-offset: 1px;
+}
+
+/* A block of text of a page is green, so that it stands apart from the widgets around it. */
+.subject-component-wrapper.selectable.text-block {
+    --selection-rgb: var(--mud-palette-success-rgb);
+    --selection-strong: var(--mud-palette-success);
 }
 
 /* A widget that shows nothing, such as a ValueMap, would otherwise be an invisible tab stop. */
@@ -39,45 +49,21 @@
 
 @media (hover: hover) {
     .subject-component-wrapper.selectable:not(.selected):hover:not(:has(.subject-component-wrapper.selectable:hover)) {
-        outline: 1px solid rgba(var(--mud-palette-primary-rgb), 0.7);
+        outline: 1px solid rgba(var(--selection-rgb), 0.7);
     }
 }
 
 .subject-component-wrapper.selectable:focus-visible {
-    outline: 2px solid rgba(var(--mud-palette-primary-rgb), 0.7);
+    outline: 2px solid rgba(var(--selection-rgb), 0.7);
 }
 
 .subject-component-wrapper.selectable.selected {
-    outline: 2px solid var(--mud-palette-primary);
+    outline: 2px solid var(--selection-strong);
 }
 
 /* The outline of the selection would hide the focus, so a focused selected widget also gets a ring around it. */
 .subject-component-wrapper.selectable.selected:focus-visible {
-    box-shadow: 0 0 0 5px rgba(var(--mud-palette-primary-rgb), 0.35);
-}
-
-/* A block of text of a page is green, so that it stands apart from the widgets around it. Each rule is one class more
-   specific than the rule of a widget above it. The dark mode tones are in MainLayout.razor.css of HomeBlaze.Host. */
-.subject-component-wrapper.selectable.text-block {
-    outline-color: rgba(var(--mud-palette-success-rgb), 0.35);
-}
-
-@media (hover: hover) {
-    .subject-component-wrapper.selectable.text-block:not(.selected):hover:not(:has(.subject-component-wrapper.selectable:hover)) {
-        outline-color: rgba(var(--mud-palette-success-rgb), 0.7);
-    }
-}
-
-.subject-component-wrapper.selectable.text-block:focus-visible {
-    outline-color: rgba(var(--mud-palette-success-rgb), 0.7);
-}
-
-.subject-component-wrapper.selectable.selected.text-block {
-    outline-color: var(--mud-palette-success);
-}
-
-.subject-component-wrapper.selectable.selected.text-block:focus-visible {
-    box-shadow: 0 0 0 5px rgba(var(--mud-palette-success-rgb), 0.35);
+    box-shadow: 0 0 0 5px rgba(var(--selection-rgb), 0.35);
 }
 
 /* The bar sits above the top right corner of the selected widget and flips below the widget when there is no room.

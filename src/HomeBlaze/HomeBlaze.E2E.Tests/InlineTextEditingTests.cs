@@ -738,6 +738,29 @@ public class InlineTextEditingTests
     }
 
     [Fact]
+    public async Task WhenAWidgetOrATextBlockIsSelected_ThenItsBarHasABorderInTheColorOfItsOutline()
+    {
+        // Arrange: the server runs in dark mode, which lightens both colors.
+        var page = await OpenPageInInlineModeAsync();
+        var cardWrapper = page.Locator(".subject-component-wrapper.selectable:has(> [data-testid='card'])")
+            .Filter(new() { Has = page.GetByTestId("card-title").GetByText("Text Card", new() { Exact = true }) });
+        var primary = await page.ResolveColorAsync("var(--mud-palette-primary-lighten)");
+        var success = await page.ResolveColorAsync("var(--mud-palette-success-lighten)");
+
+        // Act
+        var cardBar = await page.GetCard("Text Card").Locator(".mud-card-header").SelectWidgetAsync();
+        await Assertions.Expect(cardBar).Not.ToHaveClassAsync(new Regex(@"\btext-block-bar\b"), new() { Timeout = Timeout });
+        var cardColors = new[] { await GetOutlineColorAsync(cardWrapper), await GetBorderColorAsync(cardBar) };
+        var textBar = await SelectTextAsync(page, "First paragraph");
+        await Assertions.Expect(textBar).ToHaveClassAsync(new Regex(@"\btext-block-bar\b"), new() { Timeout = Timeout });
+        var textColors = new[] { await GetOutlineColorAsync(GetTextWrapper(page, "First paragraph")), await GetBorderColorAsync(textBar) };
+
+        // Assert
+        Assert.Equal(new[] { primary, primary }, cardColors);
+        Assert.Equal(new[] { success, success }, textColors);
+    }
+
+    [Fact]
     public async Task WhenAOneLineParagraphInASelectedCardIsClickedInItsMiddle_ThenTheParagraphIsSelected()
     {
         // Arrange
@@ -1085,6 +1108,9 @@ public class InlineTextEditingTests
 
     private static Task<string> GetOutlineColorAsync(ILocator element) =>
         element.EvaluateAsync<string>("element => getComputedStyle(element).outlineColor");
+
+    private static Task<string> GetBorderColorAsync(ILocator element) =>
+        element.EvaluateAsync<string>("element => getComputedStyle(element).borderTopColor");
 
     // The success color of both palettes, #007932 and its lightened tone #0dde9c, has its largest channel in green, unlike
     // the primary colors.
