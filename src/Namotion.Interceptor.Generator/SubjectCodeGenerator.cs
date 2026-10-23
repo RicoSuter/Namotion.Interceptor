@@ -206,10 +206,8 @@ internal static class SubjectCodeGenerator
         builder.AppendLine("        {");
         builder.AppendLine("            lock (((IInterceptorSubject)this).SyncRoot)");
         builder.AppendLine("            {");
-        // Interface dispatch starts the merge from the most-derived property set.
-        builder.AppendLine("                _properties = ((IInterceptorSubject)this).Properties");
-        builder.AppendLine("                    .Concat(properties.Select(p => new KeyValuePair<string, SubjectPropertyMetadata>(p.Name, p)))");
-        builder.AppendLine("                    .ToFrozenDictionary();");
+        // The helper reads Properties through the interface, which starts the merge from the most-derived property set.
+        builder.AppendLine("                _properties = ((IInterceptorSubject)this).MergeProperties(properties);");
         builder.AppendLine("            }");
         builder.AppendLine("        }");
         builder.AppendLine();

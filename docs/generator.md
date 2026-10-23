@@ -790,9 +790,12 @@ public class TrackedEntityBase : IInterceptorSubject, INotifyPropertyChanged, IR
         => GetInstanceProperties() ?? DefaultProperties;
 
     void IInterceptorSubject.AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
-        => _properties = ((IInterceptorSubject)this).Properties
-            .Concat(properties.Select(p => new KeyValuePair<string, SubjectPropertyMetadata>(p.Name, p)))
-            .ToFrozenDictionary();
+    {
+        lock (((IInterceptorSubject)this).SyncRoot)
+        {
+            _properties = ((IInterceptorSubject)this).MergeProperties(properties);
+        }
+    }
 
     public static IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties { get; }
         = FrozenDictionary<string, SubjectPropertyMetadata>.Empty;
@@ -830,7 +833,7 @@ public partial class Machine : TrackedEntityBase
 
 The list above is checked by looking at member signatures, which cannot see what the members do. Three requirements are behavioural, and a base class that gets one of them wrong passes every check and then misbehaves at runtime.
 
-1. **`AddProperties` must merge starting from `((IInterceptorSubject)this).Properties`**, not from its own `DefaultProperties` and not from its own backing field, and it must store the result in the field that `GetInstanceProperties()` returns. Merging from its own field drops the subclass's `DefaultProperties` on the first call, so the subject loses its own generated properties.
+1. **`AddProperties` must merge starting from `((IInterceptorSubject)this).Properties`**, not from its own `DefaultProperties` and not from its own backing field, and it must store the result in the field that `GetInstanceProperties()` returns. Merging from its own field drops the subclass's `DefaultProperties` on the first call, so the subject loses its own generated properties. `MergeProperties` from the core package merges that way and throws `InvalidOperationException` on a repeated property name without changing anything, so an implementation that calls it under `SyncRoot` and stores the result satisfies this requirement.
 2. **The three helpers must route through the same executor that `IInterceptorSubject.Context` publishes for that instance.** A base class that keeps a second executor for the helpers still compiles, and then writes look fine while no interceptor ever sees them.
 3. **`IInterceptorSubject.Context` must return an `IInterceptorExecutor` built for that instance.** `InterceptorExecutor` binds to its subject when it is constructed, and other parts of the library cast `Context` to `IInterceptorExecutor` without checking, so a borrowed or shared context misroutes every property reference.
 
