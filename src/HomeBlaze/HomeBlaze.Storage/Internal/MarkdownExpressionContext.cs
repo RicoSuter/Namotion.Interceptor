@@ -35,6 +35,9 @@ internal readonly struct MarkdownExpressionContext(
         return property is null ? ExpressionValue.Missing : ExpressionValue.FromProperty(property, property.GetValue());
     }
 
+    // The text of a page binds no variable, and MarkdownExpressions refuses one before an expression is evaluated.
+    public ExpressionValue ResolveVariable(string variable, string? memberPath) => ExpressionValue.Missing;
+
     public ExpressionValue ApplyPipe(string name, ImmutableArray<string> arguments, ExpressionValue input) =>
         ExpressionValue.FromText(name.Equals(MarkdownExpressions.RawPipe, StringComparison.OrdinalIgnoreCase)
             ? input.IsText ? (string)input.Value! : RawValueFormatter.Format(input.Value)

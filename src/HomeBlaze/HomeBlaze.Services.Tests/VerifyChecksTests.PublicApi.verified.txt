@@ -379,6 +379,8 @@ namespace HomeBlaze.Services.Expressions
     {
         HomeBlaze.Services.Expressions.ExpressionValue ApplyPipe(string name, System.Collections.Immutable.ImmutableArray<string> arguments, HomeBlaze.Services.Expressions.ExpressionValue input);
         HomeBlaze.Services.Expressions.ExpressionValue ResolvePath(string path);
+        HomeBlaze.Services.Expressions.ExpressionValue ResolveVariable(string variable, string? memberPath);
+        string ToText(HomeBlaze.Services.Expressions.ExpressionValue result);
     }
     public sealed class ParsedExpression
     {
@@ -393,6 +395,14 @@ namespace HomeBlaze.Services.Expressions
         public HomeBlaze.Services.Expressions.ExpressionValue EvaluateWithoutPipes<TContext>(ref TContext context)
             where TContext :  struct, HomeBlaze.Services.Expressions.IExpressionContext { }
         public static bool TryParse(string text, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out HomeBlaze.Services.Expressions.ParsedExpression? expression, [System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out string? error) { }
+    }
+    public sealed class TextTemplate
+    {
+        public System.Collections.Immutable.ImmutableArray<HomeBlaze.Services.Expressions.ParsedExpression> Expressions { get; }
+        public string Text { get; }
+        public string Render<TContext>(ref TContext context)
+            where TContext :  struct, HomeBlaze.Services.Expressions.IExpressionContext { }
+        public static bool TryParse(string text, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out HomeBlaze.Services.Expressions.TextTemplate? template, [System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out string? error) { }
     }
 }
 namespace HomeBlaze.Services.Lifecycle
