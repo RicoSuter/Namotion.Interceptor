@@ -118,7 +118,7 @@
     private async Task WatchEscapeAsync()
     {
         var reference = DotNetObjectReference.Create(this);
-        IJSObjectReference module;
+        IJSObjectReference? module = null;
         IJSObjectReference escapeWatch;
         try
         {
@@ -129,6 +129,7 @@
         {
             // Without the watch, Escape does nothing and Cancel still asks before it discards a change.
             reference.Dispose();
+            await DisposeModuleAsync(module);
             return;
         }
 
@@ -144,6 +145,21 @@
         _module = module;
         _reference = reference;
         _escapeWatch = escapeWatch;
+    }
+
+    private static async Task DisposeModuleAsync(IJSObjectReference? module)
+    {
+        if (module is null)
+            return;
+
+        try
+        {
+            await module.DisposeAsync();
+        }
+        catch (Exception exception) when (exception is JSException or OperationCanceledException or JSDisconnectedException)
+        {
+            // The circuit is gone, and the module with it.
+        }
     }
 
     /// <summary>Called by the module of the dialog for an Escape in the dialog that the editor did not take.</summary>
