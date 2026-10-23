@@ -68,7 +68,7 @@ namespace TestNamespace
                         (o) => ((DeepNestedSubject)o).Value,
                         (o, v) => ((DeepNestedSubject)o).Value = (int)v,
                         isIntercepted: true,
-                        isDynamic: false),
+                        isDynamic: false).WithStoredValueReader<int>(static (o) => ((DeepNestedSubject)o)._Value),
             }
             .ToFrozenDictionary();
 
