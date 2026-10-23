@@ -348,7 +348,7 @@ Both built-in MQTT connectors implement liveness monitoring and report through t
 
 **`IsOperational` for the client means the connection to the broker is up.** It is set as soon as the connect returns, before the property subscriptions are established, so on the first connect it leads them by the duration of the subscribe. After a reconnect it is raised only once resubscription and the initial-state reload have both succeeded, because a client that reconnected but could not resubscribe is not serving anything. It drops on every disconnect, including one the connection monitor is about to recover from, and on teardown.
 
-**`IsOperational` for the server means the broker is listening.**
+**`IsOperational` for the server means the broker is listening.** The server restarts on failure with exponential backoff and jitter, as described in [SubjectServerBase](connectors.md#subjectserverbase).
 
 Neither connector measures throughput, so `Throughput.IncomingPerSecond` and `Throughput.OutgoingPerSecond` are both `null` rather than `0.0`.
 

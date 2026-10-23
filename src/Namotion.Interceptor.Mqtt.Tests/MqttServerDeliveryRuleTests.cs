@@ -29,7 +29,7 @@ public class MqttServerDeliveryRuleTests
         await using var server = new MqttSubjectServer(subject, new MqttServerConfiguration(), NullLogger<MqttSubjectServer>.Instance);
 
         // Act
-        using var processor = server.CreateChangeQueueProcessor();
+        using var processor = server.CreateOutboundProcessor(dropHandler: null);
 
         // Assert
         Assert.Equal(ChangeDeliveryRule.SourceValuesAreSettled, processor.DeliveryRule);
