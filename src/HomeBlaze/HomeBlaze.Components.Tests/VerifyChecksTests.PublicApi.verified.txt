@@ -483,8 +483,6 @@ namespace HomeBlaze.Components
         public HomeBlaze.Components.PageAddTargetKind Kind { get; }
         public string? Label { get; }
         public string? SlotName { get; }
-        public static HomeBlaze.Components.PageAddTarget? Find(System.Collections.Generic.IReadOnlyList<HomeBlaze.Components.PageAddTarget> targets, string slotName) { }
-        public static string GetSlotLabel(string slotName) { }
     }
     public enum PageAddTargetKind
     {

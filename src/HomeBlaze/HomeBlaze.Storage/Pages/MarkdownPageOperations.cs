@@ -163,14 +163,8 @@ internal static class MarkdownPageOperations
             return null;
         }
 
-        if (joinsHtml)
-        {
-            refusal = "The text would join the HTML next to it.";
-            return null;
-        }
-
         var owner = textBlock.Owner;
-        if (IsAfterOpenHtml(page, owner, targetLine))
+        if (joinsHtml || IsAfterOpenHtml(page, owner, targetLine))
         {
             refusal = "The text would join the HTML next to it.";
             return null;

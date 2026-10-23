@@ -50,7 +50,7 @@ public sealed class PageAddTarget
     public string? AddItemName => Kind == PageAddTargetKind.ConfiguredItem ? $"Add {Label}" : null;
 
     /// <summary>Gets the slot named <paramref name="slotName"/> among <paramref name="targets"/>, or null.</summary>
-    public static PageAddTarget? Find(IReadOnlyList<PageAddTarget> targets, string slotName)
+    internal static PageAddTarget? Find(IReadOnlyList<PageAddTarget> targets, string slotName)
     {
         foreach (var target in targets)
         {
@@ -67,7 +67,7 @@ public sealed class PageAddTarget
     /// Gets the name of a slot as words: the first letter as it is, a space before each capital that does not follow a capital,
     /// and every capital after the first letter in lower case.
     /// </summary>
-    public static string GetSlotLabel(string slotName)
+    internal static string GetSlotLabel(string slotName)
     {
         StringBuilder? builder = null;
         for (var index = 1; index < slotName.Length; index++)
