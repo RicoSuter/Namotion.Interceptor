@@ -91,8 +91,10 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     {
         var property = change.Property;
 
-        // Skip properties without tracking data (never participated in the dependency graph).
-        var data = property.TryGetDerivedPropertyData();
+        // Skip properties without tracking data (never in the dependency graph, or already detached).
+        // Removing the data makes a later attach start from the first-attach state, so the
+        // order in which a subject's properties are attached again does not matter.
+        var data = property.TryRemoveDerivedPropertyData();
         if (data is null)
         {
             return;
@@ -213,7 +215,14 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         object? oldValue;
 
         // Phase 1: Acquire recalculation ownership (brief lock).
-        var data = derivedProperty.GetDerivedPropertyData();
+        // TryGet, not Get: detach removes the data, and creating a fresh entry here would
+        // resurrect a detached property's used-by links from a stale used-by snapshot.
+        var data = derivedProperty.TryGetDerivedPropertyData();
+        if (data is null)
+        {
+            return;
+        }
+
         lock (data)
         {
             if (data.IsRecalculating)

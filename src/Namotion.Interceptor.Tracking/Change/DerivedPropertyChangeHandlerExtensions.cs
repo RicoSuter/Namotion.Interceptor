@@ -71,4 +71,11 @@ public static class DerivedPropertyChangeHandlerExtensions
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static DerivedPropertyData? TryGetDerivedPropertyData(this PropertyReference property) =>
         property.TryGetPropertyData(DataKey, out var value) ? value as DerivedPropertyData : null;
+
+    /// <summary>
+    /// Removes the consolidated tracking data and returns it, or null if none was registered.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static DerivedPropertyData? TryRemoveDerivedPropertyData(this PropertyReference property) =>
+        property.Subject.Data.TryRemove((property.Name, DataKey), out var value) ? value as DerivedPropertyData : null;
 }
