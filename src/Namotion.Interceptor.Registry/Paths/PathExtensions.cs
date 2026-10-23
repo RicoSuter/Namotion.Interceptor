@@ -361,44 +361,259 @@ public static class PathExtensions
                 return null;
             }
 
-            var builder = new StringBuilder();
-            for (var i = frames.Count - 1; i >= 0; i--)
-            {
-                var (prop, index) = frames[i];
-
-                // [InlinePaths] frames emit just the key where the reader resolves it back; no IsPropertyIncluded
-                // check, since providers already include them and these frames are only traversed for navigation.
-                if (index is not null &&
-                    InlinePathsAttribute.IsInlinePathsProperty(
-                        prop.Subject.GetType(), prop.Name))
-                {
-                    if (!TryAppendInlineKey(builder, pathProvider, characters, prop, index))
-                    {
-                        return null;
-                    }
-
-                    continue;
-                }
-
-                var segment = pathProvider.TryGetPropertySegment(prop) ?? prop.BrowseName;
-                if (builder.Length > 0)
-                {
-                    builder.Append(characters.Separator);
-                }
-
-                builder.Append(segment);
-                if (index is not null)
-                {
-                    PathSyntax.AppendIndex(builder, index, characters);
-                }
-            }
-
-            return builder.Length > 0 ? builder.ToString() : null;
+            return TryWritePath(frames, pathProvider, characters);
         }
         finally
         {
             frames.Return();
         }
+    }
+
+    /// <summary>
+    /// Writes every path of the subject: one per chain of parents from the subject up to a subject that has no
+    /// parents, in the order the parents are listed. When the chain of first parents ends at a subject without parents
+    /// and every property on it is included, the first path is the one
+    /// <see cref="TryGetPath(RegisteredSubjectProperty, PathProviderBase, IInterceptorSubject?, object?)"/> writes for the
+    /// subject's first parent. A chain that returns to a subject already on it is not a path and is skipped.
+    /// </summary>
+    /// <param name="subject">The subject.</param>
+    /// <param name="pathProvider">The path provider.</param>
+    /// <param name="paths">Receives the paths that could be written.</param>
+    /// <param name="maxPaths">The most paths to write.</param>
+    /// <returns>
+    /// True when every chain was written; false when a chain could not be written (a property on it is excluded or an
+    /// [InlinePaths] key needs the explicit form while another segment shadows it), more than <paramref name="maxPaths"/>
+    /// chains exist, or the search exceeded its budget of 64 parent links per allowed path before every chain was found.
+    /// A subject without parents has no paths and returns true.
+    /// </returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="maxPaths"/> is not positive.</exception>
+    public static bool TryGetPaths(this RegisteredSubject subject, PathProviderBase pathProvider, ICollection<string> paths, int maxPaths = 64)
+    {
+        ArgumentNullException.ThrowIfNull(subject);
+        ArgumentNullException.ThrowIfNull(pathProvider);
+        ArgumentNullException.ThrowIfNull(paths);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxPaths);
+
+        var parents = subject.Parents;
+        if (parents.Length == 0)
+        {
+            return true;
+        }
+
+        var writer = new ChainPathWriter(pathProvider, paths, maxPaths);
+        var frames = PooledFrames.Rent();
+        try
+        {
+            if (!TryWriteSingleParentChain(subject, parents, ref frames, ref writer))
+            {
+                frames.Reset();
+                WriteChainPaths(subject, parents, (long)maxPaths * 64, ref frames, ref writer);
+            }
+
+            return writer.IsComplete;
+        }
+        finally
+        {
+            frames.Return();
+        }
+    }
+
+    /// <summary>
+    /// Follows the only parent at every level without allocating a search, like <see cref="TryBuildPathFrames"/>, and
+    /// writes the one chain. False at the first subject with several parents, where the full search has to take over.
+    /// </summary>
+    private static bool TryWriteSingleParentChain(
+        RegisteredSubject subject, ImmutableArray<SubjectPropertyParent> parents, ref PooledFrames frames, ref ChainPathWriter writer)
+    {
+        var current = subject;
+        HashSet<RegisteredSubject>? visited = null;
+        var depth = 0;
+        while (true)
+        {
+            if (parents.Length > 1)
+            {
+                return false;
+            }
+
+            // Start tracking only past the threshold; a revisit then means the chain is a cycle and has no path.
+            if (++depth > CycleDetectionDepthThreshold && !(visited ??= []).Add(current))
+            {
+                return true;
+            }
+
+            var parent = parents[0];
+            frames.Add((parent.Property, parent.Index));
+            current = parent.Property.Parent;
+            parents = current.Parents;
+            if (parents.Length == 0)
+            {
+                writer.TryWrite(frames);
+                return true;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Iterative depth-first search over every chain of parents from <paramref name="subject"/> to a subject without
+    /// parents, handing each complete chain (leaf-first in <paramref name="frames"/>) to <paramref name="writer"/>.
+    /// Cycles are pruned per branch. Owners are not memoized, because every chain is wanted, not only one, so the
+    /// number of parent links taken is bounded by <paramref name="budget"/> instead.
+    /// </summary>
+    private static void WriteChainPaths(
+        RegisteredSubject subject, ImmutableArray<SubjectPropertyParent> parents, long budget,
+        ref PooledFrames frames, ref ChainPathWriter writer)
+    {
+        var visiting = new HashSet<RegisteredSubject> { subject };
+
+        // stack[i + 1] expands the owner frames[i] leads into; stack[0] is the subject, which has no frame.
+        var stack = new List<SearchFrame>(8) { new() { Owner = subject, Parents = parents } };
+        while (stack.Count > 0)
+        {
+            var topIndex = stack.Count - 1;
+            var top = stack[topIndex];
+            if (top.NextParentIndex == top.Parents.Length)
+            {
+                visiting.Remove(top.Owner);
+                stack.RemoveAt(topIndex);
+                if (stack.Count > 0)
+                {
+                    frames.RemoveLast();
+                }
+
+                continue;
+            }
+
+            if (--budget < 0)
+            {
+                writer.MarkIncomplete();
+                return;
+            }
+
+            var parent = top.Parents[top.NextParentIndex];
+            top.NextParentIndex++;
+            stack[topIndex] = top; // top is a copy; write the advanced cursor back
+
+            var owner = parent.Property.Parent;
+            var ownerParents = owner.Parents;
+            if (ownerParents.Length == 0)
+            {
+                frames.Add((parent.Property, parent.Index));
+                var proceed = writer.TryWrite(frames);
+                frames.RemoveLast();
+                if (!proceed)
+                {
+                    return;
+                }
+            }
+            else if (visiting.Add(owner))
+            {
+                frames.Add((parent.Property, parent.Index));
+                stack.Add(new SearchFrame { Owner = owner, Parents = ownerParents });
+            }
+        }
+    }
+
+    /// <summary>
+    /// Collects the paths of complete chains for <see cref="TryGetPaths"/> and tracks whether every chain was written.
+    /// </summary>
+    private struct ChainPathWriter
+    {
+        private readonly PathProviderBase _pathProvider;
+        private readonly PathCharacters _characters;
+        private readonly ICollection<string> _paths;
+        private readonly int _maxPaths;
+        private int _written;
+
+        public ChainPathWriter(PathProviderBase pathProvider, ICollection<string> paths, int maxPaths)
+        {
+            _pathProvider = pathProvider;
+            _characters = pathProvider.GetCharacters();
+            _paths = paths;
+            _maxPaths = maxPaths;
+            IsComplete = true;
+        }
+
+        public bool IsComplete { get; private set; }
+
+        public void MarkIncomplete() => IsComplete = false;
+
+        /// <summary>Writes the chain in <paramref name="frames"/>; false when the result is settled and the search can stop.</summary>
+        public bool TryWrite(in PooledFrames frames)
+        {
+            if (_written == _maxPaths)
+            {
+                IsComplete = false;
+                return false;
+            }
+
+            // Resolution that respects IsPropertyIncluded checks every segment, so a chain through an excluded property has no path.
+            var path = AreAllPropertiesIncluded(frames, _pathProvider) ? TryWritePath(frames, _pathProvider, _characters) : null;
+            if (path is null)
+            {
+                IsComplete = false;
+            }
+            else
+            {
+                _paths.Add(path);
+                _written++;
+            }
+
+            return IsComplete || _written < _maxPaths;
+        }
+
+        private static bool AreAllPropertiesIncluded(in PooledFrames frames, PathProviderBase pathProvider)
+        {
+            for (var i = 0; i < frames.Count; i++)
+            {
+                if (!pathProvider.IsPropertyIncluded(frames[i].Property))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Writes the chain in <paramref name="frames"/> (leaf-first) as a path; null when an [InlinePaths] key cannot be
+    /// written or the path is empty.
+    /// </summary>
+    private static string? TryWritePath(in PooledFrames frames, PathProviderBase pathProvider, PathCharacters characters)
+    {
+        var builder = new StringBuilder();
+        for (var i = frames.Count - 1; i >= 0; i--)
+        {
+            var (prop, index) = frames[i];
+
+            // [InlinePaths] frames emit just the key where the reader resolves it back; no IsPropertyIncluded
+            // check, since providers already include them and these frames are only traversed for navigation.
+            if (index is not null &&
+                InlinePathsAttribute.IsInlinePathsProperty(
+                    prop.Subject.GetType(), prop.Name))
+            {
+                if (!TryAppendInlineKey(builder, pathProvider, characters, prop, index))
+                {
+                    return null;
+                }
+
+                continue;
+            }
+
+            var segment = pathProvider.TryGetPropertySegment(prop) ?? prop.BrowseName;
+            if (builder.Length > 0)
+            {
+                builder.Append(characters.Separator);
+            }
+
+            builder.Append(segment);
+            if (index is not null)
+            {
+                PathSyntax.AppendIndex(builder, index, characters);
+            }
+        }
+
+        return builder.Length > 0 ? builder.ToString() : null;
     }
 
     private static bool TryAppendInlineKey(
