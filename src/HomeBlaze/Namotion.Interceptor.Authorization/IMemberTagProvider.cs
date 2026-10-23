@@ -10,7 +10,8 @@ public interface IMemberTagProvider
     /// </summary>
     /// <remarks>
     /// Called on every evaluation of a rule with tags and possibly concurrently, so an implementation caches what is
-    /// expensive to derive. Return an array where possible; the policy then compares tags without allocating.
+    /// expensive to derive. Return an array where possible; the policy then compares tags without allocating. Never
+    /// returns null; return an empty array for a member without tags.
     /// </remarks>
     IReadOnlyCollection<string> GetTags(RegisteredSubjectProperty member);
 }

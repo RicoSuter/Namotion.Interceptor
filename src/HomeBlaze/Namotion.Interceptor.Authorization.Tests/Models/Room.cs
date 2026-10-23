@@ -16,4 +16,7 @@ public partial class Room
 
     /// <summary>A reference that can form a cycle between rooms.</summary>
     public partial Room? Neighbor { get; set; }
+
+    /// <summary>A second reference, so two rooms can point at each other through two properties.</summary>
+    public partial Room? Opposite { get; set; }
 }

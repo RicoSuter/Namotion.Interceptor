@@ -16,8 +16,15 @@ public sealed class AuthorizationPolicy
     /// <summary>The name of the role that <see cref="Explain(RegisteredSubjectProperty, PermissionAction)"/> reports for a system deny rule; no role may use it.</summary>
     public const string SystemRoleName = "System";
 
-    // Below this depth the reachability walk allocates nothing; past it a revisit means a cycle in the parent chain.
+    // Along a single-parent chain the walk allocates nothing; a branch or this depth starts the visited set, so a subject is explored once and a cycle ends.
     private const int VisitedTrackingDepth = 32;
+
+    private const int MaxPaths = 64;
+
+    // The root's single empty path; PathPattern.Matches does not mutate it, so it is shared.
+    private static readonly List<(string segment, string? index)>[] RootPaths = [[]];
+
+    private static readonly TypeNameCache TypeNames = new();
 
     private readonly CompiledRule[] _allow;
     private readonly CompiledRule[] _deny;
@@ -26,7 +33,6 @@ public sealed class AuthorizationPolicy
     private readonly ulong _writeBit;
     private readonly IMemberTagProvider? _tagProvider;
     private readonly PathProviderBase? _pathProvider;
-    private readonly TypeNameCache _typeNames = new();
 
     private AuthorizationPolicy(
         ImmutableArray<AuthorizationRole> roles,
@@ -88,6 +94,7 @@ public sealed class AuthorizationPolicy
         return IsAllowed(member, GetBit(action));
     }
 
+    /// <summary>Whether the member may be read.</summary>
     public bool CanRead(RegisteredSubjectProperty member)
     {
         ArgumentNullException.ThrowIfNull(member);
@@ -97,6 +104,7 @@ public sealed class AuthorizationPolicy
     /// <summary>Whether at least one member of the subject is readable and the subject is reachable from the root through readable subject-holding properties.</summary>
     public bool CanRead(RegisteredSubject subject) => Explain(subject).IsReadable;
 
+    /// <summary>Whether the member may be written.</summary>
     public bool CanWrite(RegisteredSubjectProperty member)
     {
         ArgumentNullException.ThrowIfNull(member);
@@ -110,8 +118,8 @@ public sealed class AuthorizationPolicy
         ArgumentNullException.ThrowIfNull(member);
         var bit = GetBit(action);
         var context = new MatchContext(member);
-        var allowed = FindMatch(_allow, bit, ref context);
-        var denied = FindMatch(_deny, bit, ref context);
+        var allowed = FindMatch(_allow, bit, isDeny: false, ref context);
+        var denied = FindMatch(_deny, bit, isDeny: true, ref context);
         return new PermissionDecision(allowed is not null && denied is null, allowed?.Role, allowed?.Rule, denied?.Role, denied?.Rule);
     }
 
@@ -125,8 +133,9 @@ public sealed class AuthorizationPolicy
         }
 
         HashSet<RegisteredSubject>? visited = null;
-        var deniedProperty = FindUnreadableLink(subject, 0, ref visited);
-        return new SubjectReadDecision(deniedProperty is null, HasReadableMember: true, deniedProperty);
+        RegisteredSubjectProperty? deniedProperty = null;
+        var isReachable = IsReachable(subject, 0, ref visited, ref deniedProperty);
+        return new SubjectReadDecision(isReachable, HasReadableMember: true, isReachable ? null : deniedProperty);
     }
 
     private ulong GetBit(PermissionAction action)
@@ -148,14 +157,17 @@ public sealed class AuthorizationPolicy
     private bool IsAllowed(RegisteredSubjectProperty member, ulong bit)
     {
         var context = new MatchContext(member);
-        return FindMatch(_allow, bit, ref context) is not null && FindMatch(_deny, bit, ref context) is null;
+        return IsAllowed(bit, ref context);
     }
 
-    private CompiledRule? FindMatch(CompiledRule[] rules, ulong bit, ref MatchContext context)
+    private bool IsAllowed(ulong bit, ref MatchContext context)
+        => FindMatch(_allow, bit, isDeny: false, ref context) is not null && FindMatch(_deny, bit, isDeny: true, ref context) is null;
+
+    private CompiledRule? FindMatch(CompiledRule[] rules, ulong bit, bool isDeny, ref MatchContext context)
     {
         foreach (var rule in rules)
         {
-            if (Matches(rule, bit, ref context))
+            if (Matches(rule, bit, isDeny, ref context))
             {
                 return rule;
             }
@@ -164,9 +176,9 @@ public sealed class AuthorizationPolicy
         return null;
     }
 
-    // Selectors are checked cheapest first; the path is written and parsed once per member and only when a rule with paths gets that far.
-    private bool Matches(CompiledRule rule, ulong bit, ref MatchContext context)
-        => (rule.Actions & bit) != 0 && MatchesMemberSelectors(rule, ref context) && MatchesPaths(rule.Paths, ref context);
+    // Selectors are checked cheapest first; the paths are written and parsed once per evaluation and only when a rule with paths gets that far.
+    private bool Matches(CompiledRule rule, ulong bit, bool isDeny, ref MatchContext context)
+        => (rule.Actions & bit) != 0 && MatchesMemberSelectors(rule, ref context) && MatchesPaths(rule.Paths, isDeny, ref context);
 
     private bool MatchesMemberSelectors(CompiledRule rule, ref MatchContext context)
     {
@@ -180,7 +192,7 @@ public sealed class AuthorizationPolicy
             return false;
         }
 
-        if (rule.Types is not null && !_typeNames.IsAssignableToAny(context.Member.Parent.Subject.GetType(), rule.Types))
+        if (rule.Types is not null && !TypeNames.IsAssignableToAny(context.Member.Parent.Subject.GetType(), rule.Types))
         {
             return false;
         }
@@ -188,7 +200,8 @@ public sealed class AuthorizationPolicy
         return true;
     }
 
-    private bool MatchesPaths(PathPattern[]? patterns, ref MatchContext context)
+    // A deny rule fails closed: when some path of the subject could not be written, it may be the one the rule names.
+    private bool MatchesPaths(PathPattern[]? patterns, bool isDeny, ref MatchContext context)
     {
         if (patterns is null)
         {
@@ -197,11 +210,11 @@ public sealed class AuthorizationPolicy
 
         if (!context.PathsComputed)
         {
-            context.Paths = GetPaths(context.Member.Parent);
+            context.Paths = GetPaths(context.Member.Parent, out context.PathsComplete);
             context.PathsComputed = true;
         }
 
-        return AnyPathMatches(patterns, context.Paths);
+        return (isDeny && !context.PathsComplete) || AnyPathMatches(patterns, context.Paths!);
     }
 
     private static bool HasAllTags(IReadOnlyCollection<string> memberTags, string[] requiredTags)
@@ -244,30 +257,34 @@ public sealed class AuthorizationPolicy
         return false;
     }
 
-    // The canonical path through each immediate parent; the root has the single empty path. Null when no path can be written.
-    private List<(string segment, string? index)>[]? GetPaths(RegisteredSubject subject)
+    // Every path of the subject; the root has the single empty path. Incomplete when a path could not be written or parsed,
+    // more than MaxPaths exist, or the subject has parents but no path was found.
+    private List<(string segment, string? index)>[] GetPaths(RegisteredSubject subject, out bool isComplete)
     {
-        var parents = subject.Parents;
-        if (parents.Length == 0)
+        if (subject.Parents.Length == 0)
         {
-            return [[]];
+            isComplete = true;
+            return RootPaths;
         }
 
-        List<(string segment, string? index)>[]? paths = null;
+        var written = new List<string>();
+        isComplete = subject.TryGetPaths(_pathProvider!, written, MaxPaths) && written.Count > 0;
+
+        var paths = new List<(string segment, string? index)>[written.Count];
         var count = 0;
-        foreach (var parent in parents)
+        foreach (var path in written)
         {
-            var path = parent.Property.TryGetPath(_pathProvider!, rootSubject: null, parent.Index);
-            if (path is null || !_pathProvider!.TryParsePath(path, out var segments, out _))
+            if (_pathProvider!.TryParsePath(path, out var segments, out _))
             {
-                continue;
+                paths[count++] = segments;
             }
-
-            paths ??= new List<(string segment, string? index)>[parents.Length];
-            paths[count++] = segments;
+            else
+            {
+                isComplete = false;
+            }
         }
 
-        if (paths is not null && count < paths.Length)
+        if (count < paths.Length)
         {
             Array.Resize(ref paths, count);
         }
@@ -275,13 +292,8 @@ public sealed class AuthorizationPolicy
         return paths;
     }
 
-    private static bool AnyPathMatches(PathPattern[] patterns, List<(string segment, string? index)>[]? paths)
+    private static bool AnyPathMatches(PathPattern[] patterns, List<(string segment, string? index)>[] paths)
     {
-        if (paths is null)
-        {
-            return false;
-        }
-
         foreach (var pattern in patterns)
         {
             foreach (var path in paths)
@@ -296,11 +308,51 @@ public sealed class AuthorizationPolicy
         return false;
     }
 
+    // The paths belong to the subject, not the member, so they are carried from member to member and written at most once.
     private bool HasReadableMember(RegisteredSubject subject)
     {
+        List<(string segment, string? index)>[]? paths = null;
+        var pathsComplete = false;
+        var pathsComputed = false;
         foreach (var member in subject.Properties)
         {
-            if (IsAllowed(member, _readBit))
+            var context = new MatchContext(member) { Paths = paths, PathsComplete = pathsComplete, PathsComputed = pathsComputed };
+            if (IsAllowed(_readBit, ref context))
+            {
+                return true;
+            }
+
+            paths = context.Paths;
+            pathsComplete = context.PathsComplete;
+            pathsComputed = context.PathsComputed;
+        }
+
+        return false;
+    }
+
+    // True when some chain of readable subject-holding properties leads to a root. Otherwise deniedProperty is the first
+    // unreadable link found, or stays null when every chain returns to a subject already walked.
+    private bool IsReachable(RegisteredSubject subject, int depth, ref HashSet<RegisteredSubject>? visited, ref RegisteredSubjectProperty? deniedProperty)
+    {
+        var parents = subject.Parents;
+        if (parents.Length == 0)
+        {
+            return true;
+        }
+
+        // Already explored from here, or a cycle: no new route to a root through this subject.
+        if ((parents.Length > 1 || depth >= VisitedTrackingDepth) && !(visited ??= []).Add(subject))
+        {
+            return false;
+        }
+
+        foreach (var parent in parents)
+        {
+            if (!IsAllowed(parent.Property, _readBit))
+            {
+                deniedProperty ??= parent.Property;
+            }
+            else if (IsReachable(parent.Property.Parent, depth + 1, ref visited, ref deniedProperty))
             {
                 return true;
             }
@@ -309,51 +361,13 @@ public sealed class AuthorizationPolicy
         return false;
     }
 
-    // Null when some chain of readable subject-holding properties leads to the root; otherwise the first unreadable link found.
-    private RegisteredSubjectProperty? FindUnreadableLink(RegisteredSubject subject, int depth, ref HashSet<RegisteredSubject>? visited)
-    {
-        var parents = subject.Parents;
-        if (parents.Length == 0)
-        {
-            return null;
-        }
-
-        if (depth >= VisitedTrackingDepth)
-        {
-            visited ??= [];
-            if (!visited.Add(subject))
-            {
-                return parents[0].Property;
-            }
-        }
-
-        RegisteredSubjectProperty? firstDenied = null;
-        foreach (var parent in parents)
-        {
-            if (!IsAllowed(parent.Property, _readBit))
-            {
-                firstDenied ??= parent.Property;
-                continue;
-            }
-
-            var denied = FindUnreadableLink(parent.Property.Parent, depth + 1, ref visited);
-            if (denied is null)
-            {
-                return null;
-            }
-
-            firstDenied ??= denied;
-        }
-
-        return firstDenied;
-    }
-
     private struct MatchContext(RegisteredSubjectProperty member)
     {
         public readonly RegisteredSubjectProperty Member = member;
         public string? MemberName;
         public IReadOnlyCollection<string>? Tags;
         public List<(string segment, string? index)>[]? Paths;
+        public bool PathsComplete;
         public bool PathsComputed;
     }
 }

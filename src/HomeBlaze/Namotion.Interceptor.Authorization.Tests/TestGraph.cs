@@ -11,22 +11,38 @@ namespace Namotion.Interceptor.Authorization.Tests;
 /// </summary>
 internal static class TestGraph
 {
-    public static Home Create()
-    {
-        var context = InterceptorSubjectContext
+    public static Home Create() => Create(neighborFirst: false);
+
+    /// <summary>
+    /// The same graph, but Rooms[Bedroom].Neighbor is the kitchen and the bedroom is attached first, so the
+    /// kitchen's first parent is the bedroom's Neighbor and its second Home.Rooms.
+    /// </summary>
+    public static Home CreateWithNeighborFirst() => Create(neighborFirst: true);
+
+    public static IInterceptorSubjectContext CreateContext()
+        => InterceptorSubjectContext
             .Create()
             .WithFullPropertyTracking()
             .WithRegistry();
 
-        var home = new Home(context);
+    private static Home Create(bool neighborFirst)
+    {
+        var home = new Home(CreateContext());
 
         var kitchen = new Room { Sensor = new Sensor() };
         kitchen.Lights = new Dictionary<string, Light> { ["Ceiling"] = new Light(), ["Counter"] = new Light() };
 
         var bedroom = new Room();
         bedroom.Lights = new Dictionary<string, Light> { ["Lamp"] = new Light() };
+        if (neighborFirst)
+        {
+            bedroom.Neighbor = kitchen;
+        }
 
-        home.Rooms = new Dictionary<string, Room> { ["Kitchen"] = kitchen, ["Bedroom"] = bedroom };
+        // Rooms attach in key order, so the bedroom first attaches the kitchen through its Neighbor.
+        home.Rooms = neighborFirst
+            ? new Dictionary<string, Room> { ["Bedroom"] = bedroom, ["Kitchen"] = kitchen }
+            : new Dictionary<string, Room> { ["Kitchen"] = kitchen, ["Bedroom"] = bedroom };
         home.Wifi = new Wifi();
         return home;
     }
