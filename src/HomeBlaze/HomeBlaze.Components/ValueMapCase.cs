@@ -130,7 +130,7 @@ public partial class ValueMapCase : IConfigurable
     /// <param name="binding">The value and its subject.</param>
     /// <param name="resolver">The resolver of the paths of the text.</param>
     /// <param name="timeZone">The time zone of the viewer for dates, or null for that of the server.</param>
-    public string? GetText(in ValueBinding binding, SubjectPathResolver resolver, ITimeZoneDisplay? timeZone)
+    internal string? GetText(in ValueBinding binding, SubjectPathResolver resolver, ITimeZoneDisplay? timeZone)
     {
         if (GetTemplate().Template is not { } template)
         {

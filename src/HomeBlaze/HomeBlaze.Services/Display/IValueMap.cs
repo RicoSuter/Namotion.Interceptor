@@ -6,6 +6,12 @@ namespace HomeBlaze.Services.Display;
 public interface IValueMap
 {
     /// <summary>
+    /// Gets what is wrong with the map, such as a case with a condition that cannot be parsed, or null when the map is
+    /// fine. A map with an error is not applied.
+    /// </summary>
+    string? GetError();
+
+    /// <summary>
     /// Gets the text of the first case that matches the binding, with its expressions evaluated, or null when no case
     /// matches or the matching case has no text.
     /// </summary>

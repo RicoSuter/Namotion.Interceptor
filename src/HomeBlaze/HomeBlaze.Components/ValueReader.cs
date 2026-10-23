@@ -195,36 +195,8 @@ public static class ValueReader
 
         if (ResolveSubject(resolver, widget, map) is ValueMap valueMap)
         {
-            var cases = valueMap.Cases;
-            for (var index = 0; index < cases.Length; index++)
-            {
-                var valueCase = cases[index];
-                if (!valueCase.IsColorValid())
-                {
-                    error = ValueColor.GetError(valueCase.Color);
-                    return null;
-                }
-
-                if (!valueCase.IsTextColorValid())
-                {
-                    error = ValueColor.GetError(valueCase.TextColor);
-                    return null;
-                }
-
-                if (valueCase.GetExpressionError() is { } expressionError)
-                {
-                    error = $"Case {index + 1}, {expressionError}";
-                    return null;
-                }
-
-                if (valueCase.IsDefault && index < cases.Length - 1)
-                {
-                    error = $"Case {index + 1} has no Value and no When, so it matches every value and the cases after it never match. Make it the last case.";
-                    return null;
-                }
-            }
-
-            return valueMap;
+            error = valueMap.GetError();
+            return error is null ? valueMap : null;
         }
 
         error = $"Cannot resolve map: {map}";

@@ -60,6 +60,11 @@ internal readonly struct MarkdownExpressionContext(
             return ExpressionValue.FromText($"Cannot resolve map: {mapName}");
         }
 
+        if (valueMap.GetError() is { } error)
+        {
+            return ExpressionValue.FromText(error);
+        }
+
         var binding = ValueBinding.FromExpressionValue(input);
         return ExpressionValue.FromText(valueMap.GetText(binding, pathResolver, timeZone) ?? ToText(input));
     }

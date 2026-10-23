@@ -347,6 +347,7 @@ namespace HomeBlaze.Services.Display
     }
     public interface IValueMap
     {
+        string? GetError();
         string? GetText(in HomeBlaze.Services.Display.ValueBinding binding, HomeBlaze.Services.SubjectPathResolver resolver, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone);
     }
     public static class RawValueFormatter

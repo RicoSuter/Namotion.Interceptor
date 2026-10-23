@@ -9,7 +9,7 @@ using Namotion.Interceptor.Attributes;
 namespace HomeBlaze.Components;
 
 /// <summary>
-/// Says what text, colour and icon a value gets in the value widgets that refer to this map, and in the pipe <c>map</c> of the text of a page. Shows nothing itself.
+/// Says what text, color and icon a value gets in the value widgets that refer to this map, and in the pipe <c>map</c> of the text of a page. Shows nothing itself.
 /// </summary>
 [Category("Dashboard")]
 [Description("Text, colour and icon per value, for value widgets")]
@@ -53,6 +53,37 @@ public partial class ValueMap : IConfigurable, ITitleProvider, IValueMap
             if (valueCase.Matches(rawText, binding, resolver))
             {
                 return valueCase;
+            }
+        }
+
+        return null;
+    }
+
+    /// <inheritdoc />
+    public string? GetError()
+    {
+        var cases = Cases;
+        for (var index = 0; index < cases.Length; index++)
+        {
+            var valueCase = cases[index];
+            if (!valueCase.IsColorValid())
+            {
+                return ValueColor.GetError(valueCase.Color);
+            }
+
+            if (!valueCase.IsTextColorValid())
+            {
+                return ValueColor.GetError(valueCase.TextColor);
+            }
+
+            if (valueCase.GetExpressionError() is { } expressionError)
+            {
+                return $"Case {index + 1}, {expressionError}";
+            }
+
+            if (valueCase.IsDefault && index < cases.Length - 1)
+            {
+                return $"Case {index + 1} has no Value and no When, so it matches every value and the cases after it never match. Make it the last case.";
             }
         }
 
