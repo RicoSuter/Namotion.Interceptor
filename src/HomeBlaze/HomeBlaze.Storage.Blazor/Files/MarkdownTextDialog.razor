@@ -14,9 +14,9 @@
    above it and keeps what was typed, and so does a close: Escape and Cancel ask before they discard a change. *@
 <MudDialog Class="markdown-text-dialog" ContentClass="markdown-text-dialog-content" DefaultFocus="DefaultFocus.None">
     <DialogContent>
-        @* The dialog reports no Escape to its OnKeyDown, so the keys are handled here and on the buttons. The editor stops a
-           key that it uses, such as an Escape that closes its suggestions. *@
-        <div class="markdown-text-dialog-body" @onkeydown="_keyDownCallback">
+        @* The dialog reports no Escape to its OnKeyDown, so the module of the editor watches the dialog for it, see
+           watchEscape. The editor stops a key that it uses, such as an Escape that closes its suggestions. *@
+        <div class="markdown-text-dialog-body" @ref="_body">
             @if (_refusal is not null)
             {
                 <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-2" data-testid="markdown-text-refusal">@_refusal</MudAlert>
@@ -34,8 +34,8 @@
         <MarkdownEditorStyles/>
     </DialogContent>
     <DialogActions>
-        <MudButton Disabled="_isSaving" OnClick="CancelAsync" @onkeydown="_keyDownCallback" data-testid="markdown-text-cancel">Cancel</MudButton>
-        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="_isSaving" OnClick="SaveAsync" @onkeydown="_keyDownCallback" data-testid="markdown-text-save">Save</MudButton>
+        <MudButton Disabled="_isSaving" OnClick="CancelAsync" data-testid="markdown-text-cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="_isSaving" OnClick="SaveAsync" data-testid="markdown-text-save">Save</MudButton>
     </DialogActions>
 </MudDialog>
 
@@ -87,17 +87,14 @@
     public Func<string, Task<string?>> Save { get; set; } = default!;
 
     private StandaloneCodeEditor? _editor;
+    private ElementReference _body;
     private Task<IJSObjectReference>? _moduleImport;
+    private DotNetObjectReference<MarkdownTextDialog>? _reference;
+    private IJSObjectReference? _escapeWatch;
     private string? _refusal;
     private bool _isSaving;
     private bool _isCanceling;
     private bool _isDisposed;
-    private EventCallback<KeyboardEventArgs> _keyDownCallback;
-
-    protected override void OnInitialized()
-    {
-        _keyDownCallback = EventCallback.Factory.Create<KeyboardEventArgs>(this, OnKeyDownAsync);
-    }
 
     private StandaloneEditorConstructionOptions GetEditorOptions(StandaloneCodeEditor editor)
     {
@@ -111,14 +108,15 @@
         if (_editor is null)
             return;
 
+        // The keys work before the editor takes the focus, so that a key typed right away is not lost. CtrlCmd is Command on a
+        // Mac and Control elsewhere.
+        await _editor.AddCommand((int)KeyMod.CtrlCmd | (int)KeyCode.KeyS, arguments => _ = SaveByKeyAsync());
         if (await GetModuleAsync() is { } module)
         {
+            await WatchEscapeAsync(module);
             await module.InvokeVoidAsync("focusEnd", EditorId);
             await DecorateAsync(module);
         }
-
-        // CtrlCmd is Command on a Mac and Control elsewhere.
-        await _editor.AddCommand((int)KeyMod.CtrlCmd | (int)KeyCode.KeyS, arguments => _ = SaveByKeyAsync());
     }
 
     private async Task OnContentChangedAsync(ModelContentChangedEvent change)
@@ -164,7 +162,39 @@
         }
     }
 
-    private Task OnKeyDownAsync(KeyboardEventArgs args) => args.Key == "Escape" ? CancelAsync() : Task.CompletedTask;
+    // A dispose while the watch starts would miss the watch and the reference, so they are let go here then.
+    private async Task WatchEscapeAsync(IJSObjectReference module)
+    {
+        if (_escapeWatch is not null)
+            return;
+
+        var reference = DotNetObjectReference.Create(this);
+        var escapeWatch = await module.InvokeAsync<IJSObjectReference>("watchEscape", _body, reference);
+        if (_isDisposed)
+        {
+            await escapeWatch.InvokeVoidAsync("dispose");
+            await escapeWatch.DisposeAsync();
+            reference.Dispose();
+            return;
+        }
+
+        _reference = reference;
+        _escapeWatch = escapeWatch;
+    }
+
+    /// <summary>Called by the module of the editor for an Escape in the dialog that the editor did not take.</summary>
+    [JSInvokable]
+    public async Task CancelByEscapeAsync()
+    {
+        try
+        {
+            await CancelAsync();
+        }
+        catch (Exception exception)
+        {
+            await DispatchExceptionAsync(exception);
+        }
+    }
 
     // Ignored while a save runs, so that the write is never dropped without the dialog showing its outcome.
     private async Task CancelAsync()
@@ -259,18 +289,26 @@
     public async ValueTask DisposeAsync()
     {
         _isDisposed = true;
-        if (_moduleImport is null)
-        {
-            return;
-        }
-
         try
         {
-            await (await _moduleImport).DisposeAsync();
+            if (_escapeWatch is not null)
+            {
+                await _escapeWatch.InvokeVoidAsync("dispose");
+                await _escapeWatch.DisposeAsync();
+            }
+
+            if (_moduleImport is not null)
+            {
+                await (await _moduleImport).DisposeAsync();
+            }
         }
         catch (Exception exception) when (exception is JSException or OperationCanceledException or JSDisconnectedException)
         {
-            // The import failed or the circuit is gone, and there is no module to dispose.
+            // The import failed or the circuit is gone, and there is nothing to dispose.
+        }
+        finally
+        {
+            _reference?.Dispose();
         }
     }
 

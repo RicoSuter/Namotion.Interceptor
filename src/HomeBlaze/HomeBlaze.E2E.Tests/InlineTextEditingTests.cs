@@ -461,6 +461,72 @@ public class InlineTextEditingTests
     }
 
     [Fact]
+    public async Task WhenKeepEditingIsChosenAfterEscape_ThenTheEditorHasTheFocusAgain()
+    {
+        // Arrange
+        var page = await OpenPageInInlineModeAsync();
+        var actionBar = await SelectTextAsync(page, "Last paragraph");
+        await actionBar.GetByTestId("edit-subject-button").ClickAsync();
+        await ExpectTextEditorValueAsync(page, "Last paragraph on the page.");
+        await WaitForTextEditorFocusAsync(page);
+        await page.Keyboard.TypeAsync(" One.");
+        await page.Keyboard.PressAsync("Escape");
+
+        // Act
+        await page.GetByRole(AriaRole.Button, new() { Name = "Keep editing", Exact = true }).ClickAsync();
+
+        // Assert
+        await WaitForTextEditorFocusAsync(page);
+        await page.Keyboard.TypeAsync(" Two.");
+        await ExpectTextEditorValueAsync(page, "Last paragraph on the page. One. Two.");
+    }
+
+    [Fact]
+    public async Task WhenEscapeIsPressedWithTheFocusOnTheTitleOfTheDialog_ThenTheDialogCloses()
+    {
+        // Arrange: a click on the title takes the focus out of the editor.
+        var page = await OpenPageInInlineModeAsync();
+        var actionBar = await SelectTextAsync(page, "Last paragraph");
+        await actionBar.GetByTestId("edit-subject-button").ClickAsync();
+        await ExpectTextEditorValueAsync(page, "Last paragraph on the page.");
+        await WaitForTextEditorFocusAsync(page);
+        await page.GetByRole(AriaRole.Dialog).Locator(".mud-dialog-title").ClickAsync();
+        await page.WaitForFunctionAsync(
+            $"() => !blazorMonaco.editor.getEditor('{TextEditorId}', true)?.hasTextFocus()", null, new() { Timeout = Timeout });
+
+        // Act
+        await page.Keyboard.PressAsync("Escape");
+
+        // Assert
+        await Assertions.Expect(page.GetByRole(AriaRole.Dialog)).ToHaveCountAsync(0, new() { Timeout = Timeout });
+    }
+
+    [Fact]
+    public async Task WhenATextBlockIsEditedThroughItsDialogWithTheKeyboard_ThenTheChangedBlockHasTheFocus()
+    {
+        // Arrange: Enter selects the focused block, and a second Enter opens its dialog.
+        var page = await OpenPageInInlineModeAsync();
+        var wrapper = GetTextWrapper(page, "First paragraph");
+        await Assertions.Expect(wrapper).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await wrapper.FocusAsync();
+        await page.Keyboard.PressAsync("Enter");
+        await Assertions.Expect(wrapper).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
+        await page.Keyboard.PressAsync("Enter");
+        await ExpectTextEditorValueAsync(page, "First paragraph on the page.");
+        await WaitForTextEditorFocusAsync(page);
+
+        // Act
+        await page.Keyboard.TypeAsync(" Typed.");
+        await page.Keyboard.PressAsync("ControlOrMeta+s");
+
+        // Assert
+        await _fixture.WaitForDemoPageTextAsync(
+            PageName, text => text.Contains("\nFirst paragraph on the page. Typed.\n"), "The paragraph was not saved.");
+        await Assertions.Expect(page.GetByRole(AriaRole.Dialog)).ToHaveCountAsync(0, new() { Timeout = Timeout });
+        await Assertions.Expect(GetTextWrapper(page, "Typed.")).ToBeFocusedAsync(new() { Timeout = Timeout });
+    }
+
+    [Fact]
     public async Task WhenEscapeIsPressedWithoutAChange_ThenTheDialogClosesAtOnce()
     {
         // Arrange
@@ -818,6 +884,29 @@ public class InlineTextEditingTests
         // Assert
         await Assertions.Expect(cardWrapper).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
         await Assertions.Expect(page.Locator(".subject-component-wrapper.selected:has(> .markdown-text)")).ToHaveCountAsync(0);
+    }
+
+    [Fact]
+    public async Task WhenABlockInsideACardIsDeleted_ThenTheCardIsSelected()
+    {
+        // Arrange
+        var page = await OpenPageInInlineModeAsync(LayoutPageName, LayoutContent);
+        var layoutCard = page.Locator(".subject-component-wrapper.selectable:has(> [data-testid='card'])")
+            .Filter(new() { Has = page.GetByTestId("card-title").GetByText("Layout Card", new() { Exact = true }) });
+        await page.GetCard("Layout Card").Locator(".mud-card-header").First.SelectWidgetAsync();
+        var actionBar = await page.GetCard("Inner Card").Last.Locator(".mud-card-header").SelectWidgetAsync();
+        await Assertions.Expect(page.Locator(".subject-component-wrapper.selected:has(> [data-testid='card'])")
+            .Filter(new() { Has = page.GetByTestId("card-title").GetByText("Inner Card", new() { Exact = true }) })).ToHaveCountAsync(1, new() { Timeout = Timeout });
+
+        // Act
+        await actionBar.GetByTestId("delete-block-button").ClickAsync();
+        await page.GetByRole(AriaRole.Dialog).GetByRole(AriaRole.Button, new() { Name = "Delete", Exact = true }).ClickAsync();
+
+        // Assert
+        await _fixture.WaitForDemoPageTextAsync(
+            LayoutPageName, text => !text.Contains("Inner Card", StringComparison.Ordinal), "The inner card was not deleted.");
+        await Assertions.Expect(page.GetByTestId("card-title").GetByText("Inner Card", new() { Exact = true })).ToHaveCountAsync(0, new() { Timeout = Timeout });
+        await Assertions.Expect(layoutCard).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
     }
 
     [Fact]

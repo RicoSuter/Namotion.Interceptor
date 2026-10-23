@@ -50,7 +50,7 @@
         const active = document.activeElement;
         if (event.key === 'Escape') {
             if (bar.contains(active)) {
-                widget.focus();
+                widget.focus({ preventScroll: true });
             }
 
             return;
@@ -100,11 +100,12 @@
 
     // Called once the widget that an edit selected rendered. An edit that replaced the element with the focus, such as the
     // moved widget or the button of its bar, left the focus on the body, and a keyboard user would start over from the top.
+    // The page stays where it is, so that a widget only partly in view does not jump.
     window.widgetSelection = {
         restoreFocus: () => {
             const active = document.activeElement;
             if (!active || active === document.body) {
-                document.querySelector('.subject-component-wrapper.selected')?.focus();
+                document.querySelector('.subject-component-wrapper.selected')?.focus({ preventScroll: true });
             }
         }
     };
@@ -116,6 +117,6 @@
         }
 
         const widget = document.querySelector('.subject-component-wrapper.selected');
-        widget?.parentElement?.closest('.subject-component-wrapper.selectable')?.focus();
+        widget?.parentElement?.closest('.subject-component-wrapper.selectable')?.focus({ preventScroll: true });
     }, true);
 })();
