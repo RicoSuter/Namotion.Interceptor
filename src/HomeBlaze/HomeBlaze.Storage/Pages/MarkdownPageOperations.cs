@@ -31,6 +31,7 @@ internal static class MarkdownPageOperations
     private const string NoClosingLineRefusal = "Add the closing line of the block first.";
     private const string MoveRefusal = "Moving the block would change other blocks of the page.";
     private const string TextMoveRefusal = "Moving the text would change other blocks of the page.";
+    private const string OpenHtmlRefusal = "The text would leave HTML open over the text after it.";
 
     /// <summary>Removes the block with everything in it.</summary>
     /// <returns>Null with a refusal when the change would change other blocks of the page.</returns>
@@ -792,10 +793,11 @@ internal static class MarkdownPageOperations
     {
         var after = MarkdownPageParser.Parse(newSource);
         var textLine = FindFirstTextLine(after, edit);
+        var takesTextAfter = false;
         if (MarkdownBlockAlignment.TryAlign(page, after, edit, insertedBlockCount, owner, MarkdownBlockKind.Widget) is not { } map ||
-            (textLine > 0 && !StandsApart(after, edit, textLine)))
+            (textLine > 0 && !StandsApart(after, edit, textLine, out takesTextAfter)))
         {
-            refusal = alignmentRefusal;
+            refusal = takesTextAfter ? OpenHtmlRefusal : alignmentRefusal;
             return null;
         }
 
@@ -810,15 +812,22 @@ internal static class MarkdownPageOperations
 
     // The comparison of the document skips the new lines, which raw HTML can join with the text around them while every
     // block keeps its own text: no text block from before the change takes the new text, and none of the new text takes the
-    // text after it.
-    private static bool StandsApart(MarkdownPage after, MarkdownLineEdit edit, int textLine)
+    // text after it. `takesTextAfter` tells that raw HTML of the new text stays open over the text after it.
+    private static bool StandsApart(MarkdownPage after, MarkdownLineEdit edit, int textLine, out bool takesTextAfter)
     {
+        takesTextAfter = false;
         foreach (var textBlock in MarkdownTextBlocks.Find(after))
         {
-            if (textBlock.Line < edit.Line
-                    ? textBlock.EndLine >= textLine
-                    : textBlock.Line < edit.InsertedEnd && textBlock.EndLine >= edit.InsertedEnd)
+            if (textBlock.Line < edit.Line)
             {
+                if (textBlock.EndLine >= textLine)
+                {
+                    return false;
+                }
+            }
+            else if (textBlock.Line < edit.InsertedEnd && textBlock.EndLine >= edit.InsertedEnd)
+            {
+                takesTextAfter = textBlock.HoldsHtml;
                 return false;
             }
         }

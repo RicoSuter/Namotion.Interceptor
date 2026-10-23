@@ -19,6 +19,7 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
         "The text changed since you opened it. Copy your text, close the dialog and open the text again.";
     private const string PageChangedWhileCreatingMessage =
         "The page changed since you opened the dialog. Copy your text, close the dialog and try again.";
+    internal const string MovedBlockMessage = "The block moved. Select it again.";
 
     private readonly MarkdownFile _file;
     private readonly WidgetSelection _selection;
@@ -74,10 +75,23 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
             CanEditInSource: subject is HtmlSegment { Start: HtmlSegmentStart.Source } && SourceEditor is not null);
     }
 
-    public override Task EditInSourceAsync(IInterceptorSubject subject) =>
-        subject is HtmlSegment { Start: HtmlSegmentStart.Source } && SourceEditor is { } sourceEditor
-            ? sourceEditor.RevealAsync(subject)
-            : Task.CompletedTask;
+    public override Task EditInSourceAsync(IInterceptorSubject subject)
+    {
+        if (subject is not HtmlSegment { Start: HtmlSegmentStart.Source } segment || SourceEditor is not { } sourceEditor)
+        {
+            return Task.CompletedTask;
+        }
+
+        // A block that the page no longer has, such as one that a reload replaced, keeps Inline mode, where the block can be
+        // selected again; the Split mode would show no lines and has nothing to select.
+        if (_file.GetTextBlockLines(segment) is null)
+        {
+            _snackbar.Add(MovedBlockMessage, Severity.Warning);
+            return Task.CompletedTask;
+        }
+
+        return sourceEditor.RevealAsync(subject);
+    }
 
     // Two reads of the page, which a reload between them can answer from two versions. The bar renders again after every
     // reload, as GetContentSlots reads the children of the page, and every add checks the page again.

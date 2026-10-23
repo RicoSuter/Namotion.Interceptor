@@ -330,7 +330,7 @@ public class MarkdownTextNextToHtmlTests
     }
 
     [Fact]
-    public void WhenChangedTextWouldLeaveAnElementOpenOverTheTextAfterIt_ThenTheChangeIsRefused()
+    public void WhenChangedTextWouldLeaveAnElementOpenOverTheTextAfterIt_ThenTheChangeIsRefusedForThatReason()
     {
         // Arrange
         var page = MarkdownPageParser.Parse("Before.\n\nAfter.\n");
@@ -340,7 +340,21 @@ public class MarkdownTextNextToHtmlTests
 
         // Assert
         Assert.Null(change);
-        Assert.Equal("Changing the text would change other blocks of the page.", refusal);
+        Assert.Equal("The text would leave HTML open over the text after it.", refusal);
+    }
+
+    [Fact]
+    public void WhenInsertedTextWouldLeaveAnElementOpenOverTheTextAfterIt_ThenTheInsertIsRefusedForThatReason()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("Before.\n\nAfter.\n");
+
+        // Act
+        var insert = MarkdownPageOperations.TryInsertText(page, NoSubjects, null, 3, "<div>", out var refusal);
+
+        // Assert
+        Assert.Null(insert);
+        Assert.Equal("The text would leave HTML open over the text after it.", refusal);
     }
 
     [Fact]

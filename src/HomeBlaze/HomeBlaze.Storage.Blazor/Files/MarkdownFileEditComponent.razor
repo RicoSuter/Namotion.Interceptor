@@ -503,7 +503,7 @@ else
     {
         if (file.GetTextBlockLines(segment) is not (var line, var endLine))
         {
-            Snackbar.Add("The block moved. Select it again.", Severity.Warning);
+            Snackbar.Add(MarkdownPageStructureEditor.MovedBlockMessage, Severity.Warning);
             return true;
         }
 
