@@ -30,7 +30,8 @@ internal sealed class UnseenPropertyNames
             : null;
 
     /// <summary>
-    /// Marks every name that resolves to a scalar property of <paramref name="subject"/> as seen.
+    /// Marks as seen every <c>where</c> path that leads from <paramref name="subject"/> to a property the path provider
+    /// exposes, also one that holds subjects but not an attribute, and every selected name that is a scalar property of it.
     /// </summary>
     public void Observe(RegisteredSubject subject, PathProviderBase pathProvider)
     {

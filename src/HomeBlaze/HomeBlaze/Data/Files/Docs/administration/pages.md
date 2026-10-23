@@ -186,7 +186,7 @@ A `style` attribute needs the raw value. In this sample the width of the bar is 
 
 ### Conditions
 
-An expression can compare values and combine the results. In the text of a page a condition shows only `Yes` or `No`, and nothing while a value it needs is missing:
+An expression can compare values and combine the results. In the text of a page a condition shows only `Yes` or `No`, and nothing while a value it needs is missing. The language is the same as that of the where filter of the AI agents' search, see [AI Agents](ai-agents.md). For example:
 
 ~~~~markdown
 The conveyor runs fast: {{ /Demo/Conveyor/CurrentSpeed > 500 }}.

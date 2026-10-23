@@ -128,6 +128,35 @@ public class SubjectFilterToolTests
     }
 
     [Fact]
+    public async Task WhenSearchWherePathLeadsNowhereThroughSubject_ThenWarnsWithTheWholePath()
+    {
+        // Arrange
+        var tool = CreateTool(CreateRoom(), "search");
+
+        // Act
+        var json = await InvokeAsync(tool, new { format = "json", where = "Device.Missing == 1" });
+
+        // Assert
+        Assert.Equal(0, json.GetProperty("subjectCount").GetInt32());
+        var warnings = json.GetProperty("warnings").EnumerateArray().Select(warning => warning.GetString()!).ToArray();
+        Assert.Equal(["No subject in scope has a property named 'Device.Missing'."], warnings);
+    }
+
+    [Fact]
+    public async Task WhenSearchWherePathResolvesThroughSubject_ThenHasNoWarnings()
+    {
+        // Arrange
+        var tool = CreateTool(CreateRoom(), "search");
+
+        // Act
+        var json = await InvokeAsync(tool, new { format = "json", where = "Device.IsOn == true" });
+
+        // Assert
+        Assert.Equal(1, json.GetProperty("subjectCount").GetInt32());
+        Assert.False(json.TryGetProperty("warnings", out _));
+    }
+
+    [Fact]
     public async Task WhenPropertyExistsOnlyOutsideTheTypeFilter_ThenSearchWarns()
     {
         // Arrange
@@ -276,6 +305,14 @@ public class SubjectFilterToolTests
             ["Pump"] = new(context) { DeviceName = "Pump", IsOn = false }
         };
         return group;
+    }
+
+    // The root is not searched, so the room sits below it.
+    private static TestMixedGroup CreateRoom()
+    {
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var room = new TestRoom(context) { Name = "Kitchen", Device = new TestDevice(context) { DeviceName = "Light", IsOn = true } };
+        return new TestMixedGroup(context) { Items = new Dictionary<string, IInterceptorSubject> { ["Kitchen"] = room } };
     }
 
     private static McpToolInfo CreateTool(IInterceptorSubject root, string name, PathProviderBase? pathProvider = null)

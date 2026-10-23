@@ -33,6 +33,7 @@ public class SubjectFilterExpressionTests
     [InlineData("Device == null", false)]
     [InlineData("Device == Light", false)]
     [InlineData("Device", false)]
+    [InlineData("not Device", true)]
     public void WhenRoomIsFiltered_ThenComparisonFollowsValueType(string where, bool expected)
     {
         // Arrange
