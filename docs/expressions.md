@@ -32,12 +32,12 @@ literal    := number | "text" | 'text' | true | false | null
 - **Equality** is `==`. A single `=` is an error with the hint `use '==' for equality`.
 - **Both sides** of a comparison may be paths, such as `Power > MaximumPower`.
 - **Bare operands**: an operand without a comparison is a condition. It is true only when its value is the boolean `true`. Any other value is false, and a missing value is unknown. So when `Device` holds a subject, `Device` is false and `not Device` is true; test for a missing value with `Device == null` instead.
-- **Literals**: a number is a token that starts with a digit, or with a sign or a dot followed by a digit, and holds no `/`; it is read as `double` in the invariant culture. So when the separator is `.`, a word that starts with a digit is a number and a path segment cannot start with a digit. A text is in double or single quotes and has no escapes.
+- **Literals**: a number is a token that starts with a digit, or with a sign or a dot followed by a digit, unless it holds the path separator: with `/` as separator `5/2` is a path, but with `:` it is an invalid number and `5:2` is a path. A number is read as `double` in the invariant culture. When the separator is `.`, a dot is the decimal point, so `1.5` is a number and `1.5.2` is an invalid number. So a path cannot start with a digit when the separator is `.`, but its later segments can, as in `Device.2nd`. A text is in double or single quotes and has no escapes.
 - **A bare word after an operator is text**, such as the name of an enum value in `Mode == Away`, unless it holds the path separator or an index (`Device.Mode`, `Devices[a].Mode`) or is a variable, see [Paths and variables](#paths-and-variables). Elsewhere, a word is a path.
 - **A path token** ends at white space, a parenthesis, a quote, or one of `| & = ! < >`. Inside brackets everything up to the closing `]` belongs to the token, so a key may hold any of these characters.
 - **Arithmetic is reserved**: `+`, `-`, `*` and `/` standing alone between operands, such as `a - b`, are rejected with `arithmetic is not supported`, so a later version can add arithmetic without changing what an expression means. A sign before a number is part of the number, and these characters inside a path token are part of the path.
 - **Limits**: an expression is at most 1000 characters long and nests at most 32 levels, counting parentheses and each `not`.
-- **Errors**: `ParsedExpression.TryParse` does not throw. It returns false and an error of the form `<message> at position <n>`, with a zero-based position, such as `expected ')' at position 16`.
+- **Errors**: `ParsedExpression.TryParse` returns false for a mistake in the text, with an error of the form `<message> at position <n>` and a zero-based position, such as `expected ')' at position 16`. It throws an `ArgumentException` for an invalid path separator, which is a mistake of the host.
 
 ## Paths and variables
 
@@ -47,7 +47,7 @@ A path is written in the syntax of the host: its segments are divided by a separ
 ParsedExpression.TryParse(text, '.', out var expression, out var error);
 ```
 
-The separator cannot be white space, a letter, a digit, a quote, a bracket or one of `| & = ! < >`, and `TryParse` throws an `ArgumentException` for such a character. `ParsedExpression.Paths` lists the distinct paths of an expression in order of first appearance, and `SinglePath` is the path of an expression that is nothing but one path. How a path resolves is up to the host. When it comes from the [registry](registry.md#path-syntax), the host can resolve it with a path provider.
+The separator cannot be white space, a letter, a digit, a quote, a bracket or one of `| & = ! < > + - *`, and `TryParse` throws an `ArgumentException` for such a character. `ParsedExpression.Paths` lists the distinct paths of an expression in order of first appearance, and `SinglePath` is the path of an expression that is nothing but one path. How a path resolves is up to the host. When it comes from the [registry](registry.md#path-syntax), the host can resolve it with a path provider.
 
 Two names are variables with a meaning the host gives them:
 
