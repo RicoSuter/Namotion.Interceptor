@@ -29,6 +29,8 @@ namespace Namotion.Interceptor.Authorization
         public System.Collections.Immutable.ImmutableArray<Namotion.Interceptor.Authorization.PermissionRule> Deny { get; init; }
         public System.Collections.Immutable.ImmutableArray<string> Includes { get; init; }
         public required string Name { get; init; }
+        public bool Equals(Namotion.Interceptor.Authorization.AuthorizationRole? other) { }
+        public override int GetHashCode() { }
     }
     public interface IMemberTagProvider
     {
@@ -68,6 +70,8 @@ namespace Namotion.Interceptor.Authorization
         public System.Collections.Immutable.ImmutableArray<string> Paths { get; init; }
         public System.Collections.Immutable.ImmutableArray<string> Tags { get; init; }
         public System.Collections.Immutable.ImmutableArray<string> Types { get; init; }
+        public bool Equals(Namotion.Interceptor.Authorization.PermissionRule? other) { }
+        public override int GetHashCode() { }
     }
     public readonly struct SubjectReadDecision : System.IEquatable<Namotion.Interceptor.Authorization.SubjectReadDecision>
     {

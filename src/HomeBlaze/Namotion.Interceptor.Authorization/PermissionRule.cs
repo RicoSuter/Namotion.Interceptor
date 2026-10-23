@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using Namotion.Interceptor.Authorization.Internal;
 
 namespace Namotion.Interceptor.Authorization;
 
@@ -8,6 +9,7 @@ namespace Namotion.Interceptor.Authorization;
 /// names, the member's name matches one of the member globs, and the member carries all the tags. Whether the rule
 /// allows or denies is decided by the list of <see cref="AuthorizationRole"/> it is in.
 /// </summary>
+/// <remarks>Two instances are equal when every property is equal element by element, selector values compared exactly.</remarks>
 public sealed record PermissionRule
 {
     /// <summary>Gets the path patterns; empty for everywhere. See the README for the syntax.</summary>
@@ -30,4 +32,25 @@ public sealed record PermissionRule
 
     /// <summary>Gets the actions the rule applies to; at least one.</summary>
     public ImmutableArray<PermissionAction> Actions { get; init; } = [];
+
+    /// <summary>Whether every property of <paramref name="other"/> is equal element by element, in order.</summary>
+    public bool Equals(PermissionRule? other)
+        => ReferenceEquals(this, other) ||
+           (other is not null &&
+            SequenceEquality.AreEqual(Paths, other.Paths, StringComparer.Ordinal) &&
+            SequenceEquality.AreEqual(Types, other.Types, StringComparer.Ordinal) &&
+            SequenceEquality.AreEqual(Members, other.Members, StringComparer.Ordinal) &&
+            SequenceEquality.AreEqual(Tags, other.Tags, StringComparer.Ordinal) &&
+            SequenceEquality.AreEqual(Actions, other.Actions));
+
+    public override int GetHashCode()
+    {
+        var hash = new HashCode();
+        SequenceEquality.AddTo(ref hash, Paths, StringComparer.Ordinal);
+        SequenceEquality.AddTo(ref hash, Types, StringComparer.Ordinal);
+        SequenceEquality.AddTo(ref hash, Members, StringComparer.Ordinal);
+        SequenceEquality.AddTo(ref hash, Tags, StringComparer.Ordinal);
+        SequenceEquality.AddTo(ref hash, Actions);
+        return hash.ToHashCode();
+    }
 }

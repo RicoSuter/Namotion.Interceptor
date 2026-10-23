@@ -17,7 +17,7 @@ internal sealed class PathPattern
         _segments = segments;
     }
 
-    /// <exception cref="AuthorizationException">The pattern does not start with the separator or is malformed.</exception>
+    /// <exception cref="AuthorizationException">The pattern does not start with the separator, is malformed or has a segment with leading or trailing whitespace.</exception>
     public static PathPattern Parse(string pattern, PathProviderBase pathProvider, string roleName)
     {
         var separator = pathProvider.PathSeparator;
@@ -35,11 +35,19 @@ internal sealed class PathPattern
         for (var i = 0; i < parsed.Count; i++)
         {
             var (name, index) = parsed[i];
+            if (HasOuterWhitespace(name) || (index is not null && HasOuterWhitespace(index)))
+            {
+                throw new AuthorizationException($"Path pattern '{pattern}' of role '{roleName}' has a segment with leading or trailing whitespace.");
+            }
+
             segments[i] = new Segment(name, index, IsAnySegments: name == AnySegments && index is null);
         }
 
         return new PathPattern(segments);
     }
+
+    private static bool HasOuterWhitespace(string text)
+        => text.Length > 0 && (char.IsWhiteSpace(text[0]) || char.IsWhiteSpace(text[^1]));
 
     public bool Matches(List<(string segment, string? index)> path)
     {

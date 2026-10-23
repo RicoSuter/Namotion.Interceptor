@@ -27,6 +27,7 @@ public class PathPatternTests
     [InlineData("/Rooms/**", "Wifi", false)]
     [InlineData("/Rooms[Kitchen]/Light*", "Rooms[Kitchen]/Lights[Ceiling]", true)]
     [InlineData("/Rooms['Kitchen [north]']", "Rooms['Kitchen [north]']/Sensor", true)]
+    [InlineData("/Rooms['Living Room']", "Rooms['Living Room']/Sensor", true)]
     [InlineData("/Rooms[*]", "Rooms", false)]
     [InlineData("/Items[3]", "Items[30]", false)]
     [InlineData("/Rooms/**/Sensor/**/Lights", "Rooms[Kitchen]/Sensor/Lights", true)]
@@ -49,6 +50,8 @@ public class PathPatternTests
     [InlineData("", "must start with '/'")]
     [InlineData("/Rooms[", "malformed")]
     [InlineData("/Rooms[]", "malformed")]
+    [InlineData("/ Rooms", "whitespace")]
+    [InlineData("/Rooms[ Kitchen]", "whitespace")]
     public void WhenPatternIsInvalid_ThenParseThrowsNamingTheRole(string pattern, string expectedMessagePart)
     {
         // Act

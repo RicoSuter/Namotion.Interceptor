@@ -54,7 +54,7 @@ Patterns are parsed with the registry's path parser of the `PathProviderBase` gi
 Paths select subjects, never members; `Members` selects those.
 
 - A pattern is matched against the canonical path the provider writes for the subject, with the provider's segment names and `[InlinePaths]` keys as it writes them, not against other spellings the provider would also resolve.
-- Segment text is taken as written, so `/Home/ Kitchen` with a stray space never matches.
+- Segment text is taken as written, and a segment name or index with leading or trailing whitespace, such as `/Home/ Kitchen`, fails compilation; a quoted key may contain inner spaces, as in `/Rooms['Living Room']`.
 - A pattern written with another provider's separator never matches: under a `.`-separated provider `.Home/Kitchen` is the single segment `Home/Kitchen`. For such a provider a pattern starts with `.`, as in `.Home.Kitchen`.
 - Quoting a key does not make `*` literal: `Machines['CNC*']` is still a glob.
 - `**` with an index, as in `**[A*]`, is an ordinary glob over exactly one segment.
@@ -104,7 +104,7 @@ policy.CanRead(registeredSubject);   // visible at all
 
 - Over all roles given: a role that is null, has no name, has a name defined more than once, or uses the reserved name `System` (`AuthorizationPolicy.SystemRoleName`).
 - For the principal's roles and every role they include: an unknown or empty role name (an unknown include is reported with the including role), a cycle of includes, or includes nested more than 64 levels deep.
-- For the rules of those roles and the system deny rules: a rule that is null, has no actions, names an unknown action or has an empty selector value, or a path pattern that is malformed or does not start with the provider's separator.
+- For the rules of those roles and the system deny rules: a rule that is null, has no actions, names an unknown action or has an empty selector value, or a path pattern that is malformed, does not start with the provider's separator or has a segment with leading or trailing whitespace.
 - For the known actions: one without a name, or more than 64 in total.
 
 Give a principal whose roles fail to compile `AuthorizationPolicy.DenyAll`, which denies every action, known or not; a policy must never partially apply. `policy.Roles` lists the principal's roles and every role they include, included roles first.

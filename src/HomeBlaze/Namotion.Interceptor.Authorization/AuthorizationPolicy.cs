@@ -67,7 +67,13 @@ public sealed class AuthorizationPolicy
     /// <param name="knownActions">Every action a rule may name; <see cref="PermissionAction.Read"/> and <see cref="PermissionAction.Write"/> are always known. At most 64.</param>
     /// <param name="tagProvider">Supplies the tags of members.</param>
     /// <param name="pathProvider">Defines path syntax and writes the paths that patterns are matched against.</param>
-    /// <exception cref="AuthorizationException">A role name is unknown, duplicated, reserved or part of a cycle, a rule has no actions, an unknown action or an empty selector value, or a path pattern is malformed.</exception>
+    /// <exception cref="AuthorizationException">
+    /// A role is null, has no name, is defined more than once or uses <see cref="SystemRoleName"/>.
+    /// A role or include name is unknown or empty, includes form a cycle, or includes are nested more than 64 levels deep.
+    /// A rule is null, has no actions, names an unknown action or has an empty selector value.
+    /// A path pattern is malformed, does not start with the provider's separator or has a segment with leading or trailing whitespace.
+    /// A known action has no name, or there are more than 64 known actions.
+    /// </exception>
     public static AuthorizationPolicy Compile(
         IReadOnlyCollection<AuthorizationRole> roles,
         IReadOnlyCollection<string> roleNames,
@@ -87,7 +93,7 @@ public sealed class AuthorizationPolicy
     }
 
     /// <summary>Whether the action is allowed on the member.</summary>
-    /// <exception cref="ArgumentException">The action is not a known action of this policy.</exception>
+    /// <exception cref="ArgumentException">The action is not a known action of this policy; <see cref="DenyAll"/> answers no to any action instead.</exception>
     public bool IsAllowed(RegisteredSubjectProperty member, PermissionAction action)
     {
         ArgumentNullException.ThrowIfNull(member);
@@ -112,7 +118,7 @@ public sealed class AuthorizationPolicy
     }
 
     /// <summary>Answers <see cref="IsAllowed(RegisteredSubjectProperty, PermissionAction)"/> and names the rules that decided it. May allocate; not for hot paths.</summary>
-    /// <exception cref="ArgumentException">The action is not a known action of this policy.</exception>
+    /// <exception cref="ArgumentException">The action is not a known action of this policy; <see cref="DenyAll"/> answers no to any action instead.</exception>
     public PermissionDecision Explain(RegisteredSubjectProperty member, PermissionAction action)
     {
         ArgumentNullException.ThrowIfNull(member);

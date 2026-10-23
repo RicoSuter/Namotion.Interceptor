@@ -4,7 +4,7 @@ using static Namotion.Interceptor.Authorization.Tests.TestGraph;
 
 namespace Namotion.Interceptor.Authorization.Tests;
 
-public class PathFacetTests
+public class PathSelectorTests
 {
     private static readonly PermissionAction[] Read = [PermissionAction.Read];
     private static readonly PermissionAction[] Write = [PermissionAction.Write];
