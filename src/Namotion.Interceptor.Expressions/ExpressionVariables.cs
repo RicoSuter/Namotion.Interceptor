@@ -40,4 +40,34 @@ public static class ExpressionVariables
 
         return variable is not null;
     }
+
+    /// <summary>Gets whether the first segment of the path is a variable, and which one, with the rest of the path.</summary>
+    /// <param name="path">The path.</param>
+    /// <param name="pathSeparator">The character between the segments of the path.</param>
+    /// <param name="variable">The variable, or null.</param>
+    /// <param name="memberPath">The path after the variable and its separator, or null for the variable alone or a path without one.</param>
+    public static bool TryGetVariable(
+        string path,
+        char pathSeparator,
+        [NotNullWhen(true)] out string? variable,
+        out string? memberPath)
+    {
+        if (!TryGetVariable(path, pathSeparator, out variable))
+        {
+            memberPath = null;
+            return false;
+        }
+
+        if (path.Length == variable.Length)
+        {
+            memberPath = null;
+        }
+        else
+        {
+            // An index directly after the variable stays part of the member path.
+            memberPath = path[variable.Length] == pathSeparator ? path[(variable.Length + 1)..] : path[variable.Length..];
+        }
+
+        return true;
+    }
 }

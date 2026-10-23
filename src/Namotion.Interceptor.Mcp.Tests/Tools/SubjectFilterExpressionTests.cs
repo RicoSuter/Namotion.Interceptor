@@ -29,7 +29,10 @@ public class SubjectFilterExpressionTests
     [InlineData("Temperature == \"21.5\"", false)]
     [InlineData("Missing == 1", false)]
     [InlineData("Missing != 1", false)]
-    [InlineData("Device != null", false)]
+    [InlineData("Device != null", true)]
+    [InlineData("Device == null", false)]
+    [InlineData("Device == Light", false)]
+    [InlineData("Device", false)]
     public void WhenRoomIsFiltered_ThenComparisonFollowsValueType(string where, bool expected)
     {
         // Arrange
@@ -211,7 +214,7 @@ public class SubjectFilterExpressionTests
         var room = new TestRoom(context) { Name = "Kitchen", Temperature = 21.5m };
 
         // Act
-        var matches = Evaluate("Temperature > 0", room, new TemperatureHidingPathProvider());
+        var matches = Evaluate("Temperature > 0", room, new HidingPathProvider("Temperature"));
 
         // Assert
         Assert.False(matches);
@@ -249,6 +252,8 @@ public class SubjectFilterExpressionTests
     [InlineData("subject.Name == Kitchen", true)]
     [InlineData("subject.Device.IsOn and Temperature > 20", true)]
     [InlineData("Temperature > Device.Missing", false)]
+    [InlineData("not (Missing > 1)", false)]
+    [InlineData("not (Device == Light)", false)]
     public void WhenFilterUsesPathsNotOrMissingValues_ThenItMatchesAsTheExpressionLanguageSays(string where, bool expected)
     {
         // Arrange
@@ -279,6 +284,58 @@ public class SubjectFilterExpressionTests
         Assert.Equal(expectedError, error);
     }
 
+    [Theory]
+    [InlineData("Device == null", true)]
+    [InlineData("Device != null", false)]
+    [InlineData("Device.IsOn == null", true)]
+    public void WhenPropertyHoldingASubjectIsNotSet_ThenItIsNull(string where, bool expected)
+    {
+        // Arrange
+        var context = CreateContext();
+        var room = new TestRoom(context) { Name = "Kitchen", Temperature = 21.5m };
+
+        // Act
+        var matches = Evaluate(where, room);
+
+        // Assert
+        Assert.Equal(expected, matches);
+    }
+
+    [Theory]
+    [InlineData("Devices != null", true)]
+    [InlineData("Devices == null", false)]
+    [InlineData("Devices[a].IsOn == true", true)]
+    [InlineData("Devices[a] == null", true)]
+    [InlineData("Devices[a] != null", false)]
+    public void WhenPathHasAnIndex_ThenOnlyTheLastSegmentIsMissing(string where, bool expected)
+    {
+        // Arrange
+        var context = CreateContext();
+        var group = new TestDeviceGroup(context);
+        group.Devices = new Dictionary<string, TestDevice> { ["a"] = new TestDevice(context) { DeviceName = "Light", IsOn = true } };
+
+        // Act
+        var matches = Evaluate(where, group);
+
+        // Assert
+        Assert.Equal(expected, matches);
+    }
+
+    [Fact]
+    public void WhenPathProviderHidesAnIntermediatePropertyOfThePath_ThenFilterDoesNotMatchIt()
+    {
+        // Arrange
+        var context = CreateContext();
+        var room = new TestRoom(context) { Name = "Kitchen", Temperature = 21.5m };
+        room.Device = new TestDevice(context) { DeviceName = "Light", IsOn = true };
+
+        // Act
+        var matches = Evaluate("Device.IsOn == true", room, new HidingPathProvider("Device"));
+
+        // Assert
+        Assert.False(matches);
+    }
+
     [Fact]
     public void WhenPathProviderHidesAPropertyOnThePath_ThenFilterDoesNotMatchIt()
     {
@@ -287,7 +344,7 @@ public class SubjectFilterExpressionTests
         var room = new TestRoom(context) { Name = "Kitchen", Temperature = 21.5m };
 
         // Act
-        var matches = Evaluate("subject.Temperature > 0", room, new TemperatureHidingPathProvider());
+        var matches = Evaluate("subject.Temperature > 0", room, new HidingPathProvider("Temperature"));
 
         // Assert
         Assert.False(matches);
@@ -303,9 +360,9 @@ public class SubjectFilterExpressionTests
         return expression.Matches(subject.TryGetRegisteredSubject()!, pathProvider);
     }
 
-    private sealed class TemperatureHidingPathProvider : PathProviderBase
+    private sealed class HidingPathProvider(string hiddenName) : PathProviderBase
     {
-        public override bool IsPropertyIncluded(RegisteredSubjectProperty property) => property.Name != "Temperature";
+        public override bool IsPropertyIncluded(RegisteredSubjectProperty property) => property.Name != hiddenName;
 
         public override string? TryGetPropertySegment(RegisteredSubjectProperty property) =>
             IsPropertyIncluded(property) ? property.Name : null;

@@ -195,9 +195,10 @@ internal static class McpToolHelper
 
     /// <summary>
     /// Resolves a path from the subject through the path provider to a property that a filter can read: every property
-    /// on the way is one the provider includes, and the last one is no attribute, holds no subject and has no index.
+    /// on the way is one the provider includes, and the last one is no attribute and has no index. A property that holds
+    /// subjects is one a filter can read, and its value is the subject, the collection or the dictionary, or null.
     /// </summary>
-    internal static RegisteredSubjectProperty? TryGetScalarPropertyFromPath(
+    internal static RegisteredSubjectProperty? TryGetFilterPropertyFromPath(
         RegisteredSubject subject,
         PathProviderBase pathProvider,
         string path)
@@ -208,7 +209,7 @@ internal static class McpToolHelper
             return null;
         }
 
-        return property.IsAttribute || property.CanContainSubjects ? null : property;
+        return property.IsAttribute ? null : property;
     }
 
     internal static string? TryGetSubjectPath(

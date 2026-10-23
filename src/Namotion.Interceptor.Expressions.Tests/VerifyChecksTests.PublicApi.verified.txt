@@ -27,6 +27,7 @@ namespace Namotion.Interceptor.Expressions
         public const string Value = "value";
         public static bool TryGetVariable(string path, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out string? variable) { }
         public static bool TryGetVariable(string path, char pathSeparator, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out string? variable) { }
+        public static bool TryGetVariable(string path, char pathSeparator, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out string? variable, out string? memberPath) { }
     }
     public interface IExpressionContext
     {

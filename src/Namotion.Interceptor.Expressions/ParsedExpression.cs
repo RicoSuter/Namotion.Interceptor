@@ -48,8 +48,9 @@ public sealed class ParsedExpression
         TryParse(text, '/', out expression, out error);
 
     /// <summary>
-    /// Parses the text with paths whose segments the separator divides, such as <c>.</c>. A word after an operator is a
-    /// path when it holds the separator or an index, otherwise text. On failure the error reads
+    /// Parses the text with paths whose segments the separator divides, such as <c>.</c>. A word after an operator is text,
+    /// such as the name of an enum value, unless it holds the separator or an index or is the variable <c>value</c> or
+    /// <c>subject</c>, which are paths. On failure the error reads
     /// <c>&lt;message&gt; at position &lt;zero-based index&gt;</c>.
     /// </summary>
     public static bool TryParse(

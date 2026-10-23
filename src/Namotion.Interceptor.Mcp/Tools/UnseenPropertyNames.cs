@@ -4,9 +4,10 @@ using Namotion.Interceptor.Registry.Paths;
 namespace Namotion.Interceptor.Mcp.Tools;
 
 /// <summary>
-/// The requested property names that no observed subject has as an exposed scalar property yet, so a tool can warn
+/// The requested property names that no observed subject has as an exposed property yet, so a tool can warn
 /// about a name that resolves on no subject in scope instead of silently matching or returning nothing. A
-/// <c>where</c> path is resolved like the filter resolves it, a <c>properties</c> name like the selection matches it.
+/// <c>where</c> path is resolved like the filter resolves it, a <c>properties</c> name like the selection matches it,
+/// which is a scalar property only.
 /// </summary>
 internal sealed class UnseenPropertyNames
 {
@@ -35,7 +36,7 @@ internal sealed class UnseenPropertyNames
     {
         for (var index = _wherePaths.Count - 1; index >= 0; index--)
         {
-            if (McpToolHelper.TryGetScalarPropertyFromPath(subject, pathProvider, _wherePaths[index]) is not null)
+            if (McpToolHelper.TryGetFilterPropertyFromPath(subject, pathProvider, _wherePaths[index]) is not null)
             {
                 _wherePaths.RemoveAt(index);
             }

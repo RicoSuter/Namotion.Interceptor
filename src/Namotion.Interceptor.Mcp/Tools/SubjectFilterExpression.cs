@@ -80,7 +80,7 @@ internal sealed class SubjectFilterExpression
         foreach (var path in parsed.Paths)
         {
             var memberPath = path;
-            if (ExpressionVariables.TryGetVariable(path, pathSeparator, out var variable))
+            if (ExpressionVariables.TryGetVariable(path, pathSeparator, out var variable, out var variableMemberPath))
             {
                 if (variable == ExpressionVariables.Value)
                 {
@@ -88,12 +88,12 @@ internal sealed class SubjectFilterExpression
                     return false;
                 }
 
-                if (path.Length == variable.Length)
+                if (variableMemberPath is null)
                 {
                     continue;
                 }
 
-                memberPath = path[variable.Length] == pathSeparator ? path[(variable.Length + 1)..] : path[variable.Length..];
+                memberPath = variableMemberPath;
             }
 
             if (!paths.Contains(memberPath))
@@ -108,7 +108,7 @@ internal sealed class SubjectFilterExpression
     private readonly struct FilterContext(RegisteredSubject subject, PathProviderBase pathProvider) : IExpressionContext
     {
         public ExpressionValue ResolvePath(string path) =>
-            McpToolHelper.TryGetScalarPropertyFromPath(subject, pathProvider, path) is { } property
+            McpToolHelper.TryGetFilterPropertyFromPath(subject, pathProvider, path) is { } property
                 ? ExpressionValue.FromProperty(property, property.GetValue())
                 : ExpressionValue.Missing;
 

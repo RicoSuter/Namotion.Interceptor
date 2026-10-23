@@ -12,7 +12,6 @@ public class ParsedExpressionEvaluationTests
     }
 
     // The rows of SubjectFilterExpressionTests in Namotion.Interceptor.Mcp.Tests, which every valid where text must keep.
-    // "Device != null" is left out: MCP hides a property that holds a subject, which is a rule of its host.
     [Theory]
     [InlineData("Temperature > 20", true)]
     [InlineData("Temperature < 20", false)]
@@ -61,7 +60,7 @@ public class ParsedExpressionEvaluationTests
     [InlineData("FloatValue == 0.1", true)]
     [InlineData("FloatValue < 0.2", true)]
     [InlineData("FloatValue > 0.1", false)]
-    public void WhenFilterTextIsEvaluated_ThenItMatchesAsAFilter(string text, bool expected)
+    public void WhenConditionComparesValues_ThenTheComparerRulesApply(string text, bool expected)
     {
         // Arrange
         var values = new Dictionary<string, object?>
@@ -145,7 +144,7 @@ public class ParsedExpressionEvaluationTests
         Assert.Equal(expected, result);
     }
 
-    // A path on the right needs a slash; a bare word there is text, as in a filter.
+    // A path on the right needs a slash; a bare word there is text, such as the name of an enum value.
     [Theory]
     [InlineData("meter/Power > meter/Maximum", false)]
     [InlineData("0.1 == meter/Float", true)]

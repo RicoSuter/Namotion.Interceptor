@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using Namotion.Interceptor.Expressions;
 
 namespace Namotion.Interceptor.Expressions.Tests;
@@ -31,7 +32,8 @@ public class ParsedExpressionParseTests
     [InlineData("Temperature > Limits.Maximum", '.', true)]
     [InlineData("Temperature > Limits.Maximum", '/', false)]
     [InlineData("Temperature > Limits/Maximum", '/', true)]
-    [InlineData("Temperature > 1.5", '.', false)]
+    [InlineData("x == subject", '.', true)]
+    [InlineData("x == subjects.Power", '.', true)]
     public void WhenSeparatorIsGiven_ThenAWordAfterAnOperatorWithTheSeparatorIsAPath(string text, char separator, bool isPath)
     {
         // Act
@@ -39,6 +41,21 @@ public class ParsedExpressionParseTests
 
         // Assert
         Assert.Equal(isPath ? 2 : 1, expression.Paths.Length);
+    }
+
+    [Fact]
+    public void WhenSeparatorIsADotAndNumberHasADecimalPoint_ThenItIsANumberAndNoPath()
+    {
+        // Arrange
+        Assert.True(ParsedExpression.TryParse("Temperature > 1.5", '.', out var expression, out var error), error);
+        var context = new TestExpressionContext(new Dictionary<string, object?> { ["Temperature"] = 2.0 });
+
+        // Act
+        var result = expression.EvaluateCondition(ref context);
+
+        // Assert
+        Assert.Equal(["Temperature"], expression.Paths.ToArray());
+        Assert.True(result);
     }
 
     [Fact]
@@ -56,13 +73,34 @@ public class ParsedExpressionParseTests
     [InlineData("value", '.', "value")]
     [InlineData("subject/Power", '.', null)]
     [InlineData("subjects.Power", '.', null)]
-    public void WhenPathStartsWithAVariableAndTheSeparator_ThenItIsThatVariable(string path, char separator, string? expected)
+    public void WhenPathIsChecked_ThenItsFirstSegmentDecidesTheVariable(string path, char separator, string? expected)
     {
         // Act
         ExpressionVariables.TryGetVariable(path, separator, out var variable);
 
         // Assert
         Assert.Equal(expected, variable);
+    }
+
+    [Theory]
+    [InlineData("subject.Power", '.', "subject", "Power")]
+    [InlineData("value.Device.IsOn", '.', "value", "Device.IsOn")]
+    [InlineData("subject/Device/IsOn", '/', "subject", "Device/IsOn")]
+    [InlineData("subject", '.', "subject", null)]
+    [InlineData("subject[0]", '.', "subject", "[0]")]
+    [InlineData("subject[0].Power", '.', "subject", "[0].Power")]
+    [InlineData("subjects.Power", '.', null, null)]
+    [InlineData("subject/Power", '.', null, null)]
+    public void WhenPathIsSplit_ThenMemberPathFollowsTheVariableAndItsSeparator(
+        string path, char separator, string? expectedVariable, string? expectedMemberPath)
+    {
+        // Act
+        var isVariable = ExpressionVariables.TryGetVariable(path, separator, out var variable, out var memberPath);
+
+        // Assert
+        Assert.Equal(expectedVariable is not null, isVariable);
+        Assert.Equal(expectedVariable, variable);
+        Assert.Equal(expectedMemberPath, memberPath);
     }
 
     [Theory]
@@ -238,7 +276,7 @@ public class ParsedExpressionParseTests
             return ExpressionValue.Missing;
         }
 
-        public ExpressionValue ApplyPipe(string name, System.Collections.Immutable.ImmutableArray<string> arguments, ExpressionValue input) => input;
+        public ExpressionValue ApplyPipe(string name, ImmutableArray<string> arguments, ExpressionValue input) => input;
 
         public string ToText(ExpressionValue result) => string.Empty;
     }

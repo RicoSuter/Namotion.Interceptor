@@ -15,22 +15,12 @@ internal sealed class PathNode : ExpressionNode
     public PathNode(string path, char pathSeparator)
     {
         Path = path;
-        if (ExpressionVariables.TryGetVariable(path, pathSeparator, out var variable))
+        // Split once here, so that an evaluation allocates no part of the path.
+        if (ExpressionVariables.TryGetVariable(path, pathSeparator, out var variable, out var memberPath))
         {
             Variable = variable;
-            // Split once here, so that an evaluation allocates no part of the path.
-            MemberPath = GetMemberPath(path, variable.Length, pathSeparator);
+            MemberPath = memberPath;
         }
-    }
-
-    private static string? GetMemberPath(string path, int variableLength, char pathSeparator)
-    {
-        if (path.Length == variableLength)
-        {
-            return null;
-        }
-
-        return path[variableLength] == pathSeparator ? path[(variableLength + 1)..] : path[variableLength..];
     }
 
     public string Path { get; }
