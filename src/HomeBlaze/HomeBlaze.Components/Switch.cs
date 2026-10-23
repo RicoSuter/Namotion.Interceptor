@@ -24,9 +24,10 @@ public partial class Switch : IConfigurable, ITitleProvider
     public partial string? Path { get; set; }
 
     /// <summary>
-    /// The label next to the switch. Defaults to the title the property declares, then to its name.
+    /// The label next to the switch. Defaults to the title the property declares, then to its name. It can show values with expressions between double braces, such as <c>{{ subject/Name }}</c>.
     /// </summary>
     [Configuration]
+    [TextTemplate]
     public partial string? Label { get; set; }
 
     /// <summary>
@@ -58,9 +59,10 @@ public partial class Switch : IConfigurable, ITitleProvider
     public partial string? Map { get; set; }
 
     /// <summary>
-    /// A second, smaller line below the label of a tile. Without it, a tile with a map shows the text of the value.
+    /// A second, smaller line below the label of a tile. Without it, a tile with a map shows the text of the value. It can show values with expressions between double braces, such as <c>{{ subject/Name }}</c>.
     /// </summary>
     [Configuration]
+    [TextTemplate]
     public partial string? Subtitle { get; set; }
 
     /// <summary>

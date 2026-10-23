@@ -14,14 +14,15 @@
     // Read once per render and never kept: its render records the reads, so that it renders again when one changes.
     var path = tile.Path;
     var reading = ValueReader.Read(PathResolver, tile, path, tile.Map, TimeZone);
-    if (reading.MapError is not null)
+    var labelText = _label.Render(tile.Label, PathResolver, tile, reading.Binding, TimeZone, out var labelError);
+    if ((reading.MapError ?? labelError) is { } error)
     {
-        <WidgetArgumentError Message="@reading.MapError" />
+        <WidgetArgumentError Message="@error" />
     }
     else
     {
         var icon = MudBlazorIconResolver.ResolveOrNull(reading.Icon ?? tile.Icon);
-        var label = ValueReader.GetLabel(reading.Property, tile.Label, path);
+        var label = ValueReader.GetLabel(reading.Property, labelText, path);
 
         if (tile.Kind == ValueTileKind.Tile)
         {
@@ -55,6 +56,7 @@
 }
 
 @code {
+    private readonly WidgetText _label = new(nameof(ValueTile.Label), ExpressionUse.WidgetText);
     private IPropertyHistoryViewer? _viewer;
     private EventCallback<MouseEventArgs> _showHistoryCallback;
 
@@ -80,6 +82,7 @@
 
         var path = tile.Path;
         var property = ValueReader.ResolveProperty(PathResolver, tile, path);
-        return _viewer.TryShowAsync(property, IsEditing, ValueReader.GetLabel(property, tile.Label, path));
+        var label = _label.Render(tile.Label, PathResolver, tile, path, TimeZone, out _);
+        return _viewer.TryShowAsync(property, IsEditing, ValueReader.GetLabel(property, label, path));
     }
 }

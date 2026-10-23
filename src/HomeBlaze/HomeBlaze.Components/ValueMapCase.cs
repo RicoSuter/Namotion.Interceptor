@@ -41,6 +41,7 @@ public partial class ValueMapCase : IConfigurable
     /// shows its value with the pipes <c>display</c> and <c>raw</c>. Without it the formatted value is shown.
     /// </summary>
     [Configuration]
+    [TextTemplate]
     public partial string? Text { get; set; }
 
     /// <summary>

@@ -136,8 +136,10 @@ namespace HomeBlaze.Components
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public bool Outlined { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
+        [HomeBlaze.Abstractions.Attributes.TextTemplate]
         public string? Subtitle { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
+        [HomeBlaze.Abstractions.Attributes.TextTemplate]
         public string? Title { get; set; }
         public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
         public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
@@ -158,6 +160,7 @@ namespace HomeBlaze.Components
         public Control() { }
         public Control(Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.Configuration]
+        [HomeBlaze.Abstractions.Attributes.TextTemplate]
         public string? Label { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         [HomeBlaze.Abstractions.Attributes.SubjectPath(typeof(HomeBlaze.Components.ValueMap))]
@@ -293,6 +296,7 @@ namespace HomeBlaze.Components
         public Gauge() { }
         public Gauge(Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.Configuration]
+        [HomeBlaze.Abstractions.Attributes.TextTemplate]
         public string? Label { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         [HomeBlaze.Abstractions.Attributes.SubjectPath(typeof(HomeBlaze.Components.ValueMap))]
@@ -672,6 +676,7 @@ namespace HomeBlaze.Components
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public HomeBlaze.Components.SwitchKind Kind { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
+        [HomeBlaze.Abstractions.Attributes.TextTemplate]
         public string? Label { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         [HomeBlaze.Abstractions.Attributes.SubjectPath(typeof(HomeBlaze.Components.ValueMap))]
@@ -687,6 +692,7 @@ namespace HomeBlaze.Components
                 typeof(bool)})]
         public string? Path { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
+        [HomeBlaze.Abstractions.Attributes.TextTemplate]
         public string? Subtitle { get; set; }
         public string? Title { get; }
         public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
@@ -826,6 +832,7 @@ namespace HomeBlaze.Components
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public string? Icon { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
+        [HomeBlaze.Abstractions.Attributes.TextTemplate]
         public string? Text { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public string? TextColor { get; set; }
@@ -885,6 +892,7 @@ namespace HomeBlaze.Components
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public string? Icon { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
+        [HomeBlaze.Abstractions.Attributes.TextTemplate]
         public string? Label { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         [HomeBlaze.Abstractions.Attributes.SubjectPath(typeof(HomeBlaze.Components.ValueMap))]
@@ -916,6 +924,7 @@ namespace HomeBlaze.Components
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public HomeBlaze.Components.ValueTileKind Kind { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
+        [HomeBlaze.Abstractions.Attributes.TextTemplate]
         public string? Label { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         [HomeBlaze.Abstractions.Attributes.SubjectPath(typeof(HomeBlaze.Components.ValueMap))]
@@ -1048,7 +1057,7 @@ namespace HomeBlaze.Components.Components
         protected override void OnInitialized() { }
         public System.Threading.Tasks.Task SaveAsync(System.Threading.CancellationToken cancellationToken) { }
     }
-    [HomeBlaze.Components.Abstractions.Attributes.SubjectComponent(HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType.Widget, typeof(HomeBlaze.Components.Card?))]
+    [HomeBlaze.Components.Abstractions.Attributes.SubjectComponent(HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType.Widget, typeof(HomeBlaze.Components.Card))]
     public class CardWidget : Microsoft.AspNetCore.Components.ComponentBase, HomeBlaze.Components.Abstractions.ISubjectComponent
     {
         public CardWidget() { }
