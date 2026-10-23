@@ -35,6 +35,7 @@ public class AttributeUniquenessTests
         var person = new Person(context);
         var firstName = person.TryGetRegisteredProperty(p => p!.FirstName)!;
         var subjectPropertyCount = ((IInterceptorSubject)person).Properties.Count;
+        var registeredPropertyCount = firstName.Parent.Properties.Length;
 
         // Act & Assert
         var exception = Assert.Throws<InvalidOperationException>(() =>
@@ -44,6 +45,7 @@ public class AttributeUniquenessTests
             "The property 'FirstName' of subject 'Person' already has an attribute named 'MaxLength' (property 'FirstName_MaxLength').",
             exception.Message);
         Assert.Equal(subjectPropertyCount, ((IInterceptorSubject)person).Properties.Count);
+        Assert.Equal(registeredPropertyCount, firstName.Parent.Properties.Length);
     }
 
     [Fact]
@@ -152,5 +154,54 @@ public class AttributeUniquenessTests
         Assert.Equal(threadCount - 1, failures);
         Assert.Equal(1, firstName.Parent.Properties.Count(p => p.Name == "FirstName@Flag"));
         Assert.True(((IInterceptorSubject)person).Properties.ContainsKey("FirstName@Flag"));
+    }
+
+    [Fact]
+    public void WhenThreadsAddDifferentPropertiesForTheSameAttributePairConcurrently_ThenExactlyOneSucceeds()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var person = new Person(context);
+        var registered = person.TryGetRegisteredSubject()!;
+
+        const int threadCount = 8;
+        var barrier = new Barrier(threadCount);
+        var successes = 0;
+        var failures = 0;
+
+        // Act
+        var threads = new Thread[threadCount];
+        for (var index = 0; index < threadCount; index++)
+        {
+            var slot = index;
+            threads[index] = new Thread(() =>
+            {
+                barrier.SignalAndWait();
+                try
+                {
+                    registered.AddProperty($"Flag{slot}", typeof(int), _ => 1, null,
+                        new PropertyAttributeAttribute(nameof(Person.FirstName), "Flag"));
+                    Interlocked.Increment(ref successes);
+                }
+                catch (InvalidOperationException)
+                {
+                    Interlocked.Increment(ref failures);
+                }
+            })
+            {
+                IsBackground = true
+            };
+            threads[index].Start();
+        }
+
+        foreach (var thread in threads)
+        {
+            thread.Join();
+        }
+
+        // Assert
+        Assert.Equal(1, successes);
+        Assert.Equal(threadCount - 1, failures);
+        Assert.Equal(1, registered.Properties.Count(p => p.IsAttribute && p.AttributeMetadata.AttributeName == "Flag"));
     }
 }

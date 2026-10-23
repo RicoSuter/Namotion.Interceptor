@@ -364,8 +364,9 @@ public class RegisteredSubject
             isIntercepted: true,
             isDynamic: true);
 
-        // Lock order: _lock first, then the subject's SyncRoot inside AddProperties. Nothing that
-        // holds SyncRoot calls back into the registry, so this order must not be inverted.
+        // Lock order: the subject's SyncRoot first, then _lock. Getters and setters run under SyncRoot
+        // and may take _lock (Parents does), so _lock must never be held while SyncRoot is acquired.
+        lock (Subject.SyncRoot)
         lock (_lock)
         {
             // The pair check runs before the name check so that a get-or-add finds an attribute
