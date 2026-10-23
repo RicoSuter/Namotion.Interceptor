@@ -9,6 +9,10 @@
         <ProjectReference Include="..\Namotion.Devices.Luxtronik.HomeBlaze\Namotion.Devices.Luxtronik.HomeBlaze.csproj" />
         <ProjectReference Include="..\Namotion.Devices.MyStrom\Namotion.Devices.MyStrom.csproj" />
         <ProjectReference Include="..\Namotion.Devices.MyStrom.HomeBlaze\Namotion.Devices.MyStrom.HomeBlaze.csproj" />
+        <ProjectReference Include="..\Namotion.Devices.Nuki\Namotion.Devices.Nuki.csproj" />
+        <ProjectReference Include="..\Namotion.Devices.Nuki.HomeBlaze\Namotion.Devices.Nuki.HomeBlaze.csproj" />
+        <ProjectReference Include="..\Namotion.Services.Pushover\Namotion.Services.Pushover.csproj" />
+        <ProjectReference Include="..\Namotion.Services.Pushover.HomeBlaze\Namotion.Services.Pushover.HomeBlaze.csproj" />
         <ProjectReference Include="..\Namotion.Devices.Shelly\Namotion.Devices.Shelly.csproj" />
         <ProjectReference Include="..\Namotion.Devices.Shelly.HomeBlaze\Namotion.Devices.Shelly.HomeBlaze.csproj" />
         <ProjectReference Include="..\Namotion.Devices.Sonos\Namotion.Devices.Sonos.csproj" />
@@ -72,6 +76,8 @@
         <!-- SDK-built images own every file as root, so the app user could not write /data.
              Root also gives access to GPIO devices. -->
         <ContainerUser>root</ContainerUser>
+        <!-- Adds the org.opencontainers.image.revision label, which the publish workflow reads to move the edge tag. -->
+        <PublishRepositoryUrl>true</PublishRepositoryUrl>
     </PropertyGroup>
 
     <ItemGroup>
@@ -80,6 +86,16 @@
         <ContainerEnvironmentVariable Include="HomeBlaze__RootConfigFile" Value="/data/Root.json" />
         <ContainerEnvironmentVariable Include="HomeBlaze__SeedDirectory" Value="/app/Seed" />
     </ItemGroup>
+
+    <!-- The multi-platform publish hands labels to each platform build as Key:Value and the SDK keeps only the text
+         up to the next colon, so timestamps and URLs arrive cut off. Remove once CI builds with an SDK that has dotnet/sdk#55414. -->
+    <Target Name="RestoreContainerLabelValues" AfterTargets="_ParseItemsForPublishingSingleContainer">
+        <ItemGroup>
+            <ContainerLabel Remove="@(ContainerLabel)" />
+            <ContainerLabel Include="$([System.String]::Copy('%(_ParsedContainerLabel.Identity)').Split(':')[0])"
+                            Value="$([System.String]::Copy('%(_ParsedContainerLabel.Identity)').Split(':', 2)[1])" />
+        </ItemGroup>
+    </Target>
 
     <!-- The docs are linked from the development data so they exist only once in the repository.
          An Update on the SDK's default None items would keep their RecursiveDir relative to the project folder,

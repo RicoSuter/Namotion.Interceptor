@@ -121,7 +121,7 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
             return Task.FromResult(error);
         }
 
-        var methods = subject.GetAllMethods().Select(method => new
+        var methods = subject.GetAllMethods(ExclusionTarget.Agents).Select(method => new
         {
             name = method.PropertyName,
             kind = method.Kind.ToString().ToLowerInvariant(),

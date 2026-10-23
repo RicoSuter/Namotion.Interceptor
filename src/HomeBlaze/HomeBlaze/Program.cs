@@ -21,6 +21,10 @@ using Namotion.Devices.Gpio;
 using Namotion.Devices.Gpio.HomeBlaze;
 using Namotion.Devices.MyStrom;
 using Namotion.Devices.MyStrom.HomeBlaze;
+using Namotion.Devices.Nuki;
+using Namotion.Devices.Nuki.HomeBlaze;
+using Namotion.Services.Pushover;
+using Namotion.Services.Pushover.HomeBlaze;
 using Namotion.Devices.Shelly;
 using Namotion.Devices.Shelly.HomeBlaze;
 using Namotion.Devices.Sonos;
@@ -65,12 +69,14 @@ builder.Services.AddHomeBlazeMcpToolProvider(context => new HistoryMcpToolProvid
     context.Services.GetRequiredService<ILoggerFactory>().CreateLogger<HistoryMcpToolProvider>()));
 builder.Services.AddHomeBlazeAgents();
 
-// The MCP server is always registered because the built-in agents use it; McpServer:Enabled only decides
-// whether the external /mcp route is mapped (default: false, enabled in Development).
+// The external MCP server at /mcp (default: off, enabled in Development). The built-in agents do not use it.
 var mcpEnabled = builder.Configuration.GetValue("McpServer:Enabled", false);
-builder.Services.AddMcpServer()
-    .WithHttpTransport(options => options.Stateless = true)
-    .WithHomeBlazeMcpTools(isReadOnly: builder.Configuration.GetValue("McpServer:ReadOnly", true));
+if (mcpEnabled)
+{
+    builder.Services.AddMcpServer()
+        .WithHttpTransport(options => options.Stateless = true)
+        .WithHomeBlazeMcpTools(isReadOnly: builder.Configuration.GetValue("McpServer:ReadOnly", true));
+}
 
 // Add services to the container.
 builder.Services
@@ -120,6 +126,10 @@ typeProvider
     .AddAssembly(typeof(HueBridgeSetupComponent).Assembly)
     .AddAssembly(typeof(MyStromSwitch).Assembly)
     .AddAssembly(typeof(MyStromSwitchWidget).Assembly)
+    .AddAssembly(typeof(NukiBridge).Assembly)
+    .AddAssembly(typeof(NukiBridgeWidget).Assembly)
+    .AddAssembly(typeof(PushoverService).Assembly)
+    .AddAssembly(typeof(PushoverServiceWidget).Assembly)
     .AddAssembly(typeof(ShellyDevice).Assembly)
     .AddAssembly(typeof(ShellyDeviceWidget).Assembly)
     .AddAssembly(typeof(SunSpecDevice).Assembly)
@@ -166,19 +176,10 @@ if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Error", createScopeForErrors: true);
     app.UseHsts();
-}
-
-if (!app.Environment.IsDevelopment())
-{
-    // The CLI agent calls back over HTTP on the same host; a redirect would drop its bearer token.
-    app.UseWhen(
-        context => !context.Request.Path.StartsWithSegments(AgentMcpEndpoint.Route),
-        branch => branch.UseHttpsRedirection());
+    app.UseHttpsRedirection();
 }
 
 app.UseAntiforgery();
-
-app.MapHomeBlazeAgentMcp();
 
 // Map the external MCP server endpoint if enabled
 if (mcpEnabled)

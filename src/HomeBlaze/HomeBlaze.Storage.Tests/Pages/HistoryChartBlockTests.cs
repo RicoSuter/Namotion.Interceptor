@@ -33,4 +33,29 @@ public class HistoryChartBlockTests
         Assert.Equal(["pump/CurrentSpeed", "pump/Status"], chart.Series.Select(series => series.Path));
         Assert.Equal("#E4572E", chart.Series[0].Color);
     }
+
+    [Fact]
+    public async Task WhenASeriesOfABarChartIsNegated_ThenTheChartTakesDeltaTheDaysAndTheSign()
+    {
+        // Arrange
+        const string source =
+            ":: HomeBlaze.Samples.Motor#meter Name=\"Meter\"\n" +
+            "::\n\n" +
+            ":: HomeBlaze.History.Blazor.HistoryChart Range=30d Bucket=day Aggregation=Delta\n" +
+            "::: Series Path=meter/Energy Label=\"Imported\"\n" +
+            "::: Series Path=meter/Energy Label=\"Exported\" Negate=true\n" +
+            "::\n";
+        var fixture = await MarkdownPageFixture.CreateWithWidgetsAndSamplesAsync();
+
+        // Act
+        var page = await fixture.AddPageAsync("Bars.md", source);
+
+        // Assert
+        Assert.Empty(PageErrorBoxes.FindSortedByLine(page));
+        var chartBlock = MarkdownPageParser.Parse(source).Blocks[1];
+        var chart = Assert.IsType<HistoryChart>(page.GetBlockSubject(chartBlock.Index));
+        Assert.Equal("day", chart.Bucket);
+        Assert.Equal("Delta", chart.Aggregation);
+        Assert.Equal([false, true], chart.Series.Select(series => series.Negate));
+    }
 }

@@ -1,7 +1,6 @@
 ---
 title: Configuration Demo
 navTitle: Configuration Demo
-position: 9
 ---
 
 # Configuration Demo
@@ -54,13 +53,14 @@ A type with a list or a subject in its configuration, for example a device, take
 
 ## Cells of a grid
 
-Each cell of a `GridLayout` is a `Cell` block inside the grid: its arguments say where the cell is, and its content is what the cell shows. The grid below has one row and two columns. The first cell shows the value motor from the top of this page with a `Widget` block, and the second cell holds text with expressions.
+Each cell of a `GridLayout` is a `Cell` block inside the grid: its arguments say where the cell is, and its content is what the cell shows. The grid below has one row and two columns. The first cell shows the value motor from the top of this page with a `Widget` block, and the second cell holds a card with text with expressions, because a cell draws no box of its own.
 
 ~~~~markdown
 :: HomeBlaze.Components.GridLayout#cellgrid Rows=1 Columns=2
 ::: Cell Row=0 Column=0
 :::: HomeBlaze.Components.Widget Path=valuemotor
 ::: Cell#speed Row=0 Column=1
+:::: HomeBlaze.Components.Card Title="Speed"
 The **value motor** is set to {{ valuemotor/TargetSpeed }} RPM and runs at {{ valuemotor/CurrentSpeed }} RPM.
 ::
 ~~~~
@@ -69,6 +69,7 @@ The **value motor** is set to {{ valuemotor/TargetSpeed }} RPM and runs at {{ va
 ::: Cell Row=0 Column=0
 :::: HomeBlaze.Components.Widget Path=valuemotor
 ::: Cell#speed Row=0 Column=1
+:::: HomeBlaze.Components.Card Title="Speed"
 The **value motor** is set to {{ valuemotor/TargetSpeed }} RPM and runs at {{ valuemotor/CurrentSpeed }} RPM.
 ::
 

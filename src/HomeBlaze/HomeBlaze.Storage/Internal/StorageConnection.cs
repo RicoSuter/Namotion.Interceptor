@@ -58,7 +58,8 @@ internal sealed class StorageConnection : IDisposable
         _storageDirectory = storageDirectory;
         _timeProvider = timeProvider;
         Index = new StorageIndex();
-        Reconciler = new StorageReconciler(_client, storage, subjectFactory, serializer, Index, timeProvider, logger, _endedSource.Token);
+        Reconciler = new StorageReconciler(
+            _client, storage, subjectFactory, serializer, Index, timeProvider, logger, isOnDisk: storageDirectory is not null, _endedSource.Token);
         // On the worker, which is the only one that reads the index, and after its last item: nothing places
         // the subjects of an ended connection any more.
         Worker = new StorageWorker(logger, Reconciler.ReleaseUnplacedSubjects, _endedSource.Token);

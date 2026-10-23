@@ -223,7 +223,7 @@ public class HistoryChartSeriesResolverTests
         // Assert
         Assert.Equal(
             "Unknown aggregation 'Median': use one of TimeWeightedAverage, Average, SampleAverage, Minimum, Maximum, Sum, " +
-            "StandardDeviation, Last, First, Count",
+            "StandardDeviation, Last, First, Count, Delta",
             error);
     }
 
@@ -239,27 +239,16 @@ public class HistoryChartSeriesResolverTests
         Assert.StartsWith("Unknown aggregation 'Mean' of series 'Fan'", error);
     }
 
-    [Fact]
-    public void WhenTheAggregationOfTheChartIsDelta_ThenItIsUnknown()
+    [Theory]
+    [InlineData("Delta")]
+    [InlineData("delta")]
+    public void WhenTheAggregationIsDelta_ThenThereIsNoError(string aggregation)
     {
         // Act
-        var error = FindArgumentError("24h", "Auto", "Delta", [Line("Energy", aggregation: "Delta")]);
+        var error = FindArgumentError("30d", "day", aggregation, [Line("Energy", aggregation: aggregation)]);
 
         // Assert
-        Assert.NotNull(error);
-        Assert.StartsWith("Unknown aggregation 'Delta': use one of ", error);
-    }
-
-    [Fact]
-    public void WhenTheAggregationOfASeriesIsDelta_ThenItIsUnknownForThatSeries()
-    {
-        // Act
-        var error = FindArgumentError(
-            "24h", "Auto", "Maximum", [Line("Pump", aggregation: "Maximum"), Line("Energy", aggregation: "delta")]);
-
-        // Assert
-        Assert.NotNull(error);
-        Assert.StartsWith("Unknown aggregation 'delta' of series 'Energy'", error);
+        Assert.Null(error);
     }
 
     [Theory]
@@ -476,6 +465,8 @@ public class HistoryChartSeriesResolverTests
     [InlineData(typeof(double), false, true, false, HistoryAggregations.Maximum, HistoryAggregations.Maximum)]
     [InlineData(typeof(double), true, false, false, HistoryAggregations.Maximum, HistoryAggregations.Last)]
     [InlineData(typeof(double), false, false, true, HistoryAggregations.Maximum, HistoryAggregations.Last)]
+    [InlineData(typeof(double), false, true, false, "delta", HistoryAggregations.Delta)]
+    [InlineData(typeof(double), false, true, true, HistoryAggregations.Delta, HistoryAggregations.Last)]
     public void WhenAnAggregationIsRequested_ThenALineTakesItWhenOfferedAndBandsAndRawQueriesTakeTheLastValue(
         Type propertyType, bool isBand, bool isCumulative, bool isRaw, string requested, string expected)
     {
@@ -502,6 +493,22 @@ public class HistoryChartSeriesResolverTests
         // Assert
         Assert.Equal(HistoryAggregations.TimeWeightedAverage, aggregation);
         Assert.Equal("Sum not available, shows Average", note);
+    }
+
+    [Fact]
+    public void WhenAPropertyThatIsNoCounterAsksForDelta_ThenItFallsBackAndItsNoteSaysSo()
+    {
+        // Arrange
+        var series = Line("Power", aggregation: "Delta");
+
+        // Act
+        var aggregation = HistoryChartSeriesResolver.ChooseAggregation(
+            typeof(double), false, isCumulative: false, false, AllAggregations, series.Aggregation);
+        var note = HistoryChartSeriesResolver.GetAggregationNote(series, isRaw: false, aggregation);
+
+        // Assert
+        Assert.Equal(HistoryAggregations.TimeWeightedAverage, aggregation);
+        Assert.Equal("Delta not available, shows Average", note);
     }
 
     [Theory]

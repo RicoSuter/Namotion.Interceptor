@@ -2,7 +2,6 @@
 title: Help
 icon: Help
 location: AppBar
-position: 20
 alignment: Right
 ---
 

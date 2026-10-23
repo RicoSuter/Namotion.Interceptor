@@ -40,23 +40,93 @@ public class CanvasExtentTests
     public void WhenWidthIsNotAboveZero_ThenItIsAnError(int value)
     {
         // Act & Assert
-        Assert.Equal($"Width must be above 0: {value}", CanvasExtent.Validate(value));
+        Assert.Equal($"Width must be above 0: {value}", CanvasExtent.Validate(value, null, null));
     }
 
     [Theory]
-    [InlineData(CanvasScale.FitWidth, false, 1000, 500, 0.5)]
-    [InlineData(CanvasScale.FitWidth, false, 1000, 1500, 1.5)]
-    [InlineData(CanvasScale.FitWidth, true, 1000, 500, 1)]
-    [InlineData(CanvasScale.None, false, 1000, 500, 1)]
-    [InlineData(CanvasScale.FitWidth, false, 0, 500, 1)]
-    [InlineData(CanvasScale.FitWidth, false, 1000, 0, 1)]
-    public void WhenFactorIsComputed_ThenOnlyAViewedFitWidthCanvasWithAWidthIsScaled(
-        CanvasScale scale, bool isEditing, int designWidth, double availableWidth, double expected)
+    [InlineData(CanvasScale.FitWidth, false, 1000, true)]
+    [InlineData(CanvasScale.FitWidth, true, 1000, false)]
+    [InlineData(CanvasScale.None, false, 1000, false)]
+    [InlineData(CanvasScale.FitWidth, false, 0, false)]
+    public void WhenCanvasIsChecked_ThenOnlyAViewedFitWidthCanvasWithAWidthIsScaled(
+        CanvasScale scale, bool isEditing, int designWidth, bool expected)
     {
         // Act
-        var factor = CanvasExtent.GetFactor(scale, isEditing, designWidth, availableWidth);
+        var isScaled = CanvasExtent.IsScaled(scale, isEditing, designWidth);
 
         // Assert
-        Assert.Equal(expected, factor, 6);
+        Assert.Equal(expected, isScaled);
+    }
+
+    [Fact]
+    public void WhenCanvasHasNoMinWidth_ThenItIsDrawnAtTheWidthOfItsFrame()
+    {
+        // Act
+        var drawnWidth = CanvasExtent.GetDrawnWidth(null, null);
+        var angle = CanvasExtent.GetAngle(drawnWidth, 1104);
+
+        // Assert
+        Assert.Equal("100cqw", drawnWidth);
+        Assert.Equal("atan2(100cqw, 1104px)", angle);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-5)]
+    public void WhenMinWidthIsNotAboveZero_ThenItIsAnError(int value)
+    {
+        // Act & Assert
+        Assert.Equal($"MinWidth must be above 0: {value}", CanvasExtent.Validate(null, value, null));
+    }
+
+    [Fact]
+    public void WhenCanvasHasAMinWidth_ThenItIsDrawnAtLeastThatWide()
+    {
+        // Act
+        var drawnWidth = CanvasExtent.GetDrawnWidth(750, null);
+        var angle = CanvasExtent.GetAngle(drawnWidth, 1000);
+
+        // Assert
+        Assert.Equal("max(100cqw, 750px)", drawnWidth);
+        Assert.Equal("atan2(max(100cqw, 750px), 1000px)", angle);
+    }
+
+    [Fact]
+    public void WhenCanvasHasAMaxWidth_ThenItIsDrawnAtMostThatWide()
+    {
+        // Act
+        var drawnWidth = CanvasExtent.GetDrawnWidth(null, 1104);
+        var angle = CanvasExtent.GetAngle(drawnWidth, 1104);
+
+        // Assert
+        Assert.Equal("min(100cqw, 1104px)", drawnWidth);
+        Assert.Equal("atan2(min(100cqw, 1104px), 1104px)", angle);
+    }
+
+    [Fact]
+    public void WhenCanvasHasAMinWidthAndAMaxWidth_ThenItIsDrawnBetweenBoth()
+    {
+        // Act
+        var drawnWidth = CanvasExtent.GetDrawnWidth(720, 1104);
+
+        // Assert
+        Assert.Equal("clamp(720px, 100cqw, 1104px)", drawnWidth);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-5)]
+    public void WhenMaxWidthIsNotAboveZero_ThenItIsAnError(int value)
+    {
+        // Act & Assert
+        Assert.Equal($"MaxWidth must be above 0: {value}", CanvasExtent.Validate(null, null, value));
+    }
+
+    [Fact]
+    public void WhenMaxWidthIsBelowMinWidth_ThenItIsAnError()
+    {
+        // Act & Assert
+        Assert.Equal("MaxWidth must not be below MinWidth: 600", CanvasExtent.Validate(null, 720, 600));
+        Assert.Null(CanvasExtent.Validate(null, 720, 720));
     }
 }

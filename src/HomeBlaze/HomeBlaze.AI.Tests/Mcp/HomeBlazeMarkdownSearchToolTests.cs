@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Text.Json;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
@@ -13,6 +14,7 @@ using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Mcp;
 using Namotion.Interceptor.Mcp.Tools;
+using Namotion.Interceptor.Registry;
 using Xunit;
 
 namespace HomeBlaze.AI.Tests.Mcp;
@@ -343,6 +345,131 @@ public sealed class HomeBlazeMarkdownSearchToolTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenNotesOfMetadataMatch_ThenTheyAreReturnedWithThePathOfTheirSubjectAndTheirProperty()
+    {
+        // Arrange
+        var (root, services) = await CreateGraphAsync(
+        [
+            ("Docs/Pump.json", """{ "speed": 1 }"""),
+            ("Docs/Pump.metadata.json", """{ "notes": "Check the freezer gasket.", "$properties": { "FileSize": { "notes": "Grows with the freezer log." } } }""")
+        ]);
+        var tools = CreateTools(services, root, forAgents: true);
+
+        // Act
+        var result = await CallAsync(tools[HomeBlazeMarkdownSearchToolProvider.SearchMarkdownToolName], new { query = "freezer" });
+
+        // Assert
+        var matches = result.GetProperty("pages").EnumerateArray().ToArray();
+        Assert.Equal(
+            ["/Storage/Docs/Pump.json", "/Storage/Docs/Pump.json", "/Storage/Notes.md"],
+            matches.Select(match => match.GetProperty("path").GetString()));
+        Assert.Equal(
+            [null, "FileSize", null],
+            matches.Select(match => match.TryGetProperty("property", out var property) ? property.GetString() : null));
+        Assert.Equal(["notes", "notes"], matches.Take(2).Select(match => match.GetProperty("kind").GetString()));
+        Assert.False(matches[2].TryGetProperty("kind", out _));
+        Assert.Equal("Check the freezer gasket.", matches[0].GetProperty("matches")[0].GetProperty("snippet").GetString());
+        Assert.Equal(1, matches[1].GetProperty("matches")[0].GetProperty("line").GetInt32());
+        Assert.Equal(
+            ["/Storage/Docs/Pump.json/HomeBlaze:Metadata", "/Storage/Docs/Pump.json/FileSize@HomeBlaze:Metadata"],
+            matches.Take(2).Select(match => match.GetProperty("read").GetString()));
+        Assert.False(matches[2].TryGetProperty("read", out _));
+        var subjectNotes = await CallAsync(tools["get_property"], new { path = matches[0].GetProperty("read").GetString() });
+        var propertyNotes = await CallAsync(tools["get_property"], new { path = matches[1].GetProperty("read").GetString() });
+        Assert.Equal("Check the freezer gasket.", subjectNotes.GetProperty("value").GetProperty("notes").GetString());
+        Assert.Equal("Grows with the freezer log.", propertyNotes.GetProperty("value").GetProperty("notes").GetString());
+    }
+
+    [Fact]
+    public async Task WhenThePathIsGiven_ThenOnlyNotesInOrUnderItAreSearched()
+    {
+        // Arrange
+        var tool = await CreateToolAsync(
+            ("Docs/Pump.json", """{ "speed": 1 }"""),
+            ("Docs/Pump.metadata.json", """{ "notes": "Check the heat pump filter." }"""));
+
+        // Act
+        var result = await CallAsync(tool, new { query = "heat pump", path = "/Storage/Docs" });
+
+        // Assert
+        Assert.Equal(
+            ["/Storage/Docs/HeatPump.md", "/Storage/Docs/Pump.json"],
+            result.GetProperty("pages").EnumerateArray().Select(page => page.GetProperty("path").GetString()));
+    }
+
+    [Fact]
+    public async Task WhenNotesBelongToASubjectOfATypeHiddenFromAgents_ThenTheyAreNotSearched()
+    {
+        // Arrange
+        var tool = await CreateToolAsync(
+            ("Docs/Hidden.json", $$"""{ "$type": "{{typeof(AgentExcludedDevice).FullName}}" }"""),
+            ("Docs/Hidden.metadata.json", """{ "notes": "The freezer key hangs here." }"""));
+
+        // Act
+        var result = await CallAsync(tool, new { query = "freezer" });
+
+        // Assert
+        Assert.Equal(["/Storage/Notes.md"], result.GetProperty("pages").EnumerateArray().Select(page => page.GetProperty("path").GetString()));
+    }
+
+    [Theory]
+    [InlineData(false, new[] { "/Agent", "/Storage/Notes.md" })]
+    [InlineData(true, new[] { "/Storage/Notes.md" })]
+    public async Task WhenNotesBelongToAnAgent_ThenOnlyAgentsDoNotSearchThem(bool forAgents, string[] expectedPaths)
+    {
+        // Arrange
+        var (root, services) = await CreateGraphAsync([]);
+        var agent = new FakeAgent(AgentTestContext.CreateServices(root));
+        root.Children = new Dictionary<string, IInterceptorSubject>(root.Children) { ["Agent"] = agent };
+        var metadata = ImmutableDictionary<string, JsonElement>.Empty.Add("notes", JsonElement.Parse("\"The freezer list of the agent.\""));
+        agent.TryGetRegisteredSubject()!.AddProperty(KnownAttributes.Metadata, metadata.GetType(), _ => metadata, null);
+        var tool = CreateTool(services, root, forAgents);
+
+        // Act
+        var result = await CallAsync(tool, new { query = "freezer" });
+
+        // Assert
+        Assert.Equal(expectedPaths, result.GetProperty("pages").EnumerateArray().Select(page => page.GetProperty("path").GetString()));
+    }
+
+    [Fact]
+    public async Task WhenAPageHasNotes_ThenThePageComesBeforeItsNotes()
+    {
+        // Arrange
+        var (root, services) = await CreateGraphAsync([]);
+        var page = ((FluentStorageContainer)root.Children["Storage"]).Children["Notes.md"];
+        var metadata = ImmutableDictionary<string, JsonElement>.Empty.Add("notes", JsonElement.Parse("\"The freezer page.\""));
+        page.TryGetRegisteredSubject()!.AddProperty(KnownAttributes.Metadata, metadata.GetType(), _ => metadata, null);
+        var tool = CreateTool(services, root, forAgents: true);
+
+        // Act
+        var result = await CallAsync(tool, new { query = "freezer" });
+
+        // Assert
+        var matches = result.GetProperty("pages").EnumerateArray().ToArray();
+        Assert.Equal(["/Storage/Notes.md", "/Storage/Notes.md"], matches.Select(match => match.GetProperty("path").GetString()));
+        Assert.Equal([false, true], matches.Select(match => match.TryGetProperty("kind", out _)));
+    }
+
+    [Fact]
+    public async Task WhenTheRootHasNotes_ThenTheyAreFoundAtTheRootWithThePathToReadThem()
+    {
+        // Arrange
+        var (root, services) = await CreateGraphAsync([]);
+        var metadata = ImmutableDictionary<string, JsonElement>.Empty.Add("notes", JsonElement.Parse("\"The freezer of the house.\""));
+        root.TryGetRegisteredSubject()!.AddProperty(KnownAttributes.Metadata, metadata.GetType(), _ => metadata, null);
+        var tool = CreateTool(services, root, forAgents: true);
+
+        // Act
+        var result = await CallAsync(tool, new { query = "house" });
+
+        // Assert
+        var page = GetSinglePage(result);
+        Assert.Equal("/", page.GetProperty("path").GetString());
+        Assert.Equal("/HomeBlaze:Metadata", page.GetProperty("read").GetString());
+    }
+
+    [Fact]
     public async Task WhenTheConfigurationIsReadOnly_ThenSearchMarkdownIsOfferedAsAReadOnlyTool()
     {
         // Act
@@ -355,8 +482,16 @@ public sealed class HomeBlazeMarkdownSearchToolTests : IDisposable
     private async Task<McpToolInfo> CreateToolAsync(params (string Path, string Content)[] additionalFiles)
     {
         var (root, services) = await CreateGraphAsync(additionalFiles);
-        var configuration = HomeBlazeMcpConfigurationFactory.Create(services, () => root, isReadOnly: true, forAgents: true);
-        return new McpToolFactory(root, configuration).CreateTools().Single(tool => tool.Name == HomeBlazeMarkdownSearchToolProvider.SearchMarkdownToolName);
+        return CreateTool(services, root, forAgents: true);
+    }
+
+    private static McpToolInfo CreateTool(IServiceProvider services, AgentTestRoot root, bool forAgents) =>
+        CreateTools(services, root, forAgents)[HomeBlazeMarkdownSearchToolProvider.SearchMarkdownToolName];
+
+    private static Dictionary<string, McpToolInfo> CreateTools(IServiceProvider services, AgentTestRoot root, bool forAgents)
+    {
+        var configuration = HomeBlazeMcpConfigurationFactory.Create(services, () => root, isReadOnly: true, forAgents);
+        return new McpToolFactory(root, configuration).CreateTools().ToDictionary(tool => tool.Name);
     }
 
     private async Task<(AgentTestRoot Root, IServiceProvider Services)> CreateGraphAsync((string Path, string Content)[] additionalFiles)

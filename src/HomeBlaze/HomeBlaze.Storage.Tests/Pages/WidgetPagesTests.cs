@@ -80,8 +80,11 @@ public class WidgetPagesTests : IClassFixture<AdministrationFolderFixture>
 
         // Assert
         Assert.Equal((3, 1), (valueList.OfType<ValueList>().Count(), valueList.OfType<Progress>().Count()));
-        Assert.Equal(3, valueTile.OfType<ValueTile>().Count());
+        Assert.Equal(
+            [ValueTileKind.Box, ValueTileKind.Box, ValueTileKind.Box, ValueTileKind.Tile, ValueTileKind.Tile],
+            valueTile.OfType<ValueTile>().Select(tile => tile.Kind));
         Assert.Equal([(140, 3)], valueTile.OfType<FlowLayout>().Select(flow => (flow.MinWidth, flow.Items.Length)));
+        Assert.Equal(["1:1"], valueTile.OfType<GridLayout>().Select(grid => grid.CellAspectRatio));
         Assert.Equal([IndicatorKind.Chip, IndicatorKind.Icon, IndicatorKind.Icon, IndicatorKind.Chip], indicator.OfType<Indicator>().Select(widget => widget.Kind));
         Assert.Single(indicator.OfType<Card>());
         Assert.Equal(2, progress.OfType<Progress>().Count());
@@ -175,7 +178,7 @@ public class WidgetPagesTests : IClassFixture<AdministrationFolderFixture>
     }
 
     [Fact]
-    public void WhenGridLayoutPageIsLoaded_ThenTheGridShowsTheMotorsAndItsLastCellHoldsText()
+    public void WhenGridLayoutPageIsLoaded_ThenTheGridShowsTheMotorsAndItsLastCellHoldsACardWithText()
     {
         // Act
         IPathScope page = _folder.FindPage(GetPagePath("grid-layout.md"));
@@ -189,8 +192,10 @@ public class WidgetPagesTests : IClassFixture<AdministrationFolderFixture>
             grid.Cells.Take(2).Select(cell => Assert.IsType<MarkdownFragment>(cell.Child).Children.Values.OfType<Widget>().Single().Path));
 
         var lastCell = Assert.IsType<MarkdownFragment>(grid.Cells[2].Child).Children.Values;
-        Assert.Empty(lastCell.OfType<Widget>());
-        Assert.Equal([$"{PumpPath}/TargetSpeed", $"{FanPath}/TargetSpeed"], lastCell.OfType<RenderExpression>().Select(expression => expression.Path));
+        var card = Assert.Single(lastCell.OfType<Card>());
+        var body = Assert.IsType<MarkdownFragment>(card.Content).Children.Values;
+        Assert.Empty(body.OfType<Widget>());
+        Assert.Equal([$"{PumpPath}/TargetSpeed", $"{FanPath}/TargetSpeed"], body.OfType<RenderExpression>().Select(expression => expression.Path));
     }
 
     [Fact]

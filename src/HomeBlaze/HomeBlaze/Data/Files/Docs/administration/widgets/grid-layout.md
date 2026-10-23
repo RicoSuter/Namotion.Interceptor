@@ -1,7 +1,6 @@
 ---
 title: GridLayout
 navTitle: GridLayout
-position: 12
 ---
 
 # GridLayout
@@ -33,7 +32,7 @@ The arguments of a `Cell` block:
 
 ## Samples
 
-A grid of two rows and two columns. The two cells of the first row show the two sample motors. The cell of the second row spans both columns and holds text with expressions:
+A grid of two rows and two columns. The two cells of the first row show the two sample motors. The cell of the second row spans both columns and holds a card with text with expressions:
 
 <!-- sample: live -->
 ~~~~markdown
@@ -43,6 +42,7 @@ A grid of two rows and two columns. The two cells of the first row show the two 
 ::: Cell Row=0 Column=1
 :::: HomeBlaze.Components.Widget Path=../Fan
 ::: Cell Row=1 Column=0 ColumnSpan=2
+:::: HomeBlaze.Components.Card Title="Targets"
 The pump is set to **{{ ../Pump/TargetSpeed }}** and the fan to **{{ ../Fan/TargetSpeed }}**.
 ::
 ~~~~
@@ -53,6 +53,7 @@ The pump is set to **{{ ../Pump/TargetSpeed }}** and the fan to **{{ ../Fan/Targ
 ::: Cell Row=0 Column=1
 :::: HomeBlaze.Components.Widget Path=../Fan
 ::: Cell Row=1 Column=0 ColumnSpan=2
+:::: HomeBlaze.Components.Card Title="Targets"
 The pump is set to **{{ ../Pump/TargetSpeed }}** and the fan to **{{ ../Fan/TargetSpeed }}**.
 ::
 
@@ -62,31 +63,33 @@ A grid with cells that keep their shape. `CellAspectRatio=1:1` makes each cell a
 ~~~~markdown
 :: HomeBlaze.Components.GridLayout#squaregrid Rows=1 Columns=3 CellAspectRatio=1:1
 ::: Cell Row=0 Column=0
-Living room
+:::: HomeBlaze.Components.Card Title="Living room"
 ::: Cell Row=0 Column=1
-Kitchen
+:::: HomeBlaze.Components.Card Title="Kitchen"
 ::: Cell Row=0 Column=2
-Garden
+:::: HomeBlaze.Components.Card Title="Garden"
 ::
 ~~~~
 
 :: HomeBlaze.Components.GridLayout#squaregrid Rows=1 Columns=3 CellAspectRatio=1:1
 ::: Cell Row=0 Column=0
-Living room
+:::: HomeBlaze.Components.Card Title="Living room"
 ::: Cell Row=0 Column=1
-Kitchen
+:::: HomeBlaze.Components.Card Title="Kitchen"
 ::: Cell Row=0 Column=2
-Garden
+:::: HomeBlaze.Components.Card Title="Garden"
 ::
 
 ## Behavior and Limits
 
+- **No frame**: A cell draws no border, no background and no room around its content, it only places it. Content that needs a surface brings its own: put it into a [Card](card.md), or use a tile.
 - **Equal rows and columns**: All columns have the same width. Without `CellAspectRatio` all rows have the same height and the grid is at least 400 pixels high.
 - **Cell aspect ratio**: With `CellAspectRatio=W:H` a row is as high as a column is wide times H/W, and follows the width of the page. The cells have no minimum height then.
 - **An invalid ratio**: A `CellAspectRatio` that is not two numbers above 0 with a colon between them shows `CellAspectRatio must look like 1:1` with the value in place of the grid, see [Value Widget Errors](../page-errors.md#value-widget-errors).
-- **Tiles**: A tile ([Switch](switch.md) or [OperationButton](operation-button.md) with `Kind=Tile`) in a cell fills the cell, as a card does. Square cells suit tiles.
+- **Tiles**: A tile ([Switch](switch.md), [OperationButton](operation-button.md) or [ValueTile](value-tile.md) with `Kind=Tile`) in a cell fills the cell, as a card does. Square cells suit tiles.
+- **Gauges**: A [Gauge](gauge.md) that is the only content of a cell stands in the middle of the cell.
 - **Cards**: A [Card](card.md) in a cell fills the cell and ignores its `AspectRatio`, unless it has a `Height` of its own. Its body scrolls when its content does not fit.
-- **Fixed columns**: The grid keeps its columns at every width of the screen. A cell cuts off content that needs more room than the cell has, which a narrow window shows in the first row of the grid above. Use a `FlowLayout` where the cells should wrap.
+- **Fixed columns**: The grid keeps its columns at every width of the screen. A cell cuts off content that needs more room than the cell has, which a narrow window shows in the first row of the grid above. Only the shadow of a card or a tile that fills the cell reaches past it, except in Safari, which cuts it off too. Use a `FlowLayout` where the cells should wrap.
 - **Names**: Give a cell a `#name` to keep it and everything in it when cells are added or removed, see [What an Edit of the Page Keeps](../pages.md#what-an-edit-of-the-page-keeps).
 - **Edit mode**: While the page is in edit mode, each cell has buttons to edit and remove it, which show while the grid or a widget in one of its cells is selected. A click on a cell without a widget, or on a free place, selects the grid, and once the grid itself is selected, a click on the plus in a free place adds a cell there, see [Editing in the Page Editor](../pages.md#editing-in-the-page-editor).
 
