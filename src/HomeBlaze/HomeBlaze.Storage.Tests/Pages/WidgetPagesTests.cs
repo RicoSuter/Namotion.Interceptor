@@ -81,7 +81,7 @@ public class WidgetPagesTests : IClassFixture<AdministrationFolderFixture>
         // Assert
         Assert.Equal((3, 1), (valueList.OfType<ValueList>().Count(), valueList.OfType<Progress>().Count()));
         Assert.Equal(
-            [ValueTileKind.Box, ValueTileKind.Box, ValueTileKind.Box, ValueTileKind.Tile, ValueTileKind.Tile],
+            [ValueTileKind.Box, ValueTileKind.Box, ValueTileKind.Box, ValueTileKind.Tile, ValueTileKind.Tile, ValueTileKind.Tile],
             valueTile.OfType<ValueTile>().Select(tile => tile.Kind));
         Assert.Equal([(140, 3)], valueTile.OfType<FlowLayout>().Select(flow => (flow.MinWidth, flow.Items.Length)));
         Assert.Equal(["1:1"], valueTile.OfType<GridLayout>().Select(grid => grid.CellAspectRatio));

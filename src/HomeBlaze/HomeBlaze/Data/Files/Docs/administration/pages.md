@@ -215,7 +215,7 @@ The reader sees "Speed: 600 RPM", and the tooltip of the text shows the target s
 ### Where an Expression Is Not Evaluated
 
 - **In markdown code**: An expression in inline code, in an indented code block or in a fenced code block is shown as written, with its braces. A fenced code block is markdown's way to show code: a line of three or more backticks or tildes, the lines of code, and a line of the same characters. This page shows all its samples that way.
-- **On the head line of a block and in its `json` block**: The value of an argument is taken as written. `Title="{{ mymotor/Name }}"` gives a title with braces in it. The exception is the `Text` and the `When` of a `Case` of a value map, see [ValueMap](widgets/value-map.md#conditions).
+- **On the head line of a block and in its `json` block**: The value of an argument is taken as written. The exceptions are the arguments that are text with values, such as the `Label` of a `ValueTile` and the `Title` of a `Card`, see [Text with Values](widgets/basics.md#text-with-values), and the `Text` and the `When` of a `Case` of a value map, see [ValueMap](widgets/value-map.md#conditions). The page itself does not evaluate them: the widget does, when it renders.
 - **In the frontmatter**.
 - **In the address of a markdown link**: `[text](https://example.com/{{ path }})` gives a broken link. Write the link as an HTML `<a>` element, where an expression works inside the `href` attribute.
 

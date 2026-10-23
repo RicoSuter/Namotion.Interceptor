@@ -2,6 +2,7 @@ using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Components;
 using HomeBlaze.Services;
+using HomeBlaze.Services.Expressions;
 using HomeBlaze.Storage.Internal;
 using HomeBlaze.Storage.Pages;
 using Microsoft.Extensions.DependencyInjection;
@@ -68,6 +69,56 @@ public class WidgetDocumentationPathTests : IClassFixture<AdministrationFolderFi
                 .Select(path => $"{subject.GetType().Name}.{path.PropertyName}={path.Text}"));
 
         Assert.Empty(pathsToNothing);
+    }
+
+    [Theory]
+    [MemberData(nameof(Pages))]
+    public void WhenPageIsLoadedWithItsFolder_ThenEveryTemplateArgumentParsesAndItsPagePathsLeadToAProperty(string pagePath)
+    {
+        // Arrange
+        var resolver = _folder.Services.GetRequiredService<SubjectPathResolver>();
+
+        // Act
+        var page = _folder.FindPage(pagePath);
+
+        // Assert: a variable is bound by the widget, every other path resolves from the widget like the paths of the page
+        var mistakes = DocumentationFolderFixture.FindSubjects(page)
+            .SelectMany(subject => FindTemplates(subject).SelectMany(template => FindMistakes(template, subject, resolver)));
+
+        Assert.Empty(mistakes);
+    }
+
+    private static IEnumerable<(string PropertyName, string Text)> FindTemplates(IInterceptorSubject subject)
+    {
+        foreach (var property in subject.TryGetRegisteredSubject()!.Properties)
+        {
+            if (property.ReflectionAttributes.OfType<TextTemplateAttribute>().Any() &&
+                property.GetValue() is string { Length: > 0 } text &&
+                text.Contains("{{", StringComparison.Ordinal))
+            {
+                yield return (property.Name, text);
+            }
+        }
+    }
+
+    private static IEnumerable<string> FindMistakes(
+        (string PropertyName, string Text) template, IInterceptorSubject subject, SubjectPathResolver resolver)
+    {
+        var name = $"{subject.GetType().Name}.{template.PropertyName}={template.Text}";
+        if (!TextTemplate.TryParse(template.Text, out var parsed, out var error))
+        {
+            yield return $"{name}: {error}";
+            yield break;
+        }
+
+        foreach (var path in parsed.Expressions.SelectMany(expression => expression.Paths))
+        {
+            if (!ExpressionVariables.TryGetVariable(path, out _) &&
+                resolver.ResolveScopedProperty(path, PathStyle.Canonical, subject) is null)
+            {
+                yield return $"{name}: the path '{path}' leads to no property";
+            }
+        }
     }
 
     /// <summary>

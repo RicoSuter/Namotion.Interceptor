@@ -73,11 +73,33 @@ The slots of a widget are filled as [Content and Slots](../pages.md#content-and-
 
 ## Labels
 
-A widget with a `Label` argument shows the label that is set. Without it, a widget that reads a property shows the title that the property declares, and the name of the property when it declares none. When the path leads nowhere:
+A widget with a `Label` argument shows the label that is set. Without it, a widget that reads a property shows the title that the property declares, and the name of the property when it declares none. A label can also show values, see [Text with Values](#text-with-values). When the path leads nowhere:
 
 - **Controls, values and chart series**: A [Switch](switch.md), a [Slider](slider.md), a [Select](select.md), a [Control](control.md), a [Gauge](gauge.md), a row of a [ValueList](value-list.md), a [ValueTile](value-tile.md) and a series of a [HistoryChart](history-chart.md) show the path.
 - **Operations**: An [OperationButton](operation-button.md), and a `Control` for an operation, show the title of the method, and the path when the path leads nowhere.
 - **Table columns**: A column of a [SubjectTable](subject-table.md) without `Label` takes the title of the property from the first row that has the property, and the name of the property when no row has it.
+
+## Text with Values
+
+The `Label` of a [ValueTile](value-tile.md), a [Gauge](gauge.md), a [Control](control.md), a [Switch](switch.md) and a row of a [ValueList](value-list.md), the `Subtitle` of a `Switch`, and the `Title` and the `Subtitle` of a [Card](card.md) can show values with expressions between double braces, as the text of a page does:
+
+<!-- sample: live -->
+~~~~markdown
+:: HomeBlaze.Components.ValueTile Kind=Tile Path=../Pump/CurrentSpeed Label="Target {{ subject/TargetSpeed }}"
+::
+~~~~
+
+:: HomeBlaze.Components.ValueTile Kind=Tile Path=../Pump/CurrentSpeed Label="Target {{ subject/TargetSpeed }}"
+::
+
+- **`value` and `subject`**: In a widget with a `Path`, `value` is the value that the path leads to, and `subject` is the subject that owns it, or the subject that the path leads to, as in the cases of a [ValueMap](value-map.md#conditions). A card has no `Path`, so its title and subtitle use paths from the page only, and `value` or `subject` there is an error.
+- **Other paths** resolve from the page, as in the text of the page, see [Expression Paths](../pages.md#expression-paths).
+- **Pipes**: `display`, `raw` and `map:name`, see [Pipes](../pages.md#pipes). A map name resolves like the `Map` of the widget.
+- **Live**: The text updates when a value that it shows changes.
+- **Empty**: A label whose expressions give no text, because a value is missing, shows the label of the property, as a label that is not set does.
+- **Errors**: A mistake shows in place of the widget with the name of the argument in front, such as `Label: expected ')' at position 5`, see [Page Errors](../page-errors.md#value-widget-errors).
+- **Written as is elsewhere**: The source of the page, the page editor, the property panel, the tree of subjects and AI agents see the text as written, with its braces.
+- **Other arguments**: Paths, map names, colors, icons and numbers are taken as written. A color or an icon that depends on a value comes from a [ValueMap](value-map.md).
 
 ## Value Widgets
 
