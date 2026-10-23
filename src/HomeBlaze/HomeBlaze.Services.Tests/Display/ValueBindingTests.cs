@@ -84,6 +84,21 @@ public class ValueBindingTests
         Assert.Null(binding.Subject);
         Assert.Null(binding.Property);
     }
+
+    [Fact]
+    public void WhenResultIsASubjectWithoutAProperty_ThenTheSubjectIsBoundAndNoValue()
+    {
+        // Arrange
+        var charger = new BindingCharger(CreateContext());
+
+        // Act
+        var binding = ValueBinding.FromExpressionValue(ExpressionValue.FromValue(charger));
+
+        // Assert
+        Assert.Same(charger, binding.Subject);
+        Assert.Null(binding.Value);
+        Assert.Null(binding.Property);
+    }
 }
 
 [InterceptorSubject]

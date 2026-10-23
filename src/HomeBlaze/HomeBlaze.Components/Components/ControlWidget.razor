@@ -19,7 +19,8 @@
     var property = ValueReader.ResolveProperty(PathResolver, control, path);
     var kind = ControlKindResolver.Resolve(property, minimum, maximum, out var sliderRange);
 
-    if (labelError is not null)
+    // The operation button, the switch and the slider ignore the map, so that their label error is the only one they can have.
+    if (labelError is not null && kind is ControlKind.OperationButton or ControlKind.Switch or ControlKind.Slider)
     {
         <WidgetArgumentError Message="@labelError" />
     }
@@ -40,9 +41,11 @@
     {
         // A select and a value row show the map; one that cannot be resolved replaces the control, as it does every widget.
         var valueMap = ValueReader.ResolveMap(PathResolver, control, map, out var mapError);
-        if (mapError is not null)
+        // A widget shows one error: that of its map first, then that of its label.
+        var error = mapError ?? labelError;
+        if (error is not null)
         {
-            <WidgetArgumentError Message="@mapError" />
+            <WidgetArgumentError Message="@error" />
         }
         else if (kind == ControlKind.Select)
         {

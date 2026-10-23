@@ -48,6 +48,7 @@ public class WidgetTextTests
     [InlineData("{{ subject/ChargingPower | raw }} W", "wallbox", "7400 W")]
     [InlineData("{{ meter/Power }}", null, "1.23 kW")]
     [InlineData("{{ value | map:charging }}", "wallbox/IsCharging", "Charging 7.4 kW")]
+    [InlineData("{{ subject | map:charging }}", "wallbox", "Charging 7.4 kW")]
     [InlineData("{{ subject/IsCharging and value > 1000 }}", "wallbox/ChargingPower", "Yes")]
     [InlineData("[{{ value }}]", "nothing/Here", "[]")]
     public async Task WhenTextHasExpressions_ThenTheyShowTheValuesOfThePathAndThePage(string text, string? path, string expected)

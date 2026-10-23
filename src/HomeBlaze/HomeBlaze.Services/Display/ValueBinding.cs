@@ -63,11 +63,19 @@ public readonly struct ValueBinding(RegisteredSubjectProperty? property, object?
         }
     }
 
-    /// <summary>Binds the result of an expression, with the same rule for its property as <see cref="FromProperty"/>.</summary>
+    /// <summary>
+    /// Binds the result of an expression, with the same rule for its property as <see cref="FromProperty"/>. A result that
+    /// has no property and is a subject, such as the variable <c>subject</c> itself, binds that subject and no value.
+    /// </summary>
     public static ValueBinding FromExpressionValue(ExpressionValue result)
     {
         if (result.Property is not { } property)
         {
+            if (result.Value is IInterceptorSubject subject)
+            {
+                return new ValueBinding(null, null, subject);
+            }
+
             return new ValueBinding(null, result.IsText ? null : result.Value, null);
         }
 

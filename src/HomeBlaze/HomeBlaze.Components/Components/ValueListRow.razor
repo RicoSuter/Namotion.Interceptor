@@ -7,6 +7,8 @@
     var content = Row.Content;
     // A row with an empty path has no reading and binds nothing.
     var label = _label.Render(Row.Label, PathResolver, Row, Reading is null ? default : Reading.Binding, TimeZone, out var labelError);
+    // A row shows one error: that of its map first, then that of its label.
+    var error = Reading?.MapError ?? labelError;
 }
 
 @* No gutters, so that the rows start and end where the text around the list does. Inside a card that is where the icon and the title of its header start and where the content of its header ends. *@
@@ -14,9 +16,9 @@
              Class="value-list-item"
              Gutters="false"
              data-testid="value-row">
-    @if (labelError is not null)
+    @if (error is not null)
     {
-        <WidgetArgumentError Message="@labelError" />
+        <WidgetArgumentError Message="@error" />
     }
     else
     {
