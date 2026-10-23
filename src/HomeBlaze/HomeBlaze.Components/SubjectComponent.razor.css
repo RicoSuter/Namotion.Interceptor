@@ -6,18 +6,18 @@
 .subject-component-wrapper.selectable {
     /* The color of the outlines as r, g, b, and the color of the selected outline, which dark mode lightens. The rules of
        the dark mode and of the bar, which takes the same colors, are in MainLayout.razor.css of HomeBlaze.Host. */
-    --selection-rgb: var(--mud-palette-primary-rgb);
-    --selection-strong: var(--mud-palette-primary);
+    --subject-selection-rgb: var(--mud-palette-primary-rgb);
+    --subject-selection-strong: var(--mud-palette-primary);
     pointer-events: auto;
     cursor: pointer;
-    outline: 1px dashed rgba(var(--selection-rgb), 0.35);
+    outline: 1px dashed rgba(var(--subject-selection-rgb), 0.35);
     outline-offset: 1px;
 }
 
 /* A block of text of a page is green, so that it stands apart from the widgets around it. */
 .subject-component-wrapper.selectable.text-block {
-    --selection-rgb: var(--mud-palette-success-rgb);
-    --selection-strong: var(--mud-palette-success);
+    --subject-selection-rgb: var(--mud-palette-success-rgb);
+    --subject-selection-strong: var(--mud-palette-success);
 }
 
 /* A widget that shows nothing, such as a ValueMap, would otherwise be an invisible tab stop. */
@@ -49,21 +49,21 @@
 
 @media (hover: hover) {
     .subject-component-wrapper.selectable:not(.selected):hover:not(:has(.subject-component-wrapper.selectable:hover)) {
-        outline: 1px solid rgba(var(--selection-rgb), 0.7);
+        outline: 1px solid rgba(var(--subject-selection-rgb), 0.7);
     }
 }
 
 .subject-component-wrapper.selectable:focus-visible {
-    outline: 2px solid rgba(var(--selection-rgb), 0.7);
+    outline: 2px solid rgba(var(--subject-selection-rgb), 0.7);
 }
 
 .subject-component-wrapper.selectable.selected {
-    outline: 2px solid var(--selection-strong);
+    outline: 2px solid var(--subject-selection-strong);
 }
 
 /* The outline of the selection would hide the focus, so a focused selected widget also gets a ring around it. */
 .subject-component-wrapper.selectable.selected:focus-visible {
-    box-shadow: 0 0 0 5px rgba(var(--selection-rgb), 0.35);
+    box-shadow: 0 0 0 5px rgba(var(--subject-selection-rgb), 0.35);
 }
 
 /* The bar sits above the top right corner of the selected widget and flips below the widget when there is no room.
@@ -249,7 +249,8 @@
    bar is drawn over the gap above the block that follows, with the button in the middle of the line. Only its button
    takes the pointer, and it is never drawn over a block, so that a click anywhere on a block selects it: the page keeps
    gaps of at least 1rem between the blocks it edits inline and at the edges of their containers, which the button fits
-   into (see MarkdownFilePageComponent.razor.css of HomeBlaze.Storage.Blazor). */
+   into (see MarkdownFilePageComponent.razor.css of HomeBlaze.Storage.Blazor). The content of a value list row is the
+   exception: its blocks stand in the row without gaps, and the buttons of its lines can be drawn over its value. */
 ::deep .block-insert-line {
     position: relative;
     height: 0;

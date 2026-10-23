@@ -14,6 +14,7 @@
     [Parameter, EditorRequired]
     public string Text { get; set; } = string.Empty;
 
+    /// <summary>The test id of the chip, which tells the kind of widget apart in tests.</summary>
     [Parameter]
     public string? TestId { get; set; }
 }
