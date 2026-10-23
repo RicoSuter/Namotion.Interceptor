@@ -50,12 +50,12 @@ public partial class HomeBlazeInstallation
     }
 
     /// <summary>
-    /// Brings <see cref="Clients"/> in line with the open circuits: a circuit joins the named client its browser stores
-    /// the id of, otherwise it is an anonymous client of its own; an unnamed client without circuit is removed.
+    /// Brings <see cref="Clients"/> in line with the open circuits: a circuit joins the named client whose token its
+    /// browser stores, otherwise it is an anonymous client of its own; an unnamed client without circuit is removed.
     /// </summary>
     internal void ReconcileClients()
     {
-        List<(ClientConnection Connection, string ClientId)>? idsToStore = null;
+        List<(ClientConnection Connection, string Token)>? tokensToStore = null;
         lock (_clientsLock)
         {
             var connections = _clientConnectionService.Connections;
@@ -73,18 +73,18 @@ public partial class HomeBlazeInstallation
 
             foreach (var (id, client) in next)
             {
-                UpdateClient(id, client, connections, clientIds, ref idsToStore);
+                UpdateClient(id, client, connections, clientIds, ref tokensToStore);
             }
 
             ConnectedCircuitCount = connections.Length;
         }
 
         // Outside the lock: the callback runs on the dispatcher of the circuit.
-        if (idsToStore is not null)
+        if (tokensToStore is not null)
         {
-            foreach (var (connection, clientId) in idsToStore)
+            foreach (var (connection, token) in tokensToStore)
             {
-                _ = StoreClientIdAsync(connection, clientId);
+                _ = StoreClientTokenAsync(connection, token);
             }
         }
     }
@@ -171,34 +171,53 @@ public partial class HomeBlazeInstallation
         return client.RenameAsync(name, cancellationToken);
     }
 
-    private async Task StoreClientIdAsync(ClientConnection connection, string clientId)
+    private async Task StoreClientTokenAsync(ClientConnection connection, string token)
     {
         try
         {
-            await connection.Callbacks.StoreClientIdAsync(clientId);
+            await connection.Callbacks.StoreClientTokenAsync(token);
         }
         catch (Exception exception)
         {
-            _logger.LogWarning(exception, "Storing the client id {ClientId} in its browser failed", clientId);
+            _logger.LogWarning(exception, "Storing the token of the client {ClientId} in its browser failed", connection.ClientId);
         }
     }
 
     /// <summary>
-    /// Returns the client id of each connection: the named client its browser stores the id of, otherwise its own id.
+    /// Returns the client id of each connection: the named client whose token hash its browser stores, otherwise its own id.
     /// </summary>
     private static string[] ResolveClientIds(ImmutableArray<ClientConnection> connections, Dictionary<string, HomeBlazeClient> current)
     {
+        Dictionary<string, string>? clientIdsByTokenHash = null;
         var clientIds = new string[connections.Length];
         for (var index = 0; index < connections.Length; index++)
         {
             var connection = connections[index];
-            clientIds[index] = connection.CookieClientId is { } cookieClientId &&
-                current.TryGetValue(cookieClientId, out var stored) && stored.IsNamed
-                    ? cookieClientId
-                    : connection.ConnectionId;
+            string? clientId = null;
+            if (connection.CookieTokenHash is { } cookieTokenHash)
+            {
+                clientIdsByTokenHash ??= CreateClientIdsByTokenHash(current);
+                clientIdsByTokenHash.TryGetValue(cookieTokenHash, out clientId);
+            }
+
+            clientIds[index] = clientId ?? connection.ConnectionId;
         }
 
         return clientIds;
+    }
+
+    private static Dictionary<string, string> CreateClientIdsByTokenHash(Dictionary<string, HomeBlazeClient> current)
+    {
+        var clientIdsByTokenHash = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var (id, client) in current)
+        {
+            if (client.IsNamed && client.TokenHash is { } tokenHash)
+            {
+                clientIdsByTokenHash.TryAdd(tokenHash, id);
+            }
+        }
+
+        return clientIdsByTokenHash;
     }
 
     /// <summary>
@@ -231,8 +250,10 @@ public partial class HomeBlazeInstallation
         HomeBlazeClient client,
         ImmutableArray<ClientConnection> connections,
         string[] clientIds,
-        ref List<(ClientConnection Connection, string ClientId)>? idsToStore)
+        ref List<(ClientConnection Connection, string Token)>? tokensToStore)
     {
+        var tokenHash = client.IsNamed ? client.TokenHash : null;
+        var token = tokenHash is null ? null : client.GetIssuedToken(tokenHash);
         var connectionCount = 0;
         var lastConnected = client.LastConnected;
         for (var index = 0; index < connections.Length; index++)
@@ -250,10 +271,10 @@ public partial class HomeBlazeInstallation
             }
 
             connection.Assign(id, client.Name);
-            if (client.IsNamed && connection.CookieClientId != id)
+            if (token is not null && connection.CookieTokenHash != tokenHash)
             {
-                connection.CookieClientId = id;
-                (idsToStore ??= []).Add((connection, id));
+                connection.CookieTokenHash = tokenHash;
+                (tokensToStore ??= []).Add((connection, token));
             }
         }
 

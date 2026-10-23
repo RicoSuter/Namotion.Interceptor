@@ -44,7 +44,7 @@ public class HomeBlazeInstallationClientTests
     }
 
     [Fact]
-    public async Task WhenAClientIsRenamed_ThenItIsPersistedAndItsTabStoresTheId()
+    public async Task WhenAConnectedAnonymousClientIsRenamed_ThenItIsPersistedAndItsTabStoresATokenThatHashesToItsTokenHash()
     {
         // Arrange
         var callbacks = new FakeClientCallbacks();
@@ -58,28 +58,85 @@ public class HomeBlazeInstallationClientTests
         // Assert
         Assert.Equal("Kitchen tablet", client.Name);
         Assert.Equal("Kitchen tablet", connection.ClientName);
-        Assert.Equal(connection.ConnectionId, connection.CookieClientId);
+        Assert.NotNull(client.TokenHash);
+        Assert.Equal(client.TokenHash, connection.CookieTokenHash);
         Assert.Contains(_installation, _root.Written);
-        await AsyncTestHelpers.WaitUntilAsync(() => callbacks.StoredClientIds.Count == 1, message: "The id was not stored");
-        Assert.Equal(connection.ConnectionId, callbacks.StoredClientIds[0]);
+        await AsyncTestHelpers.WaitUntilAsync(() => callbacks.StoredTokens.Count == 1, message: "The token was not stored");
+        var token = callbacks.StoredTokens[0];
+        Assert.NotEqual(client.Id, token);
+        Assert.Equal(client.TokenHash, ClientConnectionService.HashClientToken(token));
     }
 
     [Fact]
-    public async Task WhenANamedClientCloses_ThenItStaysOfflineAndALaterTabWithItsCookieJoinsIt()
+    public async Task WhenTheNameOfAConnectedAnonymousClientIsSetDirectly_ThenItsTabStoresAToken()
     {
         // Arrange
-        var first = _connections.Connect(null, new FakeClientCallbacks());
+        var callbacks = new FakeClientCallbacks();
+        var connection = _connections.Connect(null, callbacks);
+        _installation.ReconcileClients();
+        var client = _installation.Clients[connection.ConnectionId];
+
+        // Act
+        client.Name = "Hall";
+
+        // Assert
+        Assert.NotNull(client.TokenHash);
+        await AsyncTestHelpers.WaitUntilAsync(() => callbacks.StoredTokens.Count == 1, message: "The token was not stored");
+        Assert.Equal(client.TokenHash, ClientConnectionService.HashClientToken(callbacks.StoredTokens[0]));
+    }
+
+    [Fact]
+    public void WhenANameIsSetOnAClientOutsideAnInstallation_ThenNoTokenIsIssued()
+    {
+        // Act
+        var client = new HomeBlazeClient { Name = "Hall" };
+
+        // Assert
+        Assert.Null(client.TokenHash);
+    }
+
+    [Fact]
+    public async Task WhenANamedClientIsRenamed_ThenItKeepsItsTokenHash()
+    {
+        // Arrange
+        var callbacks = new FakeClientCallbacks();
+        var connection = _connections.Connect(null, callbacks);
+        _installation.ReconcileClients();
+        var client = _installation.Clients[connection.ConnectionId];
+        await client.RenameAsync("Hall", CancellationToken.None);
+        var tokenHash = client.TokenHash;
+
+        // Act
+        await client.RenameAsync("Kitchen", CancellationToken.None);
+
+        // Assert
+        Assert.Equal("Kitchen", client.Name);
+        Assert.NotNull(tokenHash);
+        Assert.Equal(tokenHash, client.TokenHash);
+        Assert.Equal(tokenHash, connection.CookieTokenHash);
+        await AsyncTestHelpers.WaitUntilAsync(() => callbacks.StoredTokens.Count == 1, message: "The token was not stored");
+        Assert.Single(callbacks.StoredTokens);
+    }
+
+    [Fact]
+    public async Task WhenANamedClientCloses_ThenItStaysOfflineAndALaterTabWithItsTokenJoinsIt()
+    {
+        // Arrange
+        var callbacks = new FakeClientCallbacks();
+        var first = _connections.Connect(null, callbacks);
         _installation.ReconcileClients();
         await _installation.Clients[first.ConnectionId].RenameAsync("Hall", CancellationToken.None);
         var id = first.ConnectionId;
+        await AsyncTestHelpers.WaitUntilAsync(() => callbacks.StoredTokens.Count == 1, message: "The token was not stored");
+        var token = callbacks.StoredTokens[0];
 
         // Act
         _connections.Disconnect(first);
         _installation.ReconcileClients();
         var offline = _installation.Clients[id];
         var isConnectedAfterClose = offline.IsConnected;
-        var second = _connections.Connect(id, new FakeClientCallbacks());
-        var third = _connections.Connect(id, new FakeClientCallbacks());
+        var second = _connections.Connect(token, new FakeClientCallbacks());
+        var third = _connections.Connect(token, new FakeClientCallbacks());
         _installation.ReconcileClients();
 
         // Assert
@@ -94,7 +151,31 @@ public class HomeBlazeInstallationClientTests
     }
 
     [Fact]
-    public void WhenTheCookieNamesNoKnownClient_ThenTheTabIsAnonymous()
+    public async Task WhenATabPresentsTheIdOfANamedClientAsItsCookie_ThenItDoesNotJoinItAndIsAnonymous()
+    {
+        // Arrange
+        var first = _connections.Connect(null, new FakeClientCallbacks());
+        _installation.ReconcileClients();
+        var named = _installation.Clients[first.ConnectionId];
+        await named.RenameAsync("Hall", CancellationToken.None);
+        var intruderCallbacks = new FakeClientCallbacks();
+
+        // Act
+        var intruder = _connections.Connect(named.Id, intruderCallbacks);
+        _installation.ReconcileClients();
+        await named.SendNotificationAsync(new Notification { Message = "Hello" }, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(intruder.ConnectionId, intruder.ClientId);
+        Assert.Equal(string.Empty, intruder.ClientName);
+        Assert.Equal(1, named.ConnectionCount);
+        Assert.False(_installation.Clients[intruder.ConnectionId].IsNamed);
+        Assert.Empty(intruderCallbacks.Notifications);
+        Assert.Empty(intruderCallbacks.StoredTokens);
+    }
+
+    [Fact]
+    public void WhenTheCookieTokenIsUnknown_ThenTheTabIsAnonymous()
     {
         // Arrange
         var connection = _connections.Connect("forgotten123", new FakeClientCallbacks());
@@ -139,21 +220,47 @@ public class HomeBlazeInstallationClientTests
         // Assert
         var client = Assert.Single(_installation.Clients).Value;
         Assert.False(client.IsNamed);
+        Assert.Null(client.TokenHash);
         Assert.True(client.IsConnected);
         Assert.Equal(string.Empty, connection.ClientName);
         Assert.Equal(client.Id, connection.ClientId);
     }
 
     [Fact]
+    public async Task WhenANamedClientIsForgotten_ThenATabWithItsOldTokenIsAnonymous()
+    {
+        // Arrange
+        var callbacks = new FakeClientCallbacks();
+        var connection = _connections.Connect(null, callbacks);
+        _installation.ReconcileClients();
+        var id = connection.ConnectionId;
+        var client = _installation.Clients[id];
+        await client.RenameAsync("Hall", CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => callbacks.StoredTokens.Count == 1, message: "The token was not stored");
+        var token = callbacks.StoredTokens[0];
+
+        // Act
+        await client.ForgetAsync(CancellationToken.None);
+        var later = _connections.Connect(token, new FakeClientCallbacks());
+        _installation.ReconcileClients();
+
+        // Assert
+        Assert.Null(client.TokenHash);
+        Assert.Equal(later.ConnectionId, later.ClientId);
+        Assert.Equal(string.Empty, later.ClientName);
+        Assert.All(_installation.Clients.Values, each => Assert.False(each.IsNamed));
+    }
+
+    [Fact]
     public async Task WhenACircuitReconcilesBetweenAReloadAndItsApply_ThenTheLoadedClientsAreKept()
     {
         // Arrange
-        var loadedClient = new HomeBlazeClient { Name = "Hall" };
+        var loadedClient = new HomeBlazeClient { Name = "Hall", TokenHash = ClientConnectionService.HashClientToken("loaded-token") };
         var loaded = new Dictionary<string, HomeBlazeClient> { ["named1234567"] = loadedClient };
 
         // Act
         _installation.Clients = loaded;
-        var connection = _connections.Connect("named1234567", new FakeClientCallbacks());
+        var connection = _connections.Connect("loaded-token", new FakeClientCallbacks());
         _installation.ReconcileClients();
         await _installation.ApplyConfigurationAsync(CancellationToken.None);
 
@@ -213,29 +320,46 @@ public class HomeBlazeInstallationClientTests
     public async Task WhenTheConfigurationIsSavedAndLoadedIntoANewInstallation_ThenTheNamedClientIsKeptAndTheAnonymousOneIsDropped()
     {
         // Arrange
-        var named = _connections.Connect(null, new FakeClientCallbacks());
+        var callbacks = new FakeClientCallbacks();
+        var named = _connections.Connect(null, callbacks);
         var anonymous = _connections.Connect(null, new FakeClientCallbacks());
         _installation.ReconcileClients();
-        await _installation.Clients[named.ConnectionId].RenameAsync("Hall", CancellationToken.None);
+        var namedClient = _installation.Clients[named.ConnectionId];
+        await namedClient.RenameAsync("Hall", CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => callbacks.StoredTokens.Count == 1, message: "The token was not stored");
+        var token = callbacks.StoredTokens[0];
+        var tokenHash = namedClient.TokenHash;
         var typeProvider = new TypeProvider();
         typeProvider.AddTypes([typeof(HomeBlazeInstallation), typeof(HomeBlazeClient)]);
         var serializer = new ConfigurableSubjectSerializer(typeProvider, new ServiceCollection().BuildServiceProvider());
         var json = serializer.Serialize(_installation);
+        var restartedConnections = new ClientConnectionService(TimeProvider.System, NullLogger<ClientConnectionService>.Instance);
         var restartedRoot = new TestRoot(SubjectContextFactory.Create(new ServiceCollection()));
-        var restarted = HomeBlazeInstallationTests.CreateInstallation(HomeBlazeInstallationTests.CreateBuild());
+        var restarted = HomeBlazeInstallationTests.CreateInstallation(HomeBlazeInstallationTests.CreateBuild(), clientConnections: restartedConnections);
         restartedRoot.Installation = restarted;
 
         // Act
         serializer.UpdateConfiguration(restarted, json);
         await restarted.ApplyConfigurationAsync(CancellationToken.None);
+        var offline = Assert.Single(restarted.Clients);
+        var isConnectedBeforeTab = offline.Value.IsConnected;
+        var tab = restartedConnections.Connect(token, new FakeClientCallbacks());
+        restarted.ReconcileClients();
 
         // Assert
         Assert.Contains(anonymous.ConnectionId, json);
-        var client = Assert.Single(restarted.Clients);
-        Assert.Equal(named.ConnectionId, client.Key);
-        Assert.Equal(named.ConnectionId, client.Value.Id);
-        Assert.Equal("Hall", client.Value.Name);
-        Assert.False(client.Value.IsConnected);
+        Assert.Contains(tokenHash!, json);
+        Assert.DoesNotContain(token, json);
+        Assert.Equal(named.ConnectionId, offline.Key);
+        Assert.Equal(named.ConnectionId, offline.Value.Id);
+        Assert.Equal("Hall", offline.Value.Name);
+        Assert.Equal(tokenHash, offline.Value.TokenHash);
+        Assert.False(isConnectedBeforeTab);
+        var client = Assert.Single(restarted.Clients).Value;
+        Assert.Same(offline.Value, client);
+        Assert.True(client.IsConnected);
+        Assert.Equal(named.ConnectionId, tab.ClientId);
+        Assert.Equal("Hall", tab.ClientName);
     }
 
     [Fact]
@@ -259,14 +383,17 @@ public class HomeBlazeInstallationClientTests
     public async Task WhenNotifyingAClientWithTwoTabsOfWhichOneFails_ThenTheOtherShowsItAndTheSendSucceeds()
     {
         // Arrange
-        var first = _connections.Connect(null, new FakeClientCallbacks());
+        var callbacks = new FakeClientCallbacks();
+        var first = _connections.Connect(null, callbacks);
         _installation.ReconcileClients();
         var client = _installation.Clients[first.ConnectionId];
         await client.RenameAsync("Hall", CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => callbacks.StoredTokens.Count == 1, message: "The token was not stored");
+        var token = callbacks.StoredTokens[0];
         var working = new FakeClientCallbacks();
-        _connections.Connect(first.ConnectionId, working);
+        _connections.Connect(token, working);
         _connections.Disconnect(first);
-        _connections.Connect(first.ConnectionId, new FakeClientCallbacks { FailsToShow = true });
+        _connections.Connect(token, new FakeClientCallbacks { FailsToShow = true });
         _installation.ReconcileClients();
 
         // Act

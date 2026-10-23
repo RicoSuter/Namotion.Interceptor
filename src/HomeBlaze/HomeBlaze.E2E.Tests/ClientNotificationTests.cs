@@ -1,6 +1,7 @@
 using HomeBlaze.Abstractions.Messaging;
 using HomeBlaze.E2E.Tests.Infrastructure;
 using HomeBlaze.Installation;
+using HomeBlaze.Services.Clients;
 using Microsoft.Playwright;
 using Namotion.Interceptor.Testing;
 
@@ -47,7 +48,9 @@ public class ClientNotificationTests
             await Assertions.Expect(page.GetByTestId("client-notification-message"))
                 .ToHaveTextAsync("Hello from the test", new() { Timeout = Timeout });
             var cookies = await page.Context.CookiesAsync();
-            Assert.Contains(cookies, cookie => cookie.Name == "homeblaze.client-id" && cookie.Value == client.Id);
+            var tokenCookie = Assert.Single(cookies, cookie => cookie.Name == "homeblaze.client-token");
+            Assert.NotEqual(client.Id, tokenCookie.Value);
+            Assert.Equal(client.TokenHash, ClientConnectionService.HashClientToken(tokenCookie.Value));
         }
         finally
         {

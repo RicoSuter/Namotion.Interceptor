@@ -1,5 +1,7 @@
+using System.Buffers.Text;
 using System.Collections.Immutable;
 using System.Security.Cryptography;
+using System.Text;
 using Microsoft.Extensions.Logging;
 
 namespace HomeBlaze.Services.Clients;
@@ -11,6 +13,8 @@ public sealed class ClientConnectionService
 {
     private const string IdCharacters = "abcdefghijklmnopqrstuvwxyz234567";
     private const int IdLength = 12;
+    private const int TokenByteCount = 32;
+    private const int MaximumStackTokenByteCount = 256;
 
     private readonly TimeProvider _timeProvider;
     private readonly ILogger _logger;
@@ -50,11 +54,40 @@ public sealed class ClientConnectionService
     public static string CreateClientId() => RandomNumberGenerator.GetString(IdCharacters, IdLength);
 
     /// <summary>
-    /// Adds an open circuit with a new random connection id and raises <see cref="Changed"/>.
+    /// Creates a secret client token of 32 random bytes, encoded as 43 base64url characters without padding.
     /// </summary>
-    public ClientConnection Connect(string? cookieClientId, IClientConnectionCallbacks callbacks)
+    public static string CreateClientToken()
     {
-        var connection = new ClientConnection(CreateClientId(), cookieClientId, _timeProvider.GetUtcNow(), callbacks);
+        Span<byte> bytes = stackalloc byte[TokenByteCount];
+        RandomNumberGenerator.Fill(bytes);
+        return Base64Url.EncodeToString(bytes);
+    }
+
+    /// <summary>
+    /// Returns the SHA-256 hash of the UTF-8 encoded token as 64 lowercase hexadecimal characters.
+    /// </summary>
+    public static string HashClientToken(string token)
+    {
+        ArgumentNullException.ThrowIfNull(token);
+
+        // The token comes from a cookie, so its length is not trusted for the stack.
+        var byteCount = Encoding.UTF8.GetByteCount(token);
+        var bytes = byteCount <= MaximumStackTokenByteCount ? stackalloc byte[MaximumStackTokenByteCount] : new byte[byteCount];
+        var written = Encoding.UTF8.GetBytes(token, bytes);
+
+        Span<byte> hash = stackalloc byte[SHA256.HashSizeInBytes];
+        SHA256.HashData(bytes[..written], hash);
+        return Convert.ToHexStringLower(hash);
+    }
+
+    /// <summary>
+    /// Adds an open circuit with a new random connection id and the hash of the client token its browser stores, if
+    /// any, and raises <see cref="Changed"/>.
+    /// </summary>
+    public ClientConnection Connect(string? cookieToken, IClientConnectionCallbacks callbacks)
+    {
+        var cookieTokenHash = string.IsNullOrEmpty(cookieToken) ? null : HashClientToken(cookieToken);
+        var connection = new ClientConnection(CreateClientId(), cookieTokenHash, _timeProvider.GetUtcNow(), callbacks);
         lock (_lock)
         {
             _connections = _connections.Add(connection);

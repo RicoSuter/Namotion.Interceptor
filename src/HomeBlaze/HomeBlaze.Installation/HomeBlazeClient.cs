@@ -2,6 +2,7 @@ using System.ComponentModel;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Messaging;
+using HomeBlaze.Services.Clients;
 using Namotion.Interceptor.Attributes;
 
 namespace HomeBlaze.Installation;
@@ -21,6 +22,11 @@ public partial class HomeBlazeClient :
     ITitleProvider,
     IIconProvider
 {
+    private readonly Lock _tokenLock = new();
+
+    // The raw token is never persisted, so only the process that issued it can hand it to the open tabs of the client.
+    private volatile IssuedToken? _issuedToken;
+
     // Not intercepted: an intercepted property holding the installation would attach it as a child of its own child.
     internal HomeBlazeInstallation? Installation { get; set; }
 
@@ -32,6 +38,12 @@ public partial class HomeBlazeClient :
     /// </summary>
     [Configuration]
     public partial string Name { get; set; }
+
+    /// <summary>
+    /// The SHA-256 hash of the secret token that the browsers of the named client store, or null while it has none.
+    /// </summary>
+    [Configuration(IsSecret = true)]
+    public partial string? TokenHash { get; set; }
 
     [State(Position = 1)]
     public partial string Id { get; internal set; }
@@ -63,6 +75,7 @@ public partial class HomeBlazeClient :
     public HomeBlazeClient()
     {
         Name = string.Empty;
+        TokenHash = null;
         Id = string.Empty;
         IsConnected = false;
         ConnectionCount = 0;
@@ -99,6 +112,50 @@ public partial class HomeBlazeClient :
         return Task.CompletedTask;
     }
 
+    /// <summary>
+    /// Returns the token of the client while this instance issued the token of <paramref name="tokenHash"/>, otherwise null.
+    /// </summary>
+    internal string? GetIssuedToken(string tokenHash) =>
+        _issuedToken is { } issued && issued.Hash == tokenHash ? issued.Token : null;
+
     // Also a name set in the configuration editor reaches the tabs of the client.
-    partial void OnNameChanged(string newValue) => Installation?.ReconcileClients();
+    partial void OnNameChanged(string newValue)
+    {
+        var installation = Installation;
+        if (installation is null)
+        {
+            // Deserialization sets the name before the token hash and before the client joins an installation.
+            return;
+        }
+
+        UpdateToken();
+        installation.ReconcileClients();
+    }
+
+    private void UpdateToken()
+    {
+        // Reads the current name rather than the changed value, so concurrent renames settle on the last name.
+        lock (_tokenLock)
+        {
+            if (!IsNamed)
+            {
+                _issuedToken = null;
+                TokenHash = null;
+            }
+            else if (TokenHash is null)
+            {
+                var token = ClientConnectionService.CreateClientToken();
+                var issued = new IssuedToken(token, ClientConnectionService.HashClientToken(token));
+                _issuedToken = issued;
+                TokenHash = issued.Hash;
+            }
+        }
+    }
+
+    private sealed class IssuedToken(string token, string hash)
+    {
+        public string Token { get; } = token;
+
+        public string Hash { get; } = hash;
+    }
 }

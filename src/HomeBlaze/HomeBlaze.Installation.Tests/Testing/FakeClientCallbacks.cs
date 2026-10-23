@@ -7,7 +7,7 @@ public sealed class FakeClientCallbacks : IClientConnectionCallbacks
 {
     private readonly Lock _lock = new();
     private readonly List<Notification> _notifications = [];
-    private readonly List<string> _storedClientIds = [];
+    private readonly List<string> _storedTokens = [];
 
     public bool FailsToShow { get; init; }
 
@@ -22,13 +22,13 @@ public sealed class FakeClientCallbacks : IClientConnectionCallbacks
         }
     }
 
-    public IReadOnlyList<string> StoredClientIds
+    public IReadOnlyList<string> StoredTokens
     {
         get
         {
             lock (_lock)
             {
-                return [.. _storedClientIds];
+                return [.. _storedTokens];
             }
         }
     }
@@ -48,11 +48,11 @@ public sealed class FakeClientCallbacks : IClientConnectionCallbacks
         return Task.CompletedTask;
     }
 
-    public Task StoreClientIdAsync(string clientId)
+    public Task StoreClientTokenAsync(string token)
     {
         lock (_lock)
         {
-            _storedClientIds.Add(clientId);
+            _storedTokens.Add(token);
         }
 
         return Task.CompletedTask;

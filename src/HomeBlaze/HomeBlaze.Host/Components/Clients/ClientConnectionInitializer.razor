@@ -23,22 +23,22 @@
             return;
         }
 
-        _connection = ClientConnections.Connect(Preferences.Get(BrowserPreferenceKeys.ClientId), this);
+        _connection = ClientConnections.Connect(Preferences.Get(BrowserPreferenceKeys.ClientToken), this);
         CurrentConnection.Connection = _connection;
     }
 
     Task IClientConnectionCallbacks.ShowNotificationAsync(Notification notification, CancellationToken cancellationToken) =>
         InvokeAsync(async () => await ClientNotificationDialog.ShowAsync(DialogService, notification));
 
-    async Task IClientConnectionCallbacks.StoreClientIdAsync(string clientId)
+    async Task IClientConnectionCallbacks.StoreClientTokenAsync(string token)
     {
         try
         {
-            await InvokeAsync(async () => await Preferences.SetAsync(BrowserPreferenceKeys.ClientId, clientId));
+            await InvokeAsync(async () => await Preferences.SetAsync(BrowserPreferenceKeys.ClientToken, token));
         }
         catch (Exception exception)
         {
-            Logger.LogWarning(exception, "Storing the client id in the browser failed.");
+            Logger.LogWarning(exception, "Storing the client token in the browser failed.");
         }
     }
 

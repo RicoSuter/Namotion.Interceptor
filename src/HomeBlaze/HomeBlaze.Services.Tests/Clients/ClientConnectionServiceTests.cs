@@ -15,13 +15,12 @@ public class ClientConnectionServiceTests
         service.Changed += () => changes++;
 
         // Act
-        var connection = service.Connect("cookie", new NoCallbacks());
+        var connection = service.Connect(null, new NoCallbacks());
         var connected = service.Connections;
         service.Disconnect(connection);
 
         // Assert
         Assert.Equal(connection, Assert.Single(connected));
-        Assert.Equal("cookie", connection.CookieClientId);
         Assert.Equal(12, connection.ConnectionId.Length);
         Assert.Empty(service.Connections);
         Assert.Equal(2, changes);
@@ -37,6 +36,61 @@ public class ClientConnectionServiceTests
         // Assert
         Assert.Matches("^[a-z2-7]{12}$", first);
         Assert.NotEqual(first, second);
+    }
+
+    [Fact]
+    public void WhenACircuitConnectsWithAToken_ThenItKeepsTheHashOfTheTokenAndNotTheToken()
+    {
+        // Arrange
+        var service = CreateService();
+        var token = ClientConnectionService.CreateClientToken();
+
+        // Act
+        var connection = service.Connect(token, new NoCallbacks());
+
+        // Assert
+        Assert.Equal(ClientConnectionService.HashClientToken(token), connection.CookieTokenHash);
+        Assert.NotEqual(token, connection.CookieTokenHash);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    public void WhenACircuitConnectsWithoutAToken_ThenItHasNoTokenHash(string? token)
+    {
+        // Act
+        var connection = CreateService().Connect(token, new NoCallbacks());
+
+        // Assert
+        Assert.Null(connection.CookieTokenHash);
+    }
+
+    [Fact]
+    public void WhenTokensAreCreated_ThenTheyAre43Base64UrlCharactersAndDistinct()
+    {
+        // Act
+        var first = ClientConnectionService.CreateClientToken();
+        var second = ClientConnectionService.CreateClientToken();
+
+        // Assert
+        Assert.Matches("^[A-Za-z0-9_-]{43}$", first);
+        Assert.Matches("^[A-Za-z0-9_-]{43}$", second);
+        Assert.NotEqual(first, second);
+    }
+
+    [Fact]
+    public void WhenATokenIsHashed_ThenTheHashIsDeterministicLowercaseHexOf64Characters()
+    {
+        // Act
+        var first = ClientConnectionService.HashClientToken("token");
+        var second = ClientConnectionService.HashClientToken("token");
+        var other = ClientConnectionService.HashClientToken("other");
+
+        // Assert
+        Assert.Matches("^[0-9a-f]{64}$", first);
+        Assert.Equal(first, second);
+        Assert.NotEqual(first, other);
+        Assert.Equal("3c469e9d6c5875d37a43f353d4f88e61fcf812c66eee3457465a40b0da4153e0", first);
     }
 
     [Fact]
@@ -113,6 +167,6 @@ public class ClientConnectionServiceTests
     {
         public Task ShowNotificationAsync(Notification notification, CancellationToken cancellationToken) => Task.CompletedTask;
 
-        public Task StoreClientIdAsync(string clientId) => Task.CompletedTask;
+        public Task StoreClientTokenAsync(string token) => Task.CompletedTask;
     }
 }

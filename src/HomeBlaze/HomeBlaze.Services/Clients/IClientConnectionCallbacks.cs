@@ -13,7 +13,7 @@ public interface IClientConnectionCallbacks
     Task ShowNotificationAsync(Notification notification, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Stores the id of the named client in the browser, so later tabs join that client.
+    /// Stores the secret token of the named client in the browser, so later tabs join that client.
     /// </summary>
-    Task StoreClientIdAsync(string clientId);
+    Task StoreClientTokenAsync(string token);
 }

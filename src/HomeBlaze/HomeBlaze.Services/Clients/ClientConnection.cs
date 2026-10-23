@@ -7,12 +7,12 @@ public sealed class ClientConnection
 {
     // One reference, so a reader never sees the id of one assignment with the name of another.
     private volatile Assignment? _assignment;
-    private volatile string? _cookieClientId;
+    private volatile string? _cookieTokenHash;
 
-    internal ClientConnection(string connectionId, string? cookieClientId, DateTimeOffset connectedAt, IClientConnectionCallbacks callbacks)
+    internal ClientConnection(string connectionId, string? cookieTokenHash, DateTimeOffset connectedAt, IClientConnectionCallbacks callbacks)
     {
         ConnectionId = connectionId;
-        _cookieClientId = cookieClientId;
+        _cookieTokenHash = cookieTokenHash;
         ConnectedAt = connectedAt;
         Callbacks = callbacks;
     }
@@ -23,12 +23,12 @@ public sealed class ClientConnection
     public string ConnectionId { get; }
 
     /// <summary>
-    /// The client id that the browser stores, or null when it stores none.
+    /// The hash of the client token that the browser stores, never the token itself, or null when it stores none.
     /// </summary>
-    public string? CookieClientId
+    public string? CookieTokenHash
     {
-        get => _cookieClientId;
-        set => _cookieClientId = value;
+        get => _cookieTokenHash;
+        set => _cookieTokenHash = value;
     }
 
     /// <summary>
