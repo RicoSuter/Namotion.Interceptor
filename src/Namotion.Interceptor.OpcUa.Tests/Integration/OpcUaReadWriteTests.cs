@@ -114,6 +114,7 @@ public class OpcUaReadWriteTests : SharedServerTestBase
 /// Tests for nested structure synchronization (server→client) using the shared OPC UA server.
 /// Tests object references, arrays, dictionaries, deep nesting, OpcUaValue pattern, and PropertyAttribute.
 /// </summary>
+[Collection("Nested OPC UA integration")]
 [Trait("Category", "Integration")]
 public class OpcUaNestedStructureTests : SharedServerTestBase
 {
@@ -156,4 +157,9 @@ public class OpcUaNestedStructureTests : SharedServerTestBase
 
         Logger.Log("All nested structure tests passed!");
     }
+}
+
+[CollectionDefinition("Nested OPC UA integration", DisableParallelization = true)]
+public sealed class NestedOpcUaIntegrationCollection
+{
 }
