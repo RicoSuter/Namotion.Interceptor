@@ -1,6 +1,6 @@
 using System.Globalization;
 
-namespace HomeBlaze.Services.Expressions;
+namespace Namotion.Interceptor.Expressions;
 
 internal abstract class ExpressionNode;
 

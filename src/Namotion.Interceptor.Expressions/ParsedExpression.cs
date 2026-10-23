@@ -1,7 +1,7 @@
 using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
 
-namespace HomeBlaze.Services.Expressions;
+namespace Namotion.Interceptor.Expressions;
 
 /// <summary>
 /// An expression parsed once: paths and literals, compared with <c>== != &lt; &lt;= &gt; &gt;=</c> and combined with

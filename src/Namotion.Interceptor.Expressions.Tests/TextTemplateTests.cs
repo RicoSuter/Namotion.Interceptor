@@ -1,7 +1,7 @@
 using System.Collections.Immutable;
-using HomeBlaze.Services.Expressions;
+using Namotion.Interceptor.Expressions;
 
-namespace HomeBlaze.Services.Tests.Expressions;
+namespace Namotion.Interceptor.Expressions.Tests;
 
 public class TextTemplateTests
 {
@@ -64,7 +64,7 @@ public class TextTemplateTests
     [InlineData("subject/IsCharging", "subject|IsCharging")]
     [InlineData("subject/Session/Energy", "subject|Session/Energy")]
     [InlineData("subject[0]", "subject|[0]")]
-    [InlineData("valueMap/Power", "path:valueMap/Power")]
+    [InlineData("values/Power", "path:values/Power")]
     public void WhenPathStartsWithAVariable_ThenTheContextGetsTheVariableAndTheRest(string path, string expected)
     {
         // Arrange

@@ -1,6 +1,6 @@
 using Namotion.Interceptor.Registry.Abstractions;
 
-namespace HomeBlaze.Services.Expressions;
+namespace Namotion.Interceptor.Expressions;
 
 /// <summary>
 /// The result of evaluating an expression or a part of it: a value, the property it was read from, and whether it is

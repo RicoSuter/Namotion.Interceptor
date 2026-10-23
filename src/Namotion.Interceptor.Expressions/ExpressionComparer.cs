@@ -1,6 +1,6 @@
 using System.Globalization;
 
-namespace HomeBlaze.Services.Expressions;
+namespace Namotion.Interceptor.Expressions;
 
 /// <summary>
 /// Compares two values that are not null, with the rules of the where filter of MCP: a boolean only for equality, an enum

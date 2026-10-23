@@ -1,14 +1,13 @@
 using System.Diagnostics.CodeAnalysis;
 
-namespace HomeBlaze.Services.Expressions;
+namespace Namotion.Interceptor.Expressions;
 
 /// <summary>
-/// The names of the variables that a host of an expression binds. They are the same for every host, so that one map
-/// serves every widget that applies it.
+/// The names of the variables that a host of an expression binds. They are the same for every host, so that an expression written once, such as a condition shared by several hosts, means the same in each.
 /// </summary>
 public static class ExpressionVariables
 {
-    /// <summary>The value the host shows, such as the value of the property at the path of a widget.</summary>
+    /// <summary>The value the host evaluates the expression for, such as the value of a property it shows.</summary>
     public const string Value = "value";
 
     /// <summary>The subject of that value: the owner of its property, or the subject that a path to a subject leads to.</summary>

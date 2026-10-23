@@ -1,4 +1,4 @@
-namespace HomeBlaze.Services.Expressions;
+namespace Namotion.Interceptor.Expressions;
 
 /// <summary>
 /// Evaluates nodes with a context taken by reference. A switch over the node types instead of virtual methods keeps the

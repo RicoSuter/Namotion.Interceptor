@@ -1,6 +1,6 @@
-using HomeBlaze.Services.Expressions;
+using Namotion.Interceptor.Expressions;
 
-namespace HomeBlaze.Services.Tests.Expressions;
+namespace Namotion.Interceptor.Expressions.Tests;
 
 public class ParsedExpressionParseTests
 {
@@ -13,9 +13,9 @@ public class ParsedExpressionParseTests
     [Theory]
     [InlineData("motor/Speed", "motor/Speed")]
     [InlineData("  /Demo/Conveyor/CurrentSpeed  ", "/Demo/Conveyor/CurrentSpeed")]
-    [InlineData("../value-map.md/motorstate", "../value-map.md/motorstate")]
+    [InlineData("../notes-v2.md/motorstate", "../notes-v2.md/motorstate")]
     [InlineData("/Devices[a|b c]/Speed", "/Devices[a|b c]/Speed")]
-    [InlineData("HomeBlaze:Metadata", "HomeBlaze:Metadata")]
+    [InlineData("Vendor:Metadata", "Vendor:Metadata")]
     [InlineData("2024/Report.md/Title", "2024/Report.md/Title")]
     public void WhenTextIsOnePath_ThenSinglePathIsThatPath(string text, string path)
     {

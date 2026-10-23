@@ -1,7 +1,7 @@
 using System.Collections.Immutable;
 using System.Globalization;
 
-namespace HomeBlaze.Services.Expressions;
+namespace Namotion.Interceptor.Expressions;
 
 /// <summary>
 /// Parses an expression by recursive descent. Throws a <see cref="FormatException"/> whose message reads
@@ -181,7 +181,7 @@ internal sealed class ExpressionParser(string text)
             throw CreateError(ExpectedValue(operatorText));
         }
 
-        // A bare word after an operator is text, such as the name of an enum value, as in the where filter of MCP.
+        // A bare word after an operator is text, such as the name of an enum value.
         if (operatorText is not null && token.AsSpan().IndexOfAny('/', '[') < 0 && !ExpressionVariables.TryGetVariable(token, out _))
         {
             return new LiteralNode(token);
@@ -302,7 +302,7 @@ internal sealed class ExpressionParser(string text)
         return text.Substring(start + 1, end - start - 1);
     }
 
-    // An operator of arithmetic stands alone between operands. Inside a token such as "value-map.md" it is part of a name.
+    // An operator of arithmetic stands alone between operands. Inside a token such as "notes-v2.md" it is part of a name.
     private void ThrowIfArithmetic()
     {
         if (_position < text.Length &&

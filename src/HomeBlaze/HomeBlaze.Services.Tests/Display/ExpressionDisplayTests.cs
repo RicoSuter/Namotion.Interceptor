@@ -1,5 +1,5 @@
 using HomeBlaze.Services.Display;
-using HomeBlaze.Services.Expressions;
+using Namotion.Interceptor.Expressions;
 
 namespace HomeBlaze.Services.Tests.Display;
 

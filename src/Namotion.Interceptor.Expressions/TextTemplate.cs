@@ -2,7 +2,7 @@ using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 
-namespace HomeBlaze.Services.Expressions;
+namespace Namotion.Interceptor.Expressions;
 
 /// <summary>
 /// A text with expressions between double braces, such as <c>Charging {{ subject/ChargingPower }}</c>, parsed once. A

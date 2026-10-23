@@ -1,6 +1,6 @@
 using System.Collections.Immutable;
 
-namespace HomeBlaze.Services.Expressions;
+namespace Namotion.Interceptor.Expressions;
 
 /// <summary>
 /// What the host of an expression supplies for one evaluation. Implemented by a struct, which the evaluator takes by

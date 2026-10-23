@@ -3,7 +3,7 @@ using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Components;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Display;
-using HomeBlaze.Services.Expressions;
+using Namotion.Interceptor.Expressions;
 using HomeBlaze.Storage.Internal;
 using HomeBlaze.Storage.Pages;
 using Microsoft.Extensions.DependencyInjection;
