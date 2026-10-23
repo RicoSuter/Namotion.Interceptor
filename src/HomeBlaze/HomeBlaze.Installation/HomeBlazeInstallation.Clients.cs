@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.ComponentModel;
+using System.Runtime.ExceptionServices;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Messaging;
 using HomeBlaze.Services.Clients;
@@ -12,6 +13,7 @@ namespace HomeBlaze.Installation;
 public partial class HomeBlazeInstallation
 {
     private readonly Lock _clientsLock = new();
+    private Dictionary<string, HomeBlazeClient>? _pendingClients;
 
     /// <summary>
     /// The connected and the named clients by id. Only named clients persist.
@@ -35,6 +37,16 @@ public partial class HomeBlazeInstallation
             client.Installation = this;
             client.Id = id;
         }
+
+        // A reload assigns outside the lock, so a reconcile on another thread may read Clients before this write
+        // lands and assign its result after it; the reconcile starts from this dictionary instead, so it keeps the loaded clients.
+        if (!_clientsLock.IsHeldByCurrentThread)
+        {
+            lock (_clientsLock)
+            {
+                _pendingClients = newValue;
+            }
+        }
     }
 
     /// <summary>
@@ -47,17 +59,19 @@ public partial class HomeBlazeInstallation
         lock (_clientsLock)
         {
             var connections = _clientConnectionService.Connections;
-            var current = Clients;
+            var current = _pendingClients ?? Clients;
+            _pendingClients = null;
             var clientIds = ResolveClientIds(connections, current);
             var next = CreateClients(current, clientIds);
 
+            // Change observers of these writes run synchronously under the lock and must not block on another thread that reconciles.
             // Replacing the dictionary attaches and detaches subjects, so it is replaced only when an entry changed.
-            if (!HasSameEntries(current, next))
+            if (!ReferenceEquals(current, Clients) || !HasSameEntries(current, next))
             {
                 Clients = next;
             }
 
-            foreach (var (id, client) in Clients)
+            foreach (var (id, client) in next)
             {
                 UpdateClient(id, client, connections, clientIds, ref idsToStore);
             }
@@ -77,6 +91,7 @@ public partial class HomeBlazeInstallation
 
     internal async Task<NotificationResult> SendNotificationAsync(HomeBlazeClient client, Notification notification, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(notification);
         ArgumentException.ThrowIfNullOrWhiteSpace(notification.Message);
 
         // Read from the committed Clients, so a client that a reload replaced or removed cannot send anymore.
@@ -109,7 +124,7 @@ public partial class HomeBlazeInstallation
 
         if (shownCount == 0)
         {
-            throw lastException!;
+            ExceptionDispatchInfo.Capture(lastException!).Throw();
         }
 
         return new NotificationResult { Id = Guid.NewGuid().ToString("N") };

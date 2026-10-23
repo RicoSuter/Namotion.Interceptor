@@ -124,6 +124,48 @@ public class HomeBlazeInstallationClientTests
     }
 
     [Fact]
+    public async Task WhenAConnectedNamedClientIsForgotten_ThenItsTabBecomesAnAnonymousClient()
+    {
+        // Arrange
+        var connection = _connections.Connect(null, new FakeClientCallbacks());
+        _installation.ReconcileClients();
+        var id = connection.ConnectionId;
+        await _installation.Clients[id].RenameAsync("Hall", CancellationToken.None);
+
+        // Act
+        await _installation.Clients[id].ForgetAsync(CancellationToken.None);
+
+        // Assert
+        var client = Assert.Single(_installation.Clients).Value;
+        Assert.False(client.IsNamed);
+        Assert.True(client.IsConnected);
+        Assert.Equal(string.Empty, connection.ClientName);
+        Assert.Equal(client.Id, connection.ClientId);
+    }
+
+    [Fact]
+    public async Task WhenACircuitReconcilesBetweenAReloadAndItsApply_ThenTheLoadedClientsAreKept()
+    {
+        // Arrange
+        var loadedClient = new HomeBlazeClient { Name = "Hall" };
+        var loaded = new Dictionary<string, HomeBlazeClient> { ["named1234567"] = loadedClient };
+
+        // Act
+        _installation.Clients = loaded;
+        var connection = _connections.Connect("named1234567", new FakeClientCallbacks());
+        _installation.ReconcileClients();
+        await _installation.ApplyConfigurationAsync(CancellationToken.None);
+
+        // Assert
+        var client = Assert.Single(_installation.Clients);
+        Assert.Equal("named1234567", client.Key);
+        Assert.Same(loadedClient, client.Value);
+        Assert.True(loadedClient.IsConnected);
+        Assert.Equal("named1234567", connection.ClientId);
+        Assert.Equal("Hall", connection.ClientName);
+    }
+
+    [Fact]
     public async Task WhenTheConfigurationIsApplied_ThenUnnamedClientsWithoutCircuitAreDropped()
     {
         // Arrange
