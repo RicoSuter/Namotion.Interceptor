@@ -163,7 +163,7 @@ using var subscription = context.GetSourceMonitor().Subscribe(sourceEvent =>
 });
 ```
 
-Delivery is queued per subscription and runs outside every lock, so a slow handler delays only itself. Handlers run on a thread-pool thread without the publisher's execution context (its `AsyncLocal` values do not flow), so a UI consumer must marshal. `Subscribe` also returns the sources registered at that moment (`SourceSubscription.Sources`), captured atomically with the subscription, so seeding from that snapshot and then processing the stream sees every source exactly once.
+Delivery is queued per subscription and runs outside every lock, so a slow handler delays only itself. Handlers run on a thread-pool thread, so a UI consumer must marshal. They do not run in the publisher's execution context, so its `AsyncLocal` values do not flow into them. `Subscribe` also returns the sources registered at that moment (`SourceSubscription.Sources`), captured atomically with the subscription, so seeding from that snapshot and then processing the stream sees every source exactly once.
 
 `OldState` and `NewState` describe one transition and must not be applied blindly: the ownership compare-and-set and the enqueue are not atomic, so events for one property can arrive inverted. Apply `CurrentState`, which re-resolves at read time.
 

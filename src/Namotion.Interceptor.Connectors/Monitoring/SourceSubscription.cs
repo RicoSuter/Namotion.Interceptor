@@ -56,7 +56,7 @@ public sealed class SourceSubscription : IDisposable
         _queue.Enqueue(sourceEvent);
 
         // Single-flight: one drain at a time, and it exits when the queue is empty, so an idle
-        // subscription owns no task.
+        // subscription has no queued work item.
         if (Interlocked.CompareExchange(ref _draining, 1, 0) == 0)
         {
             // Global, not Task.Run: from a pool worker that puts the drain on the worker's local

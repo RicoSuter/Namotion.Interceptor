@@ -1,7 +1,7 @@
 using System.Collections.Immutable;
-using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Connectors.Monitoring;
 using Namotion.Interceptor.Connectors.Tests.Models;
+using Namotion.Interceptor.Testing;
 
 namespace Namotion.Interceptor.Connectors.Tests;
 
@@ -23,17 +23,19 @@ public class SourceSubscriptionSchedulingTests
         // it, and a worker steals only when the global queue is empty. Keeping the global queue busy
         // and then blocking the enqueuing worker is what a loaded host does to a producer that raises
         // a source event and carries on, and it stranded the drain until that worker was released.
-        var handlerEntered = new ManualResetEventSlim(false);
+        using var handlerEntered = new ManualResetEventSlim(false);
         using var subscription = new SourceSubscription(
             _ => handlerEntered.Set(),
             ImmutableArray<ISubjectSource>.Empty,
             _ => { },
             new SourceMonitor());
 
-        var stopFlood = new StrongBox<int>();
-        for (var i = 0; i < Math.Max(64, ThreadPool.ThreadCount * 4); i++)
+        var flood = new Flood();
+        var floodItemCount = Math.Max(64, ThreadPool.ThreadCount * 4);
+        flood.ActiveItems = floodItemCount;
+        for (var i = 0; i < floodItemCount; i++)
         {
-            QueueFloodItem(stopFlood);
+            QueueFloodItem(flood);
         }
 
         try
@@ -50,23 +52,35 @@ public class SourceSubscriptionSchedulingTests
         }
         finally
         {
-            Volatile.Write(ref stopFlood.Value, 1);
+            // Waits for the flood to drain so none of it is left occupying the pool for the next test.
+            Volatile.Write(ref flood.Stop, 1);
+            await AsyncTestHelpers.WaitUntilAsync(() => Volatile.Read(ref flood.ActiveItems) == 0);
         }
     }
 
     /// <summary>
     /// Queues a work item that occupies a worker briefly and then queues itself again, so the
-    /// global queue never runs empty until <paramref name="stop"/> is set.
+    /// global queue never runs empty until <see cref="Flood.Stop"/> is set.
     /// </summary>
-    private static void QueueFloodItem(StrongBox<int> stop) =>
-        ThreadPool.UnsafeQueueUserWorkItem(static stop =>
+    private static void QueueFloodItem(Flood flood) =>
+        ThreadPool.UnsafeQueueUserWorkItem(static flood =>
         {
             Thread.Sleep(20);
-            if (Volatile.Read(ref stop.Value) == 0)
+            if (Volatile.Read(ref flood.Stop) == 0)
             {
-                QueueFloodItem(stop);
+                QueueFloodItem(flood);
             }
-        }, stop, preferLocal: false);
+            else
+            {
+                Interlocked.Decrement(ref flood.ActiveItems);
+            }
+        }, flood, preferLocal: false);
+
+    private sealed class Flood
+    {
+        public int Stop;
+        public int ActiveItems;
+    }
 
     private static SourceEvent CreateEvent() => new(
         SourceEventKind.SourceRegistered, new TestStateSource(new Person()), null,
