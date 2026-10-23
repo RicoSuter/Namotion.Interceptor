@@ -179,7 +179,7 @@ internal static class Diagnostics
     public static readonly DiagnosticDescriptor DuplicatePropertyAttributeTarget = new(
         id: "NI0066",
         title: "More than one property attaches the same attribute to a property",
-        messageFormat: "'{0}' attaches the attribute '{1}' to property '{2}' through both '{3}' and '{4}'; an attribute name is unique per property, so the registry rejects the subject at registration. Rename one attribute or remove one of the properties.",
+        messageFormat: "'{0}' attaches the attribute '{1}' to property '{2}' through both '{3}' and '{4}'; an attribute name is unique per property, so the registry keeps the attribute of the property whose name sorts first and registers the other as a plain property. Rename one attribute or remove one of the properties.",
         category: Category,
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true,

@@ -134,7 +134,6 @@ public class RegisteredSubject
         return _properties.GetValueOrDefault(propertyName);
     }
 
-    /// <exception cref="InvalidOperationException">Two properties of the subject attach the same attribute name to the same property.</exception>
     public RegisteredSubject(IInterceptorSubject subject)
     {
         Subject = subject;
@@ -145,13 +144,15 @@ public class RegisteredSubject
                 p => new RegisteredSubjectProperty(
                     this, p.Key, p.Value.Type, p.Value.Attributes));
 
-        ThrowIfAttributePairsAreNotUnique();
+        ResolveRepeatedAttributePairs();
     }
 
-    // The dictionary is allocated on the first attribute property, so a subject without attributes pays nothing.
-    private void ThrowIfAttributePairsAreNotUnique()
+    // Registration runs in a lifecycle handler, which must not throw, so a repeated pair is resolved instead of
+    // rejected; NI0066 reports it at compile time.
+    private void ResolveRepeatedAttributePairs()
     {
         Dictionary<(string PropertyName, string AttributeName), string>? providers = null;
+        HashSet<string>? losers = null;
         foreach (var property in _properties.Values)
         {
             if (!property.IsAttribute)
@@ -163,13 +164,41 @@ public class RegisteredSubject
             var pair = (attributeMetadata.PropertyName, attributeMetadata.AttributeName);
 
             providers ??= new Dictionary<(string, string), string>();
-            if (!providers.TryAdd(pair, property.Name))
+            if (providers.TryAdd(pair, property.Name))
             {
-                throw new InvalidOperationException(
-                    $"The subject '{Subject.GetType().Name}' declares the properties '{providers[pair]}' and '{property.Name}' " +
-                    $"which both attach the attribute '{attributeMetadata.AttributeName}' to the property '{attributeMetadata.PropertyName}'.");
+                continue;
+            }
+
+            losers ??= [];
+            var winner = providers[pair];
+            if (string.CompareOrdinal(property.Name, winner) < 0)
+            {
+                losers.Add(winner);
+                providers[pair] = property.Name;
+            }
+            else
+            {
+                losers.Add(property.Name);
             }
         }
+
+        if (losers is not null)
+        {
+            _properties = _properties.ToFrozenDictionary(
+                p => p.Key,
+                p => losers.Contains(p.Key) ? CreatePlainProperty(p.Key) : p.Value,
+                _properties.Comparer);
+        }
+    }
+
+    private RegisteredSubjectProperty CreatePlainProperty(string name)
+    {
+        var metadata = Subject.Properties[name];
+        var attributes = metadata.Attributes
+            .Where(attribute => attribute is not PropertyAttributeAttribute)
+            .ToArray();
+
+        return new RegisteredSubjectProperty(this, name, metadata.Type, attributes);
     }
 
     internal void AddParent(RegisteredSubjectProperty parent, object? index)

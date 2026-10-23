@@ -194,6 +194,46 @@ public class SubjectAttributeConflictTests
     }
 
     [Fact]
+    public void WhenAnOverrideInheritsTheAttributeOfItsBaseProperty_ThenNI0066IsReportedForANewDuplicate()
+    {
+        // Arrange: at runtime the override inherits the base declaration's attribute, so Forward_Enabled repeats its pair.
+        const string source = """
+            using Namotion.Interceptor;
+            using Namotion.Interceptor.Attributes;
+            using Namotion.Interceptor.Registry.Attributes;
+
+            namespace Repro
+            {
+                [InterceptorSubject]
+                public partial class BaseMotor
+                {
+                    public partial bool Forward { get; set; }
+
+                    [PropertyAttribute(nameof(Forward), "IsEnabled")]
+                    public virtual partial bool Forward_IsEnabled { get; set; }
+                }
+
+                [InterceptorSubject]
+                public partial class Motor : BaseMotor
+                {
+                    public override partial bool Forward_IsEnabled { get; set; }
+
+                    [PropertyAttribute(nameof(Forward), "IsEnabled")]
+                    public partial bool Forward_Enabled { get; set; }
+                }
+            }
+            """;
+
+        // Act
+        var result = GeneratorTestHost.Run(source);
+
+        // Assert
+        var diagnostic = result.GeneratorDiagnostics.Single(d => d.Id == "NI0066");
+        Assert.StartsWith("'Motor' attaches", diagnostic.GetMessage());
+        Assert.Empty(result.CompilationErrors);
+    }
+
+    [Fact]
     public void WhenTwoPropertiesAttachDifferentAttributesToOneProperty_ThenNI0066IsNotReported()
     {
         // Arrange

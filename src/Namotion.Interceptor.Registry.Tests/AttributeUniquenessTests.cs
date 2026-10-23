@@ -211,18 +211,47 @@ public class AttributeUniquenessTests
     }
 
     [Fact]
-    public void WhenASubjectDeclaresTwoPropertiesForOneAttributePair_ThenAttachingItThrows()
+    public void WhenASubjectDeclaresTwoPropertiesForOneAttributePair_ThenThePropertyWhoseNameSortsFirstProvidesTheAttribute()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithRegistry();
 
-        // Act & Assert: registration runs in the registry's lifecycle handler, so the throw surfaces from the attach.
-        var exception = Assert.Throws<InvalidOperationException>(() => new DuplicateAttributeTarget(context));
+        // Act
+        var subject = new DuplicateAttributeTarget(context);
 
-        Assert.Contains("The subject 'DuplicateAttributeTarget' declares the properties ", exception.Message);
-        Assert.Contains("'Forward_IsEnabled'", exception.Message);
-        Assert.Contains("'Forward_Enabled'", exception.Message);
-        Assert.EndsWith("which both attach the attribute 'IsEnabled' to the property 'Forward'.", exception.Message);
+        // Assert
+        var registered = subject.TryGetRegisteredSubject()!;
+        Assert.Equal("Forward_Enabled", registered.TryGetPropertyAttribute("Forward", "IsEnabled")!.Name);
+
+        var loser = registered.TryGetProperty("Forward_IsEnabled")!;
+        Assert.False(loser.IsAttribute);
+        Assert.Equal("Forward_IsEnabled", loser.BrowseName);
+
+        var attribute = Assert.Single(registered.TryGetProperty("Forward")!.Attributes);
+        Assert.Equal("Forward_Enabled", attribute.Name);
+    }
+
+    [Fact]
+    public void WhenADuplicateAttributeTargetIsAttachedAndDetached_ThenItIsRegisteredAndReleased()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var registry = context.GetService<ISubjectRegistry>();
+        var parent = new DuplicateAttributeTarget(context);
+        var child = new DuplicateAttributeTarget();
+
+        // Act
+        parent.Child = child;
+
+        // Assert
+        Assert.NotNull(child.TryGetRegisteredSubject());
+        Assert.Contains(child, registry.KnownSubjects.Keys);
+
+        // Act
+        parent.Child = null;
+
+        // Assert
+        Assert.DoesNotContain(child, registry.KnownSubjects.Keys);
     }
 
     [Fact]
@@ -260,12 +289,33 @@ public class AttributeUniquenessTests
         var subjectPropertyCount = ((IInterceptorSubject)person).Properties.Count;
 
         // Act
-        var attribute = firstName.GetOrAddAttribute("MaxLength", typeof(string), _ => "ignored", null);
+        var attribute = firstName.GetOrAddAttribute("MaxLength", typeof(int), _ => 0, null);
 
         // Assert
         Assert.Same(existing, attribute);
         Assert.Equal(123, attribute.GetValue());
         Assert.Equal(subjectPropertyCount, ((IInterceptorSubject)person).Properties.Count);
+    }
+
+    [Fact]
+    public void WhenGetOrAddAttributeFindsAnAttributeOfAnotherType_ThenItThrows()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var person = new Person(context);
+        var firstName = person.TryGetRegisteredProperty(p => p!.FirstName)!;
+        var subjectPropertyCount = ((IInterceptorSubject)person).Properties.Count;
+        var registeredPropertyCount = firstName.Parent.Properties.Length;
+
+        // Act & Assert
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            firstName.GetOrAddAttribute("MaxLength", typeof(string), _ => "x", null));
+
+        Assert.Equal(
+            "The property 'FirstName' of subject 'Person' already has an attribute named 'MaxLength' of type 'System.Int32', not 'System.String' (property 'FirstName_MaxLength').",
+            exception.Message);
+        Assert.Equal(subjectPropertyCount, ((IInterceptorSubject)person).Properties.Count);
+        Assert.Equal(registeredPropertyCount, firstName.Parent.Properties.Length);
     }
 
     [Fact]

@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using Microsoft.CodeAnalysis;
@@ -21,6 +22,24 @@ internal static class SubjectAncestry
         => SymbolExtensions.EnumerateChain(typeSymbol.BaseType)
             .FirstOrDefault(ancestor =>
                 HasInterceptorSubjectAttribute(ancestor) || DeclaresInterceptorSubject(ancestor));
+
+    /// <summary>
+    /// The [InterceptorSubject] classes in the base chain, nearest first, or null when there are none.
+    /// </summary>
+    public static List<INamedTypeSymbol>? GetSubjectAncestors(INamedTypeSymbol typeSymbol)
+    {
+        // Root subjects need no collection allocation during repeated IDE generation.
+        List<INamedTypeSymbol>? subjectAncestors = null;
+        foreach (var ancestor in SymbolExtensions.EnumerateChain(typeSymbol.BaseType))
+        {
+            if (HasInterceptorSubjectAttribute(ancestor))
+            {
+                (subjectAncestors ??= new List<INamedTypeSymbol>()).Add(ancestor);
+            }
+        }
+
+        return subjectAncestors;
+    }
 
     public static bool HasInterceptorSubjectAttribute(INamedTypeSymbol? type)
     {
