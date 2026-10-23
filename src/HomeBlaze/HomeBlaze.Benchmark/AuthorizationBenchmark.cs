@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using BenchmarkDotNet.Attributes;
+using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Authorization;
 using Namotion.Interceptor.Registry;
@@ -8,7 +9,7 @@ using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Tracking;
 
-namespace Namotion.Interceptor.Benchmark;
+namespace HomeBlaze.Benchmark;
 
 #pragma warning disable CS8618
 

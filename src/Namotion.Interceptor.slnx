@@ -64,6 +64,7 @@
   <Folder Name="/HomeBlaze/Authorization/">
     <Project Path="HomeBlaze/Namotion.Interceptor.Authorization/Namotion.Interceptor.Authorization.csproj" />
     <Project Path="HomeBlaze/Namotion.Interceptor.Authorization.Tests/Namotion.Interceptor.Authorization.Tests.csproj" />
+    <Project Path="HomeBlaze/HomeBlaze.Benchmark/HomeBlaze.Benchmark.csproj" />
   </Folder>
   <Folder Name="/HomeBlaze/Devices/">
     <Project Path="HomeBlaze/Namotion.Devices.Gpio.HomeBlaze/Namotion.Devices.Gpio.HomeBlaze.csproj" />

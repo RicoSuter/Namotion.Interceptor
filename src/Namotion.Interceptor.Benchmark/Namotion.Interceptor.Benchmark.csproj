@@ -20,7 +20,6 @@
 	</ItemGroup>
 
 	<ItemGroup>
-      <ProjectReference Include="..\HomeBlaze\Namotion.Interceptor.Authorization\Namotion.Interceptor.Authorization.csproj" />
       <ProjectReference Include="..\Namotion.Interceptor.Blazor\Namotion.Interceptor.Blazor.csproj" />
       <ProjectReference Include="..\Namotion.Interceptor.Dynamic\Namotion.Interceptor.Dynamic.csproj" />
       <ProjectReference Include="..\Namotion.Interceptor.Hosting\Namotion.Interceptor.Hosting.csproj" />
