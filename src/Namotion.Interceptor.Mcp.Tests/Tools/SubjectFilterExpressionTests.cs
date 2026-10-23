@@ -274,6 +274,11 @@ public class SubjectFilterExpressionTests
     [InlineData("Name == value", "where: 'value' is not available in where")]
     [InlineData("Name | raw", "where: a condition takes no pipes")]
     [InlineData("Temperature - 1 > 0", "where: arithmetic is not supported at position 12")]
+    [InlineData("Devices[a] == null", "where: a path ends at a property, not at an entry such as 'Devices[a]'")]
+    [InlineData("subject.Devices[a] != null", "where: a path ends at a property, not at an entry such as 'subject.Devices[a]'")]
+    [InlineData("subject[0] == null", "where: a path ends at a property, not at an entry such as 'subject[0]'")]
+    [InlineData("subject. == 1", "where: expected a name after 'subject.'")]
+    [InlineData("subject..Name == 1", "where: a path starts at the subject and cannot start with '.'")]
     public void WhenFilterUsesWhatWhereDoesNotHave_ThenReturnsError(string where, string expectedError)
     {
         // Act
@@ -302,13 +307,26 @@ public class SubjectFilterExpressionTests
         Assert.Equal(expected, matches);
     }
 
+    [Fact]
+    public void WhenNotIsAppliedToAnUnsetSubjectProperty_ThenItIsUnknownAndDoesNotMatch()
+    {
+        // Arrange
+        var context = CreateContext();
+        var room = new TestRoom(context) { Name = "Kitchen", Temperature = 21.5m };
+
+        // Act
+        var matches = Evaluate("not Device", room);
+
+        // Assert
+        Assert.False(matches);
+    }
+
     [Theory]
     [InlineData("Devices != null", true)]
     [InlineData("Devices == null", false)]
     [InlineData("Devices[a].IsOn == true", true)]
-    [InlineData("Devices[a] == null", true)]
-    [InlineData("Devices[a] != null", false)]
-    public void WhenPathHasAnIndex_ThenOnlyTheLastSegmentIsMissing(string where, bool expected)
+    [InlineData("Devices[b].IsOn == true", false)]
+    public void WhenPathHasAnIndexOnAnIntermediateSegment_ThenItResolvesThroughTheEntry(string where, bool expected)
     {
         // Arrange
         var context = CreateContext();
@@ -320,6 +338,54 @@ public class SubjectFilterExpressionTests
 
         // Assert
         Assert.Equal(expected, matches);
+    }
+
+    [Theory]
+    [InlineData("Device/IsOn == true", true)]
+    [InlineData("subject/Name == Kitchen", true)]
+    [InlineData("Temperature > 1.5", true)]
+    [InlineData("Device.IsOn == true", false)]
+    [InlineData("Device/Missing == null", true)]
+    public void WhenPathProviderSeparatesWithASlash_ThenPathsUseTheSlash(string where, bool expected)
+    {
+        // Arrange
+        var context = CreateContext();
+        var room = new TestRoom(context) { Name = "Kitchen", Temperature = 21.5m };
+        room.Device = new TestDevice(context) { DeviceName = "Light", IsOn = true };
+
+        // Act
+        var matches = Evaluate(where, room, new SlashPathProvider());
+
+        // Assert
+        Assert.Equal(expected, matches);
+    }
+
+    [Theory]
+    [InlineData("subject/ == 1", '/', "where: expected a name after 'subject/'")]
+    [InlineData("/Name == 1", '/', "where: a path starts at the subject and cannot start with '/'")]
+    [InlineData("subject//Name == 1", '/', "where: a path starts at the subject and cannot start with '/'")]
+    [InlineData("../Name == 1", '/', "where: a path starts at the subject and cannot go up with '..'")]
+    [InlineData("Device/../Name == 1", '/', "where: a path starts at the subject and cannot go up with '..'")]
+    [InlineData("subject/../Name == 1", '/', "where: a path starts at the subject and cannot go up with '..'")]
+    public void WhenPathStartsOutsideTheSubject_ThenReturnsError(string where, char separator, string expectedError)
+    {
+        // Act
+        var parsed = SubjectFilterExpression.TryParse(where, separator, out var expression, out var error);
+
+        // Assert
+        Assert.False(parsed);
+        Assert.Null(expression);
+        Assert.Equal(expectedError, error);
+    }
+
+    [Fact]
+    public void WhenAnIndexKeyContainsDoubleDots_ThenItIsNoParentSegment()
+    {
+        // Act
+        var parsed = SubjectFilterExpression.TryParse("Devices[../x]/IsOn == true", '/', out _, out var error);
+
+        // Assert
+        Assert.True(parsed, error);
     }
 
     [Fact]
@@ -359,6 +425,11 @@ public class SubjectFilterExpressionTests
         pathProvider ??= DefaultPathProvider.Instance;
         Assert.True(SubjectFilterExpression.TryParse(where, pathProvider.PathSeparator, out var expression, out _));
         return expression.Matches(subject.TryGetRegisteredSubject()!, pathProvider);
+    }
+
+    private sealed class SlashPathProvider : PathProviderBase
+    {
+        public override char PathSeparator => '/';
     }
 
     private sealed class HidingPathProvider(string hiddenName) : PathProviderBase

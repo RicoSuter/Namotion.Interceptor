@@ -157,6 +157,20 @@ public class SubjectFilterToolTests
     }
 
     [Fact]
+    public async Task WhenPathProviderSeparatesWithASlash_ThenSearchWhereResolvesPathsWithTheSlash()
+    {
+        // Arrange
+        var tool = CreateTool(CreateRoom(), "search", new SlashPathProvider());
+
+        // Act
+        var json = await InvokeAsync(tool, new { format = "json", where = "Device/IsOn == true" });
+
+        // Assert
+        Assert.Equal(1, json.GetProperty("subjectCount").GetInt32());
+        Assert.False(json.TryGetProperty("warnings", out _));
+    }
+
+    [Fact]
     public async Task WhenPropertyExistsOnlyOutsideTheTypeFilter_ThenSearchWarns()
     {
         // Arrange
@@ -325,6 +339,11 @@ public class SubjectFilterToolTests
     {
         var result = await tool.Handler(JsonSerializer.SerializeToElement(input), CancellationToken.None);
         return JsonSerializer.SerializeToElement(result);
+    }
+
+    private sealed class SlashPathProvider : PathProviderBase
+    {
+        public override char PathSeparator => '/';
     }
 
     // Includes every property but gives the named one no path segment, so it is listed by its browse name only.

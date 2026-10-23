@@ -93,7 +93,19 @@ internal sealed class SubjectFilterExpression
                     continue;
                 }
 
+                if (variableMemberPath.Length == 0)
+                {
+                    error = ErrorPrefix + $"expected a name after '{variable}{pathSeparator}'";
+                    return false;
+                }
+
                 memberPath = variableMemberPath;
+            }
+
+            error = GetMemberPathError(path, memberPath, pathSeparator);
+            if (error is not null)
+            {
+                return false;
             }
 
             if (!paths.Contains(memberPath))
@@ -103,6 +115,60 @@ internal sealed class SubjectFilterExpression
         }
 
         return true;
+    }
+
+    // A path starts at the subject and ends at a property, so none starts with the separator, goes up with '..' or ends
+    // at an entry such as 'Devices[a]', which no filter can compare with anything but null.
+    private static string? GetMemberPathError(string path, string memberPath, char pathSeparator)
+    {
+        if (memberPath[0] == pathSeparator)
+        {
+            return ErrorPrefix + $"a path starts at the subject and cannot start with '{pathSeparator}'";
+        }
+
+        if (HasParentSegment(memberPath, pathSeparator))
+        {
+            return ErrorPrefix + "a path starts at the subject and cannot go up with '..'";
+        }
+
+        return memberPath[^1] == ']'
+            ? ErrorPrefix + $"a path ends at a property, not at an entry such as '{path}'"
+            : null;
+    }
+
+    private static bool HasParentSegment(string memberPath, char pathSeparator)
+    {
+        var segmentStart = 0;
+        var depth = 0;
+        for (var index = 0; index <= memberPath.Length; index++)
+        {
+            if (index < memberPath.Length)
+            {
+                var character = memberPath[index];
+                if (character == '[')
+                {
+                    depth++;
+                }
+                else if (character == ']' && depth > 0)
+                {
+                    depth--;
+                }
+
+                if (character != pathSeparator || depth > 0)
+                {
+                    continue;
+                }
+            }
+
+            if (memberPath.AsSpan(segmentStart, index - segmentStart) is "..")
+            {
+                return true;
+            }
+
+            segmentStart = index + 1;
+        }
+
+        return false;
     }
 
     private readonly struct FilterContext(RegisteredSubject subject, PathProviderBase pathProvider) : IExpressionContext
