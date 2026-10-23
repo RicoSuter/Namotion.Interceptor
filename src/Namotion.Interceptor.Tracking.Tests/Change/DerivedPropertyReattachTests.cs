@@ -1,5 +1,6 @@
 using System.Reactive.Concurrency;
 using System.Runtime.CompilerServices;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Tests.Models;
@@ -52,6 +53,51 @@ public class DerivedPropertyReattachTests
         Assert.Contains(changes, change =>
             change.Property == fullNameProperty &&
             change.GetNewValue<string?>() == "Jane Doe");
+    }
+
+    [Fact]
+    public async Task WhenSubjectIsMovedWhileADerivedChangeIsBeingPublished_ThenTheLastPublishedValueIsCurrent()
+    {
+        // Arrange
+        var blocker = new ValueBlockingWriteInterceptor(nameof(Person.FullName), "A D");
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking();
+        context.WithService(() => blocker);
+
+        var parent = new Person(context);
+        var child = new Person { FirstName = "J", LastName = "D" };
+        parent.Mother = child;
+
+        var fullNameProperty = new PropertyReference(child, nameof(Person.FullName));
+        var published = new List<string?>();
+        context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(change =>
+            {
+                if (change.Property == fullNameProperty)
+                {
+                    lock (published)
+                    {
+                        published.Add(change.GetNewValue<string?>());
+                    }
+                }
+            });
+
+        // Act
+        var writer = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => { child.FirstName = "A"; });
+        Assert.True(blocker.Entered.Wait(TimeSpan.FromSeconds(10)));
+
+        parent.Mother = null;
+        parent.Father = child;
+        child.FirstName = "B";
+
+        blocker.Proceed.Set();
+        await writer.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // Assert
+        Assert.Equal("B D", child.FullName);
+        Assert.Equal("B D", published[^1]);
     }
 
     [Fact]
