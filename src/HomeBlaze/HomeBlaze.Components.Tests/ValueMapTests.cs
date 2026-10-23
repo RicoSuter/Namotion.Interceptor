@@ -133,7 +133,7 @@ public class ValueMapTests
     [InlineData("value | raw", null, "When: A condition takes no pipes")]
     [InlineData("value/IsCharging", null, "When: 'value' has no members: write subject/... to read a property of its subject")]
     [InlineData("subject/", null, "When: expected a name after 'subject/'")]
-    [InlineData("subject//IsCharging", null, "When: a path after 'subject/' cannot start with '/'")]
+    [InlineData("subject//IsCharging", null, "When: a path starts at the subject and cannot start with '/'")]
     [InlineData(null, "{{ value/Name }}", "Text: 'value' has no members: write subject/... to read a property of its subject")]
     [InlineData(null, "{{ value | rounded }}", "Text: Unknown pipe 'rounded'")]
     [InlineData(null, "{{ value | map:x }}", "Text: The pipe 'map' cannot be used in the text of a case")]
