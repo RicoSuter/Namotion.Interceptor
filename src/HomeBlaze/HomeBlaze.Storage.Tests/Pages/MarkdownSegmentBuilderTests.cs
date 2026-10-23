@@ -816,10 +816,10 @@ public class MarkdownSegmentBuilderTests
 
         // Assert
         var starts = segments.OfType<HtmlMarkdownSegment>().Where(segment => segment.TextBlock is not null).ToList();
-        Assert.Equal([1, 8], starts.Select(segment => segment.TextBlock!.Line));
-        Assert.StartsWith("<!--TEXT:00000000000000000000000000000000:1-->", starts[0].Html);
-        Assert.Contains("Text.", starts[0].Html);
-        Assert.Contains("After.", starts[1].Html);
+        Assert.Equal([1, 3, 8], starts.Select(segment => segment.TextBlock!.Line));
+        Assert.Equal("<!--TEXT:00000000000000000000000000000000:1-->\n", starts[0].Html);
+        Assert.Contains("Text.", starts[1].Html);
+        Assert.Contains("After.", starts[2].Html);
     }
 
     [Fact]

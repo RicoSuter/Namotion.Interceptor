@@ -135,8 +135,8 @@ internal static class MarkdownPageOperations
     /// after it, where an item is a widget block or a text block between the slot blocks around the text block.
     /// </summary>
     /// <returns>
-    /// Null with a refusal when the text block cannot be edited, has no item in that direction, would go next to raw HTML or
-    /// where a block without a closing line takes it, or the change would change other blocks of the page or join the moved
+    /// Null with a refusal when the text block cannot be edited, has no item in that direction, would go past a widget block
+    /// next to raw HTML or where a block without a closing line takes it, or the change would change other blocks of the page or join the moved
     /// text with the text around it.
     /// </returns>
     public static MarkdownStructureChange? TryMoveText(
@@ -229,8 +229,9 @@ internal static class MarkdownPageOperations
         !joinsHtml &&
         CanInsertTextAt(page, textBlock.Owner, targetLine);
 
-    // Past a widget block, the text comes next to the text beyond it and joins its run, which raw HTML keeps as one text
-    // block that cannot be edited. Text next to the text block is in its run already, so it holds no raw HTML.
+    // Past a widget block, the text comes next to the text beyond it, and raw HTML there can take it, such as an element that
+    // the HTML leaves open up to the widget block. Past raw HTML in its own run, the text goes beyond the HTML that closes what
+    // it opens, and the checks of the move refuse a move that changes the HTML.
     private static int? FindTextMoveLine(List<MoveItem> items, int position, int direction, out bool joinsHtml)
     {
         var line = FindMoveLine(items, position, direction);

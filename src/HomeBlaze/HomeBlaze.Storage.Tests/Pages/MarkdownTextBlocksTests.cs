@@ -1,4 +1,5 @@
 using HomeBlaze.Storage.Pages;
+using Markdig.Syntax;
 
 namespace HomeBlaze.Storage.Tests.Pages;
 
@@ -56,19 +57,61 @@ public class MarkdownTextBlocksTests
         Assert.Same(card.Children[0], textBlocks[1].Owner);
     }
 
-    [Fact]
-    public void WhenARunOfTextHoldsRawHtml_ThenTheRunIsOneTextBlockThatCannotBeEdited()
+    [Theory]
+    [InlineData("<script>\nlet a = 1;\n</script>", HtmlBlockType.ScriptPreOrStyle)]
+    [InlineData("<pre>\n<div>\n</pre>", HtmlBlockType.ScriptPreOrStyle)]
+    [InlineData("<!--\nc\n\nd\n-->", HtmlBlockType.Comment)]
+    [InlineData("<?xml version=\"1.0\"?>", HtmlBlockType.ProcessingInstruction)]
+    [InlineData("<!DOCTYPE html>", HtmlBlockType.DocumentType)]
+    [InlineData("<![CDATA[\n<div>\n]]>", HtmlBlockType.CData)]
+    [InlineData("<div align=\"center\">\n<img src=\"a.png\"><br/>\n</div>", HtmlBlockType.InterruptingBlock)]
+    [InlineData("<my-element>\nx\n</my-element>", HtmlBlockType.NonInterruptingBlock)]
+    public void WhenRawHtmlClosesWhatItOpens_ThenItIsATextBlockOfItsOwnAndTheTextAroundItCanBeEdited(string html, HtmlBlockType type)
     {
         // Arrange
-        var page = MarkdownPageParser.Parse("Before.\n\n<div>\n\nInside.\n\n</div>\n\n:: Demo.One\n::\n\nAfter.\n");
+        var htmlLineCount = html.Count(character => character == '\n') + 1;
+        var page = MarkdownPageParser.Parse($"Before.\n\n{html}\n\nAfter.\n");
 
         // Act
         var textBlocks = MarkdownTextBlocks.Find(page);
 
         // Assert
         Assert.Equal(
-            [(1, 7, false), (12, 12, true)],
-            textBlocks.Select(textBlock => (textBlock.Line, textBlock.EndLine, textBlock.IsEditable)));
+            [(1, 1, true, false), (3, 2 + htmlLineCount, false, true), (4 + htmlLineCount, 4 + htmlLineCount, true, false)],
+            textBlocks.Select(textBlock => (textBlock.Line, textBlock.EndLine, textBlock.IsEditable, textBlock.HoldsHtml)));
+        Assert.Equal(type, Assert.IsType<HtmlBlock>(textBlocks[1].FirstBlock).Type);
+    }
+
+    [Fact]
+    public void WhenRawHtmlOpensAnElementThatALaterBlockCloses_ThenTheBlocksUpToTheClosingOneAreOneTextBlockThatCannotBeEdited()
+    {
+        // Arrange: the comment and the void element inside open nothing, the details element is closed by the last HTML block.
+        var page = MarkdownPageParser.Parse(
+            "Before.\n\n<details>\n<summary>More</summary>\n\nInside.\n\n<!-- </details> -->\n\n<br>\n\n</details>\n\nAfter.\n\n" +
+            ":: Demo.One\n::\n\nLast.\n");
+
+        // Act
+        var textBlocks = MarkdownTextBlocks.Find(page);
+
+        // Assert
+        Assert.Equal(
+            [(1, 1, true, false), (3, 12, false, true), (14, 14, true, false), (19, 19, true, false)],
+            textBlocks.Select(textBlock => (textBlock.Line, textBlock.EndLine, textBlock.IsEditable, textBlock.HoldsHtml)));
+    }
+
+    [Fact]
+    public void WhenAnElementOfRawHtmlIsNotClosedBeforeAWidget_ThenItsTextBlockEndsWithTheRun()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("<div>\n\nInside.\n\n:: Demo.One\n::\n\n</div>\n\nAfter.\n");
+
+        // Act
+        var textBlocks = MarkdownTextBlocks.Find(page);
+
+        // Assert
+        Assert.Equal(
+            [(1, 3, false, true), (8, 8, false, true), (10, 10, true, false)],
+            textBlocks.Select(textBlock => (textBlock.Line, textBlock.EndLine, textBlock.IsEditable, textBlock.HoldsHtml)));
     }
 
     [Fact]

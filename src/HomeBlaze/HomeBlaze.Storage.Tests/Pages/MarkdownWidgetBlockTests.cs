@@ -643,10 +643,10 @@ public class MarkdownWidgetBlockTests
         var page = await fixture.AddPageAsync(
             "page.md", $"# Title\n\nText {{{{ missing/Path }}}}.\n\n<div>raw</div>\n\n:: {LeafType} Name=a\n::\n\nAfter.\n");
 
-        // Assert: the title, the text and the raw HTML before the block are one run with raw HTML in it.
+        // Assert: the raw HTML is a text block of its own that cannot be edited, and the text around it can.
         var starts = page.Children.Values.OfType<HtmlSegment>()
             .Select(segment => segment.Start)
             .Where(start => start != HtmlSegmentStart.None);
-        Assert.Equal([HtmlSegmentStart.Other, HtmlSegmentStart.Text], starts);
+        Assert.Equal([HtmlSegmentStart.Text, HtmlSegmentStart.Text, HtmlSegmentStart.Other, HtmlSegmentStart.Text], starts);
     }
 }
