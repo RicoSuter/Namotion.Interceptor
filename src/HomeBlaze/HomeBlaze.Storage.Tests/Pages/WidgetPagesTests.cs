@@ -239,7 +239,7 @@ public class WidgetPagesTests : IClassFixture<AdministrationFolderFixture>
 
         // Assert
         var cards = DocumentationFolderFixture.FindSubjects(page).OfType<Card>().ToList();
-        Assert.Equal(7, cards.Count);
+        Assert.Equal(8, cards.Count);
 
         var fullCard = cards[0];
         var body = Assert.IsType<MarkdownFragment>(fullCard.Content).Children.Values;
@@ -254,6 +254,9 @@ public class WidgetPagesTests : IClassFixture<AdministrationFolderFixture>
         var optionCard = cards[2];
         Assert.Equal(("Sample motor", "../pages.md", MudBlazor.Color.Primary, false, 6), (optionCard.Subtitle, optionCard.Href, optionCard.IconColor, optionCard.Outlined, optionCard.Elevation));
         Assert.Contains(Assert.IsType<MarkdownFragment>(optionCard.HeaderRight).Children.Values, child => child is RenderExpression { Text: $"{PumpPath}/Status" });
+
+        var templateCard = cards[3];
+        Assert.Equal(($"Pump {{{{ {PumpPath}/Status }}}}", $"Target {{{{ {PumpPath}/TargetSpeed }}}} RPM"), (templateCard.Title, templateCard.Subtitle));
 
         Assert.Equal(["Pump", "Fan", "Notes"], cards.Where(card => card.AspectRatio is not null).Select(card => card.Title));
         Assert.All(cards.Where(card => card.AspectRatio is not null), card => Assert.Equal("4:3", card.AspectRatio));

@@ -2,6 +2,7 @@ using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Components;
 using HomeBlaze.Services;
+using HomeBlaze.Services.Display;
 using HomeBlaze.Services.Expressions;
 using HomeBlaze.Storage.Internal;
 using HomeBlaze.Storage.Pages;
@@ -73,7 +74,7 @@ public class WidgetDocumentationPathTests : IClassFixture<AdministrationFolderFi
 
     [Theory]
     [MemberData(nameof(Pages))]
-    public void WhenPageIsLoadedWithItsFolder_ThenEveryTemplateArgumentParsesAndItsPagePathsLeadToAProperty(string pagePath)
+    public void WhenPageIsLoadedWithItsFolder_ThenEveryTemplateArgumentPassesTheCheckOfItsHostAndItsPathsLeadToAProperty(string pagePath)
     {
         // Arrange
         var resolver = _folder.Services.GetRequiredService<SubjectPathResolver>();
@@ -81,7 +82,7 @@ public class WidgetDocumentationPathTests : IClassFixture<AdministrationFolderFi
         // Act
         var page = _folder.FindPage(pagePath);
 
-        // Assert: a variable is bound by the widget, every other path resolves from the widget like the paths of the page
+        // Assert: a variable is bound by the widget from its Path, every other path resolves from the widget like the paths of the page
         var mistakes = DocumentationFolderFixture.FindSubjects(page)
             .SelectMany(subject => FindTemplates(subject).SelectMany(template => FindMistakes(template, subject, resolver)));
 
@@ -111,15 +112,49 @@ public class WidgetDocumentationPathTests : IClassFixture<AdministrationFolderFi
             yield break;
         }
 
-        foreach (var path in parsed.Expressions.SelectMany(expression => expression.Paths))
+        // The use of the host, as its render checks the expressions
+        var use = subject is Card ? ExpressionUse.WidgetTextWithoutPath
+            : subject is ValueMapCase ? ExpressionUse.CaseText
+            : ExpressionUse.WidgetText;
+
+        // What the widget binds to 'subject' depends on the widget that applies the map, so that a case is not followed.
+        var boundSubject = subject is Card or ValueMapCase ? null : ValueBinding.FromPath(resolver, subject, GetPath(subject)).Subject;
+
+        foreach (var expression in parsed.Expressions)
         {
-            if (!ExpressionVariables.TryGetVariable(path, out _) &&
-                resolver.ResolveScopedProperty(path, PathStyle.Canonical, subject) is null)
+            if (ExpressionDisplay.Check(expression, use) is { } mistake)
             {
-                yield return $"{name}: the path '{path}' leads to no property";
+                yield return $"{name}: {mistake}";
+                continue;
+            }
+
+            foreach (var path in expression.Paths)
+            {
+                if (ExpressionVariables.TryGetVariable(path, out var variable))
+                {
+                    if (variable == ExpressionVariables.Subject && subject is not (Card or ValueMapCase) &&
+                        path.StartsWith("subject/", StringComparison.Ordinal))
+                    {
+                        if (boundSubject is null)
+                        {
+                            yield return $"{name}: the path '{path}' needs a subject, and the Path of the widget leads to none";
+                        }
+                        else if (resolver.ResolveDisplayablePropertyFrom(path["subject/".Length..], PathStyle.Canonical, boundSubject) is null)
+                        {
+                            yield return $"{name}: the path '{path}' leads to no property of the subject of the Path";
+                        }
+                    }
+                }
+                else if (resolver.ResolveScopedProperty(path, PathStyle.Canonical, subject) is null)
+                {
+                    yield return $"{name}: the path '{path}' leads to no property";
+                }
             }
         }
     }
+
+    private static string? GetPath(IInterceptorSubject subject) =>
+        subject.TryGetRegisteredSubject()!.TryGetProperty("Path")?.GetValue() as string;
 
     /// <summary>
     /// Gets the paths that the subject holds: the path of a <see cref="Widget"/>, which leads to any subject, and
