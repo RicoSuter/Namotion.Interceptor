@@ -67,7 +67,7 @@ public readonly struct ValueBinding(RegisteredSubjectProperty? property, object?
     /// Binds the result of an expression, with the same rule for its property as <see cref="FromProperty"/>. A result that
     /// has no property and is a subject, such as the variable <c>subject</c> itself, binds that subject and no value.
     /// </summary>
-    public static ValueBinding FromExpressionValue(ExpressionValue result)
+    internal static ValueBinding FromExpressionValue(ExpressionValue result)
     {
         if (result.Property is not { } property)
         {

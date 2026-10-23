@@ -49,7 +49,7 @@ public static class ExpressionDisplay
     internal const string RawPipe = "raw";
 
     /// <summary>The pipe that applies a value map to the value, <c>map:name</c>.</summary>
-    public const string MapPipe = "map";
+    internal const string MapPipe = "map";
 
     /// <summary>
     /// Gets the text that shows a result: the text of a pipe as it is, otherwise the value formatted for display with the
@@ -75,7 +75,7 @@ public static class ExpressionDisplay
     }
 
     /// <summary>Applies the pipe <c>display</c> or <c>raw</c>, which <see cref="Check"/> accepted.</summary>
-    public static ExpressionValue ApplyFormat(string name, ExpressionValue input, ITimeZoneDisplay? timeZone) =>
+    internal static ExpressionValue ApplyFormat(string name, ExpressionValue input, ITimeZoneDisplay? timeZone) =>
         ExpressionValue.FromText(name.Equals(RawPipe, StringComparison.OrdinalIgnoreCase)
             ? input.IsText ? (string)input.Value! : RawValueFormatter.Format(input.Value)
             : ToText(input, timeZone));
