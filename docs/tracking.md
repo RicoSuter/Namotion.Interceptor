@@ -536,6 +536,12 @@ var same = car.TryGetFirstParentOrSelf<Car>();  // The car itself, because it is
 
 Both searches go breadth first over all parents, so the nearest match wins, and neither throws when there is none. `TryGetFirstParent` never returns the subject itself.
 
+Every parent carries an `Index`: `null` for a subject reference, the position for a collection and the key for a dictionary.
+
+- The index follows the assigned value. When a new collection or dictionary keeps a subject at another position or under another key, its parent gets the new index. The subject stays attached throughout, so no lifecycle callback fires for the move.
+- A subject that sits at several positions or under several keys of one property has one parent for that property, with the first of them in enumeration order.
+- Parents are read from a collection or dictionary when it is assigned. Mutating one in place changes no parent, and the next assignment is compared against the mutated value, so it does not correct an index that both share.
+
 This enables scenarios like:
 - Finding the root object of a subject graph
 - Navigating from child to parent for validation or business logic
