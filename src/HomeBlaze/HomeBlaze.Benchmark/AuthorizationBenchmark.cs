@@ -14,7 +14,7 @@ namespace HomeBlaze.Benchmark;
 #pragma warning disable CS8618
 
 /// <summary>
-/// Evaluates a policy of about 30 rules against a graph of 50 floors with 40 lamps each (2050 subjects), the shape a
+/// Evaluates a policy of 24 rules against a graph of 50 floors with 40 lamps each (2050 subjects), the shape a
 /// browse of a building would produce.
 /// </summary>
 [MemoryDiagnoser]

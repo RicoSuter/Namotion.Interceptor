@@ -49,7 +49,7 @@ Patterns are parsed with the registry's path parser of the `PathProviderBase` gi
 | `/Home/Light*` | `/Home/LightA`, `/Home/Lights`, ...; `*` inside a segment is a glob over the segment text |
 | `/Line/Machines[*]` | every item of the collection or dictionary; the glob covers the index text, so `Machines[CNC*]` works |
 | `/Line/Machines` | the property's items as well: a pattern segment without an index matches a path segment with or without one |
-| `/` | everything, the same as no `Paths` |
+| `/` | every subject with a path; unlike no `Paths`, it does not match a subject none of whose paths can be listed, see [Subjects with several paths](#subjects-with-several-paths) |
 
 Paths select subjects, never members; `Members` selects those.
 
@@ -109,19 +109,19 @@ policy.CanRead(registeredSubject);   // visible at all
 
 Give a principal whose roles fail to compile `AuthorizationPolicy.DenyAll`, which denies every action, known or not; a policy must never partially apply. `policy.Roles` lists the principal's roles and every role they include, included roles first.
 
-`Explain(member, action)` returns a `PermissionDecision` naming the first allowing and the first denying role and rule, in the order of `Roles` with the system deny rules last, a system rule as the role `System`. `Explain(subject)` returns a `SubjectReadDecision`: whether the subject has a readable member and, when it is hidden although it has one, the unreadable subject-holding property on the way in `DeniedProperty`. `DeniedProperty` is null when the subject is readable and also when no chain of parents leads to a root at all, as for subjects that only hold each other in a cycle. Both are for user interfaces and tests, not hot paths.
+`Explain(member, action)` returns a `PermissionDecision` naming the first allowing and the first denying role and rule, in the order of `Roles` with the system deny rules last, a system rule as the role `System`. `Explain(subject)` returns a `SubjectReadDecision`: whether the subject has a readable member and, when it is hidden although it has one, the unreadable subject-holding property on the way in `DeniedProperty`. `DeniedProperty` is null when the subject is readable and also when the walk meets no unreadable link, as for subjects that only hold each other in a cycle without a root. Both are for user interfaces and tests, not hot paths.
 
 ## Performance and threading
 
 A compiled policy is immutable and safe to share across threads. Selectors are checked cheapest first: action, member glob, tags, type, path. A path rule is the expensive one: when one is reached for a member, the subject's paths are enumerated once per call; `CanRead(subject)` does this once for the subject's members and once for each link on the way to a root that reaches a path rule.
 
-Measured with `AuthorizationBenchmark` (2050 subjects, about 30 rules) on one machine:
+Measured with `AuthorizationBenchmark` (2050 subjects, 24 rules) on one machine:
 
 | Question | Time | Allocated |
 |---|---|---|
-| A read decided by a tag rule | about 25 ns | nothing |
-| `CanRead(subject)`, no path rule applies to `read` | about 140 ns | nothing |
-| A write where the deny rules have only path selectors | about 0.5 µs | about 700 B |
+| A read decided by a tag rule | about 23 ns | nothing |
+| `CanRead(subject)`, no path rule applies to `read` | about 150 ns | nothing |
+| A write where the deny rules have only path selectors | about 0.38 µs | about 420 B |
 | A browse-shaped pass over all subjects and their members | about 0.5 ms | - |
 
 The write is expensive although no deny rule matches: the subject's paths have to be enumerated to prove that none does. A deny rule that has only `Paths` is evaluated against every member of every subject that gets that far, so give a path deny rule another selector (a type, a member glob or a tag) when you can, and put path rules where they are needed rather than in a reusable base role.
@@ -133,3 +133,7 @@ Callers that evaluate many members of one subject, such as a tree browser, shoul
 ## JSON
 
 `PermissionAction` serializes as its name, so a rule reads `{ "tags": ["state"], "actions": ["read", "history"] }`. The property names are the C# names, so camelCase JSON as in this example needs `JsonSerializerOptions.Web` or other options with a camelCase naming policy; the default options expect PascalCase and compare names exactly. A missing list deserializes as empty, and a role without `name` fails to deserialize.
+
+## Design
+
+The design and the reasoning behind it are in [docs/design/authorization.md](../../../docs/design/authorization.md).
