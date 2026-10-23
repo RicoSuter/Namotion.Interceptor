@@ -107,7 +107,7 @@ public static class ExpressionDisplay
     /// <param name="mapName">The name or path of the map.</param>
     /// <param name="input">The value, bound as <see cref="ValueBinding.FromExpressionValue"/> binds it.</param>
     /// <param name="timeZone">The time zone of the viewer for dates, or null for that of the server.</param>
-    public static ExpressionValue ApplyMap(
+    internal static ExpressionValue ApplyMap(
         SubjectPathResolver resolver,
         IInterceptorSubject scope,
         string mapName,
