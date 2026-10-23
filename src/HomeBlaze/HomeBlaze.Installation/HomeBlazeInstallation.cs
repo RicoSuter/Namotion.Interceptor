@@ -130,6 +130,39 @@ public partial class HomeBlazeInstallation : BackgroundService,
             ? Math.Round((decimal)(total - free) / total, 3)
             : null;
 
+    // Runtime
+
+    [State(Position = 441)]
+    [Category("Runtime")]
+    public partial int? SubjectCount { get; internal set; }
+
+    /// <summary>
+    /// All registered properties, including attributes, method holders and subject references.
+    /// </summary>
+    [State(Position = 442)]
+    [Category("Runtime")]
+    public partial int? PropertyCount { get; internal set; }
+
+    [State(Position = 443)]
+    [Category("Runtime")]
+    public partial int? StatePropertyCount { get; internal set; }
+
+    [State(Position = 444)]
+    [Category("Runtime")]
+    public partial int? ConfigurationPropertyCount { get; internal set; }
+
+    [State(Position = 445)]
+    [Category("Runtime")]
+    public partial int? OperationCount { get; internal set; }
+
+    [State(Position = 446)]
+    [Category("Runtime")]
+    public partial int? QueryCount { get; internal set; }
+
+    [State(Position = 447)]
+    [Category("Runtime")]
+    public partial int? NotificationPublisherCount { get; internal set; }
+
     // Update
 
     /// <summary>
@@ -258,6 +291,13 @@ public partial class HomeBlazeInstallation : BackgroundService,
         DataDirectory = null;
         DataVolumeFreeSpace = null;
         DataVolumeTotalSize = null;
+        SubjectCount = null;
+        PropertyCount = null;
+        StatePropertyCount = null;
+        ConfigurationPropertyCount = null;
+        OperationCount = null;
+        QueryCount = null;
+        NotificationPublisherCount = null;
 
         UpdateAvailable = null;
         LatestVersion = null;
