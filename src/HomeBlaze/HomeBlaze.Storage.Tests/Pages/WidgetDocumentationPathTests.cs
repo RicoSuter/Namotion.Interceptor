@@ -3,6 +3,7 @@ using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Components;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Internal;
+using HomeBlaze.Storage.Pages;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
@@ -37,10 +38,15 @@ public class WidgetDocumentationPathTests : IClassFixture<AdministrationFolderFi
         var page = _folder.FindPage(pagePath);
 
         // Assert
-        var pathsToNothing = DocumentationFolderFixture.FindSubjects(page)
-            .OfType<RenderExpression>()
-            .Where(expression => resolver.ResolveScopedProperty(expression.Path, PathStyle.Canonical, page) is null)
-            .Select(expression => expression.Path);
+        var expressions = DocumentationFolderFixture.FindSubjects(page).OfType<RenderExpression>().ToList();
+        var expressionsWithAnError = expressions
+            .Where(expression => expression.Error is not null)
+            .Select(expression => $"{pagePath}: the expression '{expression.Text}' does not parse: {expression.Error}");
+        Assert.Empty(expressionsWithAnError);
+
+        var pathsToNothing = expressions
+            .SelectMany(expression => MarkdownExpressions.Parse(expression.Text, out _)!.Paths)
+            .Where(path => resolver.ResolveScopedProperty(path, PathStyle.Canonical, page) is null);
 
         Assert.Empty(pathsToNothing);
     }

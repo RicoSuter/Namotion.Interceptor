@@ -101,9 +101,18 @@ public static class StateUnitExtensions
             }
         }
 
-        // Default formatting for common types
+        return FormatDisplayValue(value, timeZone);
+    }
+
+    /// <summary>
+    /// Formats a value as <see cref="GetPropertyDisplayValue"/> does for a property without a unit: Yes or No for a boolean,
+    /// at most two decimals for a number, and a date in the time zone of the viewer, or of the server when it is null.
+    /// </summary>
+    public static string FormatDisplayValue(object value, ITimeZoneDisplay? timeZone = null)
+    {
         return value switch
         {
+            TimeSpan timeSpan => FormatTimeSpan(timeSpan),
             bool b => b ? "Yes" : "No",
             double d => d.ToString("0.##", CultureInfo.InvariantCulture),
             float f => f.ToString("0.##", CultureInfo.InvariantCulture),

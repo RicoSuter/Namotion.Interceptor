@@ -13,12 +13,12 @@ public abstract record MarkdownSegment;
 
 public sealed record HtmlMarkdownSegment(string Html) : MarkdownSegment;
 
-public sealed record ExpressionMarkdownSegment(string Path, ExpressionFormat Format, string? Error) : MarkdownSegment;
+public sealed record ExpressionMarkdownSegment(string Text) : MarkdownSegment;
 
 public sealed record BlockMarkdownSegment(MarkdownBlock Block, IReadOnlyList<MarkdownSegment> Content) : MarkdownSegment;
 
-/// <summary>One {{ path }} expression in the text of a page: where it stands, the path between the braces without the format, the format, and what is wrong with the format.</summary>
-public readonly record struct MarkdownExpression(MarkdownSpan Span, string Path, ExpressionFormat Format, string? Error);
+/// <summary>One {{ … }} expression in the text of a page: where it stands, and the text between the braces without the white space around it.</summary>
+public readonly record struct MarkdownExpression(MarkdownSpan Span, string Text);
 
 public static class MarkdownErrorBox
 {
@@ -29,16 +29,17 @@ public static class MarkdownErrorBox
 /// <summary>Renders a parsed page to HTML and cuts it into segments per block.</summary>
 public static partial class MarkdownSegmentBuilder
 {
-    // The path takes no brace and no '<'. Without that, an opening pair of braces that is never closed would
-    // take everything up to the closing pair of a later expression, and in the rendered HTML also the
-    // markers of the blocks in between.
+    // The text takes no brace and no '<'. Without that, an opening pair of braces that is never closed would take
+    // everything up to the closing pair of a later expression, and in the rendered HTML also the markers in between.
+    // It finds the expressions in HTML that the page writes; those in running text are markers already.
     private const string ExpressionPattern = @"\{\{\s*([^{}<]+?)\s*\}\}";
 
-    [GeneratedRegex(@"<!--(/?)BLOCK:([0-9a-f]{32}):(\d+)-->|" + ExpressionPattern)]
-    private static partial Regex MarkerRegex();
+    // The source is searched with '<' allowed, because running text has the operators of an expression as written.
+    [GeneratedRegex(@"\{\{\s*([^{}]+?)\s*\}\}")]
+    private static partial Regex SourceExpressionRegex();
 
-    [GeneratedRegex(ExpressionPattern)]
-    private static partial Regex ExpressionRegex();
+    [GeneratedRegex(@"<!--(/?)BLOCK:([0-9a-f]{32}):(\d+)-->|<!--EXPR:([0-9a-f]{32}):(\d+)-->|" + ExpressionPattern)]
+    private static partial Regex MarkerRegex();
 
     private static readonly char[] Braces = ['{', '}'];
 
@@ -47,30 +48,40 @@ public static partial class MarkdownSegmentBuilder
         $"{MarkdownBlockFence.Create(MarkdownBlockFence.MinimumLength)} Full.Type.Name#name key=value, " +
         $"then a closing {MarkdownBlockFence.Create(MarkdownBlockFence.MinimumLength)} line.";
 
-    // The characters that the path part of the expression pattern excludes.
-    private static readonly char[] ExcludedFromPath = ['{', '}', '<'];
+    // A brace that the HTML has as a character reference comes from markdown code, and encloses no expression.
+    private static readonly char[] ExcludedFromText = ['{', '}'];
 
     /// <summary>
-    /// Gets the expressions in the text of the page in document order. An expression is a path between two
-    /// pairs of braces that contains no brace and no '&lt;'. A brace inside markdown code neither opens nor
-    /// closes one.
+    /// Gets the expressions in the text of the page in document order: the text between two pairs of braces that
+    /// contains no brace. A brace inside markdown code neither opens nor closes one.
     /// </summary>
     /// <remarks>
     /// The search reads the text and not the rendered page, so it also returns an expression that
     /// <see cref="Build"/> does not turn into a segment: one in the front matter, in the content of an invalid
     /// block or on the head line of a block, and one whose braces enclose markdown markup or the border of a block.
-    /// A path with a character reference in it, such as <c>&amp;amp;</c>, is returned as written, while the
-    /// segment has the character.
+    /// An expression with a character reference in it, such as <c>&amp;amp;</c>, is returned as written, except one
+    /// in HTML that the page writes: its text has the character, like its segment, and one whose character
+    /// is a brace is skipped. The segment of an expression in running text keeps it as written.
     /// </remarks>
     public static IEnumerable<MarkdownExpression> FindExpressions(MarkdownPage page)
     {
         var source = page.Source;
-        foreach (Match match in ExpressionRegex().Matches(HideBracesInCode(page)))
+        foreach (Match match in SourceExpressionRegex().Matches(HideBracesInCode(page)))
         {
-            var path = match.Groups[1];
-            var text = MarkdownExpressionText.Parse(source.Substring(path.Index, path.Length));
-            yield return new MarkdownExpression(
-                new MarkdownSpan(match.Index, match.Length), text.Path, text.Format, text.Error);
+            var group = match.Groups[1];
+            var text = source.Substring(group.Index, group.Length);
+
+            // Raw HTML is HTML to the page, which reads a character reference in it, so a '<' is written as &lt;.
+            if (page.IsInsideRawHtml(match.Index))
+            {
+                text = WebUtility.HtmlDecode(text);
+                if (text.AsSpan().IndexOfAny(ExcludedFromText) >= 0)
+                {
+                    continue;
+                }
+            }
+
+            yield return new MarkdownExpression(new MarkdownSpan(match.Index, match.Length), text);
         }
     }
 
@@ -103,6 +114,8 @@ public static partial class MarkdownSegmentBuilder
         var renderer = new HtmlRenderer(writer) { LinkRewriter = linkRewriter };
         MarkdownPageParser.Pipeline.Setup(renderer);
         renderer.ObjectRenderers.Insert(0, new BlockMarkerRenderer(page, token));
+        var expressions = new List<string>();
+        renderer.ObjectRenderers.Insert(0, new ExpressionMarkerRenderer(token, expressions));
 
         // Extensions configure the code renderers by exact type during Setup, so the
         // replacements are put in afterwards and take over what they configured.
@@ -143,10 +156,10 @@ public static partial class MarkdownSegmentBuilder
         renderer.Render(page.Document);
         writer.Flush();
 
-        return Split(writer.ToString(), page, token);
+        return Split(writer.ToString(), page, token, expressions);
     }
 
-    internal static List<MarkdownSegment> Split(string html, MarkdownPage page, string token)
+    internal static List<MarkdownSegment> Split(string html, MarkdownPage page, string token, IReadOnlyList<string> expressions)
     {
         var root = new List<MarkdownSegment>();
         var stack = new Stack<(MarkdownBlock Block, List<MarkdownSegment> Outer)>();
@@ -155,18 +168,20 @@ public static partial class MarkdownSegmentBuilder
 
         foreach (Match match in MarkerRegex().Matches(html))
         {
-            var isForgedMarker = match.Groups[2].Success && match.Groups[2].Value != token;
+            var isForgedMarker =
+                (match.Groups[2].Success && match.Groups[2].Value != token) ||
+                (match.Groups[4].Success && match.Groups[4].Value != token);
             if (isForgedMarker)
             {
                 continue;
             }
 
-            // The path is HTML here, so a quote or an ampersand in it is a character reference.
-            var path = match.Groups[4].Success ? WebUtility.HtmlDecode(match.Groups[4].Value) : null;
+            // An expression in HTML that the page writes is HTML, so a quote or an ampersand in it is a character reference.
+            var expression = match.Groups[4].Success
+                ? expressions[int.Parse(match.Groups[5].Value)]
+                : match.Groups[6].Success ? WebUtility.HtmlDecode(match.Groups[6].Value) : null;
 
-            // The pattern cannot see a '<' or a brace that the page text has literally, because the HTML has
-            // a character reference for it. In the text such braces enclose no expression, so they stay text here.
-            if (path is not null && path.AsSpan().IndexOfAny(ExcludedFromPath) >= 0)
+            if (match.Groups[6].Success && expression!.AsSpan().IndexOfAny(ExcludedFromText) >= 0)
             {
                 continue;
             }
@@ -178,10 +193,9 @@ public static partial class MarkdownSegmentBuilder
 
             lastIndex = match.Index + match.Length;
 
-            if (path is not null)
+            if (expression is not null)
             {
-                var text = MarkdownExpressionText.Parse(path);
-                current.Add(new ExpressionMarkdownSegment(text.Path, text.Format, text.Error));
+                current.Add(new ExpressionMarkdownSegment(expression));
             }
             else if (match.Groups[1].Length == 0)
             {
@@ -210,6 +224,16 @@ public static partial class MarkdownSegmentBuilder
         }
 
         return root;
+    }
+
+    // The marker holds an index and not the text, so that no text of an expression, such as "-->", can end the comment.
+    private sealed class ExpressionMarkerRenderer(string token, List<string> expressions) : HtmlObjectRenderer<MarkdownExpressionInline>
+    {
+        protected override void Write(HtmlRenderer renderer, MarkdownExpressionInline expression)
+        {
+            renderer.Write($"<!--EXPR:{token}:{expressions.Count}-->");
+            expressions.Add(expression.Text);
+        }
     }
 
     private sealed class BlockMarkerRenderer(MarkdownPage page, string token) : HtmlObjectRenderer<MarkdownBlockContainer>

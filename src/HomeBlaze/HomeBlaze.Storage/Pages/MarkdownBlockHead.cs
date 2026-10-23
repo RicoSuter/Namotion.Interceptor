@@ -1,6 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using System.Text.RegularExpressions;
+using HomeBlaze.Services.Expressions;
 
 namespace HomeBlaze.Storage.Pages;
 
@@ -27,6 +28,12 @@ public sealed partial record MarkdownBlockHead(
     public bool IsWidget => Name.Contains('.');
 
     public static bool IsValidId(string id) => IdRegex().IsMatch(id);
+
+    /// <summary>Gets whether the name is a variable of expressions, which a block cannot have as its name.</summary>
+    public static bool IsReservedId(string id) => id is ExpressionVariables.Value or ExpressionVariables.Subject;
+
+    /// <summary>Gets the error for a name that is a variable of expressions.</summary>
+    public static string GetReservedIdError(string id) => $"'{id}' is reserved for expressions and cannot be the name of a block.";
 
     /// <summary>Gets whether the name is a valid block name: a type name or a slot name.</summary>
     internal static bool IsValidName(string name) => NameRegex().IsMatch(name);
@@ -88,6 +95,12 @@ public sealed partial record MarkdownBlockHead(
             if (!IdRegex().IsMatch(id))
             {
                 error = $"'{id}' is not a valid name after '#'.";
+                return false;
+            }
+
+            if (IsReservedId(id))
+            {
+                error = GetReservedIdError(id);
                 return false;
             }
         }

@@ -412,6 +412,21 @@ public class StateUnitExtensionsTests
         Assert.Equal("79228162514264337593543950335", result);
     }
 
+    [Theory]
+    [InlineData(true, "Yes")]
+    [InlineData(false, "No")]
+    [InlineData(1234.567, "1234.57")]
+    [InlineData("text", "text")]
+    [InlineData(DayOfWeek.Monday, "Monday")]
+    public void WhenValueHasNoProperty_ThenItIsFormattedWithoutAUnit(object value, string expected)
+    {
+        // Act
+        var text = StateUnitExtensions.FormatDisplayValue(value);
+
+        // Assert
+        Assert.Equal(expected, text);
+    }
+
     private static RegisteredSubjectProperty GetRatioProperty()
     {
         var subject = new DisplayTestSubject(CreateContext());

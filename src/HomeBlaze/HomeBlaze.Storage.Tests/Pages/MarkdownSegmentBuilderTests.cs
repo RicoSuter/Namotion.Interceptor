@@ -30,7 +30,7 @@ public class MarkdownSegmentBuilderTests
 
         // Assert
         Assert.Equal(new HtmlMarkdownSegment("<p>Value "), segments[0]);
-        Assert.Equal(new ExpressionMarkdownSegment("a/b", ExpressionFormat.Display, null), segments[1]);
+        Assert.Equal(new ExpressionMarkdownSegment("a/b"), segments[1]);
         Assert.DoesNotContain("title", AllHtml(segments));
     }
 
@@ -50,7 +50,7 @@ public class MarkdownSegmentBuilderTests
         // Assert
         var card = Assert.Single(segments.OfType<BlockMarkdownSegment>());
         Assert.Equal("Demo.Card", card.Block.Head!.Name);
-        Assert.Contains(card.Content, segment => segment is ExpressionMarkdownSegment { Path: "/A/B" });
+        Assert.Contains(card.Content, segment => segment is ExpressionMarkdownSegment { Text: "/A/B" });
         var widget = Assert.Single(card.Content.OfType<BlockMarkdownSegment>());
         Assert.Equal("Demo.Widget", widget.Block.Head!.Name);
         Assert.Empty(widget.Content);
@@ -483,7 +483,7 @@ public class MarkdownSegmentBuilderTests
 
         // Assert
         var expression = Assert.Single(segments.OfType<ExpressionMarkdownSegment>());
-        Assert.Equal("c/D", expression.Path);
+        Assert.Equal("c/D", expression.Text);
         Assert.Contains("<code>{{ a/B }}</code>", VisibleText(segments));
     }
 
@@ -495,7 +495,7 @@ public class MarkdownSegmentBuilderTests
 
         // Assert
         var expression = Assert.Single(segments.OfType<ExpressionMarkdownSegment>());
-        Assert.Equal("a/B", expression.Path);
+        Assert.Equal("a/B", expression.Text);
         Assert.Contains("<code>{{</code>", VisibleText(segments));
     }
 
@@ -521,7 +521,7 @@ public class MarkdownSegmentBuilderTests
 
         // Assert
         var expression = Assert.Single(segments.OfType<ExpressionMarkdownSegment>());
-        Assert.Equal("a/B", expression.Path);
+        Assert.Equal("a/B", expression.Text);
     }
 
     [Fact]
@@ -578,7 +578,7 @@ public class MarkdownSegmentBuilderTests
         Assert.Equal("Demo.Card", block.Block.Head!.Name);
         Assert.Contains("Use {{ to start an expression.", AllHtml(block.Content));
         Assert.Contains("After the card", AllHtml(segments.Where(segment => segment is HtmlMarkdownSegment)));
-        Assert.Equal(new ExpressionMarkdownSegment("motor/Speed", ExpressionFormat.Display, null), Assert.Single(segments.OfType<ExpressionMarkdownSegment>()));
+        Assert.Equal(new ExpressionMarkdownSegment("motor/Speed"), Assert.Single(segments.OfType<ExpressionMarkdownSegment>()));
     }
 
     [Fact]
@@ -599,7 +599,7 @@ public class MarkdownSegmentBuilderTests
         var block = Assert.Single(segments.OfType<BlockMarkdownSegment>());
         Assert.Equal("Demo.Card", block.Block.Head!.Name);
         Assert.Equal(
-            new ExpressionMarkdownSegment("motor/Speed", ExpressionFormat.Display, null), Assert.Single(block.Content.OfType<ExpressionMarkdownSegment>()));
+            new ExpressionMarkdownSegment("motor/Speed"), Assert.Single(block.Content.OfType<ExpressionMarkdownSegment>()));
         Assert.Empty(segments.OfType<ExpressionMarkdownSegment>());
         var outside = AllHtml(segments.Where(segment => segment is HtmlMarkdownSegment));
         Assert.Contains("Use {{ to start an expression.", outside);
@@ -613,7 +613,7 @@ public class MarkdownSegmentBuilderTests
         var segments = Build("Use {{ to start one, like {{ a/B }} here");
 
         // Assert
-        Assert.Equal(new ExpressionMarkdownSegment("a/B", ExpressionFormat.Display, null), Assert.Single(segments.OfType<ExpressionMarkdownSegment>()));
+        Assert.Equal(new ExpressionMarkdownSegment("a/B"), Assert.Single(segments.OfType<ExpressionMarkdownSegment>()));
         Assert.Contains("Use {{ to start one, like ", AllHtml(segments));
     }
 
@@ -626,7 +626,7 @@ public class MarkdownSegmentBuilderTests
 
         // Act
         var segments = MarkdownSegmentBuilder.Split(
-            $"<p>Before</p><!--BLOCK:{token}:0--><p>Inside</p>", page, token);
+            $"<p>Before</p><!--BLOCK:{token}:0--><p>Inside</p>", page, token, []);
 
         // Assert
         Assert.Equal(2, segments.Count);
@@ -646,18 +646,19 @@ public class MarkdownSegmentBuilderTests
         var segments = Build(source);
 
         // Assert
-        Assert.Equal(new ExpressionMarkdownSegment(expectedPath, ExpressionFormat.Display, null), Assert.Single(segments.OfType<ExpressionMarkdownSegment>()));
+        Assert.Equal(new ExpressionMarkdownSegment(expectedPath), Assert.Single(segments.OfType<ExpressionMarkdownSegment>()));
     }
 
     [Fact]
-    public void WhenBracesEncloseALiteralLessThanSign_ThenTheyAreShownAsWrittenAndAreNoSegment()
+    public void WhenBracesEncloseALiteralLessThanSign_ThenTheyAreAnExpressionWithIt()
     {
         // Act
         var segments = Build("Value {{ a < b }} now and {{ c/D }}");
 
         // Assert
-        Assert.Equal(new ExpressionMarkdownSegment("c/D", ExpressionFormat.Display, null), Assert.Single(segments.OfType<ExpressionMarkdownSegment>()));
-        Assert.Contains("Value {{ a < b }} now and ", VisibleText(segments));
+        Assert.Equal(["a < b", "c/D"], segments.OfType<ExpressionMarkdownSegment>().Select(segment => segment.Text));
+        Assert.Contains("Value ", VisibleText(segments));
+        Assert.DoesNotContain("{{", VisibleText(segments));
     }
 
     [Theory]
@@ -677,6 +678,8 @@ public class MarkdownSegmentBuilderTests
     [InlineData("""Value {{ Items["a"]/B }} and {{ A&B/C }} now""")]
     [InlineData("Value {{ a < b }} now and {{ c/D }}")]
     [InlineData("Value {{ a&b/C }} now")]
+    [InlineData("<div>{{ a/B &lt; 5 }}</div>")]
+    [InlineData("Value {{ a/B < 5 }} and <b title=\"{{ c/D &gt; 1 }}\">x</b>")]
     [InlineData("Nothing to see here")]
     public void WhenPageIsRendered_ThenItsExpressionsAreTheOnesFoundInItsText(string source)
     {
@@ -686,34 +689,21 @@ public class MarkdownSegmentBuilderTests
         // Act
         var rendered = Flatten(MarkdownSegmentBuilder.Build(page))
             .OfType<ExpressionMarkdownSegment>()
-            .Select(expression => expression.Path);
-        var found = MarkdownSegmentBuilder.FindExpressions(page).Select(expression => expression.Path);
+            .Select(expression => expression.Text);
+        var found = MarkdownSegmentBuilder.FindExpressions(page).Select(expression => expression.Text);
 
         // Assert
         Assert.Equal(found, rendered);
     }
 
     [Fact]
-    public void WhenExpressionHasTheRawFormat_ThenItIsFoundWithThePathWithoutTheFormat()
+    public void WhenExpressionHasAPipe_ThenItIsFoundWithItsWholeText()
     {
         // Act
         var expression = Assert.Single(MarkdownSegmentBuilder.FindExpressions(MarkdownPageParser.Parse("Value {{ a | raw }} now")));
 
         // Assert
-        Assert.Equal("a", expression.Path);
-        Assert.Equal(ExpressionFormat.Raw, expression.Format);
-        Assert.Null(expression.Error);
-    }
-
-    [Fact]
-    public void WhenExpressionHasAnUnknownFormat_ThenItIsFoundWithAnError()
-    {
-        // Act
-        var expression = Assert.Single(MarkdownSegmentBuilder.FindExpressions(MarkdownPageParser.Parse("Value {{ a | x }} now")));
-
-        // Assert
-        Assert.Equal("a", expression.Path);
-        Assert.Equal("Unknown format 'x'", expression.Error);
+        Assert.Equal("a | raw", expression.Text);
     }
 
     [Fact]
@@ -727,7 +717,7 @@ public class MarkdownSegmentBuilderTests
 
         // Assert
         Assert.Equal("{{ a/B }}", source.Substring(expression.Span.Start, expression.Span.Length));
-        Assert.Equal("a/B", expression.Path);
+        Assert.Equal("a/B", expression.Text);
     }
 
     private static IEnumerable<MarkdownSegment> Flatten(IEnumerable<MarkdownSegment> segments) =>
@@ -767,6 +757,55 @@ public class MarkdownSegmentBuilderTests
         Assert.Contains("<code>Type.<wbr>Name</code>", html);
         Assert.Contains("<code>HomeBlaze.<wbr>Components.<wbr>Card</code>", html);
         Assert.Contains("<code>Subtitle</code>", html);
+    }
+
+    [Theory]
+    [InlineData("Power {{ a==1 or b==2 }} now", "a==1 or b==2")]
+    [InlineData("Power {{ a < 5 }} now", "a < 5")]
+    [InlineData("Power {{ a <= 5 && b }} now", "a <= 5 && b")]
+    [InlineData("Power {{ a == 'x' }} now", "a == 'x'")]
+    [InlineData("Power **{{ a > 5 }}** now", "a > 5")]
+    public void WhenExpressionHasOperators_ThenItsTextReachesTheSegmentAsWritten(string source, string text)
+    {
+        // Act
+        var segments = Build(source);
+
+        // Assert
+        Assert.Equal(new ExpressionMarkdownSegment(text), Assert.Single(segments.OfType<ExpressionMarkdownSegment>()));
+    }
+
+    [Fact]
+    public void WhenExpressionInATableCellHasPipes_ThenTheCellIsNotSplit()
+    {
+        // Act
+        var segments = Build("| A | B |\n|---|---|\n| {{ a | raw }} | {{ a || b }} |\n| {{ c \\| raw }} | z |");
+
+        // Assert
+        Assert.Equal(
+            ["a | raw", "a || b", "c \\| raw"],
+            segments.OfType<ExpressionMarkdownSegment>().Select(segment => segment.Text));
+        // Two body rows of two cells each: a '|' inside an expression split none of them.
+        Assert.Equal(4, System.Text.RegularExpressions.Regex.Matches(AllHtml(segments), "<td").Count);
+    }
+
+    [Fact]
+    public void WhenRawHtmlHasAnExpressionInAnAttribute_ThenItIsStillASegment()
+    {
+        // Act
+        var segments = Build("<span title=\"{{ a &lt; 5 }}\">{{ b }}</span>");
+
+        // Assert
+        Assert.Equal(["a < 5", "b"], segments.OfType<ExpressionMarkdownSegment>().Select(segment => segment.Text).Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public void WhenTextLooksLikeAMarker_ThenItIsNoExpression()
+    {
+        // Act
+        var segments = Build("<!--EXPR:00000000000000000000000000000000:0--> and {{ a }}");
+
+        // Assert
+        Assert.Equal(new ExpressionMarkdownSegment("a"), Assert.Single(segments.OfType<ExpressionMarkdownSegment>()));
     }
 
     // What a browser shows for the HTML: character references are decoded.
