@@ -232,6 +232,31 @@ public class AttributeUniquenessTests
     }
 
     [Fact]
+    public void WhenASubjectDeclaresThreePropertiesForOneAttributePair_ThenTheOrdinalFirstProvidesTheAttributeAndTheOthersArePlain()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+
+        // Act
+        var subject = new TripleAttributeTarget(context);
+
+        // Assert: ordinal order is Forward_A, Forward_Enabled, Forward_IsEnabled.
+        var registered = subject.TryGetRegisteredSubject()!;
+        Assert.Equal("Forward_A", registered.TryGetPropertyAttribute("Forward", "IsEnabled")!.Name);
+
+        foreach (var loserName in new[] { "Forward_Enabled", "Forward_IsEnabled" })
+        {
+            var loser = registered.TryGetProperty(loserName)!;
+            Assert.False(loser.IsAttribute);
+            Assert.Equal(loserName, loser.BrowseName);
+            Assert.DoesNotContain(loser.ReflectionAttributes, reflectionAttribute => reflectionAttribute is PropertyAttributeAttribute);
+        }
+
+        var attribute = Assert.Single(registered.TryGetProperty("Forward")!.Attributes);
+        Assert.Equal("Forward_A", attribute.Name);
+    }
+
+    [Fact]
     public void WhenADuplicateAttributeTargetIsAttachedAndDetached_ThenItIsRegisteredAndReleased()
     {
         // Arrange
