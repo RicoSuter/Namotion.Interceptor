@@ -185,7 +185,7 @@ A `style` attribute needs the raw value. In this sample the width of the bar is 
 
 ### Conditions
 
-An expression can compare values and combine the results. It shows `Yes` or `No`, and nothing while a value it needs is missing:
+An expression can compare values and combine the results. In the text of a page a condition shows only `Yes` or `No`, and nothing while a value it needs is missing:
 
 ~~~~markdown
 The conveyor runs fast: {{ /Demo/Conveyor/CurrentSpeed > 500 }}.
@@ -194,7 +194,7 @@ The conveyor runs fast: {{ /Demo/Conveyor/CurrentSpeed > 500 }}.
 - **Comparisons**: `==`, `!=`, `<`, `<=`, `>` and `>=` compare a value with a number, `true`, `false`, `null`, a text in quotes, or another path. A word without a slash after an operator is a text, such as the name of an enum value: `{{ mymotor/Status == Running }}`. A path to compare with has a slash in it, such as `mymotor/Speed`, `../Pump/Speed` or `/Demo/Pump/Speed`.
 - **Logic**: `and` (`&&`), `or` (`||`), `not` (`!`) and parentheses combine comparisons. A missing value makes a comparison unknown, and an unknown part makes the whole unknown unless the rest decides it: `false and unknown` is `false`.
 - **Texts and enums** compare without regard to upper and lower case. A date compares with a text in ISO 8601, such as `'2026-10-01'`.
-- **No arithmetic**: `+`, `-`, `*` and `/` between values show an error.
+- **No arithmetic**: `+`, `-`, `*` and `/` between values show an error. They are reserved, so that a later version can add arithmetic without changing what a page shows.
 - **Errors**: A mistake shows its message and where it is, such as `expected ')' at position 16`, in place of the value. See [Page Errors](page-errors.md#expression-errors).
 
 ### Where an Expression Works
