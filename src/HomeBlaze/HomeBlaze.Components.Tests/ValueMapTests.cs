@@ -131,8 +131,12 @@ public class ValueMapTests
     [Theory]
     [InlineData("value >", null, "When: expected a value after '>' at position 7")]
     [InlineData("value | raw", null, "When: A condition takes no pipes")]
+    [InlineData("value/IsCharging", null, "When: 'value' has no members: write subject/... to read a property of its subject")]
+    [InlineData("subject/", null, "When: expected a name after 'subject/'")]
+    [InlineData("subject//IsCharging", null, "When: a path after 'subject/' cannot start with '/'")]
+    [InlineData(null, "{{ value/Name }}", "Text: 'value' has no members: write subject/... to read a property of its subject")]
     [InlineData(null, "{{ value | rounded }}", "Text: Unknown pipe 'rounded'")]
-    [InlineData(null, "{{ value | map:x }}", "Text: Unknown pipe 'map'")]
+    [InlineData(null, "{{ value | map:x }}", "Text: The pipe 'map' cannot be used in the text of a case")]
     [InlineData(null, "a {{ value", "Text: '{{' is not closed at position 2")]
     [InlineData("value > 1", "{{ subject/Power }} W", null)]
     public void WhenCaseHasAMistake_ThenItsErrorNamesTheArgument(string? when, string? text, string? expected)
@@ -145,6 +149,19 @@ public class ValueMapTests
 
         // Assert
         Assert.Equal(expected, error);
+    }
+
+    [Fact]
+    public void WhenConditionReadsAPathIntoTheValue_ThenTheMapErrorNamesTheCase()
+    {
+        // Arrange
+        var map = new ValueMap { Cases = [new ValueMapCase { When = "value/IsCharging", Text = "charging" }] };
+
+        // Act
+        var error = map.GetError();
+
+        // Assert
+        Assert.Equal("Case 1, When: 'value' has no members: write subject/... to read a property of its subject", error);
     }
 
     [Fact]

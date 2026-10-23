@@ -70,10 +70,21 @@ public static class ExpressionDisplay
             return "A condition takes no pipes";
         }
 
-        foreach (var pipe in expression.Pipes)
+        for (var index = 0; index < expression.Pipes.Length; index++)
         {
-            if (use == ExpressionUse.PageText && pipe.Name.Equals(MapPipe, StringComparison.OrdinalIgnoreCase))
+            var pipe = expression.Pipes[index];
+            if (pipe.Name.Equals(MapPipe, StringComparison.OrdinalIgnoreCase))
             {
+                if (use == ExpressionUse.CaseText)
+                {
+                    return "The pipe 'map' cannot be used in the text of a case";
+                }
+
+                if (index > 0)
+                {
+                    return "The pipe 'map' must be the first pipe";
+                }
+
                 if (pipe.Arguments.Length != 1)
                 {
                     return "The pipe 'map' takes the name of a value map, such as map:wallbox";
@@ -94,14 +105,50 @@ public static class ExpressionDisplay
             }
         }
 
-        if (use == ExpressionUse.PageText)
+        foreach (var path in expression.Paths)
         {
-            foreach (var path in expression.Paths)
+            if (!ExpressionVariables.TryGetVariable(path, out var variable))
             {
-                if (ExpressionVariables.TryGetVariable(path, out var variable))
-                {
-                    return $"'{variable}' is not available in the text of a page";
-                }
+                continue;
+            }
+
+            if (use == ExpressionUse.PageText)
+            {
+                return $"'{variable}' is not available in the text of a page";
+            }
+
+            if (GetVariablePathError(path, variable) is { } pathError)
+            {
+                return pathError;
+            }
+        }
+
+        return null;
+    }
+
+    private static string? GetVariablePathError(string path, string variable)
+    {
+        var rest = path.AsSpan(variable.Length);
+        if (rest.IsEmpty)
+        {
+            return null;
+        }
+
+        if (variable == ExpressionVariables.Value)
+        {
+            return "'value' has no members: write subject/... to read a property of its subject";
+        }
+
+        if (rest[0] == '/')
+        {
+            if (rest.Length == 1)
+            {
+                return "expected a name after 'subject/'";
+            }
+
+            if (rest[1] == '/')
+            {
+                return "a path after 'subject/' cannot start with '/'";
             }
         }
 
