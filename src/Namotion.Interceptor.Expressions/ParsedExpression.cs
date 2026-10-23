@@ -43,7 +43,7 @@ public sealed class ParsedExpression
     /// <c>subject</c>, which are paths. On failure the error reads
     /// <c>&lt;message&gt; at position &lt;zero-based index&gt;</c>.
     /// </summary>
-    /// <exception cref="ArgumentException">The separator is white space, a letter, a digit, a quote, a bracket, or one of <c>| &amp; = ! &lt; &gt;</c>.</exception>
+    /// <exception cref="ArgumentException">The separator is white space, a letter, a digit, a quote, a bracket, or one of <c>| &amp; = ! &lt; &gt; + - *</c>.</exception>
     public static bool TryParse(
         string text,
         char pathSeparator,

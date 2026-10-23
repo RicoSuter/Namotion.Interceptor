@@ -41,9 +41,19 @@ internal sealed class SubjectFilterExpression
         [NotNullWhen(false)] out string? error)
     {
         expression = null;
-        if (!ParsedExpression.TryParse(text, pathSeparator, out var parsed, out var parseError))
+        ParsedExpression? parsed;
+        string? parseError;
+        try
         {
-            error = ErrorPrefix + parseError;
+            if (!ParsedExpression.TryParse(text, pathSeparator, out parsed, out parseError))
+            {
+                error = ErrorPrefix + parseError;
+                return false;
+            }
+        }
+        catch (ArgumentException exception) when (exception.ParamName == nameof(pathSeparator))
+        {
+            error = ErrorPrefix + $"the path separator '{pathSeparator}' is not supported";
             return false;
         }
 

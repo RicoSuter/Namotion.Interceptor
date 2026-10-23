@@ -378,6 +378,23 @@ public class SubjectFilterExpressionTests
         Assert.Equal(expectedError, error);
     }
 
+    [Theory]
+    [InlineData('-')]
+    [InlineData('+')]
+    [InlineData('*')]
+    [InlineData('|')]
+    [InlineData('a')]
+    public void WhenPathSeparatorIsNotSupportedByTheLanguage_ThenReturnsErrorNamingIt(char separator)
+    {
+        // Act
+        var parsed = SubjectFilterExpression.TryParse("Name == 1", separator, out var expression, out var error);
+
+        // Assert
+        Assert.False(parsed);
+        Assert.Null(expression);
+        Assert.Equal($"where: the path separator '{separator}' is not supported", error);
+    }
+
     [Fact]
     public void WhenAnIndexKeyContainsDoubleDots_ThenItIsNoParentSegment()
     {
