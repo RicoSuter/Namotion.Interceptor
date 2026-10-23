@@ -805,7 +805,6 @@ namespace HomeBlaze.Components
         public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
         public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
         public System.Threading.Tasks.Task ApplyConfigurationAsync(System.Threading.CancellationToken cancellationToken = default) { }
-        public HomeBlaze.Components.ValueMapCase? FindCase(string rawText) { }
         public HomeBlaze.Components.ValueMapCase? FindCase(in HomeBlaze.Services.Display.ValueBinding binding, HomeBlaze.Services.SubjectPathResolver resolver) { }
         protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
         protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
@@ -852,8 +851,8 @@ namespace HomeBlaze.Components
         public static string GetLabel(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? property, string? label, string? path) { }
         public static double? GetProgressPercent(object? value, double minimum, double maximum) { }
         public static HomeBlaze.Components.ValueReading Read(HomeBlaze.Services.SubjectPathResolver resolver, Namotion.Interceptor.IInterceptorSubject widget, string? path, string? map, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone) { }
-        public static HomeBlaze.Components.ValueReading ReadProperty(Namotion.Interceptor.IInterceptorSubject subject, string? propertyName, HomeBlaze.Components.ValueMap? valueMap, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone) { }
-        public static HomeBlaze.Components.ValueReading ReadResolved(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? property, HomeBlaze.Components.ValueMap? valueMap, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone) { }
+        public static HomeBlaze.Components.ValueReading ReadProperty(HomeBlaze.Services.SubjectPathResolver resolver, Namotion.Interceptor.IInterceptorSubject subject, string? propertyName, HomeBlaze.Components.ValueMap? valueMap, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone) { }
+        public static HomeBlaze.Components.ValueReading ReadResolved(HomeBlaze.Services.SubjectPathResolver resolver, Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? property, HomeBlaze.Components.ValueMap? valueMap, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone) { }
         public static object? ReadValue(HomeBlaze.Services.SubjectPathResolver resolver, Namotion.Interceptor.IInterceptorSubject widget, string? path) { }
         public static HomeBlaze.Components.ValueMap? ResolveMap(HomeBlaze.Services.SubjectPathResolver resolver, Namotion.Interceptor.IInterceptorSubject widget, string? map, out string? error) { }
         public static Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? ResolveProperty(HomeBlaze.Services.SubjectPathResolver resolver, Namotion.Interceptor.IInterceptorSubject widget, string? path) { }
@@ -862,6 +861,7 @@ namespace HomeBlaze.Components
     {
         public ValueReading(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? Property, object? Value, string Text, HomeBlaze.Components.ValueColor Color, string? Icon, string? MapError) { }
         public HomeBlaze.Components.ValueColor Color { get; init; }
+        public bool HasCase { get; init; }
         public string? Icon { get; init; }
         public bool IsMissing { get; }
         public string? MapError { get; init; }

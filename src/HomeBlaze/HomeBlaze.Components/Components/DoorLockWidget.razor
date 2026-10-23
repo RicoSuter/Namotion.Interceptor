@@ -72,7 +72,7 @@
         var target = string.IsNullOrEmpty(path)
             ? null
             : ValueReader.ResolveSubject(PathResolver, widget, path) as IDoorLockState as IInterceptorSubject;
-        var appearance = DoorLockDisplay.Get((target as IDoorLockState)?.LockState, (target as IDoorSensor)?.DoorState, valueMap);
+        var appearance = DoorLockDisplay.Get((target as IDoorLockState)?.LockState, (target as IDoorSensor)?.DoorState, valueMap, target, PathResolver);
         var property = target is not null && appearance.Operation is { } name ? target.TryGetRegisteredProperty(name) : null;
         var operation = property?.TryGetMethodMetadata() is { } method && property.IsMethodEnabled() ? method : null;
         return (target, appearance, operation);

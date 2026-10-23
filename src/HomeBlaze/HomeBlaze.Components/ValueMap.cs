@@ -33,22 +33,6 @@ public partial class ValueMap : IConfigurable, ITitleProvider, IValueMap
     public string? Title => null;
 
     /// <summary>
-    /// Returns the first case whose value equals the text without regard to case, or null.
-    /// </summary>
-    public ValueMapCase? FindCase(string rawText)
-    {
-        foreach (var valueCase in Cases)
-        {
-            if (string.Equals(valueCase.Value, rawText, StringComparison.OrdinalIgnoreCase))
-            {
-                return valueCase;
-            }
-        }
-
-        return null;
-    }
-
-    /// <summary>
     /// Returns the first case that matches the bound value, see <see cref="ValueMapCase.Matches"/>, or null.
     /// </summary>
     /// <param name="binding">The value and its subject.</param>
