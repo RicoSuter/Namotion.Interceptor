@@ -1,3 +1,5 @@
+using System.Collections.Frozen;
+
 namespace Namotion.Interceptor;
 
 public static class InterceptorSubjectExtensions
@@ -21,5 +23,32 @@ public static class InterceptorSubjectExtensions
     public static bool TryAddData(this IInterceptorSubject subject, string key, object? value)
     {
         return subject.Data.TryAdd((null, key), value);
+    }
+
+    /// <summary>
+    /// Merges additional properties into the subject's current property set, for an
+    /// <see cref="IInterceptorSubject.AddProperties"/> implementation to store. The merge starts from
+    /// <see cref="IInterceptorSubject.Properties"/>, so the property set of a subclass is kept.
+    /// </summary>
+    /// <param name="subject">The subject.</param>
+    /// <param name="properties">The properties to add.</param>
+    /// <returns>The merged property set.</returns>
+    /// <exception cref="InvalidOperationException">A property name is already present on the subject or
+    /// appears twice in <paramref name="properties"/>. Nothing is merged in that case.</exception>
+    /// <remarks>The caller holds <see cref="IInterceptorSubject.SyncRoot"/>; this method does not lock.</remarks>
+    public static FrozenDictionary<string, SubjectPropertyMetadata> MergeProperties(
+        this IInterceptorSubject subject, IEnumerable<SubjectPropertyMetadata> properties)
+    {
+        var merged = new Dictionary<string, SubjectPropertyMetadata>(subject.Properties);
+        foreach (var property in properties)
+        {
+            if (!merged.TryAdd(property.Name, property))
+            {
+                throw new InvalidOperationException(
+                    $"The subject '{subject.GetType().Name}' already has a property named '{property.Name}'.");
+            }
+        }
+
+        return merged.ToFrozenDictionary();
     }
 }
