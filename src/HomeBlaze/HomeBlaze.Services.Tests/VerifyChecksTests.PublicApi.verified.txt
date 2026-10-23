@@ -59,11 +59,16 @@ namespace HomeBlaze.Services
     }
     public static class HomeBlazePaths
     {
+        public const string DataProtectionCertificatePasswordKey = "HomeBlaze:DataProtection:CertificatePassword";
+        public const string DataProtectionCertificatePathKey = "HomeBlaze:DataProtection:CertificatePath";
+        public const string DataProtectionKeysDirectory = "DataProtection-Keys";
         public const string PluginConfigurationPathKey = "PluginConfigurationPath";
         public const string RootConfigurationFileKey = "HomeBlaze:RootConfigFile";
         public const string SeedDirectoryKey = "HomeBlaze:SeedDirectory";
         public static readonly string DefaultPluginConfigurationFile;
         public static readonly string DefaultRootConfigurationFile;
+        public static string? GetDataProtectionCertificatePath(Microsoft.Extensions.Configuration.IConfiguration configuration) { }
+        public static string GetDataProtectionKeysPath(Microsoft.Extensions.Configuration.IConfiguration? configuration) { }
         public static string GetPluginConfigurationPath(Microsoft.Extensions.Configuration.IConfiguration configuration) { }
         public static string GetRootConfigurationPath(Microsoft.Extensions.Configuration.IConfiguration? configuration) { }
     }
