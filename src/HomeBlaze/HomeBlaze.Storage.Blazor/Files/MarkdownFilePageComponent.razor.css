@@ -34,20 +34,15 @@
     margin-bottom: 1rem;
 }
 
-/* A heading, also in the wrapper of a block of text edited inline, is closer to the text below it than to the block above
-   it. A heading that ends the content keeps its 1rem, which the box at the end cancels. An insert line between a heading
-   and its block takes the closer distance as well, so that the block does not move when the line shows. */
-.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > :is(h1, h2, h3, h4, h5, h6, .subject-component-wrapper:has(> .markdown-text > :is(h1, h2, h3, h4, h5, h6))):not(:last-child) {
+/* A heading is closer to the text below it than to the block above it. A heading that ends the content keeps its 1rem,
+   which the box at the end cancels. Edited inline, a heading stands in the wrapper of its block of text and keeps the 1rem
+   of a block (see below). */
+.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > :is(h1, h2, h3, h4, h5, h6):not(:last-child) {
     margin-bottom: 0.5rem;
 }
 
-.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > :is(h1, h2, h3, h4, h5, h6, .subject-component-wrapper:has(> .markdown-text > :is(h1, h2, h3, h4, h5, h6))) + *,
-.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > :is(h1, h2, h3, h4, h5, h6, .subject-component-wrapper:has(> .markdown-text > :is(h1, h2, h3, h4, h5, h6))) + .block-insert-line + * {
+.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > :is(h1, h2, h3, h4, h5, h6) + * {
     margin-top: 0.5rem;
-}
-
-.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > :is(h1, h2, h3, h4, h5, h6, .subject-component-wrapper:has(> .markdown-text > :is(h1, h2, h3, h4, h5, h6))) + .block-insert-line:not(:last-child) {
-    margin-bottom: 0.5rem;
 }
 
 /* The boxes cancel exactly 1rem: a first or a last block with another outer margin would show the difference at the edge,
@@ -66,78 +61,14 @@
     margin-top: -1rem;
 }
 
-/* Above the first and below the last block of a container there is no gap but the padding of the container. The bars of
-   the lines at these edges are centered on the edge of the content. The line at the end takes back the margin that the
-   rules above give it, which would put it 1rem below the content, where it would widen what a scrolling container can
-   scroll. */
-.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > .block-insert-line:last-child:not(:first-child) {
-    margin-top: -1rem;
-}
-
-.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > .block-insert-line:is(:first-child, :last-child) > .block-insert-line-bar {
-    top: 0;
-}
-
-/* A line at an edge of a container, where the padding can be too small for the button or missing, and a line after a
-   heading, where the gap is smaller than the button, place the button at the start of the line, left of the content, in
-   the padding of the container or in the space around it. On the page, a line stands below the margin of the block before
-   it, which is smaller than the button after text, so the line after text or other content than a widget does as well.
-   The rules up to the footer of a card repeat the list of these lines of a container, and change together. */
-.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > :is(.block-insert-line:is(:first-child, :last-child), :is(h1, h2, h3, h4, h5, h6, .subject-component-wrapper:has(> .markdown-text > :is(h1, h2, h3, h4, h5, h6))) + .block-insert-line) > .block-insert-line-bar,
-.markdown-content > ::deep :is(.subject-component-wrapper:has(> .markdown-text), :not(.subject-component-wrapper, .block-insert-line)) + .block-insert-line > .block-insert-line-bar {
-    left: -1rem;
-}
-
-.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > :is(.block-insert-line:is(:first-child, :last-child), :is(h1, h2, h3, h4, h5, h6, .subject-component-wrapper:has(> .markdown-text > :is(h1, h2, h3, h4, h5, h6))) + .block-insert-line) > .block-insert-line-bar::before,
-.markdown-content > ::deep :is(.subject-component-wrapper:has(> .markdown-text), :not(.subject-component-wrapper, .block-insert-line)) + .block-insert-line > .block-insert-line-bar::before {
-    display: none;
-}
-
-/* A panel beside a tab bar clips and scrolls its content and has padding only at the side of the tab bar (see
-   GetPanelClasses of TabLayoutWidget), so there the button of a line at an edge stays inside the content, beside the first
-   and the last block, and stands at the end of the line when the tab bar is at the right. */
-.markdown-content ::deep .tab-layout-panel-beside > .subject-component-wrapper > .markdown-fragment > .block-insert-line:first-child:not(:last-child) > .block-insert-line-bar {
-    transform: none;
-}
-
-.markdown-content ::deep .tab-layout-panel-beside > .subject-component-wrapper > .markdown-fragment > .block-insert-line:last-child:not(:first-child) > .block-insert-line-bar {
-    transform: translateY(-100%);
-}
-
-.markdown-content ::deep .tab-layout-panel-bar-right > .subject-component-wrapper > .markdown-fragment > :is(.block-insert-line:is(:first-child, :last-child), :is(h1, h2, h3, h4, h5, h6, .subject-component-wrapper:has(> .markdown-text > :is(h1, h2, h3, h4, h5, h6))) + .block-insert-line) > .block-insert-line-bar {
-    left: 0;
-    right: -1rem;
-}
-
-.markdown-content ::deep .tab-layout-panel-bar-right > .subject-component-wrapper > .markdown-fragment > :is(.block-insert-line:is(:first-child, :last-child), :is(h1, h2, h3, h4, h5, h6, .subject-component-wrapper:has(> .markdown-text > :is(h1, h2, h3, h4, h5, h6))) + .block-insert-line) > .block-insert-line-bar::before {
-    display: block;
-}
-
-.markdown-content ::deep .tab-layout-panel-bar-right > .subject-component-wrapper > .markdown-fragment > :is(.block-insert-line:is(:first-child, :last-child), :is(h1, h2, h3, h4, h5, h6, .subject-component-wrapper:has(> .markdown-text > :is(h1, h2, h3, h4, h5, h6))) + .block-insert-line) > .block-insert-line-bar::after {
-    display: none;
-}
-
-/* A grid cell and a canvas node clip their content and have no padding, so in a layout or a Responsive there the button
-   at the start of a line stays inside the content, over the first pixels of the block beside it: at the top of the first
-   block, at the bottom of the last one. A tab keeps it in the padding between its content and its tab bar instead. */
-.markdown-content ::deep :is(.grid-cell-content, .canvas-node-content) :is(.layout-cell, .responsive-widget):not(.tab-layout-panel-beside) > .subject-component-wrapper > .markdown-fragment > :is(.block-insert-line:is(:first-child, :last-child), :is(h1, h2, h3, h4, h5, h6, .subject-component-wrapper:has(> .markdown-text > :is(h1, h2, h3, h4, h5, h6))) + .block-insert-line) > .block-insert-line-bar {
-    left: 0;
-}
-
-.markdown-content ::deep :is(.grid-cell-content, .canvas-node-content) :is(.layout-cell, .responsive-widget):not(.tab-layout-panel-beside) > .subject-component-wrapper > .markdown-fragment > .block-insert-line:first-child:not(:last-child) > .block-insert-line-bar {
-    transform: none;
-}
-
-.markdown-content ::deep :is(.grid-cell-content, .canvas-node-content) :is(.layout-cell, .responsive-widget):not(.tab-layout-panel-beside) > .subject-component-wrapper > .markdown-fragment > .block-insert-line:last-child:not(:first-child) > .block-insert-line-bar {
-    transform: translateY(-100%);
-}
-
-.markdown-content ::deep :is(.grid-cell-content, .canvas-node-content) :is(.tab-layout-panel):is(.tab-layout-panel-bar-top) > .subject-component-wrapper > .markdown-fragment > .block-insert-line:first-child:not(:last-child) > .block-insert-line-bar {
-    transform: translateY(-100%);
-}
-
-.markdown-content ::deep :is(.grid-cell-content, .canvas-node-content) :is(.tab-layout-panel):is(.tab-layout-panel-bar-bottom) > .subject-component-wrapper > .markdown-fragment > .block-insert-line:last-child:not(:first-child) > .block-insert-line-bar {
-    transform: none;
+/* Edited inline, the content of a container also keeps 1rem inside its edges, so that every item of an edited content is at
+   least 1rem from the next one and from the edges: the button of an insert line is 1rem high and centered on its line,
+   which takes no room, and fits there without covering a block, also where a container clips its content. The gaps stay
+   while no line shows, so that the page does not move when the selection shows or hides the lines. The content of a grid
+   cell or a canvas node fills its place and never has lines. */
+.markdown-content-inline ::deep :is(.mud-card-content, .layout-cell, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment {
+    padding-block: 1rem;
+    box-sizing: border-box;
 }
 
 /* The blocks of a card footer, such as buttons, stand in a row, and the footer padding is the space at its edges. */
@@ -220,13 +151,9 @@
     display: none;
 }
 
-/* A block of text that is edited inline stands in a wrapper (see MarkdownTextWidget). On the page the wrapper takes no
-   margin, so that the margins of the text apply as on the viewed page. In a container the wrapper takes the margins of a
-   block and of a heading from the rules above, which the text takes on the viewed page, and the text takes none. */
-.markdown-content > ::deep .subject-component-wrapper:has(> .markdown-text) {
-    margin: 0;
-}
-
+/* A block of text that is edited inline stands in a wrapper (see MarkdownTextWidget). On the page the wrapper takes the 1rem
+   of a block, and a larger margin of its text, such as the one above a title, collapses with it. In a container the
+   wrapper takes the margins of a block from the rules above and the text takes none. */
 .markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper > .markdown-text > * {
     margin-top: 0;
     margin-bottom: 0;

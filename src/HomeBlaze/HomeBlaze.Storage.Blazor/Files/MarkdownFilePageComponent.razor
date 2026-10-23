@@ -17,9 +17,13 @@
 @inject SubjectFactory SubjectFactory
 @inject ILogger<MarkdownPageStructureEditor> StructureEditorLogger
 
+@{
+    var structureEditor = StructureEditor;
+}
 <CascadingValue Value="@IsEditing" Name="IsEditing">
-    <CascadingValue Value="@StructureEditor" TValue="PageStructureEditor">
-        <div class="markdown-content" style="position: relative;">
+    <CascadingValue Value="@structureEditor" TValue="PageStructureEditor">
+        @* The second class marks Inline mode, which spaces the blocks for its insert lines (see the scoped styles). *@
+        <div class="@(structureEditor is not null ? "markdown-content markdown-content-inline" : "markdown-content")" style="position: relative;">
             @if (IsLoading)
             {
                 <MudProgressCircular Indeterminate="true" />

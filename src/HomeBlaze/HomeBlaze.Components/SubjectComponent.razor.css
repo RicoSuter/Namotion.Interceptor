@@ -297,10 +297,10 @@
 
 /* The line where a new block goes, between the blocks of the content that is edited. It takes no room, so that the content
    does not move when the selection shows or hides the lines, and margins collapse through it as if it were not there: its
-   bar is drawn in the middle of the gap above the block that follows. Only its button takes the pointer, and it is never
-   drawn over a block, so that a click anywhere on a block selects it: in a gap of 1rem it fits between the blocks, and
-   where the gap is smaller or the line is at an edge of its content, the page places it at the start of the line, beside
-   the content (see MarkdownFilePageComponent.razor.css of HomeBlaze.Storage.Blazor). */
+   bar is drawn over the gap above the block that follows, with the button in the middle of the line. Only its button
+   takes the pointer, and it is never drawn over a block, so that a click anywhere on a block selects it: the page keeps
+   gaps of at least 1rem between the blocks it edits inline and at the edges of their containers, which the button fits
+   into (see MarkdownFilePageComponent.razor.css of HomeBlaze.Storage.Blazor). */
 ::deep .block-insert-line {
     position: relative;
     height: 0;

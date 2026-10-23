@@ -689,7 +689,7 @@ public class InlineStructureEditingTests
     }
 
     [Fact]
-    public async Task WhenACardIsSelected_ThenNoBlockOfThePageMoves()
+    public async Task WhenACardOrTextInItIsSelected_ThenNoBlockOfThePageMoves()
     {
         // Arrange: the card has text, a widget and a footer, whose lines show only while the card is selected.
         var content = Content
@@ -716,12 +716,15 @@ public class InlineStructureEditingTests
         await Assertions.Expect(card.Locator("[data-testid='block-insert-line'] button").First).ToBeVisibleAsync(new() { Timeout = Timeout });
 
         // Assert
-        var after = await GetBlockBoxesAsync(page);
-        Assert.Equal(before.Length, after.Length);
-        for (var index = 0; index < before.Length; index++)
-        {
-            Assert.InRange(after[index], before[index] - 0.5, before[index] + 0.5);
-        }
+        AssertSameBoxes(before, await GetBlockBoxesAsync(page));
+
+        // Act: the heading in the card, a block of text whose content is the one of the card.
+        var heading = page.Locator(".subject-component-wrapper.text-block").Filter(new() { HasText = "Card Heading" });
+        await heading.SelectWidgetAsync();
+        await Assertions.Expect(heading).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
+
+        // Assert
+        AssertSameBoxes(before, await GetBlockBoxesAsync(page));
     }
 
     [Fact]
@@ -791,16 +794,22 @@ public class InlineStructureEditingTests
         Assert.Equal(new[] { 0, 0 }, scrollRanges);
         Assert.True(await IsHitAtItsCenterAsync(buttons.First), "The first button is covered or cut off.");
         Assert.True(await IsHitAtItsCenterAsync(buttons.Last), "The last button is covered or cut off.");
+        var findings = await GetInsertButtonFindingsAsync(card);
+        Assert.True(findings.Length == 0, string.Join("; ", findings));
     }
 
     [Theory]
     [InlineData(":: HomeBlaze.Components.TabLayout\n::: Tab Title=\"First\"\n" + TwoWidgetsInItem + ":::\n::\n", "[data-testid='tab-panel']")]
     [InlineData(":: HomeBlaze.Components.TabLayout Position=Left\n::: Tab Title=\"First\"\n" + TwoWidgetsInItem + ":::\n::\n", "[data-testid='tab-panel']")]
-    [InlineData(":: HomeBlaze.Components.FlowLayout MinWidth=200\n::: Item\n" + TwoWidgetsInItem + ":::\n::\n", "[data-testid='flow-item']")]
-    public async Task WhenAWidgetInATabOrAFlowItemIsSelected_ThenTheFirstAndTheLastInsertLinesCanBeClickedAndNothingScrollsFurther(string block, string containerSelector)
+    [InlineData(":: HomeBlaze.Components.TabLayout Position=Right\n::: Tab Title=\"First\"\n" + TwoWidgetsInItem + ":::\n::\n", "[data-testid='tab-panel']")]
+    [InlineData(":: HomeBlaze.Components.FlowLayout MinWidth=400\n::: Item\n" + TwoWidgetsInItem + ":::\n::\n", "[data-testid='flow-item']")]
+    [InlineData(":: HomeBlaze.Components.GridLayout Rows=1 Columns=2\n::: Cell Row=0 Column=0\n:::: HomeBlaze.Components.FlowLayout MinWidth=300\n::::: Item\n" + TwoWidgetsInNestedItem + "::\n", "[data-testid='flow-item']")]
+    [InlineData(":: HomeBlaze.Components.CanvasLayout MinHeight=300\n::: Node X=20 Y=20 Width=400 Height=250\n:::: HomeBlaze.Components.FlowLayout MinWidth=300\n::::: Item\n" + TwoWidgetsInNestedItem + "::\n", "[data-testid='flow-item']")]
+    public async Task WhenAWidgetInATabOrAFlowItemIsSelected_ThenItsInsertButtonsAreCenteredOverNoBlockAndNothingScrollsFurther(string block, string containerSelector)
     {
         // Arrange: the content of the container starts and ends with a widget, so its first and its last line stand at
-        // its edges.
+        // its edges. A flow item is wide enough that the bar of the selected widget, above its right end, leaves the
+        // button in the middle of the line above it free.
         var page = await OpenPageInInlineModeAsync(Content + "\n" + block + "\nText after.\n");
         var container = page.Locator(containerSelector).First;
         await Assertions.Expect(container).ToBeVisibleAsync(new() { Timeout = Timeout });
@@ -812,6 +821,9 @@ public class InlineStructureEditingTests
         // Assert
         Assert.True(await IsHitAtItsCenterAsync(buttons.First), "The first button is covered or cut off.");
         Assert.True(await IsHitAtItsCenterAsync(buttons.Last), "The last button is covered or cut off.");
+
+        var findings = await GetInsertButtonFindingsAsync(container);
+        Assert.True(findings.Length == 0, string.Join("; ", findings));
 
         // The lines of the page hide with the selection, so the page can scroll less, never more.
         var rangesAfter = await GetScrollRangesAsync(container);
@@ -902,15 +914,31 @@ public class InlineStructureEditingTests
         await Assertions.Expect(page.GetByTestId("create-subject-dialog")).ToBeVisibleAsync(new() { Timeout = Timeout });
     }
 
-    // The top, left, width and height of every block, paragraph and heading of the page, one after the other.
+    // The top, left, width and height of every block, paragraph and heading of the page, one after the other, in the
+    // coordinates of the document, which a selection that scrolls the block into view does not change. A hidden block has
+    // no box and is all zeros.
     private static Task<double[]> GetBlockBoxesAsync(IPage page) =>
         page.Locator(".markdown-content").EvaluateAsync<double[]>(
             """
             content => [...content.querySelectorAll('.subject-component-wrapper, p, h3')].flatMap(element => {
+                if (element.getClientRects().length === 0) {
+                    return [0, 0, 0, 0];
+                }
+
                 const box = element.getBoundingClientRect();
-                return [box.top, box.left, box.width, box.height];
+                return [box.top + window.scrollY, box.left + window.scrollX, box.width, box.height];
             })
             """);
+
+    // The boxes are the same within the rounding of the layout.
+    private static void AssertSameBoxes(double[] expected, double[] actual)
+    {
+        Assert.Equal(expected.Length, actual.Length);
+        for (var index = 0; index < expected.Length; index++)
+        {
+            Assert.True(Math.Abs(actual[index] - expected[index]) <= 0.5, $"Value {index % 4} of block {index / 4} changed from {expected[index]} to {actual[index]}.");
+        }
+    }
 
     // Two widgets, so that the content they are in starts and ends with a widget.
     private const string TwoWidgets =
@@ -921,6 +949,10 @@ public class InlineStructureEditingTests
         ":::: HomeBlaze.Components.Switch Path=structuremotor/IsPowered\n::::\n"
         + ":::: HomeBlaze.Components.Progress Path=structuremotor/TargetSpeed Minimum=0 Maximum=1600\n::::\n";
 
+    private const string TwoWidgetsInNestedItem =
+        ":::::: HomeBlaze.Components.Switch Path=structuremotor/IsPowered\n::::::\n"
+        + ":::::: HomeBlaze.Components.Progress Path=structuremotor/TargetSpeed Minimum=0 Maximum=1600\n::::::\n";
+
     // Selects the first widget in the container, which shows the insert lines of the content it is in: one before each of
     // the two widgets and one at the end.
     private static async Task<ILocator> SelectFirstWidgetAndGetInsertButtonsAsync(ILocator container)
@@ -930,6 +962,36 @@ public class InlineStructureEditingTests
         await Assertions.Expect(buttons).ToHaveCountAsync(3, new() { Timeout = Timeout });
         return buttons;
     }
+
+    // What is wrong with the insert buttons in the element: a button that is not centered on its line, or that covers a part
+    // of a block next to its line.
+    private static Task<string[]> GetInsertButtonFindingsAsync(ILocator element) =>
+        element.EvaluateAsync<string[]>(
+            """
+            element => {
+                const findings = [];
+                for (const button of element.querySelectorAll('[data-testid=block-insert-line] button')) {
+                    const line = button.closest('[data-testid=block-insert-line]');
+                    const box = button.getBoundingClientRect();
+                    const lineBox = line.getBoundingClientRect();
+                    const offset = box.left + box.width / 2 - (lineBox.left + lineBox.width / 2);
+                    if (Math.abs(offset) > 1) {
+                        findings.push(`${button.ariaLabel} is ${offset} pixels beside the center of its line`);
+                    }
+
+                    for (const block of line.parentElement.querySelectorAll(':scope > .subject-component-wrapper')) {
+                        const other = block.getBoundingClientRect();
+                        const width = Math.min(box.right, other.right) - Math.max(box.left, other.left);
+                        const height = Math.min(box.bottom, other.bottom) - Math.max(box.top, other.top);
+                        if (width > 0.5 && height > 0.5) {
+                            findings.push(`${button.ariaLabel} covers ${width}x${height} pixels of ${block.ariaLabel}`);
+                        }
+                    }
+                }
+
+                return findings;
+            }
+            """);
 
     // Whether a click at the center of the element reaches it, which it does not when it is covered or cut off.
     private static Task<bool> IsHitAtItsCenterAsync(ILocator element) =>

@@ -811,11 +811,10 @@ public class InlineTextEditingTests
 
         await Assertions.Expect(fragment.Locator(":scope > [data-testid='block-insert-line']")).ToHaveCountAsync(lineCount, new() { Timeout = Timeout });
 
-        // Assert: a grid cell clips its content and has no padding, so there a button at an edge stands over the corner of
-        // the block beside it, and only the center of a block must stay free.
+        // Assert: every button is centered on its line and covers no block, also where a grid cell clips the content.
         var findings = await fragment.EvaluateAsync<string[]>(
             """
-            (fragment, coversCorners) => {
+            fragment => {
                 const findings = [];
                 const buttons = [...fragment.querySelectorAll(':scope > [data-testid=block-insert-line] button')];
 
@@ -831,31 +830,34 @@ public class InlineTextEditingTests
                     button.scrollIntoView({ block: 'center' });
                     const box = button.getBoundingClientRect();
                     if (box.height > 16.5) {
-                        findings.push(`${button.title} is ${box.height} pixels high`);
+                        findings.push(`${button.ariaLabel} is ${box.height} pixels high`);
                     }
 
                     const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
                     if (!button.contains(hit)) {
-                        findings.push(`${button.title} is not hit at its center, ${hit?.className} is`);
+                        findings.push(`${button.ariaLabel} is not hit at its center, ${hit?.className} is`);
+                    }
+
+                    // A line in the row of a card footer stands upright between two blocks of the row.
+                    const line = button.closest('[data-testid=block-insert-line]').getBoundingClientRect();
+                    const offset = box.left + box.width / 2 - (line.left + line.width / 2);
+                    if (Math.abs(offset) > 1) {
+                        findings.push(`${button.ariaLabel} is ${offset} pixels beside the center of its line`);
                     }
 
                     for (const block of blocks) {
                         const other = block.getBoundingClientRect();
                         const width = Math.min(box.right, other.right) - Math.max(box.left, other.left);
                         const height = Math.min(box.bottom, other.bottom) - Math.max(box.top, other.top);
-                        const centerX = other.left + other.width / 2;
-                        const centerY = other.top + other.height / 2;
-                        const coversCenter = box.left <= centerX && centerX <= box.right && box.top <= centerY && centerY <= box.bottom;
-                        if (width > 0.5 && height > 0.5 && (!coversCorners || coversCenter)) {
-                            findings.push(`${button.title} covers ${width}x${height} pixels of "${block.textContent.trim()}"`);
+                        if (width > 0.5 && height > 0.5) {
+                            findings.push(`${button.ariaLabel} covers ${width}x${height} pixels of "${block.textContent.trim()}"`);
                         }
                     }
                 }
 
                 return findings;
             }
-            """,
-            content.EndsWith("in a grid cell", StringComparison.Ordinal));
+            """);
         Assert.True(findings.Length == 0, string.Join("; ", findings));
     }
 
