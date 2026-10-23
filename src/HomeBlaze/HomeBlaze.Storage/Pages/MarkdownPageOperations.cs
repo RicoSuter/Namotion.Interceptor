@@ -1,3 +1,4 @@
+using System.Text;
 using Namotion.Interceptor;
 
 namespace HomeBlaze.Storage.Pages;
@@ -619,12 +620,13 @@ internal static class MarkdownPageOperations
     /// Replaces the lines of the text block with <paramref name="text"/>, or removes them when it is empty or white space.
     /// The text gets the line endings of the page and the indentation of its content, and an empty line keeps it apart from
     /// a line of text before or after it. Complete widget blocks at the top level of the text become new blocks of the
-    /// content.
+    /// content, and the fence of such a block that is too short to stand in the content is raised to the shortest that does,
+    /// with the fences of the blocks inside it raised as much.
     /// </summary>
     /// <returns>
     /// Null with a refusal when the text block cannot be edited, the text holds a block that is no widget block at its top
-    /// level, a widget block with too short a fence, an invalid block or a name that a block of the page or of the text
-    /// already has, or the change would change other blocks of the page or the text around it.
+    /// level, a widget block with too short a fence that raising would change, an invalid block or a name that a block of the
+    /// page or of the text already has, or the change would change other blocks of the page or the text around it.
     /// </returns>
     public static MarkdownStructureChange? TryReplaceText(
         MarkdownPage page, IReadOnlyDictionary<int, IInterceptorSubject> blockSubjects, MarkdownTextBlock textBlock, string text, out string? refusal)
@@ -642,7 +644,7 @@ internal static class MarkdownPageOperations
         var source = page.Source;
         var lineEnding = MarkdownBlockWriter.GetLineEnding(source, MarkdownBlockWriter.GetLineStart(source, textBlock.Line));
         var prepared = PrepareText(page, text, textBlock.Owner, lineEnding);
-        if (!TryCountWidgetBlocks(page, prepared, textBlock.Owner, out var blockCount, out refusal))
+        if (!TryCountWidgetBlocks(page, ref prepared, textBlock.Owner, out var blockCount, out refusal))
         {
             return null;
         }
@@ -679,12 +681,13 @@ internal static class MarkdownPageOperations
     /// <summary>
     /// Inserts <paramref name="text"/> into the content of <paramref name="owner"/>, or of the page when it is null, before
     /// the 1-based <paramref name="line"/> from <see cref="GetInsertLine"/>, with empty lines around it like a block. Complete
-    /// widget blocks at the top level of the text become new blocks of the content.
+    /// widget blocks at the top level of the text become new blocks of the content, with their fences raised as
+    /// <see cref="TryReplaceText"/> raises them.
     /// </summary>
     /// <returns>
     /// Null with a refusal when the text is empty, holds a block that is no widget block at its top level, a widget block
-    /// with too short a fence, an invalid block or a name that a block of the page or of the text already has, or the change
-    /// would change other blocks of the page or the text around it.
+    /// with too short a fence that raising would change, an invalid block or a name that a block of the page or of the text
+    /// already has, or the change would change other blocks of the page or the text around it.
     /// </returns>
     public static MarkdownStructureChange? TryInsertText(
         MarkdownPage page, IReadOnlyDictionary<int, IInterceptorSubject> blockSubjects, MarkdownBlock? owner, int line, string text, out string? refusal)
@@ -709,7 +712,7 @@ internal static class MarkdownPageOperations
         var source = page.Source;
         var lineEnding = MarkdownBlockWriter.GetLineEnding(source, MarkdownBlockWriter.GetLineStart(source, Math.Max(line - 1, 1)));
         var prepared = PrepareText(page, text, owner, lineEnding);
-        if (!TryCountWidgetBlocks(page, prepared, owner, out var blockCount, out refusal))
+        if (!TryCountWidgetBlocks(page, ref prepared, owner, out var blockCount, out refusal))
         {
             return null;
         }
@@ -835,12 +838,13 @@ internal static class MarkdownPageOperations
         return true;
     }
 
-    // Counts the blocks of text that goes into the content of `owner`: every block at its top level must be a widget block
-    // with a fence long enough to stand directly in that content, and the blocks inside them count as well. The text is
-    // parsed on its own, where a slot block or a closing line has no block around it and is an invalid block. A name must
-    // be new to the page, as the parser gives a name to the first block that has it and makes every other one an error.
+    // Counts the blocks of text that goes into the content of `owner`: every block at its top level must be a widget block,
+    // and the blocks inside them count as well. A widget block with too short a fence to stand directly in that content gets
+    // a longer one in `text`, see RaiseFences. The text is parsed on its own, where a slot block or a closing line has no
+    // block around it and is an invalid block. A name must be new to the page, as the parser gives a name to the first block
+    // that has it and makes every other one an error.
     private static bool TryCountWidgetBlocks(
-        MarkdownPage page, string text, MarkdownBlock? owner, out int blockCount, out string? refusal)
+        MarkdownPage page, ref string text, MarkdownBlock? owner, out int blockCount, out string? refusal)
     {
         blockCount = 0;
         refusal = null;
@@ -853,6 +857,7 @@ internal static class MarkdownPageOperations
 
         var parsed = MarkdownPageParser.Parse(text);
         var minimumFenceLength = GetWidgetFenceLength(owner);
+        var hasShortFence = false;
         foreach (var block in parsed.Blocks)
         {
             if (block.Kind != MarkdownBlockKind.Widget)
@@ -861,12 +866,7 @@ internal static class MarkdownPageOperations
                 return false;
             }
 
-            if (block.FenceLength < minimumFenceLength)
-            {
-                refusal = $"A widget in this content needs at least {minimumFenceLength} '{MarkdownBlockFence.Character}' characters.";
-                return false;
-            }
-
+            hasShortFence |= block.FenceLength < minimumFenceLength;
             blockCount += CountBlocks(block);
         }
 
@@ -888,6 +888,100 @@ internal static class MarkdownPageOperations
                     refusal = $"The name '{name}' is already used on this page.";
                     return false;
                 }
+            }
+        }
+
+        if (hasShortFence)
+        {
+            if (RaiseFences(parsed, minimumFenceLength) is not { } raised)
+            {
+                refusal = $"A widget in this content needs at least {minimumFenceLength} '{MarkdownBlockFence.Character}' characters.";
+                return false;
+            }
+
+            text = raised;
+        }
+
+        return true;
+    }
+
+    // The text of the page with the fence of every block at its top level that is shorter than `minimumFenceLength` raised to
+    // it, and every fence inside such a block, closing lines included, raised by as many characters, so that the blocks keep
+    // their depths among each other. Null when the raised text has other blocks, such as when a line of fence characters in
+    // raw HTML becomes the closing line of a raised block.
+    private static string? RaiseFences(MarkdownPage page, int minimumFenceLength)
+    {
+        var source = page.Source;
+        var insertions = new List<(int Offset, int Count)>();
+        foreach (var block in page.Blocks)
+        {
+            if (block.FenceLength < minimumFenceLength)
+            {
+                AddFenceInsertions(source, block, minimumFenceLength - block.FenceLength, insertions);
+            }
+        }
+
+        insertions.Sort(static (left, right) => left.Offset.CompareTo(right.Offset));
+        var builder = new StringBuilder(source.Length + insertions.Count * minimumFenceLength);
+        var position = 0;
+        foreach (var (offset, count) in insertions)
+        {
+            builder.Append(source, position, offset - position).Append(MarkdownBlockFence.Character, count);
+            position = offset;
+        }
+
+        var raised = builder.Append(source, position, source.Length - position).ToString();
+        var raisedPage = MarkdownPageParser.Parse(raised);
+        if (raisedPage.AllBlocks.Count != page.AllBlocks.Count || raisedPage.Blocks.Count != page.Blocks.Count)
+        {
+            return null;
+        }
+
+        for (var index = 0; index < page.Blocks.Count; index++)
+        {
+            var block = page.Blocks[index];
+            if (!IsRaised(block, raisedPage.Blocks[index], Math.Max(minimumFenceLength - block.FenceLength, 0)))
+            {
+                return null;
+            }
+        }
+
+        return raised;
+    }
+
+    // The fence of a head line starts its span, and that of a closing line follows the indentation of the line.
+    private static void AddFenceInsertions(string source, MarkdownBlock block, int count, List<(int Offset, int Count)> insertions)
+    {
+        insertions.Add((block.HeadSpan.Start, count));
+        if (block.HasClosingLine)
+        {
+            var lineStart = MarkdownBlockWriter.GetLineStart(source, block.EndLine);
+            insertions.Add((lineStart + source.AsSpan(lineStart).IndexOfAnyExcept(' ', '\t'), count));
+        }
+
+        foreach (var child in block.Children)
+        {
+            AddFenceInsertions(source, child, count, insertions);
+        }
+    }
+
+    private static bool IsRaised(MarkdownBlock block, MarkdownBlock raisedBlock, int count)
+    {
+        if (raisedBlock.Kind != block.Kind ||
+            raisedBlock.FenceLength != block.FenceLength + count ||
+            raisedBlock.Line != block.Line ||
+            raisedBlock.EndLine != block.EndLine ||
+            raisedBlock.HasClosingLine != block.HasClosingLine ||
+            raisedBlock.Children.Count != block.Children.Count)
+        {
+            return false;
+        }
+
+        for (var index = 0; index < block.Children.Count; index++)
+        {
+            if (!IsRaised(block.Children[index], raisedBlock.Children[index], count))
+            {
+                return false;
             }
         }
 

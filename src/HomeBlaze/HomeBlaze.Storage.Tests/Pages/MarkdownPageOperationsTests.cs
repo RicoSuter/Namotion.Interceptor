@@ -792,14 +792,51 @@ public class MarkdownPageOperationsTests
         Assert.Equal("Text can hold widgets, not the parts of a widget.", refusal);
     }
 
-    [Fact]
-    public void WhenAWidgetInTheTextOfACardHasNoMoreColonsThanTheCard_ThenTheChangeIsRefused()
+    [Theory]
+    [InlineData(":: Demo.X\n::", ":::: Demo.X\n::::")]
+    [InlineData(":: Demo.List\n::: Row Label=A\n:::: Demo.X\n::::\n:::\n::", ":::: Demo.List\n::::: Row Label=A\n:::::: Demo.X\n::::::\n:::::\n::::")]
+    [InlineData(":: Demo.Grid\n::: Cell\nOne.\n::: Cell\nTwo.\n\n:: Demo.X", ":::: Demo.Grid\n::::: Cell\nOne.\n::::: Cell\nTwo.\n\n:::: Demo.X")]
+    [InlineData(":: Demo.A\n::\n\n::::: Demo.B\n:::::", ":::: Demo.A\n::::\n\n::::: Demo.B\n:::::")]
+    public void WhenWidgetsInTheTextOfABlockHaveTooFewColons_ThenTheirFencesAndThoseInsideThemAreRaised(string text, string expected)
     {
         // Arrange
+        var page = MarkdownPageParser.Parse(":: Demo.Card\n::: Demo.Panel\nOld.\n:::\n::\n");
+
+        // Act
+        var change = MarkdownPageOperations.TryReplaceText(page, NoSubjects, TextAt(page, 3), text, out var refusal);
+
+        // Assert
+        Assert.Null(refusal);
+        Assert.Equal($":: Demo.Card\n::: Demo.Panel\n{expected}\n:::\n::\n", change!.Write.Page.Source);
+        Assert.True(change.Write.HasInsertedOrRemovedBlocks);
+    }
+
+    [Fact]
+    public void WhenAWidgetOfThePageIsInsertedIntoACard_ThenItGetsOneColonMoreThanTheCard()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse(":: Demo.Card\nBody.\n::\n");
+        var card = page.Blocks[0];
+
+        // Act
+        var change = MarkdownPageOperations.TryInsertText(
+            page, NoSubjects, card, InsertLine(page, card, null), ":: Demo.X#x\n::", out var refusal);
+
+        // Assert
+        Assert.Null(refusal);
+        Assert.Equal(":: Demo.Card\nBody.\n\n::: Demo.X#x\n:::\n\n::\n", change!.Write.Page.Source);
+        Assert.Equal(change.Write.Page.Blocks[0].Children[0].Index, change.ResultBlockIndex);
+    }
+
+    [Fact]
+    public void WhenRaisingTheFenceOfAWidgetInTheTextWouldChangeItsBlocks_ThenTheChangeIsRefused()
+    {
+        // Arrange: the line of three colons is a part of the HTML until the widget has three colons itself.
         var page = MarkdownPageParser.Parse(":: Demo.Card\nOld.\n::\n");
 
         // Act
-        var change = MarkdownPageOperations.TryReplaceText(page, NoSubjects, TextAt(page, 2), ":: Demo.X\n::", out var refusal);
+        var change = MarkdownPageOperations.TryReplaceText(
+            page, NoSubjects, TextAt(page, 2), ":: Demo.X\n<div>\n:::\n</div>\n::", out var refusal);
 
         // Assert
         Assert.Null(change);

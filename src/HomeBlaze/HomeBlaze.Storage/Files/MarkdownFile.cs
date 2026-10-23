@@ -593,13 +593,14 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// <summary>
     /// Replaces the text block that <paramref name="segment"/> starts with <paramref name="newText"/>, or removes it when that
     /// is empty or white space, and saves the page. Complete widget blocks at the top level of the new text become blocks of
-    /// the content, and the page creates their subjects.
+    /// the content, and the page creates their subjects. Such a block with fewer fence characters than
+    /// <see cref="GetWidgetFenceLengthInText"/> gets that many, and the blocks inside it as many more.
     /// </summary>
     /// <remarks>
     /// Refused when the segment starts no text block that can be edited any more or its text is no longer
     /// <paramref name="expectedText"/>, as <see cref="GetTextBlockText"/> returned it, when the new text holds a block that is
-    /// no widget block at its top level, a widget block with fewer fence characters than
-    /// <see cref="GetWidgetFenceLengthInText"/>, an invalid block, or a widget block whose name a block of the page or another
+    /// no widget block at its top level, a widget block with too few fence characters whose blocks raising them would change,
+    /// an invalid block, or a widget block whose name a block of the page or another
     /// block of the text already has, when the file differs from the text the page last read, and the page then reads it, or
     /// when the page would be larger than <see cref="MaxContentSize"/> bytes.
     /// </remarks>
@@ -631,11 +632,12 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// <summary>
     /// Inserts <paramref name="text"/> into <paramref name="content"/> before <paramref name="before"/>, as
     /// <see cref="InsertWidgetAsync"/> places a widget, and saves the page. Complete widget blocks at the top level of the text
-    /// become blocks of the content, and the page creates their subjects.
+    /// become blocks of the content, and the page creates their subjects. Such a block with fewer fence characters than
+    /// <see cref="GetWidgetFenceLengthInContent"/> gets that many, and the blocks inside it as many more.
     /// </summary>
     /// <remarks>
-    /// Refused when the text holds a block that is no widget block at its top level, a widget block with fewer fence
-    /// characters than <see cref="GetWidgetFenceLengthInContent"/>, an invalid block, or a widget block whose name a block of
+    /// Refused when the text holds a block that is no widget block at its top level, a widget block with too few fence
+    /// characters whose blocks raising them would change, an invalid block, or a widget block whose name a block of
     /// the page or another block of the text already has, when the file differs from the text the page last read, and the
     /// page then reads it, or when the page would be larger than <see cref="MaxContentSize"/> bytes.
     /// </remarks>

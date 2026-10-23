@@ -188,9 +188,11 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
     public override Task AddWidgetAsync(IInterceptorSubject owner, PageAddTarget target) =>
         CreateWidgetAsync((widget, name) => _file.AddWidgetToSlotAsync(owner, target.SlotName, widget, name, CancellationToken.None));
 
+    // The content of a slot can be missing, so Create writes a widget for the text alone, and the save raises its fence.
     public override Task AddTextAsync(IInterceptorSubject owner, PageAddTarget target) =>
         CreateTextAsync(
             target.AddTextName ?? "Add text",
+            minimumFenceLength: 0,
             text => _file.AddTextToSlotAsync(owner, target.SlotName, text, CancellationToken.None));
 
     public override async Task AddListItemAsync(IInterceptorSubject owner, PageAddTarget target)
@@ -232,6 +234,8 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
             "Edit text",
             text,
             _isDarkMode(),
+            _file.GetWidgetFenceLengthInText(segment),
+            MarkdownBlockNames.GetUsedNames(_file.Content ?? string.Empty),
             async newText =>
             {
                 // Text saved as it was opened is not written: the write would still change the block, such as the indentation
@@ -255,7 +259,10 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
         _file.CanInsertTextAt(content, before);
 
     public override Task InsertTextAsync(IInterceptorSubject content, IInterceptorSubject? before) =>
-        CreateTextAsync("Insert text", text => _file.InsertTextAsync(content, before, text, CancellationToken.None));
+        CreateTextAsync(
+            "Insert text",
+            _file.GetWidgetFenceLengthInContent(content),
+            text => _file.InsertTextAsync(content, before, text, CancellationToken.None));
 
     // Asks for a widget and its name, and writes it unless the page changed while the dialog was open.
     private async Task CreateWidgetAsync(Func<IInterceptorSubject, string?, Task<MarkdownEditResult>> write)
@@ -286,7 +293,7 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
     }
 
     // Asks for new text in an empty dialog, which shows a refusal and keeps the text.
-    private async Task CreateTextAsync(string title, Func<string, Task<MarkdownEditResult>> write)
+    private async Task CreateTextAsync(string title, int minimumFenceLength, Func<string, Task<MarkdownEditResult>> write)
     {
         var pageContent = _file.Content;
         await MarkdownTextDialog.ShowAsync(
@@ -294,6 +301,8 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
             title,
             string.Empty,
             _isDarkMode(),
+            minimumFenceLength,
+            MarkdownBlockNames.GetUsedNames(pageContent ?? string.Empty),
             async text =>
             {
                 // The place was chosen in the page as it was, and every later save is refused as well, so the message says

@@ -2,7 +2,7 @@ namespace HomeBlaze.Storage.Blazor.Models;
 
 /// <summary>
 /// Writes the decorations and folding ranges of the page editor as records of six numbers: kind, color, start line,
-/// start column, end line and end column. The editor module (<c>Files/MarkdownFileEditComponent.razor.js</c>) turns
+/// start column, end line and end column. The editor module (<c>Files/MarkdownSourceEditor.razor.js</c>) turns
 /// them into Monaco decorations, so a refresh sends numbers and not decoration objects.
 /// </summary>
 public static class BlockOutlineDecorations

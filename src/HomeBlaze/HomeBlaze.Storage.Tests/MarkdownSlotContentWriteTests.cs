@@ -144,10 +144,24 @@ public class MarkdownSlotContentWriteTests : IDisposable
         Assert.Contains(Assert.IsType<HtmlSegment>(result.Subject), Assert.IsType<MarkdownFragment>(card.HeaderRight).Children.Values);
     }
 
-    [Theory]
-    [InlineData($":: {LeafType}\n::", "A widget in this content needs at least 4 ':' characters.")]
-    [InlineData($"Foot.\n\n:::: {LeafType}#bodyleaf\n::::", "The name 'bodyleaf' is already used on this page.")]
-    public async Task WhenTheContentForAMissingNamedSlotIsRefused_ThenNothingIsWritten(string text, string refusal)
+    [Fact]
+    public async Task WhenAWidgetOfThePageIsAddedToAMissingNamedSlot_ThenItsFenceIsRaisedToStandInTheNewSlotBlock()
+    {
+        // Arrange
+        var markdown = await LoadAsync(CardPage);
+        var card = Assert.IsType<Card>(markdown.Children["card"]);
+
+        // Act
+        var result = await markdown.AddTextToSlotAsync(card, "Footer", $":: {LeafType}#footleaf Name=f\n::", CancellationToken.None);
+
+        // Assert
+        Assert.True(result.IsWritten);
+        Assert.Contains($"::: Footer\n\n:::: {LeafType}#footleaf Name=f\n::::\n\n:::\n::\n", ReadPage());
+        Assert.Same(result.Subject, ((MarkdownFragment)card.Footer!).Children.Values.OfType<TestLeaf>().Single());
+    }
+
+    [Fact]
+    public async Task WhenTheContentForAMissingNamedSlotIsRefused_ThenNothingIsWritten()
     {
         // Arrange
         const string source = $"# Cards\n\n:: HomeBlaze.Components.Card#card Title=A\nBody.\n\n::: {LeafType}#bodyleaf Name=b\n:::\n::\n";
@@ -156,10 +170,10 @@ public class MarkdownSlotContentWriteTests : IDisposable
         var body = card.Content;
 
         // Act
-        var result = await markdown.AddTextToSlotAsync(card, "Footer", text, CancellationToken.None);
+        var result = await markdown.AddTextToSlotAsync(card, "Footer", $"Foot.\n\n:::: {LeafType}#bodyleaf\n::::", CancellationToken.None);
 
         // Assert
-        Assert.Equal(refusal, result.Refusal);
+        Assert.Equal("The name 'bodyleaf' is already used on this page.", result.Refusal);
         Assert.Equal(source, ReadPage());
         Assert.Equal(source, markdown.Content);
         Assert.Same(body, card.Content);

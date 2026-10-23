@@ -1,7 +1,10 @@
+using System.Collections.Concurrent;
 using System.Globalization;
+using System.Text;
 using System.Text.RegularExpressions;
 using HomeBlaze.E2E.Tests.Infrastructure;
 using Microsoft.Playwright;
+using Namotion.Interceptor.Testing;
 
 namespace HomeBlaze.E2E.Tests;
 
@@ -541,6 +544,146 @@ public class InlineTextEditingTests
 
         // Assert
         await Assertions.Expect(page.GetByRole(AriaRole.Dialog)).ToHaveCountAsync(0, new() { Timeout = Timeout });
+    }
+
+    [Fact]
+    public async Task WhenAWidgetIsCreatedInTheTextDialog_ThenItIsWrittenAtTheCursorAndSelectedAfterTheSave()
+    {
+        // Arrange
+        var page = await OpenPageInInlineModeAsync();
+        var actionBar = await SelectTextAsync(page, "First paragraph");
+        await actionBar.GetByTestId("edit-subject-button").ClickAsync();
+        await ExpectTextEditorValueAsync(page, "First paragraph on the page.");
+        await SetTextEditorValueAsync(page, "Before the widget.\n\nAfter the widget.");
+        await SetTextEditorCursorAsync(page, 3);
+
+        // Act
+        await CreateAlertInTextDialogAsync(page, "textalert");
+        await ExpectTextEditorToContainAsync(page, ":: HomeBlaze.Components.Alert#textalert");
+        await page.GetByTestId("markdown-text-save").ClickAsync();
+
+        // Assert
+        await _fixture.WaitForDemoPageTextAsync(
+            PageName,
+            text => text.Contains("# Text Editing Demo\n\nBefore the widget.\n\n:: HomeBlaze.Components.Alert#textalert") &&
+                    text.Contains("::\n\nAfter the widget.\n\n:: HomeBlaze.Components.Card"),
+            "The alert was not written between the two paragraphs.");
+        await Assertions.Expect(page.GetByRole(AriaRole.Dialog)).ToHaveCountAsync(0, new() { Timeout = Timeout });
+        await Assertions.Expect(page.Locator(".subject-component-wrapper.selected .mud-alert")).ToHaveCountAsync(1, new() { Timeout = Timeout });
+    }
+
+    [Fact]
+    public async Task WhenAWidgetIsCreatedInTheTextDialogOfACardBody_ThenItHasOneColonMoreThanTheCard()
+    {
+        // Arrange: the first click selects the card, and the text of its body is selectable once the card is selected.
+        var page = await OpenPageInInlineModeAsync();
+        await page.GetCard("Text Card").Locator(".mud-card-header").SelectWidgetAsync();
+        var actionBar = await SelectTextAsync(page, "Card body text");
+        await actionBar.GetByTestId("edit-subject-button").ClickAsync();
+        await ExpectTextEditorValueAsync(page, "Card body text.");
+        await SetTextEditorCursorAsync(page, 1);
+
+        // Act
+        await CreateAlertInTextDialogAsync(page, "cardalert");
+        await ExpectTextEditorToContainAsync(page, "::: HomeBlaze.Components.Alert#cardalert");
+        await page.GetByTestId("markdown-text-save").ClickAsync();
+
+        // Assert
+        await _fixture.WaitForDemoPageTextAsync(
+            PageName,
+            text => text.Contains(":: HomeBlaze.Components.Card Title=\"Text Card\"\n::: HomeBlaze.Components.Alert#cardalert") &&
+                    text.Contains(":::\n\nCard body text.\n::\n"),
+            "The alert was not written into the card with three colons.");
+        await Assertions.Expect(page.Locator(".subject-component-wrapper.selected .mud-alert")).ToHaveCountAsync(1, new() { Timeout = Timeout });
+    }
+
+    [Fact]
+    public async Task WhenAWidgetOfThePageIsPastedIntoTheTextOfACardBody_ThenItIsWrittenWithOneColonMoreThanTheCard()
+    {
+        // Arrange
+        var page = await OpenPageInInlineModeAsync();
+        await page.GetCard("Text Card").Locator(".mud-card-header").SelectWidgetAsync();
+        var actionBar = await SelectTextAsync(page, "Card body text");
+        await actionBar.GetByTestId("edit-subject-button").ClickAsync();
+        await ExpectTextEditorValueAsync(page, "Card body text.");
+
+        // Act
+        await SetTextEditorValueAsync(page, "Card body text.\n\n:: HomeBlaze.Components.Alert#pastedalert\n::");
+        await page.GetByTestId("markdown-text-save").ClickAsync();
+
+        // Assert
+        await _fixture.WaitForDemoPageTextAsync(
+            PageName,
+            text => text.Contains("Card body text.\n\n::: HomeBlaze.Components.Alert#pastedalert\n:::\n::\n"),
+            "The pasted alert was not written into the card with three colons.");
+        await Assertions.Expect(page.GetByRole(AriaRole.Dialog)).ToHaveCountAsync(0, new() { Timeout = Timeout });
+    }
+
+    [Fact]
+    public async Task WhenTheTextDialogIsOpenOnAPhone_ThenItsTextAreaHasTheFocusAndSavesWithControlS()
+    {
+        // Arrange: Monaco does not support the browsers of phones, so a device whose pointer is coarse gets a text area.
+        await _fixture.WriteDemoPageAsync(PageName, Content);
+        var page = await _fixture.CreatePageAsync(
+            new BrowserNewContextOptions { HasTouch = true, IsMobile = true, ViewportSize = new() { Width = 375, Height = 667 } });
+        await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/{PageName}");
+        await page.WaitUntilInteractiveAsync(Timeout);
+        await page.SwitchToInlineModeAsync();
+        var actionBar = await SelectTextAsync(page, "First paragraph");
+        await actionBar.GetByTestId("edit-subject-button").ClickAsync();
+        var textArea = page.GetByRole(AriaRole.Dialog).GetByTestId("markdown-source-text");
+        await Assertions.Expect(textArea).ToHaveValueAsync("First paragraph on the page.", new() { Timeout = Timeout });
+        await Assertions.Expect(textArea).ToBeFocusedAsync(new() { Timeout = Timeout });
+
+        // Act
+        await page.Keyboard.TypeAsync(" More.");
+        await page.Keyboard.PressAsync("ControlOrMeta+s");
+
+        // Assert
+        await _fixture.WaitForDemoPageTextAsync(
+            PageName,
+            text => text.Contains("# Text Editing Demo\n\nFirst paragraph on the page. More.\n\n:: HomeBlaze.Components.Card"),
+            "The typed text was not saved.");
+        await Assertions.Expect(page.GetByRole(AriaRole.Dialog)).ToHaveCountAsync(0, new() { Timeout = Timeout });
+    }
+
+    [Fact]
+    public async Task WhenTextIsTypedInTheTextDialog_ThenTheDialogIsNotRenderedForEveryCharacter()
+    {
+        // Arrange: the server sends a render batch for every render, and calls update of the module of the editor once it
+        // decorated the text of a version of the editor model.
+        await _fixture.WriteDemoPageAsync(PageName, Content);
+        var page = await _fixture.CreatePageAsync();
+        var renderBatchCount = 0;
+        var decoratedVersions = new ConcurrentQueue<string>();
+        page.WebSocket += (_, webSocket) => webSocket.FrameReceived += (_, frame) =>
+        {
+            var text = frame.Binary is { } binary ? Encoding.Latin1.GetString(binary) : frame.Text ?? string.Empty;
+            Interlocked.Add(ref renderBatchCount, Regex.Count(text, "JS\\.RenderBatch"));
+            foreach (Match match in Regex.Matches(text, $"update.{{0,8}}\\[\"{TextEditorId}\",(\\d+),"))
+            {
+                decoratedVersions.Enqueue(match.Groups[1].Value);
+            }
+        };
+
+        await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/{PageName}");
+        await page.WaitUntilInteractiveAsync(Timeout);
+        await page.SwitchToInlineModeAsync();
+        var actionBar = await SelectTextAsync(page, "First paragraph");
+        await actionBar.GetByTestId("edit-subject-button").ClickAsync();
+        await ExpectTextEditorValueAsync(page, "First paragraph on the page.");
+        await WaitForTextEditorFocusAsync(page);
+        await page.Keyboard.TypeAsync("a");
+        await WaitForDecoratedVersionAsync(page, decoratedVersions);
+        var renderBatchCountBefore = Volatile.Read(ref renderBatchCount);
+
+        // Act
+        await page.Keyboard.TypeAsync("bcdefghi");
+        await WaitForDecoratedVersionAsync(page, decoratedVersions);
+
+        // Assert: a render for every character would be at least eight batches.
+        var renderBatchCountWhileTyping = Volatile.Read(ref renderBatchCount) - renderBatchCountBefore;
+        Assert.True(renderBatchCountWhileTyping < 4, $"{renderBatchCountWhileTyping} render batches arrived while eight characters were typed.");
     }
 
     [Fact]
@@ -1095,6 +1238,14 @@ public class InlineTextEditingTests
         }
     }
 
+    // Waits until the server decorated the text of the current version of the editor model, after it handled every change.
+    private static async Task WaitForDecoratedVersionAsync(IPage page, ConcurrentQueue<string> decoratedVersions)
+    {
+        var version = (await page.EvaluateAsync<int>($"() => blazorMonaco.editor.getEditor('{TextEditorId}').getModel().getVersionId()"))
+            .ToString(CultureInfo.InvariantCulture);
+        await AsyncTestHelpers.WaitUntilAsync(() => decoratedVersions.Contains(version), message: $"The server did not decorate version {version}.");
+    }
+
     private static Task WaitForTextEditorFocusAsync(IPage page) =>
         page.WaitForFunctionAsync(
             $"() => blazorMonaco.editor.getEditor('{TextEditorId}', true)?.hasTextFocus() === true", null, new() { Timeout = Timeout });
@@ -1104,6 +1255,27 @@ public class InlineTextEditingTests
         await page.WaitForFunctionAsync(
             $"() => window.blazorMonaco?.editor.getEditor('{TextEditorId}', true) != null", null, new() { Timeout = Timeout });
         await page.EvaluateAsync($"text => blazorMonaco.editor.getEditor('{TextEditorId}').setValue(text)", text);
+    }
+
+    private static Task SetTextEditorCursorAsync(IPage page, int lineNumber) =>
+        page.EvaluateAsync($"line => blazorMonaco.editor.getEditor('{TextEditorId}').setPosition({{ lineNumber: line, column: 1 }})", lineNumber);
+
+    private static Task ExpectTextEditorToContainAsync(IPage page, string expected) =>
+        page.WaitForFunctionAsync(
+            $"expected => window.blazorMonaco?.editor.getEditor('{TextEditorId}', true)?.getValue().includes(expected) === true",
+            expected,
+            new() { Timeout = Timeout });
+
+    // Create of the text dialog opens the setup dialog above it, which closes once the alert is configured.
+    private static async Task CreateAlertInTextDialogAsync(IPage page, string name)
+    {
+        await page.GetByTestId("markdown-text-create").ClickAsync();
+        var dialog = page.GetByTestId("create-subject-dialog");
+        await dialog.GetByTestId("type-search-input").FillAsync("Alert");
+        await dialog.GetByTestId("type-row-alert").ClickAsync();
+        await dialog.GetByTestId("create-name-input").FillAsync(name);
+        await page.GetByTestId("create-button").ClickAsync();
+        await Assertions.Expect(dialog).ToBeHiddenAsync(new() { Timeout = Timeout });
     }
 
     private static Task<string> GetOutlineColorAsync(ILocator element) =>

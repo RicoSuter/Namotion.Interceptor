@@ -47,10 +47,36 @@ else
                           OnDidInit="OnEditorInitAsync"
                           OnDidChangeModelContent="_contentChangedCallback"
                           OnDidChangeCursorPosition="_cursorPositionChangedCallback"/>
-    <MarkdownEditorStyles/>
+
+    @* Not scoped, because Monaco creates the elements that the module decorates. A dialog renders outside of the page, so
+       every editor renders these. *@
+    <style>
+        /* The colors of the block depths, as red, green and blue for rgb() and rgba(). */
+        .monaco-editor.vs-dark .block-color-0 { --block-color: 108, 166, 240; }
+        .monaco-editor.vs-dark .block-color-1 { --block-color: 79, 201, 164; }
+        .monaco-editor.vs-dark .block-color-2 { --block-color: 179, 157, 245; }
+        .monaco-editor.vs-dark .block-color-3 { --block-color: 238, 143, 181; }
+        .monaco-editor.vs-dark .block-color-4 { --block-color: 150, 200, 90; }
+        .monaco-editor.vs .block-color-0 { --block-color: 37, 99, 200; }
+        .monaco-editor.vs .block-color-1 { --block-color: 13, 140, 105; }
+        .monaco-editor.vs .block-color-2 { --block-color: 110, 80, 210; }
+        .monaco-editor.vs .block-color-3 { --block-color: 200, 60, 120; }
+        .monaco-editor.vs .block-color-4 { --block-color: 70, 130, 30; }
+
+        .monaco-editor .block-fence { color: rgb(var(--block-color)) !important; }
+        .monaco-editor .block-name { font-weight: bold; }
+        .monaco-editor .block-closing-label { color: rgb(var(--block-color)) !important; font-style: italic; opacity: 0.6; }
+        .monaco-editor .block-head { background-color: rgba(var(--block-color), 0.16); border-radius: 3px; }
+        .monaco-editor.vs .block-head { background-color: rgba(var(--block-color), 0.12); }
+
+        .monaco-editor .expression-decoration { background-color: rgba(224, 160, 80, 0.22); border-radius: 3px; }
+        .monaco-editor.vs .expression-decoration { background-color: rgba(210, 130, 20, 0.18); }
+    </style>
 }
 
 @code {
+    private const string ModulePath = "./_content/HomeBlaze.Storage.Blazor/Files/MarkdownSourceEditor.razor.js";
+
     private static int _editorCount;
 
     private string _editorId = string.Empty;
@@ -166,7 +192,23 @@ else
     private StandaloneEditorConstructionOptions GetEditorOptions(StandaloneCodeEditor editor)
     {
         _previousDarkMode = IsDarkMode;
-        var options = MarkdownEditor.CreateOptions(_initialText, IsDarkMode);
+        var options = new StandaloneEditorConstructionOptions
+        {
+            AutomaticLayout = true,
+            Language = "markdown",
+            Value = _initialText,
+            WordWrap = "on",
+            Theme = GetTheme(IsDarkMode),
+            Folding = true,
+            ShowFoldingControls = "always",
+            StickyScroll = new EditorStickyScrollOptions
+            {
+                Enabled = true,
+                DefaultModel = "foldingProviderModel",
+                MaxLineCount = 6
+            }
+        };
+
         if (!HasMinimap)
         {
             options.Minimap = new EditorMinimapOptions { Enabled = false };
@@ -174,6 +216,8 @@ else
 
         return options;
     }
+
+    private static string GetTheme(bool isDarkMode) => isDarkMode ? "vs-dark" : "vs";
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -206,7 +250,7 @@ else
         if (_editor != null && _previousDarkMode != IsDarkMode)
         {
             _previousDarkMode = IsDarkMode;
-            await Global.SetTheme(JsRuntime, MarkdownEditor.GetTheme(IsDarkMode));
+            await Global.SetTheme(JsRuntime, GetTheme(IsDarkMode));
         }
     }
 
@@ -437,7 +481,7 @@ else
         // configured in it is gone once the dialog has closed.
         var result = await SubjectSetupDialog.ShowAsync(DialogService, new SubjectSetupOptions
         {
-            NameField = MarkdownBlockNames.CreateNameOptions(text)
+            NameField = MarkdownBlockNames.CreateNameOptions(text, ReservedNames)
         });
 
         if (result?.Name is null)
@@ -547,7 +591,7 @@ else
         if (_isDisposed)
             return null;
 
-        var moduleImport = _moduleImport ??= JsRuntime.InvokeAsync<IJSObjectReference>("import", MarkdownEditor.ModulePath).AsTask();
+        var moduleImport = _moduleImport ??= JsRuntime.InvokeAsync<IJSObjectReference>("import", ModulePath).AsTask();
         try
         {
             var module = await moduleImport;
@@ -566,19 +610,19 @@ else
     }
 
     // The text with the version of the editor model, or with version 0 when the module is not available.
-    private async Task<MarkdownEditorContent?> ReadContentAsync(StandaloneCodeEditor editor)
+    private async Task<EditorContent?> ReadContentAsync(StandaloneCodeEditor editor)
     {
         if (_isDisposed)
             return null;
 
         if (await GetModuleAsync() is { } module)
-            return await module.InvokeAsync<MarkdownEditorContent?>("getContent", editor.Id);
+            return await module.InvokeAsync<EditorContent?>("getContent", editor.Id);
 
         // Checked again, because the component can have been disposed while the module was imported.
         if (_isDisposed)
             return null;
 
-        return new MarkdownEditorContent(0, await editor.GetValue());
+        return new EditorContent(0, await editor.GetValue());
     }
 
     private static async Task DisposeEditorAsync(IJSObjectReference editorHandle)
@@ -619,6 +663,9 @@ else
             _reference?.Dispose();
         }
     }
+
+    // The text of the editor together with the version of its model, as the module gives it.
+    private sealed record EditorContent(int Version, string Text);
 
     // Runs a callback without rendering the component that created it.
     private sealed class NonRenderingReceiver : IHandleEvent
