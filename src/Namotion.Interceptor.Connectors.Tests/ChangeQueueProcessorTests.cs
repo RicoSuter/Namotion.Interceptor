@@ -2896,6 +2896,57 @@ public class ChangeQueueProcessorTests
         }
     }
 
+    [Fact]
+    public async Task WhenManyProcessorsAreIdle_ThenEachDeliversWithoutHoldingAPoolThread()
+    {
+        // Arrange: far more processors than the pool's minimum threads. If each idle one held a pool thread,
+        // the rest would wait on the pool's slow thread injection and miss the timeout.
+        const int processorCount = 256;
+        var context = InterceptorSubjectContext.Create()
+            .WithRegistry()
+            .WithPropertyChangeSubscriptions();
+        var subject = new Person(context);
+        var deliveredCount = 0;
+        var processors = Enumerable.Range(0, processorCount)
+            .Select(_ => new ChangeQueueProcessor(
+                source: new object(),
+                context: context,
+                propertyFilter: _ => true,
+                writeHandler: (_, _) =>
+                {
+                    Interlocked.Increment(ref deliveredCount);
+                    return ValueTask.CompletedTask;
+                },
+                bufferTime: TimeSpan.FromMilliseconds(50),
+                maxQueueDepth: null,
+                logger: NullLogger.Instance,
+                deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale))
+            .ToArray();
+        using var cancellation = new CancellationTokenSource();
+        var processing = processors.Select(processor => processor.ProcessAsync(cancellation.Token)).ToArray();
+
+        try
+        {
+            // Act
+            subject.FirstName = "delivered";
+
+            // Assert
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => Volatile.Read(ref deliveredCount) == processorCount,
+                timeout: TestTimeout,
+                message: "Every idle processor should deliver the change.");
+        }
+        finally
+        {
+            await cancellation.CancelAsync();
+            await Task.WhenAll(processing).WaitAsync(TestTimeout);
+            foreach (var processor in processors)
+            {
+                processor.Dispose();
+            }
+        }
+    }
+
     private sealed class ThrowingLogger : ILogger
     {
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
