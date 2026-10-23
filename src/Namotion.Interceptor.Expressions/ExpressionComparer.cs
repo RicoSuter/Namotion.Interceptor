@@ -3,7 +3,7 @@ using System.Globalization;
 namespace Namotion.Interceptor.Expressions;
 
 /// <summary>
-/// Compares two values that are not null, with the rules of the where filter of MCP: a boolean only for equality, an enum
+/// Compares two values that are not null: a boolean only for equality, an enum
 /// by its name without regard to case and only for equality, a text without regard to case for equality and ordinal for
 /// order, a date against ISO 8601 text, a float as a float, and NaN never. A null result means the pair has no order, so the
 /// comparison is unknown.

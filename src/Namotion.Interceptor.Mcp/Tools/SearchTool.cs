@@ -36,7 +36,7 @@ internal class SearchTool
             path = new { type = "string", description = "Scope search to a subtree path prefix" },
             query = new { type = "string", description = "Filter by path and enrichment values (e.g. $title, $icon) ONLY — does NOT match types, interfaces, or property names. Use list_types + types parameter for capability filtering" },
             properties = new { type = "array", items = new { type = "string" }, description = "Return only these properties, e.g. [\"IsConnected\",\"BatteryLevel\"]. Implies includeProperties." },
-            where = new { type = "string", description = "Filter by property values, C#-style: comparisons (== != < <= > >=) of a property against a number, true, false, null or a string, combined with && (and), || (or) and parentheses. Example: IsConnected == false || BatteryLevel < 0.2. Enums compare by name, dates against ISO 8601 strings. A subject without the property does not match." }
+            where = new { type = "string", description = "Filter by property values, C#-style: comparisons (== != < <= > >=) of a property against a number, true, false, null, a string or another property, combined with && (and), || (or), ! (not) and parentheses. A property is a path such as Device.IsOn, and a bare boolean property is a condition. Example: IsConnected == false || BatteryLevel < 0.2. Enums compare by name, dates against ISO 8601 strings. A missing property (also one the subject does not have) is null: == null matches it, every other comparison does not." }
         }
     });
 
@@ -104,13 +104,13 @@ internal class SearchTool
 
             var whereText = whereElement.GetString()!;
             if (!string.IsNullOrWhiteSpace(whereText) &&
-                !SubjectFilterExpression.TryParse(whereText, out filter, out var whereError))
+                !SubjectFilterExpression.TryParse(whereText, pathProvider.PathSeparator, out filter, out var whereError))
             {
                 return Task.FromResult<object?>(new { error = whereError });
             }
         }
 
-        var unseenPropertyNames = UnseenPropertyNames.TryCreate(filter?.PropertyNames, propertyNames);
+        var unseenPropertyNames = UnseenPropertyNames.TryCreate(filter?.Paths, propertyNames);
         var subjects = new Dictionary<string, SubjectNode>();
         var truncated = false;
         var rootSubject = _rootSubjectProvider();

@@ -6,16 +6,16 @@ namespace Namotion.Interceptor.Mcp.Tools;
 /// <summary>
 /// The requested property names that no observed subject has as an exposed scalar property yet, so a tool can warn
 /// about a name that resolves on no subject in scope instead of silently matching or returning nothing. A
-/// <c>where</c> name is resolved like the filter resolves it, a <c>properties</c> name like the selection matches it.
+/// <c>where</c> path is resolved like the filter resolves it, a <c>properties</c> name like the selection matches it.
 /// </summary>
 internal sealed class UnseenPropertyNames
 {
-    private readonly List<string> _whereNames;
+    private readonly List<string> _wherePaths;
     private readonly List<string> _selectedNames;
 
-    private UnseenPropertyNames(List<string> whereNames, List<string> selectedNames)
+    private UnseenPropertyNames(List<string> wherePaths, List<string> selectedNames)
     {
-        _whereNames = whereNames;
+        _wherePaths = wherePaths;
         _selectedNames = selectedNames;
     }
 
@@ -23,9 +23,9 @@ internal sealed class UnseenPropertyNames
     /// Creates a tracker for the names of both sources, each without duplicates, or returns null when there are none.
     /// </summary>
     public static UnseenPropertyNames? TryCreate(
-        IReadOnlyCollection<string>? whereNames, IReadOnlyCollection<string>? selectedNames) =>
-        whereNames is { Count: > 0 } || selectedNames is { Count: > 0 }
-            ? new UnseenPropertyNames([.. whereNames ?? []], [.. selectedNames ?? []])
+        IReadOnlyCollection<string>? wherePaths, IReadOnlyCollection<string>? selectedNames) =>
+        wherePaths is { Count: > 0 } || selectedNames is { Count: > 0 }
+            ? new UnseenPropertyNames([.. wherePaths ?? []], [.. selectedNames ?? []])
             : null;
 
     /// <summary>
@@ -33,11 +33,11 @@ internal sealed class UnseenPropertyNames
     /// </summary>
     public void Observe(RegisteredSubject subject, PathProviderBase pathProvider)
     {
-        for (var index = _whereNames.Count - 1; index >= 0; index--)
+        for (var index = _wherePaths.Count - 1; index >= 0; index--)
         {
-            if (McpToolHelper.TryGetScalarProperty(subject, pathProvider, _whereNames[index]) is not null)
+            if (McpToolHelper.TryGetScalarPropertyFromPath(subject, pathProvider, _wherePaths[index]) is not null)
             {
-                _whereNames.RemoveAt(index);
+                _wherePaths.RemoveAt(index);
             }
         }
 
@@ -59,8 +59,8 @@ internal sealed class UnseenPropertyNames
     /// One warning per name no observed subject has, or null when every name was seen.
     /// </summary>
     public IReadOnlyList<string>? CreateWarnings() =>
-        _whereNames.Count > 0 || _selectedNames.Count > 0
-            ? _whereNames.Concat(_selectedNames)
+        _wherePaths.Count > 0 || _selectedNames.Count > 0
+            ? _wherePaths.Concat(_selectedNames)
                 .Distinct(StringComparer.Ordinal)
                 .Select(name => $"No subject in scope has a property named '{name}'.")
                 .ToArray()

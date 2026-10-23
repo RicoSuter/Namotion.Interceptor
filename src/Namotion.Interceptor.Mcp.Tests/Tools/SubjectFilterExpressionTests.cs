@@ -146,14 +146,15 @@ public class SubjectFilterExpressionTests
     }
 
     [Fact]
-    public void WhenExpressionIsParsed_ThenExposesEachReferencedPropertyNameOnce()
+    public void WhenExpressionIsParsed_ThenExposesEachPathOnce()
     {
         // Act
         Assert.True(SubjectFilterExpression.TryParse(
-            "IsOn == true && (Temperature > 1 || IsOn == false) || Name != null", out var expression, out _));
+            "IsOn == true && (Temperature > 1 || IsOn == false) || Name != null",
+            DefaultPathProvider.Instance.PathSeparator, out var expression, out _));
 
         // Assert
-        Assert.Equal(["IsOn", "Temperature", "Name"], expression.PropertyNames);
+        Assert.Equal(["IsOn", "Temperature", "Name"], expression.Paths);
     }
 
     [Fact]
@@ -163,7 +164,7 @@ public class SubjectFilterExpressionTests
         var where = "Name == " + new string('a', 1001 - "Name == ".Length);
 
         // Act
-        var parsed = SubjectFilterExpression.TryParse(where, out var expression, out var error);
+        var parsed = SubjectFilterExpression.TryParse(where, DefaultPathProvider.Instance.PathSeparator, out var expression, out var error);
 
         // Assert
         Assert.False(parsed);
@@ -178,7 +179,7 @@ public class SubjectFilterExpressionTests
         var where = new string('(', 33) + "Temperature > 0" + new string(')', 33);
 
         // Act
-        var parsed = SubjectFilterExpression.TryParse(where, out var expression, out var error);
+        var parsed = SubjectFilterExpression.TryParse(where, DefaultPathProvider.Instance.PathSeparator, out var expression, out var error);
 
         // Assert
         Assert.False(parsed);
@@ -195,7 +196,7 @@ public class SubjectFilterExpressionTests
         var where = new string('(', 32) + "Temperature > 0" + new string(')', 32);
 
         // Act
-        var parsed = SubjectFilterExpression.TryParse(where, out var expression, out _);
+        var parsed = SubjectFilterExpression.TryParse(where, DefaultPathProvider.Instance.PathSeparator, out var expression, out _);
 
         // Assert
         Assert.True(parsed);
@@ -217,8 +218,7 @@ public class SubjectFilterExpressionTests
     }
 
     [Theory]
-    [InlineData("", "where: expected a property name at position 0")]
-    [InlineData("Temperature", "where: expected a comparison operator after 'Temperature' at position 11")]
+    [InlineData("", "where: expected a value at position 0")]
     [InlineData("Temperature >", "where: expected a value after '>' at position 13")]
     [InlineData("Temperature = 1", "where: use '==' for equality at position 12")]
     [InlineData("(Temperature > 1", "where: expected ')' at position 16")]
@@ -228,7 +228,7 @@ public class SubjectFilterExpressionTests
     public void WhenExpressionIsInvalid_ThenReturnsErrorWithPosition(string where, string expectedError)
     {
         // Act
-        var parsed = SubjectFilterExpression.TryParse(where, out var expression, out var error);
+        var parsed = SubjectFilterExpression.TryParse(where, DefaultPathProvider.Instance.PathSeparator, out var expression, out var error);
 
         // Assert
         Assert.False(parsed);
@@ -236,13 +236,71 @@ public class SubjectFilterExpressionTests
         Assert.Equal(expectedError, error);
     }
 
+    [Theory]
+    [InlineData("Missing == null", true)]
+    [InlineData("Missing != null", false)]
+    [InlineData("Device.IsOn == true", true)]
+    [InlineData("Device.DeviceName == Light", true)]
+    [InlineData("Device.Missing == null", true)]
+    [InlineData("not (Temperature > 30)", true)]
+    [InlineData("!(Name == Kitchen)", false)]
+    [InlineData("Device.IsOn", true)]
+    [InlineData("not Device.IsOn", false)]
+    [InlineData("subject.Name == Kitchen", true)]
+    [InlineData("subject.Device.IsOn and Temperature > 20", true)]
+    [InlineData("Temperature > Device.Missing", false)]
+    public void WhenFilterUsesPathsNotOrMissingValues_ThenItMatchesAsTheExpressionLanguageSays(string where, bool expected)
+    {
+        // Arrange
+        var context = CreateContext();
+        var room = new TestRoom(context) { Name = "Kitchen", Temperature = 21.5m };
+        room.Device = new TestDevice(context) { DeviceName = "Light", IsOn = true };
+
+        // Act
+        var matches = Evaluate(where, room);
+
+        // Assert
+        Assert.Equal(expected, matches);
+    }
+
+    [Theory]
+    [InlineData("value > 1", "where: 'value' is not available in where")]
+    [InlineData("Name == value", "where: 'value' is not available in where")]
+    [InlineData("Name | raw", "where: a condition takes no pipes")]
+    [InlineData("Temperature - 1 > 0", "where: arithmetic is not supported at position 12")]
+    public void WhenFilterUsesWhatWhereDoesNotHave_ThenReturnsError(string where, string expectedError)
+    {
+        // Act
+        var parsed = SubjectFilterExpression.TryParse(where, '.', out var expression, out var error);
+
+        // Assert
+        Assert.False(parsed);
+        Assert.Null(expression);
+        Assert.Equal(expectedError, error);
+    }
+
+    [Fact]
+    public void WhenPathProviderHidesAPropertyOnThePath_ThenFilterDoesNotMatchIt()
+    {
+        // Arrange
+        var context = CreateContext();
+        var room = new TestRoom(context) { Name = "Kitchen", Temperature = 21.5m };
+
+        // Act
+        var matches = Evaluate("subject.Temperature > 0", room, new TemperatureHidingPathProvider());
+
+        // Assert
+        Assert.False(matches);
+    }
+
     private static IInterceptorSubjectContext CreateContext() =>
         InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
 
     private static bool Evaluate(string where, IInterceptorSubject subject, PathProviderBase? pathProvider = null)
     {
-        Assert.True(SubjectFilterExpression.TryParse(where, out var expression, out _));
-        return expression.Matches(subject.TryGetRegisteredSubject()!, pathProvider ?? DefaultPathProvider.Instance);
+        pathProvider ??= DefaultPathProvider.Instance;
+        Assert.True(SubjectFilterExpression.TryParse(where, pathProvider.PathSeparator, out var expression, out _));
+        return expression.Matches(subject.TryGetRegisteredSubject()!, pathProvider);
     }
 
     private sealed class TemperatureHidingPathProvider : PathProviderBase

@@ -6,7 +6,8 @@ namespace Namotion.Interceptor.Expressions;
 /// <summary>
 /// An expression parsed once: paths and literals, compared with <c>== != &lt; &lt;= &gt; &gt;=</c> and combined with
 /// <c>and</c> (<c>&amp;&amp;</c>), <c>or</c> (<c>||</c>), <c>not</c> (<c>!</c>) and parentheses, followed by pipes such as
-/// <c>| raw</c>. A bare word after an operator is text unless it holds the path separator or an index. Arithmetic is rejected.
+/// <c>| raw</c>. A bare word after an operator is text, such as the name of an enum value, unless it holds the path separator or an index
+/// or is the variable <c>value</c> or <c>subject</c>. Arithmetic is rejected.
 /// </summary>
 public sealed class ParsedExpression
 {

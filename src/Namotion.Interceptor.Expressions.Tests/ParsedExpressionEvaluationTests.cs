@@ -61,7 +61,7 @@ public class ParsedExpressionEvaluationTests
     [InlineData("FloatValue == 0.1", true)]
     [InlineData("FloatValue < 0.2", true)]
     [InlineData("FloatValue > 0.1", false)]
-    public void WhenWhereTextOfMcpIsEvaluated_ThenItMatchesAsInMcp(string text, bool expected)
+    public void WhenFilterTextIsEvaluated_ThenItMatchesAsAFilter(string text, bool expected)
     {
         // Arrange
         var values = new Dictionary<string, object?>
@@ -145,7 +145,7 @@ public class ParsedExpressionEvaluationTests
         Assert.Equal(expected, result);
     }
 
-    // A path on the right needs a slash; a bare word there is text, as in MCP where.
+    // A path on the right needs a slash; a bare word there is text, as in a filter.
     [Theory]
     [InlineData("meter/Power > meter/Maximum", false)]
     [InlineData("0.1 == meter/Float", true)]
