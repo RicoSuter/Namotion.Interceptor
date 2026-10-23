@@ -1589,6 +1589,19 @@ namespace HomeBlaze.Components.Components
         public string Message { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
     }
+    public class WidgetChip : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public WidgetChip() { }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Icon { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? TestId { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Text { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+    }
     [HomeBlaze.Components.Abstractions.Attributes.SubjectComponent(HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType.Edit, typeof(HomeBlaze.Components.Widget?))]
     public class WidgetEditComponent : Microsoft.AspNetCore.Components.ComponentBase, HomeBlaze.Components.Abstractions.ISubjectComponent, HomeBlaze.Components.Abstractions.ISubjectEditComponent, System.IDisposable
     {

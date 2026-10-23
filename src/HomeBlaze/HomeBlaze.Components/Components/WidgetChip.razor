@@ -1,0 +1,19 @@
+@* A chip that stands in Inline mode where a widget shows nothing, such as a ValueMap or a Responsive whose content this
+   screen hides, so that the widget can be selected. *@
+<div class="invisible-widget-chip" data-testid="@TestId">
+    <MudIcon Icon="@Icon" Size="Size.Small" aria-hidden="true" />
+    <span>@Text</span>
+</div>
+
+@code {
+    /// <summary>The icon of the kind of widget.</summary>
+    [Parameter, EditorRequired]
+    public string Icon { get; set; } = string.Empty;
+
+    /// <summary>The text of the chip, which names the widget.</summary>
+    [Parameter, EditorRequired]
+    public string Text { get; set; } = string.Empty;
+
+    [Parameter]
+    public string? TestId { get; set; }
+}

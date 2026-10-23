@@ -6,10 +6,7 @@
    the list of its cases. *@
 @if (IsEditing && Selection is not null && Subject is ValueMap map)
 {
-    <div class="invisible-widget-chip" data-testid="invisible-widget-chip">
-        <MudIcon Icon="@Icons.Material.Filled.SwapHoriz" Size="Size.Small" aria-hidden="true" />
-        <span>@(StructureEditor?.GetBlockName(map) ?? nameof(ValueMap))</span>
-    </div>
+    <WidgetChip Icon="@Icons.Material.Filled.SwapHoriz" Text="@(StructureEditor?.GetBlockName(map) ?? nameof(ValueMap))" TestId="invisible-widget-chip" />
 
     @if (ContainsSelection)
     {
