@@ -92,11 +92,11 @@ The `Label` of a [ValueTile](value-tile.md), a [Gauge](gauge.md), a [Control](co
 :: HomeBlaze.Components.ValueTile Kind=Tile Path=../Pump/CurrentSpeed Label="Target {{ subject/TargetSpeed }}"
 ::
 
-- **`value` and `subject`**: In a widget with a `Path`, `value` is the value that the path leads to, and `subject` is the subject that owns it, or the subject that the path leads to, as in the cases of a [ValueMap](value-map.md#conditions). A card has no `Path`, so its title and subtitle use paths from the page only, and `value` or `subject` there is an error.
-- **Other paths** resolve from the page, as in the text of the page, see [Expression Paths](../pages.md#expression-paths).
-- **Pipes**: `display`, `raw` and `map:name`, see [Pipes](../pages.md#pipes). A map name resolves like the `Map` of the widget.
+- **`value` and `subject`**: In a widget with a `Path`, `value` is the value that the path leads to, and `subject` is the subject that owns it, or the subject that the path leads to, as in the cases of a [ValueMap](value-map.md#conditions). A card has no `Path`, so its title and subtitle use paths from the page only, and `value` or `subject` there is an error. A `Control` for an operation binds the subject that has the operation as `subject` and no useful `value`.
+- **Other paths** resolve from the widget, and so from the page that holds it, as in the text of the page, see [Expression Paths](../pages.md#expression-paths).
+- **Pipes**: `display`, `raw` and `map:name`, see [Pipes](../pages.md#pipes). A map name resolves like the `Map` of the widget, and `{{ subject | map:name }}` applies the map to the subject that the `Path` leads to, such as a wallbox, so that the label shows the text of its case.
 - **Live**: The text updates when a value that it shows changes.
-- **Empty**: A label whose expressions give no text, because a value is missing, shows the label of the property, as a label that is not set does.
+- **Empty**: A text that is empty, also one whose expressions give no text because a value is missing, is shown as one that is not set: an empty label shows the label of the property, an empty title or subtitle of a card shows none, and an empty subtitle of a switch shows the text of the value.
 - **Errors**: A mistake shows in place of the widget with the name of the argument in front, such as `Label: expected ')' at position 5`, see [Page Errors](../page-errors.md#value-widget-errors).
 - **Written as is elsewhere**: The source of the page, the page editor, the property panel, the tree of subjects and AI agents see the text as written, with its braces.
 - **Other arguments**: Paths, map names, colors, icons and numbers are taken as written. A color or an icon that depends on a value comes from a [ValueMap](value-map.md).

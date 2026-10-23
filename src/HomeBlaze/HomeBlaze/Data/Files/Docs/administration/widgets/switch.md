@@ -17,7 +17,7 @@ Turns a boolean on and off. It writes the property, or it invokes one operation 
 | `Off` | Path (Operation) | None | The operation that turns the switch off. Set it together with `On` |
 | `Kind` | `Switch` or `Tile` | `Switch` | `Switch` is a toggle switch with its label next to it. `Tile` is a tile that fills its place and is filled by the state, see [Tiles](#tiles) |
 | `Map` | Name or path of a `ValueMap` | None | The map that gives a state its color, icon and text, see [ValueMap](value-map.md). A tile is filled with the color of the matched case, a toggle switch takes it as its color |
-| `Subtitle` | Text with values | None | A second line below the label of a tile. Without it, a tile with a map shows the text of the value, see [Text with Values](basics.md#text-with-values) |
+| `Subtitle` | Text with values | None | A second line below the label of a tile, see [Text with Values](basics.md#text-with-values). Without it, a tile with a map shows the text of the value |
 | `Icon` | Text | None | The [icon](basics.md#icons) of a tile. The icon of a matched case replaces it |
 
 ## Slots

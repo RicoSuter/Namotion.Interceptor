@@ -89,11 +89,11 @@ An expression with a mistake does not take a block down. The page shows the mess
 | `The pipe 'map' takes the name of a value map, such as map:wallbox` | The pipe `map` without a name, or with more than one | Write `map:` and the name of the map |
 | `'value' is not available in the text of a page` | The text of a page uses `value` or `subject`, which are reserved for the values that widgets give their expressions | Write the path of the property |
 
-A pipe `map` with a name that leads to no value map shows `Cannot resolve map: name` as the text of the expression, and a map with a mistake shows its message there, the messages of [Value Widget Errors](#value-widget-errors).
+A pipe `map` with a name that leads to no value map shows `Cannot resolve map: name` as the text of the expression, and a map with a mistake shows its message there, one of the map messages of [Value Widget Errors](#value-widget-errors).
 
 ## Value Widget Errors
 
-A map that cannot be found, or an argument that a widget cannot use, does not take a block down either. The widget shows the message in a small red alert in its place, without a line number, and the rest of the page is shown as usual.
+A map that cannot be found, or an argument that a widget cannot use, does not take a block down either. The widget shows the message in a small red alert in its place, without a line number, and the rest of the page is shown as usual. A widget shows one error at a time: that of its map first, then that of its `Label` or `Title`, then that of its `Subtitle`.
 
 | Message | Cause | Fix |
 |---------|-------|-----|

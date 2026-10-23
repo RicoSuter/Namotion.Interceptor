@@ -87,6 +87,19 @@ The pump runs at {{ ../Pump/CurrentSpeed }} RPM.
 {{ ../Pump/Status }}
 ::
 
+A card whose title and subtitle show values from the page. They update when the values change, and `value` and `subject` are not available, because a card has no `Path`:
+
+<!-- sample: live -->
+~~~~markdown
+:: HomeBlaze.Components.Card Title="Pump {{ ../Pump/Status }}" Subtitle="Target {{ ../Pump/TargetSpeed }} RPM" Icon=WaterDrop
+The pump runs at {{ ../Pump/CurrentSpeed }} RPM.
+::
+~~~~
+
+:: HomeBlaze.Components.Card Title="Pump {{ ../Pump/Status }}" Subtitle="Target {{ ../Pump/TargetSpeed }} RPM" Icon=WaterDrop
+The pump runs at {{ ../Pump/CurrentSpeed }} RPM.
+::
+
 Three cards in a flow layout with `AspectRatio="4:3"`. Each card is three quarters as high as it is wide, so the three cards are equally high whatever their text is, and they grow and shrink with the width of the window. A body whose text does not fit scrolls:
 
 <!-- sample: live -->
