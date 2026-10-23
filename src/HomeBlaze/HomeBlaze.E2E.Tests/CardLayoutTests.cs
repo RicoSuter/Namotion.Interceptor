@@ -144,6 +144,56 @@ public class CardLayoutTests
     }
 
     [Theory]
+    [InlineData("Grid Card", ".grid-cell-content")]
+    [InlineData("Canvas Card", ".canvas-node-content")]
+    public async Task WhenACardInAGridCellOrACanvasNodeIsSelectedInline_ThenItKeepsFillingItAndItsPlaceHasNoInsertLines(string title, string container)
+    {
+        // Arrange
+        var page = await OpenPageAsync();
+        var card = page.GetCard(title);
+        await Assertions.Expect(card).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await page.SelectEditModeAsync("Inline", Timeout);
+        var place = page.Locator(container).Filter(new() { Has = card });
+        var wrapper = place.Locator(".subject-component-wrapper.selectable").Filter(new() { Has = card }).Last;
+
+        // Act
+        var actionBar = await wrapper.SelectWidgetAsync();
+
+        // Assert
+        await Assertions.Expect(wrapper).ToHaveAttributeAsync("aria-current", "true", new() { Timeout = Timeout });
+        await OpenEditDialogAfterSelectionAsync(page, actionBar);
+        await Assertions.Expect(place.GetByTestId("block-insert-line")).ToHaveCountAsync(0);
+        await CloseEditDialogAsync(page);
+        var heights = await card.EvaluateAsync<double[]>(
+            "(card, container) => [card.getBoundingClientRect().height, card.closest(container).getBoundingClientRect().height]",
+            container);
+        Assert.Equal(heights[1], heights[0], 1.0);
+
+        // Act: the layout around the card.
+        await actionBar.GetByTestId("select-parent-button").ClickAsync();
+
+        // Assert
+        await Assertions.Expect(wrapper).Not.ToHaveAttributeAsync("aria-current", "true", new() { Timeout = Timeout });
+        await Assertions.Expect(page.Locator(".subject-component-wrapper.selected")).ToHaveCountAsync(1, new() { Timeout = Timeout });
+        await OpenEditDialogAfterSelectionAsync(page, page.GetWidgetActionBar());
+        await Assertions.Expect(place.GetByTestId("block-insert-line")).ToHaveCountAsync(0);
+    }
+
+    // A content updates its insert lines only after the render of the selection. The edit dialog comes with a later round
+    // trip, so the lines are final once it shows, and a test can tell that none are left.
+    private static async Task OpenEditDialogAfterSelectionAsync(IPage page, ILocator actionBar)
+    {
+        await actionBar.GetByTestId("edit-subject-button").ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Dialog)).ToBeVisibleAsync(new() { Timeout = Timeout });
+    }
+
+    private static async Task CloseEditDialogAsync(IPage page)
+    {
+        await page.GetByRole(AriaRole.Dialog).GetByRole(AriaRole.Button, new() { Name = "Cancel", Exact = true }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Dialog)).ToHaveCountAsync(0, new() { Timeout = Timeout });
+    }
+
+    [Theory]
     [InlineData("Grid Ratio Card", ".grid-cell-content")]
     [InlineData("Canvas Ratio Card", ".canvas-node-content")]
     public async Task WhenACardWithAnAspectRatioIsInAGridCellOrACanvasNode_ThenItFillsItsWidthAndHeight(string title, string container)

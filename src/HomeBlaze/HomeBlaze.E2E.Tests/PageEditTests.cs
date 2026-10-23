@@ -1,6 +1,11 @@
+using System.Collections.Concurrent;
+using System.Globalization;
+using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using HomeBlaze.E2E.Tests.Infrastructure;
 using Microsoft.Playwright;
+using Namotion.Interceptor.Testing;
 
 namespace HomeBlaze.E2E.Tests;
 
@@ -11,6 +16,9 @@ namespace HomeBlaze.E2E.Tests;
 [Trait("Category", "Integration")]
 public class PageEditTests
 {
+    // The page that tests overwrite. Each of them writes its own content before it opens the page.
+    private const string ScratchPage = "Scratch.md";
+
     private readonly PlaywrightFixture _fixture;
 
     public PageEditTests(PlaywrightFixture fixture)
@@ -113,6 +121,163 @@ public class PageEditTests
         // Split view should NOT be visible
         var splitter = page.Locator("[data-testid='edit-splitter']");
         await Assertions.Expect(splitter).Not.ToBeVisibleAsync(new() { Timeout = 5000 });
+    }
+
+    [Fact]
+    public async Task WhenThePageIsEditedInTheSourceModeOnAPhone_ThenATextAreaShowsTheTextAndSavesTheChange()
+    {
+        // Arrange: Monaco does not support the browsers of phones, so a device whose pointer is coarse gets a text area.
+        const string source = "# Scratch\n\nText before the edit\n";
+        await _fixture.WriteDemoPageAsync(ScratchPage, source);
+        var page = await _fixture.CreatePageAsync(
+            new BrowserNewContextOptions { HasTouch = true, IsMobile = true, ViewportSize = new() { Width = 375, Height = 667 } });
+        await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/{ScratchPage}");
+        await page.WaitUntilInteractiveAsync();
+        await page.SelectEditModeAsync("Source");
+
+        var textArea = page.GetByTestId("markdown-source-text");
+        await Assertions.Expect(textArea).ToHaveValueAsync(source, new() { Timeout = 30000 });
+        await Assertions.Expect(page.Locator(".monaco-editor")).ToHaveCountAsync(0);
+
+        // Act
+        await textArea.FillAsync(source.Replace("before", "after"));
+        await page.Locator("[data-testid='save-button'] button").ClickAsync();
+
+        // Assert
+        await _fixture.WaitForDemoPageTextAsync(
+            ScratchPage, text => text == source.Replace("before", "after"), "The text of the text area was not saved.");
+    }
+
+    [Fact]
+    public async Task WhenTextIsTypedInTheSourceEditor_ThenTheEditorIsNotRenderedForEveryCharacter()
+    {
+        // Arrange: the server sends a render batch for every render, and calls update of the module once it decorated the
+        // text of a version of the editor model.
+        await _fixture.WriteDemoPageAsync(ScratchPage, "# Scratch\n\nText\n");
+        var page = await _fixture.CreatePageAsync();
+        var renderBatchCount = 0;
+        var decoratedVersions = new ConcurrentQueue<string>();
+        page.WebSocket += (_, webSocket) => webSocket.FrameReceived += (_, frame) =>
+        {
+            var text = frame.Binary is { } binary ? Encoding.Latin1.GetString(binary) : frame.Text ?? string.Empty;
+            Interlocked.Add(ref renderBatchCount, Regex.Count(text, "JS\\.RenderBatch"));
+            foreach (Match match in Regex.Matches(text, "update.{0,8}\\[\"markdown-editor\",(\\d+),"))
+            {
+                decoratedVersions.Enqueue(match.Groups[1].Value);
+            }
+        };
+
+        await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/{ScratchPage}");
+        await page.WaitUntilInteractiveAsync();
+        await page.SelectEditModeAsync("Source");
+        var line = page.Locator(".monaco-editor .view-line", new() { HasTextString = "Text" });
+        await Assertions.Expect(line).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await line.ClickAsync();
+        await page.Keyboard.PressAsync("End");
+
+        // The first character makes the page dirty, which renders the panel around the editor once.
+        await page.Keyboard.TypeAsync("a");
+        await WaitForDecoratedVersionAsync(page, decoratedVersions);
+        var renderBatchCountBefore = Volatile.Read(ref renderBatchCount);
+
+        // Act
+        await page.Keyboard.TypeAsync("bcdefghi");
+        await WaitForDecoratedVersionAsync(page, decoratedVersions);
+
+        // Assert: a render for every character would be at least eight batches.
+        var renderBatchCountWhileTyping = Volatile.Read(ref renderBatchCount) - renderBatchCountBefore;
+        Assert.True(renderBatchCountWhileTyping < 4, $"{renderBatchCountWhileTyping} render batches arrived while eight characters were typed.");
+    }
+
+    // Waits until the server decorated the text of the current version of the editor model, after it handled every change.
+    private static async Task WaitForDecoratedVersionAsync(IPage page, ConcurrentQueue<string> decoratedVersions)
+    {
+        var version = (await page.EvaluateAsync<int>("() => blazorMonaco.editor.getEditor('markdown-editor').getModel().getVersionId()"))
+            .ToString(CultureInfo.InvariantCulture);
+        await AsyncTestHelpers.WaitUntilAsync(() => decoratedVersions.Contains(version), message: $"The server did not decorate version {version}.");
+    }
+
+    [Fact]
+    public async Task WhenTheSourceModeIsLeft_ThenItsEditorAndTheModelOfTheEditorAreDisposed()
+    {
+        // Arrange
+        var page = await OpenWidgetsDemoPageAsync();
+        await page.SelectEditModeAsync("Source");
+        await Assertions.Expect(page.Locator(".monaco-editor")).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await page.WaitForFunctionAsync("() => monaco.editor.getEditors().length === 1", null, new() { Timeout = 30000 });
+
+        // Act
+        await page.SelectEditModeAsync("View");
+
+        // Assert
+        await page.WaitForFunctionAsync(
+            "() => monaco.editor.getEditors().length === 0 && monaco.editor.getModels().length === 0 && blazorMonaco.editors.length === 0",
+            null,
+            new() { Timeout = 30000 });
+    }
+
+    [Fact]
+    public async Task WhenAPageWithCarriageReturnsIsEditedInTheTextAreaOfAPhone_ThenEveryLineOfTheSavedPageEndsWithACarriageReturn()
+    {
+        // Arrange: a text area ends every line with a line feed alone.
+        await _fixture.WriteDemoPageAsync(ScratchPage, "# Scratch\r\n\r\nLine one\r\n");
+        var page = await _fixture.CreatePageAsync(
+            new BrowserNewContextOptions { HasTouch = true, IsMobile = true, ViewportSize = new() { Width = 375, Height = 667 } });
+        await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/{ScratchPage}");
+        await page.WaitUntilInteractiveAsync();
+        await page.SelectEditModeAsync("Source");
+
+        var textArea = page.GetByTestId("markdown-source-text");
+        await Assertions.Expect(textArea).ToHaveValueAsync("# Scratch\n\nLine one\n", new() { Timeout = 30000 });
+        await textArea.EvaluateAsync("element => { element.focus(); element.setSelectionRange(element.value.length, element.value.length); }");
+
+        // Act
+        await page.Keyboard.TypeAsync("Line two");
+        await page.Locator("[data-testid='save-button'] button").ClickAsync();
+
+        // Assert
+        await _fixture.WaitForDemoPageTextAsync(ScratchPage, text => text.Contains("Line two"), "The text of the text area was not saved.");
+        Assert.Equal("# Scratch\r\n\r\nLine one\r\nLine two", await _fixture.ReadFileAsync(_fixture.GetDemoPagePath(ScratchPage)));
+    }
+
+    [Fact]
+    public async Task WhenAWidgetIsCreatedInTheTextAreaOfAPhone_ThenItsBlockIsWrittenBeforeTheLineOfTheCursor()
+    {
+        // Arrange
+        const string source = "# Scratch\n\nFirst line\n\nSecond line\n";
+        await _fixture.WriteDemoPageAsync(ScratchPage, source);
+        var page = await _fixture.CreatePageAsync(
+            new BrowserNewContextOptions { HasTouch = true, IsMobile = true, ViewportSize = new() { Width = 375, Height = 667 } });
+        await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/{ScratchPage}");
+        await page.WaitUntilInteractiveAsync();
+        await page.SelectEditModeAsync("Source");
+
+        var textArea = page.GetByTestId("markdown-source-text");
+        await Assertions.Expect(textArea).ToHaveValueAsync(source, new() { Timeout = 30000 });
+        await textArea.EvaluateAsync(
+            "(element, offset) => { element.focus(); element.setSelectionRange(offset, offset); }",
+            source.IndexOf("Second line", StringComparison.Ordinal) + 3);
+
+        // Act
+        await page.GetByTestId("create-subject-button").TapAsync();
+        await page.GetByTestId("type-group-dashboard").TapAsync();
+        var tileRow = SubjectSetupDialogTests.TypeRows(page).Filter(new() { HasText = "Value tile" });
+        await tileRow.TapAsync();
+        var dialog = SubjectSetupDialogTests.Dialog(page);
+        await dialog.GetByLabel("Path", new() { Exact = true }).FillAsync("scratchmotor/CurrentSpeed");
+        var createButton = SubjectSetupDialogTests.CreateButton(page);
+        await Assertions.Expect(createButton).ToBeEnabledAsync(new() { Timeout = 30000 });
+        await createButton.TapAsync();
+
+        // Assert
+        await Assertions.Expect(dialog).ToBeHiddenAsync(new() { Timeout = 30000 });
+        var written = await _fixture.WaitForDemoPageTextAsync(
+            ScratchPage, text => text.Contains(":: HomeBlaze.Components.ValueTile"), "The block of the widget was not written.");
+        var lines = written.Split('\n');
+        var headLineIndex = Array.FindIndex(lines, line => line.StartsWith(":: HomeBlaze.Components.ValueTile", StringComparison.Ordinal));
+        Assert.True(headLineIndex > Array.IndexOf(lines, "First line"), written);
+        Assert.True(headLineIndex < Array.IndexOf(lines, "Second line"), written);
+        await Assertions.Expect(textArea).ToHaveValueAsync(written);
     }
 
     [Fact]

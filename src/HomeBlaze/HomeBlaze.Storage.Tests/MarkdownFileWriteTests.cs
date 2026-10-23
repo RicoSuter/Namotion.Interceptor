@@ -21,6 +21,23 @@ public class MarkdownFileWriteTests : IDisposable
     private readonly List<FluentStorageContainer> _storages = [];
 
     [Fact]
+    public async Task WhenAWidgetIsInsertedIntoAPageOfTheStorage_ThenTheResultNamesTheSubjectOfItsBlock()
+    {
+        // Arrange
+        WriteFile("Cards.md", "# Cards\n");
+        var storage = await ConnectAsync();
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Cards.md"]);
+
+        // Act
+        var result = await markdown.InsertWidgetAsync(
+            markdown, null, new HomeBlaze.Components.Card { Title = "Added" }, "added", CancellationToken.None);
+
+        // Assert
+        Assert.True(result.IsWritten);
+        Assert.Same(markdown.Children["added"], result.Subject);
+    }
+
+    [Fact]
     public async Task WhenReplacingTheContent_ThenTheFileTheContentAndTheParsedChildrenAreUpdated()
     {
         // Arrange
@@ -36,6 +53,169 @@ public class MarkdownFileWriteTests : IDisposable
         Assert.Equal("# New heading\n\nBody", markdown.Content);
         Assert.Contains(markdown.Children.Values.OfType<HtmlSegment>(), segment => segment.Html.Contains("New heading"));
         Assert.DoesNotContain(markdown.Children.Values.OfType<HtmlSegment>(), segment => segment.Html.Contains("Old heading"));
+    }
+
+    [Fact]
+    public async Task WhenAParagraphOfAPageOfTheStorageIsReplaced_ThenTheResultNamesTheSegmentOfTheNewText()
+    {
+        // Arrange
+        WriteFile("Notes.md", "# Notes\n\nOld text.\n");
+        var storage = await ConnectAsync();
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Notes.md"]);
+        var segment = markdown.Children.Values.OfType<HtmlSegment>().Single(candidate => candidate.Html.Contains("Old text."));
+
+        // Act
+        var result = await markdown.ReplaceTextBlockAsync(segment, "Old text.", "New text.", CancellationToken.None);
+
+        // Assert
+        Assert.Equal("# Notes\n\nNew text.\n", ReadFile("Notes.md"));
+        var written = Assert.IsType<HtmlSegment>(result.Subject);
+        Assert.Contains("New text.", written.Html);
+        Assert.Contains(written, markdown.Children.Values);
+    }
+
+    [Fact]
+    public async Task WhenTextIsInsertedIntoAPageOfTheStorage_ThenTheResultNamesTheSegmentOfTheText()
+    {
+        // Arrange
+        WriteFile("Notes.md", "# Notes\n\nOld text.\n");
+        var storage = await ConnectAsync();
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Notes.md"]);
+
+        // Act
+        var result = await markdown.InsertTextAsync(markdown, null, "Added text.", CancellationToken.None);
+
+        // Assert
+        Assert.Equal("# Notes\n\nOld text.\n\nAdded text.\n", ReadFile("Notes.md"));
+        var written = Assert.IsType<HtmlSegment>(result.Subject);
+        Assert.Contains("Added text.", written.Html);
+        Assert.Contains(written, markdown.Children.Values);
+    }
+
+    [Fact]
+    public async Task WhenTextWithACardReplacesAParagraph_ThenTheResultNamesTheNewCardAndTheOtherCardKeepsItsSubject()
+    {
+        // Arrange
+        WriteFile("Cards.md", "# Cards\n\nOld text.\n\n:: HomeBlaze.Components.Card#first Title=First\n::\n");
+        var storage = await ConnectAsync();
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Cards.md"]);
+        var first = markdown.Children["first"];
+        var segment = markdown.Children.Values.OfType<HtmlSegment>().Single(candidate => candidate.Html.Contains("Old text."));
+
+        // Act
+        var result = await markdown.ReplaceTextBlockAsync(
+            segment, "Old text.", "New text.\n\n:: HomeBlaze.Components.Card#added Title=Added\n::", CancellationToken.None);
+
+        // Assert
+        Assert.Equal(
+            "# Cards\n\nNew text.\n\n:: HomeBlaze.Components.Card#added Title=Added\n::\n\n:: HomeBlaze.Components.Card#first Title=First\n::\n",
+            ReadFile("Cards.md"));
+        Assert.Same(markdown.Children["added"], result.Subject);
+        Assert.Equal("Added", Assert.IsType<HomeBlaze.Components.Card>(result.Subject).Title);
+        Assert.Same(first, markdown.Children["first"]);
+    }
+
+    [Theory]
+    [InlineData("# Cards\n\nOld text.\n\n:: HomeBlaze.Components.Card#first Title=First\n::\n")]
+    [InlineData("# Cards\n\n:: HomeBlaze.Components.Card#first Title=First\n::\n\nOld text.\n")]
+    public async Task WhenTextWithACardReusesTheNameOfAnotherCard_ThenTheChangeIsRefusedAndTheCardKeepsItsSubject(string source)
+    {
+        // Arrange
+        WriteFile("Cards.md", source);
+        var storage = await ConnectAsync();
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Cards.md"]);
+        var first = markdown.Children["first"];
+        var segment = markdown.Children.Values.OfType<HtmlSegment>().Single(candidate => candidate.Html.Contains("Old text."));
+
+        // Act
+        var result = await markdown.ReplaceTextBlockAsync(
+            segment, "Old text.", ":: HomeBlaze.Components.Card#first Title=Copy\n::", CancellationToken.None);
+
+        // Assert
+        Assert.Equal("The name 'first' is already used on this page.", result.Refusal);
+        Assert.Equal(source, ReadFile("Cards.md"));
+        Assert.Same(first, markdown.Children["first"]);
+        Assert.Equal("First", Assert.IsType<HomeBlaze.Components.Card>(first).Title);
+    }
+
+    [Fact]
+    public async Task WhenTextWithAWidgetOfAnUnknownTypeIsWritten_ThenTheResultNamesTheTextAfterIt()
+    {
+        // Arrange
+        WriteFile("Notes.md", "# Notes\n\nOld text.\n");
+        var storage = await ConnectAsync();
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Notes.md"]);
+        var segment = markdown.Children.Values.OfType<HtmlSegment>().Single(candidate => candidate.Html.Contains("Old text."));
+
+        // Act
+        var result = await markdown.ReplaceTextBlockAsync(
+            segment, "Old text.", ":: Demo.Unknown\n::\n\nAfter the widget.", CancellationToken.None);
+
+        // Assert
+        Assert.True(result.IsWritten);
+        Assert.Equal("# Notes\n\n:: Demo.Unknown\n::\n\nAfter the widget.\n", ReadFile("Notes.md"));
+        var written = Assert.IsType<HtmlSegment>(result.Subject);
+        Assert.Contains("After the widget.", written.Html);
+    }
+
+    [Fact]
+    public async Task WhenATextBlockOfAPageOfTheStorageIsMoved_ThenTheResultNamesTheSegmentOfTheMovedText()
+    {
+        // Arrange
+        WriteFile("Notes.md", "# Notes\n\nFirst.\n\nSecond.\n");
+        var storage = await ConnectAsync();
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Notes.md"]);
+        var segment = markdown.Children.Values.OfType<HtmlSegment>().Single(candidate => candidate.Html.Contains("Second."));
+
+        // Act
+        var result = await markdown.MoveTextBlockAsync(segment, -1, CancellationToken.None);
+
+        // Assert
+        Assert.Equal("# Notes\n\nSecond.\n\nFirst.\n", ReadFile("Notes.md"));
+        var moved = Assert.IsType<HtmlSegment>(result.Subject);
+        Assert.Contains("Second.", moved.Html);
+        Assert.Contains(moved, markdown.Children.Values);
+    }
+
+    [Fact]
+    public async Task WhenTextInsideACardIsReplaced_ThenTheContentOfTheCardShowsTheNewText()
+    {
+        // Arrange
+        WriteFile("Cards.md", "# Cards\n\n:: HomeBlaze.Components.Card#card Title=A\nCard body.\n::\n");
+        var storage = await ConnectAsync();
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Cards.md"]);
+        var card = Assert.IsType<HomeBlaze.Components.Card>(markdown.Children["card"]);
+        var segment = Assert.IsType<MarkdownFragment>(card.Content).Children.Values.OfType<HtmlSegment>()
+            .Single(candidate => candidate.Html.Contains("Card body."));
+
+        // Act
+        var result = await markdown.ReplaceTextBlockAsync(segment, "Card body.", "Changed body.", CancellationToken.None);
+
+        // Assert
+        Assert.Equal("# Cards\n\n:: HomeBlaze.Components.Card#card Title=A\nChanged body.\n::\n", ReadFile("Cards.md"));
+        var content = Assert.IsType<MarkdownFragment>(card.Content);
+        Assert.Contains("Changed body.", Pages.MarkdownPageFixture.Html(content.Children));
+        Assert.DoesNotContain("Card body.", Pages.MarkdownPageFixture.Html(content.Children));
+        Assert.Contains(Assert.IsType<HtmlSegment>(result.Subject), content.Children.Values);
+    }
+
+    [Fact]
+    public async Task WhenTheTextOfAPageWithCarriageReturnsIsReplaced_ThenTheTextFromTheFileMatchesAndTheLineEndingsStay()
+    {
+        // Arrange
+        WriteFile("Notes.md", "# Notes\r\n\r\nFirst line\r\nsecond line.\r\n");
+        var storage = await ConnectAsync();
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Notes.md"]);
+        var segment = markdown.Children.Values.OfType<HtmlSegment>().Single(candidate => candidate.Html.Contains("First line"));
+        var expectedText = markdown.GetTextBlockText(segment);
+
+        // Act
+        var result = await markdown.ReplaceTextBlockAsync(segment, expectedText!, "New line\nnext line.", CancellationToken.None);
+
+        // Assert
+        Assert.Equal("First line\nsecond line.", expectedText);
+        Assert.True(result.IsWritten);
+        Assert.Equal("# Notes\r\n\r\nNew line\r\nnext line.\r\n", ReadFile("Notes.md"));
     }
 
     [Fact]
@@ -231,6 +411,69 @@ public class MarkdownFileWriteTests : IDisposable
         Assert.Equal(content, markdown.Content);
     }
 
+    [Fact]
+    public async Task WhenTheWriteOfAStructureEditFails_ThenThePageStillDescribesTheFileAndTheNextEditLeavesTheFailedOneOut()
+    {
+        // Arrange
+        const string content = "# Motors\n\n:: HomeBlaze.Samples.Motor#first Name=First\n::\n\n:: HomeBlaze.Samples.Motor#second Name=Second\n::\n";
+        WriteFile("Motors.md", content);
+        PausableBlobStorage? client = null;
+        var storage = CreateStorage();
+        storage.ClientDecorator = inner => client = new PausableBlobStorage(inner);
+        await storage.ConnectAsync(CancellationToken.None);
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Motors.md"]);
+        var first = markdown.Children["first"];
+        var second = markdown.Children["second"];
+        var writeReached = client!.PauseNext(nameof(FluentStorage.Blobs.IBlobStorage.WriteAsync));
+
+        // Act
+        var failedDelete = markdown.DeleteBlockAsync(first, CancellationToken.None);
+        await writeReached;
+        client.FailHangingCall(new IOException("The share is gone."));
+        var failure = await Record.ExceptionAsync(() => failedDelete);
+        var actionsAfterFailure = markdown.GetBlockActions(first);
+        var contentAfterFailure = markdown.Content;
+        var result = await markdown.DeleteBlockAsync(second, CancellationToken.None);
+
+        // Assert
+        Assert.IsType<IOException>(failure);
+        Assert.True(actionsAfterFailure.CanDelete);
+        Assert.Equal(content, contentAfterFailure);
+        Assert.True(result.IsWritten);
+        var written = ReadFile("Motors.md");
+        Assert.Contains("HomeBlaze.Samples.Motor#first", written);
+        Assert.DoesNotContain("HomeBlaze.Samples.Motor#second", written);
+    }
+
+    [Fact]
+    public async Task WhenTheWriteOfAConfigurationFails_ThenTheExceptionPropagatesAndTheSubjectTakesTheFileAgain()
+    {
+        // Arrange
+        const string content = "# Motors\n\n:: HomeBlaze.Samples.Motor#motor Name=Motor TargetSpeed=1000\n::\n";
+        WriteFile("Motors.md", content);
+        PausableBlobStorage? client = null;
+        var storage = CreateStorage();
+        storage.ClientDecorator = inner => client = new PausableBlobStorage(inner);
+        await storage.ConnectAsync(CancellationToken.None);
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Motors.md"]);
+        var motor = Assert.IsType<Samples.Motor>(markdown.Children["motor"]);
+        var writeReached = client!.PauseNext(nameof(FluentStorage.Blobs.IBlobStorage.WriteAsync));
+
+        // Act
+        motor.TargetSpeed = 1500;
+        var failedWrite = markdown.WriteConfigurationAsync(motor, CancellationToken.None);
+        await writeReached;
+        client.FailHangingCall(new IOException("The share is gone."));
+        var failure = await Record.ExceptionAsync(() => failedWrite);
+
+        // Assert
+        Assert.IsType<IOException>(failure);
+        Assert.Same(motor, markdown.Children["motor"]);
+        Assert.Equal(1000, motor.TargetSpeed);
+        Assert.Equal(content, markdown.Content);
+        Assert.Equal(content, ReadFile("Motors.md"));
+    }
+
     private const string PageWithActiveContent = """
         # Motors
 
@@ -373,67 +616,76 @@ public class MarkdownFileWriteTests : IDisposable
         Assert.Equal(content, ReadFile("Motors.md"));
     }
 
-    private const string PageWithUnnamedBlock = "# Motors\n\n:: HomeBlaze.Samples.Motor Name=Unnamed\n::\n\nAfter the motor.";
+    [Fact]
+    public async Task WhenTheNewTextIsNestedBeyondTheDepthLimit_ThenItIsRejected()
+    {
+        // Arrange
+        const string content = "# Motors\n\nText.";
+        WriteFile("Motors.md", content);
+        var storage = await ConnectAsync();
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Motors.md"]);
+
+        // Act & Assert
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => markdown.ReplaceTextAsync("Text.", new string('[', 4096), CancellationToken.None));
+        Assert.Equal(content, ReadFile("Motors.md"));
+    }
+
+    private const string PageWithUnnamedBlock ="# Motors\n\n:: HomeBlaze.Samples.Motor Name=Unnamed\n::\n\nAfter the motor.";
 
     [Theory]
     [InlineData("# Motors", "# Motors at {{ /Devices/Speed }}")]
     [InlineData("# Motors\n\n", "# Motors\n\nThe speed is {{ /Devices/Speed }}.\n\n")]
-    public async Task WhenAnExpressionIsAddedBeforeABlockWithoutAName_ThenItIsRejectedBecauseTheSubjectWouldStartAgain(string oldText, string newText)
+    public async Task WhenAnExpressionIsAddedBeforeABlockWithoutAName_ThenTheTextIsChangedAndTheSubjectStays(string oldText, string newText)
     {
         // Arrange
         WriteFile("Motors.md", PageWithUnnamedBlock);
         var storage = await ConnectAsync();
         var markdown = Assert.IsType<MarkdownFile>(storage.Children["Motors.md"]);
-
-        // Act & Assert
-        var exception = await Assert.ThrowsAsync<ArgumentException>(
-            () => markdown.ReplaceTextAsync(oldText, newText, CancellationToken.None));
-        Assert.StartsWith("The change adds or removes an expression, the first text, or text between two blocks before a block without a #name", exception.Message);
-        Assert.Equal(PageWithUnnamedBlock, ReadFile("Motors.md"));
-    }
-
-    [Theory]
-    [InlineData("#main", true)]
-    [InlineData("", false)]
-    public async Task WhenAnExpressionIsAddedBeforeACardWithAnUnnamedWidget_ThenOnlyAnUnnamedCardRefusesIt(string cardName, bool isAllowed)
-    {
-        // Arrange: the widget inside the card has no name, and its key counts from the content of the card.
-        var content = $"# Cards\n\n:: HomeBlaze.Components.Card{cardName} Title=Main\n::: HomeBlaze.Components.Widget Path=/Devices\n:::\n::\n";
-        WriteFile("Cards.md", content);
-        var storage = await ConnectAsync();
-        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Cards.md"]);
+        var motor = markdown.Children["Motor_0"];
 
         // Act
-        var exception = await Record.ExceptionAsync(
-            () => markdown.ReplaceTextAsync("# Cards", "# Cards at {{ /Devices/Speed }}", CancellationToken.None));
+        await markdown.ReplaceTextAsync(oldText, newText, CancellationToken.None);
 
         // Assert
-        if (isAllowed)
-        {
-            Assert.Null(exception);
-            Assert.Equal(content.Replace("# Cards", "# Cards at {{ /Devices/Speed }}"), ReadFile("Cards.md"));
-        }
-        else
-        {
-            Assert.StartsWith("The change adds or removes an expression", Assert.IsType<ArgumentException>(exception).Message);
-            Assert.Equal(content, ReadFile("Cards.md"));
-        }
+        Assert.Equal(PageWithUnnamedBlock.Replace(oldText, newText), ReadFile("Motors.md"));
+        Assert.Same(motor, markdown.Children["Motor_0"]);
     }
 
     [Fact]
-    public async Task WhenTheFirstTextIsAddedBeforeABlockWithoutAName_ThenItIsRejectedBecauseTheSubjectWouldStartAgain()
+    public async Task WhenAnExpressionIsAddedBeforeAnUnnamedCardWithAnUnnamedWidget_ThenBothKeepTheirSubjects()
+    {
+        // Arrange
+        const string content = "# Cards\n\n:: HomeBlaze.Components.Card Title=Main\n::: HomeBlaze.Components.Widget Path=/Devices\n:::\n::\n";
+        WriteFile("Cards.md", content);
+        var storage = await ConnectAsync();
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Cards.md"]);
+        var card = markdown.Children["Card_0"];
+
+        // Act
+        await markdown.ReplaceTextAsync("# Cards", "# Cards at {{ /Devices/Speed }}", CancellationToken.None);
+
+        // Assert
+        Assert.Equal(content.Replace("# Cards", "# Cards at {{ /Devices/Speed }}"), ReadFile("Cards.md"));
+        Assert.Same(card, markdown.Children["Card_0"]);
+    }
+
+    [Fact]
+    public async Task WhenTheFirstTextIsAddedBeforeABlockWithoutAName_ThenTheTextIsChangedAndTheSubjectStays()
     {
         // Arrange
         const string content = ":: HomeBlaze.Samples.Motor Name=Unnamed\n::\n\nAfter the motor.";
         WriteFile("Motors.md", content);
         var storage = await ConnectAsync();
         var markdown = Assert.IsType<MarkdownFile>(storage.Children["Motors.md"]);
+        var motor = markdown.Children["Motor_0"];
 
-        // Act & Assert
-        var exception = await Assert.ThrowsAsync<ArgumentException>(
-            () => markdown.ReplaceContentAsync("# Motors\n\n" + content, CancellationToken.None));
-        Assert.StartsWith("The change adds or removes an expression, the first text", exception.Message);
-        Assert.Equal(content, ReadFile("Motors.md"));
+        // Act
+        await markdown.ReplaceContentAsync("# Motors\n\n" + content, CancellationToken.None);
+
+        // Assert
+        Assert.Equal("# Motors\n\n" + content, ReadFile("Motors.md"));
+        Assert.Same(motor, markdown.Children["Motor_0"]);
     }
 
     [Theory]

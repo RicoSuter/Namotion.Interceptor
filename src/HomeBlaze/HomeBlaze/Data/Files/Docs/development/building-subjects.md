@@ -1220,9 +1220,16 @@ public bool IsEditing { get; set; }
 | Ignore | Read-only widget, no editing support | Status displays |
 | Hybrid | Simple fields inline, complex via dialog | Basic fields inline, advanced via dialog |
 
+The page next to the text editor of the Split mode gets `IsEditing` false and an `IsReadOnly` cascading parameter that is true, because it must not write the page under the unsaved text of the editor. A control that writes disables itself on either, as the control widgets that ship do:
+
+```csharp
+[CascadingParameter(Name = "IsReadOnly")]
+public bool IsReadOnly { get; set; }
+```
+
 ### Auto Edit Button
 
-In the Inline and Split modes of a page, a click on a widget selects it, and the host shows a bar with its actions above the top right corner of the widget. Every widget block of a page that shows something can be selected. A block that shows nothing, such as a `ValueMap`, is hidden while the page is edited inline and is edited in the [page editor](../administration/pages.md#editing-in-the-page-editor). When the widget has an Edit component or configuration properties, the bar has an edit button. A widget without either, such as a `ValueList`, gets only the outline, and the bar when it has a parent to select:
+In the Inline mode of a page, a click on a widget selects it, and the host shows a bar with its actions above the top right corner of the widget. Every widget block of a page can be selected. A block that shows nothing, such as a `ValueMap`, is a chip where its block stands while the page is edited inline, and shows its case list once selected. In the Split mode, the page next to the editor cannot be operated, and a click on a widget shows its block in the editor instead. The bar shows the actions that apply, in this order: Select parent, Move up, Move down, Add, Edit and Delete. Add is one "+" that adds a widget or text to each slot of the block that takes page content and an item to each list slot of configured items, with a menu when it offers more than one entry. Move, Add and Delete are there for a block of a markdown page in the Inline mode. Edit is there when the widget has an Edit component or configuration properties, so a widget without either, such as a `ValueList`, gets no Edit button. A double click on the widget opens the same edit dialog. A block of text of a markdown page can be selected as well: its outline and its bar have the success color of the theme instead of the primary color, and its Edit opens the dialog that edits its Markdown. Content of a page that cannot be edited inline, such as raw HTML, has only Edit in Source, which opens its lines in the page editor.
 
 - Clicking it opens the `SubjectEditDialog` with the Edit component, or with the generated properties editor without one
 - A widget inside another one has an arrow up button that selects the widget around it, and Escape or a click on the page clears the selection

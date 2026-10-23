@@ -1,5 +1,6 @@
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(ValueList))]
 @implements ISubjectComponent
+@inherits SelectionContainingWidgetBase
 @inject SubjectPathResolver PathResolver
 @inject ITimeZoneDisplay TimeZone
 
@@ -26,11 +27,36 @@
     {
         var row = rows[index];
         var (path, reading, icon) = items[index];
-        <ValueListRow @key="row" Row="@row" Path="@path" Reading="@reading" Icon="@icon" AnyIcon="@anyIcon" />
+        if (IsEditing && Selection is not null)
+        {
+            @* A row is selectable only while the list or one of its rows is selected, so that the first click on the list
+               selects the list. It stays mounted when that changes, so that a selected widget in its content stays selected. *@
+            <SubjectComponent @key="row"
+                              Subject="@row"
+                              Type="SubjectComponentType.Widget"
+                              IsSelectionEnabled="@ContainsSelection"
+                              AdditionalParameters="@(new Dictionary<string, object?> { ["Path"] = path, ["Reading"] = reading, ["Icon"] = icon, ["AnyIcon"] = anyIcon })" />
+        }
+        else
+        {
+            <ValueListRow @key="row" Row="@row" Path="@path" Reading="@reading" Icon="@icon" AnyIcon="@anyIcon" />
+        }
     }
 </MudList>
+@if (ContainsSelection && StructureEditor is { } editor && Subject is ValueList list && PageAddTarget.Find(editor.GetAddTargets(list), "Value") is { } target)
+{
+    @* Shown while the list or one of its rows is selected, and it takes the pointer in both cases. *@
+    <MudButton Size="Size.Small"
+               StartIcon="@Icons.Material.Filled.Add"
+               Class="edit-mode-interactive"
+               OnClick="@(() => editor.AddListItemAsync(list, target))"
+               data-testid="add-value-button">Add value</MudButton>
+}
 
 @code {
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
+
+    [CascadingParameter]
+    public PageStructureEditor? StructureEditor { get; set; }
 }

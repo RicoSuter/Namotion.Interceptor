@@ -772,6 +772,110 @@ public class MarkdownSegmentBuilderTests
         Assert.Contains("<code>Subtitle</code>", html);
     }
 
+    [Fact]
+    public void WhenTextBlocksAreMarked_ThenEachStartsAnHtmlSegmentWithItsLines()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("# Title\n\nFirst {{ a/B }} paragraph.\n\n:: Demo.Card\nInside.\n::\n");
+
+        // Act
+        var segments = MarkdownSegmentBuilder.Build(page, linkRewriter: null, markTextBlocks: true);
+
+        // Assert
+        var starts = segments.OfType<HtmlMarkdownSegment>().Where(segment => segment.TextBlock is not null).ToList();
+        Assert.Equal([1, 3], starts.Select(segment => segment.TextBlock!.Line));
+        Assert.StartsWith("<h1", starts[0].Html);
+        Assert.StartsWith("<p>First ", starts[1].Html.TrimStart());
+        var all = segments.ToList();
+        Assert.IsType<ExpressionMarkdownSegment>(all[all.IndexOf(starts[1]) + 1]);
+        var inside = segments.OfType<BlockMarkdownSegment>().Single().Content
+            .OfType<HtmlMarkdownSegment>().Single(segment => segment.TextBlock is not null);
+        Assert.Same(page.Blocks[0], inside.TextBlock!.Owner);
+        Assert.Contains("Inside.", inside.Html);
+    }
+
+    [Fact]
+    public void WhenTextBlocksAreMarkedAndAListItemHoldsAWidgetWithABlockInside_ThenTheListStartsATextSegment()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("- item\n\n  :: Demo.Card\n  ::: Demo.One\n  :::\n  ::\n\nAfter.\n");
+
+        // Act
+        var segments = MarkdownSegmentBuilder.Build(page, linkRewriter: null, markTextBlocks: true);
+
+        // Assert
+        var starts = segments.OfType<HtmlMarkdownSegment>().Where(segment => segment.TextBlock is not null).ToList();
+        Assert.Equal([(1, false), (8, true)], starts.Select(segment => (segment.TextBlock!.Line, segment.TextBlock.IsEditable)));
+    }
+
+    [Fact]
+    public void WhenThePageHasACommentShapedLikeATextMarker_ThenItStaysInTheHtmlAndStartsNoTextBlock()
+    {
+        // Arrange: the comment names the index of the last text block, but not the token of the build.
+        var page = MarkdownPageParser.Parse("<!--TEXT:00000000000000000000000000000000:1-->\n\nText.\n\n:: Demo.Card\n::\n\nAfter.\n");
+
+        // Act
+        var segments = MarkdownSegmentBuilder.Build(page, linkRewriter: null, markTextBlocks: true);
+
+        // Assert
+        var starts = segments.OfType<HtmlMarkdownSegment>().Where(segment => segment.TextBlock is not null).ToList();
+        Assert.Equal([1, 3, 8], starts.Select(segment => segment.TextBlock!.Line));
+        Assert.Equal("<!--TEXT:00000000000000000000000000000000:1-->\n", starts[0].Html);
+        Assert.Contains("Text.", starts[1].Html);
+        Assert.Contains("After.", starts[2].Html);
+    }
+
+    [Fact]
+    public void WhenTextBlocksStartRightBeforeAnotherMarker_ThenEachStartsAnEmptySegment()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("One.\n\nTwo.\n");
+        var textBlocks = MarkdownTextBlocks.Find(page);
+        const string token = "0123456789abcdef0123456789abcdef";
+
+        // Act: the first marker is right before another, the second right before an expression.
+        var segments = MarkdownSegmentBuilder.Split(
+            $"<!--TEXT:{token}:0--><!--TEXT:{token}:1-->{{{{ a/B }}}}<p>x</p>", page, token, [], textBlocks);
+
+        // Assert
+        Assert.Equal(4, segments.Count);
+        Assert.Equal(new HtmlMarkdownSegment(string.Empty) { TextBlock = textBlocks[0] }, segments[0]);
+        Assert.Equal(new HtmlMarkdownSegment(string.Empty) { TextBlock = textBlocks[1] }, segments[1]);
+        Assert.IsType<ExpressionMarkdownSegment>(segments[2]);
+        Assert.Equal(new HtmlMarkdownSegment("<p>x</p>"), segments[3]);
+    }
+
+    [Fact]
+    public void WhenTheLastTextBlockStartsAtTheEndOfTheHtml_ThenItStartsAnEmptySegment()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("One.\n");
+        var textBlocks = MarkdownTextBlocks.Find(page);
+        const string token = "0123456789abcdef0123456789abcdef";
+
+        // Act
+        var segments = MarkdownSegmentBuilder.Split($"<p>x</p><!--TEXT:{token}:0-->", page, token, [], textBlocks);
+
+        // Assert
+        Assert.Equal(
+            [new HtmlMarkdownSegment("<p>x</p>"), new HtmlMarkdownSegment(string.Empty) { TextBlock = textBlocks[0] }],
+            segments);
+    }
+
+    [Fact]
+    public void WhenTheHtmlIsSplitWithoutTextBlocks_ThenATextMarkerWithTheTokenStaysInTheHtml()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("One.\n");
+        const string token = "0123456789abcdef0123456789abcdef";
+
+        // Act
+        var segments = MarkdownSegmentBuilder.Split($"<!--TEXT:{token}:0--><p>One.</p>", page, token, []);
+
+        // Assert
+        Assert.Equal(new HtmlMarkdownSegment($"<!--TEXT:{token}:0--><p>One.</p>"), Assert.Single(segments));
+    }
+
     [Theory]
     [InlineData("Power {{ a==1 or b==2 }} now", "a==1 or b==2")]
     [InlineData("Power {{ a < 5 }} now", "a < 5")]

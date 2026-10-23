@@ -19,7 +19,7 @@
         tileLabel = ValueReader.MissingText;
     }
     var tooltip = method is null ? Path : method.Description;
-    var isDisabled = IsEditing || _isRunning || !isEnabled;
+    var isDisabled = IsEditing || IsReadOnly || _isRunning || !isEnabled;
 }
 
 @if (Kind == OperationButtonKind.Tile)
@@ -112,6 +112,10 @@ else
 
     [CascadingParameter(Name = "IsEditing")]
     public bool IsEditing { get; set; }
+
+    /// <summary>Whether the page is shown without being operated, as in the preview next to the editor of a page.</summary>
+    [CascadingParameter(Name = "IsReadOnly")]
+    public bool IsReadOnly { get; set; }
 
     protected override void OnInitialized()
     {

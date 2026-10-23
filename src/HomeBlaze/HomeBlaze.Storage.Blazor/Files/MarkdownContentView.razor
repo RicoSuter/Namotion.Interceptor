@@ -3,46 +3,145 @@
 @using HomeBlaze.Components
 @using HomeBlaze.Components.Abstractions.Attributes
 @using HomeBlaze.Components.Abstractions.TimeZones
+@using HomeBlaze.Components.Components
 @using HomeBlaze.Storage.Internal
 @using Namotion.Interceptor
 @inject ITimeZoneDisplay TimeZone
+@implements IDisposable
 
-@foreach (var segment in GetRenderSegments())
+@{
+    var showsInsertLines = ShowsInsertLines();
+    var contentName = showsInsertLines ? GetContentName() : null;
+    var segments = GetRenderSegments(groupsText: IsGroupingText());
+    var position = 0;
+    var followsHiddenContent = false;
+}
+@if (showsInsertLines && segments.Count == 0)
 {
-    @if (segment.Html != null)
+    @* Empty content, such as a new item of a list, has a box to fill in place of its two lines, which would take no room. A
+       double click on the box must not open the edit dialog of the widget around it. *@
+    <div class="content-placeholder edit-mode-interactive" data-testid="content-placeholder" @ondblclick:stopPropagation="true">
+        <BlockInsertLine Label="@($"Insert into {contentName}")"
+                         OnInsertWidget="@(() => StructureEditor!.InsertWidgetAsync(Content!, null))"
+                         OnInsertText="@GetInsertTextCallback(null)" />
+    </div>
+}
+else
+{
+    foreach (var segment in segments)
     {
-        @((MarkupString)segment.Html)
+        @* Content that shows nothing, such as an HTML comment, has no line after it, which would stand where the line before
+           it stands, so that new content never goes between a comment and the block that it names. *@
+        var item = segment.Widget ?? segment.Start;
+        var isAfterHiddenContent = followsHiddenContent;
+        if (item is not null)
+        {
+            followsHiddenContent = segment.Start?.Start == HtmlSegmentStart.Other;
+        }
+
+        @if (showsInsertLines && item is not null && !isAfterHiddenContent)
+        {
+            position++;
+            <BlockInsertLine Label="@($"Insert at position {position} of {contentName}")"
+                             OnInsertWidget="@(() => StructureEditor!.InsertWidgetAsync(Content!, item))"
+                             OnInsertText="@GetInsertTextCallback(item)" />
+        }
+
+        @if (segment.Widget is not null)
+        {
+            @* Keyed, so that the state of a component stays with its subject when a reload inserts or removes a block. *@
+            <SubjectComponent @key="segment.Widget" Subject="@segment.Widget" Type="SubjectComponentType.Widget" />
+        }
+        else if (segment.Start is { Start: HtmlSegmentStart.Text or HtmlSegmentStart.Source } text)
+        {
+            @* A block of text is selectable like a row of a selected list: once its content is at the selection. So is content
+               that cannot be edited as text but shows something, which is edited in the source. *@
+            <SubjectComponent @key="text"
+                              Subject="@text"
+                              Type="SubjectComponentType.Widget"
+                              IsSelectionEnabled="@_isAtSelection"
+                              AdditionalParameters="@GetTextParameters(text, segment.Html!)" />
+        }
+        else if (segment.Html is not null)
+        {
+            @((MarkupString)segment.Html)
+        }
     }
-    else if (segment.Widget != null)
+
+    if (showsInsertLines && !followsHiddenContent)
     {
-        @* Keyed, so that the state of a component stays with its subject when a reload inserts or removes a block. *@
-        <SubjectComponent @key="segment.Widget" Subject="@segment.Widget" Type="SubjectComponentType.Widget" />
+        <BlockInsertLine Label="@($"Insert at the end of {contentName}")"
+                         OnInsertWidget="@(() => StructureEditor!.InsertWidgetAsync(Content!, null))"
+                         OnInsertText="@GetInsertTextCallback(null)" />
     }
 }
 
 @code {
+    /// <summary>The page or the fragment whose segments these are, into which new blocks are inserted.</summary>
+    [Parameter]
+    public IInterceptorSubject? Content { get; set; }
+
     /// <summary>
     /// The segments of a page or of a fragment, in order.
     /// </summary>
     [Parameter]
     public IDictionary<string, IInterceptorSubject>? Children { get; set; }
 
-    private record RenderSegment(string? Html, IInterceptorSubject? Widget);
+    [CascadingParameter(Name = "IsEditing")]
+    public bool IsEditing { get; set; }
 
-    // Runs on every render and keeps nothing: the values of expressions are read here so that the render
-    // records them, and a reload replaces the dictionary and its subjects.
-    private List<RenderSegment> GetRenderSegments()
+    [CascadingParameter]
+    public WidgetSelection? Selection { get; set; }
+
+    [CascadingParameter]
+    public PageStructureEditor? StructureEditor { get; set; }
+
+    [CascadingParameter(Name = "ParentSubjectComponent")]
+    public SubjectComponent? Owner { get; set; }
+
+    // The content of a grid cell or a canvas node, which must stay the only block of its place to fill it.
+    [CascadingParameter(Name = "PlaceContent")]
+    private IInterceptorSubject? PlaceContent { get; set; }
+
+    // Cascaded to the preview next to the editor, where a click on a block of text reveals its lines in the editor.
+    [CascadingParameter]
+    private ISubjectRevealTarget? Revealer { get; set; }
+
+    private WidgetSelection? _subscribedSelection;
+    private bool _isAtSelection;
+
+    // The parameters of the widget of each block of text, kept while its markup stays the same, so that a render for another
+    // block, such as one for the change of an expression, renders that widget again only when its own markup changed. A
+    // reload replaces the children and all their segments, and with them these.
+    private Dictionary<HtmlSegment, Dictionary<string, object?>>? _textParameters;
+    private IDictionary<string, IInterceptorSubject>? _textParametersChildren;
+
+    // Html is the markup of a stretch of HTML and expressions; Start is the segment that starts it as a text block or other
+    // content, when the content groups its text; Widget is a block.
+    private record RenderSegment(string? Html, IInterceptorSubject? Widget, HtmlSegment? Start = null);
+
+    // Runs on every render and keeps nothing: the values of expressions are read here so that the render records them, and
+    // a reload replaces the dictionary and its subjects. Without grouping, as on a viewed page, the HTML and the expressions
+    // between two widgets are one piece of markup, so that an expression can sit inside an HTML attribute.
+    private List<RenderSegment> GetRenderSegments(bool groupsText)
     {
         var result = new List<RenderSegment>();
         if (Children is null)
             return result;
 
         StringBuilder? builder = null;
+        HtmlSegment? start = null;
 
         foreach (var child in Children.Values)
         {
             if (child is HtmlSegment html)
             {
+                if (groupsText && html.Start != HtmlSegmentStart.None)
+                {
+                    AddMarkup(result, builder, start);
+                    start = html;
+                }
+
                 builder ??= new StringBuilder();
                 builder.Append(html.Html);
             }
@@ -62,23 +161,136 @@
             }
             else
             {
-                // HTML and expressions are joined into one markup string so that an
-                // expression can sit inside an HTML attribute.
-                if (builder is { Length: > 0 })
-                {
-                    result.Add(new RenderSegment(builder.ToString(), null));
-                    builder.Clear();
-                }
-
+                AddMarkup(result, builder, start);
+                start = null;
                 result.Add(new RenderSegment(null, child));
             }
         }
 
-        if (builder is { Length: > 0 })
-        {
-            result.Add(new RenderSegment(builder.ToString(), null));
-        }
-
+        AddMarkup(result, builder, start);
         return result;
     }
+
+    private Dictionary<string, object?> GetTextParameters(HtmlSegment segment, string html)
+    {
+        if (!ReferenceEquals(_textParametersChildren, Children))
+        {
+            _textParameters?.Clear();
+            _textParametersChildren = Children;
+        }
+
+        _textParameters ??= [];
+        if (_textParameters.TryGetValue(segment, out var parameters) && string.Equals((string?)parameters[ITextBlockWidget.HtmlParameterName], html, StringComparison.Ordinal))
+        {
+            return parameters;
+        }
+
+        parameters = new Dictionary<string, object?> { [ITextBlockWidget.HtmlParameterName] = html };
+        if (segment.Kind is { } kind)
+        {
+            parameters[ITextBlockWidget.KindParameterName] = kind;
+        }
+
+        _textParameters[segment] = parameters;
+        return parameters;
+    }
+
+    // Adds the markup collected so far and empties the builder.
+    private static void AddMarkup(List<RenderSegment> result, StringBuilder? builder, HtmlSegment? start)
+    {
+        if (builder is { Length: > 0 } || start is not null)
+        {
+            result.Add(new RenderSegment(builder?.ToString() ?? string.Empty, null, start));
+            builder?.Clear();
+        }
+    }
+
+    // Text is a block of its own where it is selectable, in Inline mode, and in the preview next to the editor, where a click
+    // reveals it. The content of a place keeps its text as a viewed page does.
+    private bool IsGroupingText() => (Revealer is not null || (IsEditing && Selection is not null && StructureEditor is not null)) && IsBlockContent;
+
+    private bool IsEditableContent => StructureEditor is not null && IsBlockContent;
+
+    private bool IsBlockContent => Content is not null && !ReferenceEquals(Content, PlaceContent);
+
+    protected override void OnParametersSet()
+    {
+        // The lines follow the selection, which changes without new parameters.
+        var selection = StructureEditor is not null ? Selection : null;
+        if (!ReferenceEquals(selection, _subscribedSelection))
+        {
+            Unsubscribe();
+            _subscribedSelection = selection;
+            if (selection is not null)
+            {
+                selection.Changed += OnSelectionChanged;
+            }
+        }
+    }
+
+    private void OnSelectionChanged() => _ = UpdateAfterSelectionChangedAsync();
+
+    private async Task UpdateAfterSelectionChangedAsync()
+    {
+        // The change also changes which widgets can be selected, such as the rows of a selected list, and they learn it
+        // only with the render that follows it. The yield posts the rest after that render.
+        await Task.Yield();
+        if (_subscribedSelection is null)
+        {
+            return;
+        }
+
+        // Every content of the page is notified, and only one whose lines show or hide renders again.
+        var isAtSelection = IsAtSelection();
+        if (isAtSelection != _isAtSelection)
+        {
+            _isAtSelection = isAtSelection;
+            StateHasChanged();
+        }
+    }
+
+    // The content is at the selection when it is the page and nothing is selected, or when it is the content of
+    // the selected widget or the content that holds the selected widget directly.
+    private bool IsAtSelection()
+    {
+        if (!IsEditableContent)
+        {
+            return false;
+        }
+
+        var contentOwner = Owner?.GetSelectableSelfOrAncestor();
+        var selected = Selection?.Selected;
+        return selected is null
+            ? contentOwner is null
+            : ReferenceEquals(selected, contentOwner) || ReferenceEquals(selected.SelectableAncestor, contentOwner);
+    }
+
+    // Runs once per render and remembers where the selection was for OnSelectionChanged. The editor is asked last, because
+    // whether the content belongs to the page is a scan of its blocks.
+    private bool ShowsInsertLines()
+    {
+        _isAtSelection = IsAtSelection();
+        return _isAtSelection && StructureEditor!.CanInsertInto(Content!);
+    }
+
+    // No text item where the block before the line has no closing line, which would take the text.
+    private EventCallback GetInsertTextCallback(IInterceptorSubject? before) =>
+        StructureEditor!.CanInsertText(Content!, before)
+            ? EventCallback.Factory.Create(this, () => StructureEditor!.InsertTextAsync(Content!, before))
+            : default;
+
+    // The name of the content in the names of its insert lines: the name of the widget it belongs to, or the page.
+    private string GetContentName() =>
+        Owner?.GetSelectableSelfOrAncestor() is { } owner ? owner.GetAccessibleName() : "the page";
+
+    private void Unsubscribe()
+    {
+        if (_subscribedSelection is not null)
+        {
+            _subscribedSelection.Changed -= OnSelectionChanged;
+            _subscribedSelection = null;
+        }
+    }
+
+    public void Dispose() => Unsubscribe();
 }

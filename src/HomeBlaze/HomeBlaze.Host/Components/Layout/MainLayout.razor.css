@@ -37,13 +37,25 @@
     color: var(--mud-palette-primary-lighten);
 }
 
-/* The selection of a widget in edit mode: the dark primary is below 3:1 on cards for its outline and its Edit action. */
-.homeblaze-dark-mode ::deep .subject-component-wrapper.selectable.selected {
-    outline-color: var(--mud-palette-primary-lighten);
+/* The selection of a widget in edit mode, of a block of text, and the border of the bar of either take the colors that
+   SubjectComponent.razor.css of HomeBlaze.Components sets on the widget (see the bar below, which is outside the widget).
+   The dark primary and success tones are below 3:1 on cards for the selected outline, the border of the bar and the Edit
+   and move actions. Each rule is more specific than the rule of the light mode that it replaces, so that it wins in
+   whatever order the stylesheets load. */
+.homeblaze-dark-mode ::deep :is(.subject-component-wrapper.selectable, .subject-action-bar) {
+    --subject-selection-strong: var(--mud-palette-primary-lighten);
+}
+
+.homeblaze-dark-mode ::deep :is(.subject-component-wrapper.selectable.text-block, .subject-action-bar.text-block-bar) {
+    --subject-selection-strong: var(--mud-palette-success-lighten);
 }
 
 .homeblaze-dark-mode ::deep .subject-action-bar .mud-primary-text {
     color: var(--mud-palette-primary-lighten) !important;
+}
+
+.homeblaze-dark-mode ::deep .subject-action-bar .mud-success-text {
+    color: var(--mud-palette-success-lighten) !important;
 }
 
 /* The bar with the actions of the selected widget is a popover, which MudBlazor renders in the provider above and not
@@ -52,13 +64,19 @@
    overflowPadding) below the top of the window down to that line while the anchor starts inside the window, so an
    unflipped bar can end up on the top edge of its widget. */
 ::deep .subject-action-bar {
+    --subject-selection-strong: var(--mud-palette-primary);
     margin-top: calc(var(--mud-appbar-height, 64px) - 4px);
     /* MudBlazor lifts a popover that comes close to the app bar above it. The bar stays below the app bar like the page. */
     z-index: calc(var(--mud-zindex-popover) + 1) !important;
+    border: 1px solid var(--subject-selection-strong);
+}
+
+::deep .subject-action-bar.text-block-bar {
+    --subject-selection-strong: var(--mud-palette-success);
 }
 
 ::deep .subject-action-bar[data-mudpopover-flip^="bottom"] {
-    margin-top: 4px;
+    margin-top: calc(4px + 1rem);
 }
 
 /* The menu button at the end of the app bar lines up with the edge like the drawer toggle at the start. */

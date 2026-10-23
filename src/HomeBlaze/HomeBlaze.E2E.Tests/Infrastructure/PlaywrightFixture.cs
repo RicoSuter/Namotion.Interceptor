@@ -17,6 +17,9 @@ namespace HomeBlaze.E2E.Tests.Infrastructure;
 /// </summary>
 public class PlaywrightFixture : IAsyncLifetime
 {
+    // The default timeout of AsyncTestHelpers.WaitUntilAsync, which the polls of the files use.
+    private static readonly TimeSpan ReadTimeout = TimeSpan.FromSeconds(30);
+
     private IPlaywright? _playwright;
     private IBrowser? _browser;
     private WebTestingHostFactory<App>? _factory;
@@ -216,13 +219,13 @@ public class PlaywrightFixture : IAsyncLifetime
         => Path.Combine(ServerServices.GetRequiredService<RootManager>().DataDirectory, "TestData", relativePath);
 
     /// <summary>
-    /// Reads a file that the server may hold open, such as a page that it is loading again after a write.
+    /// Reads a file of the storage of the server between the writes of the server, so that the read cannot fail one.
     /// </summary>
     public async Task<string> ReadFileAsync(string path)
     {
         var content = string.Empty;
         await RetryWhileFileIsHeldAsync(
-            () => content = File.ReadAllText(path),
+            () => content = ReadBetweenWritesOfServer(path),
             $"The file {path} could not be read");
         return content;
     }
@@ -252,12 +255,34 @@ public class PlaywrightFixture : IAsyncLifetime
         return text;
     }
 
-    // The server holds the file open while it reads it again after a write, and the poll tries a failed read again.
-    private static bool TryReadFile(string path, out string text)
+    // On the worker of the storage, which runs every write of the server. The server creates a file without sharing,
+    // and on Unix as well that fails while the file is open for reading, so a read beside a write would fail the write.
+    private string ReadBetweenWritesOfServer(string path)
+    {
+        var connection = GetRoot().Connection;
+        var text = string.Empty;
+
+        // Limited like the polls, so that a worker that hangs fails the test instead of holding it. Run on the thread
+        // pool for the reason given in WriteDemoPageAsync.
+        using var cancellation = new CancellationTokenSource(ReadTimeout);
+        Task.Run(() => FluentStorageContainer.RunOperationAsync(
+            connection,
+            _ =>
+            {
+                text = File.ReadAllText(path);
+                return Task.CompletedTask;
+            },
+            cancellation.Token)).GetAwaiter().GetResult();
+
+        return text;
+    }
+
+    // A write that the storage gave up on can still hold the file, and the poll tries a failed read again.
+    private bool TryReadFile(string path, out string text)
     {
         try
         {
-            text = File.ReadAllText(path);
+            text = ReadBetweenWritesOfServer(path);
             return true;
         }
         catch (IOException)

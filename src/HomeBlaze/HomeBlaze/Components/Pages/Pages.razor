@@ -13,11 +13,13 @@
 
 @inherits HomeBlazorComponentBase
 @implements IAsyncDisposable
+@implements ISubjectRevealTarget
 
 @inject SubjectComponentRegistry ComponentRegistry
 @inject SubjectPathResolver PathResolver
 @inject HotKeys HotKeys
 @inject IJSRuntime JsRuntime
+@inject PageEditModeChoice EditModeChoice
 @inject ITimeZoneDisplay TimeZone
 
 <PageTitle>@_title - HomeBlaze</PageTitle>
@@ -53,10 +55,23 @@ else
                              EnableSlide="true"
                              OnDoubleClicked="ResetSplitDimension">
                     <StartContent>
-                        <div class="page-split-preview" style="width: 100%; height: 100%; overflow-y: auto;" @onclick="ClearSelectionCallback">
-                            <SubjectComponent @key="_componentKey"
-                                              Subject="@_subject"
-                                              Type="SubjectComponentType.Page"/>
+                        <div class="page-split-preview" style="width: 100%; height: 100%; overflow-y: auto;">
+                            @* The preview shows the saved page and never writes it, so that it cannot overwrite the
+                               unsaved text of the editor. Its content is inert, so that neither the pointer nor the
+                               keyboard reaches a control of any widget. Pages.razor.js passes a click on the preview to
+                               the widget under the pointer, which reveals its block in the editor. The controls that read
+                               IsReadOnly disable themselves as well. *@
+                            <div class="page-split-preview-content" style="height: 100%;" inert>
+                                <CascadingValue Value="false" Name="IsEditing">
+                                    <CascadingValue Value="true" Name="IsReadOnly" IsFixed="true">
+                                        <CascadingValue Value="@((ISubjectRevealTarget)this)" IsFixed="true">
+                                            <SubjectComponent @key="_componentKey"
+                                                              Subject="@_subject"
+                                                              Type="SubjectComponentType.Page"/>
+                                        </CascadingValue>
+                                    </CascadingValue>
+                                </CascadingValue>
+                            </div>
                         </div>
                     </StartContent>
                     <EndContent>
@@ -71,7 +86,7 @@ else
                                     <span data-testid="save-button">
                                         <MudButton Color="Color.Primary"
                                                    OnClick="OnSaveClicked"
-                                                   Disabled="@(!_isEditPanelValid)">Save (Ctrl+S)</MudButton>
+                                                   Disabled="@(!_isEditPanelValid)">Save (@_saveShortcut)</MudButton>
                                     </span>
                                 </div>
                             </div>
@@ -93,7 +108,7 @@ else
                         <span data-testid="save-button">
                             <MudButton Color="Color.Primary"
                                        OnClick="OnSaveClicked"
-                                       Disabled="@(!_isEditPanelValid)">Save (Ctrl+S)</MudButton>
+                                       Disabled="@(!_isEditPanelValid)">Save (@_saveShortcut)</MudButton>
                         </span>
                     </div>
                 </div>
@@ -106,9 +121,11 @@ else
                area reaches down to the bottom of the window, so that a short page still has empty space to click; the 160px
                cover the app bar and the paddings of the layout, so that the area alone does not make the page scroll. *@
             <div style="@(IsEditing ? "min-height: calc(100vh - 160px);" : null)" @onclick="ClearSelectionCallback">
-                <SubjectComponent @key="_componentKey"
-                                  Subject="@_subject"
-                                  Type="SubjectComponentType.Page"/>
+                <CascadingValue Value="@((ISubjectRevealTarget)this)" Name="@ISubjectRevealTarget.SourceEditorName" IsFixed="true">
+                    <SubjectComponent @key="_componentKey"
+                                      Subject="@_subject"
+                                      Type="SubjectComponentType.Page"/>
+                </CascadingValue>
             </div>
         }
     </CascadingValue>
@@ -116,6 +133,11 @@ else
 }
 
 <style>
+    /* Set by Pages.razor.js while the pointer is over a widget of the preview that a click reveals. */
+    .page-split-preview.reveal-hover {
+        cursor: pointer;
+    }
+
     .page-head-content {
         display: flex;
         align-items: center;
@@ -180,6 +202,9 @@ else
 
     private HotKeysContext? _hotKeysContext;
 
+    // The label of the save shortcut, which a Mac reads from its Command key once the page knows the platform.
+    private string _saveShortcut = "Ctrl+S";
+
     private readonly WidgetSelection _widgetSelection = new();
 
     private const string ModulePath = "./Components/Pages/Pages.razor.js";
@@ -201,13 +226,8 @@ else
 
     private volatile bool _isDisposed;
 
-    private enum PageEditMode
-    {
-        View, // Read-only rendered page
-        Split, // Page on left, Monaco editor on right
-        Source, // Full Monaco editor only
-        Inline // View with inline editing on widgets
-    }
+    // The subject that "Edit in Source" shows once the edit panel of the Split mode it switched to is ready.
+    private IInterceptorSubject? _pendingReveal;
 
     private bool IsEditing => _editMode != PageEditMode.View;
     private bool ShowEditor => _editMode is PageEditMode.Split or PageEditMode.Source;
@@ -230,14 +250,46 @@ else
         _clearSelectionCallback = EventCallback.Factory.Create<MouseEventArgs>(_widgetSelection, _widgetSelection.Clear);
     }
 
+    /// <summary>
+    /// Shows the block of the subject in the source editor of the Split mode and returns whether it found it. In Inline mode
+    /// it switches to the Split mode first and shows the block once the editor is ready.
+    /// </summary>
+    public Task<bool> RevealAsync(IInterceptorSubject subject)
+    {
+        if (_editMode == PageEditMode.Inline)
+        {
+            SetEditMode(PageEditMode.Split);
+            _pendingReveal = subject;
+            StateHasChanged();
+            return Task.FromResult(true);
+        }
+
+        return _editPanel?.EditComponent is ISubjectRevealTarget target ? target.RevealAsync(subject) : Task.FromResult(false);
+    }
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender)
         {
             _hotKeysContext = HotKeys.CreateContext()
-                .Add(ModCode.Ctrl, Code.S, OnCtrlS, exclude: Exclude.None)
+                .Add(ModCode.Ctrl, Code.S, OnSaveShortcut, exclude: Exclude.None)
+                .Add(ModCode.Meta, Code.S, OnSaveShortcut, exclude: Exclude.None)
                 // Escape in a dialog belongs to the dialog, and the widget that the dialog edits stays selected.
                 .Add(Code.Escape, OnEscape, new HotKeyOptions { ExcludeSelector = ".mud-dialog-container, .mud-dialog-container *" });
+
+            try
+            {
+                _module ??= await JsRuntime.InvokeAsync<IJSObjectReference>("import", ModulePath);
+                if (await _module.InvokeAsync<bool>("isApplePlatform"))
+                {
+                    _saveShortcut = "Cmd+S";
+                    StateHasChanged();
+                }
+            }
+            catch (Exception exception) when (exception is JSDisconnectedException or JSException or TaskCanceledException)
+            {
+                // The circuit is gone, or the page was left while the call ran.
+            }
         }
 
         PageEditMode? mode = ShowEditor ? _editMode : null;
@@ -270,6 +322,11 @@ else
             if (editorBar is { } bar)
             {
                 _module ??= await JsRuntime.InvokeAsync<IJSObjectReference>("import", ModulePath);
+                if (mode == PageEditMode.Split)
+                {
+                    await _module.InvokeVoidAsync("forwardPreviewPointer");
+                }
+
                 _pageHeadFit = await _module.InvokeAsync<IJSObjectReference>("fitToEditorBar", _pageHeadContent, bar);
             }
         }
@@ -282,7 +339,7 @@ else
     protected override void OnParametersSet()
     {
         LoadSubject();
-        SetEditMode(PageEditMode.View);
+        SetEditMode(GetStartMode());
     }
 
     private void LoadSubject()
@@ -316,6 +373,15 @@ else
         return hasEditComponent || _subject.HasConfigurationProperties();
     }
 
+    private PageEditMode GetStartMode() =>
+        EditModeChoice.Mode != PageEditMode.View && CanEdit() ? EditModeChoice.Mode : PageEditMode.View;
+
+    private void ChooseEditMode(PageEditMode mode)
+    {
+        EditModeChoice.Mode = mode;
+        SetEditMode(mode);
+    }
+
     private void SetEditMode(PageEditMode mode)
     {
         if (mode == _editMode)
@@ -324,6 +390,7 @@ else
         }
 
         _editMode = mode;
+        _pendingReveal = null;
         _widgetSelection.Clear();
 
         // Every mode with an editor has an edit panel of its own, which reports its validity once it is ready.
@@ -339,12 +406,17 @@ else
         _widgetSelection.Clear();
     }
 
-    private void OnEditPanelIsValidChanged(bool isValid)
+    private async Task OnEditPanelIsValidChanged(bool isValid)
     {
         _isEditPanelValid = isValid;
+        if (_pendingReveal is { } subject && _editPanel?.EditComponent is ISubjectRevealTarget target)
+        {
+            _pendingReveal = null;
+            await target.RevealAsync(subject);
+        }
     }
 
-    private async Task OnCtrlS()
+    private async Task OnSaveShortcut()
     {
         if (!ShowEditor || _editPanel is not { } editPanel)
         {
@@ -418,22 +490,22 @@ else
             <MudDivider />
             <MudMenuItem Icon="@Icons.Material.Filled.Visibility"
                          IconColor="@(_editMode == PageEditMode.View ? Color.Primary : Color.Default)"
-                         OnClick="@(() => SetEditMode(PageEditMode.View))">
+                         OnClick="@(() => ChooseEditMode(PageEditMode.View))">
                 View
             </MudMenuItem>
             <MudMenuItem Icon="@Icons.Material.Filled.VerticalSplit"
                          IconColor="@(_editMode == PageEditMode.Split ? Color.Primary : Color.Default)"
-                         OnClick="@(() => SetEditMode(PageEditMode.Split))">
+                         OnClick="@(() => ChooseEditMode(PageEditMode.Split))">
                 Split
             </MudMenuItem>
             <MudMenuItem Icon="@Icons.Material.Filled.Code"
                          IconColor="@(_editMode == PageEditMode.Source ? Color.Primary : Color.Default)"
-                         OnClick="@(() => SetEditMode(PageEditMode.Source))">
+                         OnClick="@(() => ChooseEditMode(PageEditMode.Source))">
                 Source
             </MudMenuItem>
             <MudMenuItem Icon="@Icons.Material.Filled.Edit"
                          IconColor="@(_editMode == PageEditMode.Inline ? Color.Primary : Color.Default)"
-                         OnClick="@(() => SetEditMode(PageEditMode.Inline))">
+                         OnClick="@(() => ChooseEditMode(PageEditMode.Inline))">
                 Inline
             </MudMenuItem>
         </MudMenu>

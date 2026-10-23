@@ -6,6 +6,7 @@ using HomeBlaze.Services;
 using Namotion.Interceptor.Expressions;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Pages;
+using Markdig.Extensions.Footnotes;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -184,9 +185,9 @@ public sealed partial class MarkdownContentParser
     internal void LogRefusedWrite(string path, string reason) =>
         _logger?.LogWarning("A change was not written to the page {Path}: {Reason}", path, reason);
 
-    /// <summary>Logs that the page could not be read again after a refused write.</summary>
+    /// <summary>Logs that the page could not be read again after a write that was refused or failed.</summary>
     internal void LogFailedReload(string path, Exception exception) =>
-        _logger?.LogWarning(exception, "Failed to reload the page {Path} after a refused write", path);
+        _logger?.LogWarning(exception, "Failed to reload the page {Path} after a write that was refused or failed", path);
 
     /// <summary>
     /// Renders markdown content by replacing each {{ path }} expression that
@@ -261,10 +262,22 @@ public sealed partial class MarkdownContentParser
     /// <summary>
     /// Parses page content and reconciles it with the existing children.
     /// </summary>
-    public async Task<MarkdownParseResult> ParseAsync(
+    public Task<MarkdownParseResult> ParseAsync(
         string? content,
         MarkdownFile parent,
         IDictionary<string, IInterceptorSubject> existingChildren,
+        CancellationToken cancellationToken) =>
+        ParseAsync(content, parent, existingChildren, reusableSubjects: null, cancellationToken);
+
+    /// <summary>
+    /// Parses page content and reconciles it with the existing children. With <paramref name="reusableSubjects"/>, the
+    /// subjects of a parse of the same content by block index, a block takes its subject from there instead of by its key.
+    /// </summary>
+    internal async Task<MarkdownParseResult> ParseAsync(
+        string? content,
+        MarkdownFile parent,
+        IDictionary<string, IInterceptorSubject> existingChildren,
+        IReadOnlyDictionary<int, IInterceptorSubject>? reusableSubjects,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrEmpty(content))
@@ -275,13 +288,13 @@ public sealed partial class MarkdownContentParser
         var page = MarkdownPageParser.Parse(content);
         var basePath = GetLinkBasePath(parent);
         var pageName = EscapeFileNameForLink(Path.GetFileName(parent.FullPath));
-        var segments = MarkdownSegmentBuilder.Build(page, url => RewriteLink(url, basePath, pageName));
+        var segments = MarkdownSegmentBuilder.Build(page, url => RewriteLink(url, basePath, pageName), markTextBlocks: true);
 
-        var state = new ParseState(parent, page);
+        var state = new ParseState(parent, page, reusableSubjects);
         try
         {
             var children = await BuildChildrenAsync(segments, existingChildren, state, cancellationToken);
-            return new MarkdownParseResult(children, page, state.BlockSubjects, state.NamedSubjects);
+            return new MarkdownParseResult(children, page, state.BlockSubjects, state.NamedSubjects) { TextBlocks = state.TextBlocks };
         }
         catch
         {
@@ -298,13 +311,14 @@ public sealed partial class MarkdownContentParser
         CancellationToken cancellationToken)
     {
         var children = new Dictionary<string, IInterceptorSubject>();
+        var blockPosition = 0;
 
         for (var index = 0; index < segments.Count; index++)
         {
             switch (segments[index])
             {
                 case HtmlMarkdownSegment html:
-                    AddHtml(children, existingChildren, index, html.Html);
+                    AddHtml(children, existingChildren, index, html.Html, html.TextBlock, state);
                     break;
 
                 case ExpressionMarkdownSegment expression:
@@ -317,11 +331,12 @@ public sealed partial class MarkdownContentParser
                     break;
 
                 case BlockMarkdownSegment block:
-                    var (key, subject, error) = await CreateWidgetAsync(block, children, existingChildren, index, state, cancellationToken);
+                    var (key, subject, error) = await CreateWidgetAsync(
+                        block, children, existingChildren, blockPosition++, state, cancellationToken);
                     if (subject is null)
                     {
                         state.AddErrorBox();
-                        AddHtml(children, existingChildren, index, error!.Render());
+                        AddHtml(children, existingChildren, index, error!.Render(), textBlock: null, state);
                     }
                     else
                     {
@@ -339,20 +354,46 @@ public sealed partial class MarkdownContentParser
         Dictionary<string, IInterceptorSubject> children,
         IDictionary<string, IInterceptorSubject> existingChildren,
         int index,
-        string html)
+        string html,
+        MarkdownTextBlock? textBlock,
+        ParseState state)
     {
+        var start = textBlock is null ? HtmlSegmentStart.None
+            : textBlock.IsEditable ? HtmlSegmentStart.Text
+            : textBlock.ShowsNothing ? HtmlSegmentStart.Other
+            : HtmlSegmentStart.Source;
+        var kind = textBlock is null ? null : GetKind(textBlock);
+
         // The index is part of the key because the same HTML can occur several times.
         var key = $"{HtmlKeyPrefix}{index}_{ComputeHash(html)}";
-        children[key] = existingChildren.TryGetValue(key, out var existing) && existing is HtmlSegment
-            ? existing
-            : new HtmlSegment(html);
+        var segment = existingChildren.TryGetValue(key, out var existing) && existing is HtmlSegment reused &&
+                      reused.Start == start && reused.Kind == kind
+            ? reused
+            : new HtmlSegment(html, start, kind);
+        children[key] = segment;
+        if (textBlock is not null)
+        {
+            state.AddTextBlock(segment, textBlock);
+        }
     }
+
+    // The kind of a text block that cannot be edited as text, see HtmlSegment.Kind. A list or a quote with a block inside is
+    // named by the kind of its first element.
+    private static string? GetKind(MarkdownTextBlock textBlock) => textBlock switch
+    {
+        { IsEditable: true } => null,
+        { HoldsHtml: true } => "HTML",
+        { FirstBlock: FootnoteGroup } => "Footnotes",
+        { FirstBlock: MarkdownBlockContainer { IsStyle: true } } => "Style",
+        { FirstBlock: MarkdownBlockContainer } => "Error",
+        _ => MarkdownSegmentBuilder.IsOldSubjectFence(textBlock.FirstBlock) ? "Error" : null
+    };
 
     private async Task<(string? Key, IInterceptorSubject? Subject, BlockError? Error)> CreateWidgetAsync(
         BlockMarkdownSegment segment,
         Dictionary<string, IInterceptorSubject> children,
         IDictionary<string, IInterceptorSubject> existingChildren,
-        int index,
+        int blockPosition,
         ParseState state,
         CancellationToken cancellationToken)
     {
@@ -393,13 +434,24 @@ public sealed partial class MarkdownContentParser
         }
 
         // An id can equal the positional key of another block, for example #Card_3.
-        var key = MarkdownSubjectKeys.GetContentKey(head.Id, type, index);
+        var key = MarkdownSubjectKeys.GetContentKey(head.Id, type, blockPosition);
         if (children.ContainsKey(key))
         {
             return (null, null, new BlockError(block.Line, FormatUsedTwice(key)));
         }
 
-        existingChildren.TryGetValue(key, out var existing);
+        // The text is the one that the page describes, so the subjects of that description are where their blocks are,
+        // also after a block before them was moved, inserted or removed, which would change their key.
+        IInterceptorSubject? existing;
+        if (state.ReusableSubjects is { } reusableSubjects)
+        {
+            existing = reusableSubjects.GetValueOrDefault(segment.Block.Index);
+        }
+        else
+        {
+            existingChildren.TryGetValue(key, out existing);
+        }
+
         var (subject, error) = await CreateBlockSubjectAsync(
             type, $"The type '{head.Name}'", segment, existing, state, cancellationToken);
 
@@ -438,7 +490,7 @@ public sealed partial class MarkdownContentParser
         CancellationToken cancellationToken)
     {
         var block = segment.Block;
-        if (existing is not null && existing.GetType() == type && TryKeepUnchangedBlock(existing, block, state))
+        if (existing is not null && existing.GetType() == type && TryKeepUnchangedBlock(existing, segment, state))
         {
             return (existing, null);
         }
@@ -486,7 +538,13 @@ public sealed partial class MarkdownContentParser
                     state.Register(block, block.Head!.Id, subject);
                     if (state.ErrorBoxCount == errorBoxCount)
                     {
-                        RememberAppliedBlock(subject, block, state, registrationCount);
+                        RememberAppliedBlock(subject, segment, state, registrationCount);
+                    }
+                    else
+                    {
+                        // The remembered text is the one before the error, so keeping the block when its text returns
+                        // to it would keep the content that shows the error.
+                        ForgetAppliedBlock(subject);
                     }
 
                     return (subject, null);
@@ -586,10 +644,11 @@ public sealed partial class MarkdownContentParser
         private bool? _hasLoneCarriageReturn;
         private List<int>? _lineStarts;
 
-        public ParseState(MarkdownFile page, MarkdownPage parsedPage)
+        public ParseState(MarkdownFile page, MarkdownPage parsedPage, IReadOnlyDictionary<int, IInterceptorSubject>? reusableSubjects)
         {
             Page = page;
             Blocks = parsedPage.AllBlocks;
+            ReusableSubjects = reusableSubjects;
             _source = parsedPage.Source;
 
             // Decided before anything is built: slot blocks are built before the loose content around them, and
@@ -608,12 +667,30 @@ public sealed partial class MarkdownContentParser
         /// <summary>The widget, slot and invalid blocks of the page, by <see cref="MarkdownBlock.Index"/>.</summary>
         public IReadOnlyList<MarkdownBlock> Blocks { get; }
 
+        /// <summary>
+        /// The subjects of the blocks of a parse of the same text by block index, which this parse takes instead of finding
+        /// them by their key, or null.
+        /// </summary>
+        public IReadOnlyDictionary<int, IInterceptorSubject>? ReusableSubjects { get; }
+
         /// <summary>How many blocks this parse has shown as an error box so far.</summary>
         public int ErrorBoxCount { get; private set; }
 
         public Dictionary<int, IInterceptorSubject> BlockSubjects { get; } = new();
 
         public Dictionary<string, IInterceptorSubject> NamedSubjects { get; } = new();
+
+        /// <summary>The text block that each HTML segment of this parse starts.</summary>
+        public Dictionary<HtmlSegment, MarkdownTextBlock> TextBlocks { get; } = new(ReferenceEqualityComparer.Instance);
+
+        /// <summary>The HTML segment that starts each text block of this parse, the reverse of <see cref="TextBlocks"/>.</summary>
+        public Dictionary<MarkdownTextBlock, HtmlSegment> SegmentsByTextBlock { get; } = new(ReferenceEqualityComparer.Instance);
+
+        public void AddTextBlock(HtmlSegment segment, MarkdownTextBlock textBlock)
+        {
+            TextBlocks[segment] = textBlock;
+            SegmentsByTextBlock[textBlock] = segment;
+        }
 
         public int RegistrationCount => _registrations.Count;
 
