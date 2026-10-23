@@ -41,7 +41,7 @@
             await ClientConnections.RenameAsync(Connection, _name ?? string.Empty, CancellationToken.None);
             MudDialog?.Close();
         }
-        catch (Exception exception) when (exception is InvalidOperationException or ArgumentException)
+        catch (Exception exception) when (exception is not OperationCanceledException)
         {
             _error = exception.Message;
         }

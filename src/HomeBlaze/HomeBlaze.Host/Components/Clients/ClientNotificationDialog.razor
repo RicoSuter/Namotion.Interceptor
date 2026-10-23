@@ -40,7 +40,8 @@
             FullWidth = true,
             CloseButton = !isEmergency,
             BackdropClick = !isEmergency,
-            CloseOnEscapeKey = !isEmergency
+            CloseOnEscapeKey = !isEmergency,
+            CloseOnNavigation = !isEmergency
         };
 
         var title = string.IsNullOrWhiteSpace(notification.Title) ? "Notification" : notification.Title;

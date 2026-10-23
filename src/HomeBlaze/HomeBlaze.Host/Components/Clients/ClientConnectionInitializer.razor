@@ -48,6 +48,10 @@
         if (_connection is not null)
         {
             ClientConnections.Disconnect(_connection);
+            if (ReferenceEquals(CurrentConnection.Connection, _connection))
+            {
+                CurrentConnection.Connection = null;
+            }
         }
     }
 }
