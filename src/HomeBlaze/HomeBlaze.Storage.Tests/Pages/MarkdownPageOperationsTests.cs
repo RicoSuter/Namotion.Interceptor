@@ -829,6 +829,44 @@ public class MarkdownPageOperationsTests
     }
 
     [Fact]
+    public void WhenARaisedWidgetHoldsFencedCodeWithColonLines_ThenTheColonLinesInTheCodeStayAsTheyAre()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse(":: Demo.Card\n::: Demo.Panel\nOld.\n:::\n::\n");
+        const string text = ":: Demo.X\n```\n::\n::: Demo.Y\n:::\n```\n::";
+
+        // Act
+        var change = MarkdownPageOperations.TryReplaceText(page, NoSubjects, TextAt(page, 3), text, out var refusal);
+
+        // Assert
+        Assert.Null(refusal);
+        Assert.Equal(
+            ":: Demo.Card\n::: Demo.Panel\n:::: Demo.X\n```\n::\n::: Demo.Y\n:::\n```\n::::\n:::\n::\n",
+            change!.Write.Page.Source);
+        Assert.Single(change.Write.Page.Blocks[0].Children[0].Children);
+        Assert.Empty(change.Write.Page.Blocks[0].Children[0].Children[0].Children);
+    }
+
+    [Theory]
+    [InlineData(":: Demo.List\n::: Row Label=A\n:::\n::")]
+    [InlineData(":: Demo.List\r\n::: Row Label=A\r\n:::\r\n::")]
+    public void WhenTheWidgetsInTheTextOfABlockOnAPageWithCarriageReturnsAreRaised_ThenThePageKeepsItsLineEndings(string text)
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse(":: Demo.Card\r\n::: Demo.Panel\r\nOld.\r\n:::\r\n::\r\n");
+
+        // Act
+        var change = MarkdownPageOperations.TryReplaceText(page, NoSubjects, TextAt(page, 3), text, out var refusal);
+
+        // Assert
+        Assert.Null(refusal);
+        Assert.Equal(
+            ":: Demo.Card\r\n::: Demo.Panel\r\n:::: Demo.List\r\n::::: Row Label=A\r\n:::::\r\n::::\r\n:::\r\n::\r\n",
+            change!.Write.Page.Source);
+        Assert.True(change.Write.HasInsertedOrRemovedBlocks);
+    }
+
+    [Fact]
     public void WhenRaisingTheFenceOfAWidgetInTheTextWouldChangeItsBlocks_ThenTheChangeIsRefused()
     {
         // Arrange: the line of three colons is a part of the HTML until the widget has three colons itself.
