@@ -78,11 +78,15 @@ public sealed class MarkdownPage
     // Ordered by start and never overlapping, which the search in IsInsideCode relies on.
     private readonly MarkdownSpan[] _codeSpans;
 
-    internal MarkdownPage(string source, MarkdownDocument document, MarkdownSpan[] codeSpans)
+    // Ordered by start and never overlapping, like the code spans.
+    private readonly MarkdownSpan[] _htmlSpans;
+
+    internal MarkdownPage(string source, MarkdownDocument document, MarkdownSpan[] codeSpans, MarkdownSpan[] htmlSpans)
     {
         Source = source;
         Document = document;
         _codeSpans = codeSpans;
+        _htmlSpans = htmlSpans;
     }
 
     public string Source { get; }
@@ -110,14 +114,19 @@ public sealed class MarkdownPage
     /// with its fence lines, an indented code block, or an inline code span with its backticks.
     /// </summary>
     /// <remarks>Code in raw HTML, such as a <c>code</c> or <c>pre</c> element, is not markdown code.</remarks>
-    public bool IsInsideCode(int offset)
+    public bool IsInsideCode(int offset) => IsInside(_codeSpans, offset);
+
+    /// <summary>Gets whether the offset into <see cref="Source"/> lies inside raw HTML that the page writes: an HTML block or an HTML tag in running text.</summary>
+    internal bool IsInsideRawHtml(int offset) => IsInside(_htmlSpans, offset);
+
+    private static bool IsInside(MarkdownSpan[] spans, int offset)
     {
         var low = 0;
-        var high = _codeSpans.Length - 1;
+        var high = spans.Length - 1;
         while (low <= high)
         {
             var middle = (low + high) / 2;
-            var span = _codeSpans[middle];
+            var span = spans[middle];
             if (offset < span.Start)
             {
                 high = middle - 1;
@@ -285,7 +294,7 @@ public static class MarkdownPageParser
     internal static MarkdownPage Parse(string source, MarkdownPipeline pipeline)
     {
         var document = Markdig.Markdown.Parse(source, pipeline);
-        var page = new MarkdownPage(source, document, FindCodeSpans(source, document));
+        var page = new MarkdownPage(source, document, FindCodeSpans(source, document), FindHtmlSpans(document));
         Visit(document, page.BlockList, page, allowsBlocks: true, hasOwner: false);
         return page;
     }
@@ -301,6 +310,7 @@ public static class MarkdownPageParser
         // Blocks have a parser of their own, so that a run of fence characters has one meaning only.
         builder.Extensions.TryRemove<CustomContainerExtension>();
         builder.Extensions.Add(new MarkdownBlockContainerExtension());
+        builder.Extensions.Add(new MarkdownExpressionExtension());
         return builder;
     }
 
@@ -338,6 +348,21 @@ public static class MarkdownPageParser
         }
 
         // Markdig moves some blocks, for example footnotes to the end of the document.
+        spans.Sort(static (left, right) => left.Start.CompareTo(right.Start));
+        return [.. spans];
+    }
+
+    private static MarkdownSpan[] FindHtmlSpans(MarkdownDocument document)
+    {
+        var spans = new List<MarkdownSpan>();
+        foreach (var descendant in document.Descendants())
+        {
+            if (descendant is HtmlBlock or HtmlInline)
+            {
+                spans.Add(new MarkdownSpan(descendant.Span.Start, descendant.Span.Length));
+            }
+        }
+
         spans.Sort(static (left, right) => left.Start.CompareTo(right.Start));
         return [.. spans];
     }

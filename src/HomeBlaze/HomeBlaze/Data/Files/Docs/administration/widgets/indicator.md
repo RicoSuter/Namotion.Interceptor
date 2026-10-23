@@ -11,7 +11,7 @@ Shows a state as a colored chip, or as an icon alone. Type name: `HomeBlaze.Comp
 
 | Argument | Kind of value | Default | Meaning |
 |----------|---------------|---------|---------|
-| `Path` | Path (Value) | None | The [path](basics.md#paths) of the property whose value the indicator shows |
+| `Path` | Path (Value) | None | The [path](basics.md#paths) of the property whose value the indicator shows, or with a `Map` of a subject whose states the cases read, see [ValueMap](value-map.md#conditions) |
 | `Map` | Name or path of a `ValueMap` | None | The map that gives the indicator its text, color and icon, see [ValueMap](value-map.md) |
 | `Icon` | Text | None | The [icon](basics.md#icons) |
 | `Kind` | `Chip` or `Icon` | `Chip` | `Chip` is a chip with the icon and the text. `Icon` is the icon alone, with the text as its tooltip |

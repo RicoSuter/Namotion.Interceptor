@@ -160,28 +160,46 @@ The last segment of the path is the name of a property. Everything before it lea
 
 [Paths](paths.md) describes the path syntax in full. Its section "Paths on Markdown Pages" explains where a relative path starts and when a name is used.
 
-### Expression Formats
+### Pipes
 
-An expression shows the formatted value by default. A format after a `|` at the end of the expression chooses the form:
+An expression shows the formatted value by default. A pipe after a `|` at the end of the expression chooses the form:
 
 | Written | Shows | A temperature of 21.5 degrees Celsius |
 |---------|-------|---------------------------------------|
 | `{{ mymotor/Temperature }}` | The formatted value | `21.5°C` |
-| `{{ mymotor/Temperature \| display }}` | The formatted value, with the format written out | `21.5°C` |
+| `{{ mymotor/Temperature \| display }}` | The formatted value, with the pipe written out | `21.5°C` |
 | `{{ mymotor/Temperature \| raw }}` | The raw value | `21.5` |
 
-Inside a markdown table the `|` of an expression is written `\|`, as in the table above, because a cell of a table ends at every `|` that is not escaped.
+Inside a markdown table an expression needs no escaping: its `|` belongs to the expression. A `\|` still works, as older pages write it, and the table above uses it.
 
 - **Formatted value**: The text that the property panel shows for the property. It has the unit of the property, scaled where the unit allows it: 1234 W shows as `1.23 kW`. A number has at most two decimals, a boolean shows `Yes` or `No`, and a date is written in the time zone of the viewer.
 - **Raw value**: The plain value with a dot as the decimal separator on every system, and a date as ISO 8601. It has no unit, no scaling and no rounding, which makes it the form for an HTML attribute and for CSS, where a unit or a `Yes` would be wrong.
-- **Missing value**: A value that is not set shows nothing in both forms.
-- **Unknown format**: A format other than `display` and `raw` shows `Unknown format 'name'` in place of the value. [Page Errors](page-errors.md#expression-errors) has the message.
+- **Missing value**: A value that is not set shows nothing in both forms. With the pipe `map` it shows the text of a case that matches without the value, and otherwise nothing.
+- **Map**: `map:name` gives the text of the first case of the value map with the name that matches the value, such as `{{ mymotor/Status | map:motorstate }}`, which shows `Running` for a motor that runs. It gives the formatted value when no case matches or the case has no text. The name resolves like the `Map` of a widget. In the text of a page and in the text of a widget, a path that leads nowhere is matched like a missing value, so a default case shows for it, such as for `{{ subject | map:x }}` in a widget whose `Path` leads nowhere. A path to a subject, such as the name of a block, gives no value in the text of a page, so write the path of a property: `{{ wallbox/IsCharging | map:x }}`. The pipe `map` must be the first pipe, so `{{ wallbox/IsCharging | raw | map:x }}` shows `The pipe 'map' must be the first pipe`. A name that leads to no map shows `Cannot resolve map: name`.
+- **Unknown pipe**: A pipe other than `display`, `raw` and `map` shows `Unknown pipe 'name'` in place of the value. [Page Errors](page-errors.md#expression-errors) has the message.
 
 A `style` attribute needs the raw value. In this sample the width of the bar is the speed of the conveyor in RPM divided by ten, in pixels:
 
 ~~~~markdown
 <div style="height: 8px; background: var(--mud-palette-primary); width: calc({{ /Demo/Conveyor/CurrentSpeed | raw }} * 0.1px)"></div>
 ~~~~
+
+### Conditions
+
+An expression can compare values and combine the results. In the text of a page a condition shows only `Yes` or `No`, and nothing while a value it needs is missing. The language is the same as that of the `where` filter of the `search` tool that AI agents use. For example:
+
+~~~~markdown
+The conveyor runs fast: {{ /Demo/Conveyor/CurrentSpeed > 500 }}.
+~~~~
+
+With the pipe `map` a condition shows the text of a case instead, such as `{{ /Demo/Conveyor/CurrentSpeed > 500 | map:fastslow }}` with a map whose cases have `Value=True` and `Value=False`.
+
+- **Comparisons**: `==`, `!=`, `<`, `<=`, `>` and `>=` compare a value with a number, `true`, `false`, `null`, a text in quotes, or another path. A word after an operator is a path when it holds a slash or an index in brackets, such as `mymotor/Speed`, `../Pump/Speed`, `/Demo/Pump/Speed` or `/Devices[0]`. Any other word is a text, such as the name of an enum value: `{{ mymotor/Status == Running }}`.
+- **Missing values and `null`**: `== null` is true for a missing value and `!= null` is false, so neither is ever unknown. Any other operator with `null` is unknown.
+- **Logic**: `and` (`&&`), `or` (`||`), `not` (`!`) and parentheses combine comparisons. A missing value makes a comparison unknown, and an unknown part makes the whole unknown unless the rest decides it: `false and unknown` is `false`.
+- **Texts and enums** compare without regard to upper and lower case. A date compares with a text in ISO 8601, such as `'2026-10-01'`.
+- **No arithmetic**: `+`, `-`, `*` and `/` between values show an error. They are reserved, so that a later version can add arithmetic without changing what a page shows.
+- **Errors**: A mistake shows its message and where it is, such as `expected ')' at position 16`, in place of the value. See [Page Errors](page-errors.md#expression-errors).
 
 ### Where an Expression Works
 
@@ -198,18 +216,20 @@ The reader sees "Speed: 600 RPM", and the tooltip of the text shows the target s
 ### Where an Expression Is Not Evaluated
 
 - **In markdown code**: An expression in inline code, in an indented code block or in a fenced code block is shown as written, with its braces. A fenced code block is markdown's way to show code: a line of three or more backticks or tildes, the lines of code, and a line of the same characters. This page shows all its samples that way.
-- **On the head line of a block and in its `json` block**: The value of an argument is taken as written. `Title="{{ mymotor/Name }}"` gives a title with braces in it.
+- **On the head line of a block and in its `json` block**: The value of an argument is taken as written. The exceptions are the arguments that are text with values, such as the `Label` of a `ValueTile` and the `Title` of a `Card`, see [Text with Values](widgets/basics.md#text-with-values), and the `Text` and the `When` of a `Case` of a value map, see [ValueMap](widgets/value-map.md#conditions). The page itself does not evaluate them: the widget does, when it renders.
 - **In the frontmatter**.
 - **In the address of a markdown link**: `[text](https://example.com/{{ path }})` gives a broken link. Write the link as an HTML `<a>` element, where an expression works inside the `href` attribute.
 
 ### Expression Limits
 
-- **Two formats**: An expression has the formatted value and the raw value. Another unit, another number of decimals and conditions are not supported.
+- **Length and depth**: An expression is at most 1000 characters long and nests at most 32 levels. Each parenthesis counts as a level, and so does each `not` or `!`, so a chain of them reaches the limit. A longer or deeper expression shows an error in place of the value.
+- **Pipes**: An expression has the pipes `display`, `raw` and `map`. Another unit, another number of decimals and arithmetic are not supported.
 - **Single values**: An expression is made for text, numbers, yes or no, durations and times. For a property that holds a subject or a list of subjects, it shows a technical type name. A list of plain values is shown on one line with a space between the values. The form `raw` shows a technical type name for every list.
 - **No error for a wrong path**: An expression whose path leads to nothing shows nothing. Check the spelling of the path when a value is missing.
-- **No braces and no `<` in a path**: The path cannot contain `{`, `}` or `<`. [Paths](paths.md) says how to write a file name that contains one of them.
+- **Special characters in a name are percent-encoded**: A name with an operator character, a quote, a brace or a space is written percent-encoded in an expression. [Paths](paths.md) has the characters and examples. Inside HTML that you write, write `<` as `&lt;`.
 - **Single braces in text can disappear**: The markdown renderer reads single braces anywhere in the text of a page as attributes, and removes them from the text, when they are empty or when everything between them reads as attributes: a word like `{id}`, a class like `{.wide}`, an id like `{#top}` or a pair like `{key=value}`, also several of them with spaces between. `Use /api/{id}` is then shown as "Use /api/". To show such braces, put the text in inline code, or write a backslash before the opening brace, as in `/api/\{id}`. A heading that starts with `#` is the exception: such braces cut the heading off, so that everything from the opening brace to the end of the line is lost, also inside inline code and after a backslash. `## Path {id} syntax` is shown as "Path". Keep such braces out of these headings.
 - **No live value in markdown code**: Markdown code keeps an expression as written, so a live value cannot stand inside it. Use a `<code>` element when a live value should look like code.
+- **The names `value` and `subject`**: A block cannot be named `#value` or `#subject`, because these names are reserved for the values that widgets give their expressions.
 
 ---
 
@@ -1007,8 +1027,8 @@ Known limits of the Inline mode:
 
 ## Not Supported
 
-- More formats for expressions than `display` and `raw`, like another unit, another number of decimals or conditions.
-- Expressions in arguments. The value of an argument is fixed text.
+- More pipes for expressions than `display`, `raw` and `map`, like another unit or another number of decimals, and arithmetic in expressions.
+- Expressions in arguments. The value of an argument is fixed text, except the `Text` and the `When` of a `Case` of a value map, see [ValueMap](widgets/value-map.md#conditions).
 - Short names for types. A block always has the full type name.
 - A name for an `Item` of a `FlowLayout`, and with it a subject inside an item that survives a change of the items before it.
 - A check of the names below the top level of a `json` block.

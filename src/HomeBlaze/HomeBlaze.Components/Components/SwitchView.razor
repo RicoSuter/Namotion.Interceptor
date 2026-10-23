@@ -8,6 +8,7 @@
 @inject IDialogService DialogService
 @inject IServiceProvider ServiceProvider
 @inject ITimeZoneDisplay TimeZone
+@inject SubjectPathResolver PathResolver
 
 @{
     // Read once per render and never kept: its render records the reads, so that it renders again when one changes.
@@ -16,7 +17,9 @@
     var isOn = value as bool? ?? false;
     // A pending toggle shows the state it goes to, boxed only then, and is read back from the property when it ends.
     var shown = _pending is { } target ? target : value;
-    var matched = shown is not null ? ValueMap?.FindCase(RawValueFormatter.Format(shown)) : null;
+    var binding = new ValueBinding(property, shown, property?.Subject);
+    // A path that leads nowhere tries no case, as in ValueReader.Read, so that a default case does not hide a mistake in the path.
+    var matched = binding.IsEmpty ? null : ValueMap?.FindCase(binding, PathResolver);
     var canToggle = false;
     if (property is not null && (property.Type == typeof(bool) || property.Type == typeof(bool?)))
     {
@@ -43,7 +46,7 @@
     var fill = matched?.GetColor() ?? (shown is true ? Color.Primary : Color.Default);
     var subtitle = !string.IsNullOrEmpty(Subtitle)
         ? Subtitle
-        : ValueMap is not null && property is not null && shown is not null ? ValueReader.GetText(property, shown, matched, TimeZone) : null;
+        : ValueMap is not null && property is not null && shown is not null ? ValueReader.GetText(binding, matched, PathResolver, TimeZone) : null;
     var icon = shown is null
         ? Icons.Material.Filled.QuestionMark
         : MudBlazorIconResolver.ResolveOrNull(string.IsNullOrEmpty(matched?.Icon) ? Icon : matched.Icon);

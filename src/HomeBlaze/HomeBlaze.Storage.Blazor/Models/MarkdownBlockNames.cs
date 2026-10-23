@@ -57,6 +57,11 @@ public static class MarkdownBlockNames
     /// </summary>
     public static string? GetError(string name)
     {
+        if (MarkdownBlockHead.IsReservedId(name))
+        {
+            return MarkdownBlockHead.GetReservedIdError(name);
+        }
+
         return MarkdownBlockHead.IsValidId(name)
             ? null
             : $"'{name}' cannot be used as a name on a page. {Rule}";

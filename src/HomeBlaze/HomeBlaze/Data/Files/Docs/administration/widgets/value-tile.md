@@ -11,8 +11,8 @@ A box or a tile with a label and one large value. Type name: `HomeBlaze.Componen
 
 | Argument | Kind of value | Default | Meaning |
 |----------|---------------|---------|---------|
-| `Path` | Path (Value) | None | The [path](basics.md#paths) of the property whose value the tile shows |
-| `Label` | Text | From the property, see [Labels](basics.md#labels) | The small text above the value of a box and below the value of a tile |
+| `Path` | Path (Value) | None | The [path](basics.md#paths) of the property whose value the tile shows, or with a `Map` of a subject whose states the cases read, see [ValueMap](value-map.md#conditions) |
+| `Label` | Text with values | From the property, see [Labels](basics.md#labels) | The small text above the value of a box and below the value of a tile, see [Text with Values](basics.md#text-with-values) |
 | `Icon` | Text | None | The [icon](basics.md#icons) next to the label of a box and above the value of a tile. The icon of a matched case replaces it |
 | `Map` | Name or path of a `ValueMap` | None | The map that gives the value its text, color and icon, see [ValueMap](value-map.md). A box takes the color of the matched case for the value, a tile is filled with it |
 | `Kind` | `Box` or `Tile` | `Box` | `Box` is a raised box with the label above the value. `Tile` is a tile that fills its place, with the value as its large line, see [Tiles](#tiles) |
@@ -48,7 +48,7 @@ Three tiles in a `FlowLayout`. The first has a label of its own and an icon, the
 
 ## Tiles
 
-With `Kind=Tile` the value stands on a tile like the tiles of a [Switch](switch.md#tiles) and an [OperationButton](operation-button.md#tiles), so that a value fits into a wall of tiles. From top to bottom the tile shows the icon, the value as its large line and the label as its small line. The tiles below stand in square cells of a [GridLayout](grid-layout.md). The first shows the speed of the pump, the second its status through the map of [ValueMap](value-map.md), and is filled with the color of the matched case:
+With `Kind=Tile` the value stands on a tile like the tiles of a [Switch](switch.md#tiles) and an [OperationButton](operation-button.md#tiles), so that a value fits into a wall of tiles. From top to bottom the tile shows the icon, the value as its large line and the label as its small line. The tiles below stand in square cells of a [GridLayout](grid-layout.md). The first shows the speed of the pump, the second its status through the map of [ValueMap](value-map.md), and is filled with the color of the matched case. The third shows the target speed of the pump in its label.
 
 <!-- sample: live -->
 ~~~~markdown
@@ -57,6 +57,8 @@ With `Kind=Tile` the value stands on a tile like the tiles of a [Switch](switch.
 :::: HomeBlaze.Components.ValueTile Kind=Tile Path=../Pump/CurrentSpeed Label="Pump speed" Icon=Speed
 ::: Cell Row=0 Column=1
 :::: HomeBlaze.Components.ValueTile Kind=Tile Path=../Pump/Status Map=../value-map.md/motorstate Label="Pump"
+::: Cell Row=0 Column=2
+:::: HomeBlaze.Components.ValueTile Kind=Tile Path=../Pump/CurrentSpeed Label="Target {{ subject/TargetSpeed }}" Icon=Speed
 ::
 ~~~~
 
@@ -65,6 +67,8 @@ With `Kind=Tile` the value stands on a tile like the tiles of a [Switch](switch.
 :::: HomeBlaze.Components.ValueTile Kind=Tile Path=../Pump/CurrentSpeed Label="Pump speed" Icon=Speed
 ::: Cell Row=0 Column=1
 :::: HomeBlaze.Components.ValueTile Kind=Tile Path=../Pump/Status Map=../value-map.md/motorstate Label="Pump"
+::: Cell Row=0 Column=2
+:::: HomeBlaze.Components.ValueTile Kind=Tile Path=../Pump/CurrentSpeed Label="Target {{ subject/TargetSpeed }}" Icon=Speed
 ::
 
 Rules of a tile:

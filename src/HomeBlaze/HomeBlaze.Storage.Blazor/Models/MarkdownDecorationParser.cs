@@ -77,7 +77,7 @@ public static class MarkdownDecorationParser
             var (endLine, endColumn) = GetLineAndColumn(lineStarts, expression.Span.End);
 
             decorations.Regions.Add(new DecorationRegion(
-                startLine, startColumn, endLine, endColumn, DecorationRegionType.Expression, expression.Path));
+                startLine, startColumn, endLine, endColumn, DecorationRegionType.Expression, expression.Text));
         }
 
         return decorations;

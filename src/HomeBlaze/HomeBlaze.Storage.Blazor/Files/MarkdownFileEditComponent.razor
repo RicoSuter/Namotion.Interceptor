@@ -240,6 +240,13 @@ else
         if (File == null || _sourceEditor == null)
             return;
 
+        // The dialog edits one path. A condition, or text that does not parse, has no single path to edit.
+        if (MarkdownExpressions.Parse(region.Name, out _)?.SinglePath is not { } selectedPath)
+        {
+            Snackbar.Add($"{region.Name} has no single path to edit. Change its text in the editor.", Severity.Warning);
+            return;
+        }
+
         // Filter to only include actual subject blocks (not HtmlSegment, RenderExpression, etc.)
         var subjectBlocks = File.Children
             .Where(kvp => kvp.Value is not HtmlSegment && kvp.Value is not RenderExpression)
@@ -248,7 +255,7 @@ else
         // Open the ExpressionEditDialog
         var parameters = new DialogParameters<object>
         {
-            { "SelectedPath", region.Name },
+            { "SelectedPath", selectedPath },
             { "LocalSubjects", subjectBlocks }
         };
 

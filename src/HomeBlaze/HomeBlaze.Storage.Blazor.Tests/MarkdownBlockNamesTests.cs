@@ -122,4 +122,16 @@ public class MarkdownBlockNamesTests
         // Assert
         Assert.Null(error);
     }
+
+    [Theory]
+    [InlineData("value")]
+    [InlineData("subject")]
+    public void WhenNameIsReserved_ThenItHasAnError(string name)
+    {
+        // Act
+        var error = MarkdownBlockNames.GetError(name);
+
+        // Assert
+        Assert.Equal($"'{name}' is reserved for expressions and cannot be the name of a block.", error);
+    }
 }

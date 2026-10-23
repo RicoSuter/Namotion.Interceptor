@@ -17,16 +17,17 @@ namespace HomeBlaze.Components;
 public partial class ValueTile : IConfigurable, ITitleProvider
 {
     /// <summary>
-    /// Path of the property whose value the tile shows.
+    /// Path of the property whose value the tile shows, or with a <see cref="Map"/> of a subject whose states the cases of the map read.
     /// </summary>
     [Configuration]
     [SubjectPath]
     public partial string? Path { get; set; }
 
     /// <summary>
-    /// The label of the tile. Defaults to the title the property declares, then to its name, and to the path when the path leads nowhere.
+    /// The label of the tile. Defaults to the title the property declares, then to its name, and to the path when the path leads nowhere. It can show values with expressions between double braces, such as <c>{{ subject/Name }}</c>.
     /// </summary>
     [Configuration]
+    [TextTemplate]
     public partial string? Label { get; set; }
 
     /// <summary>

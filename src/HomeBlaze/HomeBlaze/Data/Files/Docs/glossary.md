@@ -172,7 +172,7 @@ YAML metadata at the top of markdown files controlling navigation and display. S
 
 ### Live Expression
 
-A path in double curly braces in the text of a markdown page, like `{{ mymotor/CurrentSpeed }}`. The page shows the value of the property at that path and updates it when the value changes. See [Markdown Pages: Live Expressions](administration/pages.md#live-expressions).
+A path or a condition in double curly braces in the text of a markdown page, like `{{ mymotor/CurrentSpeed }}` or `{{ mymotor/CurrentSpeed > 500 }}`. The page shows the value of the property at that path, or Yes or No for a condition, and updates it when the value changes. See [Markdown Pages: Live Expressions](administration/pages.md#live-expressions).
 
 ### Block
 

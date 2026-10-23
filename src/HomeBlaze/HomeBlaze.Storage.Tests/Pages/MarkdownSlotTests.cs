@@ -31,7 +31,7 @@ public class MarkdownSlotTests
         var content = Assert.IsType<MarkdownFragment>(panel.Content);
         Assert.Contains("<strong>bold</strong>", Html(content));
         var expression = Assert.Single(content.Children.Values.OfType<RenderExpression>());
-        Assert.Equal("/x/y", expression.Path);
+        Assert.Equal("/x/y", expression.Text);
         Assert.Same(page, expression.Parent);
         Assert.Null(panel.Footer);
     }

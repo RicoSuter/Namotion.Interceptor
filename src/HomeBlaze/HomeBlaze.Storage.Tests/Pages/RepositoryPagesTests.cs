@@ -53,6 +53,20 @@ public partial class RepositoryPagesTests
         Assert.DoesNotContain(PageErrorBoxes.CssClass, html);
     }
 
+    [Theory]
+    [MemberData(nameof(PagePaths))]
+    public void WhenRepositoryPageIsRead_ThenEveryExpressionParses(string relativePath)
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse(ReadPage(relativePath));
+
+        // Act
+        var errors = DocumentationSamplesTests.FindExpressionErrors(page, relativePath);
+
+        // Assert
+        Assert.Empty(errors);
+    }
+
     [Fact]
     public void WhenErrorsDemoPageIsParsed_ThenItHasBlockSyntaxErrorsAndAnOldFence()
     {
@@ -123,7 +137,7 @@ public partial class RepositoryPagesTests
             switch (segment)
             {
                 case ExpressionMarkdownSegment expression:
-                    result.Add($"expression:{expression.Path}|{expression.Format}|{expression.Error}");
+                    result.Add($"expression:{expression.Text}");
                     break;
                 case BlockMarkdownSegment block:
                     result.Add($"block:{block.Block.Index}");

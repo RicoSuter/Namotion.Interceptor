@@ -205,25 +205,33 @@ Search across all subjects. Use `text` format (default) for overview, `json` for
 
 #### Filtering by value
 
-`where` takes one C#-style expression over the subject's properties:
+`where` takes one expression of the language described in [Expressions](expressions.md) over the properties of the subject:
 
 ```text
 IsConnected == false || BatteryLevel < 0.2 && Status != "Running"
 ```
 
-- Comparisons: `==`, `!=`, `<`, `<=`, `>`, `>=` between a property name and a number, `true`, `false`, `null` or a string in double or single quotes. A bare word on the right, as in `Status != Running`, is read as a string.
-- Combine comparisons with `&&` (or `and`) and `||` (or `or`); `&&` binds tighter, and parentheses group.
-- Numbers compare numerically whatever their CLR type. Enums compare by name and strings case-insensitively for `==` and `!=`; strings order by ordinal. `DateTime` and `DateTimeOffset` values compare against an ISO 8601 string, a string without an offset read as UTC.
-- A subject without the property, with a null value compared to a non-null literal, with a NaN value, or with a value of an incompatible type does not match, for every operator including `!=`. `== null` and `!= null` test whether the value is null; the other operators never match `null`. Properties holding subjects and attributes never match.
-- Only properties the path provider exposes can be filtered on.
-- An expression may be at most 1000 characters long and nest parentheses at most 32 levels deep.
-- An invalid expression returns an error naming the zero-based position, for example `where: use '==' for equality at position 12`.
+A property can also be reached through other subjects, and `not` negates a condition:
+
+```text
+Device.IsOn == true and not (Device.Mode == Eco)
+```
+
+The grammar, [logic](expressions.md#grammar), [comparisons of values](expressions.md#comparisons), [missing values](expressions.md#truth-and-missing-values) and the limits of an expression are those of the language. What is specific to `where`:
+
+- **Properties**: a path from the subject through the path provider, written with the separator of the provider, such as `Device.IsOn`, or `subject.Device.IsOn`, where `subject` is the subject itself. A bare word on the right of a comparison, as in `Status != Running`, is a string, unless it holds the separator or an index, or is `subject`: then it is a property. Only properties the path provider exposes can be filtered on, also on the way of a path. A value is also missing when an attribute is addressed.
+- **Refused paths**: a path starts at the subject and ends at a property: it cannot start with the separator, go up with `..` or end at an entry such as `Devices[a]`, and indexes are written with `[` and `]` whatever the separator. These paths and `subject.` without a name are refused when the expression is parsed, as `where: a path starts at the subject and cannot start with '.'`, `where: a path starts at the subject and cannot go up with '..'`, `where: a path ends at a property, not at an entry such as 'Devices[a]'` and `where: expected a name after 'subject.'`, with the separator of the path provider.
+- **Properties that hold subjects**: a property that holds a subject, a collection or a dictionary has that value, so `Device == null` is true when no device is set and `Device != null` is true when one is. Every other comparison with it is unknown.
+- **Not available**: `value` and pipes (`|`) give the errors `where: 'value' is not available in where` and `where: a condition takes no pipes`.
+- **Errors**: an invalid expression returns an error that starts with `where: ` and names the zero-based position, for example `where: use '==' for equality at position 12`.
+
+`not Device` does not find subjects without a device: it is true when a device is set. Use `Device == null`.
 
 `browse` has no `where`; to filter a subtree, use `search` with `path` and `where`. Combine `where` with `properties` to return only the values the question needs.
 
 #### Unknown property names
 
-A name in `where` or `properties` that no subject has is not an error, because subjects of different types have different properties. So that an empty answer is not mistaken for a negative one, `search` and `browse` add a warning for each name that no subject in scope has as a property the path provider exposes and that holds no subjects. For `search` the scope is every subject that passes `types`, `excludeTypes`, `path` and `query`, before `where` is applied; for `browse` it is every subject in the returned tree. A truncated result has no warnings, because it did not look at every subject.
+A path in `where` or a name in `properties` that no subject has is not an error, because subjects of different types have different properties. So that an empty answer is not mistaken for a negative one, `search` and `browse` add a warning for each such name. A name in `properties` counts as seen when a subject in scope has a scalar property of that name that the path provider exposes, so a property that holds subjects does not count. A path in `where` counts as seen when it leads from a subject in scope to any property the path provider exposes, also one that holds subjects, but not an attribute; the warning names the whole path, such as `Device.Missing`. For `search` the scope is every subject that passes `types`, `excludeTypes`, `path` and `query`, before `where` is applied; for `browse` it is every subject in the returned tree. A truncated result has no warnings, because it did not look at every subject.
 
 In JSON, the warnings are a `warnings` array of strings, omitted when there are none:
 
