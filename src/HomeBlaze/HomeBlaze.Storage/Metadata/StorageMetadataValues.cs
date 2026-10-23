@@ -29,8 +29,8 @@ internal static class StorageMetadataValues
     /// that is no longer the current one of the subject.
     /// </summary>
     /// <remarks>
-    /// Holds the lock of the subject, see <see cref="GetLock"/>, as two first values at once would add the property
-    /// twice, and the registry does not check that. A caller that reads the values from state that another thread
+    /// Holds the lock of the subject, see <see cref="GetLock"/>, as two first values at once would both try to add the property,
+    /// and the second add would throw. A caller that reads the values from state that another thread
     /// changes reads them while it holds the same lock. The change is published while the lock is held, so whatever
     /// handles it synchronously must not write a property that holds subjects: that takes the lifecycle lock of the
     /// context, while a thread that attaches a subject holds the lifecycle lock and waits for this one.
@@ -56,9 +56,10 @@ internal static class StorageMetadataValues
                         values, value.Value, (_, newValue) => value.Value = (ImmutableDictionary<string, JsonElement>?)newValue);
                 }
             }
-            else if (values is not null && subject.TryGetProperty(name) is null)
+            else if (values is not null && subject.TryGetProperty(name) is null &&
+                     (propertyName is null || subject.TryGetPropertyAttribute(propertyName, KnownAttributes.Metadata) is null))
             {
-                // A property of that name that the subject has of its own is left alone.
+                // A property or attribute of that name that the subject has of its own is left alone.
                 Add(subject, name, propertyName, values);
             }
         }
