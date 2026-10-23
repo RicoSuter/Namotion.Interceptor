@@ -1,21 +1,16 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Text;
+using HomeBlaze.Services.Display;
 using HomeBlaze.Services.Expressions;
 
 namespace HomeBlaze.Storage.Pages;
 
 /// <summary>
-/// Parses the text between the braces of an expression in the text of a page and checks what a page takes: the pipes
-/// <c>display</c> and <c>raw</c> without arguments, and no variable, because the text of a page has no value of its own.
+/// Parses the text between the braces of an expression in the text of a page and checks it with
+/// <see cref="ExpressionDisplay.Check"/> for <see cref="ExpressionUse.PageText"/>.
 /// </summary>
 public static class MarkdownExpressions
 {
-    /// <summary>The pipe that formats the value as the property panel shows it. It is the default.</summary>
-    internal const string DisplayPipe = "display";
-
-    /// <summary>The pipe that writes the value the same way on every system.</summary>
-    internal const string RawPipe = "raw";
-
     /// <summary>
     /// Parses the text, or returns null with the message to show in place of the value. A <c>\|</c>, which a table cell
     /// needs, is a <c>|</c>. A path with a space in a segment, as pages wrote one before expressions had operators, is
@@ -36,35 +31,8 @@ public static class MarkdownExpressions
             }
         }
 
-        error = Check(expression);
+        error = ExpressionDisplay.Check(expression, ExpressionUse.PageText);
         return error is null ? expression : null;
-    }
-
-    private static string? Check(ParsedExpression expression)
-    {
-        foreach (var pipe in expression.Pipes)
-        {
-            if (!pipe.Name.Equals(DisplayPipe, StringComparison.OrdinalIgnoreCase) &&
-                !pipe.Name.Equals(RawPipe, StringComparison.OrdinalIgnoreCase))
-            {
-                return $"Unknown pipe '{pipe.Name}'";
-            }
-
-            if (pipe.Arguments.Length > 0)
-            {
-                return $"The pipe '{pipe.Name}' takes no arguments";
-            }
-        }
-
-        foreach (var path in expression.Paths)
-        {
-            if (ExpressionVariables.TryGetVariable(path, out var variable))
-            {
-                return $"'{variable}' is not available in the text of a page";
-            }
-        }
-
-        return null;
     }
 
     // The path before the last '|' outside brackets, with its spaces outside brackets percent-encoded. Only a text that
