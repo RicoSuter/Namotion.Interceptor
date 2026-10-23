@@ -328,8 +328,9 @@ public class RegisteredSubjectProperty
     /// <returns>The existing or the created attribute property.</returns>
     /// <remarks>
     /// An existing attribute is returned unchanged, whatever its type, getter or setter, so a property
-    /// initializer can run again when its subject is re-registered without guarding the call. The lookup and
-    /// the add run under the registry's lock, so concurrent calls for one name return the same attribute.
+    /// initializer can run again when its subject is re-registered without guarding the call. A miss is checked
+    /// again and added under the subject's and the registry's locks, so concurrent calls for one name return the
+    /// same attribute.
     /// </remarks>
     /// <exception cref="InvalidOperationException">The attribute's property name is taken by a property that is not this attribute.</exception>
     public RegisteredSubjectProperty GetOrAddAttribute(
@@ -338,7 +339,9 @@ public class RegisteredSubjectProperty
         Action<IInterceptorSubject, object?>? setValue,
         params Attribute[] attributes)
     {
-        return Parent.AddPropertyCore(
+        // Unlocked read: registered properties are never removed and the property table is published through a
+        // volatile field, so a hit is final; a miss is checked again under the locks in AddPropertyCore.
+        return Parent.TryGetPropertyAttribute(Name, name) ?? Parent.AddPropertyCore(
             $"{Name}@{name}",
             type, getValue, setValue,
             attributes
@@ -358,8 +361,8 @@ public class RegisteredSubjectProperty
     /// <returns>The existing or the created attribute property.</returns>
     /// <remarks>
     /// An existing attribute is returned unchanged, whatever its type, getter or setter, and whether or not it
-    /// is derived. The lookup and the add run under the registry's lock, so concurrent calls for one name return
-    /// the same attribute.
+    /// is derived. A miss is checked again and added under the subject's and the registry's locks, so concurrent
+    /// calls for one name return the same attribute.
     /// </remarks>
     /// <exception cref="InvalidOperationException">The attribute's property name is taken by a property that is not this attribute.</exception>
     public RegisteredSubjectProperty GetOrAddDerivedAttribute(
@@ -368,7 +371,7 @@ public class RegisteredSubjectProperty
         Action<IInterceptorSubject, object?>? setValue,
         params Attribute[] attributes)
     {
-        return Parent.AddPropertyCore(
+        return Parent.TryGetPropertyAttribute(Name, name) ?? Parent.AddPropertyCore(
             $"{Name}@{name}",
             type, getValue, setValue,
             attributes

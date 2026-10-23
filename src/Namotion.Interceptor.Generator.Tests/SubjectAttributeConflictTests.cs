@@ -116,6 +116,44 @@ public class SubjectAttributeConflictTests
         // Assert
         var diagnostic = result.GeneratorDiagnostics.Single(d => d.Id == "NI0066");
         Assert.StartsWith("'BaseMotor' attaches", diagnostic.GetMessage());
+        Assert.Empty(result.CompilationErrors);
+    }
+
+    [Fact]
+    public void WhenAnExplicitInterfaceImplementationCarriesTheSameAttribute_ThenNI0066IsNotReported()
+    {
+        // Arrange
+        const string source = """
+            using Namotion.Interceptor;
+            using Namotion.Interceptor.Attributes;
+            using Namotion.Interceptor.Registry.Attributes;
+
+            namespace Repro
+            {
+                public interface IMotorFlags
+                {
+                    bool IsEnabled { get; }
+                }
+
+                [InterceptorSubject]
+                public partial class Motor : IMotorFlags
+                {
+                    public partial bool Forward { get; set; }
+
+                    [PropertyAttribute(nameof(Forward), "IsEnabled")]
+                    public partial bool Forward_IsEnabled { get; set; }
+
+                    [PropertyAttribute("Forward", "IsEnabled")]
+                    bool IMotorFlags.IsEnabled => true;
+                }
+            }
+            """;
+
+        // Act
+        var result = GeneratorTestHost.Run(source);
+
+        // Assert
+        Assert.DoesNotContain(result.GeneratorDiagnostics, d => d.Id == "NI0066");
     }
 
     [Fact]

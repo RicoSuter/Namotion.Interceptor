@@ -1,7 +1,10 @@
+using System.Reactive.Concurrency;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Registry.Tests.Models;
+using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Registry.Tests;
 
@@ -204,6 +207,7 @@ public class AttributeUniquenessTests
         Assert.Equal(1, successes);
         Assert.Equal(threadCount - 1, failures);
         Assert.Equal(1, registered.Properties.Count(p => p.IsAttribute && p.AttributeMetadata.AttributeName == "Flag"));
+        Assert.Equal(1, ((IInterceptorSubject)person).Properties.Keys.Count(key => key.StartsWith("Flag", StringComparison.Ordinal)));
     }
 
     [Fact]
@@ -219,6 +223,30 @@ public class AttributeUniquenessTests
         Assert.Contains("'Forward_IsEnabled'", exception.Message);
         Assert.Contains("'Forward_Enabled'", exception.Message);
         Assert.EndsWith("which both attach the attribute 'IsEnabled' to the property 'Forward'.", exception.Message);
+    }
+
+    [Fact]
+    public void WhenGetOrAddAttributeFindsAnExistingAttribute_ThenNoChangeIsPublished()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions().WithRegistry();
+        var person = new Person(context);
+        var firstName = person.TryGetRegisteredProperty(p => p!.FirstName)!;
+        var first = firstName.AddAttribute("Flag", typeof(int), _ => 1, null);
+        var subjectPropertyCount = ((IInterceptorSubject)person).Properties.Count;
+
+        var changes = new List<SubjectPropertyChange>();
+        using var subscription = context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(change => changes.Add(change));
+
+        // Act
+        var second = firstName.GetOrAddAttribute("Flag", typeof(int), _ => 2, null);
+
+        // Assert
+        Assert.Same(first, second);
+        Assert.Empty(changes);
+        Assert.Equal(subjectPropertyCount, ((IInterceptorSubject)person).Properties.Count);
     }
 
     [Fact]

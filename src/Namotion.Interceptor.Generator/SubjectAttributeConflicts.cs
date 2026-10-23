@@ -56,7 +56,7 @@ internal static class SubjectAttributeConflicts
     {
         foreach (var member in type.GetMembers())
         {
-            if (member is not IPropertySymbol property || SymbolExtensions.IsNeverASubjectProperty(property))
+            if (member is not IPropertySymbol property || !TakesPartInUniqueness(property))
             {
                 continue;
             }
@@ -84,6 +84,12 @@ internal static class SubjectAttributeConflicts
                     subject.Name, target.AttributeName, target.PropertyName, provider.ProviderName, property.Name));
             }
         }
+    }
+
+    // An explicit implementation's attributes are not part of the property metadata, and its name is qualified.
+    private static bool TakesPartInUniqueness(IPropertySymbol property)
+    {
+        return !SymbolExtensions.IsNeverASubjectProperty(property) && property.ExplicitInterfaceImplementations.Length == 0;
     }
 
     private static bool TryGetPropertyAttributeTarget(

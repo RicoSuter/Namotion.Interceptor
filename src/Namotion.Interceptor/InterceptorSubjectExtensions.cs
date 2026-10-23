@@ -39,7 +39,14 @@ public static class InterceptorSubjectExtensions
     public static FrozenDictionary<string, SubjectPropertyMetadata> MergeProperties(
         this IInterceptorSubject subject, IEnumerable<SubjectPropertyMetadata> properties)
     {
-        var merged = new Dictionary<string, SubjectPropertyMetadata>(subject.Properties);
+        var existing = subject.Properties;
+        var merged = new Dictionary<string, SubjectPropertyMetadata>(
+            properties.TryGetNonEnumeratedCount(out var count) ? existing.Count + count : existing.Count);
+        foreach (var entry in existing)
+        {
+            merged.Add(entry.Key, entry.Value);
+        }
+
         foreach (var property in properties)
         {
             if (!merged.TryAdd(property.Name, property))
