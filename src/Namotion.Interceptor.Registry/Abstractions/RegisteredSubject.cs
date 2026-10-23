@@ -134,6 +134,7 @@ public class RegisteredSubject
         return _properties.GetValueOrDefault(propertyName);
     }
 
+    /// <exception cref="InvalidOperationException">Two properties of the subject attach the same attribute name to the same property.</exception>
     public RegisteredSubject(IInterceptorSubject subject)
     {
         Subject = subject;
@@ -143,6 +144,32 @@ public class RegisteredSubject
                 p => p.Key,
                 p => new RegisteredSubjectProperty(
                     this, p.Key, p.Value.Type, p.Value.Attributes));
+
+        ThrowIfAttributePairsAreNotUnique();
+    }
+
+    // The dictionary is allocated on the first attribute property, so a subject without attributes pays nothing.
+    private void ThrowIfAttributePairsAreNotUnique()
+    {
+        Dictionary<(string PropertyName, string AttributeName), string>? providers = null;
+        foreach (var property in _properties.Values)
+        {
+            if (!property.IsAttribute)
+            {
+                continue;
+            }
+
+            var attributeMetadata = property.AttributeMetadata;
+            var pair = (attributeMetadata.PropertyName, attributeMetadata.AttributeName);
+
+            providers ??= new Dictionary<(string, string), string>();
+            if (!providers.TryAdd(pair, property.Name))
+            {
+                throw new InvalidOperationException(
+                    $"The subject '{Subject.GetType().Name}' declares the properties '{providers[pair]}' and '{property.Name}' " +
+                    $"which both attach the attribute '{attributeMetadata.AttributeName}' to the property '{attributeMetadata.PropertyName}'.");
+            }
+        }
     }
 
     internal void AddParent(RegisteredSubjectProperty parent, object? index)

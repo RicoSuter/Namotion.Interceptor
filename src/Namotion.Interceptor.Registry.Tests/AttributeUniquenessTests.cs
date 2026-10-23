@@ -204,4 +204,19 @@ public class AttributeUniquenessTests
         Assert.Equal(threadCount - 1, failures);
         Assert.Equal(1, registered.Properties.Count(p => p.IsAttribute && p.AttributeMetadata.AttributeName == "Flag"));
     }
+
+    [Fact]
+    public void WhenASubjectDeclaresTwoPropertiesForOneAttributePair_ThenAttachingItThrows()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+
+        // Act & Assert: registration runs in the registry's lifecycle handler, so the throw surfaces from the attach.
+        var exception = Assert.Throws<InvalidOperationException>(() => new DuplicateAttributeTarget(context));
+
+        Assert.Contains("The subject 'DuplicateAttributeTarget' declares the properties ", exception.Message);
+        Assert.Contains("'Forward_IsEnabled'", exception.Message);
+        Assert.Contains("'Forward_Enabled'", exception.Message);
+        Assert.EndsWith("which both attach the attribute 'IsEnabled' to the property 'Forward'.", exception.Message);
+    }
 }
