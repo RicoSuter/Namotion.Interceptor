@@ -1,0 +1,61 @@
+@using HomeBlaze.Services.Clients
+
+@inject ClientConnectionService ClientConnections
+
+<MudDialog data-testid="client-name-dialog">
+    <DialogContent>
+        <MudText Typo="Typo.body2" Class="mb-2">A named browser stays in the clients of the installation and can receive notifications.</MudText>
+        <MudTextField @bind-Value="_name" Label="Name" Immediate="true" AutoFocus="true" data-testid="client-name-input"/>
+        @if (_error is not null)
+        {
+            <MudAlert Severity="Severity.Error" Dense="true" Class="mt-2">@_error</MudAlert>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Disabled="@(string.IsNullOrWhiteSpace(_name) || _isSaving)" OnClick="SaveAsync"
+                   data-testid="client-name-save">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance? MudDialog { get; set; }
+
+    /// <summary>The connection of this tab.</summary>
+    [Parameter, EditorRequired] public ClientConnection Connection { get; set; } = null!;
+
+    private string? _name;
+    private string? _error;
+    private bool _isSaving;
+
+    protected override void OnInitialized() => _name = Connection.ClientName;
+
+    private void Cancel() => MudDialog?.Cancel();
+
+    private async Task SaveAsync()
+    {
+        _isSaving = true;
+        _error = null;
+        try
+        {
+            await ClientConnections.RenameAsync(Connection, _name ?? string.Empty, CancellationToken.None);
+            MudDialog?.Close();
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or ArgumentException)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _isSaving = false;
+        }
+    }
+
+    /// <summary>Asks for the name of the browser of the connection and names its client.</summary>
+    public static Task<IDialogReference> ShowAsync(IDialogService dialogService, ClientConnection connection)
+    {
+        var parameters = new DialogParameters<ClientNameDialog> { { x => x.Connection, connection } };
+        var options = new DialogOptions { MaxWidth = MaxWidth.ExtraSmall, FullWidth = true, CloseButton = true };
+        return dialogService.ShowAsync<ClientNameDialog>("Name this browser", parameters, options);
+    }
+}

@@ -1,9 +1,13 @@
 @using HomeBlaze.Components.Abstractions.TimeZones
+@using HomeBlaze.Host.Clients
+@using HomeBlaze.Host.Components.Clients
 @using HomeBlaze.Host.Components.TimeZones
 
 @inject DeveloperModeService DeveloperMode
 @inject NavigationManager NavigationManager
 @inject ITimeZoneDisplay TimeZone
+@inject CurrentClientConnection CurrentConnection
+@inject IDialogService DialogService
 
 @implements IDisposable
 
@@ -29,6 +33,12 @@
         @ToggleContent("Developer mode", DeveloperMode.IsEnabled)
     </MudMenuItem>
     <TimeZoneSelector/>
+    @if (CurrentConnection.Connection is not null)
+    {
+        <MudMenuItem Icon="@Icons.Material.Filled.Devices" OnClick="@NameBrowserAsync" data-testid="app-bar-menu-name-browser">
+            Name this browser
+        </MudMenuItem>
+    }
     <MudMenuItem Icon="@(IsDarkMode ? Icons.Material.Filled.DarkMode : Icons.Material.Outlined.DarkMode)"
                  OnClick="@OnToggleDarkMode" AutoClose="false"
                  role="menuitemcheckbox" aria-checked="@(IsDarkMode ? "true" : "false")"
@@ -72,6 +82,14 @@
 
     private bool IsActive(NavigationItem item) =>
         item.IsPageUrlOf(NavigationManager.ToBaseRelativePath(NavigationManager.Uri));
+
+    private async Task NameBrowserAsync()
+    {
+        if (CurrentConnection.Connection is { } connection)
+        {
+            await ClientNameDialog.ShowAsync(DialogService, connection);
+        }
+    }
 
     private void Reload() => NavigationManager.Refresh(forceReload: true);
 
