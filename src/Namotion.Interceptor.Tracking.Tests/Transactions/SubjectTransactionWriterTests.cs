@@ -8,34 +8,12 @@ using System.Reactive.Linq;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Transactions;
 using Namotion.Interceptor.Tracking.Tests.Models;
+using static Namotion.Interceptor.Tracking.Tests.Transactions.TransactionTestContext;
 
 namespace Namotion.Interceptor.Tracking.Tests.Transactions;
 
 public class SubjectTransactionWriterTests
 {
-    private static async Task RunWithoutAsyncLocalFlowAsync(Action action)
-    {
-        Task task;
-        var flowControl = ExecutionContext.SuppressFlow();
-        try
-        {
-            task = Task.Run(action);
-        }
-        finally
-        {
-            flowControl.Undo();
-        }
-
-        await task;
-    }
-
-    private static IInterceptorSubjectContext CreateTransactionContext()
-    {
-        return InterceptorSubjectContext.Create()
-            .WithFullPropertyTracking()
-            .WithTransactions();
-    }
-
     [Theory]
     [InlineData(TransactionLocking.Exclusive, TransactionFailureHandling.Rollback)]
     [InlineData(TransactionLocking.Exclusive, TransactionFailureHandling.BestEffort)]
@@ -45,9 +23,9 @@ public class SubjectTransactionWriterTests
         TransactionLocking locking, TransactionFailureHandling failureHandling)
     {
         // Arrange
-        var context = CreateTransactionContext();
-        var writer = new NonMarkingTransactionWriter();
-        var conflictingWriter = new NonMarkingTransactionWriter();
+        var context = CreateContext();
+        var writer = new CountingTransactionWriter();
+        var conflictingWriter = new CountingTransactionWriter();
         var fallback = InterceptorSubjectContext.Create();
         context.AddService<ITransactionWriter>(writer);
         fallback.AddService<ITransactionWriter>(conflictingWriter);
@@ -107,7 +85,7 @@ public class SubjectTransactionWriterTests
     public async Task WhenBestEffortPartiallyApplies_ThenDerivedAndDerivedOfDerivedTrackTheAppliedModel()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var subject = new TransactionCascadeSubject(context)
         {
             Plain = "original",
@@ -154,7 +132,7 @@ public class SubjectTransactionWriterTests
     public async Task WhenRollbackRevertsALocalApply_ThenDerivedAndDerivedOfDerivedReturnToTheOriginalModel()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var subject = new TransactionCascadeSubject(context)
         {
             Plain = "original",
@@ -203,7 +181,7 @@ public class SubjectTransactionWriterTests
     public async Task WhenConflictPreventsApply_ThenDerivedTrackingRemainsOnTheExternalModel()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var subject = new TransactionCascadeSubject(context)
         {
             Plain = "original",
@@ -226,7 +204,7 @@ public class SubjectTransactionWriterTests
                    conflictBehavior: TransactionConflictBehavior.FailOnConflict))
         {
             subject.Plain = "transaction";
-            await RunWithoutAsyncLocalFlowAsync(() => subject.Plain = "external");
+            await RunOnThreadPoolWithoutFlowAsync(() => subject.Plain = "external");
             changes.Clear();
 
             await Assert.ThrowsAsync<SubjectTransactionConflictException>(
@@ -250,8 +228,9 @@ public class SubjectTransactionWriterTests
     public async Task WhenWriterFailurePreventsApply_ThenNoDerivedTrackingStateChanges()
     {
         // Arrange
-        var context = CreateTransactionContext();
-        context.AddService<ITransactionWriter>(new FailingTransactionWriter());
+        var context = CreateContext();
+        context.AddService<ITransactionWriter>(
+            new CountingTransactionWriter { FailedPropertyNames = { nameof(TransactionCascadeSubject.Plain) } });
         var subject = new TransactionCascadeSubject(context)
         {
             Plain = "original",
@@ -288,6 +267,144 @@ public class SubjectTransactionWriterTests
             change.GetNewValue<string>() == "original|d1");
     }
 
+    [Theory]
+    [InlineData(TransactionFailureHandling.BestEffort)]
+    [InlineData(TransactionFailureHandling.Rollback)]
+    public async Task WhenCommitTimesOutWhileRevertingAfterLocalApply_ThenCommitFailsTerminally(
+        TransactionFailureHandling failureHandling)
+    {
+        // Arrange
+        var context = CreateContext(out var handler, new RevertUntilCancelledTransactionWriter());
+        var probe = new CommitWriteProbe(handler) { ThrowOnConsumedProperty = nameof(Person.LastName) };
+        context.AddService(probe);
+        var person = new Person(context) { FirstName = "Ann", LastName = "Lee" };
+        using var transaction = await context.BeginTransactionAsync(
+            failureHandling, commitTimeout: TimeSpan.FromMilliseconds(50));
+        person.FirstName = "Bob";
+        person.LastName = "Kim";
+
+        // Act
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+        var retryException = await Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await transaction.CommitAsync(CancellationToken.None));
+
+        // Assert
+        // Every change fails, and each source revert that timed out lists its change again as stuck.
+        Assert.Equal(
+            [nameof(Person.FirstName), nameof(Person.LastName), nameof(Person.FirstName), nameof(Person.LastName)],
+            exception.FailedChanges.Select(change => change.Property.Name));
+        Assert.Equal(2, exception.Errors.Count);
+        Assert.Equal("apply failed", exception.Errors[0].Message);
+        Assert.IsAssignableFrom<OperationCanceledException>(exception.Errors[1]);
+        Assert.Equal("Ann", person.FirstName);
+        Assert.Equal("Lee", person.LastName);
+        Assert.Contains("already been committed", retryException.Message);
+    }
+
+    [Theory]
+    [InlineData(TransactionFailureHandling.BestEffort)]
+    [InlineData(TransactionFailureHandling.Rollback)]
+    public async Task WhenCommitTimesOutWhileRevertingRejectedSet_ThenCommitFailsTerminallyAndModelIsUntouched(
+        TransactionFailureHandling failureHandling)
+    {
+        // Arrange
+        var context = CreateContext(out var handler, new RevertUntilCancelledTransactionWriter());
+        handler.RejectPreApplyCheck(new InvalidOperationException("rejected"));
+        var person = new Person(context) { FirstName = "Ann", LastName = "Lee" };
+        using var transaction = await context.BeginTransactionAsync(
+            failureHandling, commitTimeout: TimeSpan.FromMilliseconds(50));
+        person.FirstName = "Bob";
+        person.LastName = "Kim";
+
+        // Act
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+        string? landedFirstName = null;
+        string? landedLastName = null;
+        RunOutsideTransactionFlow(() =>
+        {
+            landedFirstName = person.FirstName;
+            landedLastName = person.LastName;
+        });
+        var retryException = await Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await transaction.CommitAsync(CancellationToken.None));
+
+        // Assert
+        // Every checked change fails, and each source revert that timed out lists its change again as stuck.
+        Assert.Equal(
+            [nameof(Person.FirstName), nameof(Person.LastName), nameof(Person.FirstName), nameof(Person.LastName)],
+            exception.FailedChanges.Select(change => change.Property.Name));
+        Assert.Equal(2, exception.Errors.Count);
+        Assert.Equal("rejected", exception.Errors[0].Message);
+        Assert.IsAssignableFrom<OperationCanceledException>(exception.Errors[1]);
+        Assert.Equal("Ann", landedFirstName);
+        Assert.Equal("Lee", landedLastName);
+        Assert.Equal(2, handler.CommittingCalls);
+        Assert.Contains("already been committed", retryException.Message);
+    }
+
+    [Fact]
+    public async Task WhenCommitTimesOutWhileRevertingAfterSourceFailureInRollback_ThenModelIsUntouchedAndRetryCommits()
+    {
+        // Arrange
+        var context = CreateContext();
+        var writer = new RevertUntilCancelledTransactionWriter(failFirstWriteOf: nameof(Person.LastName));
+        context.AddService<ITransactionWriter>(writer);
+        var person = new Person(context) { FirstName = "Ann", LastName = "Lee" };
+        using var transaction = await context.BeginTransactionAsync(
+            TransactionFailureHandling.Rollback, commitTimeout: TimeSpan.FromMilliseconds(50));
+        person.FirstName = "Bob";
+        person.LastName = "Kim";
+
+        // Act
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+        string? landedFirstName = null;
+        RunOutsideTransactionFlow(() => landedFirstName = person.FirstName);
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal("Ann", landedFirstName);
+        Assert.Equal("Bob", person.FirstName);
+        Assert.Equal("Kim", person.LastName);
+        Assert.Equal(2, writer.WrittenPropertyNames.Count);
+        Assert.Equal([nameof(Person.FirstName), nameof(Person.LastName)], writer.WrittenPropertyNames[1]);
+    }
+
+    /// <summary>
+    /// Accepts every write, except the first write of <c>failFirstWriteOf</c>, and completes a revert only when the
+    /// commit timeout cancels it.
+    /// </summary>
+    private sealed class RevertUntilCancelledTransactionWriter(string? failFirstWriteOf = null) : ITransactionWriter
+    {
+        /// <summary>Gets the property names passed to each write call, in call order.</summary>
+        public List<string[]> WrittenPropertyNames { get; } = [];
+
+        public ValueTask<SourceWriteResult> WriteToSourcesAsync(
+            Memory<SubjectPropertyChange> changes,
+            TransactionRequirement requirement,
+            CancellationToken cancellationToken)
+        {
+            var failedPropertyName = WrittenPropertyNames.Count == 0 ? failFirstWriteOf : null;
+            var all = changes.ToArray();
+            WrittenPropertyNames.Add(all.Select(change => change.Property.Name).ToArray());
+            var failed = all.Where(change => change.Property.Name == failedPropertyName).ToArray();
+            var written = all.Where(change => change.Property.Name != failedPropertyName).ToArray();
+            Exception[] errors = failed.Length > 0 ? [new InvalidOperationException("source write failed")] : [];
+            return new(new SourceWriteResult(written, failed, errors, RevertState: null));
+        }
+
+        public async ValueTask<SourceRevertResult> RevertSourceWritesAsync(
+            IReadOnlyList<SubjectPropertyChange> written,
+            object? revertState,
+            CancellationToken cancellationToken)
+        {
+            await Task.Delay(Timeout.Infinite, cancellationToken);
+            return new SourceRevertResult([], []);
+        }
+    }
+
     private static void AssertDerivedChange(
         SubjectPropertyChange change,
         string propertyName,
@@ -299,62 +416,15 @@ public class SubjectTransactionWriterTests
         Assert.Equal(newValue, change.GetNewValue<string>());
     }
 
-    private sealed class FailingTransactionWriter : ITransactionWriter
-    {
-        public ValueTask<SourceWriteResult> WriteToSourcesAsync(
-            Memory<SubjectPropertyChange> changes,
-            TransactionRequirement requirement,
-            CancellationToken cancellationToken)
-        {
-            return new ValueTask<SourceWriteResult>(new SourceWriteResult(
-                Written: [],
-                Failed: changes.ToArray(),
-                Errors: [new InvalidOperationException("Writer rejected the changes.")],
-                RevertState: null));
-        }
-
-        public ValueTask<SourceRevertResult> RevertSourceWritesAsync(
-            IReadOnlyList<SubjectPropertyChange> written,
-            object? revertState,
-            CancellationToken cancellationToken)
-            => new(new SourceRevertResult([], []));
-    }
-
-    /// <summary>
-    /// Writes nothing to any source but marks each accepted snapshot slot with a fixed source in place,
-    /// emulating a custom writer fulfilling the in-place marking contract.
-    /// </summary>
-    private sealed class MarkingTransactionWriter(object source) : ITransactionWriter
-    {
-        public ValueTask<SourceWriteResult> WriteToSourcesAsync(
-            Memory<SubjectPropertyChange> changes,
-            TransactionRequirement requirement,
-            CancellationToken cancellationToken)
-        {
-            var span = changes.Span;
-            for (var i = 0; i < span.Length; i++)
-            {
-                span[i] = span[i].WithOrigin(ChangeOrigin.Confirmed(source));
-            }
-            return new ValueTask<SourceWriteResult>(new SourceWriteResult([], [], [], RevertState: null));
-        }
-
-        public ValueTask<SourceRevertResult> RevertSourceWritesAsync(
-            IReadOnlyList<SubjectPropertyChange> written,
-            object? revertState,
-            CancellationToken cancellationToken)
-            => new(new SourceRevertResult([], []));
-    }
-
     [Fact]
     public async Task WhenCustomWriterMarksSnapshotInPlace_ThenApplyNotificationsCarryThatSource()
     {
         // Arrange
         var source = new object();
         var changes = new List<SubjectPropertyChange>();
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(changes.Add);
-        context.AddService<ITransactionWriter>(new MarkingTransactionWriter(source));
+        context.AddService<ITransactionWriter>(new CountingTransactionWriter { ConfirmingSource = source });
 
         var person = new Person(context);
         changes.Clear();
@@ -372,44 +442,14 @@ public class SubjectTransactionWriterTests
         Assert.Equal("John", firstNameChange.GetNewValue<string?>());
     }
 
-    /// <summary>
-    /// Fulfills the writer contract but never marks any snapshot slot, like a custom writer
-    /// predating the in-place marking contract.
-    /// </summary>
-    private sealed class NonMarkingTransactionWriter : ITransactionWriter
-    {
-        public int WriteCalls { get; private set; }
-
-        public List<string> WrittenPropertyNames { get; } = [];
-
-        public ValueTask<SourceWriteResult> WriteToSourcesAsync(
-            Memory<SubjectPropertyChange> changes,
-            TransactionRequirement requirement,
-            CancellationToken cancellationToken)
-        {
-            WriteCalls++;
-            foreach (var change in changes.Span)
-            {
-                WrittenPropertyNames.Add(change.Property.Name);
-            }
-            return new(new SourceWriteResult([], [], [], RevertState: null));
-        }
-
-        public ValueTask<SourceRevertResult> RevertSourceWritesAsync(
-            IReadOnlyList<SubjectPropertyChange> written,
-            object? revertState,
-            CancellationToken cancellationToken)
-            => new(new SourceRevertResult([], []));
-    }
-
     [Fact]
     public async Task WhenCustomWriterDoesNotMarkSnapshot_ThenApplyNotificationsCarryNoSource()
     {
         // Arrange
         var changes = new List<SubjectPropertyChange>();
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(changes.Add);
-        context.AddService<ITransactionWriter>(new NonMarkingTransactionWriter());
+        context.AddService<ITransactionWriter>(new CountingTransactionWriter());
 
         var person = new Person(context);
         changes.Clear();
@@ -435,8 +475,8 @@ public class SubjectTransactionWriterTests
     {
         // Arrange
         var changes = new List<SubjectPropertyChange>();
-        var writer = new NonMarkingTransactionWriter();
-        var context = CreateTransactionContext();
+        var writer = new CountingTransactionWriter();
+        var context = CreateContext();
         context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(changes.Add);
         context.AddService<ITransactionWriter>(writer);
 
@@ -470,8 +510,8 @@ public class SubjectTransactionWriterTests
     {
         // Arrange
         var changes = new List<SubjectPropertyChange>();
-        var writer = new NonMarkingTransactionWriter();
-        var context = CreateTransactionContext();
+        var writer = new CountingTransactionWriter();
+        var context = CreateContext();
         context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(changes.Add);
         context.AddService<ITransactionWriter>(writer);
 
@@ -486,17 +526,17 @@ public class SubjectTransactionWriterTests
         person.FirstName = "Ann";
         person.LastName = "Smith";
 
-        await RunWithoutAsyncLocalFlowAsync(() => person.LastName = "External");
+        await RunOnThreadPoolWithoutFlowAsync(() => person.LastName = "External");
         await Assert.ThrowsAsync<SubjectTransactionConflictException>(
             () => transaction.CommitAsync(CancellationToken.None).AsTask());
-        await RunWithoutAsyncLocalFlowAsync(() => person.LastName = null);
+        await RunOnThreadPoolWithoutFlowAsync(() => person.LastName = null);
         changes.Clear();
 
         // Act
         await transaction.CommitAsync(CancellationToken.None);
 
         // Assert
-        Assert.Equal([nameof(Person.LastName)], writer.WrittenPropertyNames);
+        Assert.Equal([nameof(Person.LastName)], writer.ReceivedPropertyNames);
         Assert.DoesNotContain(changes, c => c.Property.Name == nameof(Person.FirstName));
         Assert.Equal("Ann", person.FirstName);
         Assert.Equal("Smith", person.LastName);

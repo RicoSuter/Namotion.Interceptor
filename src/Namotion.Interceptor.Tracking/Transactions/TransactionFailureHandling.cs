@@ -10,6 +10,8 @@ public enum TransactionFailureHandling
     /// For each property, if the source write succeeds but local apply fails, the source is rolled back
     /// to maintain per-property consistency. A <see cref="SubjectTransactionException"/> is thrown containing all failures.
     /// This maximizes successful writes but may result in partial updates across properties.
+    /// When <see cref="ITransactionHandler"/>s checked the changes, a failed local apply instead reverts every change,
+    /// as in <see cref="Rollback"/> mode, and reports every change as failed.
     /// </summary>
     BestEffort,
 

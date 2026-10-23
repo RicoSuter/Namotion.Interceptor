@@ -24,23 +24,26 @@ public static class SubjectTransactionExtensions
     /// <param name="locking">The locking mode. Exclusive (default) acquires lock at begin; Optimistic acquires only during commit.</param>
     /// <param name="requirement">The transaction requirement for validation. Defaults to <see cref="TransactionRequirement.None"/>.</param>
     /// <param name="conflictBehavior">The conflict detection behavior. Defaults to <see cref="TransactionConflictBehavior.FailOnConflict"/>.</param>
+    /// <param name="validationMode">When transaction handlers validate the written values. Defaults to <see cref="TransactionValidationMode.Immediate"/>.</param>
     /// <param name="commitTimeout">
     /// Timeout for commit operations. Defaults to 30 seconds. User cancellation is ignored during commit;
     /// only the timeout can cancel the commit operation. Use <see cref="Timeout.InfiniteTimeSpan"/> to disable timeout.
     /// </param>
     /// <param name="cancellationToken">The cancellation token (used before commit starts, ignored during commit).</param>
     /// <returns>A new SubjectTransaction instance.</returns>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S107", Justification = "The transaction policies are independent optional parameters with defaults, so callers name only the ones they change.")]
     public static TransactionAwaitable BeginTransactionAsync(
         this IInterceptorSubjectContext context,
         TransactionFailureHandling failureHandling,
         TransactionLocking locking = TransactionLocking.Exclusive,
         TransactionRequirement requirement = TransactionRequirement.None,
         TransactionConflictBehavior conflictBehavior = TransactionConflictBehavior.FailOnConflict,
+        TransactionValidationMode validationMode = TransactionValidationMode.Immediate,
         TimeSpan? commitTimeout = null,
         CancellationToken cancellationToken = default)
     {
         var effectiveTimeout = commitTimeout ?? DefaultCommitTimeout;
-        var task = SubjectTransaction.BeginTransactionAsync(context, failureHandling, locking, requirement, conflictBehavior, effectiveTimeout, cancellationToken);
+        var task = SubjectTransaction.BeginTransactionAsync(context, failureHandling, locking, requirement, conflictBehavior, validationMode, effectiveTimeout, cancellationToken);
         return new TransactionAwaitable(task);
     }
 }

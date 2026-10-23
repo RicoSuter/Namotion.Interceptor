@@ -1,21 +1,13 @@
 # Transactions
 
-The `Namotion.Interceptor.Tracking` package provides transaction support for batching property changes and committing them atomically. This is particularly useful when integrating with external data sources (OPC UA, MQTT, databases) where you want to write multiple changes as a single operation, or when you need to ensure consistency across multiple property updates.
+The `Namotion.Interceptor.Tracking` package batches property changes in a transaction and commits them together. Without a transaction, a write lands in the local model immediately and external sources (OPC UA, MQTT, databases) are synchronized in the background. This suits a local model that is the source of truth, or eventual consistency. Use a transaction when several changes must land together, or when you need to know what an external source accepted before the local model changes.
 
-## When to Use Transactions
-
-Without transactions, property changes are applied to the local model immediately, while external sources synchronize asynchronously in the background. This is suitable when the local model is the source of truth, or eventual consistency is acceptable.
-
-Use transactions when you need guarantees about what was actually persisted to external sources.
-
-## Overview
-
-Transactions provide:
-- **Configurable commit modes**: Choose between best-effort or rollback behavior on partial failures
-- **Read-your-writes consistency**: Reading a property inside a transaction returns the pending value
-- **Notification suppression**: Captured non-derived writes stay silent until commit replay applies them
-- **External source integration**: Changes can be written to external sources before being applied to the local model
-- **Rollback on dispose**: Uncommitted changes are discarded when the transaction is disposed
+A transaction provides:
+- **Read-your-writes**: reading a property inside the transaction returns its pending value.
+- **Silent capture**: captured non-derived writes fire no notifications until the commit applies them.
+- **Source-first commits**: with source transactions, changes are written to external sources before they are applied to the local model.
+- **Configurable failure handling**: keep what succeeded (`BestEffort`) or revert everything (`Rollback`).
+- **Rollback on dispose**: disposing an uncommitted transaction discards its changes.
 
 ## Setup
 
@@ -101,9 +93,9 @@ using (var transaction = await context.BeginTransactionAsync(TransactionFailureH
 }
 ```
 
-### Last-Write-Wins Semantics
+### Last-Write-Wins and Commit Order
 
-If the same property is written multiple times within a transaction, only the final value is committed:
+Each property has at most one pending change. Its new value is the last value written, its old value is the landed value before the first write, and its position is that of the first write. The commit applies the changes in this order.
 
 ```csharp
 using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
@@ -119,30 +111,24 @@ using (var transaction = await context.BeginTransactionAsync(TransactionFailureH
 }
 ```
 
+Writing a property back to its landed value cancels its pending change, so the change no longer appears in `GetPendingChanges()` and is neither written, conflict-checked nor checked by handlers. A later write restores the change with its original old value and position, so conflict detection still sees a concurrent change that landed in between.
+
 ## Configuration Options
 
 ### Failure Handling
 
-Controls behavior when some writes fail during commit.
+Controls what happens when some changes fail during commit.
 
 ```csharp
 using var tx = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback);
 ```
 
-| Value | Description |
-|-------|-------------|
-| `BestEffort` | Apply successful changes, rollback failed ones to keep each property in sync with its source. |
-| `Rollback` | All-or-nothing across all properties - any failure reverts everything. |
+| Value | On failure |
+|-------|------------|
+| `BestEffort` | Keeps the changes that succeeded. When a local apply fails, that property's source write is reverted, so each property stays in sync with its source. Use when partial progress is acceptable. |
+| `Rollback` | Reverts every source write and every local apply. Use when you need all or nothing. |
 
-**Behavior comparison:**
-
-| Scenario | BestEffort | Rollback |
-|----------|------------|----------|
-| All succeed | All changes applied | All changes applied |
-| Source write fails | Successful applied, failed not applied | All reverted |
-| Local apply fails | Successful applied, failed sources rolled back | All reverted |
-| Consistency | Per-property (each stays in sync) | All-or-nothing |
-| Use when | Partial progress acceptable | Full atomicity required |
+With [transaction handlers](#transaction-handlers), such as [validation](validation.md#transactions), a failed local apply reverts everything in both modes. See [Commit Failures](#commit-failures) for every case.
 
 ### Locking
 
@@ -168,14 +154,22 @@ using var tx = await context.BeginTransactionAsync(
 
 ### Conflict Behavior
 
-Controls value-based conflict detection in both locking modes; `BestEffort` write-failure handling does not disable it.
+Controls value-based conflict detection in both locking modes; `BestEffort` failure handling does not disable it.
 
 | Value | Description |
 |-------|-------------|
 | `FailOnConflict` | Throw `SubjectTransactionConflictException` if values changed since transaction started. (default) |
 | `Ignore` | Overwrite any concurrent changes without checking. |
 
-Conflict detection is best-effort and not atomic with respect to non-transactional writes that happen between detection and apply. Transactions are serialized against each other, but a raw property write or an external source callback can still interleave during that window.
+### Validation Mode
+
+Controls when transaction handlers, such as property validation, validate the written values: `Immediate` (default) validates each write and the final set at commit, `Deferred` only the final set at commit. See [Validation in transactions](validation.md#transactions).
+
+```csharp
+using var tx = await context.BeginTransactionAsync(
+    TransactionFailureHandling.Rollback,
+    validationMode: TransactionValidationMode.Deferred);
+```
 
 ### Requirements
 
@@ -190,15 +184,13 @@ using var tx = await context.BeginTransactionAsync(
 | Value | Description |
 |-------|-------------|
 | `None` | No constraints - multiple sources and batches allowed. (default) |
-| `SingleWrite` | Requires single source and changes within `WriteBatchSize` limit. Validated at commit time. |
+| `SingleWrite` | Requires a single source and at most `WriteBatchSize` changes for it. |
 
-**SingleWrite validation errors:**
-- Multiple sources: `"SingleWrite requirement violated: Transaction spans 2 sources, but only 1 is allowed."`
-- Exceeds batch size: `"SingleWrite requirement violated: Transaction contains 10 changes, but WriteBatchSize is 5."`
+The transaction writer enforces `SingleWrite` at commit, before writing anything. A violation is reported as a failed source write of the source-bound changes, with an error such as `SingleWrite requirement violated: Transaction spans 2 sources (...), but only 1 is allowed.` or `SingleWrite requirement violated: Transaction contains 10 changes for source '...', but WriteBatchSize is 5.`
 
 ### Commit Timeout
 
-**Default: 30-second timeout**, applied only to the external source write/revert phase (commits with no sources are not timed). If a source write exceeds it, that write is reported as a failure in a `SubjectTransactionException`; if a revert is in progress when it fires, an `OperationCanceledException` is thrown.
+**Default: 30 seconds.** The timeout bounds only the transaction writer's source writes and reverts; commits without a writer are not timed. What a timeout causes depends on when it fires, see [Commit Failures](#commit-failures).
 
 ```csharp
 // Custom timeout
@@ -212,50 +204,24 @@ using var tx = await context.BeginTransactionAsync(
     commitTimeout: Timeout.InfiniteTimeSpan);
 ```
 
-**Important:** The `cancellationToken` passed to `CommitAsync()` is **ignored during commit** - only the timeout can cancel. This prevents partial commits leaving sources inconsistent.
+**Important:** the `cancellationToken` passed to `CommitAsync()` only cancels waiting for the optimistic lock. Once the commit runs, only the timeout can cancel it, so a caller cannot leave sources partially written.
 
 ## Commit Flow
 
-When `CommitAsync()` is called, changes are processed in stages. The exact flow depends on whether `WithSourceTransactions()` is configured.
+`CommitAsync()` runs these stages in order:
 
-### Without Source Transactions
+1. **Commit check**: the [transaction handlers](#transaction-handlers) check the final set of changes.
+2. **Conflict detection**: with `FailOnConflict`, a property whose landed value changed since its first write aborts the commit.
+3. **Source writes** (with source transactions, that is `WithSourceTransactions()` or a custom `ITransactionWriter`): source-bound changes are written to their sources, in parallel when there are several. Nothing is applied to the local model yet.
+4. **Pre-apply check** (with source transactions): the handlers check the changes that will be applied again.
+5. **Local apply**: source-bound and local changes are applied in a single pass, in commit order, except those whose source write failed. Applying calls the property setters, so `OnChanging`/`OnChanged` hooks run and notifications fire.
+6. **Compensation** on failure: the reverts described in [Commit Failures](#commit-failures). A local revert writes the old value through the setter, so hooks run again.
 
-When only `WithTransactions()` is configured (no external sources):
+Nothing is written before stage 3, so a failure in stages 1 and 2 leaves the transaction retryable.
 
-1. **Apply all changes** to the local model (calls property setters, triggers `OnChanging/OnChanged` methods)
-2. If any apply fails and `Rollback` mode: revert successful applies
-3. Fire change notifications
+Stage 5 applies source-bound changes marked with a `Confirmed` origin carrying the source that accepted them in stage 3, so the outbound change queue treats their notifications as echoes and a committed value is written to its source exactly once. See [Change notification source semantics](connectors.md#change-notification-source-semantics) for the full contract, including cascade and derived property behavior.
 
-### With Source Transactions
-
-When `WithSourceTransactions()` is configured, commits execute in two stages:
-
-```
-┌───────────────────────────────────────────────────────────────────────────┐
-│  Stage 1: External sources (parallel when multiple)                       │
-│  Write source-bound changes to OPC UA, MQTT, databases, etc.              │
-│  Nothing is applied to the local model yet.                               │
-├───────────────────────────────────────────────────────────────────────────┤
-│  Stage 2: Apply to the local model in a single pass                       │
-│  Source-bound and local changes are applied together, excluding           │
-│  any whose source write failed (triggers OnChanging/OnChanged).           │
-└───────────────────────────────────────────────────────────────────────────┘
-```
-
-Stage 2 applies source-bound changes marked with a `Confirmed` origin carrying the source that accepted them in stage 1, so the outbound change queue treats their notifications as echoes and a committed value is written to its source exactly once. See [Change notification source semantics](connectors.md#change-notification-source-semantics) for the full contract, including cascade and derived property behavior. Value-transforming write interceptors are not supported with source transactions: the source would receive the stage 1 value while the local model applies the transformed one.
-
-Stage 1 is performed by an `ITransactionWriter`; the built-in `SourceTransactionWriter` is registered by `WithSourceTransactions()`. Replacing it is an advanced scenario, see [Implementing a Custom Transaction Writer](#implementing-a-custom-transaction-writer).
-
-**Rollback behavior on failure:**
-
-| Failure Stage | BestEffort | Rollback |
-|---------------|------------|----------|
-| Source write fails | Successful sources written and applied | All sources reverted, nothing applied |
-| Local apply fails (source-bound or local) | Successful kept, failed sources reverted | All reverted |
-
-Both modes ensure **per-property consistency**: if a property's local apply fails, its source write is reverted. The difference is whether successful properties are kept (BestEffort) or also reverted (Rollback).
-
-Revert operations call setters with old values, which also trigger `OnChanging/OnChanged` methods.
+Stage 3 is performed by an `ITransactionWriter`; the built-in `SourceTransactionWriter` is registered by `WithSourceTransactions()`. Replacing it is an advanced scenario, see [Implementing a Custom Transaction Writer](#implementing-a-custom-transaction-writer).
 
 ### Source Association
 
@@ -268,115 +234,74 @@ propertyReference.SetSource(this);
 // On commit, WriteChangesInBatchesAsync is called on the source
 ```
 
-Properties without an associated source are applied in Stage 2 alongside source-bound properties.
+Properties without an associated source are applied in stage 5 alongside source-bound properties.
 
-**Changing a source while a commit runs:** the source a property writes to is decided when the transaction commits, not when you set the value. So if you call `SetSource` or `RemoveSource` on a property at the same time a commit is running, it is undefined whether that commit uses the old or the new binding for that property.
+## Guarantees
 
-Rollback is not affected by this: a revert always undoes the writes at the sources they were actually written to, even if the binding changed in the meantime.
+- **Commit order**: changes are applied in commit order, see [Last-Write-Wins and Commit Order](#last-write-wins-and-commit-order).
+- **Per-property consistency**: in both failure handling modes, a property whose local apply fails has its source write reverted.
+- **All or nothing**: `Rollback` lands every change or none. With transaction handlers, a failed local apply or a pre-apply rejection lands none of the checked changes in both modes. Both hold unless a revert fails, a custom writer throws, or a change's apply fails after its value was written (see the notes under the Failure Table).
+- **Serialized commits**: every commit holds the context's transaction lock, so transactional writes cannot interleave with a commit.
+- **Quiescent consistency, not isolation**: sources are written before the local model, so while a commit runs a source can hold a new value the local model does not have yet, and during `Rollback` compensation a source briefly holds a value that is then taken back. Source and local model agree once the commit settles, unless a revert fails (see [When a Revert Fails](#when-a-revert-fails)).
 
-## Error Handling
+Writes outside transactions are not serialized with commits, see [Edge Cases and Limitations](#edge-cases-and-limitations).
 
-### SubjectTransactionException
+## Commit Failures
 
-Thrown when one or more changes fail during commit:
-
-```csharp
-try
-{
-    await transaction.CommitAsync(cancellationToken);
-}
-catch (SubjectTransactionException ex)
-{
-    Console.WriteLine($"Failed: {ex.FailedChanges.Count}, Applied: {ex.AppliedChanges.Count}");
-
-    foreach (var error in ex.Errors)
-    {
-        Console.WriteLine($"  {error.Message}");
-    }
-}
-```
-
-The built-in `SourceTransactionWriter` never throws: a source that fails or throws is reported as a failed write and reverted through the normal failure handling. Only a custom `ITransactionWriter` that throws instead of reporting violates this contract. In that case the commit fails with a `SubjectTransactionException` reporting every change as failed, applies nothing to the local model, and the transaction becomes terminal (it must be disposed, not retried). Its sources are not reverted then, because the writer never returned the written set and revert state that reverting requires, so they may be left in an undefined state. A custom writer that throws from `RevertSourceWritesAsync` is handled the same way: the changes it was asked to revert are reported as failed reverts and the commit fails terminally. An in-place marking contract violation detected by `SubjectTransaction.ValidateWriterContract` (see [Implementing a Custom Transaction Writer](#implementing-a-custom-transaction-writer)) also fails terminally. A commit timeout during a source revert (`OperationCanceledException`) is the one exception and stays retryable; a timeout during a source write is reported as a failed write and handled like any other source failure, which is terminal.
-
-### SubjectTransactionConflictException
-
-Thrown when optimistic locking detects concurrent modifications:
-
-```csharp
-try
-{
-    await transaction.CommitAsync(cancellationToken);
-}
-catch (SubjectTransactionConflictException ex)
-{
-    Console.WriteLine($"Conflicts on: {string.Join(", ", ex.ConflictingProperties.Select(p => p.Name))}");
-}
-```
-
-### Other Exceptions
-
-| Exception | Cause |
-|-----------|-------|
-| `InvalidOperationException` | Nested transactions, already committed, transactions not enabled, committing from a different async flow |
-| `ObjectDisposedException` | Using a disposed transaction |
-| `OperationCanceledException` | Commit timeout during source revert (source-write timeouts are reported via `SubjectTransactionException`) |
-
-### Failure Flows and Consistency
+### Outcomes
 
 A commit attempt ends in one of three states:
 
-- **Committed**: the commit succeeded. The transaction is finished and must be disposed.
-- **Failed, retryable**: the commit aborted before the local model was touched, either before anything was written at all (conflict detected, optimistic lock not acquired) or because a commit timeout interrupted it. The pending changes remain intact and `CommitAsync` can be called again on the same transaction. See [Retry After Conflict Detection](#retry-after-conflict-detection).
-- **Failed, terminal**: the commit got past the source-write stage, so writes may have reached sources or the local model, and compensation (reverts) already ran once. The pending changes are cleared, a second `CommitAsync` throws `InvalidOperationException`, and the transaction must be disposed and replaced with a new one. Retrying would replay the snapshot onto state that has already moved, for example re-pushing values to a source that already accepted them.
+| Outcome | Pending changes | What to do |
+|---------|-----------------|------------|
+| Committed | Cleared | Dispose the transaction. |
+| Retryable failure | Intact | Fix the cause and call `CommitAsync` again on the same transaction, or dispose it. |
+| Terminal failure | Cleared | Dispose the transaction and start a new one. A second `CommitAsync` throws `InvalidOperationException`. |
 
-Note that "terminal" describes the transaction, not the result: a successful commit is also terminal. Transactions are one-shot once anything has moved.
+A failure is retryable when nothing was written yet, or when the commit timeout's `OperationCanceledException` propagates (see the [Failure Table](#failure-table) and [Implementing a Custom Transaction Writer](#implementing-a-custom-transaction-writer)). Every other failure is terminal: writes may have reached sources or the local model and compensation already ran once, so a retry would replay the snapshot onto state that has already moved, for example re-pushing values to a source that already accepted them. A committed or terminally failed transaction is inactive even before disposal: later reads and writes use the landed model.
 
-The tables below list every flow and its end state per property. "Old" means the pre-transaction value, "new" means the transaction's value.
+### Failure Table
 
-**Local-only commits** (no `WithSourceTransactions()`). There is only the local model, so nothing can diverge; the only question is which properties end old and which end new:
+"Old" is the value before the transaction, "new" the transaction's value. "Without a source" means changes of properties without a source. "With handlers" means the transaction has at least one [transaction handler](#transaction-handlers), for example validation. Unless noted, the exception is a `SubjectTransactionException`.
 
-| Scenario | Mode | Local model ends as | Outcome |
-|----------|------|---------------------|---------|
-| All applies succeed | any | new | committed |
-| Some applies fail | BestEffort | applied keep new, failed keep old | terminal failure, reported per change |
-| Some applies fail, reverts succeed | Rollback | all old | terminal failure |
-| Some applies fail, a revert also fails | Rollback | mixed, despite Rollback | terminal failure, stuck properties are in `FailedChanges` |
+| Failure | End state | `FailedChanges` | Retry |
+|---------|-----------|-----------------|-------|
+| Commit check rejects | All old, nothing written. The handler's exception propagates unchanged, for validation a `SubjectTransactionValidationException`. | Validation: the invalid changes | Yes |
+| Conflict detected (`SubjectTransactionConflictException`, see `ConflictingProperties`) | All old, nothing written | Empty | Yes |
+| Optimistic lock wait cancelled (`OperationCanceledException`) | All old, nothing written | n/a | Yes |
+| Source write fails or times out, `BestEffort` | Successful writes new at the source and locally, failed ones old | The failed source writes | No |
+| Source write fails or times out, or a custom writer reports errors without failed changes, `Rollback` | All old, written sources reverted | The failed source writes, the changes without a source, and any failed source revert | No |
+| Commit timeout during that `Rollback` revert (`OperationCanceledException`) | Local all old, sources partially reverted | n/a | Yes, a successful retry writes every source again |
+| Pre-apply check rejects, any mode | All old, written sources reverted | Every change (failed source writes first), then each failed source revert again | No |
+| Local apply fails, `BestEffort` without handlers | Applied changes new, failed ones old with their source write reverted | The failed source writes and the failed applies | No |
+| Local apply fails, `Rollback` without handlers | All old, local applies and source writes reverted | The failed applies and any failed local or source revert; with source transactions, also the changes without a source | No |
+| Local apply fails, with handlers, any mode | All old: no further change is applied, the applied ones and the source writes are reverted | Every change (failed source writes first), then each failed local revert (in reverse apply order), then each remaining failed source revert | No |
+| Custom writer reports errors without failed changes, `BestEffort` | All new | Empty, the errors are in `Errors` | No |
+| Custom writer throws, or violates its contract | Local all old, sources unknown and not reverted | Every change | No |
 
-Commits with source writes (`WithSourceTransactions()` or a custom `ITransactionWriter`) involve two models that must agree: the external source and the local model. The next two tables split these flows by how they end.
+Notes:
+- `AppliedChanges` lists the changes that landed. It is empty whenever the commit reverted or applied nothing.
+- A change whose apply threw after its value was written, for example because a derived recalculation failed, keeps that value: the failed apply itself is not reverted ([#674](https://github.com/RicoSuter/Namotion.Interceptor/issues/674)).
+- `Errors` is not aligned one to one with `FailedChanges`: a failed source write or revert yields one error per source, a failed local apply or revert one per change.
+- The built-in writer reports a commit timeout during a source write as a failed write. During a source revert after a pre-apply rejection or after the local apply started, it is reported as a failed revert.
+- Usage errors throw `InvalidOperationException` (nested transaction, already committed, transactions not enabled, commit from a different async flow, concurrent `CommitAsync`) or `ObjectDisposedException` (transaction disposed, also while the commit check ran).
 
-**Source writes, consistent end state.** The commit fully succeeds, fails before anything is written, or every needed revert succeeds, so source and local model agree on every property:
+### When a Revert Fails
 
-| Scenario | Mode | Source ends | Local ends | Outcome |
-|----------|------|-------------|------------|---------|
-| All source writes and applies succeed | any | new | new | committed |
-| Conflict detected or optimistic lock not acquired (nothing written yet) | any | old | old | retryable failure |
-| A source write fails or times out, reverts succeed | Rollback | all old | all old | terminal failure |
-| A source write fails or times out | BestEffort | succeeded new, failed old | matches source | terminal failure |
-| A local apply fails, all reverts succeed | Rollback | all old | all old | terminal failure |
-| A local apply fails, its source revert succeeds | BestEffort | applied new, failed-apply old | matches source | terminal failure |
-| Writer reports an error without failed changes (custom writers only), reverts succeed | Rollback | all old | all old | terminal failure |
-| Writer reports an error without failed changes (custom writers only) | BestEffort | new | new | terminal failure, error surfaced in `Errors` |
+Reverts are compensating writes, not an undo, and they can fail too. A source that just failed or timed out is asked to accept another write, so this is the most likely way to end inconsistent. The affected property then has different values at the source and in the local model:
 
-**Source writes, diverged end state.** A revert failed, was interrupted, or never ran, so a property can end with different values at the source and in the local model. The end state depends only on which revert got stuck, not on which stage triggered it, so each row covers every path that reaches it. Diverged properties are always reported in `FailedChanges` and `Errors`, except for a throwing writer where the transaction cannot know which sources were touched:
+| Stuck revert | Source ends | Local ends | Reported |
+|--------------|-------------|------------|----------|
+| A source revert fails or throws, or times out after a pre-apply rejection or after the local apply started | New | Old | In `FailedChanges` and `Errors`, terminal |
+| A local revert fails (`Rollback`, or with handlers) | Old, if it has a source | New | In `FailedChanges` and `Errors`, terminal |
+| The commit timeout interrupts the `Rollback` revert after a failed source write or writer error | Partially reverted | Old | `OperationCanceledException`, retryable; the divergence is transient, a successful retry writes everything again |
+| A custom writer throws from `WriteToSourcesAsync` | Unknown, never reverted | Old | Not identifiable: the transaction cannot know which sources were touched |
 
-| Scenario | Mode | Source ends | Local ends | Outcome | Divergence |
-|----------|------|-------------|------------|---------|------------|
-| Commit timeout during source revert | Rollback | partially reverted | old | retryable failure | transient, a successful retry re-pushes everything |
-| A source revert fails or throws | any | new on the stuck source | old | terminal failure | source ahead of local |
-| A local revert fails after a failed apply | Rollback | old | new | terminal failure | local ahead of source |
-| Custom writer throws from `WriteToSourcesAsync` | any | unknown, never reverted | old | terminal failure | unknown and unreported |
+`FailedChanges` can also hold properties that ended consistent, such as changes without a source that a `Rollback` commit reverted cleanly. When it lists every change (after a pre-apply rejection, or a failed apply with handlers), each stuck property is listed a second time after the full list, so it can be told apart.
 
-Three root causes account for every divergence:
+### Local Apply Failures
 
-1. **A compensating write failed.** Reverts are inverse writes, not an undo. A source that just failed or timed out is asked to accept another write, so this is the most likely divergence in practice. It is always terminal and always reported through `FailedChanges` and `Errors`, so the caller knows exactly which properties are stuck.
-2. **The writer threw instead of reporting.** Only a custom `ITransactionWriter` can cause this (the built-in writer always reports). The transaction has no written set and no revert state, so it cannot compensate and cannot tell which sources were touched. See [SubjectTransactionException](#subjecttransactionexception).
-3. **The inherent in-flight window.** Sources are written before the local model is applied, so even a fully successful commit has a moment where a source holds the new value and the local model does not, and during Rollback compensation a source briefly holds a value that is then taken back. Transactions provide quiescent consistency (both sides agree once the commit settles), not isolation from external observers of the source.
-
-## Advanced Topics
-
-### Local Property Failures
-
-Properties can fail during commit if their `OnChanging/OnChanged` partial methods throw exceptions. This is useful for hardware integrations like GPIO.
+A local apply fails when an `OnChanging`/`OnChanged` hook or a write interceptor throws, for example in hardware integrations:
 
 ```csharp
 [InterceptorSubject]
@@ -390,11 +315,77 @@ public partial class GpioDevice
 }
 ```
 
-When `OnChanging/OnChanged` throws:
-- **BestEffort mode**: Other successful changes are applied, failure reported
-- **Rollback mode**: All previous stages are reverted (sources + successful local changes)
+### Retrying
 
-### Derived Properties
+Conflicts and commit check rejections are thrown before anything is written, so the pending changes stay intact and you can adjust them and commit again. Both exception types derive from `SubjectTransactionException`, so catch them before the base type:
+
+```csharp
+using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback);
+
+motor.MaxAllowedSpeed = 200;
+motor.MotorSpeed = 150; // validated: must not exceed MaxAllowedSpeed (see validation.md)
+
+try
+{
+    await transaction.CommitAsync(cancellationToken);
+}
+catch (SubjectTransactionConflictException)
+{
+    // Nothing was written: re-read the current state, adjust, and retry.
+    motor.MaxAllowedSpeed = 250;
+    await transaction.CommitAsync(cancellationToken);
+}
+catch (SubjectTransactionValidationException)
+{
+    // Nothing was written: fix the invalid values and retry.
+    motor.MotorSpeed = 90;
+    await transaction.CommitAsync(cancellationToken);
+}
+catch (SubjectTransactionException exception)
+{
+    // Changes may have reached a source or the local model: inspect exception.FailedChanges
+    // and exception.Errors, dispose, and start a new transaction.
+}
+```
+
+## Transaction Handlers
+
+An `ITransactionHandler` is called for each write a transaction captures and checks the final set at commit. Property validation is one.
+
+**Resolution.**
+- A handler takes part when it is registered on the transaction's context, or on the context of a subject written in the transaction, for example a subject's own context that reaches the transaction's context through a fallback.
+- Handlers of the transaction's context are resolved when the transaction begins, those of a subject's context when a subject of it is first written. A handler registered later does not take part when registered on the transaction's context, and is not guaranteed to when registered on a subject context that was already included.
+- A resolved handler takes part for the rest of the transaction: `OnCapturing` is called for later writes to any subject, and `OnCommitting` receives the whole final set. To handle only some subjects, filter by `property.Subject` (`change.Property.Subject` in `OnCommitting`).
+- Handlers are called in the order they were resolved, each context's in its service order. A handler that `Equals` one already taking part is not added again. `ValidationInterceptor` equals any instance of its type, so validation registered on several contexts of a fallback chain runs once.
+
+**Capture.** `OnCapturing` is called before a write is captured or cancelled. Throwing rejects the write: nothing is captured and the exception propagates to the setter.
+
+**Checks.** `OnCommitting` is called in up to two checks, both on the committing thread while the transaction is committing. The first handler that throws stops the rest. Do not assume a single call per commit.
+
+| | Commit check | Pre-apply check |
+|-|--------------|-----------------|
+| Runs | Before conflict detection, any source write and the local apply | Only with source transactions, after the source writes and right before the local apply |
+| Receives | The final set, in commit order | Only the changes that will be applied, with their captured origins |
+| Skipped | When nothing is pending | When nothing will be applied, when the transaction was disposed, and in `Rollback` mode after a source write failure or writer error, which reverts every source anyway |
+| Throwing | Aborts the commit before anything is written. The exception propagates unchanged, and the transaction stays retryable with its pending changes unless it was disposed. | Rejects the whole set in both failure handling modes: every written source is reverted, nothing from the set lands, every change is reported as failed in a `SubjectTransactionException`, and the transaction is terminal. |
+
+The pre-apply check exists because inbound updates can change what a handler reads while the sources are written. It rejects the whole set because the other changes were checked against the rejected values. The exception's `Errors` hold the errors of a thrown `SubjectTransactionException` that has any, otherwise the thrown exception itself, after any source write errors and before any revert errors.
+
+**Reads and writes during a check.** Handlers must not write properties.
+- On the committing thread, a read returns the checked value: the pending value of a changed property, and the landed value otherwise. A cancelled change reads the landed value, and in the pre-apply check so does a property whose source write failed.
+- On the committing thread, a write throws `InvalidOperationException`, including a write to a settable derived property. A write of a property's landed value is dropped by the equality check, same as outside a transaction.
+- On other threads that carry the transaction, reads and writes throw `InvalidOperationException` because a commit is in progress, so handlers must read synchronously on the calling thread. This includes a write back to the landed value of a pending property; a write of the landed value of a property without a pending change is dropped as unchanged instead.
+- Such a write from another thread, for example a child task, can still call `OnCapturing` while `OnCommitting` runs, before it is rejected, so handlers must tolerate concurrent calls.
+- A write to a subject whose context does not route through the transaction interceptor is not intercepted and lands immediately, even during a check.
+
+**Applies and rollbacks.** A handler that also intercepts writes can call `SubjectTransaction.TryConsumeCommitWrite` to recognize the apply of a value it already checked, or a rollback restoring one, and skip checking it again. Its limits:
+- Reference-type values match by identity and value-type values by equality, so a struct with a loose `Equals` can pass an equal, unchecked value as the checked one.
+- Only the first handler to call it for a write recognizes it; another handler that intercepts the same write checks it again.
+- It does not recognize any apply after the transaction was disposed during the commit.
+
+With handlers, a failed apply invalidates the checked set: in both failure handling modes the commit applies no further changes and reverts the applied values and every written source, see the [Failure Table](#failure-table). Writes outside transactions are not blocked by a commit, so a property a handler reads can change between its check and the local apply; the pre-apply check narrows that window to the synchronous apply itself.
+
+## Derived Properties
 
 Derived properties (marked with `[Derived]`) are handled specially. The pending read view belongs to each execution flow carrying a live ambient transaction, while derived tracking is shared across flows and therefore uses only values that have landed in the model:
 
@@ -431,91 +422,7 @@ The same landed-model rule applies when tracking evaluates a getter during initi
 
 Notification boundaries follow the evaluation nesting. A top-level derived recalculation publishes after its tracking evaluation has ended, so a synchronous subscriber reads pending values normally. If a getter causes a reentrant derived recalculation or a landed side-effect notification, that nested publication occurs while the outer getter is still being evaluated. Synchronous subscribers in that nested path read landed model values until the outer evaluation finishes.
 
-### Capture and Commit Replay
-
-Transactions buffer property writes in a pending dictionary instead of applying them immediately. Consider a motor with a configurable speed limit, where a validator rejects `MotorSpeed` values that exceed `MaxAllowedSpeed`:
-
-```csharp
-[InterceptorSubject]
-public partial class Motor
-{
-    public partial int MaxAllowedSpeed { get; set; } // Default: 100
-    public partial int MotorSpeed { get; set; }      // Validated: must be <= MaxAllowedSpeed
-}
-```
-
-**During the transaction (capture phase):**
-
-```
-motor.MaxAllowedSpeed = 200;
-    → ValidationInterceptor: validates 200 for MaxAllowedSpeed → OK
-    → TransactionInterceptor: captures in pending[MaxAllowedSpeed] = 200, stops chain
-    (no field write, no notifications)
-
-motor.MotorSpeed = 150;
-    → ValidationInterceptor: validates 150 for MotorSpeed
-        reads MaxAllowedSpeed → TransactionInterceptor returns pending value 200
-        150 <= 200 → OK
-    → TransactionInterceptor: captures in pending[MotorSpeed] = 150, stops chain
-    (no field write, no notifications)
-```
-
-**On commit (replay phase):**
-
-Changes are replayed in insertion order through the full interceptor chain against the real model:
-
-```
-await transaction.CommitAsync(cancellationToken);
-
-Apply pending[MaxAllowedSpeed] = 200:
-    → ValidationInterceptor: validates 200 → OK
-    → TransactionInterceptor: IsCommitting=true → calls next (no capture)
-    → Field write: MaxAllowedSpeed = 200
-    → Notifications fired
-
-Apply pending[MotorSpeed] = 150:
-    → ValidationInterceptor: validates 150
-        reads MaxAllowedSpeed from real model → 200 (already committed above)
-        150 <= 200 → OK
-    → TransactionInterceptor: IsCommitting=true → calls next (no capture)
-    → Field write: MotorSpeed = 150
-    → Notifications fired
-```
-
-**Why insertion order matters:** If `MotorSpeed` were committed before `MaxAllowedSpeed`, the validator would read `MaxAllowedSpeed = 100` from the real model and reject the write.
-
-**Write order limitation:** Only the final value per property is stored (last write wins), and the commit position is determined by the *first* write to each property. If a property is re-written with a value that has different dependency requirements than the initial value, the commit order (based on first-write positions) may no longer match the dependency order needed by the final values. This can cause commit-time validation to fail even though the final set of values is consistent. To avoid this, ensure that re-writes do not shift dependency requirements relative to the original insertion order. See [#192](https://github.com/RicoSuter/Namotion.Interceptor/issues/192) for details and potential solutions. Writing a property back to its landed value cancels its pending change. A later write to it restores the change in its original position with its original old value, so conflict detection still sees concurrent changes.
-
-### Retry After Conflict Detection
-
-When using `TransactionConflictBehavior.FailOnConflict`, a `SubjectTransactionConflictException` is thrown *before* any writes are applied. The pending changes remain intact, so you can modify them and retry:
-
-```csharp
-using var transaction = await context.BeginTransactionAsync(
-    TransactionFailureHandling.BestEffort,
-    conflictBehavior: TransactionConflictBehavior.FailOnConflict);
-
-motor.MaxAllowedSpeed = 200;
-motor.MotorSpeed = 150;
-
-try
-{
-    await transaction.CommitAsync(cancellationToken);
-}
-catch (SubjectTransactionConflictException ex)
-{
-    // Conflict detected before any writes: pending changes are still intact.
-    // Re-read current state, adjust, and retry.
-    motor.MaxAllowedSpeed = 250;
-    await transaction.CommitAsync(cancellationToken);
-}
-```
-
-Post-write failures (`SubjectTransactionException` from `BestEffort` or `Rollback`) clear the pending changes as part of the commit process, so retry is not possible. Dispose the transaction and start a new one.
-
-Note that concurrent `CommitAsync` calls on the same transaction are rejected: only one commit attempt can be in progress at a time.
-
-### Thread Safety
+## Thread Safety
 
 - `BeginTransactionAsync()` uses `AsyncLocal<T>` to store the current transaction
 - Exclusive transactions use a per-context semaphore
@@ -525,6 +432,7 @@ Note that concurrent `CommitAsync` calls on the same transaction are rejected: o
 - A successful or terminally failed commit is inactive for property interception even before disposal. Later reads and writes use the landed model normally; retryable failures remain active.
 - While a live ambient transaction is committing, property reads and writes on a flow carrying it throw `InvalidOperationException`. This includes custom writer callbacks. Getter reads are also rejected because sibling or landed-model state is outside the frozen snapshot and can make the source payload inconsistent.
 - Commit-owned synchronous local replay remains allowed, including property hooks, change handlers, and derived cascades initiated by that replay. This authorization does not extend into custom writer callbacks or child tasks.
+- During the handler checks, reads on the committing thread return the checked values and writes throw `InvalidOperationException`, see [Transaction Handlers](#transaction-handlers).
 - A transaction must be begun, used, committed, and disposed within the same async flow; committing from another flow throws
 - Concurrent `CommitAsync` calls on the same transaction instance are rejected
 
@@ -534,6 +442,25 @@ Note that concurrent `CommitAsync` calls on the same transaction are rejected: o
 2. **Keep transactions short** - Long transactions hold pending changes in memory
 3. **Handle exceptions from CommitAsync** - Commits can fail partially
 4. **Don't share transactions across threads** - Each async context should have its own transaction
+
+## Implementing a Custom Transaction Writer
+
+Most applications use the built-in `SourceTransactionWriter` registered by `WithSourceTransactions()` and never implement `ITransactionWriter`. A custom writer replaces stage 3 of the [commit flow](#commit-flow) (registered as an `ITransactionWriter` service on the context) and is only needed when source writes require protocol-specific orchestration the built-in writer cannot provide. The writer is also responsible for enforcing the `SingleWrite` requirement.
+
+**No property access.** Both writer callbacks execute while the caller's live ambient transaction is committing. Do not read or write subject properties from either callback, and do not suppress ambient execution-context flow to bypass this boundary. This includes getters: sibling or landed-model state is not represented by the supplied snapshot and can make source operations inconsistent with it. Construct writes from `changes` and `requirement`, and reverts from `written` and `revertState`, together with writer-owned configuration and any required subject state captured before `CommitAsync()`.
+
+**Report, never throw.** Report failures in the returned `SourceWriteResult` and `SourceRevertResult`. The built-in writer never throws, except the commit timeout's `OperationCanceledException` from a revert: a source that fails or throws is reported as a failed write.
+- A throw from `WriteToSourcesAsync` fails the commit terminally with every change reported as failed and nothing applied. Its sources are not reverted, because the writer never returned the written set and revert state that reverting requires, so they may be left in an undefined state. The commit timeout's `OperationCanceledException` is the exception: it propagates and leaves the transaction retryable, so report a write timeout as a failed write, as the built-in writer does.
+- A throw from `RevertSourceWritesAsync` counts as every requested revert failing, and the commit fails terminally.
+- `SourceRevertResult.Failed` must contain only changes from `written`.
+
+**In-place marking.** A custom writer must follow the in-place marking contract documented in the XML documentation of `ITransactionWriter.WriteToSourcesAsync`. Moving or replacing a snapshot slot silently corrupts the local apply. Not marking an accepted slot is allowed, but its apply notification publishes without a `Confirmed` origin and the outbound queue pushes the committed value to the source again. While developing a writer, enable the runtime contract validation:
+
+```csharp
+SubjectTransaction.ValidateWriterContract = true;
+```
+
+The commit then fails terminally with a `SubjectTransactionException` if a slot was moved or replaced (sources may already have been written, so no retry). The check covers slot identity only: missing or wrong-source marks are not detected. Leave it disabled in production (one array allocation and sweep per commit); the built-in `SourceTransactionWriter` does not need it.
 
 ## API Reference
 
@@ -545,6 +472,7 @@ TransactionAwaitable BeginTransactionAsync(
     TransactionLocking locking = TransactionLocking.Exclusive,
     TransactionRequirement requirement = TransactionRequirement.None,
     TransactionConflictBehavior conflictBehavior = TransactionConflictBehavior.FailOnConflict,
+    TransactionValidationMode validationMode = TransactionValidationMode.Immediate,
     TimeSpan? commitTimeout = null, // default: 30 seconds
     CancellationToken cancellationToken = default)
 ```
@@ -559,11 +487,15 @@ TransactionAwaitable BeginTransactionAsync(
 | `Context` | The context this transaction is bound to |
 | `Locking` | The locking mode |
 | `ConflictBehavior` | The conflict detection behavior |
+| `ValidationMode` | When transaction handlers validate the written values |
+| `Current` (static) | The transaction of the current async flow, or null |
+| `TryConsumeCommitWrite(...)` (static) | Lets a handler recognize a value it already checked, see [Transaction Handlers](#transaction-handlers) |
+| `ValidateWriterContract` (static) | Enables the writer contract check, see [Implementing a Custom Transaction Writer](#implementing-a-custom-transaction-writer) |
 
 ### Enums
 
 **TransactionFailureHandling:**
-- `BestEffort` - Apply successful changes, rollback failed ones (per-property consistency)
+- `BestEffort` - Keep successful changes, revert the source write of a failed apply (per-property consistency); with transaction handlers, a failed apply reverts everything
 - `Rollback` - All-or-nothing across all properties
 
 **TransactionLocking:**
@@ -578,64 +510,17 @@ TransactionAwaitable BeginTransactionAsync(
 - `FailOnConflict` - Throw on concurrent changes
 - `Ignore` - Overwrite without checking
 
-## Limitations
+**TransactionValidationMode:**
+- `Immediate` - Validate each write and the final set at commit
+- `Deferred` - Validate only the final set at commit
 
-### Single Context Binding
+## Edge Cases and Limitations
 
-A transaction is bound to a single `IInterceptorSubjectContext`. Attempting to modify a property on a subject from a different context throws `InvalidOperationException`:
-
-```csharp
-var context1 = InterceptorSubjectContext.Create().WithTransactions();
-var context2 = InterceptorSubjectContext.Create().WithTransactions();
-
-var person1 = new Person(context1);
-var person2 = new Person(context2);
-
-using var tx = await context1.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-
-person1.FirstName = "John";  // OK - same context as transaction
-person2.FirstName = "Jane";  // THROWS InvalidOperationException:
-                              // "Cannot modify property 'FirstName': Transaction is bound to a different context."
-```
-
-### Nested Transactions
-
-Nested transactions are not supported. Attempting to start a transaction while one is already active in the same execution context throws `InvalidOperationException`:
-
-```csharp
-using var tx1 = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-
-// THROWS: "Nested transactions are not supported."
-using var tx2 = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-```
-
-### Optimistic Concurrency - ABA Problem
-
-`FailOnConflict` uses value-based detection. If a property changes A → B → A between start and commit, no conflict is detected. For strict version-based detection, implement external versioning.
-
-### Multi-Source Transactions
-
-When writing to multiple sources, true atomicity is not guaranteed:
-1. Writes are parallel for performance
-2. On failure, successful sources are rolled back (best effort)
-3. During rollback, sources may temporarily have inconsistent values
-
-For strict atomicity, use a single source per transaction or implement application-level compensation.
-
-### Rollback is Best-Effort
-
-Rollback operations can also fail. If revert fails, `SubjectTransactionException` includes both the original failure and the revert failure. The system cannot guarantee consistency in this case. See [Failure Flows and Consistency](#failure-flows-and-consistency) for the full matrix of end states.
-
-## Implementing a Custom Transaction Writer
-
-Most applications use the built-in `SourceTransactionWriter` registered by `WithSourceTransactions()` and never implement `ITransactionWriter`. A custom writer replaces stage 1 of the commit flow (registered as an `ITransactionWriter` service on the context) and is only needed when source writes require protocol-specific orchestration the built-in writer cannot provide.
-
-Both writer callbacks execute while the caller's live ambient transaction is committing. Do not read or write subject properties from either callback, and do not suppress ambient execution-context flow to bypass this boundary. This includes getters: sibling or landed-model state is not represented by the supplied snapshot and can make source operations inconsistent with it. Construct writes from `changes` and `requirement`, and reverts from `written` and `revertState`, together with writer-owned configuration and any required subject state captured before `CommitAsync()`.
-
-A custom writer must follow the in-place marking contract documented in the XML documentation of `ITransactionWriter.WriteToSourcesAsync`. Moving or replacing a snapshot slot silently corrupts the local apply. Not marking an accepted slot is allowed, but its apply notification publishes without a `Confirmed` origin and the outbound queue pushes the committed value to the source again. While developing a writer, enable the runtime contract validation:
-
-```csharp
-SubjectTransaction.ValidateWriterContract = true;
-```
-
-The commit then fails terminally with a `SubjectTransactionException` if a slot was moved or replaced (sources may already have been written, so no retry). The check covers slot identity only: missing or wrong-source marks are not detected. Leave it disabled in production (one array allocation and sweep per commit); the built-in `SourceTransactionWriter` does not need it.
+- **Single context binding**: a transaction is bound to the context it begins on. Writing a subject throws `InvalidOperationException` (`Cannot modify property 'FirstName': Transaction is bound to a different context.`) unless the subject's context shares the transaction's interceptor, for example through a fallback to the transaction's context. A subject whose context has no transaction support is not intercepted at all: its writes land immediately and are not part of the transaction.
+- **No nesting**: beginning a transaction while one is active in the same execution context throws `InvalidOperationException`: `Nested transactions are not supported.`
+- **ABA**: `FailOnConflict` compares values. A property that changes A to B and back to A between the first write and the commit is not a conflict. Use external versioning for strict version-based detection.
+- **Writes outside transactions**: conflict detection is not atomic with respect to raw property writes and external source callbacks. Transactions are serialized against each other, but such a write can interleave between conflict detection, the handler checks and the apply.
+- **Multiple sources**: source writes run in parallel and reverts are best-effort, so sources can briefly disagree and atomicity across sources is not guaranteed. For strict atomicity, use a single source per transaction or application-level compensation.
+- **Changing a source binding during a commit**: the source a property writes to is decided when the transaction commits, not when the value is set. Calling `SetSource` or `RemoveSource` on a property while a commit runs leaves it undefined whether that commit uses the old or the new binding. Reverts always target the sources that were actually written, even if the binding changed in the meantime.
+- **Value-transforming write interceptors** are not supported with source transactions: the source would receive the stage 3 value while the local model applies the transformed one.
+- **Validation caveats**, such as derived properties and subjects created without a context, are listed in [Writing Validators for Transactions](validation.md#writing-validators-for-transactions).
