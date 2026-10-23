@@ -26,6 +26,7 @@ public partial class HomeBlazeInstallation
         var dataDirectory = context.TryGetService<IDataDirectoryProvider>()?.DataDirectory;
         DataDirectory = dataDirectory;
         (DataVolumeFreeSpace, DataVolumeTotalSize) = ReadVolume(dataDirectory);
+        CountSubjects(context);
 
         LastUpdated = _timeProvider.GetUtcNow();
     }

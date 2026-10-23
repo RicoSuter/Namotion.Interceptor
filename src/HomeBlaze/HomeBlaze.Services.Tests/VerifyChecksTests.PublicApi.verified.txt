@@ -2,6 +2,37 @@
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("HomeBlaze.Components.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("HomeBlaze.Services.Tests")]
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace HomeBlaze.Services.Clients
+{
+    public sealed class ClientConnection
+    {
+        public HomeBlaze.Services.Clients.IClientConnectionCallbacks Callbacks { get; }
+        public string? ClientId { get; }
+        public string? ClientName { get; }
+        public System.DateTimeOffset ConnectedAt { get; }
+        public string ConnectionId { get; }
+        public string? CookieTokenHash { get; set; }
+        public void Assign(string clientId, string clientName) { }
+    }
+    public sealed class ClientConnectionService
+    {
+        public ClientConnectionService(System.TimeProvider timeProvider, Microsoft.Extensions.Logging.ILogger<HomeBlaze.Services.Clients.ClientConnectionService> logger) { }
+        public System.Collections.Immutable.ImmutableArray<HomeBlaze.Services.Clients.ClientConnection> Connections { get; }
+        public event System.Action? Changed;
+        public HomeBlaze.Services.Clients.ClientConnection Connect(string? cookieToken, HomeBlaze.Services.Clients.IClientConnectionCallbacks callbacks) { }
+        public void Disconnect(HomeBlaze.Services.Clients.ClientConnection connection) { }
+        public System.Threading.Tasks.Task RenameAsync(HomeBlaze.Services.Clients.ClientConnection connection, string name, System.Threading.CancellationToken cancellationToken) { }
+        public System.IDisposable SetRenameHandler(System.Func<HomeBlaze.Services.Clients.ClientConnection, string, System.Threading.CancellationToken, System.Threading.Tasks.Task> handler) { }
+        public static string CreateClientId() { }
+        public static string CreateClientToken() { }
+        public static string HashClientToken(string token) { }
+    }
+    public interface IClientConnectionCallbacks
+    {
+        System.Threading.Tasks.Task ShowNotificationAsync(HomeBlaze.Abstractions.Messaging.Notification notification, System.Threading.CancellationToken cancellationToken);
+        System.Threading.Tasks.Task StoreClientTokenAsync(string token);
+    }
+}
 namespace HomeBlaze.Services.Components
 {
     public class SubjectComponentRegistration : System.IEquatable<HomeBlaze.Services.Components.SubjectComponentRegistration>
