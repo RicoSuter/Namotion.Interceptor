@@ -43,6 +43,7 @@ public class PathSelectorHardeningTests
 
         // Act & Assert
         Assert.False(deny.CanRead(brightness));
+        Assert.False(deny.Explain(brightness, PermissionAction.Read).IsAllowed);
         Assert.True(deny.CanRead(ssid));
         Assert.False(allow.CanRead(brightness));
         Assert.True(allow.CanRead(ssid));
