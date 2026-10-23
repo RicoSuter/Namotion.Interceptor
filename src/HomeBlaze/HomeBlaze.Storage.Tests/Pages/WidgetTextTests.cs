@@ -72,7 +72,7 @@ public class WidgetTextTests
     [InlineData("{{ value/ChargingPower }}", "Label: 'value' has no members: write subject/... to read a property of its subject")]
     [InlineData("{{ value[0] }}", "Label: 'value' has no members: write subject/... to read a property of its subject")]
     [InlineData("{{ subject/ }}", "Label: expected a name after 'subject/'")]
-    [InlineData("{{ subject//ChargingPower }}", "Label: a path after 'subject/' cannot start with '/'")]
+    [InlineData("{{ subject//ChargingPower }}", "Label: a path starts at the subject and cannot start with '/'")]
     [InlineData("{{ value | raw | map:charging }}", "Label: The pipe 'map' must be the first pipe")]
     public async Task WhenTextHasAMistake_ThenTheErrorNamesTheArgumentAndThereIsNoText(string text, string expected)
     {
