@@ -2,6 +2,7 @@
 using System.Collections.Immutable;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Tracking;
 
@@ -225,6 +226,8 @@ public class RegisteredSubjectProperty
     /// <param name="setValue">The value setter action.</param>
     /// <param name="attributes">The .NET reflection attributes of the attribute.</param>
     /// <returns>The created attribute property.</returns>
+    /// <exception cref="InvalidOperationException">The property already has an attribute with this name, whether a
+    /// static attribute property or a dynamic one. Neither the subject nor the registry changes in that case.</exception>
     public RegisteredSubjectProperty AddAttribute<TProperty>(
         string name,
         Func<IInterceptorSubject, TProperty?>? getValue,
@@ -245,6 +248,8 @@ public class RegisteredSubjectProperty
     /// <param name="setValue">The value setter action.</param>
     /// <param name="attributes">The .NET reflection attributes of the attribute.</param>
     /// <returns>The created attribute property.</returns>
+    /// <exception cref="InvalidOperationException">The property already has an attribute with this name, whether a
+    /// static attribute property or a dynamic one. Neither the subject nor the registry changes in that case.</exception>
     public RegisteredSubjectProperty AddAttribute<TProperty>(
         string name,
         Func<IInterceptorSubject, object?>? getValue,
@@ -263,6 +268,8 @@ public class RegisteredSubjectProperty
     /// <param name="setValue">The value setter action.</param>
     /// <param name="attributes">The .NET reflection attributes of the attribute.</param>
     /// <returns>The created attribute property.</returns>
+    /// <exception cref="InvalidOperationException">The property already has an attribute with this name, whether a
+    /// static attribute property or a dynamic one. Neither the subject nor the registry changes in that case.</exception>
     public RegisteredSubjectProperty AddAttribute(
         string name, Type type, 
         Func<IInterceptorSubject, object?>? getValue, 
@@ -290,6 +297,8 @@ public class RegisteredSubjectProperty
     /// <param name="setValue">The value setter action.</param>
     /// <param name="attributes">The .NET reflection attributes of the attribute.</param>
     /// <returns>The created attribute property.</returns>
+    /// <exception cref="InvalidOperationException">The property already has an attribute with this name, whether a
+    /// static attribute property or a dynamic one. Neither the subject nor the registry changes in that case.</exception>
     public RegisteredSubjectProperty AddDerivedAttribute(
         string name, Type type, 
         Func<IInterceptorSubject, object?>? getValue, 
@@ -304,6 +313,85 @@ public class RegisteredSubjectProperty
             attributes
                 .Concat([new PropertyAttributeAttribute(Name, name)])
                 .ToArray());
+
+        return attribute;
+    }
+
+    /// <summary>
+    /// Gets the attribute with the given name, or adds it when the property has none.
+    /// </summary>
+    /// <param name="name">The name of the attribute.</param>
+    /// <param name="type">The type of the attribute; an existing attribute must have this type.</param>
+    /// <param name="getValue">The value getter function, used only when it is added.</param>
+    /// <param name="setValue">The value setter action, used only when it is added.</param>
+    /// <param name="attributes">The .NET reflection attributes of the attribute, used only when it is added.</param>
+    /// <returns>The existing or the created attribute property.</returns>
+    /// <remarks>
+    /// An existing attribute of the same type is returned unchanged, whatever its getter or setter, so a property
+    /// initializer can run again when its subject is re-registered without guarding the call. A miss is checked
+    /// again and added under the subject's and the registry's locks, so concurrent calls for one name return the
+    /// same attribute.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">The property already has an attribute with this name of a different
+    /// type, or the attribute's property name is taken by a property that is not this attribute.</exception>
+    public RegisteredSubjectProperty GetOrAddAttribute(
+        string name, Type type,
+        Func<IInterceptorSubject, object?>? getValue,
+        Action<IInterceptorSubject, object?>? setValue,
+        params Attribute[] attributes)
+    {
+        return GetOrAddAttributeCore(name, type, getValue, setValue, attributes, isDerived: false);
+    }
+
+    /// <summary>
+    /// Gets the attribute with the given name, or adds it as a derived attribute when the property has none.
+    /// </summary>
+    /// <param name="name">The name of the attribute.</param>
+    /// <param name="type">The type of the attribute; an existing attribute must have this type.</param>
+    /// <param name="getValue">The value getter function, used only when it is added.</param>
+    /// <param name="setValue">The value setter action, used only when it is added.</param>
+    /// <param name="attributes">The .NET reflection attributes of the attribute, used only when it is added.</param>
+    /// <returns>The existing or the created attribute property.</returns>
+    /// <remarks>
+    /// An existing attribute of the same type is returned unchanged, whatever its getter or setter and whether or
+    /// not it is derived, so a property initializer can run again when its subject is re-registered without
+    /// guarding the call. A miss is checked again and added under the subject's and the registry's locks, so
+    /// concurrent calls for one name return the same attribute.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">The property already has an attribute with this name of a different
+    /// type, or the attribute's property name is taken by a property that is not this attribute.</exception>
+    public RegisteredSubjectProperty GetOrAddDerivedAttribute(
+        string name, Type type,
+        Func<IInterceptorSubject, object?>? getValue,
+        Action<IInterceptorSubject, object?>? setValue,
+        params Attribute[] attributes)
+    {
+        return GetOrAddAttributeCore(name, type, getValue, setValue, attributes, isDerived: true);
+    }
+
+    private RegisteredSubjectProperty GetOrAddAttributeCore(
+        string name, Type type,
+        Func<IInterceptorSubject, object?>? getValue,
+        Action<IInterceptorSubject, object?>? setValue,
+        Attribute[] attributes,
+        bool isDerived)
+    {
+        // Unlocked read: registered properties are never removed and the property table is published through a
+        // volatile field, so a hit is final; a miss is checked again under the locks in AddPropertyCore.
+        var attribute = Parent.TryGetPropertyAttribute(Name, name) ?? Parent.AddPropertyCore(
+            $"{Name}@{name}",
+            type, getValue, setValue,
+            (isDerived
+                ? attributes.Concat([new PropertyAttributeAttribute(Name, name), new DerivedAttribute()])
+                : attributes.Concat([new PropertyAttributeAttribute(Name, name)])).ToArray(),
+            returnExistingAttribute: true);
+
+        if (attribute.Type != type)
+        {
+            throw new InvalidOperationException(
+                $"The property '{Name}' of subject '{Parent.Subject.GetType().Name}' already has an attribute named '{name}' " +
+                $"of type '{attribute.Type}', not '{type}' (property '{attribute.Name}').");
+        }
 
         return attribute;
     }
