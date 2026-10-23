@@ -11,12 +11,9 @@
 <MudExpansionPanels MultiExpansion="@(layout?.Single != true)" data-testid="expansion-panels">
     @foreach (var panel in panels)
     {
-        @* The content of a closed panel stays rendered, so that it is read in the render of the tracking
-           scope and not only in the render that a click on the panel causes, which the scope does not record. *@
         <MudExpansionPanel @key="panel"
                            Expanded="@IsExpanded(panel)"
                            ExpandedChanged="@(expanded => SetExpanded(panel, expanded))"
-                           KeepContentAlive="true"
                            HeaderClass="edit-mode-interactive"
                            data-testid="expansion-panel">
             <TitleContent>

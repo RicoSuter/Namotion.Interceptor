@@ -1,9 +1,12 @@
 using HomeBlaze.Components.Controls;
+using HomeBlaze.History.Blazor;
+using HomeBlaze.Host.Preferences;
 using HomeBlaze.Host.Services;
 using HomeBlaze.Host.TimeZones;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using MudBlazor.Services;
+using Namotion.Interceptor.Blazor;
 
 namespace HomeBlaze.Host;
 
@@ -24,9 +27,16 @@ public static class ServiceCollectionExtensions
         // MudBlazor services
         services.AddMudServices();
 
+        // Every component renders again when a property that its render read changes.
+        services.AddBlazorSubjectTracking();
+
         services.AddHttpContextAccessor();
         services.AddScoped<TimeZoneInterop>();
+        services.AddScoped<BrowserPreferences>();
         services.AddScoped<PropertyWriter>();
+
+        // Value widgets open the history of their property through it.
+        services.AddPropertyHistoryViewer();
 
         // TryAdd, so that a test host can register its own clock first.
         services.TryAddSingleton(TimeProvider.System);

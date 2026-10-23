@@ -6,16 +6,91 @@ Automatic change tracking and re-rendering for Blazor applications using interce
 
 ### Installation
 
-Add the `Namotion.Interceptor.Blazor` package to your Blazor project and ensure your context is configured with property tracking:
+Add the `Namotion.Interceptor.Blazor` package to your Blazor project and ensure your context is configured with property tracking and the read property recorder:
 
 ```csharp
 var context = InterceptorSubjectContext
     .Create()
     .WithFullPropertyTracking()
-    .WithReadPropertyRecorder();  // Required for TrackingScope
+    .WithReadPropertyRecorder();
 ```
 
-### Basic Usage
+There are two ways to render again on a change: [component tracking](#component-tracking), which tracks every component on its own, and [`TrackingScope`](#trackingscope), which tracks the content inside it as a whole.
+
+## Component Tracking
+
+Register component tracking once, and every component renders again when a property that its own render read changes:
+
+```csharp
+builder.Services.AddBlazorSubjectTracking();
+```
+
+```razor
+<p>@person.FirstName @person.LastName</p>
+<MudText>@motor.Speed RPM</MudText>
+```
+
+No base class, wrapper or subscription is needed. A change renders only the components whose render read the changed property:
+
+- **Content passed to a child component** is read in the render of the child that renders it, so `<MudText>@motor.Speed</MudText>` renders the `MudText` again, not its parent. This holds wherever and whenever the content renders: in a grid cell, in a virtualized row, in a tab panel that opens later or in a popover.
+- **Content passed to a component that does not derive from `ComponentBase`**, such as `CascadingValue` or `SectionContent`, is recorded by the component that created it, which renders it again with the content.
+- **A component whose `ShouldRender` returns false** still renders on a tracked change, because its own reasons not to render cannot know that a value its render read has changed.
+
+### Guarantees
+
+- **At-least-once render**: After a change of a property that a component's last render read, the component renders again, and that render reads values at least as new as the change. The property is subscribed before its value is read, so a change during the render renders once more.
+- **Throttled rounds**: Renders that changes cause run at most once per `ThrottleMilliseconds` (default 33 ms). Each round renders each affected component once, in one batch, and a component that a parent renders in the same batch renders once. A burst of changes renders a component at most twice: at its start and at the end of the interval.
+- **Thread safety**: Changes can be written on any thread. Components render on their renderer's dispatcher.
+- **Cost**: A property that no component reads costs a circuit nothing. A watched property costs one subscription per circuit, however many components read it. A change of a property whose change is already pending allocates nothing. The first change after a quiet interval queues one work item, and each round of renders posts one work item to the renderer. A render allocates nothing in steady state, apart from a wrapper for content that is new on every render and passed to a component that does not derive from `ComponentBase`.
+
+### What Is Not Tracked
+
+- **Reads outside a render**: A value read in `OnInitialized`, `OnParametersSet`, after an `await` or in an event handler is not tracked, because a change renders the component again without running these methods. Read the values that the markup shows in the render.
+- **Reads on another thread** during a render.
+- **A template (`RenderFragment<T>`) passed to a component that does not derive from `ComponentBase`**: its reads are recorded only by an open `TrackingScope`. The components of the framework take no such template apart from `Router`.
+
+### Options
+
+```csharp
+builder.Services.AddBlazorSubjectTracking(options => options.ThrottleMilliseconds = 100);
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `ThrottleMilliseconds` | 33 | Minimum time between two rounds of renders that changes cause. |
+
+### Renders of the Parent
+
+A component renders whenever its parent renders and passes a parameter that is not of a primitive type, such as a subject, a record or content. Component tracking cannot prevent that, because only the component itself decides in `SetParametersAsync` whether to render. A component that derives from `TrackedComponentBase` ignores a render of its parent whose parameters are all equal to the ones passed before:
+
+```razor
+@using Namotion.Interceptor.Blazor
+@inherits TrackedComponentBase
+
+<span class="@Reading.CssClass">@Reading.Text</span>
+
+@code {
+    // A record, equal when its values are.
+    [Parameter]
+    public Reading Reading { get; set; } = default!;
+}
+```
+
+- **Unchanged** means equal by `Equals` to the value passed before, so the same instance, an equal value or an equal record. Content (`RenderFragment`) and other delegates always count as changed, as they do for Blazor. An `EventCallback` is a struct, not a delegate, so it counts as unchanged when it is equal by `Equals`, that is when it has the same receiver and an equal delegate.
+- **Still renders** when a property that its render read changes, when a parameter changes and when it calls `StateHasChanged`. `OnParametersSet` does not run for a skipped render.
+- **Only with component tracking**: while prerendering, or without `AddBlazorSubjectTracking`, it renders with its parent as any component does.
+
+Derive from it only if the render shows nothing else that can change: an object that is changed in place and is not a subject, or an `Equals` that ignores what the render shows, would stay stale. It pays off most for the rows or items of a component that reads all their values in its own render.
+
+### Prerendering and Disposal
+
+While prerendering, nothing is recorded or subscribed. The interactive render that follows subscribes what it reads. A component that the renderer disposes releases its subscriptions at the next sweep, which runs at a render or a round of renders of the circuit once a second has passed since the last sweep, or once the number of components that hold subscriptions has grown to more than twice the number after the last sweep plus 64. The circuit releases all of them when it ends.
+
+### Compatibility
+
+Component tracking is installed through `IComponentActivator` and wraps the render of each `ComponentBase` through private members of the framework. If a version of `Microsoft.AspNetCore.Components` changes one of them, an error is logged for each renderer and components render as without component tracking. Component tracking registers its own `IComponentActivator`: it replaces one that the application registered before, and one registered after it replaces component tracking.
+
+## TrackingScope
 
 Wrap your content in a `TrackingScope` to automatically re-render when tracked properties change:
 
@@ -28,7 +103,7 @@ Wrap your content in a `TrackingScope` to automatically re-render when tracked p
 </TrackingScope>
 ```
 
-When any property accessed inside the scope changes, the component automatically re-renders.
+When any property accessed inside the scope changes, the scope renders its whole content again. With component tracking registered, a scope records only the reads that no component's render records.
 
 ### Debug Mode
 
@@ -41,9 +116,9 @@ Enable `ShowDebugInfo` to visualize tracking during development:
 </TrackingScope>
 ```
 
-## Features
+### Features
 
-### Automatic Property Tracking
+#### Automatic Property Tracking
 
 Properties read during render are automatically tracked. No manual subscription required.
 
@@ -55,7 +130,7 @@ Properties read during render are automatically tracked. No manual subscription 
 </TrackingScope>
 ```
 
-### Derived Property Support
+#### Derived Property Support
 
 Works seamlessly with `[Derived]` properties. When underlying dependencies change, derived properties update and trigger re-renders.
 
@@ -70,7 +145,7 @@ public partial class Motor
 }
 ```
 
-### Hierarchical Tracking
+#### Hierarchical Tracking
 
 Child subjects are tracked automatically. Changes to nested properties trigger re-renders.
 
@@ -84,11 +159,11 @@ Child subjects are tracked automatically. Changes to nested properties trigger r
 </TrackingScope>
 ```
 
-### Session Isolation
+#### Session Isolation
 
 Each browser session has isolated tracking. Server-side Blazor with multiple concurrent users works correctly.
 
-## Parameters
+### Parameters
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
@@ -97,15 +172,15 @@ Each browser session has isolated tracking. Server-side Blazor with multiple con
 | `ShowDebugInfo` | `bool` | Optional. Shows visual debugging (border, tracked properties tooltip). |
 | `ChildContent` | `RenderFragment` | The content to render within the tracking scope. |
 
-## Guarantees
+### Guarantees
 
 - **At-Least-Once Rerender**: When a property that the scope recorded changes, or any property of a subject below a subject whose property a completed render recorded, the scope renders again after the change. A change that arrives while a render is in progress, or before the client has acknowledged it, renders once more as well, so the last render always reads values at least as new as the last change the scope tracks. This holds for the reads the scope records, see [Reads Recorded While the Scope Is Open](#reads-recorded-while-the-scope-is-open).
 - **Session Isolation**: No cross-talk between browser sessions in server-side Blazor
 - **Thread Safety**: Safe for concurrent access from multiple threads
 
-## Limitations
+### Limitations
 
-### Reads Recorded While the Scope Is Open
+#### Reads Recorded While the Scope Is Open
 
 Recording covers the property reads that happen while the scope is open: from the moment Blazor invokes the scope's render fragment until the scope's `OnAfterRender`. See [Data Flow](#data-flow) for exactly when that starts and ends. This covers the content directly inside `<TrackingScope>` and every descendant rendered in the same batch. After its first render the scope renders once more, which also records content that a descendant renders in a batch of its own right after its first render, for example after it has measured its element, as long as the descendant renders again when the scope does, as a component with a parameter of a subject type does.
 
@@ -120,7 +195,7 @@ Content that a component renders later on its own, for example after awaiting a 
 
 If `motor.Temperature` changes, even though only `motor.Speed` was read, the component still re-renders because `motor` was read. The tracked subjects are taken over when a render completes, in `OnAfterRender`, so a change below a subject that only the render still in progress has read is not matched. A read in deferred content of a subject that no completed render read is not covered: wrap such content in a nested `<TrackingScope>` of its own, which records it when it renders.
 
-### Over-Tracking Within a Batch
+#### Over-Tracking Within a Batch
 
 Every scope that is open in the async flow records every read in that flow, not only the reads of its own content. A scope stays open until its `OnAfterRender`, which runs after the whole batch has rendered, so it also records the reads of the components that Blazor renders after it in the same batch:
 
@@ -131,17 +206,19 @@ Every scope that is open in the async flow records every read in that flow, not 
 
 Over-tracking causes extra renders of the scope that over-tracks. It does not change what the other scopes record.
 
-### Prerendering
+#### Prerendering
 
 When a page is prerendered, `OnAfterRender` never runs, so a scope records from its render fragment until it is disposed at the end of prerendering. The recorded set holds each property read in that flow at most once, and disposal removes the scope from the flow. The interactive render that follows starts a new scope with its own recording.
 
-### Scope Size
+#### Scope Size
 
 A scope that renders again renders its whole content, and Blazor renders every component inside it again whose parameters it cannot compare, such as subjects or render fragments. A scope around a whole page therefore renders the whole page for each change it tracks. Scopes around the parts that change keep these renders small, at the cost of the over-tracking described above when many of them render in one batch.
 
 ---
 
 # Implementation Details
+
+For component tracking, see [Blazor Component Tracking](design/blazor-component-tracking.md). The rest of this section describes `TrackingScope`.
 
 ## Architecture Overview
 

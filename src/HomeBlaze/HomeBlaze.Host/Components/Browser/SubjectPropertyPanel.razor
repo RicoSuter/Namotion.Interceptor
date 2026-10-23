@@ -1,173 +1,194 @@
+@using System.Collections.Immutable
+@using System.Text.Json
 @using HomeBlaze.Abstractions.Attributes
 @using HomeBlaze.Abstractions.Metadata
 @using HomeBlaze.History.Abstractions
 @using HomeBlaze.History
 @using HomeBlaze.History.Blazor
 @using HomeBlaze.Components.Operations
+@using HomeBlaze.Services.Metadata
+@using HomeBlaze.Storage
 @using HomeBlaze.Storage.Abstractions
 @using HomeBlaze.Components.Abstractions.TimeZones
+@using HomeBlaze.Host.Components.Dialogs
+@using HomeBlaze.Storage.Abstractions.Metadata
+@using HomeBlaze.Storage.Metadata
+@using Microsoft.Extensions.Logging
 
 @implements IAsyncDisposable
 
 @inject IDialogService DialogService
 @inject SubjectComponentRegistry ComponentRegistry
-@inject DeveloperModeService DeveloperMode
 @inject SubjectPathResolver PathResolver
 @inject IServiceProvider ServiceProvider
 @inject ITimeZoneDisplay TimeZone
 @inject IJSRuntime JsRuntime
 @inject ISnackbar Snackbar
+@inject ILogger<SubjectPropertyPanel> Logger
 
 @if (Subject != null)
 {
-    @* The header stays in place and the content below it scrolls. The grid cell gives the column its height through
-       the element the tracking scope adds around it in developer mode. *@
+    @* The header stays in place and the content below it scrolls. *@
     <div @ref="_rootElement" style="display: grid; grid-template: minmax(0, 1fr) / minmax(0, 1fr); height: 100%;">
-        <TrackingScope Context="Subject.Context" ShowDebugInfo="DeveloperMode.IsEnabled">
-            <div style="display: flex; flex-direction: column; height: 100%;">
-                <MudListSubheader Class="d-flex align-center gap-1" Style="flex-shrink: 0;">
-                    @{
-                        var canEdit = CanEdit();
-                        var canDelete = Subject is IStorageFile or IConfigurable;
+        <div style="display: flex; flex-direction: column; height: 100%;">
+            @{
+                var childSections = GetChildSections();
+                var reorderContainer = GetReorderContainer(childSections);
+                if (reorderContainer is null && _isReordering)
+                {
+                    // A folder left with fewer than two children leaves the mode rather than return to it later.
+                    StopReordering();
+                }
+
+                var subjectMetadata = Subject.GetMetadata();
+                var hasNotesLinksOrTags = subjectMetadata.HasNotesLinksOrTags();
+                _metadataStore = GetMetadataStore();
+            }
+            <MudListSubheader Class="d-flex align-center gap-1" Style="flex-shrink: 0;">
+                @{
+                    var canEdit = CanEdit();
+                    var canDelete = Subject is IStorageFile or IConfigurable;
+                    var showsMetadataButton = _metadataStore is not null || hasNotesLinksOrTags;
+                }
+
+                @* Stays an h1: the page focuses the first h1 after navigation. *@
+                <MudText Typo="Typo.h6" HtmlTag="h1" Class="flex-grow-1 mud-typography-nowrap">
+                    <MudIcon Size="Size.Small" Icon="@GetSubjectIcon(Subject)" Color="@GetSubjectIconColor(Subject)" Class="mr-2" Style="vertical-align: middle;" />
+                    @GetSubjectTitle()
+                </MudText>
+
+                @if (canEdit)
+                {
+                    <MudTooltip Text="Edit">
+                        <MudIconButton OnClick="@OpenEditDialog"
+                                       Icon="@Icons.Material.Filled.Edit"
+                                       Variant="Variant.Text"
+                                       Size="Size.Small"
+                                       aria-label="Edit"
+                                       data-testid="edit-subject-button" />
+                    </MudTooltip>
+                }
+                @if (showsMetadataButton)
+                {
+                    <MudTooltip Text="Metadata">
+                        <MudIconButton OnClick="@(() => OpenMetadataAsync($"Metadata of {GetSubjectTitle()}", null, subjectMetadata, hasNotesLinksOrTags))"
+                                       Icon="@Icons.Material.Filled.Label"
+                                       Color="@(subjectMetadata is { Count: > 0 } ? Color.Primary : Color.Default)"
+                                       Variant="Variant.Text"
+                                       Size="Size.Small"
+                                       Disabled="@(!hasNotesLinksOrTags && !IsConnected(_metadataStore!))"
+                                       aria-label="Metadata"
+                                       data-testid="edit-metadata-button" />
+                    </MudTooltip>
+                }
+                @if (reorderContainer is not null)
+                {
+                    var reorderLabel = _isReordering ? "Done" : "Reorder";
+                    @* Done stays enabled, so that a pane whose storage disconnects can still leave the mode. *@
+                    <MudTooltip Text="@reorderLabel">
+                        <MudIconButton OnClick="@ToggleReordering"
+                                       Icon="@(_isReordering ? Icons.Material.Filled.Check : Icons.Material.Filled.SwapVert)"
+                                       Color="@(_isReordering ? Color.Primary : Color.Default)"
+                                       Variant="Variant.Text"
+                                       Size="Size.Small"
+                                       Disabled="@(!_isReordering && !IsConnected(reorderContainer))"
+                                       aria-label="@reorderLabel"
+                                       data-testid="reorder-children-button" />
+                    </MudTooltip>
+                }
+                @if (canDelete)
+                {
+                    <MudTooltip Text="Delete">
+                        <MudIconButton OnClick="@(() => OnDelete.InvokeAsync())"
+                                       Icon="@Icons.Material.Filled.Delete"
+                                       Variant="Variant.Text"
+                                       Size="Size.Small"
+                                       aria-label="Delete" />
+                    </MudTooltip>
+                }
+                @if (CanClose)
+                {
+                    @if (canEdit || canDelete || showsMetadataButton || reorderContainer is not null)
+                    {
+                        <MudDivider Vertical="true" FlexItem="true" Class="mx-1 my-1" />
                     }
 
-                    @* Stays an h1: the page focuses the first h1 after navigation. *@
-                    <MudText Typo="Typo.h6" HtmlTag="h1" Class="flex-grow-1 mud-typography-nowrap">
-                        <MudIcon Size="Size.Small" Icon="@GetSubjectIcon(Subject)" Color="@GetSubjectIconColor(Subject)" Class="mr-2" Style="vertical-align: middle;" />
-                        @GetSubjectTitle()
-                    </MudText>
+                    @* The color comes from the root of the tooltip: its class on the button loses to that of an icon button. *@
+                    <MudTooltip Text="Close" RootClass="mud-text-primary">
+                        <MudIconButton OnClick="@(() => OnClose.InvokeAsync())"
+                                       Icon="@Icons.Material.Filled.Close"
+                                       Variant="Variant.Text"
+                                       Color="Color.Inherit"
+                                       Size="Size.Medium"
+                                       Class="pa-1"
+                                       aria-label="Close"
+                                       data-testid="close-pane-button" />
+                    </MudTooltip>
+                }
+            </MudListSubheader>
 
-                    @if (canEdit)
-                    {
-                        <MudTooltip Text="Edit">
-                            <MudIconButton OnClick="@OpenEditDialog"
-                                           Icon="@Icons.Material.Filled.Edit"
-                                           Variant="Variant.Text"
-                                           Size="Size.Small"
-                                           aria-label="Edit"
-                                           data-testid="edit-subject-button" />
-                        </MudTooltip>
-                    }
-                    @if (canDelete)
-                    {
-                        <MudTooltip Text="Delete">
-                            <MudIconButton OnClick="@(() => OnDelete.InvokeAsync())"
-                                           Icon="@Icons.Material.Filled.Delete"
-                                           Variant="Variant.Text"
-                                           Size="Size.Small"
-                                           aria-label="Delete" />
-                        </MudTooltip>
-                    }
-                    @if (CanClose)
-                    {
-                        @if (canEdit || canDelete)
-                        {
-                            <MudDivider Vertical="true" FlexItem="true" Class="mx-1 my-1" />
-                        }
+            @* Only the tags, as notes can be long. *@
+            <MetadataSummary Metadata="@subjectMetadata" OnTagClick="@OpenTagFilterAsync" ShowTagsOnly="true" Class="px-4 pb-1 mt-n2" />
 
-                        @* The colour comes from the root of the tooltip: its class on the button loses to that of an icon button. *@
-                        <MudTooltip Text="Close" RootClass="mud-text-primary">
-                            <MudIconButton OnClick="@(() => OnClose.InvokeAsync())"
-                                           Icon="@Icons.Material.Filled.Close"
-                                           Variant="Variant.Text"
-                                           Color="Color.Inherit"
-                                           Size="Size.Medium"
-                                           Class="pa-1"
-                                           aria-label="Close"
-                                           data-testid="close-pane-button" />
-                        </MudTooltip>
-                    }
-                </MudListSubheader>
+            @* Each block gets the gap above it from GetGapClass, by the block before it. *@
+            <div data-testid="subject-pane-content" style="flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;">
+                @{
+                    var members = GetMemberGroups();
+                    var previousBlock = PaneBlock.None;
+                }
+                @* Child Collections *@
+                @foreach (var section in childSections)
+                {
+                    var sectionGapClass = GetGapClass(previousBlock, PaneBlock.Section);
+                    previousBlock = PaneBlock.Section;
 
-                @* Each block gets the gap above it from GetGapClass, by the block before it. *@
-                <div data-testid="subject-pane-content" style="flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;">
-                    @* Primitive properties and methods (operations and queries) without a category *@
-                    @{
-                        var members = GetMemberGroups();
-                        var previousBlock = PaneBlock.None;
-                    }
-                    @if (members.UncategorizedValues.Count > 0)
+                    @if (section.CollectionProperty is null)
                     {
-                        @RenderValues(members.UncategorizedValues, GetGapClass(previousBlock, PaneBlock.Values))
-                        previousBlock = PaneBlock.Values;
-                    }
-                    @if (members.UncategorizedMethods.Count > 0)
-                    {
-                        @RenderMethods(members.UncategorizedMethods, GetGapClass(previousBlock, PaneBlock.Methods))
-                        previousBlock = PaneBlock.Methods;
-                    }
-
-                    @* Categories: the values of a category and its methods below them *@
-                    @foreach (var category in members.Categories)
-                    {
-                        <div class="@GetGapClass(previousBlock, PaneBlock.Category)" data-testid="subject-pane-category">
-                            <MudText Typo="Typo.subtitle2" Color="Color.Primary" HtmlTag="h2" Class="px-4"
-                                     data-testid="subject-pane-category-title">@category.Name</MudText>
-                            @if (category.Values.Count > 0)
+                        @* Consecutive single child references share one list *@
+                        <MudList T="object" SelectedValue="SelectedChild" Color="Color.Primary" Dense="true" Class="@sectionGapClass">
+                            @foreach (var (property, child) in section.SingleChildren)
                             {
-                                @RenderValues(category.Values, GetGapClass(PaneBlock.CategoryTitle, PaneBlock.Values))
+                                var isSelected = child.Subject == SelectedChild;
+
+                                <MudListItem Value="@child.Subject"
+                                             OnClick="@(() => OnPropertyClick.InvokeAsync(new PropertyClickEventArgs(property.Name, child.Index, child.Subject)))"
+                                             Icon="@GetSubjectIcon(child.Subject)"
+                                             IconColor="@(isSelected ? Color.Primary : GetSubjectIconColor(child.Subject))"
+                                             Class="@(isSelected ? "mud-primary-text" : "")">
+                                    @if (isSelected)
+                                    {
+                                        <div style="float: right; line-height: 0">
+                                            <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Color="Color.Primary" />
+                                        </div>
+                                    }
+                                    @RenderChildLabel(property, child)
+                                </MudListItem>
+                                <MudDivider />
                             }
-                            @if (category.Methods.Count > 0)
-                            {
-                                @RenderMethods(category.Methods, GetGapClass(
-                                    category.Values.Count > 0 ? PaneBlock.Values : PaneBlock.CategoryTitle, PaneBlock.Methods))
-                            }
-                        </div>
-                        previousBlock = PaneBlock.Category;
+                        </MudList>
                     }
-
-                    @* Child Collections *@
-                    @foreach (var section in GetChildSections())
+                    else
                     {
-                        var sectionGapClass = GetGapClass(previousBlock, PaneBlock.Section);
-                        previousBlock = PaneBlock.Section;
-
-                        @if (section.CollectionProperty is null)
-                        {
-                            @* Consecutive single child references share one list *@
-                            <MudList T="object" SelectedValue="SelectedChild" Color="Color.Primary" Dense="true" Class="@sectionGapClass">
-                                @foreach (var (property, child) in section.SingleChildren)
+                        var property = section.CollectionProperty;
+                        var children = section.CollectionChildren;
+                        var orderedContainer = GetOrderedContainer(property);
+                        @* mb-0, as MudBlazor gives an expanded panel a margin of 16px above and below. *@
+                        <MudExpansionPanel Gutters="false" Dense="true" Expanded="true" Class="@($"{sectionGapClass} mb-0")" HeaderClass="px-4 subject-pane-section-header">
+                            <TitleContent>
+                                @GetPropertyDisplayName(property)
+                                <MudChip T="string" Size="Size.Small" Color="Color.Dark" Class="my-0">@children.Length</MudChip>
+                            </TitleContent>
+                            <ChildContent>
+                                @if (_isReordering && orderedContainer is not null)
                                 {
-                                    var isSelected = child.Subject == SelectedChild;
-                                    var childCount = GetChildCount(child);
-
-                                    <MudListItem Value="@child.Subject"
-                                                 OnClick="@(() => OnPropertyClick.InvokeAsync(new PropertyClickEventArgs(property.Name, child.Index, child.Subject)))"
-                                                 Icon="@GetSubjectIcon(child.Subject)"
-                                                 IconColor="@(isSelected ? Color.Primary : GetSubjectIconColor(child.Subject))"
-                                                 Class="@(isSelected ? "mud-primary-text" : "")">
-                                        @if (isSelected)
-                                        {
-                                            <div style="float: right; line-height: 0">
-                                                <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Color="Color.Primary" />
-                                            </div>
-                                        }
-                                        <span class="subject-pane-child-name" style="word-break: break-word;">@property.GetChildDisplayName(child)</span>
-                                        @if (childCount > 0)
-                                        {
-                                            <MudChip T="string" Size="Size.Small" Color="Color.Dark" Class="ml-4 my-0">@childCount</MudChip>
-                                        }
-                                    </MudListItem>
-                                    <MudDivider />
+                                    @RenderReorderList(property, children, orderedContainer)
                                 }
-                            </MudList>
-                        }
-                        else
-                        {
-                            var property = section.CollectionProperty;
-                            var children = section.CollectionChildren;
-                            @* mb-0, as MudBlazor gives an expanded panel a margin of 16px above and below. *@
-                            <MudExpansionPanel Gutters="false" Dense="true" Expanded="true" Class="@($"{sectionGapClass} mb-0")" HeaderClass="px-4 subject-pane-section-header">
-                                <TitleContent>
-                                    @GetPropertyDisplayName(property)
-                                    <MudChip T="string" Size="Size.Small" Color="Color.Dark" Class="my-0">@children.Length</MudChip>
-                                </TitleContent>
-                                <ChildContent>
+                                else
+                                {
                                     <MudList T="object" SelectedValue="SelectedChild" Color="Color.Primary" Dense="true">
                                         @foreach (var child in children)
                                         {
                                             var isSelected = child.Subject == SelectedChild;
-                                            var childCount = GetChildCount(child);
 
                                             <MudListItem Value="@child.Subject"
                                                          OnClick="@(() => OnPropertyClick.InvokeAsync(new PropertyClickEventArgs(property.Name, child.Index, child.Subject)))"
@@ -180,59 +201,197 @@
                                                         <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Color="Color.Primary" />
                                                     </div>
                                                 }
-                                                <span class="subject-pane-child-name" style="word-break: break-word;">@property.GetChildDisplayName(child)</span>
-                                                @if (childCount > 0)
-                                                {
-                                                    <MudChip T="string" Size="Size.Small" Color="Color.Dark" Class="ml-4 my-0">@childCount</MudChip>
-                                                }
+                                                @RenderChildLabel(property, child)
                                             </MudListItem>
                                             <MudDivider />
                                         }
                                     </MudList>
-                                </ChildContent>
-                            </MudExpansionPanel>
-                        }
-                    }
-
-                    @* Details Accordion *@
-                    <MudExpansionPanels MultiExpansion="true" Elevation="0" Gutters="false" Dense="true" Class="@GetGapClass(previousBlock, PaneBlock.Section)" Style="overflow: hidden;">
-                        <MudExpansionPanel Expanded="false" Gutters="false" Class="px-4" HeaderClass="subject-pane-section-header">
-                            <TitleContent>
-                                Details
-                            </TitleContent>
-                            <ChildContent>
-                                <div class="mb-4">
-                                    <small style="word-break: break-all;">
-                                        <p class="my-1"><strong>ID:</strong> @GetPath()</p>
-                                        <p class="my-1"><strong>Type:</strong> @Subject.GetType().FullName</p>
-                                    </small>
-                                </div>
+                                }
                             </ChildContent>
                         </MudExpansionPanel>
-                    </MudExpansionPanels>
-                </div>
+                    }
+                }
+
+                @* Primitive properties and methods (operations and queries) without a category *@
+                @if (members.UncategorizedValues.Count > 0)
+                {
+                    @RenderValues(members.UncategorizedValues, GetGapClass(previousBlock, PaneBlock.Values))
+                    previousBlock = PaneBlock.Values;
+                }
+                @if (members.UncategorizedMethods.Count > 0)
+                {
+                    @RenderMethods(members.UncategorizedMethods, GetGapClass(previousBlock, PaneBlock.Methods))
+                    previousBlock = PaneBlock.Methods;
+                }
+
+                @* Categories: the values of a category and its methods below them *@
+                @foreach (var category in members.Categories)
+                {
+                    <div class="@GetGapClass(previousBlock, PaneBlock.Category)" data-testid="subject-pane-category">
+                        <MudText Typo="Typo.subtitle2" Color="Color.Primary" HtmlTag="h2" Class="px-4"
+                                 data-testid="subject-pane-category-title">@category.Name</MudText>
+                        @if (category.Values.Count > 0)
+                        {
+                            @RenderValues(category.Values, GetGapClass(PaneBlock.CategoryTitle, PaneBlock.Values))
+                        }
+                        @if (category.Methods.Count > 0)
+                        {
+                            @RenderMethods(category.Methods, GetGapClass(
+                                category.Values.Count > 0 ? PaneBlock.Values : PaneBlock.CategoryTitle, PaneBlock.Methods))
+                        }
+                    </div>
+                    previousBlock = PaneBlock.Category;
+                }
+
+                @* Details Accordion *@
+                <MudExpansionPanels MultiExpansion="true" Elevation="0" Gutters="false" Dense="true" Class="@GetGapClass(previousBlock, PaneBlock.Section)" Style="overflow: hidden;">
+                    <MudExpansionPanel Expanded="false" Gutters="false" Class="px-4" HeaderClass="subject-pane-section-header">
+                        <TitleContent>
+                            Details
+                        </TitleContent>
+                        <ChildContent>
+                            <div class="mb-4">
+                                <small style="word-break: break-all;">
+                                    <p class="my-1"><strong>ID:</strong> @GetPath()</p>
+                                    <p class="my-1"><strong>Type:</strong> @Subject.GetType().FullName</p>
+                                </small>
+                            </div>
+                        </ChildContent>
+                    </MudExpansionPanel>
+                </MudExpansionPanels>
             </div>
-        </TrackingScope>
+        </div>
     </div>
 }
 
 <style>
     /* MudBlazor has no parameter or class for the rules below. */
 
-    /* The copy button of a value shows while its row is hovered or focused, and always on a device without hover.
-       Transparent rather than hidden, so that it stays in the tab order. */
+    /* The copy button of a value shows while its row is hovered or focused by the keyboard, and always on a device
+       without hover. Transparent rather than hidden, so that it stays in the tab order. Not on any focus, as a button
+       keeps the focus of a click, and gets it back when a dialog that it opened closes. */
     .subject-pane-copy {
         opacity: 0;
     }
 
+    /* The row of the property that a link leads to. */
+    .subject-pane-row-highlighted {
+        background-color: var(--mud-palette-primary-hover);
+    }
+
     .subject-pane-row:hover .subject-pane-copy,
-    .subject-pane-row:focus-within .subject-pane-copy {
+    .subject-pane-row:has(:focus-visible) .subject-pane-copy {
         opacity: 1;
     }
 
     @@media (hover: none) {
         .subject-pane-copy {
             opacity: 1;
+        }
+    }
+
+    /* A row in reorder mode, as high as a list item and with the line of a list divider below it. The handle takes
+       the gutter, so that the name starts where it starts in the list. */
+    .subject-pane-reorder-row {
+        display: flex;
+        align-items: center;
+        padding: 8px 16px 8px 4px;
+        border-bottom: thin solid var(--mud-palette-divider);
+        cursor: grab;
+        user-select: none;
+    }
+
+    .subject-pane-reorder-list[data-can-drag="false"] .subject-pane-reorder-row {
+        cursor: default;
+    }
+
+    .subject-pane-reorder-list[data-dragging] * {
+        cursor: grabbing;
+    }
+
+    .subject-pane-reorder-row[data-drag-source] {
+        opacity: 0.4;
+    }
+
+    /* As high as the row, so that a touch or a pen can grab it anywhere along the edge, where it does not scroll the pane. */
+    .subject-pane-reorder-handle {
+        display: flex;
+        flex-shrink: 0;
+        align-self: stretch;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        margin: -8px 0 -8px -4px;
+        color: var(--mud-palette-action-default);
+        touch-action: none;
+    }
+
+    .subject-pane-reorder-icon {
+        flex-shrink: 0;
+        margin: 0 12px 0 8px;
+    }
+
+    .subject-pane-reorder-name {
+        flex-grow: 1;
+        min-width: 0;
+        margin: 4px 0;
+    }
+
+    /* The copy of the dragged row under the pointer, and the line where it lands, above the pane but below dialogs. */
+    .subject-pane-reorder-preview {
+        position: fixed;
+        top: 0;
+        left: 0;
+        z-index: 1350;
+        background-color: var(--mud-palette-surface);
+        box-shadow: var(--mud-elevation-8);
+        opacity: 0.9;
+        pointer-events: none;
+        cursor: grabbing;
+    }
+
+    .subject-pane-reorder-indicator {
+        position: fixed;
+        top: 0;
+        left: 0;
+        z-index: 1351;
+        height: 2px;
+        background-color: var(--mud-palette-primary);
+        pointer-events: none;
+    }
+
+    /* Two columns, so that the single arrow of the first and the last row stays in the column of its kind.
+       Dragging moves a row with a mouse. The arrows are for the keyboard, so they show only while one has focus.
+       Transparent rather than hidden, so that they stay in the tab order, and without pointer events meanwhile, so
+       that a click cannot press an arrow it does not see. A device without hover shows them, as dragging there needs
+       the handle. */
+    .subject-pane-move {
+        flex-shrink: 0;
+        display: grid;
+        grid-template-columns: 28px 28px;
+        justify-items: center;
+        margin-left: 8px;
+        opacity: 0;
+        pointer-events: none;
+    }
+
+    .subject-pane-move:focus-within {
+        opacity: 1;
+        pointer-events: auto;
+    }
+
+    .subject-pane-move-up {
+        grid-column: 1;
+    }
+
+    .subject-pane-move-down {
+        grid-column: 2;
+    }
+
+    @@media (hover: none) {
+        .subject-pane-move {
+            opacity: 1;
+            pointer-events: auto;
         }
     }
 
@@ -295,7 +454,7 @@
     private readonly HashSet<string> _expandedProperties = [];
 
     private ElementReference _rootElement;
-    private string? _copyButtonsElementId;
+    private string? _registeredElementId;
     private IJSObjectReference? _module;
     private DotNetObjectReference<SubjectPropertyPanel>? _dotNetReference;
     private bool _isDisposed;
@@ -309,6 +468,20 @@
 
     // The method that runs, which shows the spinner. Not set while its prompt or result dialog is open.
     private MethodMetadata? _executingMethod;
+
+    // True while a move is written. A move meanwhile is ignored, as its target comes from the order before the move.
+    private bool _isMovingChild;
+
+    private bool _isReordering;
+
+    // The container and the children the reorder list showed last, which a drop of the script refers to.
+    private IMetadataContainer? _reorderContainer;
+    private SubjectPropertyChild[]? _reorderedChildren;
+    private readonly Dictionary<(SubjectPropertyChild Child, bool IsUpArrow), MudIconButton> _arrows = [];
+
+    // The arrow that takes the focus after the next render, the up arrow of the child when the flag is set.
+    private (SubjectPropertyChild Child, bool IsUpArrow)? _arrowToFocus;
+
     private readonly CancellationTokenSource _lifetime = new();
 
     [Parameter]
@@ -335,18 +508,16 @@
     [Parameter]
     public EventCallback OnDelete { get; set; }
 
-    protected override void OnInitialized()
-    {
-        base.OnInitialized();
-        TimeZone.Changed += OnTimeZoneChanged;
-    }
+    /// <summary>The name of the property whose row is highlighted, such as the target of a link.</summary>
+    [Parameter]
+    public string? HighlightedProperty { get; set; }
 
-    private void OnTimeZoneChanged() => InvokeAsync(StateHasChanged);
+    // The store of the shown subject, set at the start of each render, before the header and the rows read it.
+    private IMetadataStore? _metadataStore;
 
     public async ValueTask DisposeAsync()
     {
         _isDisposed = true;
-        TimeZone.Changed -= OnTimeZoneChanged;
         _lifetime.Cancel();
         _lifetime.Dispose();
         _dotNetReference?.Dispose();
@@ -366,16 +537,16 @@
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         await base.OnAfterRenderAsync(firstRender);
+        await FocusArrowAsync();
 
-        // The listener sits on the root, as the tracking scope replaces everything inside it on every change in
-        // developer mode. The root is new only when the pane showed no subject in between.
-        if (Subject is null || _rootElement.Id is null || _rootElement.Id == _copyButtonsElementId)
+        // The listeners sit on the root, which is new only when the pane showed no subject in between.
+        if (Subject is null || _rootElement.Id is null || _rootElement.Id == _registeredElementId)
         {
             return;
         }
 
         // Claimed before the awaits, so that a render during them does not register the element again.
-        _copyButtonsElementId = _rootElement.Id;
+        _registeredElementId = _rootElement.Id;
         try
         {
             _module ??= await JsRuntime.InvokeAsync<IJSObjectReference>(
@@ -387,11 +558,32 @@
             }
 
             _dotNetReference ??= DotNetObjectReference.Create(this);
-            await _module.InvokeVoidAsync("registerCopyButtons", _rootElement, _dotNetReference);
+            await _module.InvokeVoidAsync("register", _rootElement, _dotNetReference);
         }
         catch (Exception exception) when (exception is JSDisconnectedException or OperationCanceledException or JSException)
         {
-            // Without the script the copy buttons do nothing; the values are still shown.
+            // Without the script the copy buttons and dragging do nothing; the values and the arrows still work.
+        }
+    }
+
+    private async Task FocusArrowAsync()
+    {
+        if (_arrowToFocus is not { } arrow)
+        {
+            return;
+        }
+
+        _arrowToFocus = null;
+        if (_arrows.TryGetValue(arrow, out var button))
+        {
+            try
+            {
+                await button.FocusAsync();
+            }
+            catch (Exception exception) when (exception is JSDisconnectedException or OperationCanceledException or JSException)
+            {
+                // The row is gone, and with it the arrow.
+            }
         }
     }
 
@@ -417,6 +609,7 @@
         if (registeredSubject != _registeredSubject)
         {
             _linkedSubjectTypes.Clear();
+            StopReordering();
         }
 
         _registeredSubject = registeredSubject;
@@ -463,11 +656,10 @@
         if (_registeredSubject == null)
             return [];
 
+        // Read in the render, so that a property added at run time, which increments the version, renders the panel again.
+        _ = PathResolver.PathsVersion;
         return _registeredSubject.Properties
-            .Where(p =>
-                p.GetStateMetadata() != null
-                && p is { IsAttribute: false, CanContainSubjects: false }
-                && p.GetConfigurationMetadata()?.IsSecret != true)
+            .Where(static p => p.IsShownAsValue())
             .OrderBy(p => p.GetDisplayPosition());
     }
 
@@ -476,6 +668,8 @@
         if (_registeredSubject == null)
             return [];
 
+        // Read in the render, so that a property added at run time, which increments the version, renders the panel again.
+        _ = PathResolver.PathsVersion;
         return _registeredSubject.Properties
             .Where(p => p is { IsAttribute: false, CanContainSubjects: true })
             .OrderBy(p => p.GetDisplayPosition());
@@ -515,10 +709,60 @@
 
     private static SubjectPropertyChild[] GetVisibleChildren(RegisteredSubjectProperty property)
     {
-        return property.Children
-            .Where(child => !Attribute.IsDefined(child.Subject.GetType(), typeof(ExcludeFromBrowsingAttribute), true))
-            .ToArray();
+        // The children come from the registry, which is not a tracked read. Reading the property is, so the pane renders
+        // again when a child is added, replaced or removed.
+        _ = property.GetValue();
+        // A child whose type is excluded from user interfaces is neither listed nor counted.
+        var children = property.Children.Where(static child => !child.Subject.IsExcludedFrom(ExclusionTarget.UserInterface));
+
+        if (GetOrderedContainer(property) is { } container)
+        {
+            children = ChildOrdering.Order(children, container.ChildOrder, static child => child.Index?.ToString() ?? string.Empty);
+        }
+
+        return children.ToArray();
     }
+
+    // The shown subject when it is a container whose children are listed and can be put in order, null otherwise.
+    private static IMetadataContainer? GetReorderContainer(List<ChildSection> sections)
+    {
+        foreach (var section in sections)
+        {
+            if (section.CollectionProperty is { } property &&
+                section.CollectionChildren.Length > 1 &&
+                GetOrderedContainer(property) is { } container)
+            {
+                return container;
+            }
+        }
+
+        return null;
+    }
+
+    private void ToggleReordering()
+    {
+        if (_isReordering)
+        {
+            StopReordering();
+        }
+        else
+        {
+            _isReordering = true;
+        }
+    }
+
+    private void StopReordering()
+    {
+        _isReordering = false;
+        _reorderContainer = null;
+        _reorderedChildren = null;
+        _arrows.Clear();
+        _arrowToFocus = null;
+    }
+
+    // The container whose children the property holds when they can be put in order, null for any other property.
+    private static IMetadataContainer? GetOrderedContainer(RegisteredSubjectProperty property)
+        => property.Name == IMetadataContainer.ChildrenPropertyName ? property.Parent.Subject as IMetadataContainer : null;
 
     private void TogglePropertyExpanded(string propertyName)
     {
@@ -550,6 +794,13 @@
 
         // A detail without an arrow starts where the name of one with an arrow starts.
         var rowClass = depth > 0 && !hasAttributes ? "subject-pane-row d-flex align-start py-1 pl-6" : "subject-pane-row d-flex align-start py-1";
+        var isHighlighted = depth == 0 && prop.Name == HighlightedProperty;
+        if (isHighlighted)
+        {
+            rowClass += " subject-pane-row-highlighted";
+        }
+
+        var propertyMetadata = prop.IsAttribute ? null : prop.GetMetadata();
 
         RenderFragment nameAndValue =
             @<text>
@@ -571,14 +822,15 @@
                 </MudText>
             </text>;
 
-        <div class="@rowClass" data-testid="subject-pane-value">
+        <div class="@rowClass" data-testid="subject-pane-value" data-highlighted="@(isHighlighted ? "true" : null)">
             @* Outside the link, so that a click on the arrow does not open the history. *@
             @if (hasAttributes)
             {
                 <MudIconButton Icon="@(isExpanded ? Icons.Material.Filled.ArrowDropDown : Icons.Material.Filled.ArrowRight)"
                                Size="Size.Small"
                                Class="pa-0 mr-1"
-                               OnClick="@(() => TogglePropertyExpanded(prop.Name))" />
+                               OnClick="@(() => TogglePropertyExpanded(prop.Name))"
+                               data-testid="subject-pane-value-expand" />
             }
             @if (CanShowHistory(prop))
             {
@@ -623,6 +875,34 @@
                                aria-label="@($"Copy {displayName}")"
                                data-copy-value="@displayValue"
                                data-testid="subject-pane-value-copy" />
+            }
+            @* Enabled also while the storage is disconnected, as a disabled button shows no tooltip. *@
+            @if (!prop.IsAttribute && propertyMetadata.HasNotesLinksOrTags())
+            {
+                <MudTooltip>
+                    <ChildContent>
+                        <MudIconButton Icon="@Icons.Material.Filled.StickyNote2"
+                                       Size="Size.Small"
+                                       Color="Color.Primary"
+                                       Class="pa-0 ml-2"
+                                       aria-label="@($"Metadata of {displayName}")"
+                                       OnClick="@(() => OpenMetadataAsync($"Metadata of {displayName}", prop.Name, propertyMetadata, hasNotesLinksOrTags: true))"
+                                       data-testid="subject-pane-value-metadata" />
+                    </ChildContent>
+                    <TooltipContent>
+                        <MetadataSummary Metadata="@propertyMetadata" Class="py-1" />
+                    </TooltipContent>
+                </MudTooltip>
+            }
+            else if (!prop.IsAttribute && _metadataStore is not null)
+            {
+                <MudIconButton Icon="@Icons.Material.Outlined.StickyNote2"
+                               Size="Size.Small"
+                               Class="pa-0 ml-2 subject-pane-copy"
+                               title="Metadata"
+                               aria-label="@($"Metadata of {displayName}")"
+                               OnClick="@(() => OpenMetadataEditorAsync($"Metadata of {displayName}", prop.Name))"
+                               data-testid="subject-pane-value-metadata" />
             }
         </div>
 
@@ -675,7 +955,7 @@
 
     // An attribute that the row of its property shows when expanded, which gives the row its arrow.
     private static bool IsDetail(RegisteredSubjectProperty attribute) =>
-        attribute.AttributeMetadata.AttributeName is not (KnownAttributes.State or KnownAttributes.Configuration);
+        attribute.AttributeMetadata.AttributeName is not (KnownAttributes.State or KnownAttributes.Configuration or KnownAttributes.Metadata);
 
     private static bool HasDetails(RegisteredSubjectProperty property) =>
         Array.Exists(property.Attributes, IsDetail);
@@ -693,8 +973,29 @@
 
         return registered.Properties
             .Where(p => p is { IsAttribute: false, CanContainSubjects: true })
-            .Sum(p => p.Children.Length);
+            .Sum(p =>
+            {
+                // Read for the same reason as in GetVisibleChildren.
+                _ = p.GetValue();
+                var count = 0;
+                foreach (var propertyChild in p.Children)
+                {
+                    if (!propertyChild.Subject.IsExcludedFrom(ExclusionTarget.UserInterface)) count++;
+                }
+
+                return count;
+            });
     }
+
+    private RenderFragment RenderChildLabel(RegisteredSubjectProperty property, SubjectPropertyChild child) => __builder =>
+    {
+        var childCount = GetChildCount(child);
+        <span class="subject-pane-child-name" style="word-break: break-word;">@property.GetChildDisplayName(child)</span>
+        @if (childCount > 0)
+        {
+            <MudChip T="string" Size="Size.Small" Color="Color.Dark" Class="ml-4 my-0">@childCount</MudChip>
+        }
+    };
 
     public record PropertyClickEventArgs(string PropertyName, object? Index, IInterceptorSubject Subject);
 
@@ -716,6 +1017,40 @@
 
         var title = GetSubjectTitle();
         await SubjectEditDialog.ShowAsync(DialogService, ComponentRegistry, Subject, $"Edit {title}");
+    }
+
+    // The store that keeps the metadata of the shown subject, null when none does and for the storage root: a store
+    // without a store above it.
+    private IMetadataStore? GetMetadataStore()
+        => Subject?.FindMetadataStore() is { } store && store.CanStoreMetadata(Subject) &&
+           (!ReferenceEquals(store, Subject) || Subject.TryGetRegisteredSubject() is { Parents: [var parent, ..] } && parent.Property.Parent.Subject.FindMetadataStore() is not null)
+            ? store
+            : null;
+
+    private Task OpenTagFilterAsync(string tag) => MetadataTagFilterDialog.ShowAsync(DialogService, tag);
+
+    // Shows the notes, links and tags of the shown subject, or of its property with the given name, with a button to edit
+    // them where a store keeps them; edits the metadata right away when it has none of them.
+    private Task OpenMetadataAsync(
+        string title, string? propertyName, ImmutableDictionary<string, JsonElement>? metadata, bool hasNotesLinksOrTags)
+        => hasNotesLinksOrTags
+            ? MetadataSummaryDialog.ShowAsync(DialogService, title, metadata,
+                _metadataStore is not null ? () => OpenMetadataEditorAsync(title, propertyName) : null)
+            : OpenMetadataEditorAsync(title, propertyName);
+
+    // Edits the metadata of the shown subject, or of its property with the given name.
+    private async Task OpenMetadataEditorAsync(string title, string? propertyName)
+    {
+        if (Subject is null || GetMetadataStore() is not { } store)
+            return;
+
+        if (!IsConnected(store))
+        {
+            Snackbar.Add("The metadata cannot be edited while the storage is not connected.", Severity.Warning);
+            return;
+        }
+
+        await MetadataEditDialog.ShowAsync(DialogService, Subject, title, propertyName);
     }
 
     private bool CanShowHistory(RegisteredSubjectProperty property)
@@ -743,7 +1078,7 @@
             GetPrimitiveProperties().ToList(),
             static property => property.GetStateMetadata()?.Category,
             static property => property.GetDisplayPosition(),
-            _registeredSubject?.GetAllMethods() ?? [],
+            _registeredSubject?.GetAllMethods(ExclusionTarget.UserInterface) ?? [],
             static method => method.Category,
             static method => method.Position);
 
@@ -758,14 +1093,14 @@
         Section
     }
 
-    // 16px around a category, 12px around a row of method buttons, 8px otherwise. The category arm comes first: a
-    // category after a row of buttons is 16px away.
+    // 16px around a category and between the children and the values below them, 12px around a row of method
+    // buttons, 8px otherwise. The category arm comes first: a category after a row of buttons is 16px away.
     private static string GetGapClass(PaneBlock previousBlock, PaneBlock block) => (previousBlock, block) switch
     {
         (PaneBlock.None, _) => "mt-2",
         (PaneBlock.CategoryTitle, PaneBlock.Values) => "mt-1",
         (PaneBlock.CategoryTitle, _) => "mt-2",
-        (PaneBlock.Category, _) or (_, PaneBlock.Category) => "mt-4",
+        (PaneBlock.Category, _) or (_, PaneBlock.Category) or (PaneBlock.Section, PaneBlock.Values) => "mt-4",
         (PaneBlock.Methods, _) or (_, PaneBlock.Methods) => "mt-3",
         _ => "mt-2"
     };
@@ -780,10 +1115,11 @@
             }
             @foreach (var property in values)
             {
-                // Read here also for a value that gets no row: the tracking scope records the read, so the pane is
-                // rendered again once the value is set.
+                // Read here also for a value that gets no row: the render records the read, so the pane is
+                // rendered again once the value is set. A property with metadata, or that a link leads to, gets its
+                // row also without a value, for its metadata icon and its highlight.
                 var value = property.GetValue();
-                if (value is null && !HasDetails(property))
+                if (value is null && !HasDetails(property) && property.Name != HighlightedProperty && property.GetMetadata() is null)
                 {
                     emptyValues ??= [];
                     emptyValues.Add(property);
@@ -860,6 +1196,162 @@
             }
         </MudStack>
     };
+
+    private RenderFragment RenderReorderList(
+        RegisteredSubjectProperty property, SubjectPropertyChild[] children, IMetadataContainer container) => __builder =>
+    {
+        _reorderContainer = container;
+        _reorderedChildren = children;
+        var canDrag = !_isMovingChild && IsConnected(container);
+
+        // Stays enabled while a move is written, as a focused button that turns disabled loses the focus. A press
+        // meanwhile is ignored.
+        var canPressArrows = IsConnected(container);
+
+        @* The script drags the rows, see SubjectPropertyPanel.razor.js. *@
+        <div class="subject-pane-reorder-list"
+             data-reorder-list
+             data-can-drag="@(canDrag ? "true" : "false")">
+            @for (var childIndex = 0; childIndex < children.Length; childIndex++)
+            {
+                var child = children[childIndex];
+                var isSelected = child.Subject == SelectedChild;
+                var childName = property.GetChildDisplayName(child);
+                <div @key="child"
+                     class="@(isSelected ? "subject-pane-reorder-row mud-primary-text" : "subject-pane-reorder-row")"
+                     data-reorder-row
+                     data-child-name="@child.Index"
+                     data-testid="reorder-child-row">
+                    <span class="subject-pane-reorder-handle" data-reorder-handle aria-hidden="true">
+                        <MudIcon Icon="@Icons.Material.Filled.DragIndicator" Size="Size.Small" />
+                    </span>
+                    <MudIcon Icon="@GetSubjectIcon(child.Subject)"
+                             Color="@(isSelected ? Color.Primary : GetSubjectIconColor(child.Subject))"
+                             Class="subject-pane-reorder-icon" />
+                    <MudText Typo="Typo.body1" Class="subject-pane-reorder-name">
+                        @RenderChildLabel(property, child)
+                    </MudText>
+                    <span class="subject-pane-move">
+                        @if (childIndex > 0)
+                        {
+                            @RenderMoveArrow(child, children[childIndex - 1], isUp: true, reachesEnd: childIndex == 1, childName, canPressArrows)
+                        }
+                        @if (childIndex < children.Length - 1)
+                        {
+                            @RenderMoveArrow(child, children[childIndex + 1], isUp: false, reachesEnd: childIndex == children.Length - 2, childName, canPressArrows)
+                        }
+                    </span>
+                </div>
+            }
+        </div>
+    };
+
+    private RenderFragment RenderMoveArrow(
+        SubjectPropertyChild child, SubjectPropertyChild neighbor, bool isUp, bool reachesEnd, string childName, bool isEnabled) => __builder =>
+    {
+        var direction = isUp ? "up" : "down";
+        <MudIconButton @ref="_arrows[(child, isUp)]"
+                       Icon="@(isUp ? Icons.Material.Filled.ArrowUpward : Icons.Material.Filled.ArrowDownward)"
+                       Size="Size.Small"
+                       Class="@($"subject-pane-move-{direction} pa-0")"
+                       Disabled="@(!isEnabled)"
+                       OnClick="@(() => MoveChildByArrowAsync(child, neighbor, isUp, reachesEnd))"
+                       aria-label="@($"Move {childName} {direction}")"
+                       data-testid="@($"move-child-{direction}-button")" />
+    };
+
+    // Called by the script with the names of the dragged child and of the child whose place it takes, which come from
+    // the order the list showed when the drag started. Returns once the pane shows the new order, as the script shows
+    // the dragged row in its new place until then.
+    [JSInvokable]
+    public async Task OnChildDropped(string name, string targetName)
+    {
+        await MoveChildAsync(name, targetName);
+        if (!_isDisposed)
+        {
+            StateHasChanged();
+        }
+    }
+
+    // The rows are keyed, so a move takes a row out of the page and puts it back, which can take the focus from its
+    // arrow, and the arrow pressed on a row that the move takes to the top or the bottom is gone. The arrow of the row
+    // takes the focus again, its other arrow at the top or the bottom.
+    private async Task MoveChildByArrowAsync(SubjectPropertyChild child, SubjectPropertyChild target, bool isUp, bool reachesEnd)
+    {
+        if (await MoveChildAsync(child.Index!.ToString()!, target.Index!.ToString()!))
+        {
+            _arrowToFocus = (child, reachesEnd ? !isUp : isUp);
+        }
+    }
+
+    // A folder reports the status of its storage. A container or store that is no storage has no connection to lose.
+    private static bool IsConnected(object container)
+        => container is not IStorageContainer { Status: not StorageStatus.Connected };
+
+    // Returns whether the order was written: the whole order the list shows, with the child in the place of the
+    // target, as agents write it. Nothing is written when the child or the target is no longer a child of the container.
+    private async Task<bool> MoveChildAsync(string name, string targetName)
+    {
+        if (_isMovingChild || _reorderContainer is not IInterceptorSubject container || _reorderedChildren is not { } children)
+        {
+            return false;
+        }
+
+        // A child removed since the list was shown would make the write fail, as every name must be a child.
+        var currentNames = container.TryGetRegisteredSubject()?
+            .TryGetProperty(IMetadataContainer.ChildrenPropertyName)?.Children
+            .Select(item => item.Index?.ToString())
+            .ToHashSet() ?? [];
+        List<string> names = [.. children.Select(item => item.Index!.ToString()!).Where(currentNames.Contains)];
+        var index = names.IndexOf(name);
+        var targetIndex = names.IndexOf(targetName);
+        if (index < 0 || targetIndex < 0 || index == targetIndex)
+        {
+            return false;
+        }
+
+        names.RemoveAt(index);
+        names.Insert(targetIndex, name);
+
+        _isMovingChild = true;
+        try
+        {
+            await container.SetOrderAsync([.. names], _lifetime.Token);
+            return true;
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+        {
+            // The pane is gone.
+            return false;
+        }
+        catch (Exception exception)
+        {
+            if (!_isDisposed)
+            {
+                // Not awaited, so that a drop ends before the message shows rather than once it is closed.
+                _ = ShowMoveFailedAsync(exception.Message);
+            }
+
+            return false;
+        }
+        finally
+        {
+            _isMovingChild = false;
+        }
+    }
+
+    private async Task ShowMoveFailedAsync(string message)
+    {
+        try
+        {
+            await DialogService.ShowMessageBoxAsync("Move Failed", $"Failed to move: {message}", yesText: "OK");
+        }
+        catch (Exception exception)
+        {
+            // Nothing awaits this task. Dispatching the exception would end the circuit for a message box that failed.
+            Logger.LogWarning(exception, "Failed to show that moving a child failed: {Message}", message);
+        }
+    }
 
     private async Task ExecuteMethodAsync(MethodMetadata method)
     {

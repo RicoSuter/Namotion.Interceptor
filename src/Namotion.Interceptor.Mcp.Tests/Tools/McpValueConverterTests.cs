@@ -78,6 +78,11 @@ public class McpValueConverterTests
     [InlineData("\"tomorrow\"", typeof(DateTime))]
     [InlineData("\"90 seconds\"", typeof(TimeSpan))]
     [InlineData("null", typeof(int))]
+    [InlineData("""{"title":"No message","code":1}""", typeof(McpMethodParameterTests.TestNotification))]
+    [InlineData("""{"message":"Door open","code":1,"priority":1}""", typeof(McpMethodParameterTests.TestNotification))]
+    [InlineData("""{"message":"Door open","code":1,"priority":"1"}""", typeof(McpMethodParameterTests.TestNotification))]
+    [InlineData("""{"message":"Door open","code":1,"sound":"siren"}""", typeof(McpMethodParameterTests.TestNotification))]
+    [InlineData("{}", typeof(McpMethodParameterTests.TestCommand))]
     public void WhenValueCannotBeConverted_ThenThrowsJsonException(string json, Type type)
     {
         // Arrange
@@ -85,6 +90,21 @@ public class McpValueConverterTests
 
         // Act & Assert
         Assert.Throws<JsonException>(() => McpValueConverter.Deserialize(element, type));
+    }
+
+    [Fact]
+    public void WhenRecordArgumentUsesCamelCaseNames_ThenMembersAreBound()
+    {
+        // Arrange
+        var value = JsonDocument.Parse("""{"message":"Door open","code":1,"priority":"Low"}""").RootElement;
+
+        // Act
+        var result = McpValueConverter.Deserialize(value, typeof(McpMethodParameterTests.TestNotification));
+
+        // Assert
+        var notification = Assert.IsType<McpMethodParameterTests.TestNotification>(result);
+        Assert.Equal("Door open", notification.Message);
+        Assert.Equal(McpMethodParameterTests.TestPriority.Low, notification.Priority);
     }
 
     [Flags]

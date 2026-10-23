@@ -1,7 +1,6 @@
 ---
 title: Subjects, Storage & Files
 navTitle: Subjects
-position: 3
 ---
 
 # Subjects, Storage & Files
@@ -17,7 +16,7 @@ Subjects can be managed in two ways, and both produce the same result:
 **Via the Blazor UI:**
 - **Create subjects**: "Create" in the subject browser opens a dialog that lists the available types by group, with a search box. Picking a type shows its configuration form together with the file name of the new subject, "Back" returns to the list, and "Create" adds the subject
 - **Edit subjects**: Select any subject to view and edit its `[Configuration]` properties in the property panel. Changes are saved back to the JSON file automatically
-- **Inspect and operate subjects**: The property panel shows the live values, operations and child subjects of a subject, under headings where its type defines [categories](../development/building-subjects.md#categories). Values that are not set are listed in a "No value" line.
+- **Inspect and operate subjects**: The property panel shows the child subjects of a subject, then its live values and operations, under headings where its type defines [categories](../development/building-subjects.md#categories). Values that are not set are listed in a "No value" line.
 - **Create and edit files**: New JSON and Markdown files can be created from the UI. Markdown files open in an integrated Monaco editor with live preview
 - **Manage folders**: Create, rename, and delete folders in the storage tree
 
@@ -79,6 +78,10 @@ Files/
 ```
 
 Folders use `[InlinePaths]`, so children are path segments directly (no `Children[...]` brackets). See [Paths](paths.md) for full syntax.
+
+### Metadata Files
+
+A folder can hold a `.metadata.json`, and a subject file `X.json` an `X.metadata.json` beside it, with titles, icons, the order of children, notes, links, tags and other metadata, see [Metadata](metadata.md).
 
 ---
 

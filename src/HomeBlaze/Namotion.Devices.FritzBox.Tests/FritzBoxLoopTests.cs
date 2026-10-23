@@ -61,6 +61,24 @@ public class FritzBoxLoopTests
     }
 
     [Fact]
+    public async Task WhenTheHostAddressIsInvalid_ThenTheLoopReportsItWithoutConnecting()
+    {
+        // Arrange
+        await using var fake = await FakeFritzBox.StartAsync();
+        var router = CreateRouter(fake);
+        router.HostAddress = "fe80::1%@127.0.0.1?";
+
+        // Act
+        await using var running = await RunAsync(router);
+        await WaitForErrorAsync(router, FritzBoxConnectionCheck.InvalidHostAddressMessage);
+
+        // Assert
+        Assert.False(router.IsConnected);
+        Assert.Equal(0, fake.SecurityPortRequests);
+        Assert.Equal(0, fake.SecureRequests);
+    }
+
+    [Fact]
     public async Task WhenNoPasswordIsConfigured_ThenTheRouterIsNotContactedUntilTheConfigurationChanges()
     {
         // Arrange

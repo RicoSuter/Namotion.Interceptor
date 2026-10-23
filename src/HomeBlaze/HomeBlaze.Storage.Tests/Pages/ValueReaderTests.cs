@@ -22,6 +22,26 @@ public class ValueReaderTests
         ::: Case Value=False Color=Error
         ::: Case Value=TRUE Text="never"
         ::
+
+        :: HomeBlaze.Components.ValueMap#css
+        ::: Case Value=true Color="#ffffff80"
+        ::: Case Value=false Color="var(--mud-palette-text-secondary)"
+        ::
+
+        :: HomeBlaze.Components.ValueMap#broken
+        ::: Case Value=true Color=Success
+        ::: Case Value=false Color="red;background:url(x)"
+        ::
+
+        :: HomeBlaze.Components.ValueMap#textcolor
+        ::: Case Value=true Text="an" Color=Info TextColor="#ffffff"
+        ::: Case Value=false Color=Warning
+        ::
+
+        :: HomeBlaze.Components.ValueMap#brokentext
+        ::: Case Value=true Color=Info
+        ::: Case Value=false Color=Warning TextColor="#fff;background:url(x)"
+        ::
         """;
 
     private static async Task<(SubjectPathResolver Resolver, MarkdownFile Page)> AddPageAsync()
@@ -128,6 +148,86 @@ public class ValueReaderTests
 
         // Assert
         Assert.Equal($"Cannot resolve map: {map}", reading.MapError);
+    }
+
+    [Fact]
+    public async Task WhenMatchedCaseHasACssColor_ThenReadingHasItWithItsInlineStyle()
+    {
+        // Arrange
+        var (resolver, page) = await AddPageAsync();
+
+        // Act
+        var reading = ValueReader.Read(resolver, page, "meter/IsOn", "css", null);
+
+        // Assert
+        Assert.Null(reading.MapError);
+        Assert.Equal(Color.Primary, reading.Color.Theme);
+        Assert.Equal("#ffffff80", reading.Color.Css);
+        Assert.StartsWith("--mud-palette-primary: #ffffff80; ", reading.Color.Style);
+        Assert.Same(reading.Color, ValueReader.Read(resolver, page, "meter/IsOn", "css", null).Color);
+    }
+
+    [Fact]
+    public async Task WhenACaseOfTheMapHasNoColor_ThenTheMapIsNotResolvedAndReadingHasTheError()
+    {
+        // Arrange
+        var (resolver, page) = await AddPageAsync();
+
+        // Act
+        var valueMap = ValueReader.ResolveMap(resolver, page, "broken", out var error);
+        var reading = ValueReader.Read(resolver, page, "meter/IsOn", "broken", null);
+
+        // Assert: the error does not depend on whether the value matches the case with the wrong color.
+        Assert.Null(valueMap);
+        Assert.Equal("Unknown color 'red;background:url(x)': use a theme color like Success or Surface 30%, or a CSS color like #ffffff80", error);
+        Assert.Equal(error, reading.MapError);
+        Assert.Equal(Color.Default, reading.Color);
+    }
+
+    [Fact]
+    public async Task WhenMatchedCaseHasATextColor_ThenReadingHasItNextToTheFill()
+    {
+        // Arrange
+        var (resolver, page) = await AddPageAsync();
+
+        // Act
+        var reading = ValueReader.Read(resolver, page, "meter/IsOn", "textcolor", null);
+
+        // Assert
+        Assert.Null(reading.MapError);
+        Assert.Equal(Color.Info, reading.Color);
+        Assert.Equal("#ffffff", reading.TextColor.Css);
+        Assert.Same(reading.TextColor, ValueReader.Read(resolver, page, "meter/IsOn", "textcolor", null).TextColor);
+    }
+
+    [Fact]
+    public async Task WhenMatchedCaseHasNoTextColor_ThenReadingKeepsTheTextColorOfTheFill()
+    {
+        // Arrange
+        var (resolver, page) = await AddPageAsync();
+
+        // Act
+        var reading = ValueReader.Read(resolver, page, "meter/IsOn", "onoff", null);
+
+        // Assert
+        Assert.Same(ValueColor.Default, reading.TextColor);
+    }
+
+    [Fact]
+    public async Task WhenACaseOfTheMapHasATextColorThatIsNoColor_ThenTheMapIsNotResolvedAndReadingHasTheError()
+    {
+        // Arrange
+        var (resolver, page) = await AddPageAsync();
+
+        // Act
+        var valueMap = ValueReader.ResolveMap(resolver, page, "brokentext", out var error);
+        var reading = ValueReader.Read(resolver, page, "meter/IsOn", "brokentext", null);
+
+        // Assert: the case with the wrong text color is not the one that matches.
+        Assert.Null(valueMap);
+        Assert.Equal("Unknown color '#fff;background:url(x)': use a theme color like Success or Surface 30%, or a CSS color like #ffffff80", error);
+        Assert.Equal(error, reading.MapError);
+        Assert.Same(ValueColor.Default, reading.TextColor);
     }
 
     [Theory]

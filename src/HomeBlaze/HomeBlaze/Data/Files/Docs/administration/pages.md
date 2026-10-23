@@ -1,7 +1,6 @@
 ---
 title: Markdown Pages
 navTitle: Pages
-position: 4
 ---
 
 # Markdown Pages
@@ -47,7 +46,6 @@ Use YAML frontmatter at the top of your markdown file to control how it appears 
 title: My Dashboard
 navTitle: Dashboard
 icon: Dashboard
-position: 1
 ---
 ```
 
@@ -58,9 +56,27 @@ position: 1
 | `title` | string | Full page title displayed in the header |
 | `navTitle` | string | Short title for navigation menu (optional, defaults to `title`) |
 | `icon` | string | MudBlazor icon name (e.g., `Dashboard`, `Settings`, `Article`) |
-| `position` | number | Sort order in navigation (lower = higher in list) |
 | `location` | string | Where to show in navigation: `NavBar` (sidebar, default) or `AppBar` (top bar) |
-| `alignment` | string | AppBar alignment: `Left` (default) or `Right`. Only used when `location` is `AppBar` |
+| `alignment` | string | AppBar alignment: `Left` (default), `Right` or `Menu` (see [The Top Bar Menu](#the-top-bar-menu)). Only used when `location` is `AppBar` |
+
+The place of a page among the other children of its folder is set with **Reorder** in the browser, see [Navigation Order](metadata.md#navigation-order).
+
+### The Top Bar Menu
+
+The ⋮ button at the right end of the top bar opens a menu with the developer mode, the time zone, the dark mode, and Home and Reload for a phone that shows no address bar. A page with `location: AppBar` and `alignment: Menu` is an entry at the top of this menu instead of an icon in the bar, which suits pages that are opened now and then:
+
+```yaml
+---
+title: Heating Schedule
+icon: Thermostat
+location: AppBar
+alignment: Menu
+---
+```
+
+The entries follow the navigation order, like the icons in the bar.
+
+The start page, which Home opens, is the first top bar page in navigation order on the left, else on the right, else in the menu. Without one it is the first sidebar page at the top level of the data folder, and without any page the subject browser.
 
 ---
 
@@ -110,12 +126,8 @@ A picture is shown in a size that fits the page, and it always keeps its proport
 
 The navigation follows pages that are added, removed or changed while a browser tab is open:
 
-- **Sidebar.** The menu re-reads its items every 5 seconds, including the contents of every expanded folder. A folder appears once it contains a page.
-- **Top bar.** Pages with `location: AppBar` are read when the layout renders, which happens on navigation. Only pages at the top level of the data folder appear there.
-
-### Known Limitations and Follow-ups
-
-- A page with `location: AppBar` that is added or removed while a tab is open appears in or disappears from the top bar only after the next navigation in that tab. The 5 second refresh re-renders the sidebar menu, not the layout that owns the top bar.
+- **Sidebar.** The menu re-reads its items every 5 seconds, including the contents of every expanded folder. A folder appears once it contains a page for the sidebar, at any depth.
+- **Top bar.** The top bar re-reads its items, including the entries of its menu, from every folder every 5 seconds and on navigation: the pages with `location: AppBar` and the subjects whose metadata sets `location` to `AppBar`.
 
 ---
 
@@ -981,7 +993,6 @@ A complete page. Two motors that have files of their own are shown in cards side
 title: Factory Dashboard
 navTitle: Dashboard
 icon: Dashboard
-position: 0
 ---
 
 # Factory Status
@@ -1054,7 +1065,7 @@ What the sample uses:
 3. **Use property names, not the names of a JSON file**: `TargetSpeed`, not `targetSpeed`, also deep inside a `json` block
 4. **Show shared subjects by path**: Keep a device in a file of its own and show it with a `Widget` block. Create a subject in a block only when it belongs to this page
 5. **Fit `MinWidth` to the widgets**: A flow layout needs a `MinWidth` that is at least as wide as its widest widget
-6. **Order your pages**: Use `position` in the frontmatter to control the place in the navigation
+6. **Order your pages**: Click **Reorder** in the header of a folder in the browser and drag its pages and folders into place
 7. **Keep pages focused**: One topic per page makes navigation cleaner
 
 ---
@@ -1064,5 +1075,6 @@ What the sample uses:
 - [Widgets](widgets/overview.md) - Every widget for pages, each with a page of its own
 - [Page Errors](page-errors.md) - Every error message with its cause and its fix
 - [Subjects, Storage & Files](subjects.md) - Configure subjects and file layout
+- [Metadata](metadata.md) - Order, titles, icons, notes, links and tags of folders, subjects and properties
 - [Paths](paths.md) - Path syntax reference
 - [Building Custom Subjects](../development/building-subjects.md) - Create subject types and widgets with content slots

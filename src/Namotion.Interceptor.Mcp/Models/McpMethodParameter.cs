@@ -1,4 +1,9 @@
+using System.ComponentModel;
+using System.Runtime.CompilerServices;
+using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
+using Microsoft.Extensions.AI;
 using Namotion.Interceptor.Mcp.Tools;
 
 namespace Namotion.Interceptor.Mcp.Models;
@@ -8,6 +13,9 @@ namespace Namotion.Interceptor.Mcp.Models;
 /// </summary>
 public sealed record McpMethodParameter
 {
+    // Weak keys do not hold the type, but the shared serializer options cache its metadata for the process lifetime.
+    private static readonly ConditionalWeakTable<Type, StrongBox<JsonElement?>> SchemaByType = new();
+
     /// <summary>
     /// The parameter name the argument is passed under.
     /// </summary>
@@ -49,7 +57,16 @@ public sealed record McpMethodParameter
     public string? Description { get; init; }
 
     /// <summary>
-    /// Describes a parameter of the given CLR type. A <see cref="Nullable{T}"/> type is always nullable.
+    /// The JSON Schema of an object argument, or null for other types.
+    /// </summary>
+    [JsonPropertyName("schema")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public JsonElement? Schema { get; init; }
+
+    /// <summary>
+    /// Describes a parameter of the given CLR type. A <see cref="Nullable{T}"/> type is always nullable. An object type
+    /// gets the JSON Schema of the members <see cref="McpValueConverter"/> binds, with the text of each member's
+    /// <see cref="DescriptionAttribute"/> as its description.
     /// </summary>
     /// <param name="name">The parameter name.</param>
     /// <param name="type">The CLR parameter type.</param>
@@ -59,14 +76,38 @@ public sealed record McpMethodParameter
     {
         var underlyingType = Nullable.GetUnderlyingType(type);
         var valueType = underlyingType ?? type;
+        var schemaType = JsonSchemaTypeMapper.ToJsonSchemaType(valueType) ?? "object";
         return new McpMethodParameter
         {
             Name = name,
-            Type = JsonSchemaTypeMapper.ToJsonSchemaType(valueType) ?? "object",
+            Type = schemaType,
             Format = JsonSchemaTypeMapper.GetFormat(valueType),
             EnumValues = valueType.IsEnum ? Enum.GetNames(valueType) : null,
             IsNullable = isNullable || underlyingType is not null,
-            Description = description
+            Description = description,
+            Schema = schemaType == "object" ? SchemaByType.GetValue(valueType, CreateSchema).Value : null
         };
+    }
+
+    private static StrongBox<JsonElement?> CreateSchema(Type type) =>
+        new(HasMembers(type) ? AIJsonUtilities.CreateJsonSchema(type, serializerOptions: McpValueConverter.SerializerOptions) : null);
+
+    private static bool HasMembers(Type type)
+    {
+        // System.Text.Json throws an ArgumentException for a by-ref, pointer, by-ref-like or open generic type.
+        if (type.IsByRef || type.IsPointer || type.IsByRefLike || type.ContainsGenericParameters ||
+            typeof(IInterceptorSubject).IsAssignableFrom(type))
+        {
+            return false;
+        }
+
+        try
+        {
+            return McpValueConverter.SerializerOptions.GetTypeInfo(type).Kind == JsonTypeInfoKind.Object;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
     }
 }

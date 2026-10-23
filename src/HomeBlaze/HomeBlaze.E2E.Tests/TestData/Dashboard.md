@@ -2,7 +2,6 @@
 title: Dashboard
 icon: Dashboard
 location: AppBar
-position: 10
 alignment: Left
 ---
 

@@ -1,7 +1,6 @@
 ---
 title: Widget Basics
 navTitle: Basics
-position: 2
 ---
 
 # Widget Basics
@@ -12,13 +11,13 @@ The rules that all widgets of a markdown page share. The [overview](overview.md)
 
 ## Type Names
 
-A block names its type with the full type name: the namespace and the name of the class, for example `HomeBlaze.Components.Card`. The namespace is the name of the library that ships the type. The widgets of this reference are in `HomeBlaze.Components`, except `HomeBlaze.History.Blazor.HistoryChart`, which ships with the history library. The sample motor is `HomeBlaze.Samples.Motor`, and a device has the namespace of its device library. The name is case-sensitive.
+A block names its type with the full type name: the namespace and the name of the class, for example `HomeBlaze.Components.Card`. The namespace is the name of the library that ships the type. The widgets of this reference are in `HomeBlaze.Components`, except `HomeBlaze.History.Blazor.HistoryChart`, which ships with the history library. The sample motor is `HomeBlaze.Samples.Motor`, the sample lock `HomeBlaze.Samples.SimulatedDoorLock`, and a device has the namespace of its device library. The name is case-sensitive.
 
 A block that fills a slot of a widget is written with the name of the slot instead, for example `Tab` inside a `TabLayout` or `Case` inside a `ValueMap`. Such a slot block is only allowed directly inside its widget, see [Slot Blocks](#slot-blocks).
 
 ## Sample Motors
 
-The samples of these pages need subjects to show. They use two sample motors: the subject files `Pump.json` and `Fan.json` in this folder, of the type `HomeBlaze.Samples.Motor`, with the names "Pump" and "Fan" and the target speeds 1200 and 800 RPM. The documentation is copied into every installation, so the two motors run there as well and the samples show live values.
+The samples of these pages need subjects to show. They use two sample motors: the subject files `Pump.json` and `Fan.json` in this folder, of the type `HomeBlaze.Samples.Motor`, with the names "Pump" and "Fan" and the target speeds 1200 and 800 RPM. The documentation is copied into every installation, so the two motors run there as well and the samples show live values. The samples of [DoorLock](door-lock.md) use the sample lock `FrontDoor.json` in this folder, of the type `HomeBlaze.Samples.SimulatedDoorLock`, with the name "Front door".
 
 A sample refers to a motor relative to its page, for example `../Pump/CurrentSpeed` for the current speed of the pump. A sample that you copy to a page of your own needs the path of one of your subjects in its place.
 
@@ -87,6 +86,7 @@ A widget with a `Label` argument shows the label that is set. Without it, a widg
 - **The formatted value**: A value is shown in the [formatted form of an expression](../pages.md#expression-formats). A map can replace the text.
 - **Shown properties**: A widget shows the same properties as an expression. For a secret, the raw source of a page or a plain property without `[State]` it shows the dash of a [missing value](#missing-values), see [Properties Shown on Pages](../../development/building-subjects.md#properties-shown-on-pages).
 - **Live**: A value changes on the page when the property changes.
+- **History**: A property whose values are recorded, a property with `[State]` of a number, a boolean, an enum or a text, opens its history in the history dialog on a click, as in the browser: the label of a `ValueList` row, of a `Gauge` and of a `ValueTile` box, and the whole of a `ValueTile` tile. The label looks like the text around it and is underlined under the mouse pointer. While the page is edited, a click selects the widget instead. Without a history store the dialog shows an empty history.
 
 ## Missing Values
 
@@ -108,7 +108,16 @@ Rules for all ranges:
 
 ## Colors
 
-A color is one of `Default`, `Primary`, `Secondary`, `Tertiary`, `Info`, `Success`, `Warning` and `Error`. They are the colors of the theme, so they follow it. `MudBlazor.Color` has a few more names that are accepted, but these are the ones meant for pages. The `IconColor` of a card, the `Color` of a case of a map, the `Color` of a progress bar and the `Color` of an operation button take one.
+A color is one of `Default`, `Primary`, `Secondary`, `Tertiary`, `Info`, `Success`, `Warning` and `Error`. They are the colors of the theme, so they follow it. `MudBlazor.Color` has a few more names that are accepted, but these are the ones meant for pages. The `IconColor` of a card, the `Color` and the `TextColor` of a case of a map, the `Color` of a progress bar and the `Color` of an operation button take one. The names are matched without regard to upper and lower case.
+
+The `Color` and the `TextColor` of a case of a [map](value-map.md) also take a CSS color, for a color that the theme does not have, such as white or half transparent white on a filled tile. It takes these forms and no others, so that a page cannot slip other styles in with a color:
+
+- `#rgb`, `#rgba`, `#rrggbb` and `#rrggbbaa`, such as `#ffffff` and `#ffffff80` for white at 50 percent.
+- `rgb()` and `rgba()` with numbers from 0 to 255 or percentages, separated by commas, all numbers or all percentages, or by spaces with the alpha after a slash, such as `rgba(255, 255, 255, 0.5)` and `rgb(255 255 255 / 50%)`.
+- A color of the theme by its variable, such as `var(--mud-palette-text-secondary)`. The name after `--mud-palette-` has lowercase letters, digits and hyphens. The variable of a theme color, such as `var(--mud-palette-success)`, is that theme color, also for the text on a fill of it. `var(--mud-palette-primary-text)`, `var(--mud-palette-primary-hover)` and the variables that end in `-rgb` are no color: a CSS color takes the place of the first two, and the others hold three numbers without `rgb()`.
+- A theme color with transparency: the name of a theme color, white space and a percentage from 0 to 100, such as `Surface 30%` for the surface color at 30 percent. It takes `Primary`, `Secondary`, `Tertiary`, `Info`, `Success`, `Warning`, `Error`, `Dark` and `Surface`, without regard to upper and lower case, and a percentage of 1 to 3 digits, optionally followed by a point and more digits, without a sign, such as `30%` or `12.5%`. `Default`, `Inherit` and `Transparent` have no color to make transparent and are no color with a percentage.
+
+Write a CSS color in double quotes, like `Color="#ffffff80"` or `Color="Surface 30%"`. A color by its numbers does not follow the theme: white stays white in the light theme, where it does not stand out from the surface. A variable of the theme and a theme color with transparency do follow it, so `Surface 30%` is a faint dark in the dark theme and a faint white in the light theme. Color names such as `white`, `hsl()` and anything else that is neither a theme color nor one of these forms show an error in place of the widgets that use the map, see [ValueMap](value-map.md). Where a CSS color colors the text and where it fills is described there too.
 
 ## Icons
 
@@ -118,7 +127,7 @@ The `Icon` of a card, a tab, a panel, a row, a tile, an indicator, an alert, an 
 
 The control widgets ([Switch](switch.md) and the others of the group Controls in the [overview](overview.md)) write properties and invoke operations. They follow the same rules as the property panel of a subject.
 
-- **Who can operate**: Every viewer of a page can operate its controls. Every viewer of this documentation can operate the two sample motors through the control samples.
+- **Who can operate**: Every viewer of a page can operate its controls. Every viewer of this documentation can operate the two sample motors and the sample lock through the control samples.
 - **Disabled**: A control is disabled when its path leads nowhere, when the property cannot be written because it has no public setter, and while the page is edited.
 - **Live**: A control follows its property, so a change by another viewer or by the device moves it.
 - **Writes**: A value is converted to the type of the property. A value that the type cannot hold, or that the property refuses, shows an error message, and nothing is rolled back.
@@ -135,9 +144,9 @@ Only containers create space: the page, a card, a tab, an expansion panel and th
 
 - **Between blocks of a page**: 16 pixels between two blocks and between a block and the text before or after it. Paragraphs of text keep 12 pixels between each other, and headings their own space.
 - **Inside a container**: The blocks and paragraphs of the content are 16 pixels apart, and a heading is 8 pixels above what follows it. The first and the last of them add nothing at the edge of the container, also when a [Responsive](responsive.md) block that the screen hides stands first or last. A widget that shows nothing, such as a `ValueMap`, takes no space.
-- **Containers**: A [card](card.md) has 12 pixels of room at every edge of its header, body and footer, and 4 pixels between its title and a body right below it. A tab has 16 pixels between its tab bar and its content and nothing at the other edges, unless its tab bar is at a side: then its content has 4 pixels at the opposite edge and at the bottom, so that the shadow of a card in it is not cut off. An expansion panel keeps the room that its header and its frame have. A cell of a [FlowLayout](flow-layout.md) adds no room: a card in it brings its own. A cell of a [GridLayout](grid-layout.md) and a node of a [CanvasLayout](canvas-layout.md) draw a frame, so their content has the 12 pixels of a card body at every edge, unless it is a single card or a single tile, which fills them.
+- **Containers**: A [card](card.md) has 12 pixels of room at every edge of its header, body and footer, and 4 pixels between its title and a body right below it. A tab has 16 pixels between its tab bar and its content and nothing at the other edges, unless its tab bar is at a side: then its content has 4 pixels at the opposite edge and at the bottom, so that the shadow of a card in it is not cut off. An expansion panel keeps the room that its header and its frame have. A cell of a [FlowLayout](flow-layout.md) or a [GridLayout](grid-layout.md) and a node of a [CanvasLayout](canvas-layout.md) draw no frame and add no room: a card in them brings its own.
 - **Layouts**: The cells of a `FlowLayout` and of a `GridLayout` are 16 pixels apart in both directions.
-- **Fluid and fixed widgets**: A card, a tile, a list, a table and a chart are as wide as their place. A tile of a [Switch](switch.md#tiles) or an [OperationButton](operation-button.md#tiles), like a card, fills a grid cell, a canvas node or a flow row when it is their only content, and is 96 pixels high alone. A card that is the only content of a `FlowLayout` cell is as high as the highest cell of its row, so the cards of a row end on one line, and its footer stays at the bottom. A widget of a fixed size, such as a [Gauge](gauge.md) or a button, stands at the start of its place; [Gauge Rows](gauge.md#gauge-rows) shows how to choose the column width for it.
+- **Fluid and fixed widgets**: A card, a tile, a list, a table and a chart are as wide as their place. A tile of a [Switch](switch.md#tiles), an [OperationButton](operation-button.md#tiles) or a [ValueTile](value-tile.md#tiles), like a card, fills a grid cell, a canvas node or a flow row when it is their only content, and is 96 pixels high alone. In a grid cell or a canvas node the icon and the text of a tile grow with the place, from their usual size in a place of about 150 pixels to twice that size, so that a large cell is filled, and a [Gauge](gauge.md) in the same kind of place shows its value and its label in the same sizes as the value and the label of a tile. A tile in a grid cell or a canvas node that is lower than its icon and its text, about 115 pixels for two lines and 91 for one, such as a square cell on a phone, leaves out the icon so that the text stays whole; a tile with a badge needs the extra room for the badge and hides the icon below about 140 pixels instead. A badge icon, such as the lock of a [DoorLock](door-lock.md) tile, is half as large as the icon of its tile and grows with it, while a badge widget, such as an [Indicator](indicator.md), keeps its size. A tile that shows only an icon keeps it. A card that is the only content of a `FlowLayout` cell is as high as the highest cell of its row, so the cards of a row end on one line, and its footer stays at the bottom. A widget of a fixed size, such as a [Gauge](gauge.md) or a button, stands at the start of its place, and a gauge that is the only content of a grid cell or a canvas node stands in its middle; [Gauge Rows](gauge.md#gauge-rows) shows how to choose the column width for it.
 - **Card footers**: The blocks of a footer, such as two buttons, stand in a row with 8 pixels between them and wrap when the card is too narrow.
 - **Controls**: A control is aligned by its visible edges: the track of a [Switch](switch.md), the box of a [Select](select.md) and the label of a [Slider](slider.md) start at the edge where text starts. Inside a widget, its own parts keep their room, such as the 16 pixels between the rows of a value list or the small margin around a chip; the first and the last row of a value list add nothing at its edges.
 

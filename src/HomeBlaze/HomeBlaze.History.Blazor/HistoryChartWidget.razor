@@ -19,10 +19,10 @@
 
 @if (Subject is HistoryChart chart)
 {
-    // The configuration and the current values are read on every render: these reads are what the page tracking scope
-    // records, so a change of a charted value renders the legend again. The legends in the chart view are read in the
-    // same render batch.
+    // The configuration and the current values are read on every render, so that the widget renders again when one
+    // changes: its render after a change of a value is what arms the next query, see OnAfterRender.
     Resolve(chart);
+    ReadCurrentValues();
 
     <div data-testid="history-chart">
         @if (_error is not null)
@@ -35,20 +35,19 @@
             {
                 <MudAlert Severity="Severity.Warning" Dense="true" data-testid="history-chart-query-error">@_queryError</MudAlert>
             }
-            else if (_hasStores is null)
+            else if (_hasStores != false)
             {
-                <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
-            }
-            else if (_hasStores == true && _data is not null)
-            {
-                @* The view shows the legend of the lines below them and each band series in the header of its band. *@
+                @* The view shows the legend of the lines below them and each band series in the header of its band. Until
+                   the data arrives it reserves the room of the lines and bands the query will return, also while prerendering. *@
                 var linesTarget = CanShowHistory(_firstLine) ? _firstLine : -1;
-                <HistoryChartView Data="_data" MaxHeight="_resolvedHeight" ShowAxes="!chart.Compact" LineLegend="_lineLegend" BandHeader="_bandHeader"
+                <HistoryChartView Data="_data" Placeholder="_placeholder" MaxHeight="_resolvedHeight" ShowAxes="!chart.Compact"
+                                  LineLegend="_lineLegend" BandHeader="_bandHeader"
                                   LinesClicked="@(linesTarget >= 0 ? _showHistory[linesTarget] : default)"
-                                  LinesTitle="@(linesTarget >= 0 ? _historyTitles[linesTarget] : null)" />
+                                  SeriesClicked="@(linesTarget >= 0 ? _seriesClicked : default)"
+                                  LinesTitle="@(linesTarget >= 0 ? _linesTitle : null)" />
             }
 
-            @if (_queryError is not null || _hasStores != true || _data is null)
+            @if (_queryError is not null || _hasStores == false)
             {
                 <div data-testid="history-chart-legend" style="@OwnLegendStyle">
                     @for (var index = 0; index < _series.Count; index++)
@@ -70,20 +69,28 @@
     private const string ButtonEntryStyle = EntryStyle +
         " margin:0; padding:0; border:0; background:none; color:inherit; font:inherit; text-align:inherit; cursor:pointer;";
 
-    // The legend of the lines ends where the plot does, see HistoryChartView.LineLegend.
+    // The legend of the lines ends where the plot does, see HistoryChartView.LineLegend. Wrapped rows of entries stand
+    // close together, as lines of text, and the entries of a row apart.
     private const string LegendStyle =
-        "align-self:stretch; display:flex; gap:16px; flex-wrap:wrap; justify-content:flex-end; " +
-        "margin-right:var(--history-chart-plot-right, var(--history-chart-plot-end, 0px));";
+        "align-self:stretch; display:flex; gap:4px 16px; flex-wrap:wrap; justify-content:flex-end; " +
+        "margin-right:var(--history-chart-plot-end, 0px);";
 
     // The legend of every series below the widget, while there is no chart view to hold it.
-    private const string OwnLegendStyle = "align-self:stretch; display:flex; gap:16px; flex-wrap:wrap; margin-top:8px;";
+    private const string OwnLegendStyle = "align-self:stretch; display:flex; gap:4px 16px; flex-wrap:wrap; margin-top:8px;";
 
     private HistoryChartRefresh? _refresh;
     private CancellationTokenSource? _queryCancellation;
     private HistoryChartData? _data;
+
+    // What the last query recorded so that a refresh of a bar chart keeps its ended bars, see HistoryChartQuery.QueryAsync.
+    private HistoryChartReuseState? _reuseState;
     private bool? _hasStores;
     private string? _queryError;
-    private TimeSpan? _bucket;
+    private HistoryBucket? _bucket;
+
+    // Whether the last query, also one still running, was aligned to a calendar, set before it starts. Read by the
+    // handler of a change of the time zone, which can run on another thread.
+    private volatile bool _isCalendarQuery;
 
     // The resolution of the series, kept until the configuration or the paths of the graph change, because the
     // legend renders on every change of a charted value.
@@ -94,21 +101,27 @@
     private string? _resolvedAggregation;
     private int _resolvedHeight;
     private TimeSpan _resolvedRefreshInterval;
-    private int _resolvedPathsVersion = -1;
+    private long _resolvedPathsVersion = -1;
     private IReadOnlyList<HistoryChartSeriesInfo> _series = [];
     private string?[] _colors = [];
     private string?[] _swatchStyles = [];
     private string? _error;
 
-    // Built with the series, so a render allocates none: the first recorded line, which a click on the lines shows,
-    // and for every series what opens its history and the tooltip that says so.
+    // Built with the series, so a render allocates none: the first recorded line, which a click beside the lines and
+    // bars shows, the tooltip of the lines, and for every series what opens its history and the tooltip that says so.
     private int _firstLine = -1;
+    private string? _linesTitle;
     private EventCallback[] _showHistory = [];
     private string[] _historyTitles = [];
+    private readonly EventCallback<int> _seriesClicked;
 
-    // The series the shown data was queried for, and the index in them of the series of each band of the data.
+    // The series the shown data was queried for, and the index in them of the series of each band of the data. Until
+    // the first query returns, the series it will query and the bands it will return, see PlanLayout.
     private IReadOnlyList<HistoryChartSeriesInfo>? _dataSeries;
     private int[] _bandSeries = [];
+
+    // The index in the series the shown data was queried for of the series of each line of the data.
+    private int[] _lineSeries = [];
     private bool[] _hasBand = [];
 
     // Per series of the shown data, what the legend says about how its query shows it, see GetQueryNote.
@@ -116,6 +129,9 @@
 
     // One fragment per band of the shown data, built with it, so a render allocates none.
     private RenderFragment[] _bandHeaders = [];
+
+    // What the view reserves room for until the first query returns.
+    private HistoryChartPlaceholder _placeholder;
 
     private readonly RenderFragment _lineLegend;
     private readonly RenderFragment<int> _bandHeader;
@@ -126,9 +142,6 @@
     // Set when the first render or changed series queue a query, and cleared by the query that completes next, which
     // arms one more query: the stores may not have held the latest values yet, and constant values arm nothing.
     private bool _isFirstQueryPending;
-
-    // Incremented on the thread that changes the graph.
-    private int _pathsVersion;
 
     // Read on a timer thread by OnRefreshDue.
     private volatile bool _isDisposed;
@@ -144,6 +157,15 @@
     {
         _lineLegend = RenderLineLegend;
         _bandHeader = GetBandHeader;
+        _seriesClicked = EventCallback.Factory.Create<int>(this, OnSeriesClicked);
+    }
+
+    // A line or bar of data that was queried for other series than the current ones opens the first line, as a click
+    // beside the lines does, since the view took the click.
+    private Task OnSeriesClicked(int line)
+    {
+        var index = ReferenceEquals(_dataSeries, _series) && (uint)line < (uint)_lineSeries.Length ? _lineSeries[line] : _firstLine;
+        return CanShowHistory(index) ? ShowHistoryAsync(_series[index]) : Task.CompletedTask;
     }
 
     // Every series without a band in the shown data: the lines, and a band series that has no band, such as one
@@ -252,7 +274,17 @@
     protected override void OnInitialized()
     {
         _refresh = new HistoryChartRefresh(TimeProvider, OnRefreshDue);
-        PathResolver.PathsChanged += OnPathsChanged;
+        TimeZone.Changed += OnTimeZoneChanged;
+    }
+
+    // A calendar bucket starts at local midnight, so another time zone has other buckets. Until the zone of the viewer is
+    // known the buckets are aligned in UTC, which the view shows its times in as well.
+    private void OnTimeZoneChanged()
+    {
+        if (_isCalendarQuery)
+        {
+            QueueRefresh();
+        }
     }
 
     protected override void OnAfterRender(bool firstRender)
@@ -267,10 +299,18 @@
             return;
         }
 
-        // The page renders every widget on a change of any value it shows, so only a change of a value of this chart arms it.
+        // The widget renders on a change of a charted value or of its configuration, and only a change of a value arms it.
         if (_error is null && Subject is HistoryChart)
         {
             _refresh?.OnRendered(HistoryRefreshThrottle.GetWindow(_resolvedRefreshInterval, _bucket));
+        }
+    }
+
+    private void ReadCurrentValues()
+    {
+        for (var index = 0; index < _series.Count; index++)
+        {
+            _ = _series[index].Property?.GetValue();
         }
     }
 
@@ -282,7 +322,7 @@
         var aggregation = chart.Aggregation;
         var height = chart.Height;
         var refreshInterval = chart.RefreshInterval;
-        var pathsVersion = Volatile.Read(ref _pathsVersion);
+        var pathsVersion = PathResolver.PathsVersion;
 
         var isCurrent = ReferenceEquals(entries, _resolvedEntries) &&
             pathsVersion == _resolvedPathsVersion &&
@@ -293,7 +333,7 @@
             refreshInterval == _resolvedRefreshInterval &&
             entries.Length == _resolvedConfiguration.Length;
 
-        // Every entry is read once, also after one differs, so the tracking scope records all of them. While they are
+        // Every entry is read once, also after one differs, so the render records all of them. While they are
         // current nothing is allocated.
         var configurations = isCurrent ? null : new HistoryChartSeriesConfiguration[entries.Length];
         for (var index = 0; index < entries.Length; index++)
@@ -335,12 +375,21 @@
         _resolvedRefreshInterval = refreshInterval;
         _resolvedPathsVersion = pathsVersion;
         _error = error;
-        if (!seriesChanged)
+
+        // Unchanged series keep their instance, so the bands of the shown data still match them, see _dataSeries.
+        if (seriesChanged)
         {
-            // The same instance, so the bands of the shown data still match their series, see _dataSeries.
-            return;
+            SetSeries(series);
         }
 
+        if (_data is null)
+        {
+            PlanLayout();
+        }
+    }
+
+    private void SetSeries(IReadOnlyList<HistoryChartSeriesInfo> series)
+    {
         _series = series;
         _refresh?.SetSeries(series);
         _firstLine = HistoryChartSeriesResolver.FindFirstRecordedLine(series);
@@ -353,6 +402,16 @@
             _historyTitles[index] = $"Show history of {entry.Label}";
         }
 
+        var lineCount = 0;
+        foreach (var entry in series)
+        {
+            lineCount += entry is { Kind: HistoryChartSeriesKind.Line, HasHistory: true } ? 1 : 0;
+        }
+
+        _linesTitle = _firstLine < 0 ? null :
+            lineCount > 1 ? $"Show history of the clicked line or bar, else of {series[_firstLine].Label}" :
+            _historyTitles[_firstLine];
+
         _colors = HistoryChartSeriesResolver.AssignLineColors(series);
         _swatchStyles = new string?[_colors.Length];
         for (var index = 0; index < _colors.Length; index++)
@@ -364,16 +423,67 @@
         }
     }
 
-    // Runs on the thread that changes the graph, inside the lock of the lifecycle interceptor: it only notes the change,
-    // and the page renders after a change of the paths.
-    private void OnPathsChanged() => Interlocked.Increment(ref _pathsVersion);
+    // The lines and bands the first query returns follow from the series alone, see RefreshAsync, so the chart has the
+    // height it gets with its data from its first render on.
+    private void PlanLayout()
+    {
+        // Bars when every line asks for Delta of a counter in buckets, which the history stores of HomeBlaze offer. With a
+        // store that does not, the chart draws lines, and their legend moves once they are drawn.
+        var isBars = PropertyHistoryChartModel.TryGetPeriod(_resolvedBucket, out var period) && !period.IsRaw;
+        var hasLines = false;
+        var bandSeries = new List<int>();
+        var hasBand = new bool[_series.Count];
+        for (var index = 0; index < _series.Count; index++)
+        {
+            var entry = _series[index];
+            if (GetHistoryPath(entry) is null)
+            {
+                continue;
+            }
+
+            if (entry.Kind == HistoryChartSeriesKind.Band)
+            {
+                bandSeries.Add(index);
+                hasBand[index] = true;
+            }
+            else
+            {
+                hasLines = true;
+                isBars &= entry.IsCumulative &&
+                    PropertyHistoryChartModel.TryGetAggregation(entry.Aggregation, out var aggregation) &&
+                    aggregation == HistoryAggregations.Delta;
+            }
+        }
+
+        _placeholder = new HistoryChartPlaceholder(hasLines, bandSeries.Count, hasLines && isBars);
+        SetBands(_series, bandSeries.ToArray(), hasBand, new string?[_series.Count], []);
+    }
+
+    private void SetBands(
+        IReadOnlyList<HistoryChartSeriesInfo> series, int[] bandSeries, bool[] hasBand, string?[] queryNotes, int[] lineSeries)
+    {
+        _dataSeries = series;
+        _bandSeries = bandSeries;
+        _lineSeries = lineSeries;
+        _hasBand = hasBand;
+        _queryNotes = queryNotes;
+        _bandHeaders = new RenderFragment[bandSeries.Length];
+        for (var band = 0; band < _bandHeaders.Length; band++)
+        {
+            var captured = band;
+            _bandHeaders[band] = builder => RenderBandHeader(builder, captured);
+        }
+    }
+
+    // The path a query reads the history of the series from, or null when it is not queried.
+    private string? GetHistoryPath(HistoryChartSeriesInfo entry) =>
+        entry.Property is { } property && entry.HasHistory ? property.GetHistoryPath(PathResolver) : null;
 
     // Runs on a timer thread under the lock of the throttle (see the remarks of HistoryRefreshThrottle).
     private void OnRefreshDue() => QueueRefresh();
 
-    // Every query starts on the thread pool without an execution context, never inline: after a render the execution
-    // context is the one of the render, which can hold the read recorder of the page tracking scope, and InvokeAsync
-    // runs inline on an idle dispatcher, so from the throttle callback the query would run under the lock of the throttle.
+    // Every query starts on the thread pool without an execution context, never inline: InvokeAsync runs inline on an
+    // idle dispatcher, so from the throttle callback the query would run under the lock of the throttle.
     private void QueueRefresh()
     {
         if (_isDisposed)
@@ -430,35 +540,44 @@
             var requests = new List<HistoryChartSeriesRequest>(series.Count);
             var requestSeries = new List<int>(series.Count);
             var bandSeries = new List<int>();
+            var lineSeries = new List<int>(series.Count);
             var hasBand = new bool[series.Count];
             var queryNotes = new string?[series.Count];
             for (var index = 0; index < series.Count; index++)
             {
                 var entry = series[index];
-                if (entry.Property is not { } property || !entry.HasHistory || property.GetHistoryPath(PathResolver) is not { } path)
+                if (entry.Property is not { } property || GetHistoryPath(entry) is not { } path)
                 {
                     continue;
                 }
 
                 var isBand = entry.Kind == HistoryChartSeriesKind.Band;
+                // The query returns one band per band request and one line per other request, in request order.
                 if (isBand)
                 {
-                    // The query returns one band per band request, in request order.
                     bandSeries.Add(index);
                     hasBand[index] = true;
+                }
+                else
+                {
+                    lineSeries.Add(index);
                 }
 
                 var aggregation = HistoryChartSeriesResolver.ChooseAggregation(
                     property.Type, isBand, entry.IsCumulative, period.IsRaw, storeAggregations, entry.Aggregation);
                 queryNotes[index] = HistoryChartSeriesResolver.GetAggregationNote(entry, period.IsRaw, aggregation);
                 requestSeries.Add(index);
-                requests.Add(new HistoryChartSeriesRequest(path, entry.Label, property.Type, isBand, aggregation, _colors[index], entry.Unit));
+                requests.Add(new HistoryChartSeriesRequest(
+                    path, entry.Label, property.Type, isBand, aggregation, _colors[index], entry.Unit, entry.IsNegated));
             }
 
             var to = TimeProvider.GetUtcNow();
-            var from = to - range;
-            var bucket = PropertyHistoryChartModel.ResolveBucket(period, range, HistoryChartQuery.GetAvailableCoverage(stores, to));
-            var result = await HistoryChartQuery.QueryAsync(stores, requests, from, to, bucket, cancellationToken);
+            var bucket = PropertyHistoryChartModel.ResolveBucket(
+                period, range, TimeZone.Zone ?? TimeZoneInfo.Utc, HistoryChartQuery.GetAvailableCoverage(stores, to),
+                HistoryChartQuery.IsBars(requests));
+            var from = PropertyHistoryChartModel.GetWindowStart(to, range, bucket);
+            _isCalendarQuery = bucket is { CalendarUnit: not null };
+            var result = await HistoryChartQuery.QueryAsync(stores, requests, from, to, bucket, _reuseState, cancellationToken);
             if (cancellationToken.IsCancellationRequested || _isDisposed)
             {
                 return;
@@ -472,17 +591,8 @@
             }
 
             _data = result.Data;
-            _dataSeries = series;
-            _bandSeries = bandSeries.ToArray();
-            _hasBand = hasBand;
-            _queryNotes = queryNotes;
-            _bandHeaders = new RenderFragment[_bandSeries.Length];
-            for (var band = 0; band < _bandHeaders.Length; band++)
-            {
-                var captured = band;
-                _bandHeaders[band] = builder => RenderBandHeader(builder, captured);
-            }
-
+            _reuseState = result.ReuseState;
+            SetBands(series, bandSeries.ToArray(), hasBand, queryNotes, lineSeries.ToArray());
             _bucket = bucket;
             _queryError = null;
         }
@@ -516,7 +626,7 @@
     public void Dispose()
     {
         _isDisposed = true;
-        PathResolver.PathsChanged -= OnPathsChanged;
+        TimeZone.Changed -= OnTimeZoneChanged;
         _refresh?.Dispose();
 
         // Cancel before disposing: disposing does not cancel the token of a running query.

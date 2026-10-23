@@ -65,6 +65,31 @@ public class ListTypesToolTests
         Assert.Contains(typeof(ITestInterface).FullName, interfaceNames);
     }
 
+    [Fact]
+    public async Task WhenATypeIsExcluded_ThenItIsNotListed()
+    {
+        // Arrange
+        var typeProvider = new TestTypeProvider(
+            new McpTypeInfo("ITestInterface", "Test", IsInterface: true, Type: typeof(ITestInterface)),
+            new McpTypeInfo("TestMotor", "Test motor", IsInterface: false, Type: typeof(TestMotor)));
+
+        var config = new McpServerConfiguration
+        {
+            PathProvider = DefaultPathProvider.Instance,
+            TypeProviders = { typeProvider },
+            ExcludeTypes = [typeof(TestMotor)]
+        };
+        var tool = new McpToolFactory(() => null!, config).CreateTools().First(t => t.Name == "list_types");
+
+        // Act
+        var result = await tool.Handler(JsonSerializer.SerializeToElement(new { }), CancellationToken.None);
+        var json = JsonSerializer.SerializeToElement(result);
+
+        // Assert
+        var names = json.GetProperty("types").EnumerateArray().Select(type => type.GetProperty("name").GetString());
+        Assert.Equal(["ITestInterface"], names);
+    }
+
     public interface ITestInterface
     {
         string Speed { get; set; }

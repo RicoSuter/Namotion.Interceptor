@@ -91,6 +91,22 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenMetadataFileNameIsADirectory_ThenItStaysHidden()
+    {
+        // Arrange: the path filter only inspects segments, so a directory named like the folder metadata file
+        // needs its own check to stay hidden.
+        Directory.CreateDirectory(GetFullPath("Docs/.metadata.json"));
+        WriteFile("Docs/a.md");
+
+        // Act
+        var storage = await ConnectAsync();
+
+        // Assert
+        var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
+        Assert.Equal(["a.md"], docs.Children.Keys);
+    }
+
+    [Fact]
     public async Task WhenDirectoryIsCreated_ThenVirtualFolderIsAdded()
     {
         // Arrange

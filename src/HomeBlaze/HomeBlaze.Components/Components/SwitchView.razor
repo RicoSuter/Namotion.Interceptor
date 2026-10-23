@@ -10,7 +10,7 @@
 @inject ITimeZoneDisplay TimeZone
 
 @{
-    // Read once per render and never kept: the reads are what the tracking scope records.
+    // Read once per render and never kept: its render records the reads, so that it renders again when one changes.
     var property = Property;
     var value = property?.GetValue();
     var isOn = value as bool? ?? false;
@@ -40,7 +40,7 @@
 {
     // The case itself decides the fill: a case without a color is drawn on the surface, while a value without a case
     // is filled with the primary color when true.
-    var fill = matched?.Color ?? (shown is true ? Color.Primary : Color.Default);
+    var fill = matched?.GetColor() ?? (shown is true ? Color.Primary : Color.Default);
     var subtitle = !string.IsNullOrEmpty(Subtitle)
         ? Subtitle
         : ValueMap is not null && property is not null && shown is not null ? ValueReader.GetText(property, shown, matched, TimeZone) : null;
@@ -55,6 +55,7 @@
               Subtitle="@subtitle"
               Icon="@icon"
               Color="@fill"
+              TextColor="@(matched?.GetTextColor() ?? ValueColor.Default)"
               Disabled="@isDisabled"
               IsBusy="@(_pending is not null)"
               Badge="@Badge"
@@ -63,14 +64,15 @@
 else
 {
     // A matched case without a color of its own leaves the toggle switch in the primary color.
-    var color = matched?.Color is { } caseColor && caseColor != Color.Default ? caseColor : Color.Primary;
+    var color = matched?.GetColor() is { IsDefault: false } caseColor ? caseColor : (ValueColor)Color.Primary;
     <div class="switch-widget" data-testid="switch">
         <MudSwitch T="bool"
                    @key="_resetKey"
                    Value="@(_pending ?? isOn)"
                    ValueChanged="_toggleCallback"
                    Label="@label"
-                   Color="@color"
+                   Color="@color.Theme"
+                   Style="@color.Style"
                    Disabled="@isDisabled" />
     </div>
 }

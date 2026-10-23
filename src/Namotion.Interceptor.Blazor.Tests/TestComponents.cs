@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Rendering;
 using Namotion.Interceptor.Attributes;
@@ -16,18 +15,33 @@ public partial class Person
 /// </summary>
 public sealed class RenderLog
 {
-    private readonly ConcurrentDictionary<string, int> _renders = new();
-    private readonly ConcurrentDictionary<string, string?> _values = new();
+    // Under one lock, so that a test which sees the value of a render also sees that render counted.
+    private readonly Lock _lock = new();
+    private readonly Dictionary<string, (int Renders, string? Value)> _entries = new();
 
     public void Record(string key, string? value)
     {
-        _values[key] = value;
-        _renders.AddOrUpdate(key, 1, static (_, count) => count + 1);
+        lock (_lock)
+        {
+            _entries[key] = (_entries.GetValueOrDefault(key).Renders + 1, value);
+        }
     }
 
-    public int Renders(string key) => _renders.GetValueOrDefault(key);
+    public int Renders(string key)
+    {
+        lock (_lock)
+        {
+            return _entries.GetValueOrDefault(key).Renders;
+        }
+    }
 
-    public string? Value(string key) => _values.GetValueOrDefault(key);
+    public string? Value(string key)
+    {
+        lock (_lock)
+        {
+            return _entries.GetValueOrDefault(key).Value;
+        }
+    }
 }
 
 /// <summary>
@@ -39,6 +53,13 @@ public sealed class Host : ComponentBase
     public RenderFragment? Content { get; set; }
 
     public Task RenderAgainAsync() => InvokeAsync(StateHasChanged);
+
+    /// <summary>Replaces the content, on the dispatcher.</summary>
+    public void SetContent(RenderFragment content)
+    {
+        Content = content;
+        StateHasChanged();
+    }
 
     protected override void BuildRenderTree(RenderTreeBuilder builder)
     {
@@ -136,6 +157,22 @@ internal static class Fragments
             builder.AddContent(0, item(index));
             builder.CloseRegion();
         }
+    };
+
+    /// <summary>Reads the first name in the fragment itself, so the component that invokes the fragment reads it.</summary>
+    public static RenderFragment Inline(string key, Person person, RenderLog log) => builder =>
+    {
+        var value = person.FirstName;
+        builder.AddContent(0, value);
+        log.Record(key, value);
+    };
+
+    public static RenderFragment Cascading(RenderFragment content) => builder =>
+    {
+        builder.OpenComponent<CascadingValue<int>>(0);
+        builder.AddComponentParameter(1, nameof(CascadingValue<int>.Value), 1);
+        builder.AddComponentParameter(2, nameof(CascadingValue<int>.ChildContent), content);
+        builder.CloseComponent();
     };
 
     public static RenderFragment Both(RenderFragment first, RenderFragment second) => builder =>

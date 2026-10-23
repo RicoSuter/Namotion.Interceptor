@@ -8,6 +8,8 @@
     <ItemGroup>
         <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
         <PackageReference Include="Microsoft.NET.Test.Sdk" />
+        <!-- Override the transitive SQLitePCLRaw native bundle to clear NU1903 (GHSA-2m69-gcr7-jv3q) in 2.1.11. -->
+        <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" />
         <PackageReference Include="PublicApiGenerator" />
         <PackageReference Include="Verify.Xunit" />
         <PackageReference Include="xunit" />
@@ -24,6 +26,8 @@
     <ItemGroup>
         <ProjectReference Include="..\HomeBlaze.History.Blazor\HomeBlaze.History.Blazor.csproj" />
         <ProjectReference Include="..\HomeBlaze.History.Abstractions\HomeBlaze.History.Abstractions.csproj" />
+        <ProjectReference Include="..\HomeBlaze.History.InMemory\HomeBlaze.History.InMemory.csproj" />
+        <ProjectReference Include="..\HomeBlaze.History.Sqlite\HomeBlaze.History.Sqlite.csproj" />
         <ProjectReference Include="..\..\Namotion.Interceptor.Generator\Namotion.Interceptor.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
     </ItemGroup>
 

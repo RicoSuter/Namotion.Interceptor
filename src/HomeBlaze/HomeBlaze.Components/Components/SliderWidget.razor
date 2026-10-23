@@ -8,7 +8,7 @@
 
 @if (slider is not null)
 {
-    // Read once per render and never kept: the reads are what the tracking scope records.
+    // Read once per render and never kept: its render records the reads, so that it renders again when one changes.
     var path = slider.Path;
     <SliderView Property="@ValueReader.ResolveProperty(PathResolver, slider, path)"
                 Path="@path"

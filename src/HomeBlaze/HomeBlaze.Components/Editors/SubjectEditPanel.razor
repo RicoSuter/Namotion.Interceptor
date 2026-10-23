@@ -1,44 +1,40 @@
 @using HomeBlaze.Abstractions
 @using HomeBlaze.Services
-@using Namotion.Interceptor.Tracking.Change
 
 @implements IAsyncDisposable
 
 @inject RootManager RootManager
 @inject SubjectComponentRegistry ComponentRegistry
 @inject ISnackbar Snackbar
-@inject DeveloperModeService DeveloperMode
 
-<TrackingScope Context="TrackedContext" ShowDebugInfo="DeveloperMode.IsEnabled">
-    @if (Subject != null)
-    {
-        @* A hosted form may change its validity without raising IsValidChanged, so the panel reads it again after
-           interaction. Blazor does not bubble change, so a control that only changes on change is picked up by
-           the next focus change. *@
-        <div @oninput="_refreshIsValid"
-             @onclick="_refreshIsValid"
-             @onkeyup="_refreshIsValid"
-             @onfocusin="_refreshIsValid"
-             @onfocusout="_refreshIsValid">
-            @if (HostedComponentType is { } hostedComponentType)
-            {
-                <SubjectComponent @key="Subject"
-                                  Subject="@Subject"
-                                  Type="hostedComponentType"
-                                  AdditionalParameters="@(IsCreating ? CreatingParameters : EditingParameters)"
-                                  ComponentInstance="_subjectComponent"
-                                  ComponentInstanceChanged="OnSubjectComponentRendered" />
-            }
-            else
-            {
-                <ConfigurationPropertiesEditor @key="Subject"
-                                               @ref="_propertiesEditor"
-                                               Subject="@Subject"
-                                               IsValidChanged="OnPropertiesEditorIsValidChanged" />
-            }
-        </div>
-    }
-</TrackingScope>
+@if (Subject != null)
+{
+    @* A hosted form may change its validity without raising IsValidChanged, so the panel reads it again after
+       interaction. Blazor does not bubble change, so a control that only changes on change is picked up by
+       the next focus change. *@
+    <div @oninput="_refreshIsValid"
+         @onclick="_refreshIsValid"
+         @onkeyup="_refreshIsValid"
+         @onfocusin="_refreshIsValid"
+         @onfocusout="_refreshIsValid">
+        @if (HostedComponentType is { } hostedComponentType)
+        {
+            <SubjectComponent @key="Subject"
+                              Subject="@Subject"
+                              Type="hostedComponentType"
+                              AdditionalParameters="@(IsCreating ? CreatingParameters : EditingParameters)"
+                              ComponentInstance="_subjectComponent"
+                              ComponentInstanceChanged="OnSubjectComponentRendered" />
+        }
+        else
+        {
+            <ConfigurationPropertiesEditor @key="Subject"
+                                           @ref="_propertiesEditor"
+                                           Subject="@Subject"
+                                           IsValidChanged="OnPropertiesEditorIsValidChanged" />
+        }
+    </div>
+}
 
 @code {
     // SubjectComponent builds the parameters of the hosted component again whenever it is given another instance.
@@ -67,11 +63,6 @@
     private ConfigurationPropertiesEditor? _propertiesEditor;
     private bool? _reportedIsValid;
     private Func<Task> _refreshIsValid = () => Task.CompletedTask;
-
-    // A subject created without the root context, such as one whose constructor takes services, has no change
-    // tracking until it is added to the graph, and TrackingScope fails to subscribe to such a context.
-    private IInterceptorSubjectContext? TrackedContext =>
-        Subject?.Context is { } context && context.TryGetService<PropertyChangeInterceptor>() is not null ? context : null;
 
     private SubjectComponentType? HostedComponentType
     {

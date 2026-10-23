@@ -200,10 +200,11 @@ public class SpacingLayoutTests
     }
 
     [Fact]
-    public async Task WhenContentStandsInAGridCellOrACanvasNode_ThenItHasTheRoomOfACardBodyUnlessItIsALoneCard()
+    public async Task WhenContentStandsInAGridCellOrACanvasNode_ThenTheCellOrTheNodeAddsNoRoom()
     {
         // Arrange
         var page = await OpenPageAsync();
+        await Assertions.Expect(page.GetByText("Text in a cell.", new() { Exact = true })).ToBeVisibleAsync(new() { Timeout = Timeout });
         await Assertions.Expect(page.GetByText("Text in a node.", new() { Exact = true })).ToBeVisibleAsync(new() { Timeout = Timeout });
         await Assertions.Expect(page.GetCard("Cell Card")).ToBeVisibleAsync(new() { Timeout = Timeout });
         await Assertions.Expect(page.GetByTestId("value-tile").Filter(new() { HasText = "Cell Speed" })).ToBeVisibleAsync(new() { Timeout = Timeout });
@@ -230,10 +231,62 @@ public class SpacingLayoutTests
             """);
 
         // Assert
-        Assert.All(edges[0], edge => Assert.Equal(CardPadding, edge, Tolerance));
-        Assert.All(edges[1], edge => Assert.Equal(CardPadding, edge, Tolerance));
-        Assert.All(edges[2], edge => Assert.Equal(CardPadding, edge, Tolerance));
-        Assert.All(edges[3], edge => Assert.Equal(0, edge, Tolerance));
+        Assert.All(edges, room => Assert.All(room, edge => Assert.Equal(0, edge, Tolerance)));
+    }
+
+    [Fact]
+    public async Task WhenAGridCellOrACanvasNodeIsViewed_ThenItHasNoBorderAndNoBackgroundOfItsOwn()
+    {
+        // Arrange & Act
+        var page = await OpenPageAsync();
+
+        // Assert
+        foreach (var (selector, text) in new[] { (".grid-cell", "Text in a cell."), (".canvas-node", "Text in a node.") })
+        {
+            var frame = page.Locator(selector).Filter(new() { Has = page.GetByText(text, new() { Exact = true }) });
+            await Assertions.Expect(frame).ToHaveCSSAsync("border-width", "0px", new() { Timeout = Timeout });
+            await Assertions.Expect(frame).ToHaveCSSAsync("background-color", "rgba(0, 0, 0, 0)");
+        }
+    }
+
+    [Fact]
+    public async Task WhenAGridCellHasWiderContentThanItsColumn_ThenTheColumnsStayEqualAndTheCellCutsItOff()
+    {
+        // Arrange & Act
+        var page = await OpenPageAsync(width: 375);
+        var cells = page.Locator(".grid-cell").Filter(new() { Has = page.GetByText("Narrow cell.", new() { Exact = true }) })
+            .Locator("xpath=..").Locator(":scope > .grid-cell");
+        await Assertions.Expect(cells).ToHaveCountAsync(2, new() { Timeout = Timeout });
+
+        // Assert
+        var widths = await cells.EvaluateAllAsync<double[]>("cells => cells.map(cell => cell.getBoundingClientRect().width)");
+        Assert.Equal(widths[1], widths[0], Tolerance);
+
+        // The text runs past the right edge of its cell, which clips it at that edge.
+        var overflow = await cells.First.EvaluateAsync<double>(
+            """
+            cell => {
+                const range = document.createRange();
+                range.selectNodeContents(cell.querySelector('.grid-cell-content'));
+                return range.getBoundingClientRect().right - cell.getBoundingClientRect().right;
+            }
+            """);
+        Assert.True(overflow > 8, $"The text reaches only {overflow} pixels past the cell.");
+        await Assertions.Expect(cells.First).ToHaveCSSAsync("overflow", "clip");
+        await Assertions.Expect(cells.First).ToHaveCSSAsync("overflow-clip-margin", "0px");
+    }
+
+    [Fact]
+    public async Task WhenACardFillsAGridCell_ThenOnlyThatCellLeavesRoomForItsShadow()
+    {
+        // Arrange & Act
+        var page = await OpenPageAsync();
+        var cardCell = page.Locator(".grid-cell").Filter(new() { Has = page.GetCard("Cell Card") });
+        var textCell = page.Locator(".grid-cell").Filter(new() { Has = page.GetByText("Text in a cell.", new() { Exact = true }) });
+
+        // Assert
+        await Assertions.Expect(cardCell).ToHaveCSSAsync("overflow-clip-margin", "8px", new() { Timeout = Timeout });
+        await Assertions.Expect(textCell).ToHaveCSSAsync("overflow-clip-margin", "0px");
     }
 
     [Fact]
@@ -285,34 +338,26 @@ public class SpacingLayoutTests
     [Theory]
     [InlineData(400)]
     [InlineData(1400)]
-    public async Task WhenAPageHasATitle_ThenItsTimeAndTheEditButtonDoNotOverlapItOrEachOther(int width)
+    public async Task WhenAPageHasATitle_ThenTheButtonOfThePageMenuDoesNotOverlapIt(int width)
     {
         // Arrange
         var page = await OpenPageAsync(width: width);
-        await Assertions.Expect(page.GetByTestId("page-last-modified")).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetByTestId("edit-mode-menu")).ToBeVisibleAsync(new() { Timeout = Timeout });
 
         // Act
-        var overlaps = await page.EvaluateAsync<string[]>(
+        var overlappingLines = await page.EvaluateAsync<int>(
             """
             () => {
                 const range = document.createRange();
                 range.selectNodeContents(document.querySelector('.markdown-content h1'));
-                const boxes = {
-                    time: [document.querySelector('[data-testid=page-last-modified]').getBoundingClientRect()],
-                    button: [document.querySelector('[data-testid=edit-mode-menu]').getBoundingClientRect()],
-                    title: [...range.getClientRects()]
-                };
+                const button = document.querySelector('[data-testid=edit-mode-menu]').getBoundingClientRect();
                 const intersect = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
-                const result = [];
-                for (const [first, second] of [['time', 'button'], ['time', 'title'], ['button', 'title']]) {
-                    if (boxes[first].some(a => boxes[second].some(b => intersect(a, b)))) result.push(`${first} and ${second}`);
-                }
-                return result;
+                return [...range.getClientRects()].filter(line => intersect(line, button)).length;
             }
             """);
 
         // Assert
-        Assert.Empty(overlaps);
+        Assert.Equal(0, overlappingLines);
     }
 
     [Fact]

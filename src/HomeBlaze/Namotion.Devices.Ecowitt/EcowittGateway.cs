@@ -36,9 +36,6 @@ public partial class EcowittGateway : BackgroundService,
     private readonly ILogger<EcowittGateway> _logger;
     private readonly SemaphoreSlim _configChangedSignal = new(0, 1);
 
-    private EcowittVersionInfo? _versionInfo;
-    private EcowittNetworkInfo? _networkInfo;
-    private EcowittDeviceInfo? _deviceInfo;
     private EcowittSensorInfo[]? _sensorsInfo;
 
     // The rain totals change with every poll while it rains, so of the writes in a row that wrote nothing
@@ -77,6 +74,11 @@ public partial class EcowittGateway : BackgroundService,
 
     [State(IsDiscrete = true)]
     public partial ServiceStatus Status { get; internal set; }
+
+    // Tracked, so that the derived properties that read it change when it is fetched or reset.
+    internal partial EcowittVersionInfo? VersionInfo { get; set; }
+    internal partial EcowittNetworkInfo? NetworkInfo { get; set; }
+    internal partial EcowittDeviceInfo? DeviceInfo { get; set; }
 
     [State]
     public partial string? StatusMessage { get; internal set; }
@@ -125,7 +127,7 @@ public partial class EcowittGateway : BackgroundService,
     // Derived properties
     [Derived]
     [State]
-    public string? SoftwareVersion => _versionInfo?.Version;
+    public string? SoftwareVersion => VersionInfo?.Version;
 
     [Derived]
     [State]
@@ -133,15 +135,15 @@ public partial class EcowittGateway : BackgroundService,
 
     [Derived]
     [State]
-    public string? MacAddress => _networkInfo?.MacAddress;
+    public string? MacAddress => NetworkInfo?.MacAddress;
 
     [Derived]
     [State]
-    public string? IpAddress => _networkInfo?.IpAddress;
+    public string? IpAddress => NetworkInfo?.IpAddress;
 
-    public string? SubnetMask => _networkInfo?.SubnetMask;
-    public string? Gateway => _networkInfo?.Gateway;
-    public bool? IsWireless => _networkInfo?.IsWireless;
+    public string? SubnetMask => NetworkInfo?.SubnetMask;
+    public string? Gateway => NetworkInfo?.Gateway;
+    public bool? IsWireless => NetworkInfo?.IsWireless;
     public int? SignalStrength => null;
 
     // IDeviceInfo
@@ -151,15 +153,15 @@ public partial class EcowittGateway : BackgroundService,
 
     [Derived]
     [State]
-    public string? Model => _deviceInfo?.Model;
+    public string? Model => DeviceInfo?.Model;
 
     [Derived]
     [State]
-    public string? ProductCode => _deviceInfo?.StationType;
+    public string? ProductCode => DeviceInfo?.StationType;
 
     [Derived]
     [State]
-    public string? SerialNumber => _networkInfo?.MacAddress;
+    public string? SerialNumber => NetworkInfo?.MacAddress;
 
     [Derived]
     [State]
@@ -167,7 +169,7 @@ public partial class EcowittGateway : BackgroundService,
 
     [Derived]
     public string? Title => !string.IsNullOrEmpty(Name) ? Name :
-        _deviceInfo?.Model ?? HostAddress;
+        DeviceInfo?.Model ?? HostAddress;
 
     [Derived]
     public string IconName => IsConnected ? "Cloud" : "CloudOff";
@@ -243,9 +245,9 @@ public partial class EcowittGateway : BackgroundService,
                 var deviceInfoTask = client.GetDeviceInfoAsync(stoppingToken);
                 await Task.WhenAll(versionTask, networkTask, deviceInfoTask);
 
-                _versionInfo = await versionTask;
-                _networkInfo = await networkTask;
-                _deviceInfo = await deviceInfoTask;
+                VersionInfo = await versionTask;
+                NetworkInfo = await networkTask;
+                DeviceInfo = await deviceInfoTask;
                 _sensorsInfo = await client.GetSensorsInfoAsync(stoppingToken);
 
                 Status = ServiceStatus.Running;
@@ -323,9 +325,9 @@ public partial class EcowittGateway : BackgroundService,
                 var signaled = await _configChangedSignal.WaitAsync(PollingInterval, stoppingToken);
                 if (signaled)
                 {
-                    _versionInfo = null;
-                    _networkInfo = null;
-                    _deviceInfo = null;
+                    VersionInfo = null;
+                    NetworkInfo = null;
+                    DeviceInfo = null;
                     return;
                 }
             }

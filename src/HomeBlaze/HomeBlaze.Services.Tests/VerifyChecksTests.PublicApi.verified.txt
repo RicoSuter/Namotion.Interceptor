@@ -67,17 +67,27 @@ namespace HomeBlaze.Services
         public static string GetPluginConfigurationPath(Microsoft.Extensions.Configuration.IConfiguration configuration) { }
         public static string GetRootConfigurationPath(Microsoft.Extensions.Configuration.IConfiguration? configuration) { }
     }
+    public sealed class ObjectParameterMember : System.IEquatable<HomeBlaze.Services.ObjectParameterMember>
+    {
+        public ObjectParameterMember(string Name, System.Type Type, bool IsRequired) { }
+        public bool IsRequired { get; init; }
+        public string Name { get; init; }
+        public System.Type Type { get; init; }
+    }
     public static class ParameterConverter
     {
+        public static System.Collections.Generic.IReadOnlyList<HomeBlaze.Services.ObjectParameterMember> GetObjectMembers(System.Type type) { }
+        public static bool IsJsonObject(System.Type type) { }
         public static bool IsSupported(System.Type type) { }
+        public static bool IsSupportedObject(System.Type type) { }
         public static bool TryConvert(string? input, System.Type targetType, out object? value) { }
         public static bool TryConvert(string? input, System.Type targetType, HomeBlaze.Abstractions.Attributes.StateUnit? unit, out object? value) { }
+        public static bool TryCreateObject(System.Type type, System.Collections.Generic.IReadOnlyDictionary<string, string?> inputs, out object? value, out string? error) { }
+        public static bool TryParseJson(string? input, System.Type type, bool isNullable, out object? value, out string? error) { }
     }
     public static class RegisteredSubjectMethodExtensions
     {
-        public static System.Collections.Generic.IReadOnlyList<HomeBlaze.Abstractions.Metadata.MethodMetadata> GetAllMethods(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject) { }
-        public static System.Collections.Generic.IReadOnlyList<HomeBlaze.Abstractions.Metadata.MethodMetadata> GetOperationMethods(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject) { }
-        public static System.Collections.Generic.IReadOnlyList<HomeBlaze.Abstractions.Metadata.MethodMetadata> GetQueryMethods(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject) { }
+        public static System.Collections.Generic.IReadOnlyList<HomeBlaze.Abstractions.Metadata.MethodMetadata> GetAllMethods(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject, HomeBlaze.Abstractions.Attributes.ExclusionTarget target) { }
         public static bool IsMethodEnabled(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty methodProperty) { }
         public static HomeBlaze.Abstractions.Metadata.MethodMetadata? TryGetMethodMetadata(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
     }
@@ -124,10 +134,19 @@ namespace HomeBlaze.Services
     {
         public static string? ResolveScopedLink(this Namotion.Interceptor.IInterceptorSubject subject, string? link) { }
     }
-    public class SubjectPathResolver : HomeBlaze.Abstractions.ISubjectPathResolver, Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler
+    public static class SubjectNavigationExtensions
+    {
+        public static HomeBlaze.Components.Abstractions.Pages.AppBarAlignment GetAppBarAlignment(this Namotion.Interceptor.IInterceptorSubject subject) { }
+        public static string GetNavigationIconName(this Namotion.Interceptor.IInterceptorSubject subject) { }
+        public static HomeBlaze.Components.Abstractions.Pages.NavigationLocation GetNavigationLocation(this Namotion.Interceptor.IInterceptorSubject subject) { }
+        public static string GetNavigationTitle(this Namotion.Interceptor.IInterceptorSubject subject, string? propertyKey = null) { }
+    }
+    [Namotion.Interceptor.Attributes.RunsAfter(new System.Type[] {
+            typeof(Namotion.Interceptor.Registry.SubjectRegistry)})]
+    public class SubjectPathResolver : HomeBlaze.Abstractions.ISubjectPathResolver, Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler, Namotion.Interceptor.Tracking.Lifecycle.IPropertyLifecycleHandler
     {
         public SubjectPathResolver(System.Func<Namotion.Interceptor.IInterceptorSubject?> getRoot) { }
-        public event System.Action? PathsChanged;
+        public long PathsVersion { get; }
         public string? GetPath(Namotion.Interceptor.IInterceptorSubject subject, HomeBlaze.Abstractions.PathStyle style) { }
         public System.Collections.Generic.IReadOnlyList<string> GetPaths(Namotion.Interceptor.IInterceptorSubject subject, HomeBlaze.Abstractions.PathStyle style) { }
         public void HandleLifecycleChange(Namotion.Interceptor.Tracking.Lifecycle.SubjectLifecycleChange change) { }
@@ -326,6 +345,7 @@ namespace HomeBlaze.Services.Display
                 "NeedsSpace"})]
         public static System.ValueTuple<string, bool>? GetUnitInfo(HomeBlaze.Abstractions.Attributes.StateUnit unit) { }
         public static string? GetUnitSuffix(HomeBlaze.Abstractions.Attributes.StateUnit unit) { }
+        public static bool TryGetScaledUnit(HomeBlaze.Abstractions.Attributes.StateUnit unit, decimal magnitude, out string suffix, out decimal factor) { }
     }
 }
 namespace HomeBlaze.Services.Lifecycle
@@ -341,6 +361,74 @@ namespace HomeBlaze.Services.Lifecycle
         public void AttachProperty(Namotion.Interceptor.Tracking.Lifecycle.SubjectPropertyLifecycleChange change) { }
         public void DetachProperty(Namotion.Interceptor.Tracking.Lifecycle.SubjectPropertyLifecycleChange change) { }
         public void RefreshCollectionProperty(Namotion.Interceptor.PropertyReference property, object? value) { }
+    }
+}
+namespace HomeBlaze.Services.Metadata
+{
+    public static class ChildOrdering
+    {
+        public static string[] GetShownNames(Namotion.Interceptor.IInterceptorSubject container) { }
+        public static System.Collections.Generic.IEnumerable<T> Order<T>(System.Collections.Generic.IEnumerable<T> children, System.Collections.Immutable.ImmutableArray<string> childOrder, System.Func<T, string> getName) { }
+    }
+    public ref struct FirstParentChain
+    {
+        public FirstParentChain(Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject) { }
+        public Namotion.Interceptor.Registry.Abstractions.RegisteredSubject Current { get; }
+        public HomeBlaze.Services.Metadata.FirstParentChain GetEnumerator() { }
+        public bool MoveNext() { }
+    }
+    public static class MetadataDictionaryExtensions
+    {
+        public static TEnum? GetEnum<TEnum>(this System.Collections.Generic.IReadOnlyDictionary<string, System.Text.Json.JsonElement>? metadata, string key)
+            where TEnum :  struct, System.Enum { }
+        public static System.Collections.Immutable.ImmutableArray<HomeBlaze.Services.Metadata.MetadataLink> GetLinks(this System.Collections.Generic.IReadOnlyDictionary<string, System.Text.Json.JsonElement>? metadata) { }
+        public static string? GetString(this System.Collections.Generic.IReadOnlyDictionary<string, System.Text.Json.JsonElement>? metadata, string key) { }
+        public static System.Collections.Immutable.ImmutableArray<string> GetStringArray(this System.Collections.Generic.IReadOnlyDictionary<string, System.Text.Json.JsonElement>? metadata, string key) { }
+        public static System.Collections.Immutable.ImmutableArray<string> GetTags(this System.Collections.Generic.IReadOnlyDictionary<string, System.Text.Json.JsonElement>? metadata) { }
+        public static bool HasNotesLinksOrTags(this System.Collections.Generic.IReadOnlyDictionary<string, System.Text.Json.JsonElement>? metadata) { }
+        public static TEnum? ParseEnumName<TEnum>(string text)
+            where TEnum :  struct, System.Enum { }
+    }
+    public sealed class MetadataLink : System.IEquatable<HomeBlaze.Services.Metadata.MetadataLink>
+    {
+        public MetadataLink(string? Title, string? Url, string? Path) { }
+        public string? Path { get; init; }
+        public string? Title { get; init; }
+        public string? Url { get; init; }
+        public static bool IsAllowedAddress(string url) { }
+        public static bool IsAllowedScheme(string scheme) { }
+        public static bool IsWebAddress(string url) { }
+    }
+    public static class MetadataSearch
+    {
+        [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
+                "PropertyName",
+                "Metadata"})]
+        public static System.Collections.Generic.IEnumerable<System.ValueTuple<string?, System.Collections.Immutable.ImmutableDictionary<string, System.Text.Json.JsonElement>>> GetEntries(Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject) { }
+        public static System.Collections.Generic.IReadOnlyList<string> GetTags(Namotion.Interceptor.IInterceptorSubject root, System.Func<Namotion.Interceptor.IInterceptorSubject, bool>? isExcluded = null, System.Func<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty, bool>? isPropertyIncluded = null) { }
+        public static System.Collections.Generic.IReadOnlyList<HomeBlaze.Services.Metadata.MetadataSearchMatch> Search(Namotion.Interceptor.IInterceptorSubject root, string? tag = null, string? key = null, string? value = null, Namotion.Interceptor.IInterceptorSubject? start = null, System.Func<Namotion.Interceptor.IInterceptorSubject, bool>? isExcluded = null) { }
+    }
+    public sealed class MetadataSearchMatch : System.IEquatable<HomeBlaze.Services.Metadata.MetadataSearchMatch>
+    {
+        public MetadataSearchMatch(string Path, string? Property) { }
+        [System.Text.Json.Serialization.JsonPropertyName("path")]
+        public string Path { get; init; }
+        [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        [System.Text.Json.Serialization.JsonPropertyName("property")]
+        public string? Property { get; init; }
+    }
+    public static class MetadataText
+    {
+        public const int MaxItemCount = 20;
+        public const int MaxTagLength = 64;
+        public static bool HasControlOrFormatCharacter(string text) { }
+    }
+    public static class SubjectMetadataExtensions
+    {
+        public static HomeBlaze.Storage.Abstractions.Metadata.IMetadataStore? FindMetadataStore(this Namotion.Interceptor.IInterceptorSubject subject) { }
+        public static System.Collections.Immutable.ImmutableDictionary<string, System.Text.Json.JsonElement>? GetMetadata(this Namotion.Interceptor.IInterceptorSubject subject) { }
+        public static System.Collections.Immutable.ImmutableDictionary<string, System.Text.Json.JsonElement>? GetMetadata(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
+        public static bool IsMetadata(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
     }
 }
 namespace HomeBlaze.Services.Serialization

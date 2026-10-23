@@ -1,4 +1,5 @@
 using HomeBlaze.Abstractions;
+using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
 using Namotion.Interceptor.Registry.Abstractions;
 
@@ -10,43 +11,17 @@ namespace HomeBlaze.Services;
 public static class RegisteredSubjectMethodExtensions
 {
     /// <summary>
-    /// Gets all methods (operations and queries) for the subject, ordered by Position.
+    /// Gets the methods (operations and queries) of the subject that are offered to the target, so not excluded from
+    /// it, ordered by Position.
     /// </summary>
-    public static IReadOnlyList<MethodMetadata> GetAllMethods(this RegisteredSubject subject)
+    public static IReadOnlyList<MethodMetadata> GetAllMethods(this RegisteredSubject subject, ExclusionTarget target)
     {
         return subject.Properties
             .Where(CanContainMethodMetadata)
-            .Select(p => p.GetValue())
+            .Select(property => property.GetValue())
             .OfType<MethodMetadata>()
-            .OrderBy(m => m.Position)
-            .ToList();
-    }
-
-    /// <summary>
-    /// Gets all operation methods for the subject, ordered by Position.
-    /// </summary>
-    public static IReadOnlyList<MethodMetadata> GetOperationMethods(this RegisteredSubject subject)
-    {
-        return subject.Properties
-            .Where(CanContainMethodMetadata)
-            .Select(p => p.GetValue())
-            .OfType<MethodMetadata>()
-            .Where(m => m.Kind == MethodKind.Operation)
-            .OrderBy(m => m.Position)
-            .ToList();
-    }
-
-    /// <summary>
-    /// Gets all query methods for the subject, ordered by Position.
-    /// </summary>
-    public static IReadOnlyList<MethodMetadata> GetQueryMethods(this RegisteredSubject subject)
-    {
-        return subject.Properties
-            .Where(CanContainMethodMetadata)
-            .Select(p => p.GetValue())
-            .OfType<MethodMetadata>()
-            .Where(m => m.Kind == MethodKind.Query)
-            .OrderBy(m => m.Position)
+            .Where(method => !method.IsExcludedFrom(target))
+            .OrderBy(method => method.Position)
             .ToList();
     }
 

@@ -144,12 +144,14 @@ Browse the subject tree starting at a path. Use `text` format (default) for over
 | `path` | root | Starting path (e.g., `Folder/Device`) |
 | `depth` | 1 | Max traversal depth (0 = properties only) |
 | `includeProperties` | false | Include property values |
-| `includeAttributes` | false | Include registry attributes on properties |
+| `includeAttributes` | false | Include registry attributes on properties, leaving out read-only ones without a value |
 | `includeMethods` | false | Include `$methods` in subject nodes |
 | `includeInterfaces` | false | Include `$interfaces` in subject nodes |
 | `properties` | (all) | Return only these properties, e.g. `["IsConnected", "BatteryLevel"]`; implies `includeProperties` |
 | `excludeTypes` | (none) | Exclude subjects matching these type/interface names |
 | `maxSubjects` | server limit | Maximum subjects to return |
+
+Subjects of a type in `ExcludeTypes` of the configuration, or matching `excludeTypes`, are left out of the tree. A property collapsed at the depth limit counts and types only the remaining children and is left out if none remain.
 
 ### `search`
 
@@ -195,7 +197,7 @@ Search across all subjects. Use `text` format (default) for overview, `json` for
 | `where` | (none) | Filter by property values, see [Filtering by value](#filtering-by-value) |
 | `properties` | (all) | Return only these properties, e.g. `["IsConnected", "BatteryLevel"]`; implies `includeProperties` |
 | `includeProperties` | false | Include property values |
-| `includeAttributes` | false | Include registry attributes on properties |
+| `includeAttributes` | false | Include registry attributes on properties, leaving out read-only ones without a value |
 | `includeMethods` | false | Include `$methods` in subject nodes |
 | `includeInterfaces` | false | Include `$interfaces` in subject nodes |
 | `excludeTypes` | (none) | Exclude subjects matching these type/interface names |
@@ -238,24 +240,24 @@ In text, each warning is a `# warning: ` line before the footer, or after the "n
 
 ### `get_property`
 
-Read a property value by path. Returns the value, JSON schema type, and optional writeability flag.
+Read a property value by path. Returns the value, JSON schema type, optional writeability flag, and the registry attributes of the property, leaving out read-only ones without a value.
 
 ### `set_property`
 
-Write a property value by path. Blocked when `IsReadOnly` is true. The value is converted by `McpValueConverter`, which a custom tool can use for its own arguments: `TimeSpan`, `TimeOnly`, `DateOnly`, `DateTime`, `DateTimeOffset`, `Guid`, `Uri` and enums from their string form, enums by name (ignoring case) or by a defined number, and other values also from a string holding their JSON, such as `"0.5"`. A value that cannot be converted returns an error and leaves the property unchanged.
+Write a property value by path. Blocked when `IsReadOnly` is true. The value is converted by `McpValueConverter`, which a custom tool can use for its own arguments: `TimeSpan`, `TimeOnly`, `DateOnly`, `DateTime`, `DateTimeOffset`, `Guid`, `Uri` and enums from their string form, enums by name (ignoring case) or by a defined number, and other values also from a string holding their JSON, such as `"0.5"`. An object binds its members in any case, rejects a member its type does not have, requires each constructor parameter without a default value, and reads an enum member, or an enum element of a collection, only by name. A value that cannot be converted returns an error and leaves the property unchanged.
 
 An application can refuse writes to some properties with `PropertyWriteFilter` on the configuration: it receives the property and returns null to allow the write or the reason it is refused, for example to keep a client from changing properties that hold settings. `set_property` then returns the error `Property is not writable: <path>. <reason>` and writes nothing. A refused property is not reported as writable by `get_property`, `browse` and `search`. The filter may be called concurrently.
 
 ### `list_types`
 
-List available types from registered type providers. Interface types include property and method schemas; concrete types list their implemented interfaces.
+List available types from registered type providers. Interface types include property and method schemas; concrete types list their implemented interfaces. The types in `ExcludeTypes` of the configuration, and the types derived from them, are not listed.
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `kind` | `all` | Filter by kind: `interfaces`, `concrete`, or `all` |
 | `type` | (none) | Search type names (case-insensitive contains match) |
 
-Method parameters are listed as `McpMethodParameter` objects: `name` and JSON Schema `type`, plus the `format` of a string value: the standard JSON Schema name where one matches (`date-time`, `date`, `uuid`, `uri`), otherwise a short label: `hh:mm:ss` for `TimeSpan` (accepted as `[-][d.]hh:mm:ss[.fffffff]`) `HH:mm:ss` for `TimeOnly` (accepted as `HH:mm:ss[.fffffff]`) and `base64` for a byte array. `TimeSpan` is not `duration`, which means ISO 8601 (`PT1M30S`) and is not read by System.Text.Json. A parameter also has `enum` with the allowed names of an enum, `nullable`, and an optional `description`. `list_types` leaves `description` empty. A custom tool that lists methods can build the same shape with `McpMethodParameter.Create` and put a host-specific hint, such as a unit, into `description`.
+Method parameters are listed as `McpMethodParameter` objects: `name` and JSON Schema `type`, plus the `format` of a string value: the standard JSON Schema name where one matches (`date-time`, `date`, `uuid`, `uri`), otherwise a short label: `hh:mm:ss` for `TimeSpan` (accepted as `[-][d.]hh:mm:ss[.fffffff]`) `HH:mm:ss` for `TimeOnly` (accepted as `HH:mm:ss[.fffffff]`) and `base64` for a byte array. `TimeSpan` is not `duration`, which means ISO 8601 (`PT1M30S`) and is not read by System.Text.Json. A parameter also has `enum` with the allowed names of an enum, `nullable`, and an optional `description`. An object parameter also has `schema`, the JSON Schema of its members as `McpValueConverter` binds them: camelCase names, the `required` members (the C# `required` modifier, `[JsonRequired]` or a constructor parameter without a default value), enum names, and the `[Description]` text of each member. `list_types` leaves `description` empty. A custom tool that lists methods can build the same shape with `McpMethodParameter.Create` and put a host-specific hint, such as a unit, into `description`.
 
 ## Configuration
 
@@ -279,6 +281,9 @@ var config = new McpServerConfiguration
 
     // Optional: refuse writes to some properties; return null to allow, else the reason for the client
     PropertyWriteFilter = property => property.Name == "Password" ? "Passwords cannot be changed." : null,
+
+    // Optional: subject types that browse, search and list_types leave out
+    ExcludeTypes = [typeof(MyInternalSubject)],
 
     // Safety limits
     MaxDepth = 10,

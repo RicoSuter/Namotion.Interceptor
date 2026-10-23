@@ -1,7 +1,6 @@
 ---
 title: Building Custom Subjects
 navTitle: Building Subjects
-position: 0
 ---
 
 # Building Custom Subjects
@@ -249,11 +248,19 @@ public partial Dictionary<string, HueLightbulb> Lights { get; set; }
 
 ```csharp
 [State]
-public partial GpioPin[] Pins { get; set; }
-// Path: /Devices/Gpio/Pins[0], pin 0 is always pin 0
+public partial ShellyEnergyMeterPhase[] Phases { get; internal set; }
+// Path: /Devices/Meter/Phases[0], phase 0 is always the first phase
 ```
 
-**Rule of thumb:** If reordering or re-discovery could change which item is at index N, use a dictionary with a stable key (e.g., hardware ID, API resource ID). If the index has inherent meaning (hardware pin numbers, fixed slots), arrays are fine.
+**Use a dictionary with a number as key when the numbers have gaps:**
+
+```csharp
+[State]
+public partial Dictionary<int, GpioPin> Pins { get; set; }
+// Path: /Devices/Gpio/Pins[17], pin 17 is always GPIO 17, whichever pins exist
+```
+
+**Rule of thumb:** If reordering or re-discovery could change which item is at index N, use a dictionary with a stable key (e.g., hardware ID, API resource ID, pin number). If the index has inherent meaning and has no gaps (fixed slots, phases), arrays are fine.
 
 **Dictionary keys must be:**
 - Stable across restarts and reconnections
@@ -473,14 +480,20 @@ public partial class Motor
 - Async methods are supported and show a progress indicator
 - Methods returning values display the result in a dialog
 - Errors are caught and shown in an error dialog
-- Operations with `RequiresConfirmation = true` show a confirmation dialog first and cannot be called through MCP, see [AI Agents](../administration/ai-agents.md#tools-and-permissions). Use it for operations a person must decide on, such as unlocking, rebooting or installing code. An implementation of an interface operation that requires confirmation, or an override of a base class operation that requires it, requires confirmation as well, also when it declares its own `[Operation]`; a `[Query]` that implements or overrides such an operation becomes an operation that requires confirmation
+- Operations with `RequiresConfirmation = true` show a confirmation dialog first and cannot be called through MCP, see [AI Agents](../administration/ai-agents.md#tools-and-permissions). Use it for operations a person must decide on, such as unlocking, rebooting or installing code
+- Confirmation is inherited: an implementation of an interface operation or an override of a base class operation that requires confirmation requires it too, also with its own `[Operation]`, and a `[Query]` in its place becomes an operation that requires confirmation
 - Do not require confirmation for safety actions such as an emergency stop; agents must be able to call them
+
+**Where a method is offered:**
+
+A method is offered everywhere by default; `[ExcludeFrom]` keeps it out of the user interface or away from agents, see [Excluding Subjects and Methods](#excluding-subjects-and-methods).
 
 **Supported parameter types:**
 - `string`, `int`, `long`, `double`, `float`, `decimal`, `bool`
 - `DateTime`, `DateTimeOffset`, `Guid`, `TimeSpan`
 - Nullable versions of the above (`int?`, `bool?`, etc.)
 - Enums and nullable enums
+- Objects such as records: a form per member, or a JSON field when a member is not a supported type or the parameter is nullable
 
 **Parameter units:**
 
@@ -532,8 +545,8 @@ public partial class Server
 - The property attribute name (e.g., `"Start"`) must match the method name without the `Async` suffix
 - The `IsEnabled` property should be `[Derived]` so it automatically updates when dependencies change
 - When `IsEnabled` is `false`, the button is disabled in the UI
-- The attribute name is `IsEnabled`, without the `HB:` prefix of the HomeBlaze metadata: it describes the operation itself, so an external source can provide it and a connector that exports attributes shows it under this name
-- This uses the `TrackingScope` for automatic re-rendering when the derived property changes
+- The attribute name is `IsEnabled`, without the `HomeBlaze:` prefix of the HomeBlaze metadata: it describes the operation itself, so an external source can provide it and a connector that exports attributes shows it under this name
+- The button renders again by itself when the derived property changes, because its render read it
 
 ## Categories
 
@@ -550,7 +563,7 @@ public void SetTargetSpeed(int speed) { /* ... */ }
 ```
 
 - Categories are ordered by the lowest `Position` of their state properties. Categories with only methods come last, and names break ties.
-- A `[Category]` on an interface member applies to the class member that implements it. One on the class member wins, and `[Category("")]` there removes the category. The shared interfaces in `HomeBlaze.Abstractions` carry "Device", "Network", "Light", "Playback", "Volume" and "Track" this way.
+- A `[Category]` on an interface member applies to the class member that implements it. One on the class member wins, and `[Category("")]` there removes the category. The shared interfaces in `HomeBlaze.Abstractions` carry "Device", "Network", "Light", "Playback", "Volume", "Track", "Lock" and "Door" this way.
 - Names are case-sensitive. .NET shows "Default" as "Misc", "Config" as "Configurations", "DragDrop" as "Drag Drop" and "WindowStyle" as "Window Style".
 
 ## Background Services
@@ -615,7 +628,7 @@ This associates `TargetSpeed_Minimum` and `TargetSpeed_Maximum` as metadata for 
 
 ### Range Attributes
 
-`KnownAttributes.Minimum` and `KnownAttributes.Maximum` give a number property its range, declared as above. A widget that shows or sets a number within a range reads them when the page sets no range of its own, and only when their value is a number; [Ranges](../administration/widgets/basics.md#ranges) has the order in which the widget looks for each end, including the range 0 to 1 of a property with `StateUnit.Percent`. Like `KnownAttributes.IsEnabled` and unlike `State` and `Configuration`, they have no `HB:` prefix: they describe the value and not how HomeBlaze shows it, so they read naturally where a connector exports the property, and an external source can provide them under the same name.
+`KnownAttributes.Minimum` and `KnownAttributes.Maximum` give a number property its range, declared as above. A widget that shows or sets a number within a range reads them when the page sets no range of its own, and only when their value is a number; [Ranges](../administration/widgets/basics.md#ranges) has the order in which the widget looks for each end, including the range 0 to 1 of a property with `StateUnit.Percent`. Like `KnownAttributes.IsEnabled` and unlike `State` and `Configuration`, they have no `HomeBlaze:` prefix: they describe the value and not how HomeBlaze shows it, so they read naturally where a connector exports the property, and an external source can provide them under the same name.
 
 ## Complete Example: Motor
 
@@ -884,7 +897,7 @@ Device interfaces compose small capability interfaces, split into state and cont
 
 ### HomeBlaze.Storage.Abstractions
 
-Storage contracts: `IStorageContainer`, `IStorageFile`, `IConfigurationWriter`, `StorageStatus`, `[FileExtension]`.
+Storage contracts: `IStorageContainer`, `IStorageFile`, `IConfigurationWriter`, `IMetadataStore`, `StorageStatus`, `[FileExtension]`.
 
 ### HomeBlaze.Components.Abstractions
 
@@ -1050,30 +1063,46 @@ In an Edit component of your own, use the `SubjectPathField` component for a pat
 
 ---
 
-### Excluding Subjects from Browsing
+### Excluding Subjects and Methods
 
-Internal implementation subjects that should not appear in the UI browser panel or MCP tools can be marked with the `[ExcludeFromBrowsing]` attribute:
+`[ExcludeFrom(ExclusionTarget)]` on a subject class keeps the subjects of that type, and of the types derived from it, out of the given targets, and on an `[Operation]` or `[Query]` it does the same for the method:
 
 ```csharp
 using HomeBlaze.Abstractions.Attributes;
 
 [InterceptorSubject]
-[ExcludeFromBrowsing]
+[ExcludeFrom(ExclusionTarget.All)]
 public partial class HtmlSegment
 {
     // Internal implementation detail, not user-facing
 }
 ```
 
-This hides the subject from:
-- The Blazor browser/panel tree view
-- MCP `browse` and `search` tool results
-
 Use this for internal subjects that are part of a parent subject's implementation but have no meaning to end users or AI agents (e.g., parsed HTML segments, render expressions).
+
+| Target | A subject type is not | A method is not |
+|--------|-----------------------|-----------------|
+| `UserInterface` | listed or counted as a child in the browser, offered by the path picker, or walked by the navigation | shown as a button, or offered by the path picker and the widget pickers |
+| `Agents` | listed by MCP `browse`, `search` and `list_types` and by the built-in agents | listed by `list_methods` and `$methods`, or run by `invoke_query`, `invoke_operation`, the Markdown tools and the built-in agents |
+| `All` | any of the above, also for targets added later | any of the above, also for targets added later |
+
+Exclusion decides where a subject or a method is offered, and is no access control: an agent still reaches a subject of a type excluded from agents by its explicit path and calls its methods, and a path to a method excluded from the user interface that a person types into a widget, such as an operation button, still runs it. Code checks a subject with the extension `IsExcludedFrom(target)`, a type with `ExcludeFromAttribute.IsExcluded(type, target)`, and lists the methods for a target with `GetAllMethods(target)`.
+
+Use `UserInterface` on a method that gives an agent what a person does through other controls, as a folder does for the order that people change by dragging:
+
+```csharp
+[Query(Title = "Get Order", Description = "Gets the names of the children in the order in which they are shown.")]
+[ExcludeFrom(ExclusionTarget.UserInterface)]
+public string[] GetOrder() => ChildOrdering.GetShownNames(this);
+```
 
 ### Page Layout Types
 
-A type whose blocks only lay out a page, such as a card or a tab layout, is marked with `[PageLayout]`. Its blocks create no subject that acts on anything and hold no secret, so an AI agent with the permission to edit page layout may add, change, remove and move them, see [AI Agents](../administration/ai-agents.md#editing-page-layout). The property attributes that describe its values decide what such a block may hold: a path of a `[SubjectPath]` with a subject type must lead to an existing subject, a `[LinkAddress]` may only hold a relative address or one with http, https or mailto, and a block that sets a `[MediaAddress]`, such as the picture of a card, is no layout block:
+A type whose blocks only lay out a page, such as a card or a tab layout, is marked with `[PageLayout]`. Its blocks act on nothing and hold no secret, so an AI agent with the permission to edit page layout may add, change, remove and move them, see [AI Agents](../administration/ai-agents.md#editing-page-layout). The attributes of its properties decide what such a block may hold:
+
+- A `[SubjectPath]` with a subject type must lead to an existing subject.
+- A `[LinkAddress]` may only hold a relative address or one with http, https or mailto.
+- A block that sets a `[MediaAddress]`, such as the picture of a card, is no layout block.
 
 ```csharp
 [PageLayout]
@@ -1093,7 +1122,7 @@ Mark only types whose configuration is plain values and that do nothing but show
 A `{{ path }}` expression on a page and a [value widget](../administration/widgets/basics.md#value-widgets) show the value of a property they reach only when the property is displayable: a partial (intercepted) property, a `[Derived]` property or a property with `[State]`, on the class or through an interface. An expression shows nothing and a value widget shows a dash for:
 
 - A plain property, a public property without `[State]` that is no partial or `[Derived]` property. It is registered too but is no tracked value of the subject and can hold internal data, such as the text an agent is still writing. Mark a computed value that pages should show with `[Derived]`.
-- A default property of an interface without `[State]`, such as `bool? IsClosed => State switch { ... }`, unless it is marked with `[Derived]`. It is no partial property of the class, so it counts as a plain property otherwise.
+- A default property of an interface without `[State]`, such as `bool? IsDoorClosed => DoorState switch { ... }`, unless it is marked with `[Derived]`. It is no partial property of the class, so it counts as a plain property otherwise.
 - A secret configuration property (`[Configuration(IsSecret = true)]`).
 - A property marked with `[ExcludeFromExpressions]`, for a value that can hold secrets in another form, such as the raw source of a file.
 
@@ -1428,7 +1457,7 @@ A widget component renders a slot with `SubjectComponent` and does not need to k
     var tabs = Layout?.Tabs ?? [];
 }
 
-<MudTabs KeepPanelsAlive="true">
+<MudTabs>
     @foreach (var tab in tabs)
     {
         <MudTabPanel Text="@tab.Title">
@@ -1448,8 +1477,8 @@ A widget component renders a slot with `SubjectComponent` and does not need to k
 Rules for rendering:
 
 - **`null` renders nothing**: `SubjectComponent` with a slot that is `null` renders nothing. Test for `null` only when the widget shows something around the slot, like the divider of the card. A slot block without content gives a value that is not `null` and renders nothing.
-- **Read in the render, keep nothing**: Read slot properties inside the render and do not keep their values in fields. The page renders again when a property changes that was read while it rendered, and a change of the page text assigns new values and new arrays.
-- **Content that renders later is not tracked**: Content inside a child component that renders on its own later is not tracked that way, for example a tab panel that is only created when it is first opened. `TabLayout` keeps all its panels alive for this reason.
+- **Read in the render, keep nothing**: Read slot properties inside the render and do not keep their values in fields. Each component renders again when a property changes that its own render read, wherever and whenever it renders, and a change of the page text assigns new values and new arrays.
+- **Not in lifecycle methods**: A value read in `OnInitialized`, `OnParametersSet`, after an `await` or in an event handler is not tracked, because a change renders the component again without running these methods. Read values that the markup shows in the render.
 - **Identity of typed values**: A typed value whose block has a `#name` stays the same instance when the page text changes, so a component can compare instances to keep its state. `TabLayoutWidget.razor` keeps the selected tab this way and compares it with the tabs of the current render only.
 
 #### A Subject on a Page: Identity and Lifecycle

@@ -1,7 +1,60 @@
-/* The ring of a Gauge: the track and the value are two MudProgressCircular on top of each other, with the text in their center. */
+/* A gauge: the ring with the label below it, where the text of its place is aligned, at the top of its line. It centers
+   them in a grid cell or a canvas node, which it fills (place-centered, SubjectComponent.razor.css). */
+.gauge-widget {
+    container-name: gauge;
+    display: inline-flex;
+    vertical-align: top;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
 
+/* The diameter of the ring is the size of the gauge (--gauge-size, an inline style), and the value and the label are in
+   proportion to it. In a grid cell or a canvas node, a size container, the ring fills what the label leaves of the place,
+   up to twice its size, with 8 pixels at the edges, and the text has the sizes of the place. */
+.gauge-ring,
+.gauge-widget ::deep .gauge-label {
+    --gauge-diameter: var(--gauge-size);
+}
+
+@container gauge (height > 0px) {
+    .gauge-ring,
+    .gauge-widget ::deep .gauge-label {
+        --gauge-diameter: min(2 * var(--gauge-size), 100cqw - 16px, 100cqh - 24px - 1.25 * var(--place-secondary-text));
+    }
+
+    .gauge-widget ::deep .gauge-label {
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+}
+
+/* Only the ring gives way to the label. */
+.gauge-widget ::deep .gauge-label {
+    flex-shrink: 0;
+    font-size: var(--place-secondary-text, max(0.75rem, var(--gauge-diameter) * 0.13));
+    line-height: 1.25;
+}
+
+/* The value is at most a part of the ring and as wide as its inside, so that a long value wraps, such as its unit to a
+   second line, rather than reaching over the ring. */
+.gauge-text ::deep .mud-typography {
+    max-width: calc(var(--gauge-diameter) * 0.75);
+    font-size: min(var(--place-primary-text, max(0.75rem, var(--gauge-diameter) * 0.19)), var(--gauge-diameter) * 0.3);
+    font-weight: 700;
+    line-height: 1.15;
+    text-align: center;
+}
+
+/* The ring of a Gauge: the track and the value are two MudProgressCircular on top of each other, with the text in their
+   center. */
 .gauge-ring {
     position: relative;
+    width: var(--gauge-diameter);
+    height: var(--gauge-diameter);
 }
 
 .gauge-ring ::deep .mud-progress-circular {

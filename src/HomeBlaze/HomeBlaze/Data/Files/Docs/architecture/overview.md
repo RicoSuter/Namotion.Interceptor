@@ -1,7 +1,6 @@
 ---
 title: HomeBlaze Architecture
 navTitle: Architecture
-position: 0
 ---
 
 # HomeBlaze Architecture
@@ -157,13 +156,13 @@ It does not currently own:
 
 Every HomeBlaze instance contains the same building blocks. What makes a satellite different from a central instance is which plugins are loaded and which connectors are active. All building blocks above the core — connectors, agents, device subjects, domain logic, UI components — are delivered as plugins (NuGet packages).
 
-Detailed designs: [AI](design/ai.md), [History](design/history.md), [Messages](design/messages.md), [Methods](design/methods.md), [Plugins](design/plugins.md), [Security](design/security.md), [Observability](design/observability.md), [Storage](design/storage.md), [Deployment](design/deployment.md), [Scalability](design/scalability.md), [Resilience](design/resilience.md), [Upgrade and Migration](design/upgrade-and-migration.md), [System Testing](design/testing.md), [Audit](design/audit.md), [Alarms](design/alarms.md), [Versioning](design/versioning.md).
+Detailed designs: [AI](design/ai.md), [History](design/history.md), [Messages](design/messages.md), [Methods](design/methods.md), [Plugins](design/plugins.md), [Security](design/security.md), [Observability](design/observability.md), [Storage](design/storage.md), [Metadata](design/metadata.md), [Deployment](design/deployment.md), [Scalability](design/scalability.md), [Resilience](design/resilience.md), [Upgrade and Migration](design/upgrade-and-migration.md), [System Testing](design/testing.md), [Audit](design/audit.md), [Alarms](design/alarms.md), [Versioning](design/versioning.md).
 
 ### Level 2 — Knowledge Graph
 
 The knowledge graph is the central data structure. It unifies live state, history, metadata, documents, and operations into a single queryable model.
 
-The **Unified Namespace (UNS)** is the live state layer: all subject properties and operations, synced across instances in real time. The **knowledge graph** extends the UNS with property history, documents, and user-defined metadata (annotations, tags, links between subjects).
+The **Unified Namespace (UNS)** is the live state layer: all subject properties and operations, synced across instances in real time. The **knowledge graph** extends the UNS with property history, documents, and user-defined metadata, such as notes, tags and links between subjects.
 
 ```
 ┌──────────────────────────────────────────────────────┐
@@ -196,7 +195,7 @@ The **Unified Namespace (UNS)** is the live state layer: all subject properties 
 | Time-Series Store | Property history, configurable retention | `get_property_history` MCP tool, plugin-based (see [History](design/history.md)) |
 | File Storage | **Subject files** (`.json` with `$type`) are deserialized into typed subjects; the file is the persistence format. **Documents** (Markdown, PDFs, images, manuals) become document subjects visible as-is in the graph. See [Storage](design/storage.md) | Subject files via configuration system, documents via `browse` or `search` + `invoke_query` (for example `ReadEvaluatedContent` of a Markdown page) |
 
-Subjects can also carry user-defined metadata — annotations, tags, and links to other subjects — stored as dynamic attributes on the registry. These are persisted in configuration files and reapplied on restart, allowing operators to enrich the knowledge graph without modifying subject code. See [Storage](design/storage.md) for details.
+Folders, subjects and properties can also carry user-defined metadata, such as titles, icons, notes, links and tags, persisted in `.metadata.json` files separate from subject configuration, so operators enrich the knowledge graph without modifying subject code. See [Metadata](design/metadata.md).
 
 **How each consumer accesses the knowledge graph:**
 
@@ -204,7 +203,7 @@ The knowledge graph is accessed through two layers of MCP tools. The base layer 
 
 | Consumer | Access Pattern |
 |----------|---------------|
-| Operator UI | TrackingScope for live updates, subject browser for navigation, operations for actions |
+| Operator UI | Component tracking for live updates (each component renders again when a value its render read changes), subject browser for navigation, operations for actions |
 | AI agents | Base MCP tools (`browse`, `search`, `get_property`, `set_property`, `list_types`) + HomeBlaze MCP tools (`list_methods`, `invoke_query`, `invoke_operation`, `search_markdown`, `edit_markdown`, `write_markdown`, `create_markdown`, `get_property_history`, `get_event_history`, `get_command_history`, enriched metadata) |
 | Connectors | Read/write interceptors feed property changes in and out, operations map to protocol methods (e.g. OPC UA methods) |
 | WebSocket sync | SubjectUpdate messages replicate the subject graph and proxy operations between instances |

@@ -1,0 +1,56 @@
+using System.Collections.Immutable;
+using System.Text.Json;
+using HomeBlaze.Abstractions;
+using HomeBlaze.Storage.Abstractions.Metadata;
+using Namotion.Interceptor;
+using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
+
+namespace HomeBlaze.Services.Metadata;
+
+/// <summary>
+/// Reads the metadata that the registry holds under <see cref="KnownAttributes.Metadata"/>: in a dynamic property of a
+/// subject, and in an attribute of a property. Read its keys with <see cref="MetadataDictionaryExtensions"/>.
+/// </summary>
+public static class SubjectMetadataExtensions
+{
+    /// <summary>Gets the metadata of the subject; null without any, and for a subject that is not registered.</summary>
+    public static ImmutableDictionary<string, JsonElement>? GetMetadata(this IInterceptorSubject subject)
+        => subject.TryGetRegisteredSubject()?.TryGetProperty(KnownAttributes.Metadata)?.GetValue() as ImmutableDictionary<string, JsonElement>;
+
+    /// <summary>Gets the metadata of the property; null without any.</summary>
+    public static ImmutableDictionary<string, JsonElement>? GetMetadata(this RegisteredSubjectProperty property)
+        => property.TryGetAttribute(KnownAttributes.Metadata)?.GetValue() as ImmutableDictionary<string, JsonElement>;
+
+    /// <summary>Gets whether the property holds metadata: that of its subject, or as an attribute that of a property.</summary>
+    public static bool IsMetadata(this RegisteredSubjectProperty property)
+        => property.IsAttribute
+            ? property.AttributeMetadata.AttributeName == KnownAttributes.Metadata
+            : property.Name == KnownAttributes.Metadata;
+
+    /// <summary>
+    /// Gets the store that keeps the metadata of the subject: the subject itself when it is a
+    /// <see cref="IMetadataStore"/>, else the nearest one up the first parent of each subject, as the registry writes
+    /// the path of the subject; null without one.
+    /// </summary>
+    public static IMetadataStore? FindMetadataStore(this IInterceptorSubject subject)
+    {
+        if (subject is IMetadataStore own)
+        {
+            return own;
+        }
+
+        if (subject.TryGetRegisteredSubject() is { } registered)
+        {
+            foreach (var current in new FirstParentChain(registered))
+            {
+                if (current.Subject is IMetadataStore store)
+                {
+                    return store;
+                }
+            }
+        }
+
+        return null;
+    }
+}

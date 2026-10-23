@@ -1,0 +1,57 @@
+@* A row of a value list. The list reads the values of all rows in one render, so a row whose parameters are equal does not render again. *@
+@inherits Namotion.Interceptor.Blazor.TrackedComponentBase
+
+@{
+    var content = Row.Content;
+}
+
+@* No gutters, so that the rows start and end where the text around the list does. Inside a card that is where the icon and the title of its header start and where the content of its header ends. *@
+<MudListItem T="string"
+             Class="value-list-item"
+             Gutters="false"
+             data-testid="value-row">
+    <div class="d-flex align-center gap-2">
+        @* The icon is not the Icon of the list item, whose column is wider than the avatar of a card header. Its 8 pixels and the gap add up to the 16 that MudCardHeader leaves between avatar and title, so that labels line up with titles. *@
+        @if (Icon is not null)
+        {
+            <MudIcon Icon="@Icon" Class="flex-shrink-0 me-2" Style="color: var(--mud-palette-action-default);" data-testid="value-icon" />
+        }
+        else if (AnyIcon)
+        {
+            <MudIcon Class="flex-shrink-0 me-2" aria-hidden="true" data-testid="value-icon-space" />
+        }
+
+        @* The label takes the free room, and with content it is the content that does. *@
+        <HistoryLabel Property="@Reading?.Property" Text="@ValueReader.GetLabel(Reading?.Property, Row.Label, Path)" Class="@(content is null ? "flex-grow-1 ma-0" : "ma-0")" />
+        @if (content is not null)
+        {
+            @* MudBlazor has no text alignment utility other than this class of MudText. A flex layout is no alternative, because the bar of a Progress has to fill the room. *@
+            <div class="flex-grow-1 mud-typography-align-right" data-testid="value-content">
+                <SubjectComponent Subject="@content" Type="SubjectComponentType.Widget" />
+            </div>
+        }
+
+        @if (Reading is not null)
+        {
+            <ValueText Reading="@Reading" Path="@Path" Typo="Typo.subtitle2" />
+        }
+    </div>
+</MudListItem>
+
+@code {
+    [Parameter, EditorRequired]
+    public ValueRow Row { get; set; } = default!;
+
+    [Parameter]
+    public string? Path { get; set; }
+
+    [Parameter]
+    public ValueReading? Reading { get; set; }
+
+    [Parameter]
+    public string? Icon { get; set; }
+
+    /// <summary>Whether another row has an icon, so that this one leaves room for one.</summary>
+    [Parameter]
+    public bool AnyIcon { get; set; }
+}

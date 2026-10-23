@@ -60,6 +60,9 @@ internal static class ClaudeCliProcess
 
     private const string ConfigDirectoryName = ".anthropic-config";
 
+    // The agent route is on this address; a proxy from HTTP_PROXY or HTTPS_PROXY must not receive its calls and token.
+    private const string LoopbackAddress = "127.0.0.1";
+
     // The init line names this API key source when the CLI uses none, as with the subscription login.
     private const string NoApiKeySource = "none";
 
@@ -193,6 +196,12 @@ internal static class ClaudeCliProcess
 
         startInfo.Environment[ConfigDirectoryVariable] = CreateConfigDirectory(invocation.WorkingDirectory);
 
+        // Tools differ in which spelling they read, so both get the exclusion; on Windows they are one variable.
+        startInfo.Environment.TryGetValue("NO_PROXY", out var upperCaseNoProxy);
+        startInfo.Environment.TryGetValue("no_proxy", out var lowerCaseNoProxy);
+        startInfo.Environment["NO_PROXY"] = WithLoopbackProxyExclusion(upperCaseNoProxy ?? lowerCaseNoProxy);
+        startInfo.Environment["no_proxy"] = WithLoopbackProxyExclusion(lowerCaseNoProxy ?? upperCaseNoProxy);
+
         var process = new Process { StartInfo = startInfo };
         try
         {
@@ -243,6 +252,27 @@ internal static class ClaudeCliProcess
         }
 
         return path;
+    }
+
+    /// <summary>Adds 127.0.0.1 to a comma-separated proxy exclusion list unless it or <c>*</c> is listed already.</summary>
+    /// <param name="value">The list, or null when the variable is not set.</param>
+    internal static string WithLoopbackProxyExclusion(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return LoopbackAddress;
+        }
+
+        foreach (var entry in value.Split(','))
+        {
+            // Some tools honour "*" only as the whole value, so appending to it could route every request through the proxy.
+            if (entry.Trim() is LoopbackAddress or "*")
+            {
+                return value;
+            }
+        }
+
+        return value + "," + LoopbackAddress;
     }
 
     /// <summary>Whether the variable is removed from the CLI environment because it would reroute requests or switch billing away from the subscription.</summary>

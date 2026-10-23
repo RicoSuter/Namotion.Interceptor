@@ -4,15 +4,11 @@
 @using MudBlazor
 @using Namotion.Interceptor
 @using HomeBlaze.Services
-@using HomeBlaze.Components.Abstractions.TimeZones
 @using Microsoft.JSInterop
-@using Microsoft.AspNetCore.Components.Sections
 
 @attribute [SubjectComponent(SubjectComponentType.Page, typeof(MarkdownFile))]
 
 @implements ISubjectComponent
-@implements IDisposable
-@inject ITimeZoneDisplay TimeZone
 @inject IJSRuntime JsRuntime
 
 <CascadingValue Value="@IsEditing" Name="IsEditing">
@@ -23,12 +19,6 @@
         }
         else
         {
-            @* Shown by the page next to the button of the edit modes, so that the two never overlap. *@
-            <SectionContent SectionName="PageHeadInfo">
-                <span style="font-size: 0.8rem; color: var(--mud-palette-text-secondary); white-space: nowrap;" data-testid="page-last-modified">
-                    @(File is { } file ? TimeZone.ToZoned(new DateTimeOffset(file.LastModified, TimeSpan.Zero)).ToString("yyyy-MM-dd HH:mm:ss") : "")
-                </span>
-            </SectionContent>
             <MarkdownContentView Children="@File?.Children" />
         }
     </div>
@@ -73,14 +63,6 @@
 
     private bool IsLoading => File?.Content is null;
 
-    protected override void OnInitialized()
-    {
-        // The last-modified stamp is formatted through the display time zone, so re-render when it changes.
-        TimeZone.Changed += OnTimeZoneChanged;
-    }
-
-    private void OnTimeZoneChanged() => InvokeAsync(StateHasChanged);
-
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender)
@@ -98,10 +80,5 @@
         {
             // The circuit is gone, so there is no page with pictures to watch.
         }
-    }
-
-    public void Dispose()
-    {
-        TimeZone.Changed -= OnTimeZoneChanged;
     }
 }

@@ -9,7 +9,7 @@
 
 @if (indicator is not null)
 {
-    // Read once per render and never kept: the read is what the tracking scope records.
+    // Read once per render and never kept: its render records the read, so that it renders again when it changes.
     var path = indicator.Path;
     var map = indicator.Map;
     <IndicatorView Reading="@ValueReader.Read(PathResolver, indicator, path, map, TimeZone)"

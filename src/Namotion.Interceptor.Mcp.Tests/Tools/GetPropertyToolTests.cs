@@ -176,4 +176,35 @@ public class GetPropertyToolTests
         Assert.True(json.TryGetProperty("attributes", out var attributes));
         Assert.Equal("Celsius", attributes.GetProperty("Unit").GetString());
     }
+
+    [Fact]
+    public async Task WhenAReadOnlyAttributeHasNoValue_ThenItIsLeftOutAndAWritableOneIsKept()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+
+        var room = new TestRoom(context) { Name = "Test", Temperature = 21.5m };
+        var temperatureProperty = room.TryGetRegisteredSubject()!.TryGetProperty("Temperature")!;
+        temperatureProperty.AddAttribute<string>("Unit", _ => "Celsius");
+        temperatureProperty.AddAttribute<string>("Note", _ => null);
+        temperatureProperty.AddAttribute("Comment", typeof(string), _ => null, (_, _) => { });
+
+        var config = new McpServerConfiguration
+        {
+            PathProvider = DefaultPathProvider.Instance
+        };
+        var tool = new McpToolFactory(room, config).CreateTools().First(t => t.Name == "get_property");
+
+        // Act
+        var input = JsonSerializer.SerializeToElement(new { path = "Temperature" });
+        var json = JsonSerializer.SerializeToElement(await tool.Handler(input, CancellationToken.None));
+
+        // Assert
+        var attributes = json.GetProperty("attributes");
+        Assert.Equal("Celsius", attributes.GetProperty("Unit").GetString());
+        Assert.False(attributes.TryGetProperty("Note", out _));
+        Assert.Equal(JsonValueKind.Null, attributes.GetProperty("Comment").ValueKind);
+    }
 }

@@ -115,6 +115,14 @@ public class FritzBoxConnectionCheckTests
     [InlineData("fritz\tbox")]
     [InlineData("[fritz.box]")]
     [InlineData("[fd00::1")]
+    [InlineData("fe80::1%@evil.example")]
+    [InlineData("[fe80::1%@evil.example]")]
+    [InlineData("fe80::1%@evil.example?")]
+    [InlineData("fe80::1%@evil.example#")]
+    [InlineData("fe80::1%x?evil")]
+    [InlineData("fe80::1%x#evil")]
+    [InlineData("fe80::1%x\\evil")]
+    [InlineData("user@fritz.box")]
     public void WhenTheHostAddressIsInvalid_ThenItIsRejected(string? input)
     {
         // Act

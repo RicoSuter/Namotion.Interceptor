@@ -1,7 +1,6 @@
 ---
 title: Widgets for Markdown Pages
 navTitle: Overview
-position: 1
 ---
 
 # Widgets for Markdown Pages
@@ -35,7 +34,7 @@ Every other type that can be configured works as a block as well, see [Widgets](
 |--------|-----------|--------------|
 | [ValueMap](value-map.md) | `HomeBlaze.Components.ValueMap` | The text, color and icon that a value gets in other widgets |
 | [ValueList](value-list.md) | `HomeBlaze.Components.ValueList` | Rows with an icon, a label, optional content and a value |
-| [ValueTile](value-tile.md) | `HomeBlaze.Components.ValueTile` | A small box with a label and one large value |
+| [ValueTile](value-tile.md) | `HomeBlaze.Components.ValueTile` | A box or a tile with a label and one large value |
 | [Indicator](indicator.md) | `HomeBlaze.Components.Indicator` | A state as a colored chip or as an icon |
 | [Progress](progress.md) | `HomeBlaze.Components.Progress` | A bar that shows where a number stands between a minimum and a maximum |
 | [Gauge](gauge.md) | `HomeBlaze.Components.Gauge` | A ring with a number between a minimum and a maximum |
@@ -50,12 +49,13 @@ Every other type that can be configured works as a block as well, see [Widgets](
 | [Select](select.md) | `HomeBlaze.Components.Select` | Picks a value of an enum |
 | [OperationButton](operation-button.md) | `HomeBlaze.Components.OperationButton` | Runs an operation or a query |
 | [Control](control.md) | `HomeBlaze.Components.Control` | Shows the matching widget for what its path leads to |
+| [DoorLock](door-lock.md) | `HomeBlaze.Components.DoorLock` | A tile that shows a lock and its door, and locks or unlocks it |
 
 ## History
 
 | Widget | Type name | What it does |
 |--------|-----------|--------------|
-| [HistoryChart](history-chart.md) | `HomeBlaze.History.Blazor.HistoryChart` | The recorded history of numbers as lines and of states as bands |
+| [HistoryChart](history-chart.md) | `HomeBlaze.History.Blazor.HistoryChart` | The recorded history of numbers as lines, of counters as bars per day, week or month, and of states as bands |
 
 ## Related
 

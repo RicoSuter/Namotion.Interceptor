@@ -39,19 +39,38 @@ internal sealed class TestRenderer : Renderer
 
     private volatile bool _holdAcknowledgements;
     private int _unacknowledgedBatchCount;
+    private int _activeRenderCount;
     private int _deferredRenderRequests;
+    private int _batchCount;
 
     /// <param name="mode">How batches render and complete.</param>
     /// <param name="maximumUnacknowledgedBatches">
     /// The number of unacknowledged batches from which a render request waits in <see cref="TestRenderMode.Server"/>
     /// mode. The default is the default of a server circuit.
     /// </param>
-    public TestRenderer(TestRenderMode mode, int maximumUnacknowledgedBatches = 10)
-        : base(CreateServices(), NullLoggerFactory.Instance)
+    /// <param name="configureServices">Adds services, for example component tracking, which the renderer resolves.</param>
+    public TestRenderer(TestRenderMode mode, int maximumUnacknowledgedBatches = 10, Action<IServiceCollection>? configureServices = null)
+        : this(mode, maximumUnacknowledgedBatches, CreateServices(configureServices))
+    {
+    }
+
+    private TestRenderer(TestRenderMode mode, int maximumUnacknowledgedBatches, ServiceProvider services)
+        : base(services, NullLoggerFactory.Instance)
     {
         _mode = mode;
         _maximumUnacknowledgedBatches = maximumUnacknowledgedBatches;
+        Services = services;
+        RendererInfo = mode == TestRenderMode.Prerender
+            ? new RendererInfo("Static", isInteractive: false)
+            : new RendererInfo(mode.ToString(), isInteractive: true);
     }
+
+    public IServiceProvider Services { get; }
+
+    protected override RendererInfo RendererInfo { get; }
+
+    /// <summary>Gets the number of batches rendered so far.</summary>
+    public int BatchCount => Volatile.Read(ref _batchCount);
 
     public override Dispatcher Dispatcher { get; } = Dispatcher.CreateDefault();
 
@@ -75,12 +94,21 @@ internal sealed class TestRenderer : Renderer
     /// <summary>Gets the number of batches the client has not acknowledged yet.</summary>
     public int UnacknowledgedBatchCount => Volatile.Read(ref _unacknowledgedBatchCount);
 
+    /// <summary>Gets whether no render or acknowledgement is in progress and the client has acknowledged every batch.</summary>
+    /// <remarks>
+    /// Evaluate it after a condition on what rendered: a component renders before its batch counts as unacknowledged, so
+    /// <see cref="UnacknowledgedBatchCount"/> alone can be zero while that batch is still on its way.
+    /// </remarks>
+    public bool IsSettled => Volatile.Read(ref _activeRenderCount) == 0 && UnacknowledgedBatchCount == 0;
+
     public async Task<TComponent> RenderAsync<TComponent>(Dictionary<string, object?> parameters)
         where TComponent : IComponent, new()
     {
-        var component = new TComponent();
+        TComponent component = default!;
         await Dispatcher.InvokeAsync(() =>
         {
+            // Through the activator, as the root component of a circuit is.
+            component = (TComponent)InstantiateComponent(typeof(TComponent));
             var componentId = AssignRootComponentId(component);
             _ = RenderRootComponentAsync(componentId, ParameterView.FromDictionary(parameters));
         });
@@ -110,11 +138,20 @@ internal sealed class TestRenderer : Renderer
             return;
         }
 
-        base.ProcessPendingRender();
+        Interlocked.Increment(ref _activeRenderCount);
+        try
+        {
+            base.ProcessPendingRender();
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _activeRenderCount);
+        }
     }
 
     protected override Task UpdateDisplayAsync(in RenderBatch renderBatch)
     {
+        Interlocked.Increment(ref _batchCount);
         switch (_mode)
         {
             case TestRenderMode.WebAssembly:
@@ -161,6 +198,20 @@ internal sealed class TestRenderer : Renderer
             return;
         }
 
+        // Until the deferred render below has rendered, a batch count of zero does not mean that nothing renders.
+        Interlocked.Increment(ref _activeRenderCount);
+        try
+        {
+            AcknowledgeAndRenderDeferred(lastBatch);
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _activeRenderCount);
+        }
+    }
+
+    private void AcknowledgeAndRenderDeferred(TaskCompletionSource? lastBatch)
+    {
         // Completing a batch runs its OnAfterRender, which can render a new batch that must wait for its own acknowledgement.
         var batchCount = _unacknowledgedBatches.Count;
         for (var index = 0; index < batchCount; index++)
@@ -181,10 +232,11 @@ internal sealed class TestRenderer : Renderer
         }
     }
 
-    private static ServiceProvider CreateServices()
+    private static ServiceProvider CreateServices(Action<IServiceCollection>? configureServices)
     {
-        return new ServiceCollection()
-            .AddSingleton(typeof(ILogger<>), typeof(NullLogger<>))
-            .BuildServiceProvider();
+        var services = new ServiceCollection()
+            .AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
+        configureServices?.Invoke(services);
+        return services.BuildServiceProvider();
     }
 }

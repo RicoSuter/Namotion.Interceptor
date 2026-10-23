@@ -1,5 +1,6 @@
 using System.Text.Json;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Abstractions.Messaging;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.AI.Mcp;
 using HomeBlaze.Services.Lifecycle;
@@ -617,6 +618,86 @@ public class HomeBlazeMcpToolProviderTests
     }
 
     [Fact]
+    public async Task WhenListMethods_ThenTheMethodsExcludedFromAgentsAreLeftOut()
+    {
+        // Arrange
+        var (room, factory) = CreateTestSetup(isReadOnly: false);
+        AddMethod(room, "Everywhere", ExclusionTarget.None, () => { });
+        AddMethod(room, "NotForAgents", ExclusionTarget.Agents, () => { });
+        AddMethod(room, "NotInUserInterface", ExclusionTarget.UserInterface, () => { });
+        var tool = factory.CreateTools().First(t => t.Name == "list_methods");
+
+        // Act
+        var result = await tool.Handler(JsonSerializer.SerializeToElement(new { path = "" }), CancellationToken.None);
+
+        // Assert
+        var names = JsonSerializer.SerializeToElement(result).GetProperty("methods").EnumerateArray()
+            .Select(method => method.GetProperty("name").GetString());
+        Assert.Equal(["Everywhere", "NotInUserInterface"], names);
+    }
+
+    [Fact]
+    public async Task WhenInvokeMethodExcludedFromAgents_ThenItIsNotFoundAndNotInvoked()
+    {
+        // Arrange
+        var (room, factory) = CreateTestSetup(isReadOnly: false);
+        var isInvoked = false;
+        AddMethod(room, "NotForAgents", ExclusionTarget.Agents, () => isInvoked = true);
+
+        // Act
+        var error = await InvokeForErrorAsync(factory, "NotForAgents", parameters: null);
+
+        // Assert
+        Assert.Equal("Method not found: NotForAgents", error);
+        Assert.False(isInvoked);
+    }
+
+    [Fact]
+    public async Task WhenInvokeMethodExcludedFromTheUserInterface_ThenItIsInvoked()
+    {
+        // Arrange
+        var (room, factory) = CreateTestSetup(isReadOnly: false);
+        var isInvoked = false;
+        AddMethod(room, "NotInUserInterface", ExclusionTarget.UserInterface, () => isInvoked = true);
+        var tool = factory.CreateTools().First(t => t.Name == "invoke_operation");
+
+        // Act
+        var input = JsonSerializer.SerializeToElement(new { path = "", method = "NotInUserInterface" });
+        var result = await tool.Handler(input, CancellationToken.None);
+
+        // Assert
+        Assert.True(JsonSerializer.SerializeToElement(result).GetProperty("success").GetBoolean());
+        Assert.True(isInvoked);
+    }
+
+    [Fact]
+    public async Task WhenInvokeMethodWithStringArrayArgument_ThenItIsPassedAsArray()
+    {
+        // Arrange
+        var (room, factory) = CreateTestSetup(isReadOnly: false);
+        object? capturedNames = null;
+        room.TryGetRegisteredSubject()!.AddProperty<MethodMetadata>("SetOrder", _ => new MethodMetadata(arguments =>
+        {
+            capturedNames = arguments?[0];
+            return null;
+        })
+        {
+            Kind = MethodKind.Operation,
+            PropertyName = "SetOrder",
+            Parameters = [new MethodParameter { Name = "names", Type = typeof(string[]) }]
+        });
+        var tool = factory.CreateTools().First(t => t.Name == "invoke_operation");
+
+        // Act
+        var input = JsonSerializer.SerializeToElement(new { path = "", method = "SetOrder", parameters = new { names = new[] { "b", "a" } } });
+        var result = await tool.Handler(input, CancellationToken.None);
+
+        // Assert
+        Assert.True(JsonSerializer.SerializeToElement(result).GetProperty("success").GetBoolean());
+        Assert.Equal(new[] { "b", "a" }, Assert.IsType<string[]>(capturedNames));
+    }
+
+    [Fact]
     public async Task WhenTheCallIsCancelledDuringTheMethod_ThenTheCancellationPropagates()
     {
         // Arrange
@@ -722,8 +803,86 @@ public class HomeBlazeMcpToolProviderTests
         return (room, new McpToolFactory(room, configuration));
     }
 
+    [Fact]
+    public async Task WhenListMethodsWithNotificationParameter_ThenTheSchemaDescribesEachMember()
+    {
+        // Arrange
+        var (room, factory) = CreateTestSetup(isReadOnly: false);
+        AddMethod(room, new MethodMetadata(_ => null)
+        {
+            Kind = MethodKind.Operation,
+            PropertyName = "SendNotification",
+            Parameters = [new MethodParameter { Name = "notification", Type = typeof(Notification) }]
+        });
+
+        // Act
+        var method = await ListMethodAsync(factory, "SendNotification");
+
+        // Assert
+        var schema = method.GetProperty("parameters")[0].GetProperty("schema");
+        var members = schema.GetProperty("properties").EnumerateObject().ToArray();
+        Assert.Equal(["message", "title", "priority", "url", "urlTitle"], members.Select(member => member.Name));
+        Assert.All(members, member => Assert.False(string.IsNullOrEmpty(member.Value.GetProperty("description").GetString())));
+        Assert.Equal(["message"], schema.GetProperty("required").EnumerateArray().Select(name => name.GetString()));
+        Assert.Equal(["Low", "Normal", "High", "Emergency"], members[2].Value.GetProperty("enum").EnumerateArray().Select(value => value.GetString()));
+    }
+
+    [Fact]
+    public async Task WhenInvokeOperationWithNotificationArgument_ThenMembersAreBoundAndTheResultIdIsReturned()
+    {
+        // Arrange
+        var (room, factory) = CreateTestSetup(isReadOnly: false);
+        object? capturedNotification = null;
+        AddMethod(room, new MethodMetadata(arguments =>
+        {
+            capturedNotification = arguments?[0];
+            return Task.FromResult(new NotificationResult { Id = "receipt1" });
+        })
+        {
+            Kind = MethodKind.Operation,
+            PropertyName = "SendNotification",
+            Parameters = [new MethodParameter { Name = "notification", Type = typeof(Notification) }],
+            ResultType = typeof(NotificationResult)
+        });
+
+        var tool = factory.CreateTools().First(t => t.Name == "invoke_operation");
+
+        // Act
+        var input = JsonSerializer.SerializeToElement(new
+        {
+            path = "",
+            method = "SendNotification",
+            parameters = new { notification = new { message = "Door open", priority = "High" } }
+        });
+        var result = await tool.Handler(input, CancellationToken.None);
+
+        // Assert
+        var json = JsonSerializer.SerializeToElement(result);
+        Assert.True(json.GetProperty("success").GetBoolean());
+        Assert.Equal("receipt1", json.GetProperty("result").GetProperty("Id").GetString());
+        var notification = Assert.IsType<Notification>(capturedNotification);
+        Assert.Equal("Door open", notification.Message);
+        Assert.Equal(NotificationPriority.High, notification.Priority);
+        Assert.Null(notification.Title);
+    }
+
     private static void AddMethod(TestThing room, MethodMetadata method) =>
         room.TryGetRegisteredSubject()!.AddProperty<MethodMetadata>(method.PropertyName, _ => method);
+
+    private static void AddMethod(TestThing room, string name, ExclusionTarget excludedFrom, Action invoke)
+    {
+        room.TryGetRegisteredSubject()!.AddProperty<MethodMetadata>(name, _ => new MethodMetadata(_ =>
+        {
+            invoke();
+            return null;
+        })
+        {
+            Kind = MethodKind.Operation,
+            Title = name,
+            PropertyName = name,
+            ExcludedFrom = excludedFrom
+        });
+    }
 
     private static async Task<string> InvokeForErrorAsync(McpToolFactory factory, string methodName, string? parameters, string toolName = "invoke_operation")
     {

@@ -2,7 +2,7 @@
 @inject PropertyWriter Writer
 
 @{
-    // Read once per render and never kept: the reads are what the tracking scope records.
+    // Read once per render and never kept: its render records the reads, so that it renders again when one changes.
     var property = Property;
     var enumType = property is null ? null : EnumChoices.GetEnumType(property.Type);
     UpdateEnumType(enumType);
@@ -39,11 +39,12 @@ else
             {
                 var mapCase = map?.FindCase(name);
                 var icon = MudBlazorIconResolver.ResolveOrNull(mapCase?.Icon);
+                var iconColor = mapCase?.GetColor() ?? ValueColor.Default;
                 <MudSelectItem T="string" Value="@name">
                     <div class="d-flex align-center gap-2">
                         @if (icon is not null)
                         {
-                            <MudIcon Icon="@icon" Color="@mapCase!.Color" Size="Size.Small" />
+                            <MudIcon Icon="@icon" Color="@iconColor.Theme" Style="@iconColor.Style" Size="Size.Small" />
                         }
                         <span>@GetText(name, mapCase)</span>
                     </div>
