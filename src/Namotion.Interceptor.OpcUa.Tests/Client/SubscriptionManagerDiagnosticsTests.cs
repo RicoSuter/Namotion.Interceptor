@@ -63,6 +63,65 @@ public class SubscriptionManagerDiagnosticsTests
     }
 
     [Fact]
+    public async Task WhenTheSdkTransfersTheSameSubscriptionObjects_ThenTheyStayTrackedAndHooked()
+    {
+        // Arrange - after a successful transfer the SDK moves the original Subscription objects into
+        // the new session, so the transferred set is the set already held.
+        var configuration = CreateConfiguration();
+        await using var source = CreateClientSource(configuration: configuration);
+        var propertyWriter = new SubjectPropertyWriter(source, NullLogger.Instance);
+        await using var manager = CreateManager(
+            source,
+            propertyWriter,
+            configuration,
+            new ConcurrentQueue<Exception>());
+        var firstSubscription = new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions());
+        var secondSubscription = new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions());
+        manager.UpdateTransferredSubscriptions([firstSubscription, secondSubscription]);
+
+        // Act
+        manager.UpdateTransferredSubscriptions([firstSubscription, secondSubscription]);
+
+        // Assert
+        Assert.Equal(2, manager.SubscriptionCount);
+        Assert.Contains(firstSubscription, manager.Subscriptions);
+        Assert.Contains(secondSubscription, manager.Subscriptions);
+        Assert.NotNull(firstSubscription.FastDataChangeCallback);
+        Assert.NotNull(secondSubscription.FastDataChangeCallback);
+    }
+
+    [Fact]
+    public async Task WhenOnlySomeSubscriptionsTransfer_ThenTheRecreatedOneReplacesItsOriginal()
+    {
+        // Arrange - a subscription the server refused to transfer comes back as a freshly created
+        // clone, while the others are the original objects.
+        var configuration = CreateConfiguration();
+        await using var source = CreateClientSource(configuration: configuration);
+        var propertyWriter = new SubjectPropertyWriter(source, NullLogger.Instance);
+        await using var manager = CreateManager(
+            source,
+            propertyWriter,
+            configuration,
+            new ConcurrentQueue<Exception>());
+        var keptSubscription = new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions());
+        var replacedSubscription = new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions());
+        var replacementSubscription = new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions());
+        manager.UpdateTransferredSubscriptions([keptSubscription, replacedSubscription]);
+
+        // Act
+        manager.UpdateTransferredSubscriptions([keptSubscription, replacementSubscription]);
+
+        // Assert
+        Assert.Equal(2, manager.SubscriptionCount);
+        Assert.Contains(keptSubscription, manager.Subscriptions);
+        Assert.Contains(replacementSubscription, manager.Subscriptions);
+        Assert.DoesNotContain(replacedSubscription, manager.Subscriptions);
+        Assert.NotNull(keptSubscription.FastDataChangeCallback);
+        Assert.NotNull(replacementSubscription.FastDataChangeCallback);
+        Assert.Null(replacedSubscription.FastDataChangeCallback);
+    }
+
+    [Fact]
     public async Task WhenConversionThrows_ThenSourceReportsExactFailureOnceAndSdkCallbackStillThrows()
     {
         // Arrange

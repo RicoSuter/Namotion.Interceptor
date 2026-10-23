@@ -275,8 +275,9 @@ internal class SubscriptionManager : IAsyncDisposable
     }
 
     /// <summary>
-    /// Updates the subscription list to reference subscriptions transferred by SessionReconnectHandler.
-    /// Called after successful session transfer to embrace OPC Foundation's subscription preservation.
+    /// Replaces the tracked subscriptions with the ones the reconnected session holds. A subscription
+    /// the server accepted for transfer is the same object as before, one it refused is a fresh
+    /// clone, so only the subscriptions missing from the new set are dropped.
     /// </summary>
     public void UpdateTransferredSubscriptions(IReadOnlyCollection<Subscription> transferredSubscriptions)
     {
@@ -288,15 +289,21 @@ internal class SubscriptionManager : IAsyncDisposable
             TryAddSubscription(subscription);
         }
 
+        var removedCount = 0;
         foreach (var oldSubscription in oldSubscriptions)
         {
+            if (transferredSubscriptions.Contains(oldSubscription))
+            {
+                continue;
+            }
+
             TryRemoveSubscription(oldSubscription);
             oldSubscription.FastDataChangeCallback -= OnFastDataChange;
+            removedCount++;
         }
 
-
         _logger.LogInformation("Updated subscription manager with {Count} transferred subscriptions (removed {OldCount} old)",
-            transferredSubscriptions.Count, oldSubscriptions.Length);
+            transferredSubscriptions.Count, removedCount);
     }
 
     internal async Task ApplyChangesAndFilterFailedMonitoredItemsAsync(
