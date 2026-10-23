@@ -232,7 +232,7 @@ public static class ExpressionDisplay
 
             if (rest[1] == '/')
             {
-                return "a path after 'subject/' cannot start with '/'";
+                return "a path starts at the subject and cannot start with '/'";
             }
         }
 
