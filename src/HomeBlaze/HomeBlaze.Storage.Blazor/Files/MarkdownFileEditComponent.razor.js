@@ -1,6 +1,7 @@
-// Decorations and folding ranges of the editors of Markdown, the page editor and the text dialog. The component sends
-// records of six numbers that BlockOutlineDecorations.Create writes (Models/BlockOutlineDecorations.cs): kind, color,
-// start line, start column, end line, end column. The kinds below must stay equal to the constants there.
+// The editors of Markdown, the page editor and the text dialog: the decorations and folding ranges of Monaco, and the
+// text area that stands in for Monaco on a device with a coarse pointer. The component sends records of six numbers that
+// BlockOutlineDecorations.Create writes (Models/BlockOutlineDecorations.cs): kind, color, start line, start column, end
+// line, end column. The kinds below must stay equal to the constants there.
 const SubjectBlock = 0;
 const Expression = 1;
 const Head = 2;
@@ -12,7 +13,119 @@ const RecordLength = 6;
 
 const collections = new WeakMap();
 const foldsByModel = new Map();
+const focusedTextAreas = new WeakSet();
 let changeEmitter = null;
+
+/** Gets whether the primary pointer of the device is coarse, such as a finger, for which Monaco does not work. */
+export function isCoarsePointer() {
+    return matchMedia('(pointer: coarse)').matches;
+}
+
+/**
+ * Takes the editor that has the id now, so that it can be disposed later even when another editor has the id by then.
+ * BlazorMonaco keeps an editor and its model until another editor with the same id is created.
+ * @param {string} editorId The id of the editor of BlazorMonaco.
+ * @returns {{ dispose: () => void }} Disposes the editor together with its model and forgets it.
+ */
+export function own(editorId) {
+    const editor = window.blazorMonaco.editor.getEditor(editorId, true);
+
+    // BlazorMonaco disposes the editor itself when a new editor takes its id first.
+    let isDisposed = false;
+    editor?.onDidDispose(() => isDisposed = true);
+    return {
+        dispose: () => {
+            if (!editor || isDisposed) {
+                return;
+            }
+
+            const editors = window.blazorMonaco.editors;
+            const index = editors.findIndex(holder => holder.editor === editor);
+            if (index >= 0) {
+                editors.splice(index, 1);
+            }
+
+            const model = editor.getModel();
+            editor.dispose();
+            if (model && !model.isDisposed()) {
+                model.dispose();
+            }
+        }
+    };
+}
+
+/**
+ * Starts to remember whether the text area of an editor had the focus, before which it has no cursor of the user.
+ * @param {HTMLTextAreaElement} element The text area.
+ */
+export function watchTextArea(element) {
+    element?.addEventListener('focus', () => focusedTextAreas.add(element), { once: true });
+}
+
+/**
+ * Gets the text of a text area, in which every line ends with a line feed.
+ * @param {HTMLTextAreaElement} element The text area.
+ */
+export function getTextAreaText(element) {
+    return element ? element.value : null;
+}
+
+/**
+ * Replaces the text of a text area.
+ * @param {HTMLTextAreaElement} element The text area.
+ * @param {string} text The new text.
+ */
+export function setTextAreaText(element, text) {
+    if (element) {
+        element.value = text;
+    }
+}
+
+/**
+ * Gets the 1-based line of the cursor of a text area, or null while it never had the focus.
+ * @param {HTMLTextAreaElement} element The text area.
+ */
+export function getTextAreaCursorLine(element) {
+    if (!element || !focusedTextAreas.has(element)) {
+        return null;
+    }
+
+    return element.value.slice(0, element.selectionStart).split('\n').length;
+}
+
+/**
+ * Selects lines of a text area, scrolls their start into view and gives the text area the focus.
+ * @param {HTMLTextAreaElement} element The text area.
+ * @param {number} startLine The 1-based first line.
+ * @param {number} endLine The 1-based last line.
+ */
+export function revealTextArea(element, startLine, endLine) {
+    if (!element) {
+        return;
+    }
+
+    const lines = element.value.split('\n');
+    const start = lines.slice(0, startLine - 1).reduce((offset, line) => offset + line.length + 1, 0);
+    const end = Math.min(element.value.length, lines.slice(0, endLine).reduce((offset, line) => offset + line.length + 1, 0) - 1);
+    element.focus();
+
+    // Backward, so that the browser scrolls to the start of the lines, where the cursor then is.
+    element.setSelectionRange(start, Math.max(start, end), 'backward');
+}
+
+/**
+ * Places the cursor at the end of the text of a text area, scrolls it into view and gives the text area the focus.
+ * @param {HTMLTextAreaElement} element The text area.
+ */
+export function focusTextAreaEnd(element) {
+    if (!element) {
+        return;
+    }
+
+    element.focus();
+    element.setSelectionRange(element.value.length, element.value.length);
+    element.scrollTop = element.scrollHeight;
+}
 
 /**
  * Gets the text of the editor together with the version of its model.
