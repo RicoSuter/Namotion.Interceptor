@@ -1,3 +1,4 @@
+using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Registry.Tests.Models;
@@ -218,5 +219,213 @@ public class AttributeUniquenessTests
         Assert.Contains("'Forward_IsEnabled'", exception.Message);
         Assert.Contains("'Forward_Enabled'", exception.Message);
         Assert.EndsWith("which both attach the attribute 'IsEnabled' to the property 'Forward'.", exception.Message);
+    }
+
+    [Fact]
+    public void WhenGetOrAddAttributeFindsAStaticAttributeProperty_ThenItReturnsThatProperty()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var person = new Person(context);
+        var firstName = person.TryGetRegisteredProperty(p => p!.FirstName)!;
+        var existing = person.TryGetRegisteredProperty(p => p!.FirstName_MaxLength)!;
+        var subjectPropertyCount = ((IInterceptorSubject)person).Properties.Count;
+
+        // Act
+        var attribute = firstName.GetOrAddAttribute("MaxLength", typeof(string), _ => "ignored", null);
+
+        // Assert
+        Assert.Same(existing, attribute);
+        Assert.Equal(123, attribute.GetValue());
+        Assert.Equal(subjectPropertyCount, ((IInterceptorSubject)person).Properties.Count);
+    }
+
+    [Fact]
+    public void WhenGetOrAddAttributeFindsADynamicAttribute_ThenItReturnsThatAttribute()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var person = new Person(context);
+        var firstName = person.TryGetRegisteredProperty(p => p!.FirstName)!;
+        var first = firstName.AddAttribute("Flag", typeof(string), _ => "first", null);
+
+        // Act
+        var attribute = firstName.GetOrAddAttribute("Flag", typeof(string), _ => "second", null);
+
+        // Assert
+        Assert.Same(first, attribute);
+        Assert.Equal("first", attribute.GetValue());
+    }
+
+    [Fact]
+    public void WhenGetOrAddAttributeFindsNoAttribute_ThenItAddsOne()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var person = new Person(context);
+        var firstName = person.TryGetRegisteredProperty(p => p!.FirstName)!;
+
+        // Act
+        var attribute = firstName.GetOrAddAttribute("Flag", typeof(string), _ => "value", null);
+
+        // Assert
+        Assert.True(attribute.IsAttribute);
+        Assert.Equal("Flag", attribute.BrowseName);
+        Assert.Same(attribute, firstName.TryGetAttribute("Flag"));
+        Assert.Equal("value", attribute.GetValue());
+        Assert.True(((IInterceptorSubject)person).Properties.ContainsKey("FirstName@Flag"));
+    }
+
+    [Fact]
+    public void WhenGetOrAddDerivedAttributeFindsAStaticAttributeProperty_ThenItReturnsThatProperty()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var person = new Person(context);
+        var firstName = person.TryGetRegisteredProperty(p => p!.FirstName)!;
+        var existing = person.TryGetRegisteredProperty(p => p!.FirstName_MaxLength)!;
+
+        // Act
+        var attribute = firstName.GetOrAddDerivedAttribute("MaxLength", typeof(int), _ => 1, null);
+
+        // Assert
+        Assert.Same(existing, attribute);
+    }
+
+    [Fact]
+    public void WhenGetOrAddDerivedAttributeFindsADynamicAttribute_ThenItReturnsThatAttribute()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var person = new Person(context);
+        var firstName = person.TryGetRegisteredProperty(p => p!.FirstName)!;
+        var first = firstName.AddAttribute("Flag", typeof(string), _ => "first", null);
+
+        // Act
+        var attribute = firstName.GetOrAddDerivedAttribute("Flag", typeof(string), _ => "second", null);
+
+        // Assert
+        Assert.Same(first, attribute);
+    }
+
+    [Fact]
+    public void WhenGetOrAddDerivedAttributeFindsNoAttribute_ThenItAddsADerivedOne()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var person = new Person(context) { FirstName = "Ann" };
+        var firstName = person.TryGetRegisteredProperty(p => p!.FirstName)!;
+
+        // Act
+        var attribute = firstName.GetOrAddDerivedAttribute("Greeting", typeof(string), _ => "Hi " + person.FirstName, null);
+
+        // Assert
+        Assert.Same(attribute, firstName.TryGetAttribute("Greeting"));
+        Assert.Contains(attribute.ReflectionAttributes, reflectionAttribute => reflectionAttribute is DerivedAttribute);
+        Assert.Equal("Hi Ann", attribute.GetValue());
+    }
+
+    [Fact]
+    public void WhenThreadsGetOrAddTheSameAttributeConcurrently_ThenAllReceiveTheSameInstance()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var person = new Person(context);
+        var firstName = person.TryGetRegisteredProperty(p => p!.FirstName)!;
+
+        const int threadCount = 8;
+        var barrier = new Barrier(threadCount);
+        var results = new RegisteredSubjectProperty[threadCount];
+
+        // Act
+        var threads = new Thread[threadCount];
+        for (var index = 0; index < threadCount; index++)
+        {
+            var slot = index;
+            threads[index] = new Thread(() =>
+            {
+                barrier.SignalAndWait();
+                results[slot] = firstName.GetOrAddAttribute("Flag", typeof(int), _ => slot, null);
+            })
+            {
+                IsBackground = true
+            };
+            threads[index].Start();
+        }
+
+        foreach (var thread in threads)
+        {
+            thread.Join();
+        }
+
+        // Assert
+        Assert.All(results, result => Assert.Same(results[0], result));
+        Assert.Equal(1, firstName.Parent.Properties.Count(p => p.Name == "FirstName@Flag"));
+    }
+
+    [Fact]
+    public void WhenAnInitializerUsesGetOrAddAttribute_ThenReRegistrationKeepsOneAttribute()
+    {
+        // Arrange
+        var initializer = new FlagInitializer(useGetOrAdd: true);
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithService<ISubjectPropertyInitializer>(() => initializer);
+
+        var parent = new Person(context);
+        var child = new Person();
+
+        // Act: attach, detach and attach again, which runs the initializer twice for the child's properties.
+        parent.Mother = child;
+        parent.Mother = null;
+        parent.Mother = child;
+
+        // Assert
+        var firstName = child.TryGetRegisteredProperty(p => p!.FirstName)!;
+        Assert.NotNull(firstName.TryGetAttribute("Flag"));
+        Assert.Equal(1, firstName.Parent.Properties.Count(p => p.Name == "FirstName@Flag"));
+    }
+
+    [Fact]
+    public void WhenAnInitializerUsesAddAttribute_ThenReRegistrationThrows()
+    {
+        // Arrange
+        var initializer = new FlagInitializer(useGetOrAdd: false);
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithService<ISubjectPropertyInitializer>(() => initializer);
+
+        var parent = new Person(context);
+        var child = new Person();
+        parent.Mother = child;
+        parent.Mother = null;
+
+        // Act & Assert: the dynamic attribute survives on the subject, so the second registration finds it.
+        var exception = Assert.Throws<InvalidOperationException>(() => parent.Mother = child);
+        Assert.Equal(
+            "The property 'FirstName' of subject 'Person' already has an attribute named 'Flag' (property 'FirstName@Flag').",
+            exception.Message);
+    }
+
+    private sealed class FlagInitializer(bool useGetOrAdd) : ISubjectPropertyInitializer
+    {
+        public void InitializeProperty(RegisteredSubjectProperty property)
+        {
+            if (property.IsAttribute || property.Name != nameof(Person.FirstName))
+            {
+                return;
+            }
+
+            if (useGetOrAdd)
+            {
+                property.GetOrAddAttribute("Flag", typeof(bool), _ => true, null);
+            }
+            else
+            {
+                property.AddAttribute("Flag", typeof(bool), _ => true, null);
+            }
+        }
     }
 }

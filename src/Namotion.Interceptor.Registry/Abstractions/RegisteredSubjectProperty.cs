@@ -2,6 +2,7 @@
 using System.Collections.Immutable;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Tracking;
 
@@ -314,6 +315,66 @@ public class RegisteredSubjectProperty
                 .ToArray());
 
         return attribute;
+    }
+
+    /// <summary>
+    /// Gets the attribute with the given name, or adds it when the property has none.
+    /// </summary>
+    /// <param name="name">The name of the attribute.</param>
+    /// <param name="type">The type of the attribute, used only when it is added.</param>
+    /// <param name="getValue">The value getter function, used only when it is added.</param>
+    /// <param name="setValue">The value setter action, used only when it is added.</param>
+    /// <param name="attributes">The .NET reflection attributes of the attribute, used only when it is added.</param>
+    /// <returns>The existing or the created attribute property.</returns>
+    /// <remarks>
+    /// An existing attribute is returned unchanged, whatever its type, getter or setter, so a property
+    /// initializer can run again when its subject is re-registered without guarding the call. The lookup and
+    /// the add run under the registry's lock, so concurrent calls for one name return the same attribute.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">The attribute's property name is taken by a property that is not this attribute.</exception>
+    public RegisteredSubjectProperty GetOrAddAttribute(
+        string name, Type type,
+        Func<IInterceptorSubject, object?>? getValue,
+        Action<IInterceptorSubject, object?>? setValue,
+        params Attribute[] attributes)
+    {
+        return Parent.AddPropertyCore(
+            $"{Name}@{name}",
+            type, getValue, setValue,
+            attributes
+                .Concat([new PropertyAttributeAttribute(Name, name)])
+                .ToArray(),
+            returnExistingAttribute: true);
+    }
+
+    /// <summary>
+    /// Gets the attribute with the given name, or adds it as a derived attribute when the property has none.
+    /// </summary>
+    /// <param name="name">The name of the attribute.</param>
+    /// <param name="type">The type of the attribute, used only when it is added.</param>
+    /// <param name="getValue">The value getter function, used only when it is added.</param>
+    /// <param name="setValue">The value setter action, used only when it is added.</param>
+    /// <param name="attributes">The .NET reflection attributes of the attribute, used only when it is added.</param>
+    /// <returns>The existing or the created attribute property.</returns>
+    /// <remarks>
+    /// An existing attribute is returned unchanged, whatever its type, getter or setter, and whether or not it
+    /// is derived. The lookup and the add run under the registry's lock, so concurrent calls for one name return
+    /// the same attribute.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">The attribute's property name is taken by a property that is not this attribute.</exception>
+    public RegisteredSubjectProperty GetOrAddDerivedAttribute(
+        string name, Type type,
+        Func<IInterceptorSubject, object?>? getValue,
+        Action<IInterceptorSubject, object?>? setValue,
+        params Attribute[] attributes)
+    {
+        return Parent.AddPropertyCore(
+            $"{Name}@{name}",
+            type, getValue, setValue,
+            attributes
+                .Concat([new PropertyAttributeAttribute(Name, name), new DerivedAttribute()])
+                .ToArray(),
+            returnExistingAttribute: true);
     }
 
     /// <summary>
