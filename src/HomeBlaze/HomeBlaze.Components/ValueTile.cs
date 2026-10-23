@@ -17,7 +17,7 @@ namespace HomeBlaze.Components;
 public partial class ValueTile : IConfigurable, ITitleProvider
 {
     /// <summary>
-    /// Path of the property whose value the tile shows.
+    /// Path of the property whose value the tile shows, or with a <see cref="Map"/> of a subject whose states the cases of the map read.
     /// </summary>
     [Configuration]
     [SubjectPath]

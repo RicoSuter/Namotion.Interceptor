@@ -35,7 +35,7 @@ A case with `When` matches while its condition is true. A condition is an expres
 - **`value`**: the value the widget shows, with its unit, such as the charging power of a tile with `Path=../Charger/ChargingPower`.
 - **`subject`**: the subject the value belongs to, such as the charger. `subject/IsCharging` reads another state of it. When the `Path` of the widget leads to a subject itself, such as `Path=../Charger`, `subject` is that subject and there is no `value`.
 
-Every other path resolves from the page that holds the map, so a map on a shared page reads the same subjects for every page that uses it. A case with `Value` and `When` needs both. A case with neither is the default case: it matches every value and must be the last case. The text of a case can show values with expressions between double braces, such as `Text="{{ subject/ChargingPower }}"`, with the pipes `display` and `raw`.
+Every other path resolves from the page that holds the map, so a map on a shared page reads the same subjects for every page that uses it. A case with `Value` and `When` needs both. A case with neither is the default case: it matches every value and must be the last case. `When` is written without braces and takes no pipes. The text of a case can show values with expressions between double braces, such as `Text="{{ subject/ChargingPower }}"`, with the pipes `display` and `raw`, but not with the pipe `map`.
 
 ## Samples
 
@@ -192,7 +192,7 @@ A map for ranges of a number. The speed of the fan is green up to 700 RPM and ye
 :::: HomeBlaze.Components.ValueTile Kind=Tile Path=../Fan/CurrentSpeed Map=fanrange Label="Fan speed"
 ::
 
-A map for the state of a subject. The tile has the fan itself as its path, so its cases read the states of the fan, and the first case shows its speed in its text:
+A map for the state of a subject. The tile has the fan itself as its path, so its cases read the states of the fan, and the second case shows its speed in its text:
 
 <!-- sample: live -->
 ~~~~markdown
@@ -223,8 +223,8 @@ A map for the state of a subject. The tile has the fan itself as its path, so it
 
 - **How a widget refers to a map**: With `Map=motorstate`, the name of the block, on the same page. The pages of the other widgets refer to the map of this page as `Map=../value-map.md/motorstate`: `..` is the folder of the page, `value-map.md` the page in it and `motorstate` the name of the block. A map on another page is reached through that page. For a page `Shared.md` in the folder `Demo`, which you have made yourself and which has a map named `motorstate`, that is `Map=/Demo/Shared.md/motorstate`. This works for a map that stands directly on that page, see [Paths on Markdown Pages](../paths.md#paths-on-markdown-pages).
 - **Which case is used**: A case matches when its `Value`, when set, equals the raw text of the value without regard to upper and lower case, and its `When`, when set, is true. The raw text is what the pipe `raw` of an expression shows: `True` and `False` for a boolean, the name for an enum value, a number with a dot as the decimal separator. The first case that matches is used.
-- **No case**: A value without a case keeps the formatted text, the default color and the icon of the widget. A case without `Text` keeps the formatted text of the value. A path that leads nowhere tries no case and shows `–`. A missing value is matched only by a condition or the default case.
-- **The default case**: A case without `Value` and `When` matches every value and must be the last case. Before other cases it gives the error `Case 1 has no Value and no When, so it matches every value and the cases after it never match. Make it the last case.`
+- **No case**: A value without a case keeps the formatted text, the default color and the icon of the widget. A case without `Text` keeps the formatted text of the value. A path that leads nowhere tries no case and shows `–`. A missing value is matched by a condition that does not need the value, such as `subject/IsPowered`, or by the default case.
+- **The default case**: A case without `Value` and `When` is the default case, see [Conditions](#conditions). Before other cases it gives the error `Case 1 has no Value and no When, so it matches every value and the cases after it never match. Make it the last case.`
 - **A condition that cannot be decided**: A missing value makes a condition unknown, and an unknown condition does not match, so the next case is tried, see [Conditions](../pages.md#conditions).
 - **In the text of a page**: The pipe `map` shows the text of the matched case in place of a value, such as `{{ mymotor/Status | map:motorstate }}`, see [Pipes](../pages.md#pipes).
 - **Color and icon**: What a case changes depends on the widget, see its page. In a row of a `ValueList` and in a `ValueTile` the case gives the value its text and color and replaces the icon of the row or the tile. An `Indicator` takes text, color and icon. A `Gauge` takes the text in the center and the color of the ring. A `Select` shows the text and the icon of the case for each value, the icon in the color of the case. A column of a `SubjectTable` gives its cells the text and color. A `Control` hands its map to the select, the indicator or the value row that it chooses.

@@ -14,7 +14,7 @@ namespace HomeBlaze.Components;
 public partial class ValueRow : IConfigurable
 {
     /// <summary>
-    /// Path of the property whose value the row shows. Optional when the row has content.
+    /// Path of the property whose value the row shows, or with a <see cref="Map"/> of a subject whose states the cases of the map read. Optional when the row has content.
     /// </summary>
     [Configuration]
     [SubjectPath]

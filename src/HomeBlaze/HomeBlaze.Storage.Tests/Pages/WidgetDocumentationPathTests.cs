@@ -92,12 +92,15 @@ public class WidgetDocumentationPathTests : IClassFixture<AdministrationFolderFi
         }
     }
 
-    // The same lookups as the widgets do: a path without a subject type ends at a property. With a Map it may also
-    // end at a subject, which the cases of the map read as 'subject'.
+    // The widgets that show the value of their path, and so may lead it to a subject when they have a Map.
+    private static readonly HashSet<Type> ValueWidgets = [typeof(ValueTile), typeof(ValueRow), typeof(Indicator)];
+
+    // The same lookups as the widgets do: a path without a subject type ends at a property. With a Map a value widget
+    // may also end at a subject, which the cases of the map read as 'subject'.
     private static bool LeadsToTarget(WidgetPath path, IInterceptorSubject subject, SubjectPathResolver resolver) =>
         path.SubjectType is null
             ? resolver.ResolveScopedProperty(path.Text, PathStyle.Canonical, subject) is not null ||
-              (HasMap(subject) && resolver.ResolveScopedSubject(path.Text, PathStyle.Canonical, subject) is not null)
+              (ValueWidgets.Contains(subject.GetType()) && HasMap(subject) && resolver.ResolveScopedSubject(path.Text, PathStyle.Canonical, subject) is not null)
             : path.SubjectType.IsInstanceOfType(resolver.ResolveScopedSubject(path.Text, PathStyle.Canonical, subject));
 
     private static bool HasMap(IInterceptorSubject subject) =>
