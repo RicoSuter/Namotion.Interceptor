@@ -16,7 +16,7 @@ The `Installation` subject shows which HomeBlaze version runs, how it was built,
 | `DataDirectory`, `DataVolumeFreeSpace`, `DataVolumeTotalSize`, `DataVolumeUsage` | The data folder and the free space, total size and usage of its volume, refreshed every `PollingInterval` (30 seconds by default) |
 | `ConnectedCircuitCount` | The open browser tabs, updated at once |
 | `SubjectCount`, `PropertyCount`, `StatePropertyCount`, `ConfigurationPropertyCount` | The subjects of the graph and their properties: all registered ones, including attributes and methods, and those with state or configuration; refreshed every `PollingInterval` |
-| `OperationCount`, `QueryCount`, `NotificationPublisherCount` | The operations and queries of all subjects, and the subjects that can receive a notification, clients included; refreshed every `PollingInterval` |
+| `OperationCount`, `QueryCount` | The operations and queries of all subjects; refreshed every `PollingInterval` |
 | `Clients` | The browsers connected to this installation and the named ones, see [Clients](#clients) |
 | `UpdateAvailable` | Whether a newer release exists or, for an edge build, whether its branch has newer commits; empty until the first successful check, and stays empty when the running version of a release is not a semantic version or GitHub cannot compare the commit of an edge build with its branch |
 | `LatestVersion`, `LatestReleaseDate`, `LatestReleaseUrl` | The latest release, only checked for release builds |

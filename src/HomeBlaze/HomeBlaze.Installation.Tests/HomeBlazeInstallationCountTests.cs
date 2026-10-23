@@ -20,7 +20,6 @@ public class HomeBlazeInstallationCountTests
         // Assert
         Assert.Null(installation.SubjectCount);
         Assert.Null(installation.StatePropertyCount);
-        Assert.Null(installation.NotificationPublisherCount);
     }
 
     [Fact]
@@ -37,7 +36,6 @@ public class HomeBlazeInstallationCountTests
         var configurations = installation.ConfigurationPropertyCount!.Value;
         var operations = installation.OperationCount!.Value;
         var queries = installation.QueryCount!.Value;
-        var publishers = installation.NotificationPublisherCount!.Value;
 
         // Act
         root.Device = new TestDevice();
@@ -51,7 +49,6 @@ public class HomeBlazeInstallationCountTests
         // Reset and the SendNotification operation of INotificationPublisher.
         Assert.Equal(operations + 2, installation.OperationCount);
         Assert.Equal(queries + 1, installation.QueryCount);
-        Assert.Equal(publishers + 1, installation.NotificationPublisherCount);
     }
 
     [Fact]

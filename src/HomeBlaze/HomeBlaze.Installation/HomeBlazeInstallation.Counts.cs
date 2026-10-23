@@ -1,5 +1,4 @@
 using HomeBlaze.Abstractions;
-using HomeBlaze.Abstractions.Messaging;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Services;
 using Namotion.Interceptor;
@@ -17,15 +16,10 @@ public partial class HomeBlazeInstallation
             return;
         }
 
-        int subjects = 0, properties = 0, states = 0, configurations = 0, operations = 0, queries = 0, publishers = 0;
-        foreach (var (subject, registered) in registry.KnownSubjects)
+        int subjects = 0, properties = 0, states = 0, configurations = 0, operations = 0, queries = 0;
+        foreach (var (_, registered) in registry.KnownSubjects)
         {
             subjects++;
-            if (subject is INotificationPublisher)
-            {
-                publishers++;
-            }
-
             var subjectProperties = registered.Properties;
             properties += subjectProperties.Length;
             foreach (var property in subjectProperties)
@@ -64,7 +58,6 @@ public partial class HomeBlazeInstallation
         ConfigurationPropertyCount = configurations;
         OperationCount = operations;
         QueryCount = queries;
-        NotificationPublisherCount = publishers;
     }
 
     // Reads the value of interface and object typed properties, so the getter of any subject runs here; one that throws

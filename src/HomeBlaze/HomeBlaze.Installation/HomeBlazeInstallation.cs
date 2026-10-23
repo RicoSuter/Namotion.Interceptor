@@ -161,10 +161,6 @@ public partial class HomeBlazeInstallation : BackgroundService,
     [Category("Runtime")]
     public partial int? QueryCount { get; internal set; }
 
-    [State(Position = 447)]
-    [Category("Runtime")]
-    public partial int? NotificationPublisherCount { get; internal set; }
-
     // Update
 
     /// <summary>
@@ -305,7 +301,6 @@ public partial class HomeBlazeInstallation : BackgroundService,
         ConfigurationPropertyCount = null;
         OperationCount = null;
         QueryCount = null;
-        NotificationPublisherCount = null;
         ConnectedCircuitCount = 0;
 
         UpdateAvailable = null;
