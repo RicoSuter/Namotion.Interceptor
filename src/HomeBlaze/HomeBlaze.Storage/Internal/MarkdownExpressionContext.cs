@@ -4,15 +4,14 @@ using HomeBlaze.Components.Abstractions.TimeZones;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Display;
 using HomeBlaze.Services.Expressions;
-using HomeBlaze.Storage.Pages;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry.Abstractions;
 
 namespace HomeBlaze.Storage.Internal;
 
 /// <summary>
-/// Evaluates an expression in the text of a page: a path resolves from the page like the path of a widget, and the pipes
-/// are those that <see cref="MarkdownExpressions"/> accepts. Created on the stack for one evaluation.
+/// Evaluates an expression in the text of a page: a path resolves from the page like the path of a widget, the pipes
+/// are those of <see cref="ExpressionDisplay"/>, and <c>map</c> applies a value map that the page names. Created on the stack for one evaluation.
 /// </summary>
 internal readonly struct MarkdownExpressionContext(
     SubjectPathResolver pathResolver,
@@ -35,29 +34,40 @@ internal readonly struct MarkdownExpressionContext(
         return property is null ? ExpressionValue.Missing : ExpressionValue.FromProperty(property, property.GetValue());
     }
 
+    // The text of a page binds no variable, and MarkdownExpressions refuses one before an expression is evaluated.
+    public ExpressionValue ResolveVariable(string variable, string? memberPath) => ExpressionValue.Missing;
+
     public ExpressionValue ApplyPipe(string name, ImmutableArray<string> arguments, ExpressionValue input) =>
-        ExpressionValue.FromText(name.Equals(MarkdownExpressions.RawPipe, StringComparison.OrdinalIgnoreCase)
-            ? input.IsText ? (string)input.Value! : RawValueFormatter.Format(input.Value)
-            : ToText(input));
+        name.Equals(ExpressionDisplay.MapPipe, StringComparison.OrdinalIgnoreCase)
+            ? ApplyMap(arguments[0], input)
+            : ExpressionDisplay.ApplyFormat(name, input, timeZone);
 
-    /// <summary>
-    /// Gets the text of a result: the text of a pipe as it is, otherwise the value formatted for display with the unit of
-    /// its property, and an empty text for a missing value.
-    /// </summary>
-    public string ToText(ExpressionValue result)
+    // The name of the map resolves from the page, like the Map of a widget. A value without a matching case keeps its text.
+    private ExpressionValue ApplyMap(string mapName, ExpressionValue input)
     {
-        if (result.IsText)
+        IInterceptorSubject? map;
+        try
         {
-            return (string)result.Value!;
+            map = pathResolver.ResolveScopedSubject(mapName, PathStyle.Canonical, page);
+        }
+        catch
+        {
+            map = null;
         }
 
-        if (result.Value is not { } value)
+        if (map is not IValueMap valueMap)
         {
-            return string.Empty;
+            return ExpressionValue.FromText($"Cannot resolve map: {mapName}");
         }
 
-        return result.Property is { } property
-            ? property.GetPropertyDisplayValue(value, timeZone)
-            : StateUnitExtensions.FormatDisplayValue(value, timeZone);
+        if (valueMap.GetError() is { } error)
+        {
+            return ExpressionValue.FromText(error);
+        }
+
+        var binding = ValueBinding.FromExpressionValue(input);
+        return ExpressionValue.FromText(valueMap.GetText(binding, pathResolver, timeZone) ?? ToText(input));
     }
+
+    public string ToText(ExpressionValue result) => ExpressionDisplay.ToText(result, timeZone);
 }

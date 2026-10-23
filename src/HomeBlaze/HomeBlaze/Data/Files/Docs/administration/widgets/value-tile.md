@@ -11,7 +11,7 @@ A box or a tile with a label and one large value. Type name: `HomeBlaze.Componen
 
 | Argument | Kind of value | Default | Meaning |
 |----------|---------------|---------|---------|
-| `Path` | Path (Value) | None | The [path](basics.md#paths) of the property whose value the tile shows |
+| `Path` | Path (Value) | None | The [path](basics.md#paths) of the property whose value the tile shows, or with a `Map` of a subject whose states the cases read, see [ValueMap](value-map.md#conditions) |
 | `Label` | Text | From the property, see [Labels](basics.md#labels) | The small text above the value of a box and below the value of a tile |
 | `Icon` | Text | None | The [icon](basics.md#icons) next to the label of a box and above the value of a tile. The icon of a matched case replaces it |
 | `Map` | Name or path of a `ValueMap` | None | The map that gives the value its text, color and icon, see [ValueMap](value-map.md). A box takes the color of the matched case for the value, a tile is filled with it |

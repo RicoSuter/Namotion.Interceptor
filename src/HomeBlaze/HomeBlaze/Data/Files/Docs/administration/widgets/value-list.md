@@ -21,7 +21,7 @@ The arguments of a `Value` block:
 
 | Argument | Kind of value | Default | Meaning |
 |----------|---------------|---------|---------|
-| `Path` | Path (Value) | None | The [path](basics.md#paths) of the property whose value the row shows. A row with content needs none |
+| `Path` | Path (Value) | None | The [path](basics.md#paths) of the property whose value the row shows, or with a `Map` of a subject whose states the cases read, see [ValueMap](value-map.md#conditions). A row with content needs none |
 | `Label` | Text | From the property, see [Labels](basics.md#labels) | The label of the row |
 | `Icon` | Text | None | The [icon](basics.md#icons) at the start of the row |
 | `Map` | Name or path of a `ValueMap` | None | The map that gives the value its text, color and icon, see [ValueMap](value-map.md) |

@@ -15,7 +15,9 @@ internal static class ExpressionEvaluator
                 return ExpressionValue.FromValue(literal.Value);
 
             case PathNode path:
-                return context.ResolvePath(path.Path);
+                return path.Variable is { } variable
+                    ? context.ResolveVariable(variable, path.MemberPath)
+                    : context.ResolvePath(path.Path);
 
             default:
                 return ExpressionValue.FromBoolean(EvaluateTruth(node, ref context));

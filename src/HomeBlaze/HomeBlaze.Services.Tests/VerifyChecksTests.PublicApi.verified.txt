@@ -155,6 +155,7 @@ namespace HomeBlaze.Services
     public static class SubjectPathResolverExtensions
     {
         public static Namotion.Interceptor.IInterceptorSubject? FindChildByIndex(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, string indexStr) { }
+        public static Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? ResolveDisplayablePropertyFrom(this HomeBlaze.Services.SubjectPathResolver resolver, string path, HomeBlaze.Abstractions.PathStyle style, Namotion.Interceptor.IInterceptorSubject from) { }
         public static object? ResolveValue(this HomeBlaze.Services.SubjectPathResolver resolver, string path, HomeBlaze.Abstractions.PathStyle style, Namotion.Interceptor.IInterceptorSubject? relativeTo = null) { }
     }
     public static class SubjectPathResolverScopeExtensions
@@ -331,6 +332,24 @@ namespace HomeBlaze.Services.Diagnostics
 }
 namespace HomeBlaze.Services.Display
 {
+    public static class ExpressionDisplay
+    {
+        public const string MapPipe = "map";
+        public static HomeBlaze.Services.Expressions.ExpressionValue ApplyFormat(string name, HomeBlaze.Services.Expressions.ExpressionValue input, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone) { }
+        public static string? Check(HomeBlaze.Services.Expressions.ParsedExpression expression, HomeBlaze.Services.Display.ExpressionUse use) { }
+        public static string ToText(HomeBlaze.Services.Expressions.ExpressionValue result, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone) { }
+    }
+    public enum ExpressionUse
+    {
+        PageText = 0,
+        CaseText = 1,
+        CaseCondition = 2,
+    }
+    public interface IValueMap
+    {
+        string? GetError();
+        string? GetText(in HomeBlaze.Services.Display.ValueBinding binding, HomeBlaze.Services.SubjectPathResolver resolver, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone);
+    }
     public static class RawValueFormatter
     {
         public static string Format(object? value) { }
@@ -347,6 +366,17 @@ namespace HomeBlaze.Services.Display
         public static System.ValueTuple<string, bool>? GetUnitInfo(HomeBlaze.Abstractions.Attributes.StateUnit unit) { }
         public static string? GetUnitSuffix(HomeBlaze.Abstractions.Attributes.StateUnit unit) { }
         public static bool TryGetScaledUnit(HomeBlaze.Abstractions.Attributes.StateUnit unit, decimal magnitude, out string suffix, out decimal factor) { }
+    }
+    public readonly struct ValueBinding
+    {
+        public ValueBinding(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? property, object? value, Namotion.Interceptor.IInterceptorSubject? subject) { }
+        public bool IsEmpty { get; }
+        public Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? Property { get; }
+        public Namotion.Interceptor.IInterceptorSubject? Subject { get; }
+        public object? Value { get; }
+        public static HomeBlaze.Services.Display.ValueBinding FromExpressionValue(HomeBlaze.Services.Expressions.ExpressionValue result) { }
+        public static HomeBlaze.Services.Display.ValueBinding FromPath(HomeBlaze.Services.SubjectPathResolver resolver, Namotion.Interceptor.IInterceptorSubject from, string? path) { }
+        public static HomeBlaze.Services.Display.ValueBinding FromProperty(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
     }
 }
 namespace HomeBlaze.Services.Expressions
@@ -379,6 +409,8 @@ namespace HomeBlaze.Services.Expressions
     {
         HomeBlaze.Services.Expressions.ExpressionValue ApplyPipe(string name, System.Collections.Immutable.ImmutableArray<string> arguments, HomeBlaze.Services.Expressions.ExpressionValue input);
         HomeBlaze.Services.Expressions.ExpressionValue ResolvePath(string path);
+        HomeBlaze.Services.Expressions.ExpressionValue ResolveVariable(string variable, string? memberPath);
+        string ToText(HomeBlaze.Services.Expressions.ExpressionValue result);
     }
     public sealed class ParsedExpression
     {
@@ -393,6 +425,14 @@ namespace HomeBlaze.Services.Expressions
         public HomeBlaze.Services.Expressions.ExpressionValue EvaluateWithoutPipes<TContext>(ref TContext context)
             where TContext :  struct, HomeBlaze.Services.Expressions.IExpressionContext { }
         public static bool TryParse(string text, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out HomeBlaze.Services.Expressions.ParsedExpression? expression, [System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out string? error) { }
+    }
+    public sealed class TextTemplate
+    {
+        public System.Collections.Immutable.ImmutableArray<HomeBlaze.Services.Expressions.ParsedExpression> Expressions { get; }
+        public string Text { get; }
+        public string Render<TContext>(ref TContext context)
+            where TContext :  struct, HomeBlaze.Services.Expressions.IExpressionContext { }
+        public static bool TryParse(string text, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out HomeBlaze.Services.Expressions.TextTemplate? template, [System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out string? error) { }
     }
 }
 namespace HomeBlaze.Services.Lifecycle

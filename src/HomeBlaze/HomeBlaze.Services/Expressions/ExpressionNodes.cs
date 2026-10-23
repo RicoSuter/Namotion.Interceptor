@@ -10,9 +10,28 @@ internal sealed class LiteralNode(object? value) : ExpressionNode
     public object? Value { get; } = value;
 }
 
-internal sealed class PathNode(string path) : ExpressionNode
+internal sealed class PathNode : ExpressionNode
 {
-    public string Path { get; } = path;
+    public PathNode(string path)
+    {
+        Path = path;
+        if (ExpressionVariables.TryGetVariable(path, out var variable))
+        {
+            Variable = variable;
+            // Split once here, so that an evaluation allocates no part of the path.
+            MemberPath = path.Length == variable.Length
+                ? null
+                : path[variable.Length] == '/' ? path[(variable.Length + 1)..] : path[variable.Length..];
+        }
+    }
+
+    public string Path { get; }
+
+    /// <summary>The variable the path starts with, or null.</summary>
+    public string? Variable { get; }
+
+    /// <summary>The rest of the path after the variable and its slash, or null for the variable alone or a path without one.</summary>
+    public string? MemberPath { get; }
 }
 
 internal sealed class NotNode(ExpressionNode operand) : ExpressionNode
