@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 using System.Text.Json.Serialization;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
+using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Registry.Abstractions;
@@ -264,6 +265,8 @@ public class RegisteredSubject
     /// <param name="setValue">The set method.</param>
     /// <param name="attributes">The custom attributes.</param>
     /// <returns>The property.</returns>
+    /// <exception cref="InvalidOperationException">The subject already has a property with this name, or an attribute
+    /// with the same property and attribute name. Neither the subject nor the registry changes in that case.</exception>
     public RegisteredSubjectProperty AddDerivedProperty<TProperty>(string name, 
         Func<IInterceptorSubject, TProperty?>? getValue,
         Action<IInterceptorSubject, TProperty?>? setValue = null,
@@ -283,6 +286,8 @@ public class RegisteredSubject
     /// <param name="setValue">The set method.</param>
     /// <param name="attributes">The custom attributes.</param>
     /// <returns>The property.</returns>
+    /// <exception cref="InvalidOperationException">The subject already has a property with this name, or an attribute
+    /// with the same property and attribute name. Neither the subject nor the registry changes in that case.</exception>
     public RegisteredSubjectProperty AddProperty<TProperty>(string name, 
         Func<IInterceptorSubject, TProperty?>? getValue,
         Action<IInterceptorSubject, TProperty?>? setValue = null,
@@ -303,6 +308,8 @@ public class RegisteredSubject
     /// <param name="setValue">The set method.</param>
     /// <param name="attributes">The custom attributes.</param>
     /// <returns>The property.</returns>
+    /// <exception cref="InvalidOperationException">The subject already has a property with this name, or an attribute
+    /// with the same property and attribute name. Neither the subject nor the registry changes in that case.</exception>
     public RegisteredSubjectProperty AddDerivedProperty(string name, 
         Type type,
         Func<IInterceptorSubject, object?>? getValue,
@@ -322,6 +329,9 @@ public class RegisteredSubject
     /// <param name="setValue">The set method.</param>
     /// <param name="attributes">The custom attributes.</param>
     /// <returns>The property.</returns>
+    /// <exception cref="InvalidOperationException">The subject already has a property with this name, or
+    /// <paramref name="attributes"/> carries a <see cref="PropertyAttributeAttribute"/> whose property already
+    /// has an attribute with that attribute name. Neither the subject nor the registry changes in that case.</exception>
     public RegisteredSubjectProperty AddProperty(
         string name,
         Type type,
@@ -329,36 +339,64 @@ public class RegisteredSubject
         Action<IInterceptorSubject, object?>? setValue,
         params Attribute[] attributes)
     {
-        Subject.AddProperties(new SubjectPropertyMetadata(
+        return AddPropertyCore(name, type, getValue, setValue, attributes, returnExistingAttribute: false);
+    }
+
+    /// <summary>
+    /// Adds the property, or, with <paramref name="returnExistingAttribute"/>, returns the attribute that
+    /// already provides the same property and attribute name pair instead of throwing.
+    /// </summary>
+    internal RegisteredSubjectProperty AddPropertyCore(
+        string name,
+        Type type,
+        Func<IInterceptorSubject, object?>? getValue,
+        Action<IInterceptorSubject, object?>? setValue,
+        Attribute[] attributes,
+        bool returnExistingAttribute)
+    {
+        var subjectProperty = new RegisteredSubjectProperty(this, name, type, attributes);
+        var metadata = new SubjectPropertyMetadata(
             name,
             type,
             attributes,
             getValue is not null ? s => ((IInterceptorExecutor)s.Context).GetPropertyValue(name, getValue) : null,
             setValue is not null ? (s, v) => ((IInterceptorExecutor)s.Context).SetPropertyValue(name, v, getValue?.Invoke(s), setValue) : null,
             isIntercepted: true,
-            isDynamic: true));
+            isDynamic: true);
 
-        var property = AddPropertyInternal(name, type, attributes);
-
-        // Fires a null→value transition for lifecycle tracking of subject-valued initial values.
-        // TODO(perf): For derived-with-setter this re-enters RecalculateDerivedProperty (total
-        // 3 getter invocations: AttachProperty + invoke below + recalc), but AttachProperty has
-        // already seeded LastKnownValue. Consider a dedicated lifecycle notification for derived,
-        // or passing currentValue so PropertyValueEqualityCheckHandler short-circuits the write.
-        property.Reference.SetPropertyValueWithInterception(getValue?.Invoke(Subject) ?? null,
-            null, delegate { });
-
-        return property;
-    }
-
-    private RegisteredSubjectProperty AddPropertyInternal(string name, Type type, Attribute[] attributes)
-    {
-        var subjectProperty = new RegisteredSubjectProperty(this, name, type, attributes);
-
+        // Lock order: _lock first, then the subject's SyncRoot inside AddProperties. Nothing that
+        // holds SyncRoot calls back into the registry, so this order must not be inverted.
         lock (_lock)
         {
+            // The pair check runs before the name check so that a get-or-add finds an attribute
+            // registered under this very name instead of failing on the name.
+            if (subjectProperty.IsAttribute)
+            {
+                var attributeMetadata = subjectProperty.AttributeMetadata;
+                var existingAttribute = TryGetPropertyAttribute(attributeMetadata.PropertyName, attributeMetadata.AttributeName);
+                if (existingAttribute is not null)
+                {
+                    if (returnExistingAttribute)
+                    {
+                        return existingAttribute;
+                    }
+
+                    throw new InvalidOperationException(
+                        $"The property '{attributeMetadata.PropertyName}' of subject '{Subject.GetType().Name}' " +
+                        $"already has an attribute named '{attributeMetadata.AttributeName}' (property '{existingAttribute.Name}').");
+                }
+            }
+
+            if (_properties.ContainsKey(name))
+            {
+                throw new InvalidOperationException(
+                    $"The subject '{Subject.GetType().Name}' already has a property named '{name}'.");
+            }
+
+            Subject.AddProperties(metadata);
+
             var newProperties = _properties
-                .Append(KeyValuePair.Create(subjectProperty.Name, subjectProperty))
+                .Append(KeyValuePair.Create(name, subjectProperty))
                 .ToFrozenDictionary(p => p.Key, p => p.Value);
 
             _properties = newProperties;
@@ -370,6 +408,15 @@ public class RegisteredSubject
         }
 
         Subject.AttachSubjectProperty(subjectProperty.Reference);
+
+        // Fires a null→value transition for lifecycle tracking of subject-valued initial values.
+        // TODO(perf): For derived-with-setter this re-enters RecalculateDerivedProperty (total
+        // 3 getter invocations: AttachProperty + invoke below + recalc), but AttachProperty has
+        // already seeded LastKnownValue. Consider a dedicated lifecycle notification for derived,
+        // or passing currentValue so PropertyValueEqualityCheckHandler short-circuits the write.
+        subjectProperty.Reference.SetPropertyValueWithInterception(getValue?.Invoke(Subject) ?? null,
+            null, delegate { });
+
         return subjectProperty;
     }
 }
