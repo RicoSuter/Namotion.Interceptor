@@ -77,7 +77,7 @@ Moving a definition into JSON reuses the same domain type and configuration sche
 
 Typed relationships are structured metadata, with a kind and target reference and optional descriptive data such as technology or a label. Their source defaults to the owning subject: page metadata originates at the document, while child-scoped service metadata originates at that service. A typed reader exposes those entries to graph queries and widgets. Analyzer-produced relationships remain discovered state with provenance. Authored relationship edits reconcile the effective graph through the same change-driven pattern; they do not require independent relationship JSON files.
 
-An ordinary Markdown link can establish a document reference when a later analyzer supports it, but a link alone does not assert a runtime dependency. A general Markdown extraction-rule engine is deferred; structured frontmatter and the existing subject blocks provide explicit authoring for the MVP.
+Supported ordinary Markdown links should supply a planned reference index for backlinks, [impact exploration](../widgets/impact-view.md), and reference-validation findings. A link alone does not assert a runtime dependency or establish the truth of surrounding prose. Target mapping, source locations, and index invalidation need implementation. A general Markdown prose-extraction rule engine remains deferred; structured frontmatter and existing subject blocks provide explicit architectural authoring independently of it. MVP inclusion is still open.
 
 ## Related specifications
 

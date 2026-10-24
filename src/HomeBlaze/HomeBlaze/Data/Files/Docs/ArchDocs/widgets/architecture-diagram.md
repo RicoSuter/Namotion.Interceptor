@@ -6,7 +6,7 @@ status: Planned
 
 # Architecture Diagrams [Planned]
 
-Render service, component, context, or deployment views without fixing a documentation format.
+Render service, component, context, dependency, scenario, or deployment views without fixing a documentation format.
 
 ## Widget entry points [Proposed]
 
@@ -18,8 +18,10 @@ Use separate author-facing widgets with configurations appropriate to each view.
 | [ComponentDiagram](component-diagram.md) | A Service's [Components](../subjects/component.md), such as [Hosts](../subjects/host.md) and [Resources](../subjects/resource.md) | Service reference and optional component queries |
 | [ContextDiagram](context-diagram.md) | Internal/external Services and optional [Actors](../subjects/actor.md) | Explicit boundary selections per view |
 | [DeploymentDiagram](deployment-diagram.md) | [Environments](../subjects/environment.md), [Deployments](../subjects/deployment.md), and [DeploymentUnits](../subjects/deployment-unit.md) | Environment selections and available bindings |
+| [DependencyDiagram](dependency-diagram.md) | Discovered [CodeProject](../subjects/code-project.md) references, optionally grouped by Service or explicit layer/module queries | Project scope and optional group definitions |
+| [ScenarioDiagram](scenario-diagram.md) | Authored ordered interactions referring to shared graph participants | Explicit participant references and steps |
 
-These are proposed names and schemas, all unimplemented. The earlier single ArchitectureDiagram with a View parameter is replaced in the examples by these proposed entry points; no compatibility alias is required for an unimplemented component. This page owns their common behavior, not a second public configuration schema or a domain subject. Renderer selection and whether specialized views share one renderer or several remain open.
+These are proposed names and schemas, all unimplemented. This page owns common graph presentation behavior, not a second public configuration schema or a domain subject. Renderer selection and whether specialized views share one renderer or several remain open; sequence rendering can have different needs from static graph layout. [ImpactView](impact-view.md) can use a graph, table, or list, and [architecture-check findings](architecture-check-results.md) can annotate compatible diagrams without becoming another independent architecture model.
 
 ## Implementation readiness
 
@@ -35,7 +37,7 @@ Manual layout belongs to the document/view; semantic connections belong to share
 
 ## Runtime and deployment limits [Planned]
 
-Runtime sequences need authored scenarios. Complete deployment views need environment bindings and infrastructure mappings. Ordinary arc42 headings do not add missing graph facts. Actors are optional until their model is selected.
+Runtime sequences need authored scenarios; the proposed ScenarioDiagram supplies linked participants and explicit steps rather than inferring order from dependencies. Complete deployment views need environment bindings and infrastructure mappings. Ordinary arc42 headings do not add missing graph facts. Actors are optional until their model is selected.
 
 ## Context boundaries [Planned]
 

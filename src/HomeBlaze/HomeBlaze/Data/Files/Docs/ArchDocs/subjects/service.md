@@ -45,7 +45,7 @@ Selectors follow [path queries](../shared/path-queries.md). Description and arch
 
 **Summary widget:** title/description, relevant component and Contract/Interface information, and deployment navigation. Reuse the same compact summary when explicitly embedded in Markdown, referenced by a canvas node, or shown in an aggregate view.
 
-**Detail page:** explore selected Hosts/projects, Resources, Interfaces, relationships, diagnostics, provenance, and related Deployments without copying their facts into the page.
+**Detail page:** explore selected Hosts/projects, Resources, Interfaces, relationships, diagnostics, provenance, and related Deployments without copying their facts into the page. Reuse available [architecture-check findings](../shared/architecture-checks.md) and supported documentation backlinks; the same memberships feed dependency grouping and validation.
 
 **Editing:** logical configuration and component selection, plus authored metadata relationships/enrichment. Source discovery and deployment selections retain their own owners.
 

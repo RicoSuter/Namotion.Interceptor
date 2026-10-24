@@ -46,9 +46,23 @@ Explain the architectural choices and their trade-offs.
 :: Namotion.ArchDocs.ComponentDiagram#components Path=/catalog/Orders
 ::
 
+:: Namotion.ArchDocs.DependencyDiagram Path=/Repository
+::
+
 ## 6. Runtime view
 
 Describe selected scenarios and their order explicitly. A dependency graph does not establish runtime ordering.
+
+:: Namotion.ArchDocs.ScenarioDiagram Path=/catalog
+```json
+{
+  "Steps": [
+    { "From": "/catalog/Orders", "To": "/catalog/Payments", "Label": "Authorize payment", "Kind": "request" },
+    { "From": "/catalog/Payments", "To": "/catalog/Orders", "Label": "Authorization result", "Kind": "response" }
+  ]
+}
+```
+::
 
 ## 7. Deployment view
 
@@ -67,6 +81,9 @@ Link the relevant decision records.
 
 Describe measurable scenarios and expectations.
 
+:: Namotion.ArchDocs.ArchitectureCheckResults Path=/
+::
+
 ## 11. Risks and technical debt
 
 Record known risks and unresolved design decisions.
@@ -76,6 +93,6 @@ Record known risks and unresolved design decisions.
 Define the important terms used by this documentation.
 ````
 
-Another context view can put both Orders and Payments inside its boundary without changing either Service. Diagrams aggregate only the supplied graph facts. Complete deployment topology requires concrete bindings; runtime sequences need authored scenarios. Keep these facts and explanations visible rather than inventing a complete architecture from incomplete inputs.
+Another context view can put both Orders and Payments inside its boundary without changing either Service. Diagrams aggregate only the supplied graph facts. Complete deployment topology requires concrete bindings; runtime sequences need authored scenarios. The [validation scenario](architecture-validation.md) adds rules and guide links that make the result widget useful and explains the same checks through a CLI. Keep these facts and explanations visible rather than inventing a complete architecture from incomplete inputs.
 
 [Architecture diagrams](../widgets/architecture-diagram.md) · [Widget reference](../widgets/overview.md) · [Scenarios](overview.md)

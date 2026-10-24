@@ -53,7 +53,7 @@ Project references establish code dependencies and do not assert runtime calls. 
 
 **Summary widget:** project name, source path, language/classification, and available Contract references.
 
-**Detail page:** project dependencies, related Hosts/Services, public API Contracts, provenance, and unresolved-input diagnostics.
+**Detail page:** project dependencies, related Hosts/Services, public API Contracts, provenance, and unresolved-input diagnostics. Reuse [dependency](../widgets/dependency-diagram.md), [impact](../widgets/impact-view.md), and architecture-check results when those capabilities are available, including evidence-backed backlinks to documentation.
 
 **Editing:** authored enrichment and references through the owning metadata/configuration route. Do not edit analyzer-owned project facts as if they were manually configured values. A library summary needs no Host or Endpoint.
 

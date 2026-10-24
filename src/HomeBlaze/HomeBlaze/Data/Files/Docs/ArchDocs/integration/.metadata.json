@@ -2,6 +2,7 @@
   "title": "Integrations",
   "order": [
     "markdown-authoring.md",
+    "cli-and-ci.md",
     "page-contributions.md",
     "delivery-pipelines.md"
   ]

@@ -18,6 +18,8 @@ The durable feature reference for the generic architecture-documentation domain,
 
 Describe and explore software through ordinary Markdown documentation, authored subject configuration, discovered facts, and reusable views over one shared graph. The model does not prescribe language, source layout, cloud, process topology, organizational structure, or documentation template. AppHost and Apimundo are reference samples, not special cases in the domain API.
 
+The primary goal is keeping documentation aligned with the codebase and interlinked with minimal duplicated authoring. Discover supported facts, apply reusable membership rules, and derive structural views and backlinks. Authors supply business intent, explanations, and facts that the analyzers cannot establish. Architecture validation should guide humans and agents toward correct source edits locally and in CI; operational dashboards are an optional additional direction.
+
 ## Specification map
 
 - [Subject model](subject-model.md): conceptual UML of all subjects and capabilities, with focused ownership, reference, and inheritance views.
@@ -28,6 +30,7 @@ Describe and explore software through ordinary Markdown documentation, authored 
 - Subjects below: canonical semantics, configuration/state boundaries, references, subject-specific widgets/detail pages/editors, and unresolved schemas.
 - [Analyzers](analyzers/overview.md): read-only source and contract analysis.
 - [General widgets](widgets/overview.md): reusable aggregating views such as tables, deployment matrices, and architecture diagrams. Subject-specific presentation stays in each subject file.
+- [Architecture checks](shared/architecture-checks.md) and [CLI/CI validation](integration/cli-and-ci.md): shared file-authored rules with actionable, source-located errors for humans and agents. Start with the [discovery and validation scenario](scenarios/architecture-validation.md).
 - [Identifiers](shared/identifiers.md), [path queries](shared/path-queries.md), [metadata and relationships](shared/metadata-and-relationships.md), and [reconciliation](shared/reconciliation.md): shared behavior.
 - [Markdown authoring](integration/markdown-authoring.md) and [page contributions](integration/page-contributions.md): optional host extensions.
 - [Release and deployment integration](integration/delivery-pipelines.md): proposed connections to GitHub Actions and other pipeline providers, with explicit architecture mappings.

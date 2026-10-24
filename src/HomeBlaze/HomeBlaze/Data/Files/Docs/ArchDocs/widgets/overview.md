@@ -24,8 +24,14 @@ Registered Widget, Page, and Edit components, explicit Markdown blocks, subject 
 - [DeploymentMatrix](deployment-matrix.md)
 - [Architecture diagrams](architecture-diagram.md): shared behavior and rendering infrastructure
 - [ServiceDiagram](service-diagram.md), [ComponentDiagram](component-diagram.md), [ContextDiagram](context-diagram.md), and [DeploymentDiagram](deployment-diagram.md): proposed specialized entry points
+- [DependencyDiagram](dependency-diagram.md): discovered project/library references and optional Service or layer grouping
+- [ImpactView](impact-view.md): known dependents and referencing documentation, with evidence explaining each result
+- [ArchitectureCheckResults](architecture-check-results.md): shared validation errors, source links, remediation, and help documents
+- [ScenarioDiagram](scenario-diagram.md): authored ordered interactions with linked graph participants
 
 All ArchDocs views are unimplemented. Their explicit rendering can be built as extensions after domain prerequisites; automatic page-context insertion and ordinary-link overlays need the separate page-contribution extension. Reuse underlying queries and summary components across surfaces.
+
+Prioritize views that reuse discovered facts and existing membership rules. Dependency and grouped views avoid maintaining parallel diagrams; impact/backlink exploration helps identify documents to review; validation highlights missing assignments and explicit architectural constraints. Scenario order still needs authored steps or separately supported runtime evidence. These are accepted feature directions with proposed schemas, not a selected MVP or an implementation plan.
 
 ## Subject-specific presentation
 

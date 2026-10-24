@@ -12,6 +12,7 @@ This feature reference is the durable specification. It contains the domain cont
 
 - Keep authored Markdown, JSON, metadata, type identifiers, links, selections, and contract references understandable and easy to edit directly by humans and AI agents. The [file-authoring requirement](file-authoring.md) applies to every subject and view. Consulting this reference for syntax and supported capabilities is expected.
 
+- Keep documentation aligned with the codebase and interlinked through discovery, reusable membership rules, generated views, backlinks, and actionable validation, with minimal duplicated authoring.
 - Support several source repositories without assuming one service per repository.
 - Discover as much factual information as the supported analyzers can establish, with authored enrichment in JSON and the UI.
 - Describe services independently of source layout, language, process count, and deployment topology.
@@ -19,6 +20,7 @@ This feature reference is the durable specification. It contains the domain cont
 - Keep generated subjects stable across successful refreshes and preserve authored enrichment.
 - Reuse existing storage, registry, expressions, lifecycle, metadata, and subject UI capabilities where they fit.
 - Provide rich previews, contextual exploration, and useful service and deployment views while keeping Markdown portable and UI configuration out of authored metadata.
+- Define architecture policies as readable data and run the same validation from HomeBlaze, a local CLI, and CI. Errors should help humans and agents identify the affected subject, edit the canonical documentation/configuration, and rerun the checks.
 
 ## Candidate first-iteration exclusions
 
@@ -76,6 +78,14 @@ Present a subject's own master data first, then structural references and select
 
 The user selected three levels for scalar [Identifiers](shared/identifiers.md): a plain string, a path to any subject or ordinary Markdown page providing a generic link, and a path to the expected subject type enabling rich UI and applicable domain behavior. All three are identifiers. A corresponding subject or subject type is optional for descriptive data; typed structural operations still require their actual compatible subjects. Exact syntax is deferred, with a compact options list in the identifier specification. Automatic name resolution, equality/grouping, and rename behavior remain open.
 
+### Discovery, useful views, and executable architecture policies
+
+The user confirmed adding project/library dependency views, grouping by logical boundaries, impact/backlink exploration, architecture checks, and linked interaction scenarios. Existing Service membership selectors remain the reusable way to connect discovered facts to logical architecture. Dependency aggregation preserves code-reference evidence; it does not infer runtime communication. Scenario order remains authored unless a separately supported adapter supplies observed evidence.
+
+Architecture checks must also run from a headless CLI in local development and CI. The concrete initial policy example is that every in-scope Host must be assigned to at least one Service. This is an explicit rule rather than a hard domain invariant, and overlapping assignments remain valid. Findings explain how to update documentation/configuration and provide source locations and relevant help links in readable and agent-consumable output. The same evaluator serves the UI and CLI. Validation itself does not rewrite files, choose business ownership, or require a running HomeBlaze instance.
+
+The proposed rule persistence is an `architectureRules` metadata collection, reusing canonical owner files without adding a settled RuleSet subject. Exact rule kinds, schemas, registration, CLI packaging, loader configuration, reports, thresholds, and selected first release remain design choices. See [architecture checks](shared/architecture-checks.md), [CLI/CI](integration/cli-and-ci.md), and the [validation scenario](scenarios/architecture-validation.md). These accepted directions do not select all of them for the MVP.
+
 ## Implementation constraints
 
 Follow the repository's subject-creation guidance and existing conventions: partial intercepted properties, configuration versus state, internal setters for owned state, dictionaries for stable discovered identity, replaced published collections, headless domain code, and separate UI code. Reuse title, icon, monitoring, last-updated, path-reference, and metadata interfaces where applicable.
@@ -96,8 +106,9 @@ The following questions are tracked in the relevant element specification; this 
 - Presentation contracts: useful subject detail pages, navigation participation, shared page/widget/preview components, and exact UI slot registration.
 - Final schemas and identity: CLR/serialized names, path casing and aliases, generated keys, persistent identity and rename behavior, and raw-source path matching where graph paths are insufficient.
 - File ergonomics: evaluate readable type identifiers, generated reference syntax, complete minimal examples, schema tooling, source-located diagnostics, and focused writeback against the file-authoring requirement. Named Markdown children use inline keys; existing fully qualified type names and other generated routes still need review.
-- View configuration: separate ServiceDiagram, ComponentDiagram, ContextDiagram, and DeploymentDiagram entry points over shared rendering are proposed. Settle specialized configuration, grouping shared components, manual/automatic layout interaction, and semantic connector editing.
-- Runtime scenarios: plain authored Markdown suffices for the current example; a structured scenario/sequence model is not selected.
+- View configuration: specialized structural views, DependencyDiagram, ImpactView, ArchitectureCheckResults, and ScenarioDiagram are documented with proposed schemas. Settle grouping shared components, traversal/aggregation, layout interaction, result scheduling, and renderer choices without introducing domain entities for every view.
+- Runtime scenarios: linked participants with authored ordered steps are planned through ScenarioDiagram. Exact branching/loop schema, a reusable Scenario subject, and trace ingestion remain open.
+- Architecture validation: shared UI/CLI execution and actionable Host membership findings are accepted. Settle the proposed metadata schema, registered rule kinds, headless loader/analyzer bootstrap, qualified rule IDs, report/path contracts, severity thresholds, and any future suppression/baseline behavior. Incomplete required analysis cannot produce a clean pass.
 - Initial implementation: which candidate behaviors, exclusions, and UI surfaces form the MVP after sample review, including any long-running verification that must be agreed during planning.
 - Delivery integration: [pipeline/release/deployment connections](integration/delivery-pipelines.md) are a proposed generic extension, with GitHub Actions as an adapter example. Choose linking, observation, and optional control separately, and refine subject/record shapes and explicit mappings before implementation. Earlier candidate exclusions do not rule out this broader direction.
 

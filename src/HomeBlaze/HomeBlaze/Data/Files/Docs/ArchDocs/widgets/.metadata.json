@@ -6,6 +6,10 @@
     "context-diagram.md",
     "service-diagram.md",
     "component-diagram.md",
+    "dependency-diagram.md",
+    "impact-view.md",
+    "architecture-check-results.md",
+    "scenario-diagram.md",
     "deployment-matrix.md",
     "deployment-diagram.md",
     "architecture-diagram.md"

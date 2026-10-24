@@ -40,6 +40,12 @@ Area names identify implementation responsibility. ArchDocs covers the domain ex
 | Reconciled repository children and Environment Deployments | ArchDocs | [Planned] | Extension; lifecycle, identity, worker, and metadata prerequisites |
 | Subject-specific widgets, detail pages, and editors | ArchDocs | [Planned] | Extension; specified with each subject, with domain/parser prerequisites as applicable |
 | General tables, matrix, and diagrams | ArchDocs | [Planned] | Extension; specified in widgets/, with domain/query/renderer prerequisites |
+| Dependency/layer grouping and impact views | ArchDocs | [Planned] | Shared graph queries, evidence-preserving aggregation, reverse-reference traversal, and supported documentation backlinks; see [DependencyDiagram](widgets/dependency-diagram.md) and [ImpactView](widgets/impact-view.md) |
+| Linked authored interaction scenarios | ArchDocs | [Planned] | [ScenarioDiagram](widgets/scenario-diagram.md), participant validation, and sequence rendering; trace ingestion is separate |
+| File-authored architecture rules and actionable findings | ArchDocs | [Planned] | Headless [rule evaluator](shared/architecture-checks.md), current graph, source provenance, remediation/help links, and supported rule kinds |
+| CLI/CI architecture validation and agent-readable reports | ArchDocs; HomeBlaze if shared loading needs extraction | [Planned] | Separate [headless entry point](integration/cli-and-ci.md), deterministic file/graph loading and analyzer publication, shared rules, text/JSON reports, and unsuccessful exits for violations or incomplete validation |
+| Supported Markdown-reference indexing and backlinks | ArchDocs | [Planned] | Link parsing, file/subject target mapping, invalidation, and reference provenance; distinct from runtime relationships and a general prose-extraction engine |
+| Architecture-check result widgets and diagram annotations | ArchDocs | [Planned] | Reuse shared findings through [ArchitectureCheckResults](widgets/architecture-check-results.md); automatic surrounding-page placement separately needs host work |
 | Generic $name frontmatter subject children | HomeBlaze | [Planned] | HomeBlaze change: parsing, lifecycle, collision handling, and writeback |
 | Metadata envelope persistence in Markdown frontmatter | HomeBlaze | [Planned] | HomeBlaze change: storage apply/write and preservation of unrelated content |
 | Page-level actions/context/additional-view contributions | HomeBlaze | [Planned] | HomeBlaze change: page shell and ordered inherited multi-contributor discovery |
