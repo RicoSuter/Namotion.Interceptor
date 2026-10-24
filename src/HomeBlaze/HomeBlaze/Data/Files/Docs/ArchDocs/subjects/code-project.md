@@ -26,6 +26,14 @@ A CodeProject can contribute to multiple Hosts and Services. Libraries remain Co
 
 Project references establish code dependencies and do not assert runtime calls. Repository ownership and subject identity survive architectural selection and refresh. Tests and executable projects need explicit classification where supported; runnable output alone does not establish a production role.
 
+## UI [Planned]
+
+**Summary widget:** project name, source path, language/classification, and available Contract references.
+
+**Detail page:** project dependencies, related Hosts/Services, public API Contracts, provenance, and unresolved-input diagnostics.
+
+**Editing:** authored enrichment and references through the owning metadata/configuration route. Do not edit analyzer-owned project facts as if they were manually configured values. A library summary needs no Host or Endpoint.
+
 ## Usage examples
 
 [Library contracts](../examples/library-contracts.md)

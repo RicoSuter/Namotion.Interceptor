@@ -27,6 +27,12 @@ Composition, contract references, interface exposure, and resource provision are
 - Discovery, logical membership, deployment membership, and diagram scope remain independent.
 - Cyclic selector dependencies produce diagnostics; nested services do not imply unrestricted recursive expansion.
 
+## UI [Planned]
+
+Component is a capability, not a requirement to create a standalone component widget. Concrete subjects document their own summary, detail, and edit behavior. Registered components can reuse base/interface fallback and common presentation primitives. Keep UI registrations in UI assemblies, independent of headless domain code.
+
+Compact subject presentation can be reused by aggregating tables, diagram nodes, later link previews, and context contributions. Show only capabilities the subject supplies. Existing IPage provides navigation metadata; a registered Page component still supplies rendering. A document defining a subject remains an ordinary MarkdownFile, and its subject summary must not recursively render the containing document.
+
 ## Related specifications
 
 [Overview and status legend](../overview.md) · [Platform readiness](../implementation-readiness.md)

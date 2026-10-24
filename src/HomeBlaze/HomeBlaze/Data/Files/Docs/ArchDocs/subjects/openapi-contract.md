@@ -22,6 +22,12 @@ OpenApiContract derives from Contract and retains its source, identity, provenan
 
 Supported OpenAPI revisions, external-reference policy, parsed model shape, parser dependency, and version comparison are not selected. A source document can be recorded before parsing is implemented. No network polling or endpoint probing is implied.
 
+## UI [Planned]
+
+The specialized widget/detail view extends the [Contract presentation](contract.md#ui-planned) with supported operations, parameters, request/response details, and schemas. Offer source-document access and parser diagnostics, retaining a useful common summary when parsing is unavailable.
+
+Operation/schema navigation is specific to this subject and lives with this specification. Supported revisions, parsing, comparison, and compatibility analysis remain separate decisions; do not imply them from the subtype alone.
+
 ## Related specifications
 
 [Overview and status legend](../overview.md) · [Platform readiness](../implementation-readiness.md)

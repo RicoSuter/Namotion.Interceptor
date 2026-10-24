@@ -1,10 +1,8 @@
 {
   "order": [
     "overview.md",
-    "subject-details.md",
     "service-table.md",
     "deployment-matrix.md",
-    "architecture-diagram.md",
-    "contract-view.md"
+    "architecture-diagram.md"
   ]
 }

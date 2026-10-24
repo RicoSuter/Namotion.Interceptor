@@ -22,7 +22,13 @@ Represents an enduring intended installation of one DeploymentUnit in an Environ
 
 ## UI [Planned]
 
-Expose intended versions and access details with provenance. Observed health/version data needs an integration and must not be inferred from a configured Deployment. A deployment matrix is an explicit registered widget, independent of context slots.
+**Summary widget:** Environment/DeploymentUnit identity, intended version and access details when supplied, plus distinct observed status only when an integration provides it.
+
+**Detail page:** selected release components, Endpoint addresses, Resource mappings, provenance, diagnostics, and navigation to unit/environment subjects.
+
+**Editing:** manual enrichment through the Environment's metadata writer and supported binding configuration. Do not create an independently persisted duplicate of the generated Deployment.
+
+The general [DeploymentMatrix](../widgets/deployment-matrix.md) is a separate aggregating widget. Subject summary/detail components do not require page-context slots or a monitoring connector.
 
 ## Detailed behavior [Planned]
 

@@ -22,6 +22,10 @@ Actors can participate in typed relationships and context views. They are not us
 
 Choose representation, identity, relationship endpoints, and view presentation. Actor need not implement component composition or deployment capabilities. Internal/external and diagram membership remain view-owned.
 
+## UI [Planned]
+
+If this optional subject is selected, its compact widget and detail page can show the chosen role/person description and architectural interactions. Reuse that presentation in context diagrams. Editing remains within the eventual Actor schema; no account/directory integration or deployment behavior is implied.
+
 ## Related specifications
 
 [Overview and status legend](../overview.md) · [Platform readiness](../implementation-readiness.md)

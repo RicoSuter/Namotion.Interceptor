@@ -22,7 +22,13 @@ Represents a logical software capability, application, or neighboring system.
 
 ## UI [Planned]
 
-Provide summary, edit, and detail components through existing registration. The same summary can be explicitly embedded in Markdown or referenced by a canvas node. Automatic page-context contributions are a separate HomeBlaze extension.
+**Summary widget:** title/description, relevant component and Contract/Interface information, and deployment navigation. Reuse the same compact summary when explicitly embedded in Markdown, referenced by a canvas node, or shown in an aggregate view.
+
+**Detail page:** explore selected Hosts/projects, Resources, Interfaces, relationships, diagnostics, provenance, and related Deployments without copying their facts into the page.
+
+**Editing:** logical configuration and component selection, plus authored metadata relationships/enrichment. Source discovery and deployment selections retain their own owners.
+
+All three can use existing registered components. Automatic context-slot insertion and ordinary-link previews are separate HomeBlaze extensions. The containing Markdown document retains its normal body and navigation identity.
 
 ## Boundary [Planned]
 

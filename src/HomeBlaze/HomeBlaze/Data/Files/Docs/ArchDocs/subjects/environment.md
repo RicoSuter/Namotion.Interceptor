@@ -28,6 +28,14 @@ A configurable subject describing a deployment context, such as staging or produ
 
 It does not generate deployments for every service or every deployment unit in the graph. Only declared selections produce deployments.
 
+## UI [Planned]
+
+**Summary widget:** environment identity, selected deployment units, and intended installation counts.
+
+**Detail page:** selected units, generated Deployments, bindings, authored enrichment, and diagnostics. An environment-scoped [DeploymentMatrix](../widgets/deployment-matrix.md) can aggregate those subjects without duplicating its specification here.
+
+**Editing:** unit selection and metadata on the Environment and owned generated descendants. Intended installation counts do not establish observed health. JSON-sidecar editing can precede planned frontmatter persistence.
+
 ## Usage examples
 
 [JSON catalog](../examples/json-catalog.md)

@@ -26,6 +26,14 @@ Execution can be continuous or run-to-completion. A worker, migration executable
 
 Hosts can provide multiple Resources; a Resource can have multiple providing Hosts. These are references. Services can select Hosts directly without an intermediate Resource. Discovery of an executable does not imply Service membership, deployment membership, an always-running role, or observed execution.
 
+## UI [Planned]
+
+**Summary widget:** process definition, known source/runtime/packaging, and execution behavior when supplied.
+
+**Detail page:** entry/supporting CodeProjects, provided Resources, exposed Interfaces, architectural relationships, and release participation with provenance.
+
+**Editing:** supported authored Host configuration and enrichment. Discovered facts remain analyzer-owned. The widget does not equate a process definition with an observed running replica or infer health from deployment membership.
+
 ## Related specifications
 
 [Overview and status legend](../overview.md) · [Platform readiness](../implementation-readiness.md)

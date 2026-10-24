@@ -24,7 +24,13 @@ Several repositories can coexist. A repository need not be managed by Git. Gener
 
 ## UI [Planned]
 
-Show source scope, last successful analysis, diagnostics, discovered collections, and an explicit refresh action through ordinary subject UI. A source failure retains the last successful graph.
+**Summary widget:** source scope, analysis state, last successful analysis, and discovered project/Host counts with diagnostics.
+
+**Detail page:** browse discovered elements, project dependencies, provenance, diagnostics, and refresh status. Use an explicit refresh operation independently of a visual graph renderer.
+
+**Editing:** change source/analyzer/scan configuration where supported; enrich generated descendants through owner metadata. Generated identities and discovered facts are not independently editable configuration.
+
+These components use existing registration and explicit Markdown embedding. Automatic surrounding page contributions need the separate host extension.
 
 ## Detailed behavior [Planned]
 

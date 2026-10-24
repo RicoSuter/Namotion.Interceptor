@@ -1,12 +1,12 @@
 ---
-title: Architecture Widgets
-navTitle: Architecture Widgets
+title: General Architecture Widgets
+navTitle: General Widgets
 status: Planned
 ---
 
-# Architecture Widgets [Planned]
+# General Architecture Widgets [Planned]
 
-Reusable views of the same graph, independent of document format.
+General and aggregating views of the same graph, independent of document format. Subject-specific widgets, detail pages, and editors are specified in the relevant subject Markdown file.
 
 ## Implementation readiness
 
@@ -18,15 +18,17 @@ Reusable views of the same graph, independent of document format.
 
 Registered Widget, Page, and Edit components, explicit Markdown blocks, subject references, and manual CanvasLayout placement are available. IPage supplies navigation information; rendering still requires a registered Page component.
 
-## Views [Planned]
+## General views [Planned]
 
-- [Subject summaries and detail pages](subject-details.md)
 - [ServiceTable](service-table.md)
 - [DeploymentMatrix](deployment-matrix.md)
 - [ArchitectureDiagram](architecture-diagram.md)
-- [Contract views](contract-view.md)
 
 All ArchDocs views are unimplemented. Their explicit rendering can be built as extensions after domain prerequisites; automatic page-context insertion and ordinary-link overlays need the separate page-contribution extension. Reuse underlying queries and summary components across surfaces.
+
+## Subject-specific presentation
+
+See each [subject specification](../overview.md#subjects) for its UI section. For example, [Service](../subjects/service.md#ui-planned) owns its summary/detail/edit behavior, [Contract](../subjects/contract.md#ui-planned) owns common Contract presentation, and [OpenApiContract](../subjects/openapi-contract.md#ui-planned), [ProtobufContract](../subjects/protobuf-contract.md#ui-planned), and [CSharpApiContract](../subjects/csharp-api-contract.md#ui-planned) own their specialized viewers. Aggregating widgets reuse those presentations without maintaining separate subject-widget specifications.
 
 ## Detailed behavior [Planned]
 

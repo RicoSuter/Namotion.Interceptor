@@ -22,7 +22,11 @@ Selects the explicit components participating in a coordinated release.
 
 ## UI [Planned]
 
-Show participants, references to Services, and related Deployments using registered components. References to existing dependencies must be visibly distinct from configuration managed as part of a release.
+**Summary widget:** release identity, selected participants, related Services, and environment installation links.
+
+**Detail page:** explicit release membership, component provenance/diagnostics, and related Deployments. Distinguish an existing dependency from Resource configuration managed in the release.
+
+**Editing:** authored participant queries and metadata. Reuse the general [DeploymentMatrix](../widgets/deployment-matrix.md) when an aggregate environment view is useful; its independent specification remains in widgets/.
 
 ## Detailed behavior [Planned]
 

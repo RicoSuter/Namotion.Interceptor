@@ -22,6 +22,12 @@ CSharpApiContract derives from Contract. It can describe public types, members, 
 
 Decide whether extraction uses source symbols or compiled metadata, which surface/revision and target framework it describes, and the snapshot format. The minimal csproj XML analyzer does not implement this. Generating a complete surface must report unresolved inputs rather than invent members. Extraction, comparison, and compatibility assessment are separate capabilities.
 
+## UI [Planned]
+
+The specialized widget/detail view extends the [Contract presentation](contract.md#ui-planned) with public types, members, and signatures for the selected project/revision/target where available. Link back to the defining CodeProject and make incomplete extraction visible.
+
+Public API browsing does not require network Interfaces, Hosts, or Endpoints. A supplied snapshot can use common source presentation before extraction exists. API comparison and compatibility assessment are separate capabilities.
+
 ## Usage examples
 
 [Library contracts](../examples/library-contracts.md)

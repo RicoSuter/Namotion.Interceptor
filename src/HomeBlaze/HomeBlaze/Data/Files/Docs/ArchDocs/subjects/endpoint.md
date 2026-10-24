@@ -26,6 +26,14 @@ The same Interface can have different Endpoints in different environments. Endpo
 
 Settle defining owner, persistence, generated-versus-authored lifecycle, protocol-specific bindings, and multiple endpoints in one environment. This page does not assume an HTTP URL is sufficient for every protocol.
 
+## UI [Planned]
+
+**Summary widget:** logical Interface, Environment, optional Deployment, and available address/connection binding.
+
+**Detail page:** access information, related Contract and deployment navigation, provenance, and distinct intended/observed status.
+
+**Editing:** authored binding details through the defining owner after its schema is selected. Displaying a configured address does not establish connectivity or health. Protocol-appropriate bindings are not limited to HTTP URLs.
+
 ## Related specifications
 
 [Overview and status legend](../overview.md) · [Platform readiness](../implementation-readiness.md)

@@ -34,6 +34,16 @@ CodeProjects and Interfaces reference the base Contract capability. Additional t
 
 A library API needs no Host, network Interface, or Endpoint. A parsed representation is tied to its source/revision. Unknown or unsupported input is reported explicitly. Comparison and compatibility analysis are separate capabilities, not implied by having a version field.
 
+## UI [Planned]
+
+**Summary widget:** source, optional version, provenance, diagnostics, and referencing CodeProjects/Interfaces.
+
+**Detail page:** common source/document access and available public-surface information. Reuse the base presentation when no specialized parser or viewer is available. Format-specific viewers are documented with their Contract subtype below.
+
+**Editing:** supported authored source/version information and enrichment; parsed/analyzer-derived surfaces remain read-only discovered state.
+
+Explicit embeds and standalone detail pages use existing registration and can precede automatic context/link-preview integration. Comparison and compatibility assessment remain separate capabilities. Registering a subtype does not by itself implement parsing or comparison.
+
 ## Usage examples
 
 [Library contracts](../examples/library-contracts.md)

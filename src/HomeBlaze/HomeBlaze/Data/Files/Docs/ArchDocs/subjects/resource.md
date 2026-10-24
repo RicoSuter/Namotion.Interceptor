@@ -22,7 +22,11 @@ Represents a logical capability consumed by components, such as a database, queu
 
 ## UI [Planned]
 
-A standalone Resource can have useful page/edit/widget components like other subjects. Reuse generic subject presentation; Resource does not inherit Service merely to gain UI.
+**Summary widget:** logical capability, kind/technology where supplied, provider/consumer relationships, and relevant bindings.
+
+**Detail page:** providing Hosts, exposing Interfaces, consumers, shared membership, related Endpoints, and environment mappings with explicit unknown states.
+
+**Editing:** the Resource's authored configuration and relationships. Dependency membership does not imply provisioning or observed health. Resource can have useful page/edit/widget presentation without inheriting Service.
 
 ## Invariants [Planned]
 

@@ -26,6 +26,14 @@ An Interface is independent of a concrete address and can be documented with imp
 
 Choose the exposure relationship and its canonical authored location, shared identity, and cardinalities. Do not duplicate the same Interface to show it from different subjects. Exact field names and ownership remain open.
 
+## UI [Planned]
+
+**Summary widget:** logical interface name, access mechanism/protocol, and Contract references.
+
+**Detail page:** exposing subjects, public-surface Contracts, environment Endpoints, source/provenance, and diagnostics. Show an unknown implementation without fabricating a Host.
+
+**Editing:** the supported logical description and exposure/Contract references once their schemas are selected. Environment addresses belong to Endpoint bindings.
+
 ## Related specifications
 
 [Overview and status legend](../overview.md) · [Platform readiness](../implementation-readiness.md)

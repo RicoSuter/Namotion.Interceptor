@@ -33,7 +33,8 @@ Delivery readiness is a separate axis: **Extension** can use existing host contr
 | Repository/project and contract analyzers | [Planned] | Extension; selected read-only source and analyzer contracts |
 | Generic wildcard selection and typed relationship readers | [Planned] | Extension/shared services; existing resolver alone is insufficient |
 | Reconciled repository children and Environment Deployments | [Planned] | Extension; lifecycle, identity, worker, and metadata prerequisites |
-| Explicit ArchDocs summaries, tables, matrix, diagrams, contract viewers | [Planned] | Extension; domain/query/parser/rendering prerequisites as applicable |
+| Subject-specific widgets, detail pages, and editors | [Planned] | Extension; specified with each subject, with domain/parser prerequisites as applicable |
+| General tables, matrix, and diagrams | [Planned] | Extension; specified in widgets/, with domain/query/renderer prerequisites |
 | Generic $name frontmatter subject children | [Planned] | HomeBlaze change: parsing, lifecycle, collision handling, and writeback |
 | Metadata envelope persistence in Markdown frontmatter | [Planned] | HomeBlaze change: storage apply/write and preservation of unrelated content |
 | Page-level actions/context/additional-view contributions | [Planned] | HomeBlaze change: page shell and ordered inherited multi-contributor discovery |

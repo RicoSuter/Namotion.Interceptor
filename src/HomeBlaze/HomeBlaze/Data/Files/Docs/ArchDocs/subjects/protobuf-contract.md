@@ -22,6 +22,12 @@ ProtobufContract derives from Contract. Specialized data can describe services, 
 
 Choose source-text versus descriptor input, import resolution, supported language revisions, parsed model shape, and dependency. Running a compiler or obtaining external imports is not automatically authorized by selecting a contract file.
 
+## UI [Planned]
+
+The specialized widget/detail view extends the [Contract presentation](contract.md#ui-planned) with supported services, RPCs, messages, fields, enums, and import diagnostics. A data-only contract remains useful without a deployed gRPC endpoint.
+
+Retain source/descriptor access and generic presentation when structured parsing is unavailable. Parsed definitions are analyzer state; source selection and authored enrichment use the appropriate owning writer.
+
 ## Related specifications
 
 [Overview and status legend](../overview.md) · [Platform readiness](../implementation-readiness.md)
