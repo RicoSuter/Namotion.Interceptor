@@ -13,7 +13,7 @@ These conceptual UML views cover every subject and capability in the ArchDocs sp
 | Area | Subjects and capabilities |
 |---|---|
 | Shared capabilities | [Component](subjects/component.md), [Analyzer](subjects/analyzer.md) |
-| Architecture tests | [Rule](subjects/rule.md), configured through registered generic and domain-specific check kinds |
+| Architecture tests | Abstract [Rule](subjects/rule.md), [NamingRule](rules/naming-rule.md), [RequiredPropertyRule](rules/required-property-rule.md), [MembershipRule](rules/membership-rule.md), [AllowedDependenciesRule](rules/allowed-dependencies-rule.md), [HostsAssignedToServicesRule](rules/hosts-assigned-to-services-rule.md) |
 | Source discovery | [SourceRepository](subjects/source-repository.md), [CodeSolution](subjects/code-solution.md), [CodeProject](subjects/code-project.md) |
 | Logical architecture and access | [Host](subjects/host.md), [Service](subjects/service.md), [Resource](subjects/resource.md), [Interface](subjects/interface.md), [Endpoint](subjects/endpoint.md) |
 | Public surfaces | [Contract](subjects/contract.md), [OpenApiContract](subjects/openapi-contract.md), [ProtobufContract](subjects/protobuf-contract.md), [CSharpApiContract](subjects/csharp-api-contract.md) |
@@ -25,7 +25,7 @@ These conceptual UML views cover every subject and capability in the ArchDocs sp
 | Notation | Meaning |
 |---|---|
 | `..\|>` toward Component | Realizes the Component interface capability; no concrete base class or ownership is implied. |
-| `--\|>` toward Contract | Selected Contract specialization inheritance; the base's concrete/abstract shape and exact CLR declarations remain open. |
+| `--\|>` toward Contract or Rule | Subject specialization inheritance; Rule is abstract and its concrete implementations expose typed properties. Exact CLR declarations remain proposed. |
 | `*--` with the diamond at the owner | Canonical ownership of the described generated subjects. |
 | `-->` or `--` | Reference or association, preserving subject identity and ownership. Labels identify the relationship; an arrow identifies the referencing side when useful. |
 | `..>` with a proposed label | Proposed relationship whose schema or inclusion remains open. |
@@ -62,9 +62,32 @@ classDiagram
 
 Analyzer has a separate shared subject capability with an open CLR interface/base-class shape. No Component participation is selected for Analyzer, Rule, CodeSolution, Artifact, or Actor. Absence from this inheritance view does not prevent an ordinary subject from appearing in queries or diagrams.
 
+## Rule type inheritance [Planned]
+
+Rule is an abstract base subject. The normal JSON `$type` or Markdown block type selects a concrete implementation with typed properties. Domain-specific rules can share evaluation helpers with generic rules while retaining their own explicit input contracts. No additional kind/config dispatch registry is selected.
+
+```mermaid
+classDiagram
+    class Rule {
+        <<abstract>>
+    }
+    class NamingRule
+    class RequiredPropertyRule
+    class MembershipRule
+    class AllowedDependenciesRule
+    class HostsAssignedToServicesRule
+    Rule <|-- NamingRule
+    Rule <|-- RequiredPropertyRule
+    Rule <|-- MembershipRule
+    Rule <|-- AllowedDependenciesRule
+    Rule <|-- HostsAssignedToServicesRule
+```
+
+These are planned types, not implemented CLR declarations. The base owns common configuration/presentation, concrete types own check-specific properties, and invocation results remain repository/runner-owned.
+
 ## Discovery ownership and source grouping [Planned]
 
-A SourceRepository selects existing shared Analyzer singleton subjects within the loaded root. Several repositories can select the same instance; selecting it neither clones it nor transfers ownership. Each repository owns its own analysis work, diagnostics, results, and discovered children. It also selects authored Rule subjects without ownership transfer and owns their per-invocation validation results. A Markdown document or JSON file owns each definition; check kinds do not require one subject class per policy, and shared definitions hold no repository last-run state. The Contract ownership edge below applies only to auto-discovered Contracts, and the Host edge only to discovered Hosts. Authored Contracts and Hosts retain their separate defining owners.
+A SourceRepository selects existing shared Analyzer singleton subjects within the loaded root. Several repositories can select the same instance; selecting it neither clones it nor transfers ownership. Each repository owns its own analysis work, diagnostics, results, and discovered children. It also selects authored Rule subjects without ownership transfer and owns their per-invocation validation results. A Markdown document or JSON file owns each concrete Rule definition. Normal type discrimination selects its implementation and typed properties; several configured policies can use the same concrete type. Shared definitions hold no repository last-run state. The Contract ownership edge below applies only to auto-discovered Contracts, and the Host edge only to discovered Hosts. Authored Contracts and Hosts retain their separate defining owners.
 
 ```mermaid
 classDiagram

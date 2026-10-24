@@ -69,10 +69,22 @@ Connect the architecture to source code and enrich it through shared analyzers. 
 | [SourceRepository](subjects/source-repository.md) | [Planned] | Extension; see prerequisites |
 | [CodeProject](subjects/code-project.md) | [Planned] | Extension; see prerequisites |
 | [Analyzer](subjects/analyzer.md) | [Planned] | Shared singleton subject; registration and graph publication required |
-| [Rule](subjects/rule.md) | [Planned] | Authored architecture-test subject; wildcard selection and headless evaluation required |
 | [CodeSolution](subjects/code-solution.md) | [Planned] | Extension; see prerequisites |
 
-### 3. Deployment architecture
+### 3. Architecture tests
+
+Select typed rules as architecture unit tests; reuse JSON definitions and documented Markdown children across repositories and UI/CLI execution.
+
+| Specification | Status | Delivery |
+|---|---|---|
+| [Rule](subjects/rule.md) | [Planned] | Abstract base; shared configuration, presentation, and evaluation contract |
+| [NamingRule](rules/naming-rule.md) | [Planned] | Typed property/pattern validation |
+| [RequiredPropertyRule](rules/required-property-rule.md) | [Planned] | Typed required-value and metadata validation |
+| [MembershipRule](rules/membership-rule.md) | [Planned] | Typed membership counts and selections |
+| [AllowedDependenciesRule](rules/allowed-dependencies-rule.md) | [Planned] | Typed category-based dependency policy |
+| [HostsAssignedToServicesRule](rules/hosts-assigned-to-services-rule.md) | [Planned] | Predefined Host-to-Service policy |
+
+### 4. Deployment architecture
 
 Describe coordinated releases and their intended installations in selected environments.
 
@@ -82,7 +94,7 @@ Describe coordinated releases and their intended installations in selected envir
 | [Environment](subjects/environment.md) | [Planned] | Extension; see prerequisites |
 | [Deployment](subjects/deployment.md) | [Planned] | Extension; see prerequisites |
 
-### 4. Interfaces and public contracts
+### 5. Interfaces and public contracts
 
 Add logical access, environment addresses, and public API detail as the documentation needs it.
 
@@ -95,7 +107,7 @@ Add logical access, environment addresses, and public API detail as the document
 | [CSharpApiContract](subjects/csharp-api-contract.md) | [Planned] | Extension; see prerequisites |
 | [ProtobufContract](subjects/protobuf-contract.md) | [Planned] | Extension; see prerequisites |
 
-### 5. Optional additions
+### 6. Optional additions
 
 Extend context views with people or roles, and describe produced packages or images when those details become useful.
 

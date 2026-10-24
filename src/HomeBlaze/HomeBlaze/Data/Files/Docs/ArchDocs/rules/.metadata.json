@@ -4,7 +4,12 @@
     "overview.md",
     "authoring.md",
     "generic-rules.md",
+    "naming-rule.md",
+    "required-property-rule.md",
+    "membership-rule.md",
+    "allowed-dependencies-rule.md",
     "predefined-rules.md",
+    "hosts-assigned-to-services-rule.md",
     "architecture-checks.md"
   ]
 }

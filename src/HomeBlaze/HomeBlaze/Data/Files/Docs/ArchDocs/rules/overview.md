@@ -20,7 +20,7 @@ ArchDocs is an architecture-validation framework with documentation and linked v
 
 - [Rule subject](../subjects/rule.md): configuration/state contract and subject-specific presentation.
 - [Authoring and selection](authoring.md): `rules.md`, one JSON file per rule, exact paths, and wildcard suites.
-- [Generic rule families](generic-rules.md): naming, metadata, coverage, dependencies, cycles, references, and contracts.
+- [Generic rule families](generic-rules.md): naming, metadata, coverage, dependencies, cycles, references, and contracts. Concrete specifications include [NamingRule](naming-rule.md), [RequiredPropertyRule](required-property-rule.md), [MembershipRule](membership-rule.md), and [AllowedDependenciesRule](allowed-dependencies-rule.md).
 - [Predefined policies](predefined-rules.md): domain-specific defaults over the generic capabilities.
 - [Evaluation and findings](architecture-checks.md): shared execution semantics and actionable diagnostics.
 - [CLI and CI](../integration/cli-and-ci.md): normal graph loading, readiness, reports, and exit status.
@@ -29,7 +29,7 @@ ArchDocs is an architecture-validation framework with documentation and linked v
 
 A SourceRepository's proposed `rules` list contains shared PathQuery records; read-only `resolvedRules` references the selected definitions. Select one Rule, the children of a Markdown page, a directory subtree, or every Rule in the loaded graph. `*` stays within one path segment and `**` spans zero or more segments. A Rule can be selected by several repositories; results are identified by invocation owner, Rule identity, and the current inputs.
 
-Rule selection enumerates compatible Rule subjects. Wildcard/directory queries filter out ordinary Markdown pages, folders, and other subject kinds. An exact incompatible target, unavailable explicit target, invalid predicate, or unsupported check kind is a diagnostic. Deduplicate overlapping selectors by Rule identity. Selecting two independently authored Rule definitions with equivalent configuration does not merge their identities.
+Rule selection enumerates compatible Rule subjects. Wildcard/directory queries filter out ordinary Markdown pages, folders, and other subject kinds. An exact incompatible target, unavailable explicit target, invalid predicate, or unavailable concrete rule type is a diagnostic. Deduplicate overlapping selectors by Rule identity. Selecting two independently authored Rule definitions with equivalent configuration does not merge their identities.
 
 Proposed default: omitted or empty `rules` selects none; use an explicit global query to enable all loaded definitions. Loading or registering a Rule never selects or executes it by itself. A successful empty query reports zero selected tests; required-count policies can prevent an unintentionally empty suite. Display selected test counts in CLI/UI reports.
 

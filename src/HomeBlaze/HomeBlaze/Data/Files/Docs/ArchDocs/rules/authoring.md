@@ -6,7 +6,7 @@ status: Planned
 
 # Rule Authoring and Selection [Planned]
 
-Keep a rule's explanation, executable configuration, and remediation understandable in ordinary source files. Both named JSON-configured Markdown blocks and one JSON file per Rule use the same [Rule subject](../subjects/rule.md). Schemas and check-kind identifiers below are proposed and unimplemented.
+Keep a rule's explanation, executable configuration, and remediation understandable in ordinary source files. Both named JSON-configured Markdown blocks and one JSON file per Rule use the same [Rule subject](../subjects/rule.md). Concrete rule type names and schemas below are proposed and unimplemented. `$type` or the named block type selects the implementation, and each concrete subject exposes its own typed properties.
 
 ## Implementation readiness
 
@@ -14,7 +14,7 @@ Keep a rule's explanation, executable configuration, and remediation understanda
 
 **Delivery:** Existing standalone JSON and named body-block entry points can load Rule subjects after registration. Rule types/evaluators are planned. Generic frontmatter children are an additional planned HomeBlaze authoring option, not a prerequisite for the body-block examples.
 
-**Prerequisites:** Rule registration, evaluator schemas, shared path queries, definition provenance, and preservation of surrounding prose/configuration.
+**Prerequisites:** Concrete Rule registration and typed schemas, shared path queries, definition provenance, and preservation of surrounding prose/configuration.
 
 ## A rules.md document [Proposed]
 
@@ -27,11 +27,10 @@ Assume the documentation folder is mounted as the graph root and contains `/Repo
 
 Every discovered Host must belong to at least one Service. Shared membership is allowed. Add a matching componentSources entry or correct the existing Service selection rule, then rerun validation.
 
-:: Namotion.ArchDocs.Rule#hostsHaveService
+:: Namotion.ArchDocs.HostsAssignedToServicesRule#hostsHaveService
 ```json
 {
   "Name": "Every Host belongs to a Service",
-  "Kind": "hostsAssignedToServices",
   "Severity": "error",
   "Documentation": "#host-assignment"
 }
@@ -42,20 +41,25 @@ Every discovered Host must belong to at least one Service. Shared membership is 
 
 Every application Host in this documentation scope should be included in at least one deployment unit. Change the intended release grouping if a newly added Host is missing.
 
-:: Namotion.ArchDocs.Rule#hostsHaveDeploymentUnit
+:: Namotion.ArchDocs.MembershipRule#hostsHaveDeploymentUnit
 ```json
 {
   "Name": "Hosts have a deployment unit",
-  "Kind": "requireMembership",
   "Severity": "warning",
   "Documentation": "#host-release-coverage",
-  "Config": {
-    "Minimum": 1,
-    "MembersProperty": "components",
-    "ContainerType": "Namotion.ArchDocs.DeploymentUnit",
-    "SubjectSources": [{ "Path": "/Repository/hosts/*" }],
-    "ContainerSources": [{ "Path": "/deployment-units/*" }]
-  }
+  "Minimum": 1,
+  "MembersProperty": "components",
+  "ContainerType": "Namotion.ArchDocs.DeploymentUnit",
+  "SubjectSources": [
+    {
+      "Path": "/Repository/hosts/*"
+    }
+  ],
+  "ContainerSources": [
+    {
+      "Path": "/deployment-units/*"
+    }
+  ]
 }
 ```
 ::
@@ -69,14 +73,12 @@ An alternative `rules/hosts-have-service.json` defines the same policy independe
 
 ```json
 {
-  "$type": "Namotion.ArchDocs.Rule",
+  "$type": "Namotion.ArchDocs.HostsAssignedToServicesRule",
   "name": "Every Host belongs to a Service",
-  "kind": "hostsAssignedToServices",
   "severity": "error",
   "documentation": "../rules.md#host-assignment"
 }
 ```
-
 Its graph path is `/rules/hosts-have-service`, without `.json`. Here `rules.md` can contain only explanations and links to standalone rules. Choose one canonical definition for a test; two independently declared subjects are two tests even when their settings match. JSON files use proposed camelCase configuration, while body blocks use the existing property-casing convention.
 
 ## Select tests through paths [Proposed]
@@ -106,6 +108,6 @@ Lists combine by union and deduplicate identities; supported `where` predicates 
 
 ## Shared definitions and context [Planned]
 
-A shared predefined policy such as `hostsAssignedToServices` uses the invoking repository and documented architecture scope as inputs. Generic rules can supply explicit subject/group queries in `config`. An explicit absolute path in shared configuration is not rewritten when another repository selects it. If definitions cross documentation roots, configure their normal graph mounts and dependencies explicitly; do not search unrelated folders or silently load a full unrelated application graph.
+A shared predefined [HostsAssignedToServicesRule](hosts-assigned-to-services-rule.md) uses the invoking repository and documented architecture scope as inputs. Generic concrete rules expose explicit subject/group queries as typed properties directly on the definition. An explicit absolute path in shared configuration is not rewritten when another repository selects it. If definitions cross documentation roots, configure their normal graph mounts and dependencies explicitly; do not search unrelated folders or silently load a full unrelated application graph.
 
 [Rule overview](overview.md) · [Generic families](generic-rules.md) · [Predefined policies](predefined-rules.md) · [CLI](../integration/cli-and-ci.md)

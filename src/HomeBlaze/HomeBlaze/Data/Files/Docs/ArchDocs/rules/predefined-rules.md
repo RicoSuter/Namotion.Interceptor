@@ -6,7 +6,7 @@ status: Planned
 
 # Predefined Architecture Policies [Planned]
 
-Provide documented domain-specific defaults over generic rule capabilities. A preset may be a reusable configured Rule definition or a registered specialized check kind using the same evaluation primitives; it need not introduce another domain subject class. Exact catalog packaging, names, default inputs, and extension contracts are proposed.
+Provide documented domain-specific defaults over generic rule capabilities. A preset can configure an existing concrete Rule type or use a specialized concrete subtype when behavior or input defaults differ. Normal `$type` discrimination selects the implementation in either case. Exact catalog packaging, names, default inputs, and extension contracts are proposed.
 
 ## Implementation readiness
 
@@ -18,13 +18,13 @@ Provide documented domain-specific defaults over generic rule capabilities. A pr
 
 ## Every Host belongs to a Service [Planned]
 
-Proposed kind `hostsAssignedToServices` checks every Host discovered by the invoking SourceRepository against the direct resolved Host collections of Services in the loaded architecture scope. At least one match passes; overlapping assignment is allowed. Selecting only a CodeProject, Resource, or nested Service does not implicitly select its underlying Hosts.
+The proposed [HostsAssignedToServicesRule](hosts-assigned-to-services-rule.md) checks every Host discovered by the invoking SourceRepository against the direct resolved Host collections of Services in the loaded architecture scope. At least one match passes; overlapping assignment is allowed. Selecting only a CodeProject, Resource, or nested Service does not implicitly select its underlying Hosts.
 
 An unmatched Host produces a finding with its graph path, source project, Rule definition/block location, and remediation: update a Service's `componentSources`, correct its existing selection rule, or define the missing logical Service. Link to the defining `rules.md` section or explicit guide so a human or agent can learn the authoring syntax and rerun the check. The evaluator cannot infer business ownership from a name.
 
 This policy is opt-in through repository rule selection, not an unconditional Host domain invariant. Complete discovery with zero Hosts reports zero evaluated subjects and zero violations; a separate count policy can require Hosts. Hosts with no selected/available Service context must not pass merely because the architecture definitions failed to load. Failed required discovery yields incomplete validation.
 
-The generic `requireMembership` family can express similar policies using explicit queries, container type, member collection, and minimum/maximum counts. This preset removes repeated domain wiring by supplying documented repository-relative defaults. The [authoring reference](authoring.md) demonstrates both forms in one page and one JSON file per rule.
+The generic [MembershipRule](membership-rule.md) can express similar policies using explicit queries, container type, member collection, and minimum/maximum counts. This predefined type removes repeated domain wiring by supplying documented repository-relative defaults. The [authoring reference](authoring.md) demonstrates both forms in one page and one JSON file per rule.
 
 ## Other useful presets [Planned]
 

@@ -20,7 +20,7 @@ Evaluate selected architecture-test subjects against the current discovered and 
 
 A [Rule](../subjects/rule.md) has one canonical JSON or Markdown owner. The [authoring reference](authoring.md) shows named JSON-configured children in `rules.md`, one JSON file per definition, and page/directory/global suites. Repositories select existing definitions through `rules` and expose read-only `resolvedRules`; configuration stays on the definition, while per-invocation findings and cancellation stay with the repository/runner.
 
-Generic and predefined check kinds consume the invocation's repository, explicit architecture/documentation scope, and available current facts. Rule definitions declare requirements and cannot assume that a plain name or unavailable analyzer supplies evidence. A documented preset can provide defaults for the invoking repository without rewriting explicit absolute selectors.
+Generic and predefined concrete Rule types consume the invocation's repository, explicit architecture/documentation scope, and available current facts. Rule definitions declare requirements and cannot assume that a plain name or unavailable analyzer supplies evidence. A documented preset can provide defaults for the invoking repository without rewriting explicit absolute selectors.
 
 The initial concrete policy is [every Host belongs to a Service](predefined-rules.md#every-host-belongs-to-a-service-planned). Naming, category-based dependency constraints, coverage, cycles, required metadata, and reference checks are documented in the [generic family catalog](generic-rules.md). Enabling many selected tests should produce a combined report rather than hiding all but the first violation.
 

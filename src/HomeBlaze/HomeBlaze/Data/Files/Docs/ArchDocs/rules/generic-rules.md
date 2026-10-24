@@ -6,15 +6,15 @@ status: Planned
 
 # Generic Rule Families [Planned]
 
-Provide reusable check kinds over subject properties, selectors, memberships, and supported relationships. The framework should support enabling many tests and collecting their findings in one run. The catalog below describes planned families; it does not select every evaluator for the MVP or require a new subject class per kind.
+Provide reusable concrete [Rule](../subjects/rule.md) types over subject properties, selectors, memberships, and supported relationships. The framework should support enabling many tests and collecting their findings in one run. The catalog below describes planned families; it does not select every rule type for the MVP. Several authored policies can configure the same concrete type.
 
 ## Implementation readiness
 
 **Area:** ArchDocs. Pure graph/property checking primitives may later be reusable outside this domain, with placement chosen according to dependencies.
 
-**Delivery:** Planned registered evaluators and configuration schemas behind the common [Rule](../subjects/rule.md) subject. Names, patterns, and detailed configuration fields are proposed.
+**Delivery:** Planned registered concrete Rule subjects with typed properties and shared evaluation primitives. Names, patterns, and detailed configuration fields are proposed.
 
-**Prerequisites:** Current facts, shared queries, property/metadata access, relationship provenance, and kind-specific schemas. A family must report missing required evidence rather than silently accept an unsupported check.
+**Prerequisites:** Current facts, shared queries, property/metadata access, relationship provenance, and concrete-type schemas. A family must report missing required evidence rather than silently accept an unsupported check.
 
 ## Useful policies
 
@@ -38,22 +38,11 @@ Architectural category/layer/owner labels can be authored as generic metadata or
 
 Metadata preservation already exists, but typed category readers, query access, mapping-rule evaluation, and the final category comparison semantics still need implementation. A required-category rule can identify unclassified elements before a dependency policy runs; missing classification must remain visible rather than permitting every dependency by default. No mandatory Category or Layer subject is introduced.
 
-Proposed kind `requiredProperty` selects subjects through `config.subjectSources` and requires a nonempty value at `config.property`. The supported property/metadata accessor and empty-value semantics need a final schema. The [working JSON rule](../../../ArchDocs/rules/projects-have-category.json) illustrates `metadata.category`, with its explanation in the sample's [rules.md](../../../ArchDocs/rules.md#project-categories). The currently missing labels are intentional example findings for the future agent-edit loop, not an implemented validation test.
+The proposed [RequiredPropertyRule](required-property-rule.md) selects subjects through its `subjectSources` and requires a nonempty value at `property`. The supported property/metadata accessor and empty-value semantics need a final schema. The [working JSON rule](../../../ArchDocs/rules/projects-have-category.json) illustrates `metadata.category`, with its explanation in the sample's [rules.md](../../../ArchDocs/rules.md#project-categories). The currently missing labels are intentional example findings for the future agent-edit loop, not an implemented validation test.
 
 ## Generic membership configuration [Proposed]
 
-Proposed kind `requireMembership` compares selected subject identities with each compatible container's referenced collection. It is reusable for Service membership, deployment grouping, or other documented relationships:
-
-| Config property | Meaning |
-|---|---|
-| `minimum` | Required minimum number of distinct matching containers per subject; the examples use one. |
-| `maximum` | Optional maximum; omitted means no upper limit, so shared membership remains valid. |
-| `membersProperty` | Collection reference to inspect on each compatible container using the supported property resolver. An invalid or unavailable collection is a configuration error. |
-| `containerType` | Registered compatible subject type filter; filtering does not instantiate or convert subjects. |
-| `subjectSources` | Shared PathQuery records selecting subjects to validate. |
-| `containerSources` | Shared PathQuery records enumerating candidate containers. |
-
-Validate count bounds and target/collection kinds before checking. An unassigned subject fails a minimum-one rule. A complete empty subject selection reports zero evaluated subjects; invalid or unresolved explicit selectors remain errors. Exact CLR record/property-path syntax is still proposed. [Rule authoring](authoring.md) supplies complete Markdown and JSON entry points.
+The proposed [MembershipRule](membership-rule.md) compares selected subject identities with referenced collections of compatible containers. Its typed properties include `minimum`, optional `maximum`, `membersProperty`, `containerType`, `subjectSources`, and `containerSources`. See its canonical property table for validation and empty-scope behavior. [Rule authoring](authoring.md) supplies complete Markdown and JSON entry points.
 
 ## Allowed dependencies by category [Proposed]
 
@@ -61,23 +50,28 @@ This illustrative standalone Rule constrains code-reference edges for selected p
 
 ```json
 {
-  "$type": "Namotion.ArchDocs.Rule",
+  "$type": "Namotion.ArchDocs.AllowedDependenciesRule",
   "name": "Domain depends only on Domain or Shared",
-  "kind": "allowedDependencies",
   "severity": "error",
-  "config": {
-    "categoryProperty": "metadata.category",
-    "fromCategory": "domain",
-    "allowedTargetCategories": ["domain", "shared"],
-    "relationshipKinds": ["projectReference"],
-    "subjectSources": [{ "path": "/Repository/projects/*" }]
-  }
+  "categoryProperty": "metadata.category",
+  "fromCategory": "domain",
+  "allowedTargetCategories": [
+    "domain",
+    "shared"
+  ],
+  "relationshipKinds": [
+    "projectReference"
+  ],
+  "subjectSources": [
+    {
+      "path": "/Repository/projects/*"
+    }
+  ]
 }
 ```
+The [AllowedDependenciesRule](allowed-dependencies-rule.md) properties, metadata accessor, relationship identifier, and category vocabulary are proposed. Its `$type` selects the registered concrete implementation; category and relationship values describe the data being checked. A future registered schema must define these precisely. A known `domain -> infrastructure` edge violates this allowlist. Missing category, unresolved target, or unsupported/uncertain dependency evidence produces an explicit classification/reference/incomplete finding, rather than being interpreted as allowed. Out-of-scope targets are still relevant endpoints of selected outgoing edges; inspecting them does not add them to Service membership.
 
-The check-kind fields, metadata accessor, relationship identifier, and category vocabulary are proposed, not existing expression syntax. A future registered schema must define these precisely. A known `domain -> infrastructure` edge violates this allowlist. Missing category, unresolved target, or unsupported/uncertain dependency evidence produces an explicit classification/reference/incomplete finding, rather than being interpreted as allowed. Out-of-scope targets are still relevant endpoints of selected outgoing edges; inspecting them does not add them to Service membership.
-
-Select edge kinds explicitly. Project references, runtime API calls, messages, and documentation links have different meanings. A per-category allowlist and a forbidden source/target pair are complementary policy forms; evaluation precedence and default-deny behavior must be documented by the selected kind. For this allowlist example, targets outside the allowed set fail once their category is known.
+Select edge kinds explicitly. Project references, runtime API calls, messages, and documentation links have different meanings. A per-category allowlist and a forbidden source/target pair are complementary policy forms; evaluation precedence and default-deny behavior must be documented by the selected concrete rule type. For this allowlist example, targets outside the allowed set fail once their category is known.
 
 ## Agent-oriented findings [Planned]
 
