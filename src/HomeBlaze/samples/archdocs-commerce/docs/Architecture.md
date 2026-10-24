@@ -8,6 +8,8 @@ The [Orders service](services/Orders.md) accepts and processes orders. The [Paym
 
 See [Releasing Commerce](operations/Releasing.md) for a crosscutting view of the services and their deployment arrangement.
 
+The [service diagram](ServiceDiagram.md) places the same services as boxes on a canvas.
+
 ## Services
 
 :: Namotion.ArchDocs.ServiceTable Path=/
