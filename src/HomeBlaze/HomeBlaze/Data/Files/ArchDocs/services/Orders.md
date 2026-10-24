@@ -4,25 +4,25 @@ $service:
   $type: Namotion.ArchDocs.Service
   name: Orders
   componentSources:
-    - path: /Repository/projects/Orders.*
-    - path: /Repository/hosts/Orders.*
-    - path: /resources/OrdersDatabase
-    - path: /resources/OrderEvents
+    - path: /ArchDocs/Repository/projects/Orders.*
+    - path: /ArchDocs/Repository/hosts/Orders.*
+    - path: /ArchDocs/resources/OrdersDatabase
+    - path: /ArchDocs/resources/OrderEvents
 metadata:
   $subjects:
     "Children[service]":
       relationships:
         - kind: calls
-          target: /services/Payments.md/service
+          target: /ArchDocs/services/Payments.md/service
           technology: HTTPS
           label: Authorize payment
         - kind: writes
-          source: /Repository/hosts/Orders.Worker
-          target: /resources/OrdersDatabase
+          source: /ArchDocs/Repository/hosts/Orders.Worker
+          target: /ArchDocs/resources/OrdersDatabase
           technology: PostgreSQL
         - kind: publishes
-          source: /Repository/hosts/Orders.Worker
-          target: /resources/OrderEvents
+          source: /ArchDocs/Repository/hosts/Orders.Worker
+          target: /ArchDocs/resources/OrderEvents
           technology: AMQP
           message: OrderPlaced
 ---

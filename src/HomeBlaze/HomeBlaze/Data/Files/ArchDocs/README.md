@@ -1,66 +1,73 @@
+---
+title: ArchDocs Commerce Sample
+navTitle: ArchDocs Sample
+---
+
 # ArchDocs Commerce Working Sample
 
-Use this folder to refine the authoring experience before finalizing the domain design, implementation plan, and MVP. It contains a sample checkout, normal Markdown documentation, proposed subject JSON definitions, and a docs-only storage root. The ArchDocs types, frontmatter child declarations, path queries, and architecture widgets are proposed functionality. The .NET projects are buildable fixtures, not an implementation of that functionality.
+Use this folder to refine the authoring experience before finalizing the domain design, implementation plan, and MVP. It lives under the existing HomeBlaze Files root as ArchDocs, containing normal Markdown, proposed subject JSON definitions, and an internal .source directory with buildable source fixtures. The ArchDocs types, frontmatter child declarations, path queries, and architecture widgets are proposed functionality. The .NET projects are fixtures, not an implementation of that functionality.
 
 ## Start here
 
-Read [docs/Architecture.md](docs/Architecture.md) for the overview, [docs/services/Orders.md](docs/services/Orders.md) for a service defined in Markdown frontmatter, and [docs/deployment-units/Orders.json](docs/deployment-units/Orders.json) for a standalone subject definition. Revise these actual files while discussing the model. Type names, property names, and generated graph keys are working proposals.
+Read [Architecture.md](Architecture.md) for the overview, [services/Orders.md](services/Orders.md) for a service defined in Markdown frontmatter, and [deployment-units/Orders.json](deployment-units/Orders.json) for a standalone subject definition. Revise these actual files while discussing the model. Type names, property names, and generated graph keys are working proposals.
 
-[docs/operations/Releasing.md](docs/operations/Releasing.md) demonstrates crosscutting documentation: a topic page that brings existing services, deployment units, and environments into one view without defining duplicate domain subjects.
+[operations/Releasing.md](operations/Releasing.md) demonstrates crosscutting documentation: a topic page that brings existing services, deployment units, and environments into one view without defining duplicate domain subjects.
 
-[docs/ServiceDiagram.md](docs/ServiceDiagram.md) references the two services as widgets on the existing CanvasLayout.
+[ServiceDiagram.md](ServiceDiagram.md) references the two services as widgets on the existing CanvasLayout.
 
-[docs/arc42.md](docs/arc42.md) is one ordinary Markdown document with all twelve arc42 sections. Its embedded widgets aggregate the same service, resource, relationship, and deployment definitions used elsewhere. Narrative, decisions, and an example runtime scenario are authored in the document.
+[arc42.md](arc42.md) is one ordinary Markdown document with all twelve arc42 sections. Its embedded widgets aggregate the same service, resource, relationship, and deployment definitions used elsewhere. Narrative, decisions, and an example runtime scenario are authored in the document.
 
 ```text
-archdocs-commerce/
-├── Root.json
-├── Commerce.slnx
-├── Directory.Build.props
-├── Directory.Packages.props
-├── docs/
-│   ├── Architecture.md
-│   ├── arc42.md
-│   ├── ServiceDiagram.md
-│   ├── Repository.json
-│   ├── resources/
-│   │   ├── OrdersDatabase.json
-│   │   ├── PaymentsDatabase.json
-│   │   └── OrderEvents.json
-│   ├── services/
-│   │   ├── Orders.md
-│   │   └── Payments.md
-│   ├── deployment-units/
-│   │   ├── Orders.json
-│   │   └── Payments.json
-│   ├── environments/
-│   │   ├── Staging.json
-│   │   └── Production.json
-│   └── operations/
-│       └── Releasing.md
-└── src/
-    ├── Orders.Api/
-    ├── Orders.Worker/
-    ├── Orders.Contracts/
-    └── Payments.Api/
+Files/ArchDocs/
+├── README.md
+├── Architecture.md
+├── arc42.md
+├── ServiceDiagram.md
+├── Repository.json
+├── resources/
+│   ├── OrdersDatabase.json
+│   ├── PaymentsDatabase.json
+│   └── OrderEvents.json
+├── services/
+│   ├── Orders.md
+│   └── Payments.md
+├── deployment-units/
+│   ├── Orders.json
+│   └── Payments.json
+├── environments/
+│   ├── Staging.json
+│   └── Production.json
+├── operations/
+│   └── Releasing.md
+└── .source/
+    ├── Commerce.slnx
+    ├── Directory.Build.props
+    ├── Directory.Packages.props
+    └── src/
+        ├── Orders.Api/
+        ├── Orders.Worker/
+        ├── Orders.Contracts/
+        └── Payments.Api/
 ```
 
 ## Storage and discovery
 
-[Root.json](Root.json) uses the existing FluentStorageContainer configuration to mount only docs. Its connectionString is relative to Root.json's directory. It does not mount the source folder as documentation. [Repository.json](docs/Repository.json) proposes a SourceRepository whose sourceRoot is resolved relative to that definition file, so `..` points at this sample's root.
+The sample uses the existing HomeBlaze storage root that mounts Files. It has no nested Root.json storage subject. Graph references begin at `/ArchDocs`, so the overview queries stay within the sample. [Repository.json](Repository.json) proposes a SourceRepository whose sourceRoot is resolved relative to that definition file, so `.source` points at the internal fixture checkout.
+
+Storage already excludes dot-prefixed directories from subject discovery. The .source directory is therefore available to the analyzer as raw input without turning its projects or build outputs into documentation subjects. The ordinary application and device folders remain outside the sample's query scope. This is a development-data sample; its feature-specific types and widgets become functional when the proposed capability is implemented.
 
 The three API/worker projects explicitly declare OutputType=Exe, and Orders.Contracts is a library. The .NET analyzer should discover four CodeProjects and three Hosts. The console programs provide small runnable entry points for project discovery; the sample's names describe their architectural roles.
 
 Build from this folder with .NET 10:
 
 ```sh
-dotnet build Commerce.slnx
+dotnet build .source/Commerce.slnx
 ```
 
 For example, run one fixture with:
 
 ```sh
-dotnet run --project src/Orders.Api/Orders.Api.csproj
+dotnet run --project .source/src/Orders.Api/Orders.Api.csproj
 ```
 
 The projects and central package settings are local to this folder and can be copied together. They do not reference the surrounding solution.
@@ -103,10 +110,10 @@ For now, resources describe logical dependencies independently of environments. 
 
 ## Proposed graph and paths
 
-The storage root exposes JSON subjects by filename without extension and Markdown pages with their extension. A `$service` declaration adds a named `service` child to its containing page; the dollar sign is used only in the declaration. Absolute paths below are relative to this sample's Root.json graph. Analyzer collection keys are simplified illustrative identities; the implementation must distinguish projects with duplicate names.
+The storage root exposes JSON subjects by filename without extension and Markdown pages with their extension. A `$service` declaration adds a named `service` child to its containing page; the dollar sign is used only in the declaration. Absolute paths address `/ArchDocs` under the existing Files graph. Analyzer collection keys are simplified illustrative identities; the implementation must distinguish projects with duplicate names.
 
 ```text
-root
+ArchDocs (/ArchDocs)
 ├── Repository
 │   ├── projects
 │   │   ├── Orders.Api
@@ -138,7 +145,7 @@ root
 
 The repository owns discovered projects and hosts. Services and deployment units reference them rather than create copies. A Service's hosts collection contains the Host subjects in its resolved components. Source query entries and resolved collections remain separate, such as hostSources and hosts.
 
-An exact subject path selects one subject. A collection-property path selects its members; adding `/*` explicitly selects those direct members too. `*` stays within one path segment, and `**` spans any number of path segments. Optional `where` filters use property conditions. For example, `/Repository/**/Orders.*` illustrates recursive matching. A path targets graph subjects, not source files.
+An exact subject path selects one subject. A collection-property path selects its members; adding `/*` explicitly selects those direct members too. `*` stays within one path segment, and `**` spans any number of path segments. Optional `where` filters use property conditions. For example, `/ArchDocs/Repository/**/Orders.*` illustrates recursive matching. A path targets graph subjects, not source files.
 
 The absolute references keep this example easy to follow. Moving the sample under another graph root would require adjusting its absolute references or using suitable scoped relative paths. Source-file access still resolves from the definition's local origin.
 
@@ -162,7 +169,7 @@ To deploy only the Orders worker, change the Orders unit's hostSources to:
 ```json
 [
   {
-    "path": "/services/Orders.md/service/hosts/*",
+    "path": "/ArchDocs/services/Orders.md/service/hosts/*",
     "where": "Name == \"Orders.Worker\""
   }
 ]
@@ -174,7 +181,7 @@ To deploy hosts from both services together, add another hostSources entry to on
 
 ```json
 {
-  "path": "/services/Payments.md/service/hosts/*"
+  "path": "/ArchDocs/services/Payments.md/service/hosts/*"
 }
 ```
 

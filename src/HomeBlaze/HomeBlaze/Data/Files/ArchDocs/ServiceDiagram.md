@@ -8,11 +8,11 @@ The [Orders service](services/Orders.md) and [Payments service](services/Payment
 
 :: HomeBlaze.Components.CanvasLayout#services MinHeight=280 Width=740 MinWidth=640 MaxWidth=740 Scale=FitWidth IsSnapToGridEnabled=true GridSize=20
 ::: Node#orders X=20 Y=20 Width=320 Height=220
-:::: HomeBlaze.Components.Widget#ordersWidget Path=/services/Orders.md/service
+:::: HomeBlaze.Components.Widget#ordersWidget Path=/ArchDocs/services/Orders.md/service
 ::::
 :::
 ::: Node#payments X=400 Y=20 Width=320 Height=220
-:::: HomeBlaze.Components.Widget#paymentsWidget Path=/services/Payments.md/service
+:::: HomeBlaze.Components.Widget#paymentsWidget Path=/ArchDocs/services/Payments.md/service
 ::::
 :::
 ::

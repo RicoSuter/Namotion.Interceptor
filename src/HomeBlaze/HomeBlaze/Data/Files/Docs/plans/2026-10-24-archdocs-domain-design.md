@@ -53,7 +53,7 @@ A configurable SubjectProjection was considered. The chosen approach puts genera
 
 ### Selector syntax
 
-Structured selectors, named selections, and compact query syntax were discussed. The latest direction uses subject paths with `*` and `**` plus optional property filters, without a separate named-selection concept. Proposed default: configuration collections contain entries with `path` and optional `where`, reusing the existing expression parser for conditions. Keep source definitions distinct from resolved subject collections, illustratively `componentSources` versus `components`, `hostSources` versus `hosts`, and `deploymentUnitSources` versus `deploymentUnits`. These names remain proposed API choices. The [self-contained working sample](../../../../../samples/archdocs-commerce/README.md) is the current place to refine the file structure and schema before finalizing this design or its MVP.
+Structured selectors, named selections, and compact query syntax were discussed. The latest direction uses subject paths with `*` and `**` plus optional property filters, without a separate named-selection concept. Proposed default: configuration collections contain entries with `path` and optional `where`, reusing the existing expression parser for conditions. Keep source definitions distinct from resolved subject collections, illustratively `componentSources` versus `components`, `hostSources` versus `hosts`, and `deploymentUnitSources` versus `deploymentUnits`. These names remain proposed API choices. The [self-contained working sample](../../ArchDocs/README.md) is the current place to refine the file structure and schema before finalizing this design or its MVP.
 
 ### Markdown defines domain subjects
 

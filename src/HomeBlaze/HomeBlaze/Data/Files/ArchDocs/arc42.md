@@ -39,14 +39,14 @@ Orders separates its entry API from background processing. Payments has an indep
 
 ### Inside Orders
 
-:: Namotion.ArchDocs.ArchitectureDiagram#ordersComponents Path=/services/Orders.md/service View=Components
+:: Namotion.ArchDocs.ArchitectureDiagram#ordersComponents Path=/ArchDocs/services/Orders.md/service View=Components
 ::
 
 Host-specific relationships attach to their declared hosts. The service-level Payments call stays at the Orders boundary until its host endpoint is specified. Shared resources retain one identity across the views.
 
 ### Inside Payments
 
-:: Namotion.ArchDocs.ArchitectureDiagram#paymentsComponents Path=/services/Payments.md/service View=Components
+:: Namotion.ArchDocs.ArchitectureDiagram#paymentsComponents Path=/ArchDocs/services/Payments.md/service View=Components
 ::
 
 The [manually arranged canvas](ServiceDiagram.md) provides another presentation of these same services.
@@ -69,7 +69,7 @@ Both environments include the declared Orders and Payments deployment units. The
 :: Namotion.ArchDocs.DeploymentMatrix#deployments Path=/environments
 ::
 
-:: Namotion.ArchDocs.ArchitectureDiagram#productionDeployment Path=/environments/Production View=Deployment
+:: Namotion.ArchDocs.ArchitectureDiagram#productionDeployment Path=/ArchDocs/environments/Production View=Deployment
 ::
 
 The current model describes intended installations and host grouping. Physical infrastructure and environment-specific database and queue instances still need to be mapped.

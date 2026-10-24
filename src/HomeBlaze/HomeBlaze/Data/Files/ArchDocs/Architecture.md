@@ -14,10 +14,10 @@ The [arc42 document](arc42.md) combines the architecture narrative with embedded
 
 ## Services
 
-:: Namotion.ArchDocs.ServiceTable Path=/
+:: Namotion.ArchDocs.ServiceTable Path=/ArchDocs
 ::
 
 ## Deployments
 
-:: Namotion.ArchDocs.DeploymentMatrix Path=/
+:: Namotion.ArchDocs.DeploymentMatrix Path=/ArchDocs
 ::

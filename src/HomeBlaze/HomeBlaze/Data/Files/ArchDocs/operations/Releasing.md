@@ -10,14 +10,14 @@ This page brings the services and their environment deployments together. The sa
 
 ## Services involved
 
-:: Namotion.ArchDocs.ServiceTable Path=/
+:: Namotion.ArchDocs.ServiceTable Path=/ArchDocs
 ::
 
 ## Staging and production
 
 Both environments include the Orders and Payments deployment units. Their installed versions and URLs can be recorded independently for each deployment.
 
-:: Namotion.ArchDocs.DeploymentMatrix Path=/
+:: Namotion.ArchDocs.DeploymentMatrix Path=/ArchDocs
 ::
 
 ## Release considerations

@@ -3,10 +3,10 @@
   "name": "Production",
   "deploymentUnitSources": [
     {
-      "path": "/deployment-units/Orders"
+      "path": "/ArchDocs/deployment-units/Orders"
     },
     {
-      "path": "/deployment-units/Payments"
+      "path": "/ArchDocs/deployment-units/Payments"
     }
   ]
 }

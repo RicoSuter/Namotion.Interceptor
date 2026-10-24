@@ -4,22 +4,22 @@ $service:
   $type: Namotion.ArchDocs.Service
   name: Payments
   componentSources:
-    - path: /Repository/projects/Payments.*
-    - path: /Repository/hosts/Payments.*
-    - path: /resources/PaymentsDatabase
-    - path: /resources/OrderEvents
+    - path: /ArchDocs/Repository/projects/Payments.*
+    - path: /ArchDocs/Repository/hosts/Payments.*
+    - path: /ArchDocs/resources/PaymentsDatabase
+    - path: /ArchDocs/resources/OrderEvents
 metadata:
   $subjects:
     "Children[service]":
       relationships:
         - kind: consumes
-          source: /Repository/hosts/Payments.Api
-          target: /resources/OrderEvents
+          source: /ArchDocs/Repository/hosts/Payments.Api
+          target: /ArchDocs/resources/OrderEvents
           technology: AMQP
           message: OrderPlaced
         - kind: writes
-          source: /Repository/hosts/Payments.Api
-          target: /resources/PaymentsDatabase
+          source: /ArchDocs/Repository/hosts/Payments.Api
+          target: /ArchDocs/resources/PaymentsDatabase
           technology: PostgreSQL
 ---
 

@@ -1,4 +1,4 @@
 {
   "$type": "Namotion.ArchDocs.SourceRepository",
-  "sourceRoot": ".."
+  "sourceRoot": ".source"
 }
