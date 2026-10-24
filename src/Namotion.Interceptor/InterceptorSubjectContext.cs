@@ -152,6 +152,41 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
                Volatile.Read(ref _state).FallbackContexts.Contains(contextImpl);
     }
 
+    /// <summary>
+    /// Whether <paramref name="service"/> is a service of this context or of a fallback context other than
+    /// <paramref name="excludedContext"/>.
+    /// </summary>
+    private protected bool IsServiceReachableWithout<TInterface>(TInterface service, IInterceptorSubjectContext excludedContext)
+        where TInterface : class
+    {
+        var state = Volatile.Read(ref _state);
+        foreach (var ownService in state.Services)
+        {
+            if (ReferenceEquals(ownService, service))
+            {
+                return true;
+            }
+        }
+
+        foreach (var fallbackContext in state.FallbackContexts)
+        {
+            if (ReferenceEquals(fallbackContext, excludedContext))
+            {
+                continue;
+            }
+
+            foreach (var fallbackService in fallbackContext.GetServices<TInterface>())
+            {
+                if (ReferenceEquals(fallbackService, service))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
     public virtual bool RemoveFallbackContext(IInterceptorSubjectContext context)
     {
         var contextImpl = (InterceptorSubjectContext)context;

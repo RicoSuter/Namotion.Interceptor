@@ -164,6 +164,29 @@ public class LifecycleInterceptorTests
     }
 
     [Fact]
+    public void WhenOneOfTwoFallbackContextsThatReachTheInterceptorIsRemoved_ThenSubjectAndItsChildrenStayAttached()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithLifecycle();
+        var interceptor = context.GetServices<LifecycleInterceptor>().Single();
+        var first = InterceptorSubjectContext.Create();
+        var second = InterceptorSubjectContext.Create();
+        first.AddFallbackContext(context);
+        second.AddFallbackContext(context);
+
+        var child = new Person { FirstName = "Child" };
+        var person = new Person(first) { Mother = child };
+        ((IInterceptorSubject)person).Context.AddFallbackContext(second);
+
+        // Act
+        ((IInterceptorSubject)person).Context.RemoveFallbackContext(first);
+
+        // Assert
+        Assert.True(interceptor.TryRunWhileAttached(person, () => { }));
+        Assert.True(interceptor.TryRunWhileAttached(child, () => { }));
+    }
+
+    [Fact]
     public Task WhenRemovingInterceptors_ThenAllArrayChildrenAreDetached()
     {
         // Arrange

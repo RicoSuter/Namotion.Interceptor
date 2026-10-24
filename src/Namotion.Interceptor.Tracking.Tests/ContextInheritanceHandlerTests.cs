@@ -157,6 +157,81 @@ public class ContextInheritanceHandlerTests
     }
     
     [Fact]
+    public void WhenParentThatAttachedSharedChildIsRemoved_ThenChildInheritsContextOfRemainingParent()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance()
+            .WithParents();
+
+        var shared = new Person { FirstName = "Shared" };
+        var first = new Person { FirstName = "First", Mother = shared };
+        var second = new Person { FirstName = "Second" };
+        var root = new Person(context) { Mother = first, Father = second };
+        second.Mother = shared;
+
+        // Act
+        root.Mother = null;
+
+        // Assert
+        Assert.Empty(first.GetServices<ILifecycleInterceptor>());
+        Assert.Equal(context.GetServices<ILifecycleInterceptor>(), shared.GetServices<ILifecycleInterceptor>());
+        Assert.True(context.TryGetLifecycleInterceptor()!.TryRunWhileAttached(shared, () => { }));
+        Assert.Equal(1, ((IInterceptorSubject)shared).GetReferenceCount());
+    }
+
+    [Fact]
+    public void WhenParentThatAttachedSharedChildReleasesItAndIsRemovedLater_ThenChildKeepsContextOfRemainingParent()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance()
+            .WithParents();
+
+        var shared = new Person { FirstName = "Shared" };
+        var first = new Person { FirstName = "First", Mother = shared };
+        var second = new Person { FirstName = "Second" };
+        var root = new Person(context) { Mother = first, Father = second };
+        second.Mother = shared;
+
+        // Act
+        first.Mother = null;
+        root.Mother = null;
+
+        // Assert
+        Assert.Empty(first.GetServices<ILifecycleInterceptor>());
+        Assert.Equal(context.GetServices<ILifecycleInterceptor>(), shared.GetServices<ILifecycleInterceptor>());
+        Assert.True(context.TryGetLifecycleInterceptor()!.TryRunWhileAttached(shared, () => { }));
+        Assert.Equal(1, ((IInterceptorSubject)shared).GetReferenceCount());
+    }
+
+    [Fact]
+    public void WhenParentReleasesSubjectThatOnlyItsOwnChildStillHolds_ThenSubjectKeepsItsContextAndCanBeAssignedAgain()
+    {
+        // Arrange: the child of the subject holds it as well, which would make a cycle of their contexts.
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance()
+            .WithParents();
+
+        var subject = new Person { FirstName = "Subject" };
+        var child = new Person { FirstName = "Child" };
+        var root = new Person(context) { Mother = subject };
+        subject.Mother = child;
+        child.Mother = subject;
+
+        // Act
+        root.Mother = null;
+        root.Father = subject;
+
+        // Assert
+        Assert.Equal(context.GetServices<ILifecycleInterceptor>(), subject.GetServices<ILifecycleInterceptor>());
+        Assert.Equal(context.GetServices<ILifecycleInterceptor>(), child.GetServices<ILifecycleInterceptor>());
+    }
+
+    [Fact]
     public void WhenAddingInterceptorToChild_ThenServiceFallbackAndScopeWorks()
     {
         // Arrange
