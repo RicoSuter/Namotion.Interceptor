@@ -104,9 +104,11 @@ Internal/external is selected per context diagram. The Commerce document selects
 
 ## Resources and typed relationships
 
-Application capabilities, database systems, and neighboring software systems use the same Service model. Proposed Service kinds describe roles such as Application and Database; they do not describe whether a subject is internal to a particular diagram. The sample's two Database.json definitions are now Services with PostgreSQL technology. Their host and API/protocol details are not yet specified. They can acquire Host components and participate in deployment-unit host sources when that information is modeled.
+Service represents a logical software capability or system, including neighboring systems in the enterprise. Resource describes a component-level dependency such as a database, queue, or consumed cloud offering. Resources appear alongside Hosts in a service's component view. A cloud product called a "service" does not automatically become an architecture Service. Internal/external remains relative to each diagram, independent of the subject's type.
 
-The shared order-events queue remains a proposed Resource while deciding whether individual queues and logical database instances need that separate type or should also use lightweight Services. Services reference dependencies through componentSources alongside code and hosts. Membership does not imply exclusive ownership. A DeploymentUnit still selects Host subjects; including another Service or Resource in an application's components does not automatically provision it or include its hosts transitively. A unit can reference another service's hosts explicitly when appropriate.
+The two Database.json definitions and shared order-events queue are Resources. Their hosting and API/protocol details are not yet specified. Services reference dependencies through componentSources alongside code and hosts. Membership does not imply exclusive ownership. A DeploymentUnit currently selects Host subjects; including another Service or Resource in an application's components does not automatically provision it or include its hosts transitively. How resources participate in deployment units and environments remains open.
+
+A Service can also reference a database Host directly. Resource is optional when the Host describes enough; model a particular database as a Resource only when that extra detail is useful. Component membership does not require deploying the database Host together with application Hosts. DeploymentUnit selections define that grouping. This sample keeps the database Resources because their underlying Hosts are unspecified.
 
 Each service has a folder containing its documentation and its service-specific resources. The root resources folder holds shared resources such as OrderEvents. Folder placement organizes the files; explicit path references still define membership and relationships. Deployment units stay separate because one unit can select hosts from several services.
 
@@ -116,7 +118,9 @@ Service page metadata uses the existing metadata envelope shape with a `$subject
 
 Generated service views can aggregate host-level interactions using service membership, retaining the endpoint facts and avoiding inferred runtime order. A detailed view preserves unknown host endpoints rather than attaching a service-level relationship to a guessed process. Consumes is stored as a dependency from the consumer to its queue; a message-flow presentation may reverse the drawn direction explicitly. Shared or overlapping membership must remain visible rather than establish a fictitious exclusive owner. The same queue is never copied into separate resource identities for the two services.
 
-Environment-specific realization of logical dependencies and database services remains open. The current deployment matrix contains only the three modeled application hosts; it does not invent database hosts or provision queue instances. Automatic arc42-style views need enough data for each view: building block views use structure and relationships, runtime views need scenarios, and complete deployment views need infrastructure mappings. Diagram scope and display settings belong to the view; semantic connections belong to the shared graph.
+A Host can provide several Resources, and a Resource can have several providing Hosts. A managed cloud Resource can have no known Host. These references do not transfer subject ownership; their exact serialized representation remains open. The sample does not yet declare database Hosts or provider links.
+
+Environment-specific realization of logical resources remains open, as do links to provider services. The current deployment matrix contains only the three modeled application hosts; it does not invent database hosts or provision queue instances. Automatic arc42-style views need enough data for each view: building block views use structure and relationships, runtime views need scenarios, and complete deployment views need infrastructure mappings. Diagram scope and display settings belong to the view; semantic connections belong to the shared graph.
 
 ## Proposed graph and paths
 
@@ -137,14 +141,14 @@ ArchDocs (/ArchDocs)
 ├── services
 │   ├── Orders
 │   │   ├── Service.md/service
-│   │   │   ├── components → references 3 CodeProjects, 2 Hosts, 1 Database Service, and 1 Queue Resource
+│   │   │   ├── components → references 3 CodeProjects, 2 Hosts, 1 Database Resource, and 1 Queue Resource
 │   │   │   └── hosts → references both Orders Hosts
-│   │   └── resources/Database → Service, hosts unspecified
+│   │   └── resources/Database → Resource, hosting unspecified
 │   └── Payments
 │       ├── Service.md/service
-│       │   ├── components → references 1 CodeProject, 1 Host, 1 Database Service, and 1 Queue Resource
+│       │   ├── components → references 1 CodeProject, 1 Host, 1 Database Resource, and 1 Queue Resource
 │       │   └── hosts → references the Payments Host
-│       └── resources/Database → Service, hosts unspecified
+│       └── resources/Database → Resource, hosting unspecified
 ├── resources
 │   └── OrderEvents → shared by both services
 ├── deployment-units
