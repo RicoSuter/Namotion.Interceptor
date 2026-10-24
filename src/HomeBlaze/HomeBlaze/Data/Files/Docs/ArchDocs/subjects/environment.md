@@ -28,6 +28,10 @@ A configurable subject describing a deployment context, such as staging or produ
 
 It does not generate deployments for every service or every deployment unit in the graph. Only declared selections produce deployments.
 
+## Usage examples
+
+[JSON catalog](../examples/json-catalog.md)
+
 ## Related specifications
 
 [Overview and status legend](../overview.md) · [Platform readiness](../implementation-readiness.md)

@@ -32,6 +32,10 @@ The user accepted component-based deployment composition. The working schema the
 
 The common arrangement is one service associated with one deployment unit. Service boundaries remain logical boundaries when the deployment arrangement changes.
 
+## Usage examples
+
+[JSON catalog](../examples/json-catalog.md) · [Shared components](../examples/repositories-and-shared-components.md)
+
 ## Related specifications
 
 [Overview and status legend](../overview.md) · [Platform readiness](../implementation-readiness.md)

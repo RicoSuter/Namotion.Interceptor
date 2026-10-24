@@ -1,7 +1,10 @@
 {
   "order": [
     "overview.md",
+    "examples",
     "implementation-readiness.md",
+    "scope-and-decisions.md",
+    "verification-scenarios.md",
     "subjects",
     "analyzers",
     "widgets",

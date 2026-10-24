@@ -38,6 +38,10 @@ The user confirmed that neighboring enterprise systems are also modeled as Servi
 
 The sample uses Resource for the two database definitions. Their hosting and interface details are not yet supplied. Adding a resource or another service to an application's components does not automatically add underlying hosts to the application's resolved hosts. The direct Host subset remains explicit. Services, Hosts, and Resources can expose Interfaces describing database protocols, HTTP, or other supported interaction mechanisms.
 
+## Usage examples
+
+[JSON catalog](../examples/json-catalog.md) · [Markdown authoring variants](../examples/markdown-authoring.md)
+
 ## Related specifications
 
 [Overview and status legend](../overview.md) · [Platform readiness](../implementation-readiness.md)

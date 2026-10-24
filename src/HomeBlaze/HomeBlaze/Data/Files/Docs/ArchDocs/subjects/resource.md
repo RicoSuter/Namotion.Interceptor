@@ -38,6 +38,10 @@ The user confirmed that a Service can reference a database Host directly through
 
 The sample resources are logical definitions independent of environments. Deployments can bind these logical definitions to concrete environment-specific resources while retaining their logical identities. Exact instance/mapping records remain open. Do not imply resource provisioning or a particular deployment lifecycle from the presence of a Resource subject.
 
+## Usage examples
+
+[Shared components](../examples/repositories-and-shared-components.md)
+
 ## Related specifications
 
 [Overview and status legend](../overview.md) · [Platform readiness](../implementation-readiness.md)

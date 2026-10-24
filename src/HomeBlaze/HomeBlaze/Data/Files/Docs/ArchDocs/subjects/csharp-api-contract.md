@@ -22,6 +22,10 @@ CSharpApiContract derives from Contract. It can describe public types, members, 
 
 Decide whether extraction uses source symbols or compiled metadata, which surface/revision and target framework it describes, and the snapshot format. The minimal csproj XML analyzer does not implement this. Generating a complete surface must report unresolved inputs rather than invent members. Extraction, comparison, and compatibility assessment are separate capabilities.
 
+## Usage examples
+
+[Library contracts](../examples/library-contracts.md)
+
 ## Related specifications
 
 [Overview and status legend](../overview.md) · [Platform readiness](../implementation-readiness.md)

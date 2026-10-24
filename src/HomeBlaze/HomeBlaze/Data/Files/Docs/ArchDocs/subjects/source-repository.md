@@ -44,6 +44,10 @@ File locations such as `../` resolve relative to the defining configuration file
 
 For the MVP, defining SourceRepository in a JSON file or Markdown frontmatter provides an unambiguous local origin through the owning file. Proposed default: where no local file origin exists, require an absolute source root and report a configuration diagnostic for an ambiguous relative path. Do not guess from the process working directory. Future storage backends can supply a storage identity and a root path instead of a local filesystem location.
 
+## Usage examples
+
+[JSON catalog](../examples/json-catalog.md) · [Multiple repositories](../examples/repositories-and-shared-components.md)
+
 ## Related specifications
 
 [Overview and status legend](../overview.md) · [Platform readiness](../implementation-readiness.md)

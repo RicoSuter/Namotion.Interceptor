@@ -26,6 +26,10 @@ A CodeProject can contribute to multiple Hosts and Services. Libraries remain Co
 
 Project references establish code dependencies and do not assert runtime calls. Repository ownership and subject identity survive architectural selection and refresh. Tests and executable projects need explicit classification where supported; runnable output alone does not establish a production role.
 
+## Usage examples
+
+[Library contracts](../examples/library-contracts.md)
+
 ## Related specifications
 
 [Overview and status legend](../overview.md) · [Platform readiness](../implementation-readiness.md)

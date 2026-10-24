@@ -1,0 +1,12 @@
+{
+  "order": [
+    "overview.md",
+    "json-catalog.md",
+    "markdown-authoring.md",
+    "arc42.md",
+    "topics-and-decisions.md",
+    "library-contracts.md",
+    "repositories-and-shared-components.md",
+    "reference-cases.md"
+  ]
+}

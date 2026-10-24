@@ -6,7 +6,7 @@ status: Planned
 
 # ArchDocs Specifications [Planned]
 
-Canonical element specifications for the generic architecture-documentation domain.
+The durable feature reference for the generic architecture-documentation domain, including element specifications, examples, usage scenarios, status, and scope decisions.
 
 ## Implementation readiness
 
@@ -20,6 +20,8 @@ Describe and explore software through ordinary Markdown documentation, authored 
 
 ## Specification map
 
+- [Usage examples](examples/overview.md): standalone JSON, frontmatter and inline Markdown, arc42, topics/decisions, libraries, and multiple repositories.
+- [Scope and design decisions](scope-and-decisions.md) and [verification scenarios](verification-scenarios.md): rationale, open decisions, and behavior to verify.
 - [Implementation readiness](implementation-readiness.md): implemented platform support, planned extensions, and required HomeBlaze changes.
 - Subjects below: canonical semantics, configuration/state boundaries, references, and unresolved schemas.
 - [Analyzers](analyzers/overview.md): read-only source and contract analysis.
@@ -63,11 +65,11 @@ Component is a shared capability, with Service, Host, Resource, and CodeProject 
 
 Contract specializations are OpenApiContract, ProtobufContract, and CSharpApiContract. Keep shared contract references independent of a parser or transport. Exact CLR interfaces, fields, ownership where noted, and version identity remain open in their specifications.
 
-## Documents and samples
+## Reference ownership
 
-[Superpowers design record](../../../../../../../docs/superpowers/specs/2026-10-24-archdocs-domain-design.md) records intent, approaches, candidate acceptance scenarios, and remaining scope decisions. Implementation plans belong in `docs/superpowers/plans/` after design/MVP approval; no implementation plan exists yet.
+This feature reference is self-contained. Requirements, design decisions, examples, and verification scenarios belong here and must remain understandable without session notes or temporary planning artifacts. Keep one canonical page per concept and link to it from other pages. Update status and readiness when implementation lands. Session notes and delivery plans may point here; the reference does not depend on them.
 
-[Commerce working sample](../../ArchDocs/README.md) contains proposed Markdown/JSON definitions and buildable discovery fixtures. It is development data, not a working implementation or published seed sample. Existing ordinary architecture documents can adopt the capabilities incrementally.
+The [usage examples](examples/overview.md) contain the JSON and Markdown needed to understand different documentation styles. The separate [Commerce development fixture](../../ArchDocs/README.md) is optional editable test material with buildable discovery inputs; it is not part of published seed packaging.
 
 ## Related specifications
 

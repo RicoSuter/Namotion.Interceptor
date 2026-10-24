@@ -34,6 +34,10 @@ CodeProjects and Interfaces reference the base Contract capability. Additional t
 
 A library API needs no Host, network Interface, or Endpoint. A parsed representation is tied to its source/revision. Unknown or unsupported input is reported explicitly. Comparison and compatibility analysis are separate capabilities, not implied by having a version field.
 
+## Usage examples
+
+[Library contracts](../examples/library-contracts.md)
+
 ## Related specifications
 
 [Overview and status legend](../overview.md) · [Platform readiness](../implementation-readiness.md)
