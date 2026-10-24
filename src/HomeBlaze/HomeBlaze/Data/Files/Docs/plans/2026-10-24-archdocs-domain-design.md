@@ -53,7 +53,7 @@ A configurable SubjectProjection was considered. The chosen approach puts genera
 
 ### Selector syntax
 
-Structured selectors and a compact query language were discussed. Proposed default: use structured JSON selectors for the initial API and reuse the existing expression parser for property conditions. A compact syntax can be added later without changing selection semantics. The exact JSON property names are left to the implementation design.
+Structured selectors, named selections, and compact query syntax were discussed. The latest direction uses subject paths with `*` and `**` plus optional property filters, without a separate named-selection concept. Proposed default: configuration collections contain entries with `path` and optional `where`, reusing the existing expression parser for conditions. Keep source definitions distinct from resolved subject collections, illustratively `componentSources` versus `components`, `hostSources` versus `hosts`, and `deploymentUnitSources` versus `deploymentUnits`. These names remain proposed API choices. The [self-contained working sample](../../../../../samples/archdocs-commerce/README.md) is the current place to refine the file structure and schema before finalizing this design or its MVP.
 
 ### Markdown defines domain subjects
 
@@ -69,7 +69,7 @@ title: Orders
 $service:
   $type: Namotion.ArchDocs.Service
   name: Orders
-  selections: ...
+  componentSources: []
 $environment:
   $type: Namotion.ArchDocs.Environment
   name: Staging
@@ -146,7 +146,7 @@ Common classification must allow selectors to express "library named `*.Test`" w
 
 A configurable subject representing a logical software capability or bounded context. "Application" is not an additional entity. A service can be implemented by several hosts and can select libraries or other code elements as well.
 
-A service contains named selections, for example components and tests, and architectural descriptions and relationships. Selections refer to repository-owned subjects; they do not clone them. Membership can overlap when explicitly configured. Shared code remains one discovered element.
+A service contains path-based component-source configuration and architectural descriptions and relationships. Its resolved components refer to repository-owned subjects; they do not clone them. It exposes its selected Host components through a resolved hosts collection, so a deployment unit can reference `service/hosts` directly. Additional typed subsets can be queried with ordinary paths and filters rather than a named-selection dictionary. Membership can overlap when explicitly configured. Shared code remains one discovered element.
 
 ### DeploymentUnit
 
@@ -170,19 +170,19 @@ A generated deployment expresses the intended installation. It is not evidence t
 
 Use the existing metadata system for manually entered enrichment of generated subjects. The metadata of an environment stores entries for its Deployment descendants, keyed by their stable subject paths: in the sidecar of a JSON definition or the frontmatter of a Markdown definition. Version and URLs can use domain-specific metadata keys with typed accessors and editing support; notes, links, and tags use the existing keys. Configuration declares deployment-unit selection, and metadata holds enrichment. Do not create a second enrichment store inside the owner's configuration.
 
-## Selections and relationships
+## Path queries and relationships
 
-A selector resolves a set of subjects. Scope, kind, source path, name matching, property predicates, and explicit references are useful building blocks. The mechanism should be usable outside this domain rather than restricted to an Artifact base class.
+A path-query entry resolves subjects from an exact subject path, a collection-property path, or a subject-path pattern, then optionally applies a `where` property predicate. An exact collection path produces its members; an explicit `/*` can also select those immediate members. The mechanism should be usable outside this domain rather than restricted to an Artifact base class. Repository file-location predicates remain separate from subject-path matching.
 
 Filters within one selector combine with AND. Proposed default: a list of selectors combines by set union; exclusions subtract from that result; results are deduplicated by identity. Support explicit references as the simplest selector. Deployment-unit selections validate that their results are hosts, and environment selections validate that theirs are deployment units. A wrong result kind produces a diagnostic rather than being converted into another kind of entity.
 
-Services expose named selections that other selectors can use as a scope. A deployment unit can therefore select the hosts in a service's component selection. Proposed default: detect cycles between named selections and report an invalid configuration; do not recursively expand them forever.
+Consumers reference resolved subject properties through ordinary paths. A deployment unit can therefore select `service/hosts`, with no separate `selection` or `from` field. Proposed default: detect cyclic query dependencies and report invalid configuration; do not recursively expand them forever.
 
 Source paths are repository-relative file locations. Subject paths identify subjects in the object graph. Namespaces are another future filter. These must not be silently treated as the same address space.
 
 The current checkout has subtree matching in AgentWatchPaths, path-prefix/type/property filtering in the MCP search tool, and name wildcards in NuGetPackageNameMatcher. It does not have a general reusable path-glob matcher. Reuse the applicable behavior without introducing a dependency on the AI or NuGet plugin assembly. The NuGet matcher's `*` matches one or more characters and has no path-segment semantics, so it cannot be adopted as a path matcher unchanged.
 
-Proposed default: path globs use `/` separators, `*` within a path segment, and `**` across path segments. Name patterns support `*`. Matching rules, including casing and empty matches, must be specified once and tested by the implementation. The builder may choose an existing suitable dependency after checking the repository's requirements.
+Path globs use `/` separators, `*` within a path segment, and `**` across path segments. `*` does not cross a segment boundary, and `**` can span zero or more segments. Wildcards match subject-path segments or keys rather than display names; property conditions use `where`. Remaining matching rules, including casing and empty matches, must be specified once and tested by the implementation. The builder may choose an existing suitable dependency after checking the repository's requirements.
 
 Selectors determine membership. Dependencies outside the selected scope remain external relationships and are not automatically added. Transitive membership expansion is deferred. Project references describe code dependencies; they do not by themselves establish runtime communication between services. Authored architectural relationships and their evidence remain distinguishable from discovered code-reference edges.
 
@@ -256,11 +256,13 @@ The basic subject UI should expose applicable configuration, state, diagnostics,
 
 The user selected existing subject UI plus an optional Markdown service-summary widget and a deployment matrix for the MVP. A service summary reads a Service subject and summarizes its selected code/hosts and deployments. Proposed default: show its name and description, selected host/project counts, and links to corresponding subjects and deployments. A document defining a service retains the normal Markdown UI; an author can embed a summary explicitly, and page UI slots can make the same information accessible without blocks. The deployment matrix shows units against environments using declared deployments and manual versions/links; it must not display an unobserved deployment as healthy. Exact widget presentation remains to be designed. An interactive dependency-graph renderer is deferred; project-reference edges remain navigable through the subject graph.
 
+The user also proposed a ServiceTable widget scoped to a subject subtree, illustratively `ServiceTable Path=Project1/`. It finds Service subjects within that scope regardless of whether their definitions came from JSON, frontmatter, or inline blocks, and presents a service-oriented overview. Proposed default: include owned descendants recursively, deduplicate subject identities, and do not expand scope by following architectural relationship edges or selection references. Use shared scope/type-selection infrastructure rather than a separate filesystem scan or analyzer. Proposed columns include service name and description, host/project counts, and deployment summaries with navigation and previews. Rows and displayed facts follow graph changes. Existing SubjectTable already supports a source and type filter, but lists the source's immediate subjects rather than recursively discovering services under document children, and does not provide architecture-specific presentation. Reuse suitable table and query primitives; exact component names, path-property naming, and presentation remain builder choices.
+
 ## MVP acceptance scenarios
 
 1. Mount only a repository's documentation folder, configure a source root relative to a JSON file there, and analyze the surrounding checkout without mounting every source file as a subject.
 2. Configure two repositories; discover their project-level elements without duplicating shared elements within one repository's graph.
-3. Define a service selecting all elements under a source folder and a named test selection filtering library projects by `*.Test`.
+3. Define a service using path-query entries selecting its repository-owned components, and query library projects matching `*.Test` through paths and filters without introducing named-selection entities.
 4. Change the source or selectors and refresh; preserve unchanged generated subjects and authored enrichment while updating membership and project-reference edges.
 5. Show an external code dependency without adding its target to the service's membership or asserting runtime communication.
 6. Define a deployment unit selecting hosts from more than one service, and an environment selecting that unit; obtain exactly one generated Deployment for the pair.
@@ -275,6 +277,7 @@ The user selected existing subject UI plus an optional Markdown service-summary 
 15. Follow an ordinary Markdown link to a resolvable subject; offer a rich preview with title, subtitle, description, applicable facts, and navigation while retaining standard Markdown source and normal link navigation.
 16. Explore service membership, dependencies, and deployments through the context slot and summary, and navigate from deployment-matrix entries to their units, environments, and deployments. Surface unavailable or uncertain facts explicitly.
 17. Author the same Service type using standalone JSON or a Markdown child definition with the same configuration schema; after manually moving a definition, its enrichment, and updating references, keep the original document as documentation of the standalone subject.
+18. Place a ServiceTable in an overview document, scoped to a project subtree; find nested services defined through JSON, frontmatter, and inline blocks, show each once with useful summaries and navigation, and update rows when subjects enter or leave the scope without rerunning source analysis.
 
 These are requirements for future implementation and testing. No product code, tests, dependencies, or projects are added by this design document.
 
