@@ -1,0 +1,37 @@
+---
+title: ArchitectureDiagram
+navTitle: ArchitectureDiagram
+status: Planned
+---
+
+# ArchitectureDiagram [Planned]
+
+Render service, component, context, or deployment views without fixing a documentation format.
+
+## Implementation readiness
+
+**Delivery:** Can be implemented through existing subject and component extension points. The ArchDocs feature itself is not implemented.
+
+**Prerequisites:** Shared scope queries, component/exposure/provision relationships, relationship readers, and a renderer to be selected.
+
+## Behavior [Planned]
+
+Select graph data independently of display settings. Context views choose their internal/external sets per diagram. Component views can show Hosts, Resources, and nested Services. Preserve relationship kinds, unknown endpoints, overlapping membership, and provenance; aggregation must not fabricate runtime order.
+
+Manual layout belongs to the document/view; semantic connections belong to shared metadata. CanvasLayout placement and referenced subject widgets already exist [Implemented], but connector lines and generated architecture diagrams are [Planned]. Renderer choice, grouping, layout, and connector editing remain open.
+
+## Runtime and deployment limits [Planned]
+
+Runtime sequences need authored scenarios. Complete deployment views need environment bindings and infrastructure mappings. Ordinary arc42 headings do not add missing graph facts. Actors are optional until their model is selected.
+
+## Context boundaries [Planned]
+
+The user confirmed that internal/external is relative to the diagram's documented system boundary, including neighboring systems operated by the same organization. The author chooses what is internal and external for each context diagram. Payments can be internal in the Commerce context and external in an Orders context without changing the Service subject. Organizational ownership is a separate concern and is not requested as a substitute for this boundary classification.
+
+Proposed field shape: the diagram has internalSources and externalSources lists using the shared PathQuery record, with resolved internal and external sets as view state. Exact field spellings and rendering details remain open. The sample demonstrates both contexts using the same Orders and Payments subjects. Its block configuration uses PascalCase keys, as existing Markdown configuration fences do; persisted subject/frontmatter configuration follows its own naming convention.
+
+Proposed defaults: explicit lists control the visible participants and relationships between them; diagnose an identity selected into both sets instead of cloning it or silently choosing a side. Optional automatic discovery of neighboring participants can be considered separately. Boundary membership and layout are view configuration, while semantic relationships stay in the shared model. No global internal/external flag or separate external-Service subtype is needed. Actors and their representation remain open; no mandatory System root has been selected.
+
+## Related specifications
+
+[Overview and status legend](../overview.md) · [Platform readiness](../implementation-readiness.md)

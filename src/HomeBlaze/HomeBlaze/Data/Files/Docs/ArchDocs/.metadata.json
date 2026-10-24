@@ -1,0 +1,11 @@
+{
+  "order": [
+    "overview.md",
+    "implementation-readiness.md",
+    "subjects",
+    "analyzers",
+    "widgets",
+    "shared",
+    "integration"
+  ]
+}
