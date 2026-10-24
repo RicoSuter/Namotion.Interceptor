@@ -10,7 +10,7 @@ See [Releasing Commerce](operations/Releasing.md) for a crosscutting view of the
 
 The [service diagram](ServiceDiagram.md) places the same services as boxes on a canvas.
 
-The [architecture views](architecture/Views.md) explore the service overview, each service's components, and the production deployment from shared model data.
+The [arc42 document](arc42.md) combines the architecture narrative with embedded context, service, component, and deployment views over shared model data.
 
 ## Services
 

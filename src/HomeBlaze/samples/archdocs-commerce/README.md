@@ -10,7 +10,7 @@ Read [docs/Architecture.md](docs/Architecture.md) for the overview, [docs/servic
 
 [docs/ServiceDiagram.md](docs/ServiceDiagram.md) references the two services as widgets on the existing CanvasLayout.
 
-[docs/architecture/Views.md](docs/architecture/Views.md) sketches generated views at service, component, and deployment levels using the same resources and typed relationships.
+[docs/arc42.md](docs/arc42.md) is one ordinary Markdown document with all twelve arc42 sections. Its embedded widgets aggregate the same service, resource, relationship, and deployment definitions used elsewhere. Narrative, decisions, and an example runtime scenario are authored in the document.
 
 ```text
 archdocs-commerce/
@@ -20,10 +20,9 @@ archdocs-commerce/
 ├── Directory.Packages.props
 ├── docs/
 │   ├── Architecture.md
+│   ├── arc42.md
 │   ├── ServiceDiagram.md
 │   ├── Repository.json
-│   ├── architecture/
-│   │   └── Views.md
 │   ├── resources/
 │   │   ├── OrdersDatabase.json
 │   │   ├── PaymentsDatabase.json
@@ -76,7 +75,13 @@ Proposed interaction: selecting a row reveals that subject's details alongside t
 
 The service diagram composes existing CanvasLayout nodes with Widget references to the proposed Service subjects. Their service-summary widget supplies each box's presentation, reusing the same facts as other views. The existing canvas supports fixed node positions and sizes, edit-mode dragging, grid snapping, and width-based scaling. Named nodes keep their identities when the diagram is edited. Diagram layout belongs to this document, independently of the service definitions.
 
-Service subjects and their widget are proposed functionality; CanvasLayout and Widget already exist. The current canvas does not support connector lines between nodes. The user wants typed connections backed by model relationships and automatic diagrams at several levels. The manual canvas example records box placement without inventing unsupported edge syntax. The generated ArchitectureDiagram blocks in architecture/Views.md are proposed UI, including their View options; they are not existing components.
+Service subjects and their widget are proposed functionality; CanvasLayout and Widget already exist. The current canvas does not support connector lines between nodes. The user wants typed connections backed by model relationships and automatic diagrams at several levels. The manual canvas example records box placement without inventing unsupported edge syntax. The generated ArchitectureDiagram blocks in arc42.md are proposed UI, including their View options; they are not existing components.
+
+## One arc42 document over the shared model
+
+arc42.md is an ordinary MarkdownFile. It uses the twelve arc42 headings as document structure, not as separate domain subjects or a special document type. Service tables and context, building block, component, and deployment diagrams are embedded views, scoped by their paths. Their facts come from the existing domain subjects; the document supplies the explanations, decisions, and selected scenarios. Moving the document or reorganizing its headings does not redefine the architecture.
+
+The context widget proposes using the selected services and their component membership as the system boundary. External actors and neighboring systems are not yet modeled in this sample, and exact boundary configuration remains open. Infrastructure mappings are likewise incomplete. These are sample-data/model gaps rather than a reason to invent them during rendering. Widgets should expose missing data while the author continues working on the same document.
 
 ## Resources and typed relationships
 
