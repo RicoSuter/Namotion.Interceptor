@@ -146,8 +146,8 @@ The tables below record the logical model and current field proposals. Lowercase
 |---|---|---|---|
 | SourceRepository | `sourceRoot`; analyzer/scan options remain to be specified | `projects`, `hosts`, analysis status, diagnostics, last successful analysis, fact provenance | Owns discovered CodeProject and Host subjects; several repositories per graph |
 | CodeProject | Discovered by an analyzer; manual enrichment through owner metadata | Stable repository-relative identity, `name`, source path, language, project classification, literal project references and other supported facts | Owned once by its SourceRepository; referenced by services, hosts, and other projects |
-| Host | Discovered by an analyzer; manual enrichment through owner metadata | Stable identity, `name`, entry CodeProject reference, known source/runtime/packaging facts | Owned once by its SourceRepository; can appear in several services or units |
-| Service | `name`, `componentSources: PathQuery[]` | `components`, the Host subset `hosts`, query diagnostics | Logical membership references code, hosts, and resources; does not own copies of discovered subjects |
+| Host | Analyzer-discovered or manually authored when source discovery is unavailable; exact manual schema remains open | Stable identity, `name`, optional entry CodeProject reference, known source/runtime/packaging facts | SourceRepository owns discovered hosts; an authored definition owns a manual host; either can be referenced by services or units |
+| Service | `name`, `componentSources: PathQuery[]`; proposed extensible `kind` and optional `technology` | `components`, the direct Host subset `hosts`, query diagnostics; API/interface descriptions remain to be specified | Can represent application capabilities, database systems, or neighboring systems; references existing subjects rather than cloning them |
 | Resource | `name`, extensible `kind`, optional `technology` | Relationships and reverse-use views; environment-instance mappings remain open | Authored once in JSON or as a child definition; service-specific or shared |
 | DeploymentUnit | `name`, `hostSources: PathQuery[]` | Resolved `hosts`, query diagnostics | References hosts from one or several services; does not own the Host subjects |
 | Environment | `name`, `deploymentUnitSources: PathQuery[]` | Resolved `deploymentUnits`, generated `deployments`, query diagnostics | Owns one enduring Deployment for each selected unit |
@@ -164,6 +164,7 @@ Stable identity is a required semantic contract, not a decision to add an `id` f
 | Authored relationship | `kind`, `target`; optional `source`, `technology`, `label`, `message` | Metadata record; source defaults to the subject owning the scoped relationship list |
 | Discovered fact or relationship | Value/endpoints plus source location, analyzer identity, uncertainty, and diagnostics as applicable | Analyzer result with provenance; concrete representation remains to be designed |
 | View configuration | Data scope/query plus presentation settings | Widget or document-owned configuration; does not redefine subjects or imply architectural relationships |
+| Context boundary, view-owned | Proposed `internalSources: PathQuery[]` and `externalSources: PathQuery[]` | Resolve the subjects shown inside and outside this diagram; the classification does not modify their domain subjects |
 
 Relationship kinds describe interaction semantics, such as calls, publishes, consumes, reads, writes, or documents. Technology describes the mechanism, such as HTTPS, AMQP, or PostgreSQL; a queue is a target Resource rather than an interaction kind. The sample uses `message` for OrderPlaced. These are extensible values, not a closed runtime dependency taxonomy. Source overrides allow service-scoped authored metadata to describe known Host endpoints. Service-level edges retain unknown host endpoints rather than assigning them to guessed processes.
 
@@ -199,21 +200,25 @@ A configurable subject representing a logical software capability or bounded con
 
 A service contains path-based component-source configuration and architectural descriptions and relationships. Its resolved components reference repository-owned code/hosts and authored resources; they do not clone them. It exposes its selected Host components through a resolved hosts collection, so a deployment unit can reference `service/hosts` directly. Additional typed subsets can be queried with ordinary paths and filters rather than a named-selection dictionary. Membership can overlap when explicitly configured. Shared code and shared resources retain one subject identity.
 
-A neighboring software system can be documented without known repositories or hosts. The user proposed an internal/external kind to represent such systems. The meaning and representation of that classification remain open, as described below; no fixed Service kind flag has been accepted yet.
+The user confirmed that neighboring systems are also modeled as Services. A service can be documented without known repositories or hosts. The user also confirmed that a database system can be a Service with a host, an API/protocol, and deployment participation. The same model applies; .NET source discovery is not a prerequisite. Application or Database can be descriptive Service kinds, with exact field names and taxonomy still proposed. APIs need not be HTTP. Their structured representation is not yet chosen.
+
+The sample now uses Service for the two database-system definitions. Its database host and interface details are not yet supplied; they must not be inferred or fabricated. Adding a database service to an application's components does not automatically add its hosts to the application's resolved hosts. A deployment unit can explicitly reference the database service's hosts as another path source when those hosts are modeled. This preserves the current rule against implicit transitive membership expansion.
 
 ### Resource
 
-A reusable authored dependency such as a database, queue, topic, or storage bucket. The current sample uses generic Resource subjects with kind Database or Queue and technology PostgreSQL or RabbitMQ. Services can include resources in components, and typed relationships can originate at a Service or a particular Host. A resource can be referenced by several services, and membership does not imply exclusive ownership. Including it in a service does not automatically provision it or include it in a host-only DeploymentUnit.
+A reusable authored dependency such as an individual queue, topic, database instance, or storage bucket. Database systems are modeled as Services following the latest decision; the sample retains a shared queue as Resource while the need for a separate subordinate resource concept is being discussed. Services can include resources in components, and typed relationships can originate at a Service or a particular Host. A resource can be referenced by several services, and membership does not imply exclusive ownership. Including it in a service does not automatically provision it or include it in a host-only DeploymentUnit.
 
-The user asked whether Resource is also Service. Proposed distinction: Service describes a logical software capability, while Resource describes something consumed or accessed. A database or messaging platform can be modeled as a Service that provides database/queue Resources when its implementation and deployment matter. Shared capabilities and presentation can be expressed through interfaces; automatic Resource-to-Service inheritance has not been chosen. The exact role/interface arrangement remains open.
+The remaining proposal distinguishes a deployable/provider Service from something it provides or exposes, such as an individual queue or logical database. Shared capabilities and presentation can be expressed through interfaces; automatic Resource-to-Service inheritance has not been chosen. Whether to retain Resource for those subordinate elements or also model them as lightweight Services remains open.
 
 The sample resources are logical definitions independent of environments. Whether to represent environment-specific instances as separate subjects, mappings, or other data is not decided. Do not imply resource provisioning or a particular deployment lifecycle from the presence of a Resource subject.
 
 ### Internal/external classification and neighboring systems
 
-The requirement to represent neighboring systems, including ones with no modeled internals, is under discussion. Open question: does internal/external describe membership in the documented system boundary, or management by an organization? These meanings must not be silently combined.
+The user confirmed that internal/external is relative to the diagram's documented system boundary, including neighboring systems operated by the same organization. The author chooses what is internal and external for each context diagram. Payments can be internal in the Commerce context and external in an Orders context without changing the Service subject. Organizational ownership is a separate concern and is not requested as a substitute for this boundary classification.
 
-Proposed direction: kind describes what an element is, while inside/outside is evaluated relative to a selected view boundary. Payments can be internal to Commerce and outside an Orders-only context; an external provider can be outside both. If organizational ownership is also needed, model it separately. The user has not yet confirmed this distinction or the serialized fields. No System, Actor, or context-boundary subject type is finalized. The sample's Context view demonstrates the desired presentation, but its external participants and exact boundary configuration remain incomplete.
+Proposed field shape: the diagram has internalSources and externalSources lists using the shared PathQuery record, with resolved internal and external sets as view state. Exact field spellings and rendering details remain open. The sample demonstrates both contexts using the same Orders and Payments subjects. Its block configuration uses PascalCase keys, as existing Markdown configuration fences do; persisted subject/frontmatter configuration follows its own naming convention.
+
+Proposed defaults: explicit lists control the visible participants and relationships between them; diagnose an identity selected into both sets instead of cloning it or silently choosing a side. Optional automatic discovery of neighboring participants can be considered separately. Boundary membership and layout are view configuration, while semantic relationships stay in the shared model. No global internal/external flag or separate external-Service subtype is needed. Actors and their representation remain open; no mandatory System root has been selected.
 
 ### DeploymentUnit
 
@@ -351,6 +356,7 @@ These scenarios capture intended behavior for the evolving capability. They are 
 20. Use the same widget configuration in an ordinary service page and an arc42 document; render a service overview and a detailed host/resource view from the same graph, with explicit scope and preserved relationship endpoints.
 21. Place referenced service widgets on a manual canvas; keep layout local to that document and semantic connections in shared relationship metadata. Existing canvas limitations remain until connector support is implemented.
 22. Open a JSON-defined Resource or DeploymentUnit through useful detail presentation and reuse its compact presentation in previews, context panels, and diagram boxes. This is the proposed page direction, subject to the open presentation-interface decision.
+23. Display Payments inside the Commerce context and outside the Orders-only context using explicit per-view path sources; retain the same Service identity and relationships without writing an internal/external property to it.
 
 These scenarios describe future implementation and testing. The working sample contains fixture projects and proposed data definitions, but no ArchDocs product implementation has been authorized by this specification.
 
@@ -366,9 +372,10 @@ The sample files and this specification should be updated together as the model 
 
 The following decisions remain open:
 
-- Internal/external: boundary-relative membership versus organizational management, the corresponding serialized fields, and representation of neighboring systems and actors.
-- Service and Resource roles: their exact shared interfaces and whether an element can expose both capabilities. There is no approved inheritance relationship between them.
+- Context representation: internal/external is confirmed as diagram-relative; exact boundary fields, rendering behavior, optional neighbor discovery, and actor representation remain open. Neighboring software systems use Service.
+- Service and Resource roles: database systems use Service and can have hosts, APIs, and deployments; decide whether individual provided resources such as queues or database instances retain Resource or also use Service, and define shared interfaces. There is no approved inheritance relationship between them.
 - Resource realization: environment-specific resource instances, infrastructure targets, and their mappings to logical resources and deployments.
+- Interfaces and endpoints: represent the APIs/protocols exposed by services and hosts, including database protocols, without assuming every API is HTTP.
 - Presentation contracts: useful subject detail pages, navigation participation, shared page/widget/preview components, and exact UI slot registration.
 - Final schemas and identity: CLR/serialized names, path casing and aliases, generated keys, persistent identity and rename behavior, and raw-source path matching where graph paths are insufficient.
 - View configuration: generic diagram presets and customization, boundary selection, grouping shared components, manual/automatic layout interaction, and semantic connector editing.

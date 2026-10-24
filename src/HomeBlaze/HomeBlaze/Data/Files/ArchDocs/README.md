@@ -100,11 +100,13 @@ Separate data selection from presentation. Scoped path queries and optional filt
 
 arc42.md is an ordinary MarkdownFile. It uses the twelve arc42 headings as document structure, not as separate domain subjects or a special document type. Service tables and context, building block, component, and deployment diagrams are embedded views, scoped by their paths. Their facts come from the existing domain subjects; the document supplies the explanations, decisions, and selected scenarios. Moving the document or reorganizing its headings does not redefine the architecture.
 
-The context widget proposes using the selected services and their component membership as the system boundary. External actors and neighboring systems are not yet modeled in this sample, and exact boundary configuration remains open. Infrastructure mappings are likewise incomplete. These are sample-data/model gaps rather than a reason to invent them during rendering. Widgets should expose missing data while the author continues working on the same document.
+Internal/external is selected per context diagram. The Commerce document selects Orders and Payments as internal; the Orders service page selects Orders as internal and Payments as external. Both reference the same Service subjects. The proposed widget fields are InternalSources and ExternalSources, each using path-query entries. Their PascalCase keys follow the existing Markdown block configuration convention. This is view data rather than a global Service kind; neighboring systems can be operated by the same organization. Exact field names, overlapping-set diagnostics, and optional neighbor discovery remain presentation choices. Additional actors and neighboring systems can be added to the model later.
 
 ## Resources and typed relationships
 
-Resource is a proposed generic domain subject with an extensible kind and descriptive technology. This sample defines two logical databases and one shared queue. Services include resources through their normal componentSources alongside code and hosts. Membership does not imply exclusive ownership: both services reference the same queue. A DeploymentUnit still selects Host subjects; including a resource in a service does not automatically provision it or make it part of a host-only deployment unit.
+Application capabilities, database systems, and neighboring software systems use the same Service model. Proposed Service kinds describe roles such as Application and Database; they do not describe whether a subject is internal to a particular diagram. The sample's two Database.json definitions are now Services with PostgreSQL technology. Their host and API/protocol details are not yet specified. They can acquire Host components and participate in deployment-unit host sources when that information is modeled.
+
+The shared order-events queue remains a proposed Resource while deciding whether individual queues and logical database instances need that separate type or should also use lightweight Services. Services reference dependencies through componentSources alongside code and hosts. Membership does not imply exclusive ownership. A DeploymentUnit still selects Host subjects; including another Service or Resource in an application's components does not automatically provision it or include its hosts transitively. A unit can reference another service's hosts explicitly when appropriate.
 
 Each service has a folder containing its documentation and its service-specific resources. The root resources folder holds shared resources such as OrderEvents. Folder placement organizes the files; explicit path references still define membership and relationships. Deployment units stay separate because one unit can select hosts from several services.
 
@@ -114,7 +116,7 @@ Service page metadata uses the existing metadata envelope shape with a `$subject
 
 Generated service views can aggregate host-level interactions using service membership, retaining the endpoint facts and avoiding inferred runtime order. A detailed view preserves unknown host endpoints rather than attaching a service-level relationship to a guessed process. Consumes is stored as a dependency from the consumer to its queue; a message-flow presentation may reverse the drawn direction explicitly. Shared or overlapping membership must remain visible rather than establish a fictitious exclusive owner. The same queue is never copied into separate resource identities for the two services.
 
-For now, resources describe logical dependencies independently of environments. Mapping them to actual database, queue, or broker instances per environment remains an open design choice. Automatic arc42-style views need enough data for each view: building block views use structure and relationships, runtime views need scenarios, and complete deployment views need infrastructure mappings. Diagram scope and display settings belong to the view; semantic connections belong to the shared graph.
+Environment-specific realization of logical dependencies and database services remains open. The current deployment matrix contains only the three modeled application hosts; it does not invent database hosts or provision queue instances. Automatic arc42-style views need enough data for each view: building block views use structure and relationships, runtime views need scenarios, and complete deployment views need infrastructure mappings. Diagram scope and display settings belong to the view; semantic connections belong to the shared graph.
 
 ## Proposed graph and paths
 
@@ -135,14 +137,14 @@ ArchDocs (/ArchDocs)
 ├── services
 │   ├── Orders
 │   │   ├── Service.md/service
-│   │   │   ├── components → references 3 CodeProjects, 2 Hosts, and 2 Resources
+│   │   │   ├── components → references 3 CodeProjects, 2 Hosts, 1 Database Service, and 1 Queue Resource
 │   │   │   └── hosts → references both Orders Hosts
-│   │   └── resources/Database
+│   │   └── resources/Database → Service, hosts unspecified
 │   └── Payments
 │       ├── Service.md/service
-│       │   ├── components → references 1 CodeProject, 1 Host, and 2 Resources
+│       │   ├── components → references 1 CodeProject, 1 Host, 1 Database Service, and 1 Queue Resource
 │       │   └── hosts → references the Payments Host
-│       └── resources/Database
+│       └── resources/Database → Service, hosts unspecified
 ├── resources
 │   └── OrderEvents → shared by both services
 ├── deployment-units

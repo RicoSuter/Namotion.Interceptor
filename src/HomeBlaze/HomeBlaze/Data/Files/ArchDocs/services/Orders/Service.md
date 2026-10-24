@@ -3,6 +3,7 @@ title: Orders
 $service:
   $type: Namotion.ArchDocs.Service
   name: Orders
+  kind: Application
   componentSources:
     - path: /ArchDocs/Repository/projects/Orders.*
     - path: /ArchDocs/Repository/hosts/Orders.*
@@ -34,6 +35,23 @@ Orders accepts orders through an API host and processes them through a worker ho
 The service uses the [Payments service](../Payments/Service.md) for payment processing.
 
 The worker stores order data in the Orders database and publishes OrderPlaced messages to the shared order-events queue.
+
+## Context
+
+Orders is inside this view's boundary. Payments is a neighboring service in this view, while remaining inside the wider Commerce context.
+
+:: Namotion.ArchDocs.ArchitectureDiagram#context Path=/ArchDocs View=Context
+```json
+{
+  "InternalSources": [
+    { "Path": "service" }
+  ],
+  "ExternalSources": [
+    { "Path": "/ArchDocs/services/Payments/Service.md/service" }
+  ]
+}
+```
+::
 
 ## Components
 

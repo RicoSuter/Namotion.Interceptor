@@ -3,6 +3,7 @@ title: Payments
 $service:
   $type: Namotion.ArchDocs.Service
   name: Payments
+  kind: Application
   componentSources:
     - path: /ArchDocs/Repository/projects/Payments.*
     - path: /ArchDocs/Repository/hosts/Payments.*

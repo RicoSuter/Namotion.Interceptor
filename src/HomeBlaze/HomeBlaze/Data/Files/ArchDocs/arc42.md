@@ -18,9 +18,18 @@ The code is organized into .NET projects. Orders uses a shared contracts library
 
 ## 3. Context and scope
 
-The Commerce boundary includes Orders, Payments, and their selected components. External users and neighboring systems still need to be added to the model before this context view can show their interactions.
+The Commerce boundary includes Orders and Payments. Both are internal in this view. In the [Orders-only context](services/Orders/Service.md), Payments is outside the chosen boundary. Additional external participants can be selected as they are modeled.
 
-:: Namotion.ArchDocs.ArchitectureDiagram#context Path=/ArchDocs/services View=Context
+:: Namotion.ArchDocs.ArchitectureDiagram#context Path=/ArchDocs View=Context
+```json
+{
+  "InternalSources": [
+    { "Path": "/ArchDocs/services/Orders/Service.md/service" },
+    { "Path": "/ArchDocs/services/Payments/Service.md/service" }
+  ],
+  "ExternalSources": []
+}
+```
 ::
 
 ## 4. Solution strategy
