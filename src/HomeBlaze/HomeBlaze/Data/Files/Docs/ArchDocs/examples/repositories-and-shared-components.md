@@ -31,7 +31,10 @@ repositories/Orders.json:
 ```json
 {
   "$type": "Namotion.ArchDocs.SourceRepository",
-  "sourceRoot": "../../orders-source"
+  "sourceRoot": "../../orders-source",
+  "analyzerSources": [
+    { "path": "/analyzers/CSharpProjects" }
+  ]
 }
 ```
 
@@ -40,11 +43,16 @@ repositories/Shared.json:
 ```json
 {
   "$type": "Namotion.ArchDocs.SourceRepository",
-  "sourceRoot": "../../shared-source"
+  "sourceRoot": "../../shared-source",
+  "analyzerSources": [
+    { "path": "/analyzers/CSharpProjects" }
+  ]
 }
 ```
 
 Each sourceRoot resolves from its defining file, not the documentation graph or the process working directory. Different analyzers can later describe different languages under those roots.
+
+Both definitions select the same shared singleton [Analyzer](../subjects/analyzer.md), assumed to be published at the illustrative `/analyzers/CSharpProjects` route. The host's publication mechanism and route remain proposed. Each repository supplies its own input context and owns its analysis worker, results, diagnostics, and cancellation; neither creates or owns a copy of the Analyzer. Selection can differ by repository when additional analyzer subjects exist.
 
 ## Logical membership across repositories [Planned]
 

@@ -40,6 +40,12 @@ Three approaches were considered: declaring each host and enriching it; having e
 
 Proposed default: allow manual descriptions of hosts whose source is unavailable. Their exact authoring workflow is outside the repository-discovery slice.
 
+### Shared analyzer subjects
+
+The user selected analyzers as shared singleton subjects that SourceRepositories can select. This replaces a model where analyzers are only invisible DI services or independent instances created for every repository. Proposed configuration `analyzerSources` selects published Analyzer subjects, and read-only `analyzers` contains the resolved shared references. Normal registration remains applicable; no additional executable plugin loader is required.
+
+Repository-specific source scope, run inputs/options, results, diagnostics, generated identities, cancellation, and reconciliation remain with the repository. Shared analyzer configuration/capabilities belong to the Analyzer subject. Repositories do not take ownership of or dispose the selected singleton. Existing hosted-subject registration can share one DI instance, but its publication into the subject graph and the exact application/root lifetime still require wiring. See [Analyzer](subjects/analyzer.md) and the [analyzer contract](analyzers/overview.md) for the canonical semantics and remaining scope decisions.
+
 ### Source/build groupings and Contracts
 
 CodeSolution represents a source/build grouping and references repository-owned CodeProjects. Projects can belong to several solutions or none; this does not establish a Service or deployment boundary. The first proposed solution input is basic `.slnx` XML, alongside literal `.csproj` XML. Other formats require explicit analyzer support.

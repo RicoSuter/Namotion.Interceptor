@@ -22,6 +22,8 @@ Existing subjects already perform reconciliation. The proposed shared ArchDocs/h
 
 SourceRepository owns discovery results. Environment owns Deployment children. Each uses shared keyed reconciliation infrastructure to preserve matching instances, add missing subjects, remove subjects no longer desired, and publish replacement collections only when needed. Do not recreate all subjects on each refresh or mutate an already-published collection in place.
 
+Selected [Analyzer](../subjects/analyzer.md) singletons are shared input references, not repository-owned generated children. Reconcile analyzer selection and relevant analyzer changes without cloning the instances. Deselecting an analyzer or detaching a repository releases that repository's subscriptions/work rather than disposing an analyzer still used elsewhere. Repository publication must fence runs using obsolete selections or configuration; shared analyzer invocation must not mix results, diagnostics, or cancellation between repositories.
+
 Lifecycle attach/detach and property-reference changes provide invalidation signals. Relevant configuration/property changes also trigger reconciliation because a subject can remain attached while its selection or filter match changes. An initial reconciliation accounts for already attached inputs. Subscription establishment and the initial snapshot must not miss concurrent changes.
 
 Lifecycle callbacks are fast, exception-free bookkeeping and signaling. They run under the lifecycle lock. Do not perform file analysis or substantial graph changes directly inside these callbacks. A serialized worker re-evaluates current inputs and publishes changes outside the callback. Coalescing is allowed provided it cannot lose the final invalidation.

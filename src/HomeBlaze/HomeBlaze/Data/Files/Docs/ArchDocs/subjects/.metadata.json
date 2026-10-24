@@ -1,6 +1,7 @@
 {
   "order": [
     "component.md",
+    "analyzer.md",
     "source-repository.md",
     "code-solution.md",
     "code-project.md",

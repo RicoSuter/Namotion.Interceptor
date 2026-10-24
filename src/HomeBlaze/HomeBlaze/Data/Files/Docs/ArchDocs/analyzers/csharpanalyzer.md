@@ -8,6 +8,8 @@ status: Planned
 
 Discover [CodeSolutions](../subjects/code-solution.md), [CodeProjects](../subjects/code-project.md), supported runnable [Hosts](../subjects/host.md), and literal source/build references from supported solution and project files.
 
+Expose this capability through a shared singleton [Analyzer subject](../subjects/analyzer.md) selected by each SourceRepository. The repository supplies its own source scope and owns its results; selection references the existing analyzer rather than creating a parser instance per repository.
+
 ## Implementation readiness
 
 **Delivery:** Can be implemented through existing subject and component extension points. The ArchDocs feature itself is not implemented.

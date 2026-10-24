@@ -1,4 +1,9 @@
 {
   "$type": "Namotion.ArchDocs.SourceRepository",
-  "sourceRoot": ".source"
+  "sourceRoot": ".source",
+  "analyzerSources": [
+    {
+      "path": "/analyzers/CSharpProjects"
+    }
+  ]
 }

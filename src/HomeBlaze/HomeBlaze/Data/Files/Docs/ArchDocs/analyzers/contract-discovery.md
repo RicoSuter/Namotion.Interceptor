@@ -8,6 +8,8 @@ status: Planned
 
 Discover [Contracts](../subjects/contract.md) from raw documents while allowing an authored definition to supply explicit configuration. Discovery, project association, parsing, and presentation are separate capabilities.
 
+Expose repository discovery through a shared singleton [Analyzer subject](../subjects/analyzer.md). Repositories select the existing subject and retain separate source boundaries, result ownership, diagnostics, and cancellation. Merely installing this capability does not enable it in every repository.
+
 ## Implementation readiness
 
 **Delivery:** Extension work using local source access, subject registration, and reconciliation. Contract discovery is not implemented.

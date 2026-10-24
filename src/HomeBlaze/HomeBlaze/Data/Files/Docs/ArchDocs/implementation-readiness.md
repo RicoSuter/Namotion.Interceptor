@@ -33,6 +33,7 @@ Delivery readiness is a separate axis: **Extension** can use existing host contr
 | All ArchDocs subject types and contract specializations | [Planned] | Extension; capability model, references, and registration |
 | Identifiers with plain-text, generic-link, and typed presentation | [Planned] | Shared authoring/resolution/presentation behavior; existing path resolution and pickers are primitives; exact syntax remains deferred |
 | Repository/solution/project discovery and contract-file association/parsing | [Planned] | Extension; selected read-only source and analyzer contracts; file recognition/association does not require full parsing |
+| Shared singleton Analyzer subjects selectable by repositories | [Planned] | Extension with singleton registration and graph-publication wiring; DI singleton registration alone does not publish a selectable subject |
 | Generic wildcard selection and typed relationship readers | [Planned] | Extension/shared services; existing resolver alone is insufficient |
 | Reconciled repository children and Environment Deployments | [Planned] | Extension; lifecycle, identity, worker, and metadata prerequisites |
 | Subject-specific widgets, detail pages, and editors | [Planned] | Extension; specified with each subject, with domain/parser prerequisites as applicable |

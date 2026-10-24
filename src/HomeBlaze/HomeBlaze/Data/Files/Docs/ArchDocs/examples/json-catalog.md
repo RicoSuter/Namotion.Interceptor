@@ -34,9 +34,14 @@ Repository.json:
 ```json
 {
   "$type": "Namotion.ArchDocs.SourceRepository",
-  "sourceRoot": "../"
+  "sourceRoot": "../",
+  "analyzerSources": [
+    { "path": "/analyzers/CSharpProjects" }
+  ]
 }
 ```
+
+Assume the host has registered and published one shared [Analyzer](../subjects/analyzer.md) subject at the illustrative `/analyzers/CSharpProjects` route. This repository selects that existing subject; another repository can select the same instance. Publishing the singleton and its exact route are planned wiring, not an implemented built-in catalog. Repository-owned results stay under `/Repository`; the shared analyzer does not acquire those children. Omitted or empty selection does not silently enable every installed analyzer.
 
 For an unambiguous executable project, a minimal project input could contain the following literal XML. The analyzer reads it without building or evaluating MSBuild. Projects with only a library output remain CodeProjects.
 

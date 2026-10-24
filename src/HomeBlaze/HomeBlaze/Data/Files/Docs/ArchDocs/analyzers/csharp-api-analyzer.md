@@ -8,6 +8,8 @@ status: Planned
 
 Extract a CodeProject public programming surface as a CSharpApiContract.
 
+Expose this optional capability through a shared singleton [Analyzer subject](../subjects/analyzer.md). A repository selects it independently of basic project discovery; extraction results belong to the requesting owner rather than shared mutable state on the analyzer.
+
 ## Implementation readiness
 
 **Delivery:** Can be implemented through existing subject and component extension points. The ArchDocs feature itself is not implemented.

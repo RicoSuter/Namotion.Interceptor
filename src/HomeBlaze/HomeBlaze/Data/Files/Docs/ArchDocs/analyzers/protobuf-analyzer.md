@@ -8,6 +8,8 @@ status: Planned
 
 Populate a specialized Contract from explicitly selected or discovered protobuf source.
 
+Expose parsing through a shared singleton [Analyzer subject](../subjects/analyzer.md). Repository selection references that subject; parsed state remains with the requesting repository/Contract owner. The exact invocation/selection API for standalone authored Contracts is still open.
+
 ## Implementation readiness
 
 **Delivery:** Can be implemented through existing subject and component extension points. The ArchDocs feature itself is not implemented.
