@@ -1,6 +1,7 @@
 {
   "order": [
     "overview.md",
+    "subject-model.md",
     "examples",
     "file-authoring.md",
     "implementation-readiness.md",

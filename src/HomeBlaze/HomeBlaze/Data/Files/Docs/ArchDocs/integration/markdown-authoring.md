@@ -49,6 +49,20 @@ Regular documentation here.
 
 The document and its domain children are distinct subjects. No domain-specific MarkdownFile subclass or declared page type is needed. Domain subjects do not inherit MarkdownFile or depend on Markdown storage. The file owns their configuration persistence and provides its origin for relative file access; domain subjects must not infer that origin from the process working directory. A page that only describes an existing service can instead reference it through metadata without defining another instance. Keep domain logic headless and Blazor contributions in separate UI code. Custom page subclasses are deferred; if introduced later, they must inherit MarkdownFile and retain normal Markdown behavior.
 
+```mermaid
+flowchart LR
+    json["Standalone JSON configuration<br/>Existing loader"] --> standalone["Standalone domain subject<br/>ArchDocs types planned"]
+    markdown["Ordinary MarkdownFile<br/>Normal document UI"] --> declarations["$service / $environment<br/>Nested $type and configuration<br/>Planned frontmatter bridge"]
+    declarations --> children["Named domain children<br/>service / environment"]
+    markdown --> blocks["Named subject body block<br/>Existing loader"]
+    blocks --> children
+    markdown --> metadata["metadata.$subjects.service<br/>Planned frontmatter persistence"]
+    metadata -.-> children
+    widget["Optional explicit widget<br/>Path=service<br/>Existing widget mechanism"] --> children
+```
+
+JSON subjects and Markdown children reuse the same registered domain types and configuration schema; the ArchDocs types themselves remain planned. Frontmatter and body blocks share the child-name namespace. Scoped metadata enriches the child, and an optional widget reads it while the containing document keeps its normal Markdown behavior.
+
 Reuse registered configurable-subject loading and normal lifecycle rules for these children, as existing inline blocks already do. Their stable identity is their declared child name, independent of the entry's position in the source. Frontmatter and named inline subjects share the page's child-name namespace: duplicates must produce diagnostics rather than silently shadow or instantiate competing definitions. Reserve framework keys such as `$type` so they cannot accidentally become child declarations, and validate declaration names and values. Same-name, same-type refreshes preserve compatible children; removed children detach and type changes replace subjects through normal lifecycle handling. Invalid or unavailable types need visible diagnostics and preservation of source content, while the document remains readable. UI configuration edits route back to the corresponding `$<name>` entry through the owning file's configuration writer. Exact storage interfaces and recovery behavior are builder choices.
 
 Named children appear directly in authored paths. A declaration named `$service` is addressed as `service` from its page, including `metadata.$subjects.service`; the dollar sign belongs only to the declaration. A widget can use `Path=service` to refer to the same subject. Declaration names must remain unambiguous with published page properties, which take precedence during path resolution; diagnose collisions rather than publish a child whose intended name addresses another target. Generated descendants retain their own published collection segments.

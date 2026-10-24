@@ -18,6 +18,19 @@ Expose richer related information around ordinary documentation without requirin
 
 Existing widget content slots belong inside a configured widget. They do not implement page-level actions/context/additional-view contributions. Existing component lookup resolves one registration; its enumeration does not yet provide inherited multi-contributor discovery. Rich previews on ordinary links also need renderer integration.
 
+```mermaid
+flowchart LR
+    model["Shared subject facts and metadata"]
+    model --> navigation["IPage navigation metadata<br/>Existing"]
+    model --> registered["Registered Page / Edit / Setup / Widget<br/>Single component lookup, existing"]
+    registered --> explicit["Subject UI and explicit widgets<br/>Existing"]
+    model -.-> contributions["Ordered multi-contributor discovery<br/>Planned"]
+    contributions --> slots["Page actions, context panel<br/>and additional views<br/>Planned page-shell slots"]
+    contributions --> overlays["Ordinary Markdown link overlays<br/>Planned renderer integration"]
+```
+
+IPage supplies navigation metadata; the registered Page renderer supplies page UI. Planned contribution surfaces reuse subject information but need the additional discovery, lifecycle, and renderer integration described here.
+
 ## Scope [Proposed]
 
 Settle slot names, ordering, selection behavior, and link activation/accessibility in the UI design. A specialized subject widget or standalone detail page can be delivered before this work.

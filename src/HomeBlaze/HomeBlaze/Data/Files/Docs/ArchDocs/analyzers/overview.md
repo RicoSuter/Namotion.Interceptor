@@ -24,6 +24,26 @@ SourceRepository configuration contains `analyzerSources` using shared [PathQuer
 
 For repository discovery, the repository owns its source access boundary, analysis status, diagnostics, results, generated subjects, reconciliation worker, and cancellation. Reconciliation publishes compatible results through that owner. Other consumers retain their own result owners; standalone contract parsing does not move authored Contract state under a repository. The shared analyzer holds no mutable last-repository result or repository-owned worker. One repository canceling or detaching must not cancel another repository's call.
 
+### Shared execution and separate owners [Planned]
+
+```mermaid
+sequenceDiagram
+    participant A as Repository A worker
+    participant X as Analyzer singleton
+    participant B as Repository B worker
+    par Repository A analysis
+        A->>X: Source and run context A
+        X-->>A: Contribution A
+        Note over A: Reconcile and publish graph A
+    and Repository B analysis
+        B->>X: Source and run context B
+        X-->>B: Contribution B
+        Note over B: Reconcile and publish graph B
+    end
+```
+
+Each repository resolves its proposed `analyzerSources` into `analyzers` before invoking a compatible subject. Calls to the singleton may overlap, while each repository keeps its own worker, cancellation, and publication. DI registration, graph publication, selection, and execution are separate steps; registration alone performs none of the latter three.
+
 ## Categories [Planned]
 
 - [C# project analyzer](csharpanalyzer.md): basic solution/project XML, source/build groupings, and project-level elements.

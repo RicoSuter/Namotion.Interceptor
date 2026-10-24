@@ -24,6 +24,19 @@ A Markdown document and its named domain children remain separate targets. A pat
 
 An unresolved path retains its authored value and a visible resolution diagnostic. It must not silently become a plain identifier because its target disappeared, nor change back and forth between literal and path meaning based on current graph contents. The selected syntax must make that distinction deterministic. A target that resolves generically can still provide a link while a missing typed capability is shown as unavailable.
 
+```mermaid
+flowchart TD
+    identifier["Authored Identifier<br/>Value retained in every outcome"]
+    identifier -->|Plain identifier| plain["Plain text<br/>Valid without a subject"]
+    identifier -->|Path identifier| resolves{"Target resolves?"}
+    resolves -->|No| unresolved["Unresolved path<br/>Keep path and diagnostic"]
+    resolves -->|Yes| compatible{"Target supplies the expected type?"}
+    compatible -->|No| generic["Path to any subject or Markdown page<br/>Ordinary subject link"]
+    compatible -->|Yes| typed["Path to the expected subject type<br/>Rich UI and applicable domain behavior"]
+```
+
+These are resolution levels of the same Identifier concept; serialization syntax remains undecided. Structural operations still require the actual compatible subjects described below.
+
 ## Domain behavior [Planned]
 
 Each property documents its optional expected subject type and which operations need it. A plain environment identifier can describe an association before an Environment subject exists. Generating Environment-owned Deployments still requires the actual owning Environment and its selected DeploymentUnits. A generic subject link does not fabricate an Environment, CodeProject, membership, or installation. Collection selectors remain governed by [path queries](path-queries.md); this identifier convention does not turn unresolved text into collection members.

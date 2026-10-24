@@ -34,6 +34,23 @@ The current checkout has subtree matching in AgentWatchPaths, path-prefix/type/p
 
 Path globs use `/` separators, `*` within a path segment, and `**` across path segments. `*` does not cross a segment boundary, and `**` can span zero or more segments. Wildcards match subject-path segments or keys rather than display names; property conditions use `where`. Remaining matching rules, including casing and empty matches, must be specified once and tested by the implementation. The builder may choose an existing suitable dependency after checking the repository's requirements.
 
+**Selection pipeline [Planned]**
+
+```mermaid
+flowchart TD
+    Queries["Authored subject-path queries and exclusions"] --> Validate["Validate query syntax, predicates, and dependency cycles"]
+    Validate -->|Valid| Resolve["Resolve exact paths, collections, or path globs"]
+    Resolve -->|Unresolved explicit reference| Diagnostics["Source-located configuration diagnostics"]
+    Validate -->|Invalid| Diagnostics
+    Resolve --> Filter["Apply each selector's where conditions with AND"]
+    Filter --> Combine["Union selections, subtract exclusions, deduplicate by identity"]
+    Combine --> Kinds{"Remaining targets compatible and eligible?"}
+    Kinds -->|No| Diagnostics
+    Kinds -->|Yes| References["Resolved compatible subject references, possibly empty"]
+```
+
+This conceptual pipeline shows the planned query behavior, not a fixed evaluation algorithm or selected serialization syntax. Globs match subject graph paths: `*` stays within a segment and `**` spans zero or more segments. Raw source file inputs use their own address space, and selecting a subject does not add its transitive dependencies. Structural operations require compatible resolved targets; plain identifiers and generic links do not supply those capabilities.
+
 Selectors determine membership. Dependencies outside the selected scope remain external relationships and are not automatically added. Transitive membership expansion is deferred. Project references describe code dependencies; they do not by themselves establish runtime communication between services. Authored architectural relationships and their evidence remain distinguishable from discovered code-reference edges.
 
 Unresolved explicit references and invalid predicates are diagnostics. A syntactically valid selection with no matches is an empty result, distinguishable from failed analysis. A temporary input failure must not erase the last successful discovered graph or the authored selection.

@@ -30,6 +30,23 @@ Lifecycle callbacks are fast, exception-free bookkeeping and signaling. They run
 
 The owning subject's detach stops subscriptions and background work. Canceled or superseded work cannot republish children for an owner that is no longer active. Inputs changing during a pass schedule a later pass or invalidate that pass's publication. Once writes and source changes settle, generated collections agree with the current successfully evaluated inputs.
 
+**Repository worker and publication [Planned]**
+
+```mermaid
+flowchart TD
+    Lifecycle["Fast lifecycle callback under lock"] --> Signal["Record invalidation and signal"]
+    Changes["Relevant input changes or refresh"] --> Signal
+    Signal --> Worker["Serialized, coalesced worker outside callback"]
+    Worker --> Evaluate["Evaluate current repository inputs"]
+    Evaluate --> Current{"Owner active, run uncanceled, inputs current?"}
+    Current -->|No| Discard["Discard obsolete result"]
+    Current -->|Yes| Complete{"Complete successful pass?"}
+    Complete -->|Yes| Publish["Atomically publish repository graph"]
+    Complete -->|No| Retain["Keep entire last successful graph and report diagnostics"]
+```
+
+This is the planned SourceRepository publication flow. Invalidation during a pass remains pending for a later pass; detach or cancellation fences publication. An incomplete pass keeps the entire previous successful graph, with failure diagnostics separate; before the first success there is no graph to retain. Confirmed removals, including deliberate analyzer deselection, publish only after a complete successful pass.
+
 Use stable keyed dictionaries for generated children, not positional arrays. Proposed default: repository element keys derive from a repository identity, analyzer identity namespace, element kind, and normalized repository-relative identity. A project-file move is a removal and addition unless a later explicit identity mapping preserves it. Do not claim rename detection that the analyzer does not implement. Unchanged files retain keys across root relocation and restart.
 
 Deployment keys derive from the environment and deployment-unit identities. Persist authored identities or use the existing persistent subject reference conventions consistently; do not use discovery order, transient object references, display names, or timestamps as persisted keys. Exact serialized identifier fields and reference formatting are builder decisions, and their rename behavior must be documented.

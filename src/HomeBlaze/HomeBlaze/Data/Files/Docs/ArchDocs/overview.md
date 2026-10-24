@@ -20,6 +20,7 @@ Describe and explore software through ordinary Markdown documentation, authored 
 
 ## Specification map
 
+- [Subject model](subject-model.md): conceptual UML of all subjects and capabilities, with focused ownership, reference, and inheritance views.
 - [Usage examples](examples/overview.md): standalone JSON, frontmatter and inline Markdown, arc42, topics/decisions, libraries, and multiple repositories.
 - [Scope and design decisions](scope-and-decisions.md) and [verification scenarios](verification-scenarios.md): rationale, open decisions, and behavior to verify.
 - [File authoring and readability](file-authoring.md): understand and edit the complete authored model as text, independently of the UI.
