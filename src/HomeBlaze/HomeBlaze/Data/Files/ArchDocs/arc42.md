@@ -8,7 +8,7 @@ This document follows [arc42](https://docs.arc42.org/home/). It combines authore
 
 ## 1. Introduction and goals
 
-Commerce accepts orders and handles payment processing. Its main capabilities are described by the [Orders service](services/Orders.md) and [Payments service](services/Payments.md).
+Commerce accepts orders and handles payment processing. Its main capabilities are described by the [Orders service](services/Orders/Service.md) and [Payments service](services/Payments/Service.md).
 
 The architecture should allow the two services to be released independently while keeping the Orders API and worker in one release unit.
 
@@ -39,14 +39,14 @@ Orders separates its entry API from background processing. Payments has an indep
 
 ### Inside Orders
 
-:: Namotion.ArchDocs.ArchitectureDiagram#ordersComponents Path=/ArchDocs/services/Orders.md/service View=Components
+:: Namotion.ArchDocs.ArchitectureDiagram#ordersComponents Path=/ArchDocs/services/Orders/Service.md/service View=Components
 ::
 
 Host-specific relationships attach to their declared hosts. The service-level Payments call stays at the Orders boundary until its host endpoint is specified. Shared resources retain one identity across the views.
 
 ### Inside Payments
 
-:: Namotion.ArchDocs.ArchitectureDiagram#paymentsComponents Path=/ArchDocs/services/Payments.md/service View=Components
+:: Namotion.ArchDocs.ArchitectureDiagram#paymentsComponents Path=/ArchDocs/services/Payments/Service.md/service View=Components
 ::
 
 The [manually arranged canvas](ServiceDiagram.md) provides another presentation of these same services.

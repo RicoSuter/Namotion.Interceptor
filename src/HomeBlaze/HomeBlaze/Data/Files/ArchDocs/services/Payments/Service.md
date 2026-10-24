@@ -6,7 +6,7 @@ $service:
   componentSources:
     - path: /ArchDocs/Repository/projects/Payments.*
     - path: /ArchDocs/Repository/hosts/Payments.*
-    - path: /ArchDocs/resources/PaymentsDatabase
+    - path: /ArchDocs/services/Payments/resources/Database
     - path: /ArchDocs/resources/OrderEvents
 metadata:
   $subjects:
@@ -19,12 +19,12 @@ metadata:
           message: OrderPlaced
         - kind: writes
           source: /ArchDocs/Repository/hosts/Payments.Api
-          target: /ArchDocs/resources/PaymentsDatabase
+          target: /ArchDocs/services/Payments/resources/Database
           technology: PostgreSQL
 ---
 
 # Payments
 
-Payments handles payment processing through one API host. It is deployed independently of the [Orders service](Orders.md).
+Payments handles payment processing through one API host. It is deployed independently of the [Orders service](../Orders/Service.md).
 
 Its host consumes OrderPlaced messages from the shared order-events queue and stores payment data in the Payments database.

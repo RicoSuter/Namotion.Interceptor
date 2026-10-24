@@ -4,7 +4,7 @@ title: Releasing Commerce
 
 # Releasing Commerce
 
-A release can involve the [Orders service](../services/Orders.md), the [Payments service](../services/Payments.md), or both. Orders has an API host and a worker host in one deployment unit; Payments has its own API host and deployment unit.
+A release can involve the [Orders service](../services/Orders/Service.md), the [Payments service](../services/Payments/Service.md), or both. Orders has an API host and a worker host in one deployment unit; Payments has its own API host and deployment unit.
 
 This page brings the services and their environment deployments together. The same service and deployment definitions are used by the [architecture overview](../Architecture.md).
 

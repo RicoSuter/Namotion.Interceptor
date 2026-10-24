@@ -9,7 +9,7 @@ Use this folder to refine the authoring experience before finalizing the domain 
 
 ## Start here
 
-Read [Architecture.md](Architecture.md) for the overview, [services/Orders.md](services/Orders.md) for a service defined in Markdown frontmatter, and [deployment-units/Orders.json](deployment-units/Orders.json) for a standalone subject definition. Revise these actual files while discussing the model. Type names, property names, and generated graph keys are working proposals.
+Read [Architecture.md](Architecture.md) for the overview, [services/Orders/Service.md](services/Orders/Service.md) for a service defined in Markdown frontmatter, and [deployment-units/Orders.json](deployment-units/Orders.json) for a standalone subject definition. Revise these actual files while discussing the model. Type names, property names, and generated graph keys are working proposals.
 
 [operations/Releasing.md](operations/Releasing.md) demonstrates crosscutting documentation: a topic page that brings existing services, deployment units, and environments into one view without defining duplicate domain subjects.
 
@@ -25,12 +25,16 @@ Files/ArchDocs/
 ├── ServiceDiagram.md
 ├── Repository.json
 ├── resources/
-│   ├── OrdersDatabase.json
-│   ├── PaymentsDatabase.json
 │   └── OrderEvents.json
 ├── services/
-│   ├── Orders.md
-│   └── Payments.md
+│   ├── Orders/
+│   │   ├── Service.md
+│   │   └── resources/
+│   │       └── Database.json
+│   └── Payments/
+│       ├── Service.md
+│       └── resources/
+│           └── Database.json
 ├── deployment-units/
 │   ├── Orders.json
 │   └── Payments.json
@@ -100,6 +104,8 @@ The context widget proposes using the selected services and their component memb
 
 Resource is a proposed generic domain subject with an extensible kind and descriptive technology. This sample defines two logical databases and one shared queue. Services include resources through their normal componentSources alongside code and hosts. Membership does not imply exclusive ownership: both services reference the same queue. A DeploymentUnit still selects Host subjects; including a resource in a service does not automatically provision it or make it part of a host-only deployment unit.
 
+Each service has a folder containing its documentation and its service-specific resources. The root resources folder holds shared resources such as OrderEvents. Folder placement organizes the files; explicit path references still define membership and relationships. Deployment units stay separate because one unit can select hosts from several services.
+
 Relationships are authored metadata. Their kind expresses the interaction, such as calls, writes, publishes, or consumes; technology and optional message or label describe how it happens. The service-scoped relationship list defaults its source to that service, with an explicit source path when the interaction is known to belong to a particular Host. This lets generated and manually arranged diagrams use the same relationships.
 
 Service page metadata uses the existing metadata envelope shape with a `$subjects` entry for `Children[service]`. This scopes relationships to the Service child rather than the Markdown document. Frontmatter persistence of that envelope, typed relationship readers, source overrides, and all Resource types remain proposed functionality. The source fixtures do not implement the described API calls, database access, or messaging; those interactions are authored sample architecture facts. They must not be mistaken for analyzer-discovered facts.
@@ -125,15 +131,17 @@ ArchDocs (/ArchDocs)
 │       ├── Orders.Worker
 │       └── Payments.Api
 ├── services
-│   ├── Orders.md/service
-│   │   ├── components → references 3 CodeProjects, 2 Hosts, and 2 Resources
-│   │   └── hosts → references both Orders Hosts
-│   └── Payments.md/service
-│       ├── components → references 1 CodeProject, 1 Host, and 2 Resources
-│       └── hosts → references the Payments Host
+│   ├── Orders
+│   │   ├── Service.md/service
+│   │   │   ├── components → references 3 CodeProjects, 2 Hosts, and 2 Resources
+│   │   │   └── hosts → references both Orders Hosts
+│   │   └── resources/Database
+│   └── Payments
+│       ├── Service.md/service
+│       │   ├── components → references 1 CodeProject, 1 Host, and 2 Resources
+│       │   └── hosts → references the Payments Host
+│       └── resources/Database
 ├── resources
-│   ├── OrdersDatabase
-│   ├── PaymentsDatabase
 │   └── OrderEvents → shared by both services
 ├── deployment-units
 │   ├── Orders → references both Orders Hosts
@@ -169,7 +177,7 @@ To deploy only the Orders worker, change the Orders unit's hostSources to:
 ```json
 [
   {
-    "path": "/ArchDocs/services/Orders.md/service/hosts/*",
+    "path": "/ArchDocs/services/Orders/Service.md/service/hosts/*",
     "where": "Name == \"Orders.Worker\""
   }
 ]
@@ -181,7 +189,7 @@ To deploy hosts from both services together, add another hostSources entry to on
 
 ```json
 {
-  "path": "/ArchDocs/services/Payments.md/service/hosts/*"
+  "path": "/ArchDocs/services/Payments/Service.md/service/hosts/*"
 }
 ```
 

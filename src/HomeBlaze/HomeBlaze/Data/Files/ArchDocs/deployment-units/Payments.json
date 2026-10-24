@@ -3,7 +3,7 @@
   "name": "Payments",
   "hostSources": [
     {
-      "path": "/ArchDocs/services/Payments.md/service/hosts/*"
+      "path": "/ArchDocs/services/Payments/Service.md/service/hosts/*"
     }
   ]
 }

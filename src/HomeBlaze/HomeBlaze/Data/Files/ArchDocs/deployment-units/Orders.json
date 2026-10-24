@@ -3,7 +3,7 @@
   "name": "Orders",
   "hostSources": [
     {
-      "path": "/ArchDocs/services/Orders.md/service/hosts/*"
+      "path": "/ArchDocs/services/Orders/Service.md/service/hosts/*"
     }
   ]
 }
