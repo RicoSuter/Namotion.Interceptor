@@ -6,5 +6,9 @@
       "path": "/analyzers/CSharpProjects",
       "config": {}
     }
+  ],
+  "rules": [
+    { "path": "/ArchDocs/rules.md/*" },
+    { "path": "/ArchDocs/rules/**" }
   ]
 }

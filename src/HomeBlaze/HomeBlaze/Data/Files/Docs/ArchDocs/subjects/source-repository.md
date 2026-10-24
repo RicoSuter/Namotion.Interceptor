@@ -8,7 +8,7 @@ status: Planned
 
 ## Class definition [Planned]
 
-**SourceRepository** is an authored subject class identifying an existing source directory or checkout, selecting shared singleton [Analyzer subjects](analyzer.md), and owning analyzer-discovered [CodeSolutions](code-solution.md), [CodeProjects](code-project.md), [Hosts](host.md), and optional [Contracts](contract.md). Its defining file owns configuration and descendant enrichment. It coordinates read-only discovery and stable keyed reconciliation; it does not require Git or perform Git operations. Selected analyzers retain their shared owner and identity.
+**SourceRepository** is an authored subject class identifying an existing source directory or checkout, selecting shared singleton [Analyzer subjects](analyzer.md) and authored [Rule subjects](rule.md), and owning analyzer-discovered [CodeSolutions](code-solution.md), [CodeProjects](code-project.md), [Hosts](host.md), and optional [Contracts](contract.md). Its defining file owns configuration and descendant enrichment. It coordinates read-only discovery and stable keyed reconciliation; it does not require Git or perform Git operations. Selected analyzers retain their shared owner and identity.
 
 Authored enrichment and relationships use the [existing metadata envelope](../shared/metadata-and-relationships.md), through the defining owner. They are not a second configuration store. Names in the tables are proposed serialized camelCase names; concrete CLR signatures remain open. State properties are read-only to authors.
 
@@ -19,6 +19,7 @@ Authored enrichment and relationships use the [existing metadata envelope](../sh
 | `sourceRoot` | `string` | Required local source directory. Relative file locations resolve from the defining configuration file; no process-working-directory default. |
 | `scanOptions` | Scan-option record | Proposed inclusion, exclusion, traversal, and link policies; exact fields/defaults remain open. |
 | `analyzers` | Analyzer-configuration list | Each entry contains `path` to an existing shared [Analyzer](analyzer.md) and optional `config` for this repository's invocation. Omitted or empty selects none. Registration alone never selects an analyzer. |
+| `rules` | [PathQuery](../shared/path-queries.md) collection selecting [Rule](rule.md) | Select exact rules, page children, directory subtrees, or all loaded rules through `*`/`**`. Omitted or empty selects none; wildcard enumeration filters compatible Rule subjects. Configuration stays on the definitions. |
 
 An analyzer entry is a configuration record, not a new Analyzer instance. Its `path` identifies one shared subject; its optional `config` is an object validated against that analyzer's supported per-run schema. Omitted `config` uses documented run defaults. Shared Analyzer settings remain on the singleton. This keeps selection and repository-specific configuration together without a second options list keyed elsewhere. Exact CLR record and option schemas remain proposed.
 
@@ -31,7 +32,8 @@ An analyzer entry is a configuration record, not a new Analyzer instance. Its `p
       "path": "/analyzers/CSharpProjects",
       "config": {}
     }
-  ]
+  ],
+  "rules": [{ "path": "/rules.md/*" }]
 }
 ```
 
@@ -45,7 +47,10 @@ The route above is illustrative and requires a published singleton. An entry cur
 | `diagnostics` | Diagnostic collection | Readable source-located configuration and analyzer findings, kept separate from last successful results. |
 | `lastSuccessfulAnalysis` | Optional UTC timestamp | Time of the last complete successful publication; absent before any successful pass. |
 | `provenance` | Provenance records | Stable selected-analyzer identities, implementation/configuration information needed to interpret the published facts, and supporting source locations. Exact record shape remains proposed. |
+| `validationStatus` | Validation-status value | Not run, current evaluation, completed, incomplete, or failed; exact vocabulary remains proposed and is separate from analysis status. |
+| `ruleResults` | Per-rule evaluation records | Results for this repository and its current graph inputs, including findings, evaluated counts, requirements, and definition/source provenance. No mutable last-run state is stored on shared Rule definitions. |
 | `resolvedAnalyzers` | Reference collection of [Analyzer](analyzer.md) | Read-only resolved references from the configured entries, without cloning or ownership transfer. Effective per-run configuration remains associated with its entry. |
+| `resolvedRules` | Reference collection of [Rule](rule.md) | Deduplicated selected definitions, preserving their JSON/Markdown owner and identity. |
 | `solutions` | Keyed owned collection of [CodeSolution](code-solution.md) | Solution-file discovery results with stable repository-relative identity; grouping only. |
 | `projects` | Keyed owned collection of [CodeProject](code-project.md) | Discovered code/build projects, shared by all referring solutions. |
 | `hosts` | Keyed owned collection of [Host](host.md) | Supported runnable process definitions; discovery does not select Service/release membership. |
@@ -65,7 +70,7 @@ Several repositories can coexist. A repository need not be managed by Git. Gener
 
 **Summary widget:** source scope, selected analyzers and their availability, analysis state, last successful analysis, and discovered project/Host counts with diagnostics.
 
-**Detail page:** browse discovered elements, project dependencies, provenance, diagnostics, and refresh status. Link selected analyzers to their shared subject presentation and distinguish current selections from the analyzers recorded in last successful provenance. Use an explicit repository refresh operation independently of a visual graph renderer.
+**Detail page:** browse discovered elements, project dependencies, provenance, diagnostics, and refresh status. Link selected analyzers to their shared subject presentation and distinguish current selections from the analyzers recorded in last successful provenance. Use an explicit repository refresh operation independently of a visual graph renderer. Show selected Rules, architecture-test counts, validation status, and actionable findings with links to each definition and explanation.
 
 **Editing:** change source/scan configuration, analyzer selectors, and repository-specific run options where supported; enrich generated descendants through owner metadata. Pick existing compatible Analyzer subjects and show unresolved selections. Shared analyzer configuration is edited on the [Analyzer](analyzer.md) subject, with its effect on all selecting repositories visible. Generated identities and discovered facts are not independently editable configuration.
 
@@ -88,6 +93,12 @@ The repository owns its source boundary, run options, analysis status, diagnosti
 Selection changes, selected-subject replacement or detach, and relevant shared analyzer configuration/capability changes invalidate the repository's current inputs. The repository re-evaluates through its serialized/coalesced worker; stale calls cannot publish after replacement, cancellation, or detach. A removed or unavailable required target retains failure diagnostics separately from last successful provenance. Once inputs settle, each repository can complete and publish independently. Deliberately removing a selection removes its former contributions only through a complete successful reconciliation, including when the new analyzer selection is empty.
 
 Provenance retains the stable analyzer registration identity and relevant implementation/configuration information for each published contribution, independently of the current display name or subject path. Exact identity representation and rename/replacement behavior remain proposed in [Analyzer](analyzer.md#identity-and-lifetime-planned); a new instance or changed locator must not silently attribute an old result to a different analyzer.
+
+### Rule selection and validation
+
+`rules` uses shared path queries, including `/rules.md/*`, `/rules/**`, and `/**` for all loaded Rule definitions. See [rule authoring](../rules/authoring.md). An exact incompatible target is a diagnostic; wildcard enumeration selects only Rule subjects. A normal Markdown page is not itself a Rule, but its named Rule children are selectable. Defining or publishing a Rule alone does not run it.
+
+The repository owns invocation context, cancellation, validation status, and results. Rules consume current supported analyzer facts and the loaded architecture/documentation graph after required discovery and memberships settle. A Host-assignment test therefore needs Service definitions as well as repository facts. Shared definitions can be evaluated by several repositories independently. Rule changes invalidate affected validation results without requiring a fresh source scan when its inputs are unchanged. Missing requirements or definition-load failures cannot produce a clean pass or a silently empty suite. Execution, snapshot, and scheduling interfaces remain proposed.
 
 ### Source access and documentation mounts
 

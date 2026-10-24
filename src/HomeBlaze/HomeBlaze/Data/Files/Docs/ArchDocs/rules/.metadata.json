@@ -1,0 +1,9 @@
+{
+  "title": "Architecture Tests",
+  "order": [
+    "overview.md",
+    "authoring.md",
+    "generic-rules.md",
+    "predefined-rules.md"
+  ]
+}

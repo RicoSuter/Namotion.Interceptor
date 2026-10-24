@@ -21,7 +21,7 @@ Run architecture validation from a local terminal or CI job by starting the same
 1. Start the shared subject host with the normal type/module registrations, subject context, root configuration, storage containers, and metadata loading. Attach subjects through their ordinary lifecycle and start their required hosted services. Report unsupported authored features rather than skipping them.
 2. Let each SourceRepository resolve its source root and invoke its selected shared analyzers through its normal discovery/reconciliation worker. Repositories can point outside the documentation mount. The CLI does not maintain another source scanner or directly reproduce repository behavior.
 3. Wait for required storage loading, repository analysis, generated children, memberships, and relationships to settle for the current inputs. Registered singleton analyzers have the same configured graph paths and capabilities as in the UI. Completion must not depend on another running UI session.
-4. Collect explicitly in-scope rule definitions and run the shared evaluator against that graph. Preserve original source locations through parsing and resolution so diagnostics can point back to authored files.
+4. Resolve each selected repository's `rules` path queries to Rule subjects, including named Markdown children and JSON definitions, and run the shared evaluator against that graph. Directory/global selectors filter compatible Rule subjects; unsupported required check kinds produce configuration errors. Preserve original source locations through parsing and resolution so diagnostics can point back to authored files.
 5. Emit the report and exit status, then stop and dispose the host through normal shutdown. Validation reads authored inputs and never changes them as a side effect. Basic static analyzers do not clone, fetch, restore, build, or execute the applications described by the graph.
 
 The documentation mount, root configuration, selected rules, analyzer registry/configuration, source inputs, and supported capabilities must be reproducible locally and in CI. Given equivalent configuration and inputs, UI and CLI use the same subject types, ownership, paths, metadata, and discovery behavior, with separate runtime instances for their own process. A graph path such as `/Repository` is relative to the configured graph, not an operating-system path. Relative raw source locations retain their file-origin semantics. Exact host composition and analyzer publication remain design work; ordinary DI singleton registration alone does not publish an analyzer into the graph.
@@ -44,7 +44,7 @@ archdocs check --docs ./docs --format json --output ./artifacts/architecture-che
 archdocs check --config ./Root.json --format text
 ```
 
-Proposed `--config` starts the normal graph from an explicit root configuration. `--docs` is a convenience for a minimal normal host configuration mounting that directory, with the required analyzer subjects published through the same registration mechanism; it does not use a second loader. The graph paths of that mount must be documented, and it must not be silently remounted when running equivalent UI configuration. Rules are collected from supported metadata in the graph; scope filters and the failure threshold need a final CLI schema. `--output` writes the report only. No command shown here is implemented, and these examples are not an installation instruction or a complete CI workflow.
+Proposed `--config` starts the normal graph from an explicit root configuration. `--docs` is a convenience for a minimal normal host configuration mounting that directory, with the required analyzer subjects published through the same registration mechanism; it does not use a second loader. The graph paths of that mount must be documented, and it must not be silently remounted when running equivalent UI configuration. Repositories select Rule definitions with normal path queries; scope/repository filters and the failure threshold need a final CLI schema. A minimal graph loads the selected documentation scope, architecture subjects, Markdown Rule definitions, repositories, and published required analyzer/rule catalogs through normal lifecycle services. It need not load unrelated application/device subjects. Missing external references remain explicit input errors. `--output` writes the report only. No command shown here is implemented, and these examples are not an installation instruction or a complete CI workflow.
 
 Proposed exit contract:
 
@@ -58,16 +58,16 @@ Cancellation must produce an unsuccessful result with an explicit reason; its ex
 
 ## Human-readable errors [Planned]
 
-For the [Host membership policy](../shared/architecture-checks.md#every-host-belongs-to-a-service-planned), a diagnostic can read:
+For the [Host membership policy](../rules/predefined-rules.md#every-host-belongs-to-a-service-planned), a diagnostic can read:
 
 ```text
-ERROR hosts-have-service: Host Orders.Worker is not assigned to a Service.
+ERROR hostsHaveService: Host Orders.Worker is not assigned to a Service.
 Subject: /Repository/hosts/Orders.Worker
 Source: ../src/Orders.Worker/Orders.Worker.csproj
-Rule: .metadata.json /architectureRules/0
+Rule: rules.md block hostsHaveService (/rules.md/hostsHaveService)
 Fix: Update a Service's componentSources to include this Host, adjust its
      membership rule, or define the missing Service.
-Help: guides/assign-hosts.md
+Help: rules.md#host-assignment
 ```
 
 Source and rule locations identify different things. If no unique Service can be inferred, provide the applicable documentation/configuration candidates without pretending there is one guaranteed edit. The guide explains the supported file syntax. Plain output must remain useful in an ordinary terminal and CI log.
@@ -83,16 +83,16 @@ JSON output should carry structured fields with equivalent information. This ill
   "summary": { "errors": 1, "warnings": 0, "incompleteChecks": 0 },
   "findings": [
     {
-      "ruleId": "hosts-have-service",
-      "ruleOwnerPath": "/",
+      "ruleId": "hostsHaveService",
+      "rulePath": "/rules.md/hostsHaveService",
       "severity": "error",
       "message": "Host Orders.Worker is not assigned to a Service.",
       "subjectPath": "/Repository/hosts/Orders.Worker",
       "sourceLocation": { "path": "../src/Orders.Worker/Orders.Worker.csproj" },
-      "ruleLocation": { "path": ".metadata.json", "pointer": "/architectureRules/0" },
+      "ruleLocation": { "path": "rules.md", "block": "hostsHaveService" },
       "remediation": {
         "message": "Update a Service's componentSources to include the Host, adjust its membership rule, or define the missing Service.",
-        "documentationPath": "guides/assign-hosts.md"
+        "documentationPath": "rules.md#host-assignment"
       }
     }
   ]

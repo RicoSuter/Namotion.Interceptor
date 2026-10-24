@@ -1,0 +1,12 @@
+{
+  "$type": "Namotion.ArchDocs.Rule",
+  "name": "Projects have an architectural category",
+  "kind": "requiredProperty",
+  "severity": "warning",
+  "remediation": "Add an appropriate architectural category through the repository-owned metadata for this project, using its documented responsibility.",
+  "documentation": "../rules.md#project-categories",
+  "config": {
+    "property": "metadata.category",
+    "subjectSources": [{ "path": "/ArchDocs/Repository/projects/*" }]
+  }
+}

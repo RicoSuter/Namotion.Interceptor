@@ -1,0 +1,111 @@
+---
+title: Rule Authoring and Selection
+navTitle: Authoring and Selection
+status: Planned
+---
+
+# Rule Authoring and Selection [Planned]
+
+Keep a rule's explanation, executable configuration, and remediation understandable in ordinary source files. Both named JSON-configured Markdown blocks and one JSON file per Rule use the same [Rule subject](../subjects/rule.md). Schemas and check-kind identifiers below are proposed and unimplemented.
+
+## Implementation readiness
+
+**Area:** ArchDocs. Reuse normal configurable-subject and Markdown child loading.
+
+**Delivery:** Existing standalone JSON and named body-block entry points can load Rule subjects after registration. Rule types/evaluators are planned. Generic frontmatter children are an additional planned HomeBlaze authoring option, not a prerequisite for the body-block examples.
+
+**Prerequisites:** Rule registration, evaluator schemas, shared path queries, definition provenance, and preservation of surrounding prose/configuration.
+
+## A rules.md document [Proposed]
+
+Assume the documentation folder is mounted as the graph root and contains `/Repository`, `/catalog`, and `rules.md`. A normal JSON code fence is illustrative source only; the named subject block makes the enclosed configuration an actual subject definition. Existing body-block configuration uses PascalCase:
+
+````markdown
+# Architecture tests
+
+## Host assignment
+
+Every discovered Host must belong to at least one Service. Shared membership is allowed. Add a matching componentSources entry or correct the existing Service selection rule, then rerun validation.
+
+:: Namotion.ArchDocs.Rule#hostsHaveService
+```json
+{
+  "Name": "Every Host belongs to a Service",
+  "Kind": "hostsAssignedToServices",
+  "Severity": "error",
+  "Documentation": "#host-assignment"
+}
+```
+::
+
+## Host release coverage
+
+Every application Host in this documentation scope should be included in at least one deployment unit. Change the intended release grouping if a newly added Host is missing.
+
+:: Namotion.ArchDocs.Rule#hostsHaveDeploymentUnit
+```json
+{
+  "Name": "Hosts have a deployment unit",
+  "Kind": "requireMembership",
+  "Severity": "warning",
+  "Documentation": "#host-release-coverage",
+  "Config": {
+    "Minimum": 1,
+    "MembersProperty": "components",
+    "ContainerType": "Namotion.ArchDocs.DeploymentUnit",
+    "SubjectSources": [{ "Path": "/Repository/hosts/*" }],
+    "ContainerSources": [{ "Path": "/deployment-units/*" }]
+  }
+}
+```
+::
+````
+
+The graph paths are `/rules.md/hostsHaveService` and `/rules.md/hostsHaveDeploymentUnit`. The page stays an ordinary MarkdownFile; its named children supply Rule identity and registered summaries. A failing test can link to `rules.md#host-assignment`, where a human or agent reads the policy and its correction steps. The generic coverage rule is an example team policy, not a requirement that every Host in the domain be deployable.
+
+## One JSON file per rule [Proposed]
+
+An alternative `rules/hosts-have-service.json` defines the same policy independently of a Markdown child:
+
+```json
+{
+  "$type": "Namotion.ArchDocs.Rule",
+  "name": "Every Host belongs to a Service",
+  "kind": "hostsAssignedToServices",
+  "severity": "error",
+  "documentation": "../rules.md#host-assignment"
+}
+```
+
+Its graph path is `/rules/hosts-have-service`, without `.json`. Here `rules.md` can contain only explanations and links to standalone rules. Choose one canonical definition for a test; two independently declared subjects are two tests even when their settings match. JSON files use proposed camelCase configuration, while body blocks use the existing property-casing convention.
+
+## Select tests through paths [Proposed]
+
+SourceRepository configuration can use any of these `rules` entries:
+
+| Selection | Entry | Meaning |
+|---|---|---|
+| One test | `{ "path": "/rules.md/hostsHaveService" }` | Select that named Rule. |
+| All tests on one page | `{ "path": "/rules.md/*" }` | Select compatible immediate named children. |
+| Standalone rules in a directory | `{ "path": "/rules/*" }` | Select compatible direct children such as JSON-defined Rule subjects. |
+| A complete rule subtree | `{ "path": "/rules/**" }` | Include nested Rule subjects, including named children of Markdown pages. |
+| All loaded tests | `{ "path": "/**" }` | Select every Rule definition in the loaded graph, including published catalog rules. |
+
+For example:
+
+```json
+{
+  "$type": "Namotion.ArchDocs.SourceRepository",
+  "sourceRoot": "../",
+  "analyzers": [{ "path": "/analyzers/CSharpProjects", "config": {} }],
+  "rules": [{ "path": "/rules.md/*" }]
+}
+```
+
+Lists combine by union and deduplicate identities; supported `where` predicates can refine selection. Configuration belongs to each Rule definition. Unlike analyzer invocation entries, rule selectors do not introduce a second per-repository `config` copy or an ambiguous wildcard override scheme. Rule and analyzer selection remain separate; each check declares the facts it needs.
+
+## Shared definitions and context [Planned]
+
+A shared predefined policy such as `hostsAssignedToServices` uses the invoking repository and documented architecture scope as inputs. Generic rules can supply explicit subject/group queries in `config`. An explicit absolute path in shared configuration is not rewritten when another repository selects it. If definitions cross documentation roots, configure their normal graph mounts and dependencies explicitly; do not search unrelated folders or silently load a full unrelated application graph.
+
+[Rule overview](overview.md) · [Generic families](generic-rules.md) · [Predefined policies](predefined-rules.md) · [CLI](../integration/cli-and-ci.md)

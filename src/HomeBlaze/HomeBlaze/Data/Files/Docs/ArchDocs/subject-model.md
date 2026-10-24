@@ -13,6 +13,7 @@ These conceptual UML views cover every subject and capability in the ArchDocs sp
 | Area | Subjects and capabilities |
 |---|---|
 | Shared capabilities | [Component](subjects/component.md), [Analyzer](subjects/analyzer.md) |
+| Architecture tests | [Rule](subjects/rule.md), configured through registered generic and domain-specific check kinds |
 | Source discovery | [SourceRepository](subjects/source-repository.md), [CodeSolution](subjects/code-solution.md), [CodeProject](subjects/code-project.md) |
 | Logical architecture and access | [Host](subjects/host.md), [Service](subjects/service.md), [Resource](subjects/resource.md), [Interface](subjects/interface.md), [Endpoint](subjects/endpoint.md) |
 | Public surfaces | [Contract](subjects/contract.md), [OpenApiContract](subjects/openapi-contract.md), [ProtobufContract](subjects/protobuf-contract.md), [CSharpApiContract](subjects/csharp-api-contract.md) |
@@ -59,11 +60,11 @@ classDiagram
     Contract <|-- CSharpApiContract
 ```
 
-Analyzer has a separate shared subject capability with an open CLR interface/base-class shape. No Component participation is selected for Analyzer, CodeSolution, Artifact, or Actor. Absence from this inheritance view does not prevent an ordinary subject from appearing in queries or diagrams.
+Analyzer has a separate shared subject capability with an open CLR interface/base-class shape. No Component participation is selected for Analyzer, Rule, CodeSolution, Artifact, or Actor. Absence from this inheritance view does not prevent an ordinary subject from appearing in queries or diagrams.
 
 ## Discovery ownership and source grouping [Planned]
 
-A SourceRepository selects existing shared Analyzer singleton subjects within the loaded root. Several repositories can select the same instance; selecting it neither clones it nor transfers ownership. Each repository owns its own analysis work, diagnostics, results, and discovered children. The Contract ownership edge below applies only to auto-discovered Contracts, and the Host edge only to discovered Hosts. Authored Contracts and Hosts retain their separate defining owners.
+A SourceRepository selects existing shared Analyzer singleton subjects within the loaded root. Several repositories can select the same instance; selecting it neither clones it nor transfers ownership. Each repository owns its own analysis work, diagnostics, results, and discovered children. It also selects authored Rule subjects without ownership transfer and owns their per-invocation validation results. A Markdown document or JSON file owns each definition; check kinds do not require one subject class per policy, and shared definitions hold no repository last-run state. The Contract ownership edge below applies only to auto-discovered Contracts, and the Host edge only to discovered Hosts. Authored Contracts and Hosts retain their separate defining owners.
 
 ```mermaid
 classDiagram
@@ -75,8 +76,12 @@ classDiagram
     class CodeProject
     class Host
     class Contract
+    class Rule
 
     SourceRepository --> Analyzer : selects shared
+    SourceRepository --> Rule : selects architecture tests
+    Rule ..> CodeProject : reads supported facts
+    Rule ..> Host : reads supported facts
     SourceRepository "1" *-- "0..*" CodeSolution : owns discovered
     SourceRepository "1" *-- "0..*" CodeProject : owns discovered
     SourceRepository *-- Host : owns discovered

@@ -12,8 +12,9 @@ Display the shared [architecture-check](../shared/architecture-checks.md) result
 
 | Property | Type | Default and meaning |
 |---|---|---|
-| `Path` | Subject/folder path `string` | Required scope for rule discovery and evaluation. The runner includes the supported graph dependencies required to evaluate those rules. |
-| `RuleIds` | Optional `string` list | Omitted: in-scope rules. Empty: no rules. Bare IDs must be unique in scope; qualified identities and ambiguity diagnostics need a final schema. |
+| `Path` | Subject/folder path `string` | Required scope for repository discovery and result aggregation. Each repository evaluates its configured Rule selections against required graph inputs. |
+| `RepositorySources` | Optional [PathQuery](../shared/path-queries.md) list selecting [SourceRepository](../subjects/source-repository.md) | Omitted: repositories in scope. Empty: none. |
+| `RuleSources` | Optional PathQuery list selecting [Rule](../subjects/rule.md) | Omitted: show results for all rules selected by those repositories. Empty: show no rule results. A display filter does not enable otherwise unselected rules. |
 
 ## Markdown example [Proposed]
 

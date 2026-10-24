@@ -7,7 +7,7 @@ navTitle: ArchDocs Sample
 
 Use this folder to refine the authoring experience before finalizing the domain design, implementation plan, and MVP. It lives under the existing HomeBlaze Files root as ArchDocs, containing normal Markdown, proposed subject JSON definitions, and an internal .source directory with buildable source fixtures. The ArchDocs types, frontmatter child declarations, path queries, and architecture widgets are proposed functionality. The .NET projects are fixtures, not an implementation of that functionality.
 
-The [feature reference](../Docs/ArchDocs/overview.md) is authoritative for subjects, analyzers, shared behavior, widgets, implementation readiness, and scope decisions. Its [scenarios](../Docs/ArchDocs/scenarios/overview.md) cover different documentation styles with fenced JSON and Markdown source. This folder is optional editable test material; update the relevant reference page alongside a sample when a model decision changes. Concrete sample field names remain proposals.
+The [feature reference](../Docs/ArchDocs/overview.md) is authoritative for subjects, analyzers, shared behavior, widgets, implementation readiness, and scope decisions. Its [scenarios](../Docs/ArchDocs/scenarios/overview.md) cover different documentation styles with fenced JSON and Markdown source. The [architecture tests](rules.md) demonstrate named Rule blocks and a [standalone JSON rule](rules/projects-have-category.json), selected by Repository.json through page/subtree wildcards. The category policy intentionally has missing authored labels for the future validation/edit/rerun workflow; Rule types and the CLI remain planned. This folder is optional editable test material; update the relevant reference page alongside a sample when a model decision changes. Concrete sample field names remain proposals.
 
 The first real target is the existing AppHost documentation, with its ordinary arc42 overview, concept pages, decisions, guidelines, and domain documents. It describes one coordinated application with Web and Worker hosts, shared resources, and a one-off migrations executable. Orders there is a module, while this Commerce fixture deliberately exercises two Services with separate deployment units. The broader reference experience is [Apimundo](https://apimundo.com/organizations/namotion/projects/apimundo?service=1&tab=overview&repository=Apimundo), including its repository graph, API and contract views, deployment matrix, and package links. The specification records these domain gaps; this sample does not yet demonstrate all of them or select their MVP scope.
 
@@ -28,6 +28,9 @@ Files/ArchDocs/
 ├── arc42.md
 ├── ServiceDiagram.md
 ├── Repository.json
+├── rules.md
+├── rules/
+│   └── projects-have-category.json
 ├── resources/
 │   └── OrderEvents.json
 ├── services/

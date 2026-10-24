@@ -6,68 +6,53 @@ status: Planned
 
 # Keep Documentation Aligned with Code [Planned]
 
-Use discovery, reusable membership rules, linked views, and architecture validation to minimize duplicated information. The workflow is independent of documentation style and can run locally, in HomeBlaze, and in CI. All ArchDocs types, widgets, rule schemas, and commands in this scenario remain planned or proposed.
+Use discovery, reusable membership rules, linked views, and architecture unit tests to minimize duplicated information. The workflow is independent of documentation style and runs against the same subject model locally, in HomeBlaze, and in CI. All Rule types, evaluators, widgets, and commands remain planned or proposed.
 
-## Minimal authored information
+## Define and enable documented tests
 
-Define a SourceRepository with a file-relative source root and selected analyzers. Define logical Services with component-source rules broad enough to include their discovered parts. Keep business responsibilities, intended boundaries, decisions, and unsupported relationships as authored information. Reuse those definitions from every document rather than maintaining a separate list for each diagram.
+Define a SourceRepository with a file-relative source root and selected analyzers. Define logical Services with component-source queries broad enough to include their discovered parts. Keep responsibilities, intended boundaries, decisions, and unsupported relationships as authored information.
 
-The [JSON catalog](json-catalog.md) shows `/Repository` and Services under `/catalog`. The [membership policy](../shared/architecture-checks.md#every-host-belongs-to-a-service-planned) supplies the proposed root `.metadata.json` rule requiring every discovered Host to appear in at least one Service's direct Host set. This is an explicit team policy, not a generic restriction on all Hosts. Multiple Services may select the same Host.
+The [JSON catalog](json-catalog.md) shows `/Repository` and Services under `/catalog`. Add an ordinary `rules.md` using the [complete authoring example](../rules/authoring.md#a-rulesmd-document-proposed): each named Rule block has its explanation and remediation next to its JSON configuration. Alternatively, use [one JSON file per rule](../rules/authoring.md#one-json-file-per-rule-proposed) and link it to a normal policy document.
 
-Add a real `guides/assign-hosts.md` document beside the catalog with the supported syntax and correction steps. A minimal guide could contain:
+Select `/rules.md/*` to enable that page's tests, `/rules/**` for a nested catalog, or `/**` for every Rule in the loaded graph. These are repository `rules` path queries, not a separate suite entity. A predefined Host-assignment rule requires every discovered Host to appear in at least one Service's direct Host set. This is an explicit team policy; overlapping membership remains valid.
 
-````markdown
-# Assign a Host to a Service
-
-Find the Host's discovered graph path in the validation error. Identify the logical Service it implements. Update that Service's componentSources so its resolved components include the Host, or define the missing Service.
-
-For a JSON-defined Service, an explicit proposed entry is:
-
-```json
-{ "path": "/Repository/hosts/Orders.Worker" }
-```
-
-Add the entry to the existing componentSources array; preserve its other members and metadata. If a naming or path rule already describes the Service, correct that rule instead of adding redundant individual entries. The same Service configuration can live under a named Markdown frontmatter child.
-
-Selecting only a CodeProject does not implicitly select its Host. Check the Service's resolved hosts collection, then run architecture validation again. Choose the logical boundary deliberately; the tool cannot decide business ownership from a project name.
-````
-
-The guide and error can link to the canonical [Service](../subjects/service.md), [path query](../shared/path-queries.md), and [authoring](../file-authoring.md) reference. Final examples must use the implemented schema when it exists; the snippets here illustrate proposed syntax.
+A useful policy document explains that an error's Host path can be added to the appropriate Service's `componentSources`, or that an existing broad selection rule should be corrected. Selecting a CodeProject alone does not implicitly select its Host. Link to the canonical [Service](../subjects/service.md), [path queries](../shared/path-queries.md), and [file authoring](../file-authoring.md) syntax so a human or agent can make the intended edit.
 
 ## Add a runnable project
 
 1. A developer adds `Orders.Worker.csproj` in the source checkout.
-2. The selected analyzer discovers a CodeProject and, where supported, its Host with source provenance.
-3. Existing Service membership rules are reevaluated. A matching rule includes the Host without another manually maintained architecture entry.
-4. If no Service includes it, the membership check reports an error with the Host path, project file, rule location, remediation, and `guides/assign-hosts.md` link.
-5. A human or agent follows the guide, edits the appropriate Service's canonical JSON or Markdown configuration, and reruns the same validation command.
-6. A complete successful pass confirms membership. Dependency views, Service summaries, and linked documentation use the updated shared graph.
+2. The selected analyzer discovers its CodeProject and, where supported, Host with source provenance.
+3. Service membership queries are reevaluated. A matching query includes the Host without another manually maintained architecture entry.
+4. The repository resolves selected Rule subjects and evaluates them after required discovery and memberships settle.
+5. If no Service includes the Host, the test reports its graph path, project file, Rule file/block, remediation, and the explanation in `rules.md`.
+6. A human or agent reads that explanation, edits the appropriate Service's canonical JSON or Markdown configuration, and reruns validation.
+7. A complete successful pass confirms membership. Dependency views, summaries, backlinks, and other tests use the updated shared graph.
 
-If source analysis fails, report incomplete validation rather than pretending that no Host needs assignment. A new library may create a CodeProject without a Host and therefore does not violate this particular Host policy. Other coverage rules can apply independently.
+A new library can create a CodeProject without a Host and does not violate this particular Host policy. Independent naming, required-category, and dependency rules can validate it. A real code dependency violation requires a code change or an explicit architecture decision; inventing documentation labels is not a valid repair. Failed analysis or missing policy context produces incomplete validation, not a passing empty suite.
 
 ## Run locally and in CI [Proposed]
 
-The future [CLI](../integration/cli-and-ci.md) provides equivalent readable and structured diagnostics:
+The future [CLI](../integration/cli-and-ci.md) provides readable and structured diagnostics:
 
 ```shell
 archdocs check --docs ./docs --format text
 archdocs check --docs ./docs --format json --output ./artifacts/architecture-checks.json
 ```
 
-The command names are illustrative and not runnable today. A CI job would install/configure the selected future CLI and analyzers, run against its checkout, and fail on the configured severity threshold. The CLI starts the normal subject graph headlessly, loads storage and metadata, and lets SourceRepositories invoke their selected analyzers. It waits for discovery and memberships to settle before checking; it needs no separate parser/scanner or running web server. A proposed `--config ./Root.json` option reuses an explicit normal root configuration. The local agent loop is run, inspect findings and guides, edit canonical definitions, and rerun. Validation itself does not modify documentation.
+The commands are illustrative and not runnable today. The CLI starts a minimal normal subject host for the explicit documentation scope, loads Markdown and ArchDocs subjects, and publishes required analyzer/catalog subjects through shared mechanisms. SourceRepositories run selected analyzers and select Rule definitions; the host waits for their required graph inputs before checking. An explicit normal root configuration can cover multiple documentation mounts. A separate parser/scanner, unrelated device graph, or running web server is not required.
 
-## Reuse the results in documents
+The local/CI agent loop is run, inspect findings and rule explanations, edit canonical sources, and rerun. The runner reports selected test/evaluated counts, returns unsuccessful status for policy failures or incomplete evaluation, and shuts down normally. Validation does not write corrections itself.
 
-Explicit planned widgets can show the same evidence in an arc42 document, service page, guide, or architecture decision:
+## Reuse the evidence in documents
 
-````markdown
+```markdown
 :: Namotion.ArchDocs.DependencyDiagram Path=/Repository
 ::
 
 :: Namotion.ArchDocs.ArchitectureCheckResults Path=/
 ::
-````
+```
 
-Use [ImpactView](../widgets/impact-view.md) to find known dependents and referencing documentation. Those documents are candidates for review, not proof that their prose is stale or correct. Use [ScenarioDiagram](../widgets/scenario-diagram.md) when ordered interactions are useful; the author supplies the sequence and the graph supplies participant identities and links.
+Use [ImpactView](../widgets/impact-view.md) to find known dependents and documents to review. Use [ScenarioDiagram](../widgets/scenario-diagram.md) when ordered interactions matter; authors supply order and the graph supplies participant identities and links. The separate [Commerce development fixture](../../../ArchDocs/rules.md) demonstrates two rules on one Markdown page with repository wildcard selection.
 
-[Scenarios](overview.md) · [Architecture checks](../shared/architecture-checks.md) · [CLI and CI](../integration/cli-and-ci.md) · [General widgets](../widgets/overview.md)
+[Scenarios](overview.md) · [Architecture tests](../rules/overview.md) · [CLI and CI](../integration/cli-and-ci.md)

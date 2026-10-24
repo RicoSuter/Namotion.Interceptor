@@ -18,7 +18,7 @@ The durable feature reference for the generic architecture-documentation domain,
 
 Describe and explore software through ordinary Markdown documentation, authored subject configuration, discovered facts, and reusable views over one shared graph. The model does not prescribe language, source layout, cloud, process topology, organizational structure, or documentation template. AppHost and Apimundo are reference samples, not special cases in the domain API.
 
-The primary goal is keeping documentation aligned with the codebase and interlinked with minimal duplicated authoring. Discover supported facts, apply reusable membership rules, and derive structural views and backlinks. Authors supply business intent, explanations, and facts that the analyzers cannot establish. Architecture validation should guide humans and agents toward correct source edits locally and in CI; operational dashboards are an optional additional direction.
+ArchDocs is an architecture-validation framework with documentation and linked views. The primary goal is keeping documentation aligned with the codebase and interlinked with minimal duplicated authoring. Discover supported facts, apply reusable membership rules, and derive structural views and backlinks. Authors supply business intent, explanations, and facts that the analyzers cannot establish. Architecture validation should guide humans and agents toward correct source edits locally and in CI; operational dashboards are an optional additional direction.
 
 ## Specification map
 
@@ -30,7 +30,7 @@ The primary goal is keeping documentation aligned with the codebase and interlin
 - Subjects below: canonical semantics, configuration/state boundaries, references, subject-specific widgets/detail pages/editors, and unresolved schemas.
 - [Analyzers](analyzers/overview.md): read-only source and contract analysis.
 - [General widgets](widgets/overview.md): reusable aggregating views such as tables, deployment matrices, and architecture diagrams. Subject-specific presentation stays in each subject file.
-- [Architecture checks](shared/architecture-checks.md) and [CLI/CI validation](integration/cli-and-ci.md): shared file-authored rules with actionable, source-located errors for humans and agents. Start with the [discovery and validation scenario](scenarios/architecture-validation.md).
+- [Architecture tests and rules](rules/overview.md), [shared evaluation](shared/architecture-checks.md), and [CLI/CI validation](integration/cli-and-ci.md): selectable Rule subjects with actionable, source-located errors for humans and agents. Start with the [discovery and validation scenario](scenarios/architecture-validation.md).
 - [Identifiers](shared/identifiers.md), [path queries](shared/path-queries.md), [metadata and relationships](shared/metadata-and-relationships.md), and [reconciliation](shared/reconciliation.md): shared behavior.
 - [Markdown authoring](integration/markdown-authoring.md) and [page contributions](integration/page-contributions.md): optional host extensions.
 - [Release and deployment integration](integration/delivery-pipelines.md): proposed connections to GitHub Actions and other pipeline providers, with explicit architecture mappings.
@@ -69,6 +69,7 @@ Connect the architecture to source code and enrich it through shared analyzers. 
 | [SourceRepository](subjects/source-repository.md) | [Planned] | Extension; see prerequisites |
 | [CodeProject](subjects/code-project.md) | [Planned] | Extension; see prerequisites |
 | [Analyzer](subjects/analyzer.md) | [Planned] | Shared singleton subject; registration and graph publication required |
+| [Rule](subjects/rule.md) | [Planned] | Authored architecture-test subject; wildcard selection and headless evaluation required |
 | [CodeSolution](subjects/code-solution.md) | [Planned] | Extension; see prerequisites |
 
 ### 3. Deployment architecture
@@ -113,7 +114,7 @@ Component is a shared capability, with Service, Host, Resource, and CodeProject 
 
 CodeSolution records source/build grouping and references existing repository-owned CodeProjects. Projects can belong to several solutions or none, and contribute to zero or many Hosts. Neither solution membership nor project references establish a Service or deployment boundary.
 
-SourceRepositories select shared singleton Analyzer subjects. Selecting one references the existing instance; it does not create a repository-owned analyzer. Each repository owns its source boundary, analysis work, results, diagnostics, and generated subjects. Registering or publishing an Analyzer does not by itself execute analysis or select it for every repository.
+SourceRepositories select shared singleton Analyzer subjects and authored Rule definitions. Rules can live in one JSON file per definition or as named children in `rules.md`; repositories select page/directory/global suites with shared path queries. Rules consume available facts and authored architecture, and per-repository results stay on the invocation owner. See [rule authoring](rules/authoring.md). Selecting one references the existing instance; it does not create a repository-owned analyzer. Each repository owns its source boundary, analysis work, results, diagnostics, and generated subjects. Registering or publishing an Analyzer does not by itself execute analysis or select it for every repository.
 
 Contract specializations are OpenApiContract, ProtobufContract, and CSharpApiContract. Authored OpenAPI/protobuf descriptors select their raw document through `path`; `codeProjectPath` explicitly selects an associated graph subject. Without an explicit association, discovery considers only a unique CodeProject in the raw document's own directory. See [contract files and discovery](scenarios/contract-files.md). Keep shared contract references independent of a parser or transport. Exact CLR interfaces, fields, ownership where noted, and version identity remain open in their specifications.
 
