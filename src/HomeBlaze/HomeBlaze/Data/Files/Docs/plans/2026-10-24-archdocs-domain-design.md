@@ -9,7 +9,7 @@ Status: draft for review. This document records the agreed domain and the propos
 
 ## Intent
 
-Make a documentation folder describe and explore the software around it. A repository's `/docs` folder contains Markdown and authored subject JSON files. Source analysis discovers the code structure; authored subjects describe the logical architecture and deployment arrangement. The same graph is available to the subject browser, Markdown widgets, and queries.
+Make a documentation folder describe and explore the software around it. A repository's `/docs` folder contains ordinary Markdown, typed Markdown subject documents, and authored subject JSON files. Source analysis discovers the code structure; authored subjects describe the logical architecture and deployment arrangement. The same graph is available to the subject browser, Markdown widgets, and queries.
 
 Use the design in [PR #257, HomeBlaze: ArchDocs](https://github.com/RicoSuter/Namotion.Interceptor/pull/257) as prior work. That open PR contains only a 200-line design document, not an implementation. This design refines its entity boundaries and adds repository analysis and selections.
 
@@ -54,6 +54,28 @@ A configurable SubjectProjection was considered. The chosen approach puts genera
 
 Structured selectors and a compact query language were discussed. Proposed default: use structured JSON selectors for the initial API and reuse the existing expression parser for property conditions. A compact syntax can be added later without changing selection semantics. The exact JSON property names are left to the implementation design.
 
+### Typed Markdown
+
+The user chose MarkdownFile inheritance for typed Markdown subjects. A registered type declared by frontmatter must derive from MarkdownFile and retain the normal Markdown page renderer, editor, navigation, expressions, and blocks. A custom type can supply an optional widget that the author embeds in Markdown. Loading a typed page does not automatically replace its UI or insert a custom summary. This replaces the earlier proposal to keep the file's declared type entirely independent of MarkdownFile.
+
+## Typed Markdown and metadata
+
+Ordinary Markdown remains MarkdownFile. A `$type` discriminator in YAML frontmatter selects a registered MarkdownFile subclass, such as a service document. The file itself is that specialized subject, rather than a page that merely references a separately defined service. Configuration fields sit beside `$type`, following the existing JSON configuration naming conventions. An optional `metadata` object contains enrichment. The remaining document body is ordinary Markdown. Exact registered type names are builder choices.
+
+This is a generic storage capability for eligible MarkdownFile subclasses, not an architecture-specific parser or support for arbitrary unrelated configurable types in a Markdown file. Generic headless analysis and domain helpers stay independent of page rendering; Markdown-specific subjects accept the storage dependency imposed by inheriting MarkdownFile. Keep Blazor components in their separate UI assembly.
+
+The existing component registry already resolves base-class registrations, and the normal Markdown page component accepts MarkdownFile subclasses. Typed documents should use that existing rendering path and may register widget components independently of their page component. A service-summary widget is explicitly embedded by the author and reads the service's facts without rendering its Markdown body again. The generic Widget reference currently rejects ancestors to prevent recursion, so embedding a page's own summary needs a dedicated safe summary block or an equally explicit mechanism; do not remove general cycle protection.
+
+Use one metadata model and API with two persistence representations. JSON subjects keep metadata in their existing sidecar; ordinary and typed Markdown keep it under `metadata` in frontmatter. Frontmatter is the canonical metadata store for a Markdown document, including entries for its generated descendants; do not introduce an additional active metadata sidecar for that document. Existing untyped page display/navigation frontmatter remains supported. Define how those existing fields relate to metadata without creating two independently editable copies of the same value.
+
+Extend existing file loading to inspect Markdown frontmatter before selecting the concrete type. This is not implemented today: FileSubjectFactory chooses MarkdownFile by extension, and MarkdownFrontmatter reads a fixed set of display fields. Same-type refreshes preserve the subject where possible. A declared type change requires replacement through the normal lifecycle. Invalid or unavailable declared types need a visible diagnostic and preservation of the source content, not silent interpretation as a successful instance of another type. Exact recovery behavior is left to implementation design.
+
+Frontmatter edits through the UI must preserve the Markdown body and unrelated frontmatter keys. Use the existing metadata API for metadata changes, and the configuration writer for declared configuration. Each write must serialize with other writes to the same document. Type, configuration, metadata, and content must come from a compatible load; invalid or superseded loads cannot publish a mismatched combination.
+
+Typed relationships are structured metadata, with a kind and target reference and optional descriptive data such as technology or a label. Their source defaults to the owning subject, so relationships on a typed service document originate at that service. A typed reader exposes those entries to graph queries and widgets. Analyzer-produced relationships remain discovered state with provenance. Authored relationship edits reconcile the effective graph through the same change-driven pattern; they do not require independent relationship JSON files.
+
+An ordinary Markdown link can establish a document reference when a later analyzer supports it, but a link alone does not assert a runtime dependency. A general Markdown extraction-rule engine is deferred; structured frontmatter and the existing subject blocks provide explicit authoring for the MVP.
+
 ## Domain
 
 ### SourceRepository
@@ -88,7 +110,7 @@ The common arrangement is one service associated with one deployment unit. Servi
 
 ### Environment
 
-A configurable subject describing a deployment context, such as staging or production. It declares its deployment units and owns the generated Deployment subjects for those selections. Environments are authored as JSON files.
+A configurable subject describing a deployment context, such as staging or production. It declares its deployment units and owns the generated Deployment subjects for those selections. Environments can be authored as JSON files or typed Markdown documents.
 
 It does not generate deployments for every service or every deployment unit in the graph. Only declared selections produce deployments.
 
@@ -100,7 +122,7 @@ Environment maintains one generated Deployment subject per selected unit. It reu
 
 A generated deployment expresses the intended installation. It is not evidence that software is actually running. For the MVP, version and relevant URLs are manually configured data; no health or deployment connector populates them.
 
-Use the existing metadata system for manually entered enrichment of generated subjects. The sidecar beside an environment's JSON file stores entries for its Deployment descendants, keyed by their stable subject paths. Version and URLs can use domain-specific metadata keys with typed accessors and editing support; notes, links, and tags use the existing keys. The configuration file declares deployment-unit selection, and its sidecar holds enrichment. Do not create a second enrichment store inside the owner's configuration.
+Use the existing metadata system for manually entered enrichment of generated subjects. The metadata of an environment stores entries for its Deployment descendants, keyed by their stable subject paths: in the sidecar of a JSON definition or the frontmatter of a Markdown definition. Version and URLs can use domain-specific metadata keys with typed accessors and editing support; notes, links, and tags use the existing keys. Configuration declares deployment-unit selection, and metadata holds enrichment. Do not create a second enrichment store inside the owner's configuration.
 
 ## Selections and relationships
 
@@ -130,7 +152,7 @@ The MVP supports local folders only. Proposed default: use FluentStorage's raw l
 
 File locations such as `../` resolve relative to the defining configuration file's directory when it has a local file origin. SourceRepository then uses its resolved root as the boundary for source traversal. Subject references continue to use the existing subject path resolver. A relative file location must not be interpreted as a request to traverse above a mounted blob container through IStorageContainer.
 
-For the MVP, defining SourceRepository in its own JSON file provides an unambiguous local origin. Proposed default: where no local file origin exists, require an absolute source root and report a configuration diagnostic for an ambiguous relative path. Do not guess from the process working directory. Future storage backends can supply a storage identity and a root path instead of a local filesystem location.
+For the MVP, defining SourceRepository in its own JSON or typed Markdown file provides an unambiguous local origin. Proposed default: where no local file origin exists, require an absolute source root and report a configuration diagnostic for an ambiguous relative path. Do not guess from the process working directory. Future storage backends can supply a storage identity and a root path instead of a local filesystem location.
 
 ## Analyzer extension point and initial .NET analysis
 
@@ -178,13 +200,13 @@ Connector CollectionDiffBuilder produces ordered transport patches rather than m
 
 ## Authored data and discovered state
 
-Authored configuration determines logical intent, selectors, source locations, and explicit relationships. Metadata holds manual descriptive enrichment and manual deployment details. Analyzer results and generated child collections are state. Computed summaries and resolved views use the existing derived-property mechanism where appropriate; generated objects are not recreated by a derived getter.
+Authored configuration determines logical intent, selectors, and source locations. Metadata holds authored relationships, manual descriptive enrichment, and manual deployment details. Analyzer results and generated child collections are state. Computed summaries and resolved views use the existing derived-property mechanism where appropriate; generated objects are not recreated by a derived getter.
 
-Enrichment has one canonical persisted home: existing metadata sidecars. StorageMetadataApplier already applies a stored JSON subject's sidecar to its descendants, including children that attach after the sidecar was loaded. Unknown keys and JSON values are retained. Thus a repository sidecar can enrich discovered project and host children, and an environment sidecar can enrich generated deployments, provided their canonical ownership and paths are stable. Existing metadata limits still apply. Add typed readers, validation, and editors for any domain-specific metadata fields; generic preservation of a key does not make it a typed configuration property or an automatically generated editor field. Do not persist competing editable copies of discovered facts. Define any supported override explicitly and show the discovered value's provenance separately.
+Enrichment has one canonical persisted home per owner, as specified in Typed Markdown and Metadata. StorageMetadataApplier already applies a stored JSON subject's sidecar to its descendants, including children that attach after the sidecar was loaded, and retains unknown keys and JSON values. Extend equivalent behavior to Markdown frontmatter. Thus repository metadata can enrich discovered project and host children, and environment metadata can enrich generated deployments, provided their canonical ownership and paths are stable. Existing metadata limits still apply. Add typed readers, validation, and editors for domain-specific fields; generic preservation of a key does not make it a typed configuration property or an automatically generated editor field. Do not persist competing editable copies of discovered facts. Define any supported override explicitly and show the discovered value's provenance separately.
 
 The basic subject UI should expose applicable configuration, state, diagnostics, and refresh operations through existing interfaces and generated editors. Project reference edges and selection membership must be traversable through the subject graph without requiring a custom visual graph renderer.
 
-The user selected existing subject UI plus a Markdown service summary and a deployment matrix for the MVP. A service summary means an embeddable widget that reads a Service subject and summarizes its selected code/hosts and deployments; it is not another Markdown document that duplicates those facts. Proposed default: show the service's name and description, selected host/project counts, and links to the corresponding subjects and deployments. The deployment matrix shows units against environments using declared deployments and manual versions/links; it must not display an unobserved deployment as healthy. The exact widget presentation remains to be designed. An interactive dependency-graph renderer is deferred; project-reference edges remain navigable through the subject graph.
+The user selected existing subject UI plus an optional Markdown service-summary widget and a deployment matrix for the MVP. A service summary reads a Service subject and summarizes its selected code/hosts and deployments. Proposed default: show its name and description, selected host/project counts, and links to corresponding subjects and deployments. A typed service document retains the normal Markdown UI, and its author chooses where to embed a summary. The deployment matrix shows units against environments using declared deployments and manual versions/links; it must not display an unobserved deployment as healthy. Exact widget presentation remains to be designed. An interactive dependency-graph renderer is deferred; project-reference edges remain navigable through the subject graph.
 
 ## MVP acceptance scenarios
 
@@ -199,6 +221,8 @@ The user selected existing subject UI plus a Markdown service summary and a depl
 9. Surface malformed selectors, unresolved references, uncertain analysis, and failed source access distinctly; retain the last successful graph on temporary analysis failure.
 10. Detach an owner during queued work; prevent obsolete publication and release its subscriptions and generated children according to the normal lifecycle rules.
 11. Embed a service summary and deployment matrix in Markdown using normal widget blocks; navigate from their entries to the existing subjects without maintaining duplicate service facts in the page.
+12. Define a service in typed Markdown frontmatter; resolve it as the declared MarkdownFile subclass, render and edit it through the normal Markdown UI, and embed its optional summary without recursive rendering.
+13. Edit metadata and authored relationships on ordinary and typed Markdown through the metadata API; preserve the body and unrelated frontmatter, reapply descendant enrichment on later attach, and retain that data across refresh and restart.
 
 These are requirements for future implementation and testing. No product code, tests, dependencies, or projects are added by this design document.
 
@@ -210,6 +234,6 @@ The builder chooses exact project names, concrete interfaces, JSON property name
 
 ## Review status and remaining presentation work
 
-The user selected basic `.csproj` XML discovery, existing subject UI plus summary/matrix widgets, and reuse of metadata for enrichment. The shared reconciliation approach and Environment declaring deployment units are agreed. A builder check identified the partial-analysis failure boundary; the proposed default in this document retains the entire last successful graph of a repository whose pass fails, while other repositories can publish independently.
+The user selected basic `.csproj` XML discovery, existing subject UI plus optional summary/matrix widgets, and reuse of metadata for enrichment and authored relationships. Typed Markdown subjects inherit MarkdownFile, keep its normal UI, and store configuration beside `$type` and enrichment under `metadata` in frontmatter. Ordinary Markdown gains the same frontmatter metadata support. The shared reconciliation approach and Environment declaring deployment units are agreed. A builder check identified the partial-analysis failure boundary; the proposed default in this document retains the entire last successful graph of a repository whose pass fails, while other repositories can publish independently.
 
 The description and exact visual contents of the service summary and deployment matrix need user review. Their proposed behavior above is sufficient to discuss scope, not approval of a visual design. This domain and MVP draft must be approved before implementation planning begins.
