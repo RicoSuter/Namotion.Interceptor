@@ -8,6 +8,8 @@ status: Planned
 
 The authored model must be easy for humans and AI agents to understand and edit directly in Markdown, JSON, YAML frontmatter, contract source, and other supported file formats. HomeBlaze provides another way to explore and edit that model. The UI must not be required to understand a definition, recover its meaning, or create and change supported authored data.
 
+Consulting this feature reference to learn syntax, supported types and capabilities, defaults, and reference rules is expected. Readable files can rely on documented conventions; they must be understandable and editable with this reference and a normal file editor, without requiring UI-only knowledge or hidden state.
+
 ## Implementation readiness
 
 Existing JSON files, Markdown, sidecars, and explicit blocks provide text authoring entry points [Implemented]. The ArchDocs naming/reference conventions, complete schemas/examples, typed validation, and the preservation guarantees below are [Planned]. Existing entry points do not establish that every planned write path or editor capability is already implemented. Frontmatter children/metadata and their writeback still need the host changes in the readiness matrix.

@@ -18,10 +18,24 @@ Authored enrichment and relationships use the [existing metadata envelope](../sh
 |---|---|---|
 | `sourceRoot` | `string` | Required local source directory. Relative file locations resolve from the defining configuration file; no process-working-directory default. |
 | `scanOptions` | Scan-option record | Proposed inclusion, exclusion, traversal, and link policies; exact fields/defaults remain open. |
-| `analyzerOptions` | Analyzer run-option entries | Repository-specific options supported by selected [Analyzers](analyzer.md), associated with their stable identities. Does not configure or own the shared subjects; exact entry shape and allowed overrides remain open. |
-| `analyzerSources` | [PathQuery](../shared/path-queries.md) collection selecting [Analyzer](analyzer.md) | Explicit selection of existing shared analyzer subjects. Proposed default: omitted or empty selects none. Registration alone never selects an analyzer. |
+| `analyzers` | Analyzer-configuration list | Each entry contains `path` to an existing shared [Analyzer](analyzer.md) and optional `config` for this repository's invocation. Omitted or empty selects none. Registration alone never selects an analyzer. |
 
-No analyzer execution, source mount, or traversal policy is implied by an omitted proposed option. Scan defaults and analyzer-specific option precedence must be documented before implementation. Options for an unselected or unavailable analyzer produce a diagnostic and do not select or instantiate it. A source root without a local file origin needs an explicit absolute location unless a future backend supplies another unambiguous source identity. Analyzer selectors require actual compatible subjects; the shared [Identifier](../shared/identifiers.md) convention does not make a plain name, generic subject link, or unresolved path executable.
+An analyzer entry is a configuration record, not a new Analyzer instance. Its `path` identifies one shared subject; its optional `config` is an object validated against that analyzer's supported per-run schema. Omitted `config` uses documented run defaults. Shared Analyzer settings remain on the singleton. This keeps selection and repository-specific configuration together without a second options list keyed elsewhere. Exact CLR record and option schemas remain proposed.
+
+```json
+{
+  "$type": "Namotion.ArchDocs.SourceRepository",
+  "sourceRoot": "../",
+  "analyzers": [
+    {
+      "path": "/analyzers/CSharpProjects",
+      "config": {}
+    }
+  ]
+}
+```
+
+The route above is illustrative and requires a published singleton. An entry currently targets one exact compatible Analyzer; wildcard selection with per-target configuration is deferred. Duplicate entries resolving to the same analyzer must not silently choose conflicting configurations. No analyzer execution, source mount, or traversal policy is implied by an omitted option. Scan defaults and analyzer-specific option precedence must be documented before implementation. A source root without a local file origin needs an explicit absolute location unless a future backend supplies another unambiguous source identity. The shared [Identifier](../shared/identifiers.md) convention does not make a plain name, generic subject link, or unresolved path executable.
 
 ## State properties [Proposed schema]
 
@@ -31,7 +45,7 @@ No analyzer execution, source mount, or traversal policy is implied by an omitte
 | `diagnostics` | Diagnostic collection | Readable source-located configuration and analyzer findings, kept separate from last successful results. |
 | `lastSuccessfulAnalysis` | Optional UTC timestamp | Time of the last complete successful publication; absent before any successful pass. |
 | `provenance` | Provenance records | Stable selected-analyzer identities, implementation/configuration information needed to interpret the published facts, and supporting source locations. Exact record shape remains proposed. |
-| `analyzers` | Reference collection of [Analyzer](analyzer.md) | Resolved, deduplicated selections referencing shared singleton subjects without cloning or ownership transfer. |
+| `resolvedAnalyzers` | Reference collection of [Analyzer](analyzer.md) | Read-only resolved references from the configured entries, without cloning or ownership transfer. Effective per-run configuration remains associated with its entry. |
 | `solutions` | Keyed owned collection of [CodeSolution](code-solution.md) | Solution-file discovery results with stable repository-relative identity; grouping only. |
 | `projects` | Keyed owned collection of [CodeProject](code-project.md) | Discovered code/build projects, shared by all referring solutions. |
 | `hosts` | Keyed owned collection of [Host](host.md) | Supported runnable process definitions; discovery does not select Service/release membership. |
@@ -67,7 +81,7 @@ Analyzer-produced facts remain distinct from authored settings. Facts have enoug
 
 ### Shared analyzer selection and ownership
 
-`analyzerSources` follows shared [path queries](../shared/path-queries.md), while `analyzers` exposes the resolved references. Several repositories can select the same Analyzer singleton. Selectors do not instantiate analyzers, give repositories a canonical ownership edge to them, or execute analysis merely because the subject exists. An unresolved explicit selector or incompatible result is a source-located configuration diagnostic. Preserve the authored selector and the entire last successful graph when required selected inputs cannot be evaluated.
+`analyzers` contains the authored path/config records, while `resolvedAnalyzers` exposes the resolved subject references. Several repositories can select the same Analyzer singleton with different supported run configurations. Entries do not instantiate analyzers, give repositories a canonical ownership edge to them, or execute analysis merely because the subject exists. An unresolved path, incompatible target, invalid run configuration, or conflicting duplicate is a source-located diagnostic. Preserve the authored entries and the entire last successful graph when required inputs cannot be evaluated.
 
 The repository owns its source boundary, run options, analysis status, diagnostics, last successful graph, generated children, reconciliation worker, and invocation cancellation. Shared analyzer configuration and capabilities belong to the Analyzer subject. A repository's supported per-run options must not mutate that subject or another repository's inputs. The [Analyzer contract](analyzer.md#concurrent-calls-and-configuration-planned) defines safe concurrent calls; no repository result is stored as mutable singleton state.
 

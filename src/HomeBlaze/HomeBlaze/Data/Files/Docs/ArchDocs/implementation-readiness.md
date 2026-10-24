@@ -22,29 +22,32 @@ Delivery readiness is a separate axis: **Extension** can use existing host contr
 
 ## Capability matrix
 
-| Capability | Status | Delivery and dependency |
-|---|---|---|
-| Subject JSON configuration and registration | [Implemented] | Existing platform |
-| Registered subject page, edit, and widget components | [Implemented] | Existing platform; IPage is navigation metadata |
-| Explicit configurable body blocks and named block references | [Implemented] | Existing Markdown authoring; new types still need registration/components |
-| JSON-sidecar metadata and descendant enrichment | [Implemented] | Existing metadata store and writer |
-| Inline paths for named Markdown children and registered path writing | [Implemented] | Reuse child names such as `service`; frontmatter loading/persistence remains separate planned work |
-| Plain links and manual CanvasLayout nodes | [Implemented] | Normal navigation/placement; no semantic connector lines |
-| All ArchDocs subject types and contract specializations | [Planned] | Extension; capability model, references, and registration |
-| Identifiers with plain-text, generic-link, and typed presentation | [Planned] | Shared authoring/resolution/presentation behavior; existing path resolution and pickers are primitives; exact syntax remains deferred |
-| Repository/solution/project discovery and contract-file association/parsing | [Planned] | Extension; selected read-only source and analyzer contracts; file recognition/association does not require full parsing |
-| Shared singleton Analyzer subjects selectable by repositories | [Planned] | Extension with singleton registration and graph-publication wiring; DI singleton registration alone does not publish a selectable subject |
-| Generic wildcard selection and typed relationship readers | [Planned] | Extension/shared services; existing resolver alone is insufficient |
-| Reconciled repository children and Environment Deployments | [Planned] | Extension; lifecycle, identity, worker, and metadata prerequisites |
-| Subject-specific widgets, detail pages, and editors | [Planned] | Extension; specified with each subject, with domain/parser prerequisites as applicable |
-| General tables, matrix, and diagrams | [Planned] | Extension; specified in widgets/, with domain/query/renderer prerequisites |
-| Generic $name frontmatter subject children | [Planned] | HomeBlaze change: parsing, lifecycle, collision handling, and writeback |
-| Metadata envelope persistence in Markdown frontmatter | [Planned] | HomeBlaze change: storage apply/write and preservation of unrelated content |
-| Page-level actions/context/additional-view contributions | [Planned] | HomeBlaze change: page shell and ordered inherited multi-contributor discovery |
-| Rich overlays for ordinary Markdown links | [Planned] | HomeBlaze change: renderer integration, access/navigation, and preview lifecycle |
-| Manual canvas semantic connector editing | [Planned] | HomeBlaze canvas extension plus relationship editing; not required by a separate generated diagram widget |
-| Shared reconciliation/selection utilities | [Planned] | Optional shared extraction; no Namotion.Interceptor.Utils project exists yet |
-| Readable file schemas, complete authoring examples, diagnostics, and focused writeback | [Planned] | Cross-cutting requirement; applies to extensions and to host storage/writer changes where needed; exact tooling remains open |
+Area names identify implementation responsibility. ArchDocs covers the domain extension, analyzers, widgets, and provider adapters; HomeBlaze covers generic authoring/storage/UI integration; Namotion.Interceptor covers reusable subject helpers where their dependencies fit. Multiple areas indicate shared work. These are ownership areas, not fixed project/package names, and optional helper extraction does not require moving domain behavior into core.
+
+| Capability | Area | Status | Delivery and dependency |
+|---|---|---|---|
+| Subject JSON configuration and registration | HomeBlaze | [Implemented] | Existing platform |
+| Registered subject page, edit, and widget components | HomeBlaze | [Implemented] | Existing platform; IPage is navigation metadata |
+| Explicit configurable body blocks and named block references | HomeBlaze | [Implemented] | Existing Markdown authoring; new types still need registration/components |
+| JSON-sidecar metadata and descendant enrichment | HomeBlaze | [Implemented] | Existing metadata store and writer |
+| Inline paths for named Markdown children and registered path writing | HomeBlaze | [Implemented] | Reuse child names such as `service`; frontmatter loading/persistence remains separate planned work |
+| Plain links and manual CanvasLayout nodes | HomeBlaze | [Implemented] | Normal navigation/placement; no semantic connector lines |
+| All ArchDocs subject types and contract specializations | ArchDocs | [Planned] | Extension; capability model, references, and registration |
+| Identifiers with plain-text, generic-link, and typed presentation | ArchDocs / HomeBlaze | [Planned] | Shared authoring/resolution/presentation behavior; existing path resolution and pickers are primitives; exact syntax remains deferred |
+| Repository/solution/project discovery and contract-file association/parsing | ArchDocs | [Planned] | Extension; selected read-only source and analyzer contracts; file recognition/association does not require full parsing |
+| Shared singleton Analyzer subjects selectable by repositories | ArchDocs | [Planned] | Extension with singleton registration and graph-publication wiring; DI singleton registration alone does not publish a selectable subject |
+| Generic wildcard selection and typed relationship readers | ArchDocs; optional shared helpers in Namotion.Interceptor | [Planned] | Extension/shared services; existing resolver alone is insufficient |
+| Reconciled repository children and Environment Deployments | ArchDocs | [Planned] | Extension; lifecycle, identity, worker, and metadata prerequisites |
+| Subject-specific widgets, detail pages, and editors | ArchDocs | [Planned] | Extension; specified with each subject, with domain/parser prerequisites as applicable |
+| General tables, matrix, and diagrams | ArchDocs | [Planned] | Extension; specified in widgets/, with domain/query/renderer prerequisites |
+| Generic $name frontmatter subject children | HomeBlaze | [Planned] | HomeBlaze change: parsing, lifecycle, collision handling, and writeback |
+| Metadata envelope persistence in Markdown frontmatter | HomeBlaze | [Planned] | HomeBlaze change: storage apply/write and preservation of unrelated content |
+| Page-level actions/context/additional-view contributions | HomeBlaze | [Planned] | HomeBlaze change: page shell and ordered inherited multi-contributor discovery |
+| Rich overlays for ordinary Markdown links | HomeBlaze | [Planned] | HomeBlaze change: renderer integration, access/navigation, and preview lifecycle |
+| Manual canvas semantic connector editing | HomeBlaze / ArchDocs | [Planned] | HomeBlaze canvas extension plus relationship editing; not required by a separate generated diagram widget |
+| Shared reconciliation/selection utilities | Namotion.Interceptor | [Planned] | Optional shared extraction; no Namotion.Interceptor.Utils project exists yet |
+| Readable file schemas, complete authoring examples, diagnostics, and focused writeback | ArchDocs / HomeBlaze | [Planned] | Cross-cutting requirement; applies to extensions and to host storage/writer changes where needed; exact tooling remains open |
+| Pipeline/release/deployment provider integration | ArchDocs | [Proposed] | Optional connector and explicit mappings; see [release and deployment integration](integration/delivery-pipelines.md); observation versus control and MVP inclusion remain open |
 
 ## A delivery boundary that is possible now [Proposed]
 

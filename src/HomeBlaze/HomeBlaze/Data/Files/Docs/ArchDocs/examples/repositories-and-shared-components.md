@@ -32,8 +32,8 @@ repositories/Orders.json:
 {
   "$type": "Namotion.ArchDocs.SourceRepository",
   "sourceRoot": "../../orders-source",
-  "analyzerSources": [
-    { "path": "/analyzers/CSharpProjects" }
+  "analyzers": [
+    { "path": "/analyzers/CSharpProjects", "config": {} }
   ]
 }
 ```
@@ -44,8 +44,8 @@ repositories/Shared.json:
 {
   "$type": "Namotion.ArchDocs.SourceRepository",
   "sourceRoot": "../../shared-source",
-  "analyzerSources": [
-    { "path": "/analyzers/CSharpProjects" }
+  "analyzers": [
+    { "path": "/analyzers/CSharpProjects", "config": {} }
   ]
 }
 ```

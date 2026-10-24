@@ -30,6 +30,7 @@ Describe and explore software through ordinary Markdown documentation, authored 
 - [General widgets](widgets/overview.md): reusable aggregating views such as tables, deployment matrices, and architecture diagrams. Subject-specific presentation stays in each subject file.
 - [Identifiers](shared/identifiers.md), [path queries](shared/path-queries.md), [metadata and relationships](shared/metadata-and-relationships.md), and [reconciliation](shared/reconciliation.md): shared behavior.
 - [Markdown authoring](integration/markdown-authoring.md) and [page contributions](integration/page-contributions.md): optional host extensions.
+- [Release and deployment integration](integration/delivery-pipelines.md): proposed connections to GitHub Actions and other pipeline providers, with explicit architecture mappings.
 
 ## Status and scope
 

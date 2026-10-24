@@ -21,7 +21,7 @@ Names in the tables are proposed serialized camelCase names; concrete CLR signat
 | `name` | Optional `string` | Readable analyzer label. Does not supply persistent identity or select the analyzer for a repository. |
 | `options` | Shared analyzer-option record | Implementation-supported settings shared by every caller. Exact fields and any supported repository-level overrides remain open; repository source roots and mutable per-run state are excluded. |
 
-An implementation may require no editable shared options. Do not add a second configuration copy on each repository. Descriptive metadata uses the [existing metadata envelope](../shared/metadata-and-relationships.md). No repository selector is required on the Analyzer; repositories select it through their own `analyzerSources`.
+An implementation may require no editable shared options. Do not add a second configuration copy on each repository. Descriptive metadata uses the [existing metadata envelope](../shared/metadata-and-relationships.md). No repository selector is required on the Analyzer; repositories select it through their own `analyzers`.
 
 ## State properties [Proposed schema]
 

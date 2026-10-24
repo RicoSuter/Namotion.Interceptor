@@ -10,7 +10,7 @@ This feature reference is the durable specification. It contains the domain cont
 
 ## Goals
 
-- Keep authored Markdown, JSON, metadata, type identifiers, links, selections, and contract references understandable and easy to edit directly by humans and AI agents. The [file-authoring requirement](file-authoring.md) applies to every subject and view.
+- Keep authored Markdown, JSON, metadata, type identifiers, links, selections, and contract references understandable and easy to edit directly by humans and AI agents. The [file-authoring requirement](file-authoring.md) applies to every subject and view. Consulting this reference for syntax and supported capabilities is expected.
 
 - Support several source repositories without assuming one service per repository.
 - Discover as much factual information as the supported analyzers can establish, with authored enrichment in JSON and the UI.
@@ -42,7 +42,7 @@ Proposed default: allow manual descriptions of hosts whose source is unavailable
 
 ### Shared analyzer subjects
 
-The user selected analyzers as shared singleton subjects that SourceRepositories can select. This replaces a model where analyzers are only invisible DI services or independent instances created for every repository. Proposed configuration `analyzerSources` selects published Analyzer subjects, and read-only `analyzers` contains the resolved shared references. Normal registration remains applicable; no additional executable plugin loader is required.
+The user selected analyzers as shared singleton subjects that SourceRepositories can select. Proposed configuration `analyzers` is a list of records containing `path` to a shared Analyzer and optional per-repository `config`, keeping the reference and its supported run configuration together. Read-only `resolvedAnalyzers` contains the resolved shared references. This replaces the earlier split selection/options shape and a model where analyzers are only invisible DI services or independent instances created for every repository. Normal registration remains applicable; no additional executable plugin loader is required.
 
 Repository-specific source scope, run inputs/options, results, diagnostics, generated identities, cancellation, and reconciliation remain with the repository. Shared analyzer configuration/capabilities belong to the Analyzer subject. Repositories do not take ownership of or dispose the selected singleton. Existing hosted-subject registration can share one DI instance, but its publication into the subject graph and the exact application/root lifetime still require wiring. See [Analyzer](subjects/analyzer.md) and the [analyzer contract](analyzers/overview.md) for the canonical semantics and remaining scope decisions.
 
@@ -99,6 +99,7 @@ The following questions are tracked in the relevant element specification; this 
 - View configuration: separate ServiceDiagram, ComponentDiagram, ContextDiagram, and DeploymentDiagram entry points over shared rendering are proposed. Settle specialized configuration, grouping shared components, manual/automatic layout interaction, and semantic connector editing.
 - Runtime scenarios: plain authored Markdown suffices for the current example; a structured scenario/sequence model is not selected.
 - Initial implementation: which candidate behaviors, exclusions, and UI surfaces form the MVP after sample review, including any long-running verification that must be agreed during planning.
+- Delivery integration: [pipeline/release/deployment connections](integration/delivery-pipelines.md) are a proposed generic extension, with GitHub Actions as an adapter example. Choose linking, observation, and optional control separately, and refine subject/record shapes and explicit mappings before implementation. Earlier candidate exclusions do not rule out this broader direction.
 
 ## Related references
 

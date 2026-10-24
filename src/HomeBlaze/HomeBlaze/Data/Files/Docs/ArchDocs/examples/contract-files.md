@@ -12,7 +12,7 @@ Keep the raw API document separate from an optional authored Contract definition
 
 Mount `repository/docs` as the documentation graph root. `Repository.json` defines a [SourceRepository](../subjects/source-repository.md) with `sourceRoot: ../`. Its illustrative project route is `/Repository/projects/Orders.Api`; exact generated aliases remain proposed.
 
-As in the [JSON catalog](json-catalog.md), the repository explicitly selects shared Analyzer subjects through `analyzerSources`. For this scenario, select the project analyzer and contract-file discovery capability. Structured OpenAPI/protobuf parsing is an additional optional selection. These are shared singleton capabilities; the repository still owns its discovered Contracts and project associations.
+As in the [JSON catalog](json-catalog.md), the repository explicitly selects shared Analyzer subjects through `analyzers`. For this scenario, select the project analyzer and contract-file discovery capability. Structured OpenAPI/protobuf parsing is an additional optional selection. These are shared singleton capabilities; the repository still owns its discovered Contracts and project associations.
 
 ```text
 repository/

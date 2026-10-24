@@ -1,6 +1,7 @@
 {
   "order": [
     "markdown-authoring.md",
-    "page-contributions.md"
+    "page-contributions.md",
+    "delivery-pipelines.md"
   ]
 }

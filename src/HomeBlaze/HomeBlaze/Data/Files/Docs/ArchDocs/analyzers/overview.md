@@ -20,7 +20,7 @@ An analyzer subject declares capabilities and applicability and exposes its shar
 
 Use normal typed subject and DI/module registration. No separate executable plugin loader is required. The [Analyzer subject specification](../subjects/analyzer.md) defines the proposed app/root scope, shared settings, concurrency, identity, and subject-specific UI. Being registered or present in the graph does not automatically select an analyzer or start source analysis.
 
-SourceRepository configuration contains `analyzerSources` using shared [PathQuery](../shared/path-queries.md) entries; its read-only `analyzers` state contains resolved compatible subject references. Omitted or empty selectors select none. Repository-specific run options stay with the repository and do not mutate the shared subject. Exact option schemas remain proposed, and the shared scalar [Identifier](../shared/identifiers.md) syntax decision remains open. A name or generic subject link alone cannot supply an executable analyzer capability.
+SourceRepository configuration contains an `analyzers` list of records with a `path` to one shared Analyzer and optional repository-specific `config`. Its read-only `resolvedAnalyzers` state contains compatible subject references. Omitted or empty configuration selects none. Run options stay beside the reference in the same entry and do not mutate the shared subject. See the [repository configuration example](../subjects/source-repository.md#configuration-properties-proposed-schema). Exact option schemas remain proposed, and the shared scalar [Identifier](../shared/identifiers.md) syntax decision remains open. A name or generic subject link alone cannot supply an executable analyzer capability.
 
 For repository discovery, the repository owns its source access boundary, analysis status, diagnostics, results, generated subjects, reconciliation worker, and cancellation. Reconciliation publishes compatible results through that owner. Other consumers retain their own result owners; standalone contract parsing does not move authored Contract state under a repository. The shared analyzer holds no mutable last-repository result or repository-owned worker. One repository canceling or detaching must not cancel another repository's call.
 
@@ -42,7 +42,7 @@ sequenceDiagram
     end
 ```
 
-Each repository resolves its proposed `analyzerSources` into `analyzers` before invoking a compatible subject. Calls to the singleton may overlap, while each repository keeps its own worker, cancellation, and publication. DI registration, graph publication, selection, and execution are separate steps; registration alone performs none of the latter three.
+Each repository resolves its proposed `analyzers` into `resolvedAnalyzers` before invoking a compatible subject. Calls to the singleton may overlap, while each repository keeps its own worker, cancellation, and publication. DI registration, graph publication, selection, and execution are separate steps; registration alone performs none of the latter three.
 
 ## Categories [Planned]
 

@@ -35,8 +35,8 @@ Repository.json:
 {
   "$type": "Namotion.ArchDocs.SourceRepository",
   "sourceRoot": "../",
-  "analyzerSources": [
-    { "path": "/analyzers/CSharpProjects" }
+  "analyzers": [
+    { "path": "/analyzers/CSharpProjects", "config": {} }
   ]
 }
 ```
