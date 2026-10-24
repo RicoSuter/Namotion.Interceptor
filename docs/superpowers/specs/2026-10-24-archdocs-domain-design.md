@@ -5,13 +5,37 @@ navTitle: ArchDocs Domain Specification
 
 # ArchDocs Working Domain Specification
 
-Status: working specification under active discussion. This is the canonical reference for entities, their data, relationships, ownership, authoring, and presentation contracts. The [working sample](../../ArchDocs/README.md) supplies concrete Markdown and JSON files for refining those contracts. It is not a finalized schema or implementation plan. The latest user direction is to refine the sample first, then select the MVP and plan implementation. Earlier first-iteration boundaries remain candidates until that review. Choices labeled "Proposed default" are recommendations, not decisions made by the user; unresolved choices are listed at the end.
+Status: working specification under active discussion. This is the canonical reference for entities, their data, relationships, ownership, authoring, and presentation contracts. The [working sample](../../../src/HomeBlaze/HomeBlaze/Data/Files/ArchDocs/README.md) supplies concrete Markdown and JSON files for refining those contracts. It is not a finalized schema or implementation plan. The latest user direction is to refine the sample first, then select the MVP and plan implementation. Earlier first-iteration boundaries remain candidates until that review. Choices labeled "Proposed default" are recommendations, not decisions made by the user; unresolved choices are listed at the end.
+
+Implementation plans, once the design and MVP are approved, belong in `docs/superpowers/plans/`. No implementation plan has been written yet.
 
 ## Intent
 
 Make a documentation folder describe and explore the software around it. A repository's `/docs` folder contains ordinary Markdown, Markdown with embedded subject definitions, and authored subject JSON files. Source analysis discovers the code structure; authored subjects describe the logical architecture and deployment arrangement. The same graph is available to the subject browser, Markdown widgets, and queries.
 
 This specification and working sample continue [PR #257, HomeBlaze: ArchDocs](https://github.com/RicoSuter/Namotion.Interceptor/pull/257), replacing its original 200-line design with the current domain discussion. They refine entity boundaries and add repository analysis and path queries. The PR contains documentation, proposed configuration, and source fixtures; it does not implement ArchDocs product behavior.
+
+### Reference use cases: AppHost documentation and Apimundo
+
+The user identified AppHost as the first real documentation target and the [Apimundo project site](https://apimundo.com/organizations/namotion/projects/apimundo?service=1&tab=overview&repository=Apimundo) as the domain and exploration experience to rebuild. These guide the broader design; they do not imply that all observed features belong in the MVP or that implementation has been authorized.
+
+AppHost already has ordinary Markdown documentation: one arc42 architecture overview, crosscutting concept documents, ADRs, product decision records, guidelines, and an Orders sample domain document. Its architecture describes one coordinated application/release containing Web and Worker processes, shared libraries, a migrations executable, and resources. Orders is a module inside that application, not an independently deployed Service. Keep those existing document roles and enrich them with subject definitions, metadata, and optional views. The two-service Commerce fixture remains useful for a different topology.
+
+The inspected Aspire composition defines PostgreSQL with an appdb database, RabbitMQ, migrations, Web, and Worker. Its local orchestration project is itself executable; migrations run to completion before Web and Worker start. A runnable project is therefore not sufficient evidence of an always-running production Host or deployment membership. The domain must accommodate one-off executable roles and authored selection of deployed processes. Whether orchestration and release steps need distinct types or role metadata remains open. The documentation also distinguishes current local resources from proposed Azure topology and future features; these statuses must remain explicit rather than present proposed infrastructure as discovered deployed state.
+
+The Apimundo service and project views were inspected on 2026-10-24. The following capabilities inform the domain without fixing their replacement schemas:
+
+| Observed capability | Current model fit or gap |
+|---|---|
+| Project/service overview and Markdown descriptions | Scoped documentation and Service summaries; organization/project boundaries need not become mandatory graph roots |
+| Repository code-project dependency graph | SourceRepository and CodeProject discovery, shared references, and graph presentation |
+| Component/artifact inventory | Service, Host, and Resource cover part of this; people/actors and their relationships remain open |
+| Service-by-environment matrix, deployment detail, version and status | Environment, DeploymentUnit, and Deployment; observed health and monitoring integrations remain separate future choices |
+| Logical API, environment-specific endpoint, and versioned specification | Currently an explicit gap; distinguish interface definitions, deployed addresses, and contract documents before choosing entity names or ownership |
+| API operations, schemas, specification view, and version selection | Contract parsing and exploration extend beyond the simple project-file analyzer; MVP inclusion is undecided |
+| SDK package references and feeds | Package/artifact identities, versions, and their links to services/projects remain to be designed |
+
+The goal is to make these connected views available through ordinary documentation and the shared subject graph. Rebuilding the reference domain does not require copying its fixed navigation, its global Internal/External taxonomy, or its exact entity hierarchy. The agreed diagram-relative boundary model remains in force.
 
 ## Goals
 
@@ -53,7 +77,7 @@ A configurable SubjectProjection was considered. The chosen approach puts genera
 
 ### Selector syntax
 
-Structured selectors, named selections, and compact query syntax were discussed. The latest direction uses subject paths with `*` and `**` plus optional property filters, without a separate named-selection concept. Proposed default: configuration collections contain entries with `path` and optional `where`, reusing the existing expression parser for conditions. Keep source definitions distinct from resolved subject collections, illustratively `componentSources` versus `components`, `hostSources` versus `hosts`, and `deploymentUnitSources` versus `deploymentUnits`. These names remain proposed API choices. The [self-contained working sample](../../ArchDocs/README.md) is the current place to refine the file structure and schema before finalizing this design or its MVP.
+Structured selectors, named selections, and compact query syntax were discussed. The latest direction uses subject paths with `*` and `**` plus optional property filters, without a separate named-selection concept. Proposed default: configuration collections contain entries with `path` and optional `where`, reusing the existing expression parser for conditions. Keep source definitions distinct from resolved subject collections, illustratively `componentSources` versus `components`, `hostSources` versus `hosts`, and `deploymentUnitSources` versus `deploymentUnits`. These names remain proposed API choices. The [self-contained working sample](../../../src/HomeBlaze/HomeBlaze/Data/Files/ArchDocs/README.md) is the current place to refine the file structure and schema before finalizing this design or its MVP.
 
 ### Markdown defines domain subjects
 
@@ -379,6 +403,8 @@ The following decisions remain open:
 - Deployment participation: the current DeploymentUnit schema selects Hosts. Decide how Resources participate in units and environment deployments, including the distinction between using an existing managed resource and deploying or provisioning one.
 - Resource realization: environment-specific resource instances, infrastructure targets, and their mappings to logical resources and deployments.
 - Interfaces and endpoints: represent the APIs/protocols exposed by services and hosts, including database protocols, without assuming every API is HTTP.
+- Reference-domain coverage: decide the logical interface, environment endpoint, contract-document/version, package/artifact, and actor concepts demonstrated by Apimundo; determine their ownership, relationships, and MVP scope separately.
+- Executable roles: represent migrations/release steps and local orchestration in the AppHost use case without treating every runnable project as an always-running deployed process.
 - Presentation contracts: useful subject detail pages, navigation participation, shared page/widget/preview components, and exact UI slot registration.
 - Final schemas and identity: CLR/serialized names, path casing and aliases, generated keys, persistent identity and rename behavior, and raw-source path matching where graph paths are insufficient.
 - View configuration: generic diagram presets and customization, boundary selection, grouping shared components, manual/automatic layout interaction, and semantic connector editing.
