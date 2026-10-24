@@ -50,7 +50,7 @@ Retain raw source access and generic presentation when structured parsing is una
 
 ## Usage examples
 
-[Contract files and discovery](../examples/contract-files.md)
+[Contract files and discovery](../scenarios/contract-files.md)
 
 ## Related specifications
 

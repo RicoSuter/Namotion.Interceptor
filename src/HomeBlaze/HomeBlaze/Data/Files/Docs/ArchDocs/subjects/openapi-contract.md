@@ -50,7 +50,7 @@ Operation/schema navigation belongs to this subject. Supported revisions, parsin
 
 ## Usage examples
 
-[Contract files and discovery](../examples/contract-files.md)
+[Contract files and discovery](../scenarios/contract-files.md)
 
 ## Related specifications
 

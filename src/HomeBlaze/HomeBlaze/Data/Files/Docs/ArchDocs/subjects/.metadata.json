@@ -1,4 +1,5 @@
 {
+  "title": "Subjects",
   "order": [
     "service.md",
     "host.md",

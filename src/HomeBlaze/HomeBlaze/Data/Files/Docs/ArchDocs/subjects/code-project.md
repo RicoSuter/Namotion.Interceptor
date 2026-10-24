@@ -59,7 +59,7 @@ Project references establish code dependencies and do not assert runtime calls. 
 
 ## Usage examples
 
-[Library contracts](../examples/library-contracts.md)
+[Library contracts](../scenarios/library-contracts.md)
 
 ## Related specifications
 

@@ -46,4 +46,4 @@ Canonical source identity, conflicting explicit definitions, overlapping reposit
 
 Cover same-directory unique, absent, and ambiguous projects; an explicit cross-directory association; descriptor-relative file paths; raw `.json`, `.yaml`, `.yml`, and `.proto` sources; invalid explicit references; suppression of same-source automatic duplicates; and visible conflicts. Raw source remains accessible when association or parsing is unavailable.
 
-[Contract examples](../examples/contract-files.md) · [Analyzer model](overview.md) · [OpenAPI analyzer](openapi-analyzer.md) · [Protobuf analyzer](protobuf-analyzer.md)
+[Contract scenarios](../scenarios/contract-files.md) · [Analyzer model](overview.md) · [OpenAPI analyzer](openapi-analyzer.md) · [Protobuf analyzer](protobuf-analyzer.md)

@@ -78,4 +78,4 @@ Define the important terms used by this documentation.
 
 Another context view can put both Orders and Payments inside its boundary without changing either Service. Diagrams aggregate only the supplied graph facts. Complete deployment topology requires concrete bindings; runtime sequences need authored scenarios. Keep these facts and explanations visible rather than inventing a complete architecture from incomplete inputs.
 
-[Architecture diagrams](../widgets/architecture-diagram.md) · [Widget reference](../widgets/overview.md) · [Examples](overview.md)
+[Architecture diagrams](../widgets/architecture-diagram.md) · [Widget reference](../widgets/overview.md) · [Scenarios](overview.md)

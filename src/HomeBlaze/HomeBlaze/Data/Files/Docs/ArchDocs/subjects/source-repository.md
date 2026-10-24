@@ -101,7 +101,7 @@ For the proposed local-source slice, defining SourceRepository in a JSON file or
 
 ## Usage examples
 
-[JSON catalog](../examples/json-catalog.md) · [Multiple repositories](../examples/repositories-and-shared-components.md)
+[JSON catalog](../scenarios/json-catalog.md) · [Multiple repositories](../scenarios/repositories-and-shared-components.md)
 
 ## Related specifications
 

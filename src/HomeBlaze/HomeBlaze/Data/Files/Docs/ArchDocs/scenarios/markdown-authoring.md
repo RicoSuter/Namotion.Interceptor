@@ -84,4 +84,4 @@ This metadata does not create a second Orders Service. Frontmatter metadata pers
 
 Extracting a frontmatter definition into catalog/Orders.json uses the same Service schema. Move its enrichment to the JSON sidecar and update consumers from /services/Orders.md/service to /catalog/Orders. No automatic path-preserving relocation is promised. The original page can then reference the standalone Service through metadata.
 
-[Authoring contract](../integration/markdown-authoring.md) · [Readiness](../implementation-readiness.md) · [Examples](overview.md)
+[Authoring contract](../integration/markdown-authoring.md) · [Readiness](../implementation-readiness.md) · [Scenarios](overview.md)

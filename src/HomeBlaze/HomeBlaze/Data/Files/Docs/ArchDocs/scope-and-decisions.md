@@ -103,4 +103,4 @@ The following questions are tracked in the relevant element specification; this 
 
 ## Related references
 
-[Overview](overview.md) · [Readiness matrix](implementation-readiness.md) · [Usage examples](examples/overview.md) · [Verification scenarios](verification-scenarios.md)
+[Overview](overview.md) · [Readiness matrix](implementation-readiness.md) · [Scenarios](scenarios/overview.md) · [Verification scenarios](verification-scenarios.md)

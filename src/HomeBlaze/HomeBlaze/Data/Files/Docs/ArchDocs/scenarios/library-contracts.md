@@ -63,4 +63,4 @@ Explain the library's purpose, supported use, and compatibility policy here.
 
 Before a specialized viewer exists, the common Contract presentation can show available source/version/provenance information. Comparison and compatibility assessment are separate features. The same authoring pattern can reference OpenApiContract or ProtobufContract where appropriate without changing the generic CodeProject-to-Contract relationship.
 
-[CodeProject](../subjects/code-project.md) · [Contract](../subjects/contract.md) · [CSharpApiContract](../subjects/csharp-api-contract.md) · [Examples](overview.md)
+[CodeProject](../subjects/code-project.md) · [Contract](../subjects/contract.md) · [CSharpApiContract](../subjects/csharp-api-contract.md) · [Scenarios](overview.md)

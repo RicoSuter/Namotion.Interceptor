@@ -53,7 +53,7 @@ It does not generate deployments for every service or every deployment unit in t
 
 ## Usage examples
 
-[JSON catalog](../examples/json-catalog.md)
+[JSON catalog](../scenarios/json-catalog.md)
 
 ## Related specifications
 

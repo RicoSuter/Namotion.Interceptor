@@ -46,4 +46,4 @@ Reuse [common diagram and boundary behavior](architecture-diagram.md#context-bou
 
 **Prerequisites:** Service queries, typed relationships, shared summaries, and a renderer. Actor support is optional later work; no page-context extension is required for this explicit view.
 
-[General widgets](overview.md) · [ServiceDiagram](service-diagram.md) · [Examples](../examples/arc42.md)
+[General widgets](overview.md) · [ServiceDiagram](service-diagram.md) · [Scenarios](../scenarios/arc42.md)

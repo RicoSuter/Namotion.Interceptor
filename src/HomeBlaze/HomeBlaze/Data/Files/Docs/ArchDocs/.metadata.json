@@ -1,16 +1,17 @@
 {
+  "title": "ArchDocs Specifications",
   "order": [
     "overview.md",
     "subject-model.md",
-    "examples",
+    "scenarios",
     "file-authoring.md",
-    "implementation-readiness.md",
-    "scope-and-decisions.md",
-    "verification-scenarios.md",
     "subjects",
     "analyzers",
     "widgets",
     "shared",
-    "integration"
+    "integration",
+    "implementation-readiness.md",
+    "scope-and-decisions.md",
+    "verification-scenarios.md"
   ]
 }

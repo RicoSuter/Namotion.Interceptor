@@ -67,7 +67,7 @@ The sample uses Resource for the two database definitions. Their hosting and int
 
 ## Usage examples
 
-[JSON catalog](../examples/json-catalog.md) · [Markdown authoring variants](../examples/markdown-authoring.md)
+[JSON catalog](../scenarios/json-catalog.md) · [Markdown authoring variants](../scenarios/markdown-authoring.md)
 
 ## Related specifications
 

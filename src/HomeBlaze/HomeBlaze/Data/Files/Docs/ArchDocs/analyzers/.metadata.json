@@ -1,10 +1,11 @@
 {
+  "title": "Analyzers",
   "order": [
     "overview.md",
     "csharpanalyzer.md",
-    "csharp-api-analyzer.md",
     "contract-discovery.md",
     "openapi-analyzer.md",
-    "protobuf-analyzer.md"
+    "protobuf-analyzer.md",
+    "csharp-api-analyzer.md"
   ]
 }

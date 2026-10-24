@@ -65,7 +65,7 @@ Explicit embeds and standalone detail pages use existing registration and can pr
 
 ## Usage examples
 
-[Contract files and discovery](../examples/contract-files.md) · [Library contracts](../examples/library-contracts.md)
+[Contract files and discovery](../scenarios/contract-files.md) · [Library contracts](../scenarios/library-contracts.md)
 
 ## Related specifications
 

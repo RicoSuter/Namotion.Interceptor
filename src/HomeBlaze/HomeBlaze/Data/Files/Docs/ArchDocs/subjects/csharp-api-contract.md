@@ -56,7 +56,7 @@ Public API browsing does not require network Interfaces, Hosts, or Endpoints. A 
 
 ## Usage examples
 
-[Library contracts](../examples/library-contracts.md)
+[Library contracts](../scenarios/library-contracts.md)
 
 ## Related specifications
 

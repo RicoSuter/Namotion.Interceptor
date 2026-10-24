@@ -1,4 +1,5 @@
 {
+  "title": "Shared Behavior",
   "order": [
     "identifiers.md",
     "path-queries.md",

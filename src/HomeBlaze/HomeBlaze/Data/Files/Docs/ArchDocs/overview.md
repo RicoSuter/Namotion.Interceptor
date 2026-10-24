@@ -21,7 +21,7 @@ Describe and explore software through ordinary Markdown documentation, authored 
 ## Specification map
 
 - [Subject model](subject-model.md): conceptual UML of all subjects and capabilities, with focused ownership, reference, and inheritance views.
-- [Usage examples](examples/overview.md): standalone JSON, frontmatter and inline Markdown, arc42, topics/decisions, libraries, and multiple repositories.
+- [Scenarios](scenarios/overview.md): standalone JSON, frontmatter and inline Markdown, arc42, topics/decisions, libraries, and multiple repositories.
 - [Scope and design decisions](scope-and-decisions.md) and [verification scenarios](verification-scenarios.md): rationale, open decisions, and behavior to verify.
 - [File authoring and readability](file-authoring.md): understand and edit the complete authored model as text, independently of the UI.
 - [Implementation readiness](implementation-readiness.md): implemented platform support, planned extensions, and required HomeBlaze changes.
@@ -112,13 +112,13 @@ CodeSolution records source/build grouping and references existing repository-ow
 
 SourceRepositories select shared singleton Analyzer subjects. Selecting one references the existing instance; it does not create a repository-owned analyzer. Each repository owns its source boundary, analysis work, results, diagnostics, and generated subjects. Registering or publishing an Analyzer does not by itself execute analysis or select it for every repository.
 
-Contract specializations are OpenApiContract, ProtobufContract, and CSharpApiContract. Authored OpenAPI/protobuf descriptors select their raw document through `path`; `codeProjectPath` explicitly selects an associated graph subject. Without an explicit association, discovery considers only a unique CodeProject in the raw document's own directory. See [contract files and discovery](examples/contract-files.md). Keep shared contract references independent of a parser or transport. Exact CLR interfaces, fields, ownership where noted, and version identity remain open in their specifications.
+Contract specializations are OpenApiContract, ProtobufContract, and CSharpApiContract. Authored OpenAPI/protobuf descriptors select their raw document through `path`; `codeProjectPath` explicitly selects an associated graph subject. Without an explicit association, discovery considers only a unique CodeProject in the raw document's own directory. See [contract files and discovery](scenarios/contract-files.md). Keep shared contract references independent of a parser or transport. Exact CLR interfaces, fields, ownership where noted, and version identity remain open in their specifications.
 
 ## Reference ownership
 
 This feature reference is self-contained. Requirements, design decisions, examples, and verification scenarios belong here and must remain understandable without session notes or temporary planning artifacts. Keep one canonical page per concept and link to it from other pages. Document subject-specific widgets, detail pages, and editors in that subject's Markdown file. Put general and aggregating views in widgets/. Update status and readiness when implementation lands. Session notes and delivery plans may point here; the reference does not depend on them.
 
-The [usage examples](examples/overview.md) contain the JSON and Markdown needed to understand different documentation styles. The separate [Commerce development fixture](../../ArchDocs/README.md) is optional editable test material with buildable discovery inputs; it is not part of published seed packaging.
+The [scenarios](scenarios/overview.md) contain the JSON and Markdown needed to understand different documentation styles. The separate [Commerce development fixture](../../ArchDocs/README.md) is optional editable test material with buildable discovery inputs; it is not part of published seed packaging.
 
 ## Related specifications
 

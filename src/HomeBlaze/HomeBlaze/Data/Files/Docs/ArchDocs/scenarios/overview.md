@@ -1,12 +1,12 @@
 ---
-title: Usage Examples and Scenarios
-navTitle: Usage Examples and Scenarios
+title: Scenarios
+navTitle: Scenarios
 status: Planned
 ---
 
-# Usage Examples and Scenarios [Planned]
+# Scenarios [Planned]
 
-The examples here are part of the feature reference. They are ordinary Markdown with fenced JSON, YAML, C#, and Markdown source, so reading this documentation does not instantiate the proposed ArchDocs subjects or execute analyzers. Core types, exact field names, generated route aliases, and widgets remain [Planned] or [Proposed] as their element pages specify. These examples express the intended authoring experience, not a final supported schema.
+The scenarios here are part of the feature reference. They are ordinary Markdown with fenced JSON, YAML, C#, and Markdown source, so reading this documentation does not instantiate the proposed ArchDocs subjects or execute analyzers. Core types, exact field names, generated route aliases, and widgets remain [Planned] or [Proposed] as their element pages specify. These scenarios express the intended authoring experience, not a final supported schema.
 
 Every final example must satisfy [file authoring and readability](../file-authoring.md): it must make types, fields, source ownership, and reference resolution understandable to people and agents in a normal editor. Provisional type names, generated routes, and extraction schemas are explicit work still to settle; a UI cannot be required to fill in their meaning.
 
@@ -30,6 +30,6 @@ Each example states its documentation mount and graph paths. Source file locatio
 
 ## Existing reference cases
 
-[Reference cases](reference-cases.md) records how AppHost and Apimundo exercise the generic model. The separate [Commerce development fixture](../../../ArchDocs/README.md) contains editable files and buildable discovery inputs for a two-service arrangement. It is optional test material, not required reading for the feature contracts and not part of published seed packaging. The examples on these pages are included with the feature documentation.
+[Reference cases](reference-cases.md) records how AppHost and Apimundo exercise the generic model. The separate [Commerce development fixture](../../../ArchDocs/README.md) contains editable files and buildable discovery inputs for a two-service arrangement. It is optional test material, not required reading for the feature contracts and not part of published seed packaging. The scenarios on these pages are included with the feature documentation.
 
 [Feature overview](../overview.md) · [Readiness](../implementation-readiness.md) · [Verification scenarios](../verification-scenarios.md)

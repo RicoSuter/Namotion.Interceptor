@@ -1,13 +1,14 @@
 {
+  "title": "Scenarios",
   "order": [
     "overview.md",
     "json-catalog.md",
     "markdown-authoring.md",
+    "repositories-and-shared-components.md",
     "arc42.md",
     "topics-and-decisions.md",
-    "library-contracts.md",
     "contract-files.md",
-    "repositories-and-shared-components.md",
+    "library-contracts.md",
     "reference-cases.md"
   ]
 }

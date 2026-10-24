@@ -47,7 +47,7 @@ Each implemented authoring surface needs an accurate field/type reference and a 
 
 Present the subject's own master data first, followed by structural references and selections, within both configuration and state tables. Own data includes names, classifications, technology, versions, source facts, status, and diagnostics; the reference group includes related subjects, memberships, and graph selectors. Use the same order in authoring examples and property editors where applicable. Group by the field's meaning: a classification remains master data even if it later supports a link, while a subject reference remains a reference even if serialized as a string. Inherited fields follow the same grouping and link to their canonical base definition.
 
-Current examples deliberately mark provisional fields and incomplete extraction configurations. Before implementing the corresponding authoring surface, settle those fields and provide a full source-editable example. The [contract-file examples](examples/contract-files.md) distinguish raw source, descriptor `path`, and `codeProjectPath`; C# extraction/snapshot formats still need a complete example after that input contract is selected.
+Current examples deliberately mark provisional fields and incomplete extraction configurations. Before implementing the corresponding authoring surface, settle those fields and provide a full source-editable example. The [contract-file examples](scenarios/contract-files.md) distinguish raw source, descriptor `path`, and `codeProjectPath`; C# extraction/snapshot formats still need a complete example after that input contract is selected.
 
 Named Markdown children use their inline name directly in paths and scoped metadata: `$service` declares the child, `Path=service` references it, and `metadata.$subjects.service` enriches it. This reuses existing InlinePaths behavior; frontmatter persistence remains planned. See [scoped metadata paths](shared/metadata-and-relationships.md#scoped-metadata-paths-planned) for resolution, writeback, and compatibility limits. Ordinary generated collections retain meaningful collection segments.
 
@@ -66,4 +66,4 @@ The current fully qualified $type names, generated keys, and other reference con
 5. Diagnose malformed types, fields, selectors, and unresolved references from readable source-located diagnostics, while retaining the original source.
 6. Read the Markdown meaningfully without the widget renderer, and inspect contract/source information without relying on a specialized viewer.
 
-[Overview](overview.md) · [Usage examples](examples/overview.md) · [Readiness](implementation-readiness.md) · [Verification scenarios](verification-scenarios.md)
+[Overview](overview.md) · [Scenarios](scenarios/overview.md) · [Readiness](implementation-readiness.md) · [Verification scenarios](verification-scenarios.md)

@@ -79,4 +79,4 @@ Explain the operational and compatibility costs.
 
 Generic metadata storage for JSON subjects and body-block entry points exist. Frontmatter metadata, automatic page context, and rich overlays on normal links are separate planned host extensions. Master-detail can start inside a table widget without requiring document-level context slots.
 
-[Page contributions](../integration/page-contributions.md) · [ServiceTable](../widgets/service-table.md) · [Examples](overview.md)
+[Page contributions](../integration/page-contributions.md) · [ServiceTable](../widgets/service-table.md) · [Scenarios](overview.md)

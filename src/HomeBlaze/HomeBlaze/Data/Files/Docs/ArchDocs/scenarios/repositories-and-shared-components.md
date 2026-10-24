@@ -104,4 +104,4 @@ A deployment unit might select only /catalog/Orders/hosts. If it also manages a 
 
 The same logical queue can have different environment-specific bindings. Exact binding fields remain open; do not make copies of the logical Resource merely to show Staging and Production. Provider Hosts, Endpoint bindings, component membership, and relationships retain separate meanings.
 
-[Queries](../shared/path-queries.md) · [Resource](../subjects/resource.md) · [DeploymentUnit](../subjects/deployment-unit.md) · [Examples](overview.md)
+[Queries](../shared/path-queries.md) · [Resource](../subjects/resource.md) · [DeploymentUnit](../subjects/deployment-unit.md) · [Scenarios](overview.md)

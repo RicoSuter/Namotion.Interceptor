@@ -64,7 +64,7 @@ The sample resources are logical definitions independent of environments. Deploy
 
 ## Usage examples
 
-[Shared components](../examples/repositories-and-shared-components.md)
+[Shared components](../scenarios/repositories-and-shared-components.md)
 
 ## Related specifications
 

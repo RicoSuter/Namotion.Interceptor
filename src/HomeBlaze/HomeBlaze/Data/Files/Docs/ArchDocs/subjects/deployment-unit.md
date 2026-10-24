@@ -54,7 +54,7 @@ The common arrangement is one service associated with one deployment unit. Servi
 
 ## Usage examples
 
-[JSON catalog](../examples/json-catalog.md) · [Shared components](../examples/repositories-and-shared-components.md)
+[JSON catalog](../scenarios/json-catalog.md) · [Shared components](../scenarios/repositories-and-shared-components.md)
 
 ## Related specifications
 

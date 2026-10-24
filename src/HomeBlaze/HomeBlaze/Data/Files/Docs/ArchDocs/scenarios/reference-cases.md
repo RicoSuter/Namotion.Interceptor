@@ -28,4 +28,4 @@ The Apimundo service and project views were inspected on 2026-10-24. The followi
 
 The goal is to make these connected views available through ordinary documentation and the shared subject graph. Rebuilding the reference domain does not require copying its fixed navigation, its global Internal/External taxonomy, or its exact entity hierarchy. The agreed diagram-relative boundary model remains in force.
 
-[Usage examples](overview.md) · [Scope and decisions](../scope-and-decisions.md)
+[Scenarios](overview.md) · [Scope and decisions](../scope-and-decisions.md)

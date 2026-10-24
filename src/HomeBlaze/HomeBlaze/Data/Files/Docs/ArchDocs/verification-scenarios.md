@@ -55,4 +55,4 @@ The feature overview, element specifications, scope decisions, and usage example
 
 The [file-authoring acceptance checks](file-authoring.md#acceptance-checks-planned) apply in addition to these feature scenarios. Readability and source editing are product requirements, not only documentation-writing preferences.
 
-[Overview](overview.md) · [Scope decisions](scope-and-decisions.md) · [Examples](examples/overview.md)
+[Overview](overview.md) · [Scope decisions](scope-and-decisions.md) · [Scenarios](scenarios/overview.md)
