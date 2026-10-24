@@ -10,6 +10,8 @@ Read [docs/Architecture.md](docs/Architecture.md) for the overview, [docs/servic
 
 [docs/ServiceDiagram.md](docs/ServiceDiagram.md) references the two services as widgets on the existing CanvasLayout.
 
+[docs/architecture/Views.md](docs/architecture/Views.md) sketches generated views at service, component, and deployment levels using the same resources and typed relationships.
+
 ```text
 archdocs-commerce/
 ├── Root.json
@@ -20,6 +22,12 @@ archdocs-commerce/
 │   ├── Architecture.md
 │   ├── ServiceDiagram.md
 │   ├── Repository.json
+│   ├── architecture/
+│   │   └── Views.md
+│   ├── resources/
+│   │   ├── OrdersDatabase.json
+│   │   ├── PaymentsDatabase.json
+│   │   └── OrderEvents.json
 │   ├── services/
 │   │   ├── Orders.md
 │   │   └── Payments.md
@@ -68,7 +76,19 @@ Proposed interaction: selecting a row reveals that subject's details alongside t
 
 The service diagram composes existing CanvasLayout nodes with Widget references to the proposed Service subjects. Their service-summary widget supplies each box's presentation, reusing the same facts as other views. The existing canvas supports fixed node positions and sizes, edit-mode dragging, grid snapping, and width-based scaling. Named nodes keep their identities when the diagram is edited. Diagram layout belongs to this document, independently of the service definitions.
 
-Service subjects and their widget are proposed functionality; CanvasLayout and Widget already exist. The current canvas does not support connector lines between nodes. Whether to add manually authored connections, display model relationships, or both remains a design discussion. This example records the box composition without inventing unsupported edge syntax.
+Service subjects and their widget are proposed functionality; CanvasLayout and Widget already exist. The current canvas does not support connector lines between nodes. The user wants typed connections backed by model relationships and automatic diagrams at several levels. The manual canvas example records box placement without inventing unsupported edge syntax. The generated ArchitectureDiagram blocks in architecture/Views.md are proposed UI, including their View options; they are not existing components.
+
+## Resources and typed relationships
+
+Resource is a proposed generic domain subject with an extensible kind and descriptive technology. This sample defines two logical databases and one shared queue. Services include resources through their normal componentSources alongside code and hosts. Membership does not imply exclusive ownership: both services reference the same queue. A DeploymentUnit still selects Host subjects; including a resource in a service does not automatically provision it or make it part of a host-only deployment unit.
+
+Relationships are authored metadata. Their kind expresses the interaction, such as calls, writes, publishes, or consumes; technology and optional message or label describe how it happens. The service-scoped relationship list defaults its source to that service, with an explicit source path when the interaction is known to belong to a particular Host. This lets generated and manually arranged diagrams use the same relationships.
+
+Service page metadata uses the existing metadata envelope shape with a `$subjects` entry for `Children[service]`. This scopes relationships to the Service child rather than the Markdown document. Frontmatter persistence of that envelope, typed relationship readers, source overrides, and all Resource types remain proposed functionality. The source fixtures do not implement the described API calls, database access, or messaging; those interactions are authored sample architecture facts. They must not be mistaken for analyzer-discovered facts.
+
+Generated service views can aggregate host-level interactions using service membership, retaining the endpoint facts and avoiding inferred runtime order. A detailed view preserves unknown host endpoints rather than attaching a service-level relationship to a guessed process. Consumes is stored as a dependency from the consumer to its queue; a message-flow presentation may reverse the drawn direction explicitly. Shared or overlapping membership must remain visible rather than establish a fictitious exclusive owner. The same queue is never copied into separate resource identities for the two services.
+
+For now, resources describe logical dependencies independently of environments. Mapping them to actual database, queue, or broker instances per environment remains an open design choice. Automatic arc42-style views need enough data for each view: building block views use structure and relationships, runtime views need scenarios, and complete deployment views need infrastructure mappings. Diagram scope and display settings belong to the view; semantic connections belong to the shared graph.
 
 ## Proposed graph and paths
 
@@ -88,11 +108,15 @@ root
 │       └── Payments.Api
 ├── services
 │   ├── Orders.md/service
-│   │   ├── components → references 3 CodeProjects and 2 Hosts
+│   │   ├── components → references 3 CodeProjects, 2 Hosts, and 2 Resources
 │   │   └── hosts → references both Orders Hosts
 │   └── Payments.md/service
-│       ├── components → references 1 CodeProject and 1 Host
+│       ├── components → references 1 CodeProject, 1 Host, and 2 Resources
 │       └── hosts → references the Payments Host
+├── resources
+│   ├── OrdersDatabase
+│   ├── PaymentsDatabase
+│   └── OrderEvents → shared by both services
 ├── deployment-units
 │   ├── Orders → references both Orders Hosts
 │   └── Payments → references the Payments Host

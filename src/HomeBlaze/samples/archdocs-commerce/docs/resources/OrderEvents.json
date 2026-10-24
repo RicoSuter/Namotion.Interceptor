@@ -1,0 +1,6 @@
+{
+  "$type": "Namotion.ArchDocs.Resource",
+  "name": "Order events",
+  "kind": "Queue",
+  "technology": "RabbitMQ"
+}
