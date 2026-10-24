@@ -56,7 +56,7 @@ Structured selectors and a compact query language were discussed. Proposed defau
 
 ### Typed Markdown
 
-The user chose MarkdownFile inheritance for typed Markdown subjects. A registered type declared by frontmatter must derive from MarkdownFile and retain the normal Markdown page renderer, editor, navigation, expressions, and blocks. A custom type can supply an optional widget that the author embeds in Markdown. Loading a typed page does not automatically replace its UI or insert a custom summary. This replaces the earlier proposal to keep the file's declared type entirely independent of MarkdownFile.
+The user chose MarkdownFile inheritance for typed Markdown subjects. A registered type declared by frontmatter must derive from MarkdownFile and retain the normal Markdown page renderer, editor, navigation, expressions, and blocks. A custom type can supply an optional widget that the author embeds in Markdown or accesses through application UI extension slots. Loading a typed page does not replace the Markdown renderer or rewrite the document to insert a summary. This replaces the earlier proposal to keep the file's declared type entirely independent of MarkdownFile.
 
 ## Typed Markdown and metadata
 
@@ -75,6 +75,26 @@ Frontmatter edits through the UI must preserve the Markdown body and unrelated f
 Typed relationships are structured metadata, with a kind and target reference and optional descriptive data such as technology or a label. Their source defaults to the owning subject, so relationships on a typed service document originate at that service. A typed reader exposes those entries to graph queries and widgets. Analyzer-produced relationships remain discovered state with provenance. Authored relationship edits reconcile the effective graph through the same change-driven pattern; they do not require independent relationship JSON files.
 
 An ordinary Markdown link can establish a document reference when a later analyzer supports it, but a link alone does not assert a runtime dependency. A general Markdown extraction-rule engine is deferred; structured frontmatter and the existing subject blocks provide explicit authoring for the MVP.
+
+## Page UI extension slots
+
+Regular Markdown remains the primary authoring experience for documentation and designs. Generic metadata can make richer information available without widget blocks, a custom document type, or layout directives in the source. A page can reference a service through a `documents` relationship and offer that service's code and deployment information while remaining an ordinary MarkdownFile. `$type` is used when the page itself should be the specialized subject. Explicit widget blocks remain an optional way to place a widget at a specific point in the authored content.
+
+The user proposed additional slots where subject-specific UI can contribute around the normal page. Extend the existing component-registration model with page-level contribution points. Proposed initial slots are:
+
+| Slot | Purpose | Example |
+|---|---|---|
+| Page actions | Contextual commands in the page toolbar or menu | Explore selected projects or refresh analysis |
+| Context panel | Optional information alongside the document | Related subjects, authored relationships, host summary, deployments |
+| Additional views | Alternate views reachable from the page | Service details or deployment matrix |
+
+Optional positions above or below the content can host a summary later if that placement is wanted. Exact names and presentation remain builder and visual-design decisions. Slots are in the application page frame, so the Markdown body keeps its normal renderer and portable source. These UI extension points complement the existing `[Slot]` authoring mechanism, which fills widget content from Markdown blocks; declaring a UI extension does not require an author to add a content-slot block.
+
+UI modules register contributions based on the current subject's type or interfaces and can test relevant metadata and resolved related subjects. An ordinary page with relationship metadata can therefore receive a context contribution without `$type`. Domain subjects expose facts and capabilities; their UI assemblies provide the components. Metadata describes meaning and relationships, not component class names, UI layout, or arbitrary executable rendering instructions.
+
+Support multiple applicable contributors with deterministic ordering and stable identities. Empty or inapplicable contributions occupy no space. Contributions refresh when the metadata or the facts they read change, and release subscriptions and resources when the page or contribution leaves. Visibility and placement are application/user preferences unless an author explicitly embeds a widget. An extension failure should leave the document readable and identify the failed contribution rather than replace the whole page.
+
+The current component registry resolves one Page/Edit/Setup/Widget component, with inheritance/interface fallback; its GetComponents enumeration only matches the exact subject type. Reuse the registration and context patterns, while defining ordered multi-contributor discovery for the new slots. Do not assume the existing single-component lookup already implements those semantics. Keep page-specific contribution dependencies in the UI layers rather than Namotion.Interceptor.Utils.
 
 ## Domain
 
@@ -208,7 +228,7 @@ Enrichment has one canonical persisted home per owner, as specified in Typed Mar
 
 The basic subject UI should expose applicable configuration, state, diagnostics, and refresh operations through existing interfaces and generated editors. Project reference edges and selection membership must be traversable through the subject graph without requiring a custom visual graph renderer.
 
-The user selected existing subject UI plus an optional Markdown service-summary widget and a deployment matrix for the MVP. A service summary reads a Service subject and summarizes its selected code/hosts and deployments. Proposed default: show its name and description, selected host/project counts, and links to corresponding subjects and deployments. A typed service document retains the normal Markdown UI, and its author chooses where to embed a summary. The deployment matrix shows units against environments using declared deployments and manual versions/links; it must not display an unobserved deployment as healthy. Exact widget presentation remains to be designed. An interactive dependency-graph renderer is deferred; project-reference edges remain navigable through the subject graph.
+The user selected existing subject UI plus an optional Markdown service-summary widget and a deployment matrix for the MVP. A service summary reads a Service subject and summarizes its selected code/hosts and deployments. Proposed default: show its name and description, selected host/project counts, and links to corresponding subjects and deployments. A typed service document retains the normal Markdown UI; an author can embed a summary explicitly, and page UI slots can make the same information accessible without blocks. The deployment matrix shows units against environments using declared deployments and manual versions/links; it must not display an unobserved deployment as healthy. Exact widget presentation remains to be designed. An interactive dependency-graph renderer is deferred; project-reference edges remain navigable through the subject graph.
 
 ## MVP acceptance scenarios
 
@@ -225,6 +245,7 @@ The user selected existing subject UI plus an optional Markdown service-summary 
 11. Embed a service summary and deployment matrix in Markdown using normal widget blocks; navigate from their entries to the existing subjects without maintaining duplicate service facts in the page.
 12. Define a service in typed Markdown frontmatter; resolve it as the declared MarkdownFile subclass, render and edit it through the normal Markdown UI, and embed its optional summary without recursive rendering.
 13. Edit metadata and authored relationships on ordinary and typed Markdown through the metadata API; preserve the body and unrelated frontmatter, reapply descendant enrichment on later attach, and retain that data across refresh and restart.
+14. Open an ordinary Markdown document with relationship metadata and no blocks or `$type`; expose applicable subject information through page UI slots while leaving its source and normal Markdown rendering intact.
 
 These are requirements for future implementation and testing. No product code, tests, dependencies, or projects are added by this design document.
 
