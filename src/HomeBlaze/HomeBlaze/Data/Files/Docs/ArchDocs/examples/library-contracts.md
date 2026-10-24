@@ -16,7 +16,6 @@ repository/
   src/Shared.Contracts/Order.cs
   docs/
     Repository.json
-    Repository.metadata.json
     contracts/PublicApi.json
     libraries/shared-contracts.md
 ```
@@ -35,33 +34,19 @@ The public API Contract can describe that type and its members. A source symbol 
 
 ## Contract identity [Planned] / [Proposed schema]
 
-The proposed type discriminator in contracts/PublicApi.json selects the specialization:
+The proposed definition in contracts/PublicApi.json selects the specialization and its project explicitly:
 
 ```json
 {
-  "$type": "Namotion.ArchDocs.CSharpApiContract"
+  "$type": "Namotion.ArchDocs.CSharpApiContract",
+  "name": "Shared contracts public API",
+  "codeProjectPath": "/Repository/projects/Shared.Contracts"
 }
 ```
 
-This is a type-selection skeleton, not a complete extraction configuration. Source/snapshot fields, version identity, and parser inputs remain open in the Contract specifications. It can later point to supplied content or analyzer-produced data without introducing network semantics.
+This defines the Contract and its association, not a complete extraction configuration. Source/snapshot formats, version identity, and extraction inputs remain open in the Contract specifications. No surface is invented before a supported extractor or supplied snapshot exists.
 
-An illustrative Repository.metadata.json entry links the discovered project to that Contract using the planned typed relationship reader over the existing metadata envelope:
-
-```json
-{
-  "$subjects": {
-    "Projects[Shared.Contracts]": {
-      "relationships": [
-        { "kind": "hasContract", "target": "/contracts/PublicApi" }
-      ]
-    }
-  }
-}
-```
-
-The Projects collection name and generated route aliases remain schema proposals. hasContract illustrates an extensible relationship kind; it is not an alternative mandatory relationship entity or an independently editable duplicate of a capability property.
-
-In this example, Projects[Shared.Contracts] means the generated Shared.Contracts CodeProject owned by Repository, whose illustrative graph route is /Repository/projects/Shared.Contracts. It scopes enrichment to that existing subject; it does not define another project. The [file-authoring requirement](../file-authoring.md) requires this mapping to be understandable in text and calls for reviewing whether the final metadata/reference syntax can be simpler.
+The explicit `codeProjectPath` resolves to the discovered library CodeProject. Its read-only `contracts` list refers back to this same subject. No editable project-side `hasContract` relationship duplicates the association. Generated route aliases remain proposed and must be documented and readable under the [file-authoring requirement](../file-authoring.md). OpenAPI/protobuf file inputs have separate [complete descriptor examples](contract-files.md).
 
 ## Documentation view [Planned]
 

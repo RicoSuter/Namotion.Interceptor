@@ -6,19 +6,38 @@ status: Planned
 
 # Service [Planned]
 
-Represents a logical software capability, application, or neighboring system.
+## Class definition [Planned]
+
+**Service** is an authored subject class participating in the [Component](component.md) interface capability and representing a logical software capability, application, or neighboring system. Its defining file owns logical configuration. Selected [Hosts](host.md), [CodeProjects](code-project.md), [Resources](resource.md), and nested Services remain references to their original owners, with overlapping membership allowed.
+
+Authored enrichment and relationships use the [existing metadata envelope](../shared/metadata-and-relationships.md), through the defining owner. They are not a second configuration store. Names in the tables are proposed serialized camelCase names; concrete CLR signatures remain open. State properties are read-only to authors.
+
+## Configuration properties [Proposed schema]
+
+| Property | Type | Meaning and source |
+|---|---|---|
+| `name` | `string` | Readable logical capability/application/system name; no extra Application entity is introduced. |
+| `componentSources` | Path-query collection selecting [Component](component.md) | Explicit logical membership. Proposed default: absent or empty selects none; no transitive dependency expansion. |
+| `kind` | `string?` | Optional descriptive classification; vocabulary remains proposed. |
+| `technology` | `string?` | Optional descriptive technology; omitted means unspecified. |
+
+Selectors follow [path queries](../shared/path-queries.md). Description and architectural relationships use existing metadata; interface-exposure persistence remains proposed. There is no required repository, Host, or deployment-unit selector.
+
+## State properties [Proposed schema]
+
+| Property | Type | Meaning and source |
+|---|---|---|
+| `components` | Reference collection of [Component](component.md) | Resolved, deduplicated direct selections without cloning or ownership transfer. |
+| `hosts` | Reference collection of [Host](host.md) | Direct Host subset only. Selecting a Resource or another Service does not add its underlying Hosts. |
+| `interfaces` | Reference collection of [Interface](interface.md) | Logical exposed capabilities from canonical exposure relationships. |
+| `deployments` | Reference collection of [Deployment](deployment.md) | Related intended installations through release participants; not an ownership or one-to-one unit relationship. |
+| `diagnostics` | Diagnostic collection | Malformed/unresolved selectors, wrong result kinds, and cyclic selection dependencies. |
 
 ## Implementation readiness
 
 **Delivery:** Can be implemented through existing subject and component extension points. The ArchDocs feature itself is not implemented.
 
 **Prerequisites:** The planned ArchDocs capability model and applicable query, metadata, and lifecycle services. Their delivery order is not an approved implementation plan.
-
-## Data [Planned]
-
-| Authored configuration | Resolved state |
-|---|---|
-| name, componentSources; descriptive kind/technology remain proposed | components, direct Host subset hosts, exposed Interfaces, query diagnostics |
 
 ## UI [Planned]
 

@@ -3,6 +3,10 @@
     "overview.md",
     "service-table.md",
     "deployment-matrix.md",
-    "architecture-diagram.md"
+    "architecture-diagram.md",
+    "service-diagram.md",
+    "component-diagram.md",
+    "context-diagram.md",
+    "deployment-diagram.md"
   ]
 }

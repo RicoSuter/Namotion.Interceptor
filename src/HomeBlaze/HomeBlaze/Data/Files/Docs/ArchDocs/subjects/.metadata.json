@@ -2,6 +2,7 @@
   "order": [
     "component.md",
     "source-repository.md",
+    "code-solution.md",
     "code-project.md",
     "host.md",
     "service.md",

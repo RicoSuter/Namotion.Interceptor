@@ -8,6 +8,19 @@ status: Planned
 
 Find and summarize Services within a supplied subject/folder scope.
 
+## Configuration properties [Proposed schema]
+
+| Property | Type | Default and meaning |
+|---|---|---|
+| `Path` | Subject/folder path `string` | Required scope. Find [Services](../subjects/service.md) in this scope and its owned descendants, deduplicated by identity. Relationships do not extend the search scope. |
+
+Keys use PascalCase for the existing Markdown body-block convention. Column configuration and master-detail controls remain open. For example, with Services defined under `/catalog`:
+
+````markdown
+:: Namotion.ArchDocs.ServiceTable Path=/catalog
+::
+````
+
 ## Implementation readiness
 
 **Delivery:** Can be implemented through existing subject and component extension points. The ArchDocs feature itself is not implemented.

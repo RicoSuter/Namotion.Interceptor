@@ -6,19 +6,39 @@ status: Planned
 
 # Resource [Planned]
 
-Represents a logical capability consumed by components, such as a database, queue, bucket, or cloud offering.
+## Class definition [Planned]
+
+**Resource** is a subject class participating in the [Component](component.md) interface capability and representing a logical capability consumed by components, such as a database, queue, bucket, or cloud offering. Its authored definition or discovering analyzer owns it. Providing [Hosts](host.md), consuming subjects, and [Service](service.md) memberships reference one shared logical identity; Resource-to-Service inheritance is not selected.
+
+Authored enrichment and relationships use the [existing metadata envelope](../shared/metadata-and-relationships.md), through the defining owner. They are not a second configuration store. Names in the tables are proposed serialized camelCase names; concrete CLR signatures remain open. State properties are read-only to authors.
+
+## Configuration properties [Proposed schema]
+
+| Property | Type | Meaning and source |
+|---|---|---|
+| `name` | `string` | Readable logical resource name. |
+| `kind` | `string` | Extensible capability kind rather than a mandatory platform-specific subtype. |
+| `technology` | `string?` | Optional descriptive technology; omitted means unknown. |
+
+Descriptions and typed provide/consume/exposure relationships use existing metadata. Their canonical authored source, inverse-navigation rules, and environment mapping records remain proposed; there are no competing editable relationship collections on both endpoints.
+
+## State properties [Proposed schema]
+
+| Property | Type | Meaning and source |
+|---|---|---|
+| `hosts` | Reference collection of [Host](host.md) | Zero or many providing processes from canonical provision relationships. No Host is required. |
+| `interfaces` | Reference collection of [Interface](interface.md) | Logical exposed capabilities from canonical exposure relationships. |
+| `consumers` | Reference collection of [Component](component.md) | Consumers resolved from typed dependency relationships, distinct from membership and release participation. |
+| `services` | Reference collection of [Service](service.md) | Inverse direct logical memberships; shared membership preserves resource identity. |
+| `endpoints` | Reference collection of [Endpoint](endpoint.md) | Access bindings through exposed Interfaces where known. |
+| `deployments` | Reference collection of [Deployment](deployment.md) | Related intended installations and resource mappings where supplied; no provisioning or health implication. |
+| `diagnostics` | Diagnostic collection | Unresolved relationship targets and invalid binding or configuration inputs. |
 
 ## Implementation readiness
 
 **Delivery:** Can be implemented through existing subject and component extension points. The ArchDocs feature itself is not implemented.
 
 **Prerequisites:** The planned ArchDocs capability model and applicable query, metadata, and lifecycle services. Their delivery order is not an approved implementation plan.
-
-## Data [Planned]
-
-| Authored configuration | Relationships and bindings |
-|---|---|
-| name, extensible kind, optional technology | Optional providing Hosts, exposed Interfaces, consumers, environment-specific mappings |
 
 ## UI [Planned]
 

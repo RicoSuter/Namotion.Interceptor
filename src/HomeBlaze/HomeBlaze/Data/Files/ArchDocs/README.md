@@ -64,7 +64,7 @@ The sample uses the existing HomeBlaze storage root that mounts Files. It has no
 
 Storage already excludes dot-prefixed directories from subject discovery. The .source directory is therefore available to the analyzer as raw input without turning its projects or build outputs into documentation subjects. The ordinary application and device folders remain outside the sample's query scope. This is a development-data sample; its feature-specific types and widgets become functional when the proposed capability is implemented.
 
-The three API/worker projects explicitly declare OutputType=Exe, and Orders.Contracts is a library. The .NET analyzer should discover four CodeProjects and three Hosts. The console programs provide small runnable entry points for project discovery; the sample's names describe their architectural roles.
+The three API/worker projects explicitly declare OutputType=Exe, and Orders.Contracts is a library. The .NET analyzer should discover four CodeProjects, three Hosts, and one CodeSolution for Commerce.slnx. That solution references the four repository-owned projects; it does not own copies of them or establish a Service or deployment boundary. The console programs provide small runnable entry points for project discovery; the sample's names describe their architectural roles.
 
 Build from this folder with .NET 10:
 
@@ -90,7 +90,7 @@ Proposed interaction: selecting a row reveals that subject's details alongside t
 
 The service diagram composes existing CanvasLayout nodes with Widget references to the proposed Service subjects. Their service-summary widget supplies each box's presentation, reusing the same facts as other views. The existing canvas supports fixed node positions and sizes, edit-mode dragging, grid snapping, and width-based scaling. Named nodes keep their identities when the diagram is edited. Diagram layout belongs to this document, independently of the service definitions.
 
-Service subjects and their widget are proposed functionality; CanvasLayout and Widget already exist. The current canvas does not support connector lines between nodes. The user wants typed connections backed by model relationships and automatic diagrams at several levels. The manual canvas example records box placement without inventing unsupported edge syntax. The generated ArchitectureDiagram blocks in arc42.md are proposed UI, including their View options; they are not existing components.
+Service subjects and their widget are proposed functionality; CanvasLayout and Widget already exist. The current canvas does not support connector lines between nodes. The user wants typed connections backed by model relationships and automatic diagrams at several levels. The manual canvas example records box placement without inventing unsupported edge syntax. The ServiceDiagram, ComponentDiagram, ContextDiagram, and DeploymentDiagram blocks in arc42.md are proposed distinct widgets over shared rendering; they are not existing components.
 
 ## Reusable architecture widgets
 
@@ -116,7 +116,7 @@ Each service has a folder containing its documentation and its service-specific 
 
 Relationships are authored metadata. Their kind expresses the interaction, such as calls, writes, publishes, or consumes; technology and optional message or label describe how it happens. The service-scoped relationship list defaults its source to that service, with an explicit source path when the interaction is known to belong to a particular Host. This lets generated and manually arranged diagrams use the same relationships.
 
-Service page metadata uses the existing metadata envelope shape with a `$subjects` entry for `Children[service]`. This scopes relationships to the Service child rather than the Markdown document. Frontmatter persistence of that envelope, typed relationship readers, source overrides, and all Resource types remain proposed functionality. The source fixtures do not implement the described API calls, database access, or messaging; those interactions are authored sample architecture facts. They must not be mistaken for analyzer-discovered facts.
+Service page metadata uses the existing metadata envelope shape with a `$subjects` entry named `service`. The `$service` entry defines that child, and its metadata uses the same inline name as widgets and paths. This scopes relationships to the Service child rather than the Markdown document. Inline child paths already exist; frontmatter declarations and persistence of that envelope, typed relationship readers, source overrides, and all Resource types remain proposed functionality. The source fixtures do not implement the described API calls, database access, or messaging; those interactions are authored sample architecture facts. They must not be mistaken for analyzer-discovered facts. The [scoped metadata contract](../Docs/ArchDocs/shared/metadata-and-relationships.md#scoped-metadata-paths-planned) defines resolution and writes.
 
 Generated service views can aggregate host-level interactions using service membership, retaining the endpoint facts and avoiding inferred runtime order. A detailed view preserves unknown host endpoints rather than attaching a service-level relationship to a guessed process. Consumes is stored as a dependency from the consumer to its queue; a message-flow presentation may reverse the drawn direction explicitly. Shared or overlapping membership must remain visible rather than establish a fictitious exclusive owner. The same queue is never copied into separate resource identities for the two services.
 
@@ -135,6 +135,8 @@ The storage root exposes JSON subjects by filename without extension and Markdow
 ```text
 ArchDocs (/ArchDocs)
 ├── Repository
+│   ├── solutions
+│   │   └── Commerce.slnx → references the four CodeProjects below
 │   ├── projects
 │   │   ├── Orders.Api
 │   │   ├── Orders.Worker
@@ -165,7 +167,7 @@ ArchDocs (/ArchDocs)
     └── Production/deployments → Orders and Payments
 ```
 
-The repository owns discovered projects and hosts. Services and deployment units reference them rather than create copies. A Service's hosts collection contains the Host subjects in its resolved components. Source query entries and resolved collections remain separate: componentSources defines membership and components contains resolved references, with hosts as a typed subset where useful.
+The repository owns discovered solutions, projects, and hosts. Commerce.slnx is a CodeSolution with membership references to the same four CodeProjects in the projects collection. The projects and hosts collections retain their distinct path segments even when their entries share a key. Services and deployment units reference these subjects rather than create copies. A Service's hosts collection contains the Host subjects in its resolved components. Source query entries and resolved collections remain separate: componentSources defines membership and components contains resolved references, with hosts as a typed subset where useful.
 
 An exact subject path selects one subject. A collection-property path selects its members; adding `/*` explicitly selects those direct members too. `*` stays within one path segment, and `**` spans any number of path segments. Optional `where` filters use property conditions. For example, `/ArchDocs/Repository/**/Orders.*` illustrates recursive matching. A path targets graph subjects, not source files.
 

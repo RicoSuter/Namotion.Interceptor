@@ -38,10 +38,13 @@ All ArchDocs functionality is [Planned]. Existing host facilities are marked [Im
 
 All subjects, references, metadata, and widgets follow the [file-authoring requirement](file-authoring.md). Their serialized definitions and relationships must be understandable and editable by people and agents without opening HomeBlaze; useful UI is an additional presentation and editing path.
 
+Each subject page begins with its class or capability definition, configuration properties, and read-only state properties. Related subject types link to their definitions. These tables describe a proposed schema; they do not declare implemented CLR signatures.
+
 | Specification | Status | Delivery |
 |---|---|---|
 | [Component](subjects/component.md) | [Planned] | Extension; see prerequisites |
 | [SourceRepository](subjects/source-repository.md) | [Planned] | Extension; see prerequisites |
+| [CodeSolution](subjects/code-solution.md) | [Planned] | Extension; see prerequisites |
 | [CodeProject](subjects/code-project.md) | [Planned] | Extension; see prerequisites |
 | [Host](subjects/host.md) | [Planned] | Extension; see prerequisites |
 | [Service](subjects/service.md) | [Planned] | Extension; see prerequisites |
@@ -66,7 +69,9 @@ The existing loaded HomeBlaze root remains the runtime graph root. Queries and w
 
 Component is a shared capability, with Service, Host, Resource, and CodeProject participating. Services select components; Hosts can provide Resources; CodeProjects and Interfaces can reference Contracts; Endpoints bind Interfaces to environments; DeploymentUnits select explicit release participants; Environments own generated Deployments. Cross-references do not transfer ownership. Discovery and architectural membership are separate, and internal/external classification belongs to a view.
 
-Contract specializations are OpenApiContract, ProtobufContract, and CSharpApiContract. Keep shared contract references independent of a parser or transport. Exact CLR interfaces, fields, ownership where noted, and version identity remain open in their specifications.
+CodeSolution records source/build grouping and references existing repository-owned CodeProjects. Projects can belong to several solutions or none, and contribute to zero or many Hosts. Neither solution membership nor project references establish a Service or deployment boundary.
+
+Contract specializations are OpenApiContract, ProtobufContract, and CSharpApiContract. Authored OpenAPI/protobuf descriptors select their raw document through `path`; `codeProjectPath` explicitly selects an associated graph subject. Without an explicit association, discovery considers only a unique CodeProject in the raw document's own directory. See [contract files and discovery](examples/contract-files.md). Keep shared contract references independent of a parser or transport. Exact CLR interfaces, fields, ownership where noted, and version identity remain open in their specifications.
 
 ## Reference ownership
 

@@ -16,7 +16,7 @@ Populate a specialized Contract from an OpenAPI document.
 
 ## Input and output [Planned]
 
-Read an explicitly selected source document; preserve source/revision provenance. Where supported, expose operations, parameters, request/response definitions, and schemas. Report unsupported or unresolved input distinctly from an empty API.
+Read the `.json`, `.yaml`, or `.yml` source selected by an authored [OpenApiContract.path](../subjects/openapi-contract.md#configuration-properties-proposed-schema) or supplied by [contract discovery](contract-discovery.md). Relative descriptor paths use the defining file's local origin. Preserve source/revision provenance. Where supported, expose operations, parameters, request/response definitions, and schemas. Report unsupported or unresolved input distinctly from an empty API. File discovery and project association do not require structured API parsing.
 
 ## Decisions before parsing [Proposed]
 

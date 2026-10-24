@@ -6,19 +6,34 @@ status: Planned
 
 # Environment [Planned]
 
-Declares which deployment units have intended installations in a named context.
+## Class definition [Planned]
+
+**Environment** is an authored subject class describing a named deployment context and owning generated [Deployment](deployment.md) children for explicitly selected [DeploymentUnits](deployment-unit.md). Its defining file owns unit selection and descendant metadata. It prescribes no cloud, cluster, namespace, or geographic hierarchy.
+
+Authored enrichment and relationships use the [existing metadata envelope](../shared/metadata-and-relationships.md), through the defining owner. They are not a second configuration store. Names in the tables are proposed serialized camelCase names; concrete CLR signatures remain open. State properties are read-only to authors.
+
+## Configuration properties [Proposed schema]
+
+| Property | Type | Meaning and source |
+|---|---|---|
+| `name` | `string` | Readable context name such as staging or production; label alone is not persistent identity. |
+| `deploymentUnitSources` | Path-query collection selecting [DeploymentUnit](deployment-unit.md) | Explicit intended unit selections. Proposed default: absent or empty selects none; other subject kinds are diagnostics. |
+
+Selectors follow [path queries](../shared/path-queries.md). Existing JSON sidecars hold metadata; Markdown-frontmatter persistence remains a planned host extension.
+
+## State properties [Proposed schema]
+
+| Property | Type | Meaning and source |
+|---|---|---|
+| `deploymentUnits` | Reference collection of [DeploymentUnit](deployment-unit.md) | Resolved, deduplicated selections, without transferring unit ownership. |
+| `deployments` | Keyed owned collection of [Deployment](deployment.md) | One generated enduring installation per selected unit. Reuse stable identities, add selections, and remove confirmed deselections. |
+| `diagnostics` | Diagnostic collection | Invalid selectors, unresolved references, and reconciliation issues. |
 
 ## Implementation readiness
 
 **Delivery:** Can be implemented through existing subject and component extension points. The ArchDocs feature itself is not implemented.
 
 **Prerequisites:** Deployment-unit selection, stable generated identity, and keyed reconciliation.
-
-## Data [Planned]
-
-| Configuration | Owned state |
-|---|---|
-| name, deploymentUnitSources | Resolved units and one generated Deployment per selected unit |
 
 Environment is generic: it does not prescribe cloud, cluster, namespace, or geographic hierarchy. Metadata enriches generated descendants through the owning file. Standalone JSON can use existing metadata sidecars; Markdown frontmatter persistence needs a HomeBlaze extension.
 

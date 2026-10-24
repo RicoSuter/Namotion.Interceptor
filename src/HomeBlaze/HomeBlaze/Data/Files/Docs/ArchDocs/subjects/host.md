@@ -6,19 +6,44 @@ status: Planned
 
 # Host [Planned]
 
-Represents a runnable process definition, independently of a physical machine or running replica.
+## Class definition [Planned]
+
+**Host** is a subject class participating in the [Component](component.md) interface capability and representing a runnable process definition, independently of a physical machine or running replica. An authored definition belongs to its defining file; a discovered Host belongs to its [SourceRepository](source-repository.md). [CodeProjects](code-project.md), provided [Resources](resource.md), and exposed [Interfaces](interface.md) are references, not owned copies.
+
+Authored enrichment and relationships use the [existing metadata envelope](../shared/metadata-and-relationships.md), through the defining owner. They are not a second configuration store. Names in the tables are proposed serialized camelCase names; concrete CLR signatures remain open. State properties are read-only to authors.
+
+## Configuration properties [Proposed schema]
+
+| Property | Type | Meaning and source |
+|---|---|---|
+| `name` | `string` | Readable process-definition name for an authored Host. |
+| `runtime` | `string?` | Optional extensible runtime description; omitted means unknown. |
+| `packaging` | `string?` | Optional packaging description; omitted means unknown. |
+| `executionBehavior` | `string?` | Optional extensible behavior such as continuous or run-to-completion; no always-running default is implied. |
+| `roles` | `string` collection | Optional descriptive process roles. Absent or empty assigns no known roles. |
+| `entryProjectPath` | Optional subject path targeting [CodeProject](code-project.md) | Entry project when known; omitted remains useful for manually described or external processes. |
+| `supportingProjectPaths` | Subject-path collection targeting [CodeProject](code-project.md) | Optional supporting code references. Absent or empty selects no known supporting project. |
+
+For discovered Hosts, name/runtime/packaging/execution/role and project facts are analyzer-owned state where supported, rather than independently editable configuration. Authored overrides require an explicit future contract. The canonical metadata relationship source for resource provision and interface exposure remains open.
+
+## State properties [Proposed schema]
+
+| Property | Type | Meaning and source |
+|---|---|---|
+| `repository` | Optional reference to [SourceRepository](source-repository.md) | Canonical owner for a discovered Host; absent for an independently authored definition. |
+| `entryProject` | Optional reference to [CodeProject](code-project.md) | Resolved or discovered entry project. |
+| `supportingProjects` | Reference collection of [CodeProject](code-project.md) | Resolved or discovered supporting code references. |
+| `resources` | Reference collection of [Resource](resource.md) | Zero or many provided capabilities resolved from the canonical provision relationship. |
+| `interfaces` | Reference collection of [Interface](interface.md) | Logical exposed capabilities resolved from canonical exposure relationships. |
+| `services` | Reference collection of [Service](service.md) | Inverse direct logical memberships; no ownership or automatic nested expansion. |
+| `provenance` | Provenance records | Analyzer and supporting source for discovered facts. |
+| `diagnostics` | Diagnostic collection | Unresolved project references and invalid relationship/configuration inputs. |
 
 ## Implementation readiness
 
 **Delivery:** Can be implemented through existing subject and component extension points. The ArchDocs feature itself is not implemented.
 
 **Prerequisites:** Manual configuration can start independently; discovered Hosts require SourceRepository and an applicable analyzer.
-
-## Data [Planned]
-
-| Authored or discovered | Referenced subjects |
-|---|---|
-| Name, runtime/packaging facts, extensible execution behavior and roles | Optional entry CodeProject and supporting projects, provided Resources, exposed Interfaces |
 
 Execution can be continuous or run-to-completion. A worker, migration executable, local orchestration tool, or database process needs no dedicated platform-specific subtype. A managed resource can be modeled without any known Host.
 

@@ -40,6 +40,12 @@ Three approaches were considered: declaring each host and enriching it; having e
 
 Proposed default: allow manual descriptions of hosts whose source is unavailable. Their exact authoring workflow is outside the repository-discovery slice.
 
+### Source/build groupings and Contracts
+
+CodeSolution represents a source/build grouping and references repository-owned CodeProjects. Projects can belong to several solutions or none; this does not establish a Service or deployment boundary. The first proposed solution input is basic `.slnx` XML, alongside literal `.csproj` XML. Other formats require explicit analyzer support.
+
+An authored OpenApiContract or ProtobufContract selects raw source through `path`. Contract.codeProjectPath is the explicit primary project association, and CodeProject.contracts is its read-only inverse. Without an explicit association, only a unique CodeProject in the raw document's own directory is selected; do not search parents or infer through a Host. Missing or ambiguous associations need explicit configuration and visible diagnostics. Automatic discovery never writes descriptor JSON. Explicit definitions take precedence over automatic same-source candidates; exact identity handover and conflict handling remain open in [contract discovery](analyzers/contract-discovery.md).
+
 ### Storage access
 
 The chosen MVP approach gives SourceRepository its own file access independently of the documentation mount. The alternative is to split the current storage implementation into a shared storage connection and separately mounted views. The latter is more general but is deferred. A hidden storage subject is insufficient because navigation visibility does not prevent scanning and subject creation.
@@ -56,6 +62,8 @@ Structured selectors, named selections, and compact query syntax were discussed.
 
 The alternatives considered were making the document itself a Service, giving a specialized MarkdownFile subclass a Service property, using existing inline subject blocks only, and defining named children generically in frontmatter. The user selected generic named frontmatter children: `$service` defines a child named `service`, `$environment` defines one named `environment`, and each value contains a `$type` plus normal subject configuration. A document defines subjects rather than becoming one of those domain types. This supersedes both service-as-MarkdownFile and ServiceMarkdownFile wrapper designs. Compared with existing inline blocks, the benefit is defining a subject outside the authored body without placing its widget there. It is an additional authoring location, not a different domain model.
 
+Use the inline child name directly for scoped metadata too: `metadata.$subjects.service`, matching `Path=service`. Existing InlinePaths resolution and registered path writing support this shape. Frontmatter parsing/persistence is planned. Expanded collection keys do not normalize into bare child names automatically; any compatibility route needs owner-aware resolution and conflict handling.
+
 ## Implementation constraints
 
 Follow the repository's subject-creation guidance and existing conventions: partial intercepted properties, configuration versus state, internal setters for owned state, dictionaries for stable discovered identity, replaced published collections, headless domain code, and separate UI code. Reuse title, icon, monitoring, last-updated, path-reference, and metadata interfaces where applicable.
@@ -70,13 +78,13 @@ The following questions are tracked in the relevant element specification; this 
 - Service and Resource roles: Service represents a logical system/capability; Resources such as databases and cloud offerings appear alongside Hosts at component level. Host-to-Resource provides references are optional and many-to-many. Define shared interfaces and the exact persistence/navigation of provider relationships without assuming inheritance.
 - Deployment participation: component-based membership is accepted; settle participant eligibility and representation of resource definitions/configuration versus dependencies on existing managed resources.
 - Environment bindings: component versions, endpoint addresses, and concrete resource mappings are accepted; settle exact binding records, infrastructure references, ownership, and authored versus observed state.
-- Interfaces, Endpoints, and Contracts: settle exposure/reference schemas, ownership, supported formats, source-document references, and version/snapshot identity. CodeProject public API Contracts do not require network Interfaces or Endpoints.
+- Interfaces, Endpoints, and Contracts: settle exposure/reference schemas, ownership, parsed models, supported revisions, and version/snapshot identity. OpenAPI/protobuf file `path` and the same-directory project-association rule are specified. CodeProject public API Contracts do not require network Interfaces or Endpoints.
 - Optional domain additions: refine generic Artifact and Actor models separately from the sample products, and decide their MVP inclusion.
 - Executable roles: settle extensible execution-behavior and role fields for runnable process definitions; sample-specific subclasses are unnecessary.
 - Presentation contracts: useful subject detail pages, navigation participation, shared page/widget/preview components, and exact UI slot registration.
 - Final schemas and identity: CLR/serialized names, path casing and aliases, generated keys, persistent identity and rename behavior, and raw-source path matching where graph paths are insufficient.
-- File ergonomics: evaluate readable type identifiers, reference/metadata syntax, complete minimal examples, schema tooling, source-located diagnostics, and focused writeback against the file-authoring requirement. Existing fully qualified type names and runtime-shaped scoped metadata keys need explicit review before finalizing the authoring schema.
-- View configuration: generic diagram presets and customization, boundary selection, grouping shared components, manual/automatic layout interaction, and semantic connector editing.
+- File ergonomics: evaluate readable type identifiers, generated reference syntax, complete minimal examples, schema tooling, source-located diagnostics, and focused writeback against the file-authoring requirement. Named Markdown children use inline keys; existing fully qualified type names and other generated routes still need review.
+- View configuration: separate ServiceDiagram, ComponentDiagram, ContextDiagram, and DeploymentDiagram entry points over shared rendering are proposed. Settle specialized configuration, grouping shared components, manual/automatic layout interaction, and semantic connector editing.
 - Runtime scenarios: plain authored Markdown suffices for the current example; a structured scenario/sequence model is not selected.
 - Initial implementation: which candidate behaviors, exclusions, and UI surfaces form the MVP after sample review, including any long-running verification that must be agreed during planning.
 

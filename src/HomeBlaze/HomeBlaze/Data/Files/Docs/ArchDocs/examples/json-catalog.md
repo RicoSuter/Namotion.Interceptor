@@ -14,6 +14,7 @@ Mount repository/docs as the documentation graph root. The analyzer reads the pa
 
 ```text
 repository/
+  Commerce.slnx
   src/Orders.Api/Orders.Api.csproj
   src/Orders.Worker/Orders.Worker.csproj
   src/Orders.Contracts/Orders.Contracts.csproj
@@ -47,6 +48,18 @@ For an unambiguous executable project, a minimal project input could contain the
   </PropertyGroup>
 </Project>
 ```
+
+Commerce.slnx can group the same projects:
+
+```xml
+<Solution>
+  <Project Path="src/Orders.Api/Orders.Api.csproj" />
+  <Project Path="src/Orders.Worker/Orders.Worker.csproj" />
+  <Project Path="src/Orders.Contracts/Orders.Contracts.csproj" />
+</Solution>
+```
+
+The repository owns one [CodeSolution](../subjects/code-solution.md) and the three CodeProjects separately. The solution references those projects without cloning them. A second solution can reference them too; solution membership does not establish a Service or deployment boundary.
 
 catalog/Orders.json:
 

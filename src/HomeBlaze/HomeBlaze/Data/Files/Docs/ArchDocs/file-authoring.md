@@ -43,9 +43,11 @@ Persist semantic diagram connections as ordinary model relationships and keep po
 
 Each implemented authoring surface needs an accurate field/type reference and a complete, copyable minimal example. Machine-readable schema or type metadata should support validation and editor/agent tooling; exact schema format, publication, and editor integration remain design choices. A UI can assist discovery and completion but cannot be the only place where valid fields and reference rules are defined.
 
-Current examples deliberately mark provisional fields and incomplete type-selection skeletons. Before implementing the corresponding authoring surface, settle those fields and provide a full source-editable example. A type-only Contract skeleton is useful for discussing specialization but does not satisfy a complete Contract authoring example.
+Current examples deliberately mark provisional fields and incomplete extraction configurations. Before implementing the corresponding authoring surface, settle those fields and provide a full source-editable example. The [contract-file examples](examples/contract-files.md) distinguish raw source, descriptor `path`, and `codeProjectPath`; C# extraction/snapshot formats still need a complete example after that input contract is selected.
 
-The current fully qualified $type names and scoped metadata keys such as Children[service] and Projects[Shared.Contracts] expose existing or proposed platform conventions. They are known ergonomics review points, not exemptions from this requirement. Evaluate readable type identifiers, stable reference rules, and scoped metadata paths before declaring the final schema. Aliases or syntax improvements that need host changes must be marked as such; they are not already supported merely because an example would be clearer.
+Named Markdown children use their inline name directly in paths and scoped metadata: `$service` declares the child, `Path=service` references it, and `metadata.$subjects.service` enriches it. This reuses existing InlinePaths behavior; frontmatter persistence remains planned. See [scoped metadata paths](shared/metadata-and-relationships.md#scoped-metadata-paths-planned) for resolution, writeback, and compatibility limits. Ordinary generated collections retain meaningful collection segments.
+
+The current fully qualified $type names, generated keys, and other reference conventions still need ergonomics review. Evaluate readable type identifiers and stable reference rules before declaring the final schema. Aliases or syntax improvements that need host changes must be marked as such; they are not already supported merely because an example would be clearer.
 
 ## Acceptance checks [Planned]
 

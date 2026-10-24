@@ -20,7 +20,7 @@ The code is organized into .NET projects. Orders uses a shared contracts library
 
 The Commerce boundary includes Orders and Payments. Both are internal in this view. In the [Orders-only context](services/Orders/Service.md), Payments is outside the chosen boundary. Additional external participants can be selected as they are modeled.
 
-:: Namotion.ArchDocs.ArchitectureDiagram#context Path=/ArchDocs View=Context
+:: Namotion.ArchDocs.ContextDiagram#context Path=/ArchDocs
 ```json
 {
   "InternalSources": [
@@ -43,19 +43,19 @@ Orders separates its entry API from background processing. Payments has an indep
 :: Namotion.ArchDocs.ServiceTable#services Path=/ArchDocs/services
 ::
 
-:: Namotion.ArchDocs.ArchitectureDiagram#serviceOverview Path=/ArchDocs/services View=Services
+:: Namotion.ArchDocs.ServiceDiagram#serviceOverview Path=/ArchDocs/services
 ::
 
 ### Inside Orders
 
-:: Namotion.ArchDocs.ArchitectureDiagram#ordersComponents Path=/ArchDocs/services/Orders/Service.md/service View=Components
+:: Namotion.ArchDocs.ComponentDiagram#ordersComponents Path=/ArchDocs/services/Orders/Service.md/service
 ::
 
 Host-specific relationships attach to their declared hosts. The service-level Payments call stays at the Orders boundary until its host endpoint is specified. Shared resources retain one identity across the views.
 
 ### Inside Payments
 
-:: Namotion.ArchDocs.ArchitectureDiagram#paymentsComponents Path=/ArchDocs/services/Payments/Service.md/service View=Components
+:: Namotion.ArchDocs.ComponentDiagram#paymentsComponents Path=/ArchDocs/services/Payments/Service.md/service
 ::
 
 The [manually arranged canvas](ServiceDiagram.md) provides another presentation of these same services.
@@ -78,7 +78,7 @@ Both environments include the declared Orders and Payments deployment units. The
 :: Namotion.ArchDocs.DeploymentMatrix#deployments Path=/ArchDocs/environments
 ::
 
-:: Namotion.ArchDocs.ArchitectureDiagram#productionDeployment Path=/ArchDocs/environments/Production View=Deployment
+:: Namotion.ArchDocs.DeploymentDiagram#productionDeployment Path=/ArchDocs/environments/Production
 ::
 
 The current model describes intended installations and host grouping. Physical infrastructure and environment-specific database and queue instances still need to be mapped.

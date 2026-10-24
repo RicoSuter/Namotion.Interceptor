@@ -8,7 +8,7 @@ status: Planned
 
 The examples here are part of the feature reference. They are ordinary Markdown with fenced JSON, YAML, C#, and Markdown source, so reading this documentation does not instantiate the proposed ArchDocs subjects or execute analyzers. Core types, exact field names, generated route aliases, and widgets remain [Planned] or [Proposed] as their element pages specify. These examples express the intended authoring experience, not a final supported schema.
 
-Every final example must satisfy [file authoring and readability](../file-authoring.md): it must make types, fields, source ownership, and reference resolution understandable to people and agents in a normal editor. Provisional type names, scoped metadata keys, and incomplete Contract skeletons are explicit schema work still to settle; a UI cannot be required to fill in their meaning.
+Every final example must satisfy [file authoring and readability](../file-authoring.md): it must make types, fields, source ownership, and reference resolution understandable to people and agents in a normal editor. Provisional type names, generated routes, and extraction schemas are explicit work still to settle; a UI cannot be required to fill in their meaning.
 
 ## Choose a documentation style
 
@@ -19,6 +19,7 @@ Every final example must satisfy [file authoring and readability](../file-author
 | [One arc42 document](arc42.md) | One normal document aggregates graph views between authored sections | Same generic views as other documents; no arc42-specific subject |
 | [Topics, guides, and decisions](topics-and-decisions.md) | Crosscutting pages reference Services/units/resources stored elsewhere | Same queries and widgets; automatic context panes are optional additional host work |
 | [Library public APIs](library-contracts.md) | Library documentation links CodeProject public API Contracts | Contract subjects; optional public API extraction; no Host or deployed Endpoint required |
+| [Contract files and discovery](contract-files.md) | Raw OpenAPI/protobuf documents, optional JSON descriptors, and explicit project association | Contract discovery, local file origins, project references; parsing is a separate capability |
 | [Multiple repositories and shared resources](repositories-and-shared-components.md) | Logical architecture crosses source and folder boundaries | Multiple SourceRepositories, explicit path queries, shared identities, metadata relationships |
 
 These are alternative and composable layouts, not a required folder hierarchy. Begin with the JSON catalog for a complete minimal set of proposed subject definitions. Other pages change the authoring layout while keeping the same semantics. The reference does not require a mandatory Project or ArchitectureModel root.

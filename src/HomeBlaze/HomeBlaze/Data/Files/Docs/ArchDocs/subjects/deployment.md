@@ -6,19 +6,39 @@ status: Planned
 
 # Deployment [Planned]
 
-Represents an enduring intended installation of one DeploymentUnit in an Environment.
+## Class definition [Planned]
+
+**Deployment** is an [Environment](environment.md)-owned generated subject class representing an enduring intended installation of one [DeploymentUnit](deployment-unit.md). Its stable identity is the environment/unit pair, rather than a rollout event. Generated identity and lifecycle are state; supported manual enrichment is authored through the Environment metadata writer.
+
+Authored enrichment and relationships use the [existing metadata envelope](../shared/metadata-and-relationships.md), through the defining owner. They are not a second configuration store. Names in the tables are proposed serialized camelCase names; concrete CLR signatures remain open. State properties are read-only to authors.
+
+## Configuration properties [Proposed schema]
+
+| Property | Type | Meaning and source |
+|---|---|---|
+| None independently persisted | Not applicable | The Environment owns selection and generated descendants. Versions, URLs, and proposed bindings use the existing owner metadata route rather than a second Deployment definition. |
+
+## State properties [Proposed schema]
+
+| Property | Type | Meaning and source |
+|---|---|---|
+| `environment` | Reference to [Environment](environment.md) | Canonical owner and intended installation context. |
+| `deploymentUnit` | Reference to [DeploymentUnit](deployment-unit.md) | Selected release unit; the pair with Environment establishes generated identity. |
+| `components` | Reference collection of [Component](component.md) | Current release participants from the selected unit, without transferring their ownership. |
+| `version` | `string?` | Intended version from typed owner metadata; omitted means unknown. Metadata remains the editable source. |
+| `urls` | `string` collection | Relevant manually supplied access links from owner metadata; absent or empty provides no known links. |
+| `endpoints` | Reference collection of [Endpoint](endpoint.md) | Related environment access bindings; canonical binding ownership/persistence remains open. |
+| `resourceMappings` | Binding records referencing [Resource](resource.md) | Proposed intended concrete resource mappings, without replacing logical Resource identity; record schema remains open. |
+| `observedStatus` | Optional observation record | Read-only observation only when an integration supplies evidence; otherwise unavailable. |
+| `diagnostics` | Diagnostic collection | Selection, enrichment, or binding validation issues. |
+
+Typed metadata accessors expose intended enrichment as readable subject state; they do not make it discovered or observed data. Component-specific version bindings, endpoint bindings, and resource mapping records still require a chosen schema.
 
 ## Implementation readiness
 
 **Delivery:** Can be implemented through existing subject and component extension points. The ArchDocs feature itself is not implemented.
 
 **Prerequisites:** Environment ownership, DeploymentUnit references, reconciliation, and enrichment through the existing metadata mechanism.
-
-## Data [Planned]
-
-| Generated identity | Authored enrichment or bindings |
-|---|---|
-| Environment and DeploymentUnit | Versions, relevant URLs, Endpoint addresses, and concrete Resource mappings; exact binding records remain open |
 
 ## UI [Planned]
 

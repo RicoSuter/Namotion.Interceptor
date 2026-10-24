@@ -6,19 +6,35 @@ status: Planned
 
 # DeploymentUnit [Planned]
 
-Selects the explicit components participating in a coordinated release.
+## Class definition [Planned]
+
+**DeploymentUnit** is an authored subject class selecting the explicit [Components](component.md) participating in a coordinated release. Its defining file owns its configuration; selected participants retain their own owners. It is independent of a [Service](service.md) boundary and does not itself establish provisioning, execution, or observed deployment.
+
+Authored enrichment and relationships use the [existing metadata envelope](../shared/metadata-and-relationships.md), through the defining owner. They are not a second configuration store. Names in the tables are proposed serialized camelCase names; concrete CLR signatures remain open. State properties are read-only to authors.
+
+## Configuration properties [Proposed schema]
+
+| Property | Type | Meaning and source |
+|---|---|---|
+| `name` | `string` | Readable release-unit name; identity is not derived from the label alone. |
+| `componentSources` | Path-query collection selecting [Component](component.md) | Explicit release participants. Proposed default: absent or empty selects none; invalid or ineligible results produce diagnostics. |
+
+Selection syntax, union/deduplication behavior, and invalidation follow [path queries](../shared/path-queries.md). The participant eligibility and managed-resource schemas remain open.
+
+## State properties [Proposed schema]
+
+| Property | Type | Meaning and source |
+|---|---|---|
+| `components` | Reference collection of [Component](component.md) | Resolved, deduplicated release participants. Component capability alone does not establish release eligibility. |
+| `hosts` | Reference collection of [Host](host.md) | Direct Host subset of selected participants, where useful; no transitive expansion through Services or Resources. |
+| `deployments` | Reference collection of [Deployment](deployment.md) | Inverse intended installations that reference this unit. |
+| `diagnostics` | Diagnostic collection | Selector failures, cyclic dependencies, wrong kinds, and eligibility issues. |
 
 ## Implementation readiness
 
 **Delivery:** Can be implemented through existing subject and component extension points. The ArchDocs feature itself is not implemented.
 
 **Prerequisites:** Component path queries and release-participant eligibility rules. No HomeBlaze page-shell extension is required.
-
-## Data [Planned]
-
-| Configuration | Resolved state |
-|---|---|
-| name, componentSources | components, typed Host subset where useful, diagnostics |
 
 ## UI [Planned]
 

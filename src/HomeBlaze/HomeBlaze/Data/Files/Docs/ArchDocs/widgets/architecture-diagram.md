@@ -1,12 +1,25 @@
 ---
-title: ArchitectureDiagram
-navTitle: ArchitectureDiagram
+title: Architecture Diagrams
+navTitle: Architecture Diagrams
 status: Planned
 ---
 
-# ArchitectureDiagram [Planned]
+# Architecture Diagrams [Planned]
 
 Render service, component, context, or deployment views without fixing a documentation format.
+
+## Widget entry points [Proposed]
+
+Use separate author-facing widgets with configurations appropriate to each view. Share graph queries, relationship readers, node summaries, navigation, and renderer infrastructure underneath them. Distinct entry points allow different boxes, labels, grouping, and layout behavior without a growing `View` switch that exposes irrelevant options to each author.
+
+| Widget | Primary data | Configuration reference |
+|---|---|---|
+| [ServiceDiagram](service-diagram.md) | [Services](../subjects/service.md) and interactions between them | Service scope and optional source queries |
+| [ComponentDiagram](component-diagram.md) | A Service's [Components](../subjects/component.md), such as [Hosts](../subjects/host.md) and [Resources](../subjects/resource.md) | Service reference and optional component queries |
+| [ContextDiagram](context-diagram.md) | Internal/external Services and optional [Actors](../subjects/actor.md) | Explicit boundary selections per view |
+| [DeploymentDiagram](deployment-diagram.md) | [Environments](../subjects/environment.md), [Deployments](../subjects/deployment.md), and [DeploymentUnits](../subjects/deployment-unit.md) | Environment selections and available bindings |
+
+These are proposed names and schemas, all unimplemented. The earlier single ArchitectureDiagram with a View parameter is replaced in the examples by these proposed entry points; no compatibility alias is required for an unimplemented component. This page owns their common behavior, not a second public configuration schema or a domain subject. Renderer selection and whether specialized views share one renderer or several remain open.
 
 ## Implementation readiness
 
@@ -28,7 +41,7 @@ Runtime sequences need authored scenarios. Complete deployment views need enviro
 
 The user confirmed that internal/external is relative to the diagram's documented system boundary, including neighboring systems operated by the same organization. The author chooses what is internal and external for each context diagram. Payments can be internal in the Commerce context and external in an Orders context without changing the Service subject. Organizational ownership is a separate concern and is not requested as a substitute for this boundary classification.
 
-Proposed field shape: the diagram has internalSources and externalSources lists using the shared PathQuery record, with resolved internal and external sets as view state. Exact field spellings and rendering details remain open. The sample demonstrates both contexts using the same Orders and Payments subjects. Its block configuration uses PascalCase keys, as existing Markdown configuration fences do; persisted subject/frontmatter configuration follows its own naming convention.
+The proposed [ContextDiagram configuration](context-diagram.md#configuration-properties-proposed-schema) has InternalSources and ExternalSources lists using the shared PathQuery record, with resolved internal and external sets as view state. Exact field spellings and rendering details remain open. The sample demonstrates both contexts using the same Orders and Payments subjects. Its block configuration uses PascalCase keys, as existing Markdown configuration fences do; persisted subject/frontmatter configuration follows its own naming convention.
 
 Proposed defaults: explicit lists control the visible participants and relationships between them; diagnose an identity selected into both sets instead of cloning it or silently choosing a side. Optional automatic discovery of neighboring participants can be considered separately. Boundary membership and layout are view configuration, while semantic relationships stay in the shared model. No global internal/external flag or separate external-Service subtype is needed. Actors and their representation remain open; no mandatory System root has been selected.
 

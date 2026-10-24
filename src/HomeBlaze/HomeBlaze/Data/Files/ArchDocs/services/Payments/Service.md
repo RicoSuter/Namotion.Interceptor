@@ -11,7 +11,7 @@ $service:
     - path: /ArchDocs/resources/OrderEvents
 metadata:
   $subjects:
-    "Children[service]":
+    service:
       relationships:
         - kind: consumes
           source: /ArchDocs/Repository/hosts/Payments.Api

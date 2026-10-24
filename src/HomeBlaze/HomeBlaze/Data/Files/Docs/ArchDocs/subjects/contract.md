@@ -6,48 +6,67 @@ status: Planned
 
 # Contract [Planned]
 
-Describes a public software surface independently of networking, language, deployment, or a consumer.
+## Class definition [Planned]
+
+Contract describes a public software surface independently of networking, language, deployment, or a consumer. It is the common subject capability for [OpenApiContract](openapi-contract.md), [ProtobufContract](protobuf-contract.md), and [CSharpApiContract](csharp-api-contract.md). [CodeProjects](code-project.md) and [Interfaces](interface.md) can reference Contracts. Whether the base class itself is concrete remains a schema decision; a document with no supported parser must still have useful raw source presentation.
+
+## Configuration properties [Proposed schema]
+
+These fields describe the intended authored schema, not implemented configuration. Exact CLR declarations, type discriminators, and serialization details remain proposed.
+
+| Property | Type | Required | Contract |
+|---|---|---|---|
+| `name` | `string` | No | Optional readable name; absence does not prevent raw document access or establish a different identity. |
+| `version` | `string` | No | Optional authored version label. Absence means no authored version; it does not imply a default or compatibility guarantee. |
+| `codeProjectPath` | Subject-path `string` referencing [CodeProject](code-project.md) | No | Explicit project association, resolved through the subject path resolver. This is a subject reference, not a source file location. |
+
+Format-specific file inputs belong to the subtype. A raw contract file and an authored descriptor are distinct: the descriptor configures a subject and selects its raw source, while discovery already knows the raw file location. The descriptor need not contain a copy of the source document.
+
+## State properties [Proposed schema]
+
+The following state is read-only. The exact member names beyond the resolved `codeProject` reference, record types, collection shapes, revision identity, and snapshot ABI remain proposed.
+
+| State | Type | Meaning |
+|---|---|---|
+| `codeProject` | Optional [CodeProject](code-project.md) reference | The resolved explicit or unambiguous same-directory association. An unresolved or ambiguous association remains absent and produces a source-located diagnostic. |
+| `provenance` | Source/provenance records | Raw document location, defining file or analyzer owner, and available source/revision information. Explicit association and inferred association remain distinguishable. |
+| `diagnostics` | Diagnostic records | Unsupported input, unresolved references, parse failures, ambiguous project association, and conflicting definitions, with readable source locations. |
+| `referringSubjects` | Subject references, including [CodeProject](code-project.md) and [Interface](interface.md) | Subjects that reference this Contract. These references do not clone it or transfer ownership. |
+
+The associated CodeProject's Contracts collection is a read-only inverse of this association. Do not maintain a second editable `hasContract` relationship for the same fact. Other descriptive relationships still use the shared relationship model.
 
 ## Implementation readiness
 
-**Delivery:** Can be implemented through existing subject and component extension points. The ArchDocs feature itself is not implemented.
+**Delivery:** Can be implemented through existing subject and component extension points. The ArchDocs feature, Contract schemas, raw contract discovery, and parsers described here are not implemented.
 
-**Prerequisites:** Existing subject registration and source/document references. Parsing and public API extraction are optional analyzer capabilities.
+**Prerequisites:** Subject registration, documented file origins and subject references, project discovery for inferred associations, and reconciliation. Parsing and public API extraction are optional analyzer capabilities.
 
-## Data [Planned]
+## Association and discovery [Planned]
 
-| Common information | Capability |
-|---|---|
-| Description, source/document references, optional version, analyzer provenance | Referenced by CodeProjects and Interfaces; raw and parsed presentation where supported |
+An explicit `codeProjectPath` takes precedence over directory inference. If that explicit reference is invalid, report the error without silently substituting another project. For a selected or discovered raw contract document without an explicit association, consider only CodeProjects whose source project file is in the raw document's own directory. Exactly one candidate permits association. No candidates or multiple candidates require an explicit `codeProjectPath` in an authored descriptor; keep the raw document accessible and report a visible diagnostic.
 
-Reference source documents through existing storage/file subjects or an explicit source descriptor where suitable. Authored and discovered Contracts have a defining file or analyzer owner; referencing a Contract does not clone it or transfer ownership. Exact source, revision, snapshot, and version identity are open.
-
-## Specializations [Planned]
-
-- [OpenApiContract](openapi-contract.md): HTTP API operations, parameters, and schemas.
-- [ProtobufContract](protobuf-contract.md): services, RPCs, and message definitions.
-- [CSharpApiContract](csharp-api-contract.md): public programming types, members, and signatures.
-
-CodeProjects and Interfaces reference the base Contract capability. Additional types can be registered; no closed format enum is required. Proposed default: keep the base Contract usable for documents with no supported parser. Whether to make the base concrete is still a schema choice, not a claim that a parser exists.
+Do not search ancestor directories, choose a nearest project, or infer a project through a Host. A CodeProject can have Contracts with zero Hosts, Interfaces, or Endpoints and can contribute to zero or many Hosts. File path origins, precedence, owner boundaries, and unresolved collision choices are specified once in [Contract file discovery](../analyzers/contract-discovery.md).
 
 ## Invariants [Planned]
 
-A library API needs no Host, network Interface, or Endpoint. A parsed representation is tied to its source/revision. Unknown or unsupported input is reported explicitly. Comparison and compatibility analysis are separate capabilities, not implied by having a version field.
+A library API needs no Host, network Interface, or Endpoint. Parsed state must remain tied to its source/revision. Unknown or unsupported input is reported explicitly and retains raw source access. A version label does not implement comparison or compatibility assessment.
+
+Authored definitions take precedence over same-source discovered duplicates. Discovery never writes descriptor JSON. A referencing subject does not take ownership of a Contract. Exact source identity, competing explicit definitions, and authored/generated ownership transitions remain design work, with conflicts reported rather than silently reassigned.
 
 ## UI [Planned]
 
-**Summary widget:** source, optional version, provenance, diagnostics, and referencing CodeProjects/Interfaces.
+**Summary widget:** source, optional version, association and its provenance, diagnostics, and referencing subjects.
 
-**Detail page:** common source/document access and available public-surface information. Reuse the base presentation when no specialized parser or viewer is available. Format-specific viewers are documented with their Contract subtype below.
+**Detail page:** common source/document access and available public-surface information. Reuse the base presentation when no specialized parser or viewer is available. Format-specific viewers belong to the subtype specifications.
 
-**Editing:** supported authored source/version information and enrichment; parsed/analyzer-derived surfaces remain read-only discovered state.
+**Editing:** supported authored name, version, subtype source selection, and explicit project association through the defining file's writer. Parsed state and inferred references remain read-only. A diagnostic for a missing or ambiguous project must be understandable without opening a diagram.
 
-Explicit embeds and standalone detail pages use existing registration and can precede automatic context/link-preview integration. Comparison and compatibility assessment remain separate capabilities. Registering a subtype does not by itself implement parsing or comparison.
+Explicit embeds and standalone detail pages use existing registration and can precede automatic context/link-preview integration. Registering a subtype does not implement discovery, parsing, comparison, or compatibility assessment.
 
 ## Usage examples
 
-[Library contracts](../examples/library-contracts.md)
+[Contract files and discovery](../examples/contract-files.md) · [Library contracts](../examples/library-contracts.md)
 
 ## Related specifications
 
-[Overview and status legend](../overview.md) · [Platform readiness](../implementation-readiness.md)
+[Overview and status legend](../overview.md) · [Platform readiness](../implementation-readiness.md) · [File authoring](../file-authoring.md)

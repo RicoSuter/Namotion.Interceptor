@@ -22,7 +22,8 @@ Use normal typed DI/module registration. No separate executable plugin loader is
 
 ## Categories [Planned]
 
-- [C# project analyzer](csharpanalyzer.md): basic csproj XML and project-level elements.
+- [C# project analyzer](csharpanalyzer.md): basic solution/project XML, source/build groupings, and project-level elements.
+- [Contract file discovery](contract-discovery.md): raw file recognition, same-directory project association, and explicit-definition precedence independently of parsing.
 - [C# public API analyzer](csharp-api-analyzer.md): optional programming API Contract extraction.
 - [OpenAPI analyzer](openapi-analyzer.md): optional OpenApiContract parsing.
 - [Protobuf analyzer](protobuf-analyzer.md): optional ProtobufContract parsing.

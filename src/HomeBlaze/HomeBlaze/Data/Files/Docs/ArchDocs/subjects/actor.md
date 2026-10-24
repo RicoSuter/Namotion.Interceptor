@@ -6,7 +6,27 @@ status: Planned
 
 # Actor [Planned]
 
-Represents a person or role interacting with a system in architectural views.
+## Class definition [Planned]
+
+**Actor** is an optional proposed subject class representing a person or role interacting with a system in architectural views. It is authored by its defining file; it is not a user account. No [Component](component.md), composition, or deployment capability is selected. The following fields are proposals for this optional concept, not an approved concrete schema.
+
+Authored enrichment and relationships use the [existing metadata envelope](../shared/metadata-and-relationships.md), through the defining owner. They are not a second configuration store. Names in the tables are proposed serialized camelCase names; concrete CLR signatures remain open. State properties are read-only to authors.
+
+## Configuration properties [Proposed schema]
+
+| Property | Type | Meaning and source |
+|---|---|---|
+| `name` | `string` | Readable person or role name; proposed required field if Actor is selected. |
+| `kind` | `string?` | Optional extensible distinction such as person or role; omitted means unspecified. |
+
+Descriptions, notes, links, tags, and relationship records remain authored metadata. Identity, allowed kind values, and relationship endpoint rules remain open.
+
+## State properties [Proposed schema]
+
+| Property | Type | Meaning and source |
+|---|---|---|
+| `relationships` | Relationship references to [Service](service.md) and other supported subjects | Read-only architectural interactions resolved from the existing metadata records; endpoint validation remains proposed. |
+| `diagnostics` | Diagnostic collection | Invalid authored fields or unresolved relationship targets; empty after successful validation with no issues. |
 
 ## Implementation readiness
 

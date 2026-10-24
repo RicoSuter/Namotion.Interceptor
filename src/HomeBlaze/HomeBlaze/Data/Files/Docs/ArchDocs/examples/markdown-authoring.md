@@ -22,7 +22,7 @@ $service:
     - path: /Repository/hosts/Orders.*
 metadata:
   $subjects:
-    "Children[service]":
+    service:
       relationships:
         - kind: calls
           target: /catalog/Payments
@@ -37,7 +37,7 @@ Orders accepts and processes customer orders.
 ::
 ````
 
-Payments is assumed to be a separately defined Service. The relationship belongs to the Service child rather than the page. Generic frontmatter children and metadata persistence require HomeBlaze changes. Optional context contributions can expose related information even if the explicit Widget block is omitted, once the page-contribution extension exists.
+Payments is assumed to be a separately defined Service. The `$service` entry declares the child, while `metadata.$subjects.service` enriches it using the same inline name as `Path=service`. The relationship belongs to the Service child rather than the page. Inline child paths already exist; generic frontmatter children and metadata persistence require HomeBlaze changes. Optional context contributions can expose related information even if the explicit Widget block is omitted, once the page-contribution extension exists.
 
 ## A named body block [Implemented entry point] / [Planned subject]
 

@@ -11,7 +11,7 @@ $service:
     - path: /ArchDocs/resources/OrderEvents
 metadata:
   $subjects:
-    "Children[service]":
+    service:
       relationships:
         - kind: calls
           target: /ArchDocs/services/Payments/Service.md/service
@@ -40,7 +40,7 @@ The worker stores order data in the Orders database and publishes OrderPlaced me
 
 Orders is inside this view's boundary. Payments is a neighboring service in this view, while remaining inside the wider Commerce context.
 
-:: Namotion.ArchDocs.ArchitectureDiagram#context Path=/ArchDocs View=Context
+:: Namotion.ArchDocs.ContextDiagram#context Path=/ArchDocs
 ```json
 {
   "InternalSources": [
@@ -55,5 +55,5 @@ Orders is inside this view's boundary. Payments is a neighboring service in this
 
 ## Components
 
-:: Namotion.ArchDocs.ArchitectureDiagram#components Path=service View=Components
+:: Namotion.ArchDocs.ComponentDiagram#components Path=service
 ::

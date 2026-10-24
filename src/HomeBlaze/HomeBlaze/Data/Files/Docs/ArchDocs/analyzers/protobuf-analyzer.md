@@ -6,21 +6,21 @@ status: Planned
 
 # Protobuf Analyzer [Planned]
 
-Populate a specialized Contract from protobuf source or descriptor input.
+Populate a specialized Contract from explicitly selected or discovered protobuf source.
 
 ## Implementation readiness
 
 **Delivery:** Can be implemented through existing subject and component extension points. The ArchDocs feature itself is not implemented.
 
-**Prerequisites:** ProtobufContract, explicit source boundaries, and a parser/descriptor approach to be selected.
+**Prerequisites:** ProtobufContract, explicit source boundaries, and a source parser to be selected. Binary-descriptor input is a possible later capability.
 
 ## Input and output [Planned]
 
-Describe services, RPCs, messages, enums, and supported field information with source/revision provenance. A data-only schema can be a Contract without a network endpoint.
+Read the initial `.proto` file selected by an authored [ProtobufContract.path](../subjects/protobuf-contract.md#configuration-properties-proposed-schema) or supplied by [contract discovery](contract-discovery.md). Relative descriptor paths use the defining file's local origin. Describe services, RPCs, messages, enums, and supported field information with source/revision provenance. A data-only schema can be a Contract without a network endpoint. Discovery and project association do not require structured parsing.
 
 ## Decisions before parsing [Proposed]
 
-Source versus descriptor input, import roots, supported revisions, dependency, and diagnostics. Compiler invocation and external dependency acquisition are separate choices. The shared source boundary also applies to imported definitions.
+Import roots, supported revisions, dependency, parsed model, diagnostics, and any later binary-descriptor input. Compiler invocation and external dependency acquisition are separate choices. The shared source boundary also applies to imported definitions.
 
 ## Verification criteria [Planned]
 

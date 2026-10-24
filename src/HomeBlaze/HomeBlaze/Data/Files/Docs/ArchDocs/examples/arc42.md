@@ -25,7 +25,7 @@ Record the constraints that matter to this system.
 
 This document treats Orders as internal and Payments as a neighboring system.
 
-:: Namotion.ArchDocs.ArchitectureDiagram#context Path=/catalog View=Context
+:: Namotion.ArchDocs.ContextDiagram#context Path=/catalog
 ```json
 {
   "InternalSources": [{ "Path": "/catalog/Orders" }],
@@ -43,7 +43,7 @@ Explain the architectural choices and their trade-offs.
 :: Namotion.ArchDocs.ServiceTable Path=/catalog
 ::
 
-:: Namotion.ArchDocs.ArchitectureDiagram#components Path=/catalog/Orders View=Components
+:: Namotion.ArchDocs.ComponentDiagram#components Path=/catalog/Orders
 ::
 
 ## 6. Runtime view
@@ -78,4 +78,4 @@ Define the important terms used by this documentation.
 
 Another context view can put both Orders and Payments inside its boundary without changing either Service. Diagrams aggregate only the supplied graph facts. Complete deployment topology requires concrete bindings; runtime sequences need authored scenarios. Keep these facts and explanations visible rather than inventing a complete architecture from incomplete inputs.
 
-[ArchitectureDiagram](../widgets/architecture-diagram.md) · [Widget reference](../widgets/overview.md) · [Examples](overview.md)
+[Architecture diagrams](../widgets/architecture-diagram.md) · [Widget reference](../widgets/overview.md) · [Examples](overview.md)

@@ -6,7 +6,25 @@ status: Planned
 
 # Component [Planned]
 
-A shared capability for elements that can participate in architectural composition.
+## Class definition [Planned]
+
+**Component** is an interface capability for subjects that can participate in architectural composition, not a concrete subject class or a new ownership base. [Service](service.md), [Host](host.md), [Resource](resource.md), and [CodeProject](code-project.md) participate. Exact C# interface names and signatures remain proposed. Membership preserves the concrete subject owner and does not imply execution, deployability, exclusive ownership, or a canonical parent.
+
+Authored enrichment and relationships use the [existing metadata envelope](../shared/metadata-and-relationships.md), through the defining owner. They are not a second configuration store. Names in the tables are proposed serialized camelCase names; concrete CLR signatures remain open. State properties are read-only to authors.
+
+## Configuration properties [Proposed schema]
+
+| Property | Type | Meaning and source |
+|---|---|---|
+| None declared by this capability | Not applicable | Concrete subjects define their own authored fields; existing display and metadata capabilities are reused. |
+
+## State properties [Proposed schema]
+
+| Property | Type | Meaning and source |
+|---|---|---|
+| None declared by this capability | Not applicable | Concrete subjects expose applicable resolved collections. Component itself does not require composition, Contracts, Interfaces, or resource provision. |
+
+[Service](service.md) is also a Component, allowing nested logical services. Queries remain usable with subjects outside this capability. [CodeSolution](code-solution.md), [Artifact](artifact.md), and [Actor](actor.md) participation is not selected.
 
 ## Implementation readiness
 
@@ -14,11 +32,9 @@ A shared capability for elements that can participate in architectural compositi
 
 **Prerequisites:** The planned ArchDocs capability model and applicable query, metadata, and lifecycle services. Their delivery order is not an approved implementation plan.
 
-## Shape [Planned]
+## Capability boundaries [Planned]
 
-Use a small component interface shared by Service, Host, Resource, and CodeProject. Exact C# names and signatures remain proposed. Component membership does not imply execution, deployability, exclusive ownership, or a canonical parent. Service is also a component, allowing nested logical services. Queries remain usable with subjects that do not implement this capability.
-
-Composition, contract references, interface exposure, and resource provision are separate capabilities. Each subject implements only the ones that apply. Existing display, metadata, and path interfaces should be reused rather than copied into a large new base class.
+Composition, [Contract](contract.md) references, [Interface](interface.md) exposure, and [Resource](resource.md) provision are separate capabilities. Each subject implements only the ones that apply. Existing display, metadata, and path interfaces should be reused rather than copied into a large new base class.
 
 ## Invariants [Planned]
 

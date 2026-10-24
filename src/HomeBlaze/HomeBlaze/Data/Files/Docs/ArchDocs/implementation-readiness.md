@@ -28,9 +28,10 @@ Delivery readiness is a separate axis: **Extension** can use existing host contr
 | Registered subject page, edit, and widget components | [Implemented] | Existing platform; IPage is navigation metadata |
 | Explicit configurable body blocks and named block references | [Implemented] | Existing Markdown authoring; new types still need registration/components |
 | JSON-sidecar metadata and descendant enrichment | [Implemented] | Existing metadata store and writer |
+| Inline paths for named Markdown children and registered path writing | [Implemented] | Reuse child names such as `service`; frontmatter loading/persistence remains separate planned work |
 | Plain links and manual CanvasLayout nodes | [Implemented] | Normal navigation/placement; no semantic connector lines |
 | All ArchDocs subject types and contract specializations | [Planned] | Extension; capability model, references, and registration |
-| Repository/project and contract analyzers | [Planned] | Extension; selected read-only source and analyzer contracts |
+| Repository/solution/project discovery and contract-file association/parsing | [Planned] | Extension; selected read-only source and analyzer contracts; file recognition/association does not require full parsing |
 | Generic wildcard selection and typed relationship readers | [Planned] | Extension/shared services; existing resolver alone is insufficient |
 | Reconciled repository children and Environment Deployments | [Planned] | Extension; lifecycle, identity, worker, and metadata prerequisites |
 | Subject-specific widgets, detail pages, and editors | [Planned] | Extension; specified with each subject, with domain/parser prerequisites as applicable |

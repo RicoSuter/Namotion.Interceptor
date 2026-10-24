@@ -6,19 +6,42 @@ status: Planned
 
 # SourceRepository [Planned]
 
-Owns discovered software elements from an existing source directory or checkout.
+## Class definition [Planned]
+
+**SourceRepository** is an authored subject class identifying an existing source directory or checkout and owning analyzer-discovered [CodeSolutions](code-solution.md), [CodeProjects](code-project.md), [Hosts](host.md), and optional [Contracts](contract.md). Its defining file owns configuration and descendant enrichment. It coordinates read-only discovery and stable keyed reconciliation; it does not require Git or perform Git operations.
+
+Authored enrichment and relationships use the [existing metadata envelope](../shared/metadata-and-relationships.md), through the defining owner. They are not a second configuration store. Names in the tables are proposed serialized camelCase names; concrete CLR signatures remain open. State properties are read-only to authors.
+
+## Configuration properties [Proposed schema]
+
+| Property | Type | Meaning and source |
+|---|---|---|
+| `sourceRoot` | `string` | Required local source directory. Relative file locations resolve from the defining configuration file; no process-working-directory default. |
+| `analyzers` | Analyzer-configuration collection | Proposed registered analyzers and their supported options; exact representation/default selection remains open. |
+| `scanOptions` | Scan-option record | Proposed inclusion, exclusion, traversal, and link policies; exact fields/defaults remain open. |
+
+No analyzer execution, source mount, or traversal policy is implied by an omitted proposed option. Scan defaults must be documented before implementation. A source root without a local file origin needs an explicit absolute location unless a future backend supplies another unambiguous source identity.
+
+## State properties [Proposed schema]
+
+| Property | Type | Meaning and source |
+|---|---|---|
+| `solutions` | Keyed owned collection of [CodeSolution](code-solution.md) | Solution-file discovery results with stable repository-relative identity; grouping only. |
+| `projects` | Keyed owned collection of [CodeProject](code-project.md) | Discovered code/build projects, shared by all referring solutions. |
+| `hosts` | Keyed owned collection of [Host](host.md) | Supported runnable process definitions; discovery does not select Service/release membership. |
+| `contracts` | Keyed owned collection of [Contract](contract.md) | Optional raw-file discovery results; explicit authored definitions take precedence according to the [contract discovery rules](../analyzers/contract-discovery.md). |
+| `analysisStatus` | Analysis-status value | Distinguishes not analyzed, current work, success, failure, and cancellation; exact vocabulary remains proposed. |
+| `diagnostics` | Diagnostic collection | Readable source-located configuration and analyzer findings, kept separate from last successful results. |
+| `lastSuccessfulAnalysis` | Optional UTC timestamp | Time of the last complete successful publication; absent before any successful pass. |
+| `provenance` | Provenance records | Analyzer identities and supporting source locations for the published graph. |
+
+A successful empty result is distinct from failure. A failed pass retains the entire last successful graph, including solution/project memberships, under [reconciliation](../shared/reconciliation.md) and [publication rules](../shared/path-queries.md).
 
 ## Implementation readiness
 
 **Delivery:** Can be implemented through existing subject and component extension points. The ArchDocs feature itself is not implemented.
 
 **Prerequisites:** Read-only local source access, analyzer registration, and keyed reconciliation. Frontmatter authoring additionally needs the Markdown extension.
-
-## Data [Planned]
-
-| Authored configuration | Owned state |
-|---|---|
-| sourceRoot; analyzer and scan options to refine | projects, hosts, analysis status, diagnostics, last successful analysis, and provenance |
 
 Several repositories can coexist. A repository need not be managed by Git. Generated identity is repository-relative and independent of display names and scan order.
 
