@@ -18,6 +18,8 @@ A reusable selection mechanism, independent of source language or domain type.
 
 Do not extend the HomeBlaze page shell to implement selectors. Keep exact paths usable while adding generic collection/wildcard selection in an appropriate library. A widget can consume the same query service as a subject. Repository file paths and subject graph paths are distinct address spaces.
 
+Follow the [file-authoring requirement](../file-authoring.md): selectors and references must be understandable and editable as text, with documented scope, target derivation, casing, wildcard behavior, and defaults. Surface malformed/unresolved references with a source file and relevant key or location. Runtime graphs and UI pickers may help, but must not be the only way to understand what a path selects.
+
 ## Detailed behavior [Planned]
 
 A path-query entry resolves subjects from an exact subject path, a collection-property path, or a subject-path pattern, then optionally applies a `where` property predicate. An exact collection path produces its members; an explicit `/*` can also select those immediate members. The mechanism should be usable outside this domain rather than restricted to an Artifact base class. Repository file-location predicates remain separate from subject-path matching.

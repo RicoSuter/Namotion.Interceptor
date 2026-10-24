@@ -41,12 +41,15 @@ Delivery readiness is a separate axis: **Extension** can use existing host contr
 | Rich overlays for ordinary Markdown links | [Planned] | HomeBlaze change: renderer integration, access/navigation, and preview lifecycle |
 | Manual canvas semantic connector editing | [Planned] | HomeBlaze canvas extension plus relationship editing; not required by a separate generated diagram widget |
 | Shared reconciliation/selection utilities | [Planned] | Optional shared extraction; no Namotion.Interceptor.Utils project exists yet |
+| Readable file schemas, complete authoring examples, diagnostics, and focused writeback | [Planned] | Cross-cutting requirement; applies to extensions and to host storage/writer changes where needed; exact tooling remains open |
 
 ## A delivery boundary that is possible now [Proposed]
 
 An extension can start with JSON subjects, explicit body blocks, source discovery, exact-path membership, typed relationships in JSON-sidecar metadata, and explicitly embedded views. General selectors and reconciliation still need implementation, but do not require the page-shell changes. Build the same domain model so frontmatter and automatic page contributions can be added later without replacing its subjects. This is an available sequencing option, not an approved MVP or task plan.
 
 ## Source evidence [Implemented]
+
+Readiness for extension implementation does not waive the [file-authoring requirement](file-authoring.md). Existing serializers and entry points must be evaluated against its preservation and readability guarantees; not all planned guarantees follow from the ability to load JSON or render Markdown.
 
 - [Subject registration and JSON configuration](../../../../../HomeBlaze.Abstractions/IConfigurable.cs)
 - [JSON configuration serializer](../../../../../HomeBlaze.Services/ConfigurableSubjectSerializer.cs)

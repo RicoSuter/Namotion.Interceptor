@@ -22,6 +22,8 @@ Standalone JSON configuration and registered IConfigurable subjects in explicit 
 
 Top-level $name frontmatter child declarations and the metadata envelope are not implemented. Extend parsing, named-child publication, configuration writeback, metadata writes, and refresh identity together. These features are not prerequisites for JSON subjects or explicitly embedded widgets.
 
+Direct file editing is a first-class authoring path under the [file-authoring requirement](../file-authoring.md). UI writes and source edits must produce the same model. Preserve unrelated Markdown, frontmatter, metadata, and supported comments, and avoid unnecessary whole-document reformatting. Invalid declarations must remain available for correction with source-located diagnostics; ordinary prose and links must remain useful without richer rendering.
+
 Exact naming rules for the new frontmatter schema must be settled; the sample currently illustrates camelCase configuration. Do not assume the existing body-block naming choice automatically decides frontmatter naming.
 
 ## Detailed behavior [Planned]

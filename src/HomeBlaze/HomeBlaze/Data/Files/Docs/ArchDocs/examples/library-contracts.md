@@ -61,6 +61,8 @@ An illustrative Repository.metadata.json entry links the discovered project to t
 
 The Projects collection name and generated route aliases remain schema proposals. hasContract illustrates an extensible relationship kind; it is not an alternative mandatory relationship entity or an independently editable duplicate of a capability property.
 
+In this example, Projects[Shared.Contracts] means the generated Shared.Contracts CodeProject owned by Repository, whose illustrative graph route is /Repository/projects/Shared.Contracts. It scopes enrichment to that existing subject; it does not define another project. The [file-authoring requirement](../file-authoring.md) requires this mapping to be understandable in text and calls for reviewing whether the final metadata/reference syntax can be simpler.
+
 ## Documentation view [Planned]
 
 The library page can reference the CodeProject and Contract in prose or metadata and explicitly embed the Contract's registered widget:

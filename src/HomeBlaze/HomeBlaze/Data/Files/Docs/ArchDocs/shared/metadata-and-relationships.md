@@ -26,6 +26,8 @@ Authored metadata uses kind and target, with optional source, technology, label,
 
 Settle typed readers, validation, inverse navigation, and editor fields. Keep one authoritative persisted entry rather than editable copies on both endpoints.
 
+The [file-authoring requirement](../file-authoring.md) applies to all metadata and relationship entries. A person or agent must be able to identify the owning subject, source, target, and interaction from the text. Review scoped keys and reference syntax for readability, document their resolution, and preserve unknown/unrelated entries through UI writes. Semantic relationships must not exist only in a rendered diagram or a private UI store.
+
 ## Detailed behavior [Planned]
 
 Authored configuration determines logical intent, selectors, and source locations. Metadata holds authored relationships, manual descriptive enrichment, and manual deployment details. Analyzer results and generated child collections are state. Computed summaries and resolved views use the existing derived-property mechanism where appropriate; generated objects are not recreated by a derived getter.

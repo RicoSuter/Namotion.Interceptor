@@ -8,6 +8,8 @@ status: Planned
 
 The examples here are part of the feature reference. They are ordinary Markdown with fenced JSON, YAML, C#, and Markdown source, so reading this documentation does not instantiate the proposed ArchDocs subjects or execute analyzers. Core types, exact field names, generated route aliases, and widgets remain [Planned] or [Proposed] as their element pages specify. These examples express the intended authoring experience, not a final supported schema.
 
+Every final example must satisfy [file authoring and readability](../file-authoring.md): it must make types, fields, source ownership, and reference resolution understandable to people and agents in a normal editor. Provisional type names, scoped metadata keys, and incomplete Contract skeletons are explicit schema work still to settle; a UI cannot be required to fill in their meaning.
+
 ## Choose a documentation style
 
 | Scenario | Documentation arrangement | Planned prerequisites |

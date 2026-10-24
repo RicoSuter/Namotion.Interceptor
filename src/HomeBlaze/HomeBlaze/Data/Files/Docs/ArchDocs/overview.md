@@ -22,6 +22,7 @@ Describe and explore software through ordinary Markdown documentation, authored 
 
 - [Usage examples](examples/overview.md): standalone JSON, frontmatter and inline Markdown, arc42, topics/decisions, libraries, and multiple repositories.
 - [Scope and design decisions](scope-and-decisions.md) and [verification scenarios](verification-scenarios.md): rationale, open decisions, and behavior to verify.
+- [File authoring and readability](file-authoring.md): understand and edit the complete authored model as text, independently of the UI.
 - [Implementation readiness](implementation-readiness.md): implemented platform support, planned extensions, and required HomeBlaze changes.
 - Subjects below: canonical semantics, configuration/state boundaries, references, subject-specific widgets/detail pages/editors, and unresolved schemas.
 - [Analyzers](analyzers/overview.md): read-only source and contract analysis.
@@ -34,6 +35,8 @@ Describe and explore software through ordinary Markdown documentation, authored 
 All ArchDocs functionality is [Planned]. Existing host facilities are marked [Implemented] only in the readiness matrix and relevant integration sections. [Proposed] marks open schema or design choices. These tags track delivery state and do not select an MVP, settle every field name, or authorize product implementation. Readiness describes where work belongs, independently of delivery status.
 
 ## Subjects
+
+All subjects, references, metadata, and widgets follow the [file-authoring requirement](file-authoring.md). Their serialized definitions and relationships must be understandable and editable by people and agents without opening HomeBlaze; useful UI is an additional presentation and editing path.
 
 | Specification | Status | Delivery |
 |---|---|---|

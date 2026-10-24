@@ -10,6 +10,8 @@ This feature reference is the durable specification. It contains the domain cont
 
 ## Goals
 
+- Keep authored Markdown, JSON, metadata, type identifiers, links, selections, and contract references understandable and easy to edit directly by humans and AI agents. The [file-authoring requirement](file-authoring.md) applies to every subject and view.
+
 - Support several source repositories without assuming one service per repository.
 - Discover as much factual information as the supported analyzers can establish, with authored enrichment in JSON and the UI.
 - Describe services independently of source layout, language, process count, and deployment topology.
@@ -73,6 +75,7 @@ The following questions are tracked in the relevant element specification; this 
 - Executable roles: settle extensible execution-behavior and role fields for runnable process definitions; sample-specific subclasses are unnecessary.
 - Presentation contracts: useful subject detail pages, navigation participation, shared page/widget/preview components, and exact UI slot registration.
 - Final schemas and identity: CLR/serialized names, path casing and aliases, generated keys, persistent identity and rename behavior, and raw-source path matching where graph paths are insufficient.
+- File ergonomics: evaluate readable type identifiers, reference/metadata syntax, complete minimal examples, schema tooling, source-located diagnostics, and focused writeback against the file-authoring requirement. Existing fully qualified type names and runtime-shaped scoped metadata keys need explicit review before finalizing the authoring schema.
 - View configuration: generic diagram presets and customization, boundary selection, grouping shared components, manual/automatic layout interaction, and semantic connector editing.
 - Runtime scenarios: plain authored Markdown suffices for the current example; a structured scenario/sequence model is not selected.
 - Initial implementation: which candidate behaviors, exclusions, and UI surfaces form the MVP after sample review, including any long-running verification that must be agreed during planning.

@@ -34,11 +34,16 @@ These scenarios capture intended behavior for the evolving capability. They are 
 24. Reference a Contract from a library CodeProject to describe its public API without creating a Host, network Interface, or Endpoint; distinguish authored content from analyzer-derived snapshots.
 25. Expose an Interface from an appropriate subject, reference its Contract, and bind it to different Endpoints in different environments while retaining the logical Interface identity.
 26. Select a Resource definition/configuration as an explicit release participant alongside Hosts; keep dependency-only references separate and do not imply provisioning or observed installation.
+27. Use only the reference and a normal file editor to understand and change types, relationships, and memberships; follow references to authored definitions or documented discovery rules without a running UI.
+28. Compare equivalent file and UI edits: obtain the same effective configuration, preserve unrelated content and metadata, and produce a focused readable diff.
+29. Inspect malformed or unsupported configuration with readable source-located diagnostics and retain the original input for correction; ordinary documentation remains useful outside the widget renderer.
 
 These are planned verification scenarios, not existing passing tests. Fixture projects and example configuration do not implement ArchDocs. Choose the MVP and delivery order separately; retain the applicable invariants when each capability is implemented.
 
 ## Documentation independence [Planned]
 
 The feature overview, element specifications, scope decisions, and usage examples must explain the feature without any session notes. Each example states its assumed graph root and identifies unimplemented behavior or provisional field names. Reusing a view in another documentation style does not create duplicate domain subjects. Exact-path references, wildcard queries, frontmatter authoring, and automatic context contributions retain their distinct prerequisites.
+
+The [file-authoring acceptance checks](file-authoring.md#acceptance-checks-planned) apply in addition to these feature scenarios. Readability and source editing are product requirements, not only documentation-writing preferences.
 
 [Overview](overview.md) · [Scope decisions](scope-and-decisions.md) · [Examples](examples/overview.md)
