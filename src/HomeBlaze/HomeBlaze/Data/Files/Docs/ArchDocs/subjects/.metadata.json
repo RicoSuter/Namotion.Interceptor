@@ -1,23 +1,23 @@
 {
   "order": [
-    "component.md",
-    "analyzer.md",
-    "source-repository.md",
-    "code-solution.md",
-    "code-project.md",
-    "host.md",
     "service.md",
+    "host.md",
     "resource.md",
+    "component.md",
+    "source-repository.md",
+    "code-project.md",
+    "analyzer.md",
+    "code-solution.md",
+    "deployment-unit.md",
+    "environment.md",
+    "deployment.md",
     "interface.md",
     "endpoint.md",
     "contract.md",
     "openapi-contract.md",
-    "protobuf-contract.md",
     "csharp-api-contract.md",
-    "deployment-unit.md",
-    "environment.md",
-    "deployment.md",
-    "artifact.md",
-    "actor.md"
+    "protobuf-contract.md",
+    "actor.md",
+    "artifact.md"
   ]
 }

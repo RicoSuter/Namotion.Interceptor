@@ -43,27 +43,61 @@ Each subject page begins with its class or capability definition, configuration 
 
 Within the property tables, present the subject's own master data first, then structural references and selections. See [property presentation and authoring](file-authoring.md#schemas-and-examples-planned) for the shared convention.
 
+The groups below follow recommended product and reading priority. Implementation dependencies and the MVP scope remain separate decisions; delivery prerequisites are described in the linked specifications and the [readiness matrix](implementation-readiness.md).
+
+### 1. Core architecture
+
+Start here to describe the software, its runnable parts, and the capabilities it uses.
+
 | Specification | Status | Delivery |
 |---|---|---|
-| [Component](subjects/component.md) | [Planned] | Extension; see prerequisites |
-| [Analyzer](subjects/analyzer.md) | [Planned] | Shared singleton subject; registration and graph publication required |
-| [SourceRepository](subjects/source-repository.md) | [Planned] | Extension; see prerequisites |
-| [CodeSolution](subjects/code-solution.md) | [Planned] | Extension; see prerequisites |
-| [CodeProject](subjects/code-project.md) | [Planned] | Extension; see prerequisites |
-| [Host](subjects/host.md) | [Planned] | Extension; see prerequisites |
 | [Service](subjects/service.md) | [Planned] | Extension; see prerequisites |
+| [Host](subjects/host.md) | [Planned] | Extension; see prerequisites |
 | [Resource](subjects/resource.md) | [Planned] | Extension; see prerequisites |
+| [Component](subjects/component.md) | [Planned] | Extension; see prerequisites |
+
+### 2. Source discovery
+
+Connect the architecture to source code and enrich it through shared analyzers. Solution grouping adds useful build context after projects are available.
+
+| Specification | Status | Delivery |
+|---|---|---|
+| [SourceRepository](subjects/source-repository.md) | [Planned] | Extension; see prerequisites |
+| [CodeProject](subjects/code-project.md) | [Planned] | Extension; see prerequisites |
+| [Analyzer](subjects/analyzer.md) | [Planned] | Shared singleton subject; registration and graph publication required |
+| [CodeSolution](subjects/code-solution.md) | [Planned] | Extension; see prerequisites |
+
+### 3. Deployment architecture
+
+Describe coordinated releases and their intended installations in selected environments.
+
+| Specification | Status | Delivery |
+|---|---|---|
+| [DeploymentUnit](subjects/deployment-unit.md) | [Planned] | Extension; see prerequisites |
+| [Environment](subjects/environment.md) | [Planned] | Extension; see prerequisites |
+| [Deployment](subjects/deployment.md) | [Planned] | Extension; see prerequisites |
+
+### 4. Interfaces and public contracts
+
+Add logical access, environment addresses, and public API detail as the documentation needs it.
+
+| Specification | Status | Delivery |
+|---|---|---|
 | [Interface](subjects/interface.md) | [Planned] | Extension; see prerequisites |
 | [Endpoint](subjects/endpoint.md) | [Planned] | Extension; see prerequisites |
 | [Contract](subjects/contract.md) | [Planned] | Extension; see prerequisites |
 | [OpenApiContract](subjects/openapi-contract.md) | [Planned] | Extension; see prerequisites |
-| [ProtobufContract](subjects/protobuf-contract.md) | [Planned] | Extension; see prerequisites |
 | [CSharpApiContract](subjects/csharp-api-contract.md) | [Planned] | Extension; see prerequisites |
-| [DeploymentUnit](subjects/deployment-unit.md) | [Planned] | Extension; see prerequisites |
-| [Environment](subjects/environment.md) | [Planned] | Extension; see prerequisites |
-| [Deployment](subjects/deployment.md) | [Planned] | Extension; see prerequisites |
-| [Artifact](subjects/artifact.md) | [Planned] | Optional later concept |
+| [ProtobufContract](subjects/protobuf-contract.md) | [Planned] | Extension; see prerequisites |
+
+### 5. Optional additions
+
+Extend context views with people or roles, and describe produced packages or images when those details become useful.
+
+| Specification | Status | Delivery |
+|---|---|---|
 | [Actor](subjects/actor.md) | [Planned] | Optional later concept |
+| [Artifact](subjects/artifact.md) | [Planned] | Optional later concept |
 
 ## Root and documentation scope [Planned]
 
