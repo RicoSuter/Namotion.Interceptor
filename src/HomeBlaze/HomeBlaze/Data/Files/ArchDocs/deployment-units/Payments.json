@@ -1,7 +1,7 @@
 {
   "$type": "Namotion.ArchDocs.DeploymentUnit",
   "name": "Payments",
-  "hostSources": [
+  "componentSources": [
     {
       "path": "/ArchDocs/services/Payments/Service.md/service/hosts/*"
     }

@@ -21,7 +21,7 @@ The user identified AppHost as the first real documentation target and the [Apim
 
 AppHost already has ordinary Markdown documentation: one arc42 architecture overview, crosscutting concept documents, ADRs, product decision records, guidelines, and an Orders sample domain document. Its architecture describes one coordinated application/release containing Web and Worker processes, shared libraries, a migrations executable, and resources. Orders is a module inside that application, not an independently deployed Service. Keep those existing document roles and enrich them with subject definitions, metadata, and optional views. The two-service Commerce fixture remains useful for a different topology.
 
-The inspected Aspire composition defines PostgreSQL with an appdb database, RabbitMQ, migrations, Web, and Worker. Its local orchestration project is itself executable; migrations run to completion before Web and Worker start. A runnable project is therefore not sufficient evidence of an always-running production Host or deployment membership. The domain must accommodate one-off executable roles and authored selection of deployed processes. Whether orchestration and release steps need distinct types or role metadata remains open. The documentation also distinguishes current local resources from proposed Azure topology and future features; these statuses must remain explicit rather than present proposed infrastructure as discovered deployed state.
+The inspected Aspire composition defines PostgreSQL with an appdb database, RabbitMQ, migrations, Web, and Worker. Its local orchestration project is itself executable; migrations run to completion before Web and Worker start. A runnable project is therefore not sufficient evidence of an always-running production Host or deployment membership. Generic execution behavior and descriptive roles accommodate these differences without sample-specific types. The documentation also distinguishes current local resources from proposed Azure topology and future features; these statuses must remain explicit rather than present proposed infrastructure as discovered deployed state.
 
 The Apimundo service and project views were inspected on 2026-10-24. The following capabilities inform the domain without fixing their replacement schemas:
 
@@ -31,7 +31,7 @@ The Apimundo service and project views were inspected on 2026-10-24. The followi
 | Repository code-project dependency graph | SourceRepository and CodeProject discovery, shared references, and graph presentation |
 | Component/artifact inventory | Service, Host, and Resource cover part of this; people/actors and their relationships remain open |
 | Service-by-environment matrix, deployment detail, version and status | Environment, DeploymentUnit, and Deployment; observed health and monitoring integrations remain separate future choices |
-| Logical API, environment-specific endpoint, and versioned specification | Currently an explicit gap; distinguish interface definitions, deployed addresses, and contract documents before choosing entity names or ownership |
+| Logical API, environment-specific endpoint, and versioned specification | Interface, Endpoint, and reusable Contract are now accepted concepts; exact schema, ownership, and version representation remain open |
 | API operations, schemas, specification view, and version selection | Contract parsing and exploration extend beyond the simple project-file analyzer; MVP inclusion is undecided |
 | SDK package references and feeds | Package/artifact identities, versions, and their links to services/projects remain to be designed |
 
@@ -77,7 +77,7 @@ A configurable SubjectProjection was considered. The chosen approach puts genera
 
 ### Selector syntax
 
-Structured selectors, named selections, and compact query syntax were discussed. The latest direction uses subject paths with `*` and `**` plus optional property filters, without a separate named-selection concept. Proposed default: configuration collections contain entries with `path` and optional `where`, reusing the existing expression parser for conditions. Keep source definitions distinct from resolved subject collections, illustratively `componentSources` versus `components`, `hostSources` versus `hosts`, and `deploymentUnitSources` versus `deploymentUnits`. These names remain proposed API choices. The [self-contained working sample](../../../src/HomeBlaze/HomeBlaze/Data/Files/ArchDocs/README.md) is the current place to refine the file structure and schema before finalizing this design or its MVP.
+Structured selectors, named selections, and compact query syntax were discussed. The latest direction uses subject paths with `*` and `**` plus optional property filters, without a separate named-selection concept. Proposed default: configuration collections contain entries with `path` and optional `where`, reusing the existing expression parser for conditions. Keep source definitions distinct from resolved subject collections, illustratively `componentSources` versus `components` for services and deployment units, and `deploymentUnitSources` versus `deploymentUnits` for environments. These names remain proposed API choices. The [self-contained working sample](../../../src/HomeBlaze/HomeBlaze/Data/Files/ArchDocs/README.md) is the current place to refine the file structure and schema before finalizing this design or its MVP.
 
 ### Markdown defines domain subjects
 
@@ -169,13 +169,16 @@ The tables below record the logical model and current field proposals. Lowercase
 | Entity | Authored configuration | Resolved or discovered data | Ownership and cardinality |
 |---|---|---|---|
 | SourceRepository | `sourceRoot`; analyzer/scan options remain to be specified | `projects`, `hosts`, analysis status, diagnostics, last successful analysis, fact provenance | Owns discovered CodeProject and Host subjects; several repositories per graph |
-| CodeProject | Discovered by an analyzer; manual enrichment through owner metadata | Stable repository-relative identity, `name`, source path, language, project classification, literal project references and other supported facts | Owned once by its SourceRepository; referenced by services, hosts, and other projects |
-| Host | Analyzer-discovered or manually authored when source discovery is unavailable; exact manual schema remains open | Stable identity, `name`, optional entry CodeProject reference, known source/runtime/packaging facts | SourceRepository owns discovered hosts; an authored definition owns a manual host; either can be referenced by services or units |
-| Service | `name`, `componentSources: PathQuery[]`; proposed extensible `kind` and optional `technology` | `components`, the direct Host subset `hosts`, query diagnostics; API/interface descriptions remain to be specified | Logical software capability or system, including neighboring enterprise systems; references existing subjects rather than cloning them |
+| CodeProject | Discovered by an analyzer; manual enrichment through owner metadata; optional Contract references | Stable repository-relative identity, `name`, source path, language, project classification, literal project references, contracts, and other supported facts | Owned once by its SourceRepository; referenced by services, hosts, and other projects |
+| Host | Analyzer-discovered or manually authored; optional descriptive execution behavior such as continuous or run-to-completion | Stable identity, `name`, optional entry CodeProject reference, known runtime/packaging facts, provided Resources, exposed Interfaces | SourceRepository owns discovered hosts; an authored definition owns a manual host; either can be referenced by services or units |
+| Service | `name`, `componentSources: PathQuery[]`; proposed extensible `kind` and optional `technology` | `components`, the direct Host subset `hosts`, query diagnostics, exposed Interfaces | Logical software capability or system, including neighboring enterprise systems; references existing subjects rather than cloning them |
 | Resource | `name`, extensible `kind`, optional `technology` | Component-level dependencies such as databases, queues, or cloud offerings; relationships and reverse-use views; hosting and environment-instance mappings remain open | Authored once in JSON or as a child definition; service-specific or shared |
-| DeploymentUnit | `name`, `hostSources: PathQuery[]` | Resolved `hosts`, query diagnostics | References hosts from one or several services; does not own the Host subjects |
+| Interface | Logical capability/protocol description; optional Contract references | Exposing subjects, contracts, related Endpoints, and relationships | Can be exposed by Services, Hosts, or Resources without requiring known implementation details; exact ownership/schema remains open |
+| Contract | Public-surface description; proposed format, document/source references, and optional version information | Contract content or parsed views when supported; provenance for discovered content | Referenced by CodeProjects and Interfaces; authored contracts belong to their defining subject/file, discovered contracts to their analyzer owner; sharing does not copy them |
+| Endpoint | Interface reference, Environment reference, optional Deployment reference, address or connection binding | Concrete access details within the selected environment/deployment | Describes environment-specific access to an Interface; exact persistence and ownership remain open |
+| DeploymentUnit | `name`, `componentSources: PathQuery[]` | Resolved `components`, optional typed subsets such as `hosts`, query diagnostics | Explicit release membership can include Hosts and Resource definitions/configuration from several services; references do not transfer ownership |
 | Environment | `name`, `deploymentUnitSources: PathQuery[]` | Resolved `deploymentUnits`, generated `deployments`, query diagnostics | Owns one enduring Deployment for each selected unit |
-| Deployment | Generated environment and deployment-unit references; authored enrichment through the environment's metadata | Environment/unit identity, access to the unit's selected hosts; version and URLs through metadata | Owned by its Environment; common case is one per environment/unit pair |
+| Deployment | Generated environment and deployment-unit references; authored enrichment through the environment's metadata | Environment/unit identity, selected components, environment-specific versions, endpoints, and resource mappings | Owned by its Environment; common case is one per environment/unit pair; exact binding records remain open |
 | MarkdownFile, existing | Ordinary display frontmatter, `$<name>` child declarations, `metadata`, and Markdown content | Named configured children, parsed content blocks, and normal page rendering | Owns its declared subject children; remains distinct from a Service or Resource it defines |
 
 Stable identity is a required semantic contract, not a decision to add an `id` field to every configuration. The generated-child lifecycle section defines identity requirements; exact serialized reference and identifier representations remain open. Discovered facts need provenance, uncertainty, and diagnostics; manual values must not silently overwrite them. A Deployment describes intent until observed data is supplied.
@@ -189,6 +192,12 @@ Stable identity is a required semantic contract, not a decision to add an `id` f
 | Discovered fact or relationship | Value/endpoints plus source location, analyzer identity, uncertainty, and diagnostics as applicable | Analyzer result with provenance; concrete representation remains to be designed |
 | View configuration | Data scope/query plus presentation settings | Widget or document-owned configuration; does not redefine subjects or imply architectural relationships |
 | Context boundary, view-owned | Proposed `internalSources: PathQuery[]` and `externalSources: PathQuery[]` | Resolve the subjects shown inside and outside this diagram; the classification does not modify their domain subjects |
+
+### Shared capabilities
+
+The user accepted a component capability shared by Service, Host, Resource, and CodeProject. Service composition supports nesting and shared membership through references. Prefer small capability interfaces over a mandatory concrete base hierarchy. Illustrative capabilities include component membership, contract references, exposed interfaces, and provided resources; exact CLR interface names and signatures remain open. Being a component does not automatically make a subject runnable or deployable, and generic path queries continue to work with other subjects too.
+
+Contract references are a reusable capability: CodeProject can describe its public programming API, and Interface can describe an externally accessible contract. Exposed interfaces are available to appropriate Services, Hosts, and Resources. A subject implements only the capabilities that apply. Artifact and Actor remain useful future domain additions with MVP inclusion undecided: Artifact describes a produced or consumed output such as a package, image, or bundle, distinct from its producing CodeProject; Actor describes a person or role interacting with the system. Neither requires organization/project entities as mandatory roots.
 
 Relationship kinds describe interaction semantics, such as calls, publishes, consumes, reads, writes, or documents. Technology describes the mechanism, such as HTTPS, AMQP, or PostgreSQL; a queue is a target Resource rather than an interaction kind. The sample uses `message` for OrderPlaced. These are extensible values, not a closed runtime dependency taxonomy. Source overrides allow service-scoped authored metadata to describe known Host endpoints. Service-level edges retain unknown host endpoints rather than assigning them to guessed processes.
 
@@ -216,6 +225,10 @@ A CodeProject represents a source/build project, such as a `.csproj`. A Host rep
 
 Host and CodeProject are distinct concepts even when a simple application has one of each. Source location, analyzer identity, display name, and language are descriptive data, not the definition of a service.
 
+A Host is a runnable process definition and can describe continuous or run-to-completion execution. Roles and execution behavior are extensible descriptive data; no dedicated migration, worker, orchestration-platform, or cloud-product subclasses are required. Discovering an executable does not select it into a Service or DeploymentUnit or establish an always-running production role.
+
+A CodeProject can reference Contracts describing its public programming API. A library does not need a Host, network Interface, or deployed Endpoint to have a Contract. Discovering projects from basic XML does not imply extracting their public API; contract extraction is a separate analyzer capability and is outside the currently discussed simple XML analyzer.
+
 Common classification must allow selectors to express "library named `*.Test`" without depending on an analyzer's concrete CLR type. Proposed default: expose analyzer-independent classifications for projects, hosts, and library projects; the exact interface and type arrangement is a builder decision. Namespace and type classifications can be introduced by later analyzers.
 
 ### Service
@@ -226,17 +239,27 @@ A service contains path-based component-source configuration and architectural d
 
 The user confirmed that neighboring enterprise systems are also modeled as Services. A service can be documented without known repositories or hosts. Resources sit alongside hosts at the component level: a database or consumed cloud offering can be a Resource, while an enterprise software system is a Service. The term "service" in a cloud provider's product name does not by itself make that offering an architecture Service. A provider system can still be documented as a Service when that logical system is relevant, without requiring a second subject for every resource. Exact provider/resource links remain open.
 
-The sample uses Resource for the two database definitions. Their hosting and interface details are not yet supplied. Adding a resource or another service to an application's components does not automatically add underlying hosts to the application's resolved hosts. The direct Host subset remains explicit. APIs and interfaces can describe database protocols as well as HTTP; their structured representation and applicability across subjects remain to be specified.
+The sample uses Resource for the two database definitions. Their hosting and interface details are not yet supplied. Adding a resource or another service to an application's components does not automatically add underlying hosts to the application's resolved hosts. The direct Host subset remains explicit. Services, Hosts, and Resources can expose Interfaces describing database protocols, HTTP, or other supported interaction mechanisms.
 
 ### Resource
 
-A reusable component-level dependency such as a database, queue, topic, storage bucket, or consumed cloud offering. A Service's component view can show Resources alongside Hosts. Services can include resources in components, and typed relationships can originate at a Service or a particular Host. A resource can be referenced by several services, and membership does not imply exclusive ownership. Including it in a service does not automatically provision it or include it in the current host-only DeploymentUnit proposal.
+A reusable component-level dependency such as a database, queue, topic, storage bucket, or consumed cloud offering. A Service's component view can show Resources alongside Hosts. Services can include resources in components, and typed relationships can originate at a Service or a particular Host. A resource can be referenced by several services, and membership does not imply exclusive ownership. Including it in a service does not automatically provision it or select it into a DeploymentUnit.
 
 Host describes a runnable process; Resource describes a capability consumed by components. The user accepted a many-to-many provides relationship: a Host can provide zero or more Resources, and a Resource can have zero or more providing Hosts. This can describe a resource provided by several database-cluster processes without requiring a known Host for a managed cloud resource. Providing a resource is a reference relationship and does not transfer subject ownership. Exact serialized fields, the authored source of the relationship, and whether inverse navigation is derived remain open. Shared capabilities and presentation can be expressed through interfaces; Resource-to-Service inheritance has not been chosen.
 
 The user confirmed that a Service can reference a database Host directly through componentSources. Resource is optional when that Host reference provides enough detail. For example, a PostgreSQL process can be a Host, and individual databases it exposes can be Resources when those distinctions matter. Neither an intermediate Resource nor a complete provider model is required. Component membership alone does not require deploying that Host together with the application's other Hosts; DeploymentUnit selections determine that grouping.
 
-The sample resources are logical definitions independent of environments. Whether to represent environment-specific instances as separate subjects, mappings, or other data is not decided. Do not imply resource provisioning or a particular deployment lifecycle from the presence of a Resource subject.
+The sample resources are logical definitions independent of environments. Deployments can bind these logical definitions to concrete environment-specific resources while retaining their logical identities. Exact instance/mapping records remain open. Do not imply resource provisioning or a particular deployment lifecycle from the presence of a Resource subject.
+
+### Interface, Endpoint, and Contract
+
+The user accepted separate logical Interface, environment-specific Endpoint, and contract-document concepts, and explicitly extended contract support to CodeProject public APIs. Contract is the proposed reusable subject name for describing a public surface. These are domain concepts rather than requirements to create every subject in every document.
+
+An Interface describes an exposed capability and its protocol independently of a concrete environment or address. It can be exposed by a Service, Host, or Resource, with implementation details omitted when unknown. A Resource describes the capability being consumed; an Interface describes how it is accessed. Exact exposure relationships, shared Interface identity, and ownership still need schema decisions.
+
+An Endpoint binds an Interface to access details in an Environment and, when applicable, a Deployment. The same logical Interface can have different endpoint addresses in different environments. A Contract describes the public surface and can reference documents or other source material with an extensible format and optional version information. An Interface can reference a Contract such as an API specification; a CodeProject can reference a Contract describing its public types and members. Contract references do not require network access or deployment.
+
+Examples of contract formats include OpenAPI, GraphQL, protobuf, and programming-language public API snapshots. These examples do not define a closed format enum. Extraction, parsing, version comparison, and rich presentation are extension capabilities; recording a Contract does not require supporting all of them. Reuse existing file/storage subjects for source documents where appropriate. No additional mandatory generic Document entity or per-language subject subclasses have been selected. Exact version identity, document cardinality, and snapshot persistence remain open.
 
 ### Internal/external classification and neighboring systems
 
@@ -248,7 +271,9 @@ Proposed defaults: explicit lists control the visible participants and relations
 
 ### DeploymentUnit
 
-A configurable selection of hosts deployed together. It can select all hosts of one service, a subset, or hosts from several services. There is no ownership or cardinality restriction that forces a deployment unit to correspond to one service.
+A configurable selection of components participating in one coordinated release. It can select all hosts of one service, a subset, hosts from several services, and Resources whose definitions or configuration participate in that release. Ordinary dependencies remain separate from release membership. A reference to an existing managed resource does not by itself declare that the unit provisions it. There is no ownership or cardinality restriction that forces a deployment unit to correspond to one service.
+
+The user accepted component-based deployment composition. The working schema therefore uses componentSources and resolved components in place of the earlier hostSources-only shape. Selecting service/hosts remains a valid concise way to select its direct Hosts. Component capability alone does not establish deployability: a library CodeProject is not a runnable deployment participant merely because it can appear in a Service's components. Exact eligibility and dependency-versus-managed-resource representation remain schema decisions.
 
 The common arrangement is one service associated with one deployment unit. Service boundaries remain logical boundaries when the deployment arrangement changes.
 
@@ -268,11 +293,13 @@ A generated deployment expresses the intended installation. It is not evidence t
 
 Use the existing metadata system for manually entered enrichment of generated subjects. The metadata of an environment stores entries for its Deployment descendants, keyed by their stable subject paths: in the sidecar of a JSON definition or the frontmatter of a Markdown definition. Version and URLs can use domain-specific metadata keys with typed accessors and editing support; notes, links, and tags use the existing keys. Configuration declares deployment-unit selection, and metadata holds enrichment. Do not create a second enrichment store inside the owner's configuration.
 
+Deployment-specific bindings can supply component versions, endpoint addresses, and concrete resource mappings without replacing the shared logical component identities. The user accepted this distinction; exact binding subjects/records, authored versus observed fields, and persistence are still open. A configured mapping remains intended data until observed state supports it.
+
 ## Path queries and relationships
 
 A path-query entry resolves subjects from an exact subject path, a collection-property path, or a subject-path pattern, then optionally applies a `where` property predicate. An exact collection path produces its members; an explicit `/*` can also select those immediate members. The mechanism should be usable outside this domain rather than restricted to an Artifact base class. Repository file-location predicates remain separate from subject-path matching.
 
-Filters within one selector combine with AND. Proposed default: a list of selectors combines by set union; exclusions subtract from that result; results are deduplicated by identity. Support explicit references as the simplest selector. Deployment-unit selections validate that their results are hosts, and environment selections validate that theirs are deployment units. A wrong result kind produces a diagnostic rather than being converted into another kind of entity.
+Filters within one selector combine with AND. Proposed default: a list of selectors combines by set union; exclusions subtract from that result; results are deduplicated by identity. Support explicit references as the simplest selector. Deployment-unit selections validate release-participant eligibility rather than accepting only Hosts; environment selections validate that their results are deployment units. A wrong result kind produces a diagnostic rather than being converted into another kind of entity.
 
 Consumers reference resolved subject properties through ordinary paths. A deployment unit can therefore select `service/hosts`, with no separate `selection` or `from` field. Proposed default: detect cyclic query dependencies and report invalid configuration; do not recursively expand them forever.
 
@@ -383,6 +410,9 @@ These scenarios capture intended behavior for the evolving capability. They are 
 21. Place referenced service widgets on a manual canvas; keep layout local to that document and semantic connections in shared relationship metadata. Existing canvas limitations remain until connector support is implemented.
 22. Open a JSON-defined Resource or DeploymentUnit through useful detail presentation and reuse its compact presentation in previews, context panels, and diagram boxes. This is the proposed page direction, subject to the open presentation-interface decision.
 23. Display Payments inside the Commerce context and outside the Orders-only context using explicit per-view path sources; retain the same Service identity and relationships without writing an internal/external property to it.
+24. Reference a Contract from a library CodeProject to describe its public API without creating a Host, network Interface, or Endpoint; distinguish authored content from analyzer-derived snapshots.
+25. Expose an Interface from an appropriate subject, reference its Contract, and bind it to different Endpoints in different environments while retaining the logical Interface identity.
+26. Select a Resource definition/configuration as an explicit release participant alongside Hosts; keep dependency-only references separate and do not imply provisioning or observed installation.
 
 These scenarios describe future implementation and testing. The working sample contains fixture projects and proposed data definitions, but no ArchDocs product implementation has been authorized by this specification.
 
@@ -400,11 +430,11 @@ The following decisions remain open:
 
 - Context representation: internal/external is confirmed as diagram-relative; exact boundary fields, rendering behavior, optional neighbor discovery, and actor representation remain open. Neighboring software systems use Service.
 - Service and Resource roles: Service represents a logical system/capability; Resources such as databases and cloud offerings appear alongside Hosts at component level. Host-to-Resource provides references are optional and many-to-many. Define shared interfaces and the exact persistence/navigation of provider relationships without assuming inheritance.
-- Deployment participation: the current DeploymentUnit schema selects Hosts. Decide how Resources participate in units and environment deployments, including the distinction between using an existing managed resource and deploying or provisioning one.
-- Resource realization: environment-specific resource instances, infrastructure targets, and their mappings to logical resources and deployments.
-- Interfaces and endpoints: represent the APIs/protocols exposed by services and hosts, including database protocols, without assuming every API is HTTP.
-- Reference-domain coverage: decide the logical interface, environment endpoint, contract-document/version, package/artifact, and actor concepts demonstrated by Apimundo; determine their ownership, relationships, and MVP scope separately.
-- Executable roles: represent migrations/release steps and local orchestration in the AppHost use case without treating every runnable project as an always-running deployed process.
+- Deployment participation: component-based membership is accepted; settle participant eligibility and representation of resource definitions/configuration versus dependencies on existing managed resources.
+- Environment bindings: component versions, endpoint addresses, and concrete resource mappings are accepted; settle exact binding records, infrastructure references, ownership, and authored versus observed state.
+- Interfaces, Endpoints, and Contracts: settle exposure/reference schemas, ownership, supported formats, source-document references, and version/snapshot identity. CodeProject public API Contracts do not require network Interfaces or Endpoints.
+- Optional domain additions: refine generic Artifact and Actor models separately from the sample products, and decide their MVP inclusion.
+- Executable roles: settle extensible execution-behavior and role fields for runnable process definitions; sample-specific subclasses are unnecessary.
 - Presentation contracts: useful subject detail pages, navigation participation, shared page/widget/preview components, and exact UI slot registration.
 - Final schemas and identity: CLR/serialized names, path casing and aliases, generated keys, persistent identity and rename behavior, and raw-source path matching where graph paths are insufficient.
 - View configuration: generic diagram presets and customization, boundary selection, grouping shared components, manual/automatic layout interaction, and semantic connector editing.

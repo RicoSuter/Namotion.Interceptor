@@ -84,7 +84,7 @@ The projects and central package settings are local to this folder and can be co
 
 Documentation can follow topics, workflows, or decisions independently of the domain hierarchy. The release page references both services and embeds scoped views over their shared graph. An overview list can find Services, DeploymentUnits, or Environments by scope and type, while using their existing domain facts and presentation contributions.
 
-Proposed interaction: selecting a row reveals that subject's details alongside the list, using the page's context slot where appropriate. Services expose hosts, projects, and relationships; units expose their selected hosts and deployments; environments expose their configured units and generated deployments. Links and previews allow drilling into related subjects or opening their documentation. The document stays visible and row selection is UI state, not a rewrite of its Markdown or a new domain subject. Exact table options and layout remain open; this sample does not introduce additional widget configuration to lock them in.
+Proposed interaction: selecting a row reveals that subject's details alongside the list, using the page's context slot where appropriate. Services expose hosts, projects, and relationships; units expose their selected components and deployments; environments expose their configured units and generated deployments. Links and previews allow drilling into related subjects or opening their documentation. The document stays visible and row selection is UI state, not a rewrite of its Markdown or a new domain subject. Exact table options and layout remain open; this sample does not introduce additional widget configuration to lock them in.
 
 ## Canvas diagrams
 
@@ -108,7 +108,7 @@ Internal/external is selected per context diagram. The Commerce document selects
 
 Service represents a logical software capability or system, including neighboring systems in the enterprise. Resource describes a component-level dependency such as a database, queue, or consumed cloud offering. Resources appear alongside Hosts in a service's component view. A cloud product called a "service" does not automatically become an architecture Service. Internal/external remains relative to each diagram, independent of the subject's type.
 
-The two Database.json definitions and shared order-events queue are Resources. Their hosting and API/protocol details are not yet specified. Services reference dependencies through componentSources alongside code and hosts. Membership does not imply exclusive ownership. A DeploymentUnit currently selects Host subjects; including another Service or Resource in an application's components does not automatically provision it or include its hosts transitively. How resources participate in deployment units and environments remains open.
+The two Database.json definitions and shared order-events queue are Resources. Their hosting and API/protocol details are not yet specified. Services reference dependencies through componentSources alongside code and hosts. Membership does not imply exclusive ownership. DeploymentUnits now use componentSources too and can include Resource definitions/configuration as explicit release participants. This fixture still selects only the three application Hosts. Including another Service or Resource in an application's components does not automatically provision it or include its hosts transitively. Exact release-participant eligibility and resource binding fields remain open.
 
 A Service can also reference a database Host directly. Resource is optional when the Host describes enough; model a particular database as a Resource only when that extra detail is useful. Component membership does not require deploying the database Host together with application Hosts. DeploymentUnit selections define that grouping. This sample keeps the database Resources because their underlying Hosts are unspecified.
 
@@ -122,7 +122,11 @@ Generated service views can aggregate host-level interactions using service memb
 
 A Host can provide several Resources, and a Resource can have several providing Hosts. A managed cloud Resource can have no known Host. These references do not transfer subject ownership; their exact serialized representation remains open. The sample does not yet declare database Hosts or provider links.
 
-Environment-specific realization of logical resources remains open, as do links to provider services. The current deployment matrix contains only the three modeled application hosts; it does not invent database hosts or provision queue instances. Automatic arc42-style views need enough data for each view: building block views use structure and relationships, runtime views need scenarios, and complete deployment views need infrastructure mappings. Diagram scope and display settings belong to the view; semantic connections belong to the shared graph.
+The model supports environment-specific versions, endpoints, and resource mappings while retaining shared logical component identities. Their exact records remain open, as do links to provider services. The current deployment matrix contains only the three modeled application hosts; it does not invent database hosts or provision queue instances. Automatic arc42-style views need enough data for each view: building block views use structure and relationships, runtime views need scenarios, and complete deployment views need infrastructure mappings. Diagram scope and display settings belong to the view; semantic connections belong to the shared graph.
+
+## Interfaces and contracts
+
+The domain distinguishes Interface, Endpoint, and Contract. A Service, Host, or Resource can expose a logical Interface; an Endpoint supplies its environment-specific address or connection details. Both Interfaces and CodeProjects can reference Contracts. A CodeProject's Contract can describe its public types and members without a runnable Host or network endpoint. Formats and analyzers remain extensible. This fixture does not yet add contract files or extraction; the simple project-file analyzer is not expected to discover public API surfaces. The working specification records these concepts independently of this sample's language and topology.
 
 ## Proposed graph and paths
 
@@ -161,7 +165,7 @@ ArchDocs (/ArchDocs)
     └── Production/deployments → Orders and Payments
 ```
 
-The repository owns discovered projects and hosts. Services and deployment units reference them rather than create copies. A Service's hosts collection contains the Host subjects in its resolved components. Source query entries and resolved collections remain separate, such as hostSources and hosts.
+The repository owns discovered projects and hosts. Services and deployment units reference them rather than create copies. A Service's hosts collection contains the Host subjects in its resolved components. Source query entries and resolved collections remain separate: componentSources defines membership and components contains resolved references, with hosts as a typed subset where useful.
 
 An exact subject path selects one subject. A collection-property path selects its members; adding `/*` explicitly selects those direct members too. `*` stays within one path segment, and `**` spans any number of path segments. Optional `where` filters use property conditions. For example, `/ArchDocs/Repository/**/Orders.*` illustrates recursive matching. A path targets graph subjects, not source files.
 
@@ -182,7 +186,7 @@ These are intended installations. Creating subjects does not deploy software. In
 
 ## Variations to discuss
 
-To deploy only the Orders worker, change the Orders unit's hostSources to:
+To deploy only the Orders worker, change the Orders unit's componentSources to:
 
 ```json
 [
@@ -195,7 +199,7 @@ To deploy only the Orders worker, change the Orders unit's hostSources to:
 
 This predicate assumes the analyzer reports that project name as the Host's Name. Stable identity remains the graph key rather than its display name.
 
-To deploy hosts from both services together, add another hostSources entry to one unit:
+To deploy hosts from both services together, add another componentSources entry to one unit:
 
 ```json
 {
