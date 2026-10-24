@@ -6,6 +6,8 @@ Use this folder to refine the authoring experience before finalizing the domain 
 
 Read [docs/Architecture.md](docs/Architecture.md) for the overview, [docs/services/Orders.md](docs/services/Orders.md) for a service defined in Markdown frontmatter, and [docs/deployment-units/Orders.json](docs/deployment-units/Orders.json) for a standalone subject definition. Revise these actual files while discussing the model. Type names, property names, and generated graph keys are working proposals.
 
+[docs/operations/Releasing.md](docs/operations/Releasing.md) demonstrates crosscutting documentation: a topic page that brings existing services, deployment units, and environments into one view without defining duplicate domain subjects.
+
 ```text
 archdocs-commerce/
 ├── Root.json
@@ -21,9 +23,11 @@ archdocs-commerce/
 │   ├── deployment-units/
 │   │   ├── Orders.json
 │   │   └── Payments.json
-│   └── environments/
-│       ├── Staging.json
-│       └── Production.json
+│   ├── environments/
+│   │   ├── Staging.json
+│   │   └── Production.json
+│   └── operations/
+│       └── Releasing.md
 └── src/
     ├── Orders.Api/
     ├── Orders.Worker/
@@ -50,6 +54,12 @@ dotnet run --project src/Orders.Api/Orders.Api.csproj
 ```
 
 The projects and central package settings are local to this folder and can be copied together. They do not reference the surrounding solution.
+
+## Crosscutting and master-detail views
+
+Documentation can follow topics, workflows, or decisions independently of the domain hierarchy. The release page references both services and embeds scoped views over their shared graph. An overview list can find Services, DeploymentUnits, or Environments by scope and type, while using their existing domain facts and presentation contributions.
+
+Proposed interaction: selecting a row reveals that subject's details alongside the list, using the page's context slot where appropriate. Services expose hosts, projects, and relationships; units expose their selected hosts and deployments; environments expose their configured units and generated deployments. Links and previews allow drilling into related subjects or opening their documentation. The document stays visible and row selection is UI state, not a rewrite of its Markdown or a new domain subject. Exact table options and layout remain open; this sample does not introduce additional widget configuration to lock them in.
 
 ## Proposed graph and paths
 
