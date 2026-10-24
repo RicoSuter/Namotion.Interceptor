@@ -34,3 +34,8 @@ Orders accepts orders through an API host and processes them through a worker ho
 The service uses the [Payments service](Payments.md) for payment processing.
 
 The worker stores order data in the Orders database and publishes OrderPlaced messages to the shared order-events queue.
+
+## Components
+
+:: Namotion.ArchDocs.ArchitectureDiagram#components Path=service View=Components
+::

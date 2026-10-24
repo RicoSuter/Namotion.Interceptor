@@ -77,6 +77,12 @@ The service diagram composes existing CanvasLayout nodes with Widget references 
 
 Service subjects and their widget are proposed functionality; CanvasLayout and Widget already exist. The current canvas does not support connector lines between nodes. The user wants typed connections backed by model relationships and automatic diagrams at several levels. The manual canvas example records box placement without inventing unsupported edge syntax. The generated ArchitectureDiagram blocks in arc42.md are proposed UI, including their View options; they are not existing components.
 
+## Reusable architecture widgets
+
+All architecture widgets are independent of documentation format. They can be embedded in arc42, service documentation, design proposals, guides, ADRs, or dashboards using the same configuration and shared domain data. The Orders service page and arc42.md embed the same component-diagram widget; the release guide and arc42.md reuse the same table and matrix widgets. Document headings and file locations do not determine widget behavior.
+
+Separate data selection from presentation. Scoped path queries and optional filters choose the subjects; presentation options can choose visible subject and relationship kinds, grouping, labels, detail, and layout. Services, Components, Context, and Deployment are proposed view presets, with exact customization options still to be refined in the sample. Presets provide useful defaults while allowing mixed subject kinds and custom views. Domain-specific tables and matrices remain reusable components over shared query and subject-presentation infrastructure. Subject types can supply their own widget presentation through the existing component-registration patterns.
+
 ## One arc42 document over the shared model
 
 arc42.md is an ordinary MarkdownFile. It uses the twelve arc42 headings as document structure, not as separate domain subjects or a special document type. Service tables and context, building block, component, and deployment diagrams are embedded views, scoped by their paths. Their facts come from the existing domain subjects; the document supplies the explanations, decisions, and selected scenarios. Moving the document or reorganizing its headings does not redefine the architecture.
