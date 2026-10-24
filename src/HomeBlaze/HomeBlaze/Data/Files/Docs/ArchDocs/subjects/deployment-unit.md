@@ -25,10 +25,10 @@ Selection syntax, union/deduplication behavior, and invalidation follow [path qu
 
 | Property | Type | Meaning and source |
 |---|---|---|
+| `diagnostics` | Diagnostic collection | Selector failures, cyclic dependencies, wrong kinds, and eligibility issues. |
 | `components` | Reference collection of [Component](component.md) | Resolved, deduplicated release participants. Component capability alone does not establish release eligibility. |
 | `hosts` | Reference collection of [Host](host.md) | Direct Host subset of selected participants, where useful; no transitive expansion through Services or Resources. |
 | `deployments` | Reference collection of [Deployment](deployment.md) | Inverse intended installations that reference this unit. |
-| `diagnostics` | Diagnostic collection | Selector failures, cyclic dependencies, wrong kinds, and eligibility issues. |
 
 ## Implementation readiness
 

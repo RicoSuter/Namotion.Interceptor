@@ -27,7 +27,7 @@ Describe and explore software through ordinary Markdown documentation, authored 
 - Subjects below: canonical semantics, configuration/state boundaries, references, subject-specific widgets/detail pages/editors, and unresolved schemas.
 - [Analyzers](analyzers/overview.md): read-only source and contract analysis.
 - [General widgets](widgets/overview.md): reusable aggregating views such as tables, deployment matrices, and architecture diagrams. Subject-specific presentation stays in each subject file.
-- [Path queries](shared/path-queries.md), [metadata and relationships](shared/metadata-and-relationships.md), and [reconciliation](shared/reconciliation.md): shared behavior.
+- [Identifiers](shared/identifiers.md), [path queries](shared/path-queries.md), [metadata and relationships](shared/metadata-and-relationships.md), and [reconciliation](shared/reconciliation.md): shared behavior.
 - [Markdown authoring](integration/markdown-authoring.md) and [page contributions](integration/page-contributions.md): optional host extensions.
 
 ## Status and scope
@@ -39,6 +39,8 @@ All ArchDocs functionality is [Planned]. Existing host facilities are marked [Im
 All subjects, references, metadata, and widgets follow the [file-authoring requirement](file-authoring.md). Their serialized definitions and relationships must be understandable and editable by people and agents without opening HomeBlaze; useful UI is an additional presentation and editing path.
 
 Each subject page begins with its class or capability definition, configuration properties, and read-only state properties. Related subject types link to their definitions. These tables describe a proposed schema; they do not declare implemented CLR signatures.
+
+Within the property tables, present the subject's own master data first, then structural references and selections. See [property presentation and authoring](file-authoring.md#schemas-and-examples-planned) for the shared convention.
 
 | Specification | Status | Delivery |
 |---|---|---|

@@ -43,11 +43,17 @@ Persist semantic diagram connections as ordinary model relationships and keep po
 
 Each implemented authoring surface needs an accurate field/type reference and a complete, copyable minimal example. Machine-readable schema or type metadata should support validation and editor/agent tooling; exact schema format, publication, and editor integration remain design choices. A UI can assist discovery and completion but cannot be the only place where valid fields and reference rules are defined.
 
+Present the subject's own master data first, followed by structural references and selections, within both configuration and state tables. Own data includes names, classifications, technology, versions, source facts, status, and diagnostics; the reference group includes related subjects, memberships, and graph selectors. Use the same order in authoring examples and property editors where applicable. Group by the field's meaning: a classification remains master data even if it later supports a link, while a subject reference remains a reference even if serialized as a string. Inherited fields follow the same grouping and link to their canonical base definition.
+
 Current examples deliberately mark provisional fields and incomplete extraction configurations. Before implementing the corresponding authoring surface, settle those fields and provide a full source-editable example. The [contract-file examples](examples/contract-files.md) distinguish raw source, descriptor `path`, and `codeProjectPath`; C# extraction/snapshot formats still need a complete example after that input contract is selected.
 
 Named Markdown children use their inline name directly in paths and scoped metadata: `$service` declares the child, `Path=service` references it, and `metadata.$subjects.service` enriches it. This reuses existing InlinePaths behavior; frontmatter persistence remains planned. See [scoped metadata paths](shared/metadata-and-relationships.md#scoped-metadata-paths-planned) for resolution, writeback, and compatibility limits. Ordinary generated collections retain meaningful collection segments.
 
 The current fully qualified $type names, generated keys, and other reference conventions still need ergonomics review. Evaluate readable type identifiers and stable reference rules before declaring the final schema. Aliases or syntax improvements that need host changes must be marked as such; they are not already supported merely because an example would be clearer.
+
+## Identifiers [Planned]
+
+[Identifiers](shared/identifiers.md) support three levels: plain text, a path to any subject or ordinary Markdown page with generic link presentation, and a path to the expected subject type with rich domain presentation. All three identify the configured concept, including before its richer subject type is available. The canonical identifier specification contains the compact list of syntax options; that decision is deferred. Property presentation order is independent of identifier resolution.
 
 ## Acceptance checks [Planned]
 

@@ -14,8 +14,9 @@ ProtobufContract derives from [Contract](contract.md) and describes protobuf def
 
 | Property | Type | Required | Contract |
 |---|---|---|---|
-| Inherited configuration | [Contract configuration](contract.md#configuration-properties-proposed-schema) | As specified by Contract | Optional `name`, `version`, and `codeProjectPath`. |
+| Inherited master data | [Contract configuration](contract.md#configuration-properties-proposed-schema) | As specified by Contract | Optional `name` and `version`. |
 | `path` | Local file-location `string` | Yes for an authored descriptor | Selects the initial `.proto` source file. Resolve relative locations from the defining descriptor file's directory/local origin, never the process working directory. |
+| Inherited project identifier | [Contract configuration](contract.md#configuration-properties-proposed-schema) | No | Optional `codeProjectPath`; see Contract for identifier resolution. |
 
 For example, `protobuf-contract.json` can set `path` to `orders.proto` and `codeProjectPath` to the intended CodeProject subject. `path` selects source bytes; `codeProjectPath` selects a graph subject. They use different resolvers. A relative `path` without a local file origin is invalid; require an unambiguous absolute local path or a supported source origin and retain a configuration diagnostic. Source access remains within the declared access boundary.
 
@@ -25,8 +26,9 @@ Automatic discovery already knows the raw `.proto` location and does not require
 
 | State | Type | Meaning |
 |---|---|---|
-| Inherited state | [Contract state](contract.md#state-properties-proposed-schema) | Resolved CodeProject, source/provenance, diagnostics, and referring subjects. |
+| Inherited own state | [Contract state](contract.md#state-properties-proposed-schema) | Source/provenance and diagnostics. |
 | `surface` | Optional structured protobuf data | Supported services, RPCs, messages, fields, enums, and import information. Exact member name, data types, and public ABI remain proposed. |
+| Inherited reference state | [Contract state](contract.md#state-properties-proposed-schema) | Resolved CodeProject and referring subjects. |
 
 Imports require explicit source scope and diagnostics. Missing imports must not produce a falsely complete parsed surface. Raw source remains accessible when imports or parsing fail.
 

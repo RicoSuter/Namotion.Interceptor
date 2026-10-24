@@ -25,9 +25,9 @@ Selectors follow [path queries](../shared/path-queries.md). Existing JSON sideca
 
 | Property | Type | Meaning and source |
 |---|---|---|
+| `diagnostics` | Diagnostic collection | Invalid selectors, unresolved references, and reconciliation issues. |
 | `deploymentUnits` | Reference collection of [DeploymentUnit](deployment-unit.md) | Resolved, deduplicated selections, without transferring unit ownership. |
 | `deployments` | Keyed owned collection of [Deployment](deployment.md) | One generated enduring installation per selected unit. Reuse stable identities, add selections, and remove confirmed deselections. |
-| `diagnostics` | Diagnostic collection | Invalid selectors, unresolved references, and reconciliation issues. |
 
 ## Implementation readiness
 

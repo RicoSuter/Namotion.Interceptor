@@ -26,6 +26,8 @@ repository/
 
 Paths to raw source files resolve relative to the defining descriptor. `codeProjectPath` resolves in the subject graph. It never means the filesystem path of a `.csproj`.
 
+More generally, the field follows the shared [Identifier](../shared/identifiers.md) model: a plain project identifier is valid descriptive data, any subject target supplies a link, and a CodeProject target enables the typed association. The examples below use the typed level. Reference syntax remains deferred; these illustrative routes do not choose it.
+
 ## OpenAPI source and explicit descriptor
 
 An example `src/Orders.Api/openapi.json`:
@@ -104,7 +106,7 @@ An adjacent descriptor uses `"path": "orders.proto"`. This input does not requir
 
 If the descriptors above are absent, the proposed [discovery rule](../analyzers/contract-discovery.md) recognizes the raw files inside the repository scan scope. With exactly one CodeProject source file in `src/Orders.Api`, both Contracts associate with that same project. The repository owns the generated subjects; their names/keys and raw source remain inspectable. No JSON descriptor is written automatically.
 
-If `openapi.json` moves to `src/Orders.Api/specs`, there is no same-directory project. Discovery keeps it unassociated and reports a diagnostic, even though a project exists in the parent directory. Add an authored descriptor with `path` selecting the moved file and `codeProjectPath` selecting its intended project. The same applies if two project files share the raw document's directory: an explicit reference resolves the ambiguity. An invalid explicit reference remains an error rather than triggering a fallback guess.
+If `openapi.json` moves to `src/Orders.Api/specs`, there is no same-directory project. Discovery keeps it unassociated and reports a diagnostic, even though a project exists in the parent directory. Add an authored descriptor with `path` selecting the moved file and `codeProjectPath` selecting its intended project. The same applies if two project files share the raw document's directory: an explicit typed reference resolves the ambiguity. An unresolved explicit path retains a diagnostic rather than triggering a fallback guess. Plain identifiers and generic subject links remain useful descriptive alternatives without establishing a typed project association.
 
 An authored definition takes precedence over automatic discovery of the same raw source. Exact deduplication keys and authored/generated identity transitions remain open; implementations must diagnose conflicts and preserve traceability rather than silently create competing copies. A CodeProject's Contract list is the inverse of this association, so no separate editable project-side `hasContract` metadata entry is needed.
 

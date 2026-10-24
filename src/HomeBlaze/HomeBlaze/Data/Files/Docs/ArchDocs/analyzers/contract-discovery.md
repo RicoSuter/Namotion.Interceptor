@@ -28,7 +28,7 @@ Relative descriptor `path` values resolve from the defining file's directory/loc
 
 ## Project association [Planned]
 
-1. If the Contract defines `codeProjectPath`, resolve that graph-subject reference. An invalid explicit reference produces a diagnostic and is not replaced by inference.
+1. If the Contract defines `codeProjectPath`, preserve that [Identifier](../shared/identifiers.md) and resolve it where it is a subject path. Plain text or a generic subject link remains useful; only a compatible CodeProject supplies the typed association. An unresolved path produces a diagnostic. An explicit identifier is never replaced by inference.
 2. Otherwise, compare the raw document's directory with the source directories of discovered CodeProjects in its repository scope. Exactly one project in that directory supplies the association.
 3. If there are zero or multiple same-directory projects, retain an unassociated Contract with a source-located diagnostic. An authored definition must supply `codeProjectPath` to resolve it.
 

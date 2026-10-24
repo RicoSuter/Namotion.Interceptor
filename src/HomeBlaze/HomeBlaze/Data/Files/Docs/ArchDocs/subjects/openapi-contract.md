@@ -14,8 +14,9 @@ OpenApiContract derives from [Contract](contract.md) and describes an OpenAPI pu
 
 | Property | Type | Required | Contract |
 |---|---|---|---|
-| Inherited configuration | [Contract configuration](contract.md#configuration-properties-proposed-schema) | As specified by Contract | Optional `name`, `version`, and `codeProjectPath`. |
+| Inherited master data | [Contract configuration](contract.md#configuration-properties-proposed-schema) | As specified by Contract | Optional `name` and `version`. |
 | `path` | Local file-location `string` | Yes for an authored descriptor | Selects an OpenAPI `.json`, `.yaml`, or `.yml` file. Resolve relative locations from the defining descriptor file's directory/local origin, never the process working directory. |
+| Inherited project identifier | [Contract configuration](contract.md#configuration-properties-proposed-schema) | No | Optional `codeProjectPath`; see Contract for identifier resolution. |
 
 For example, `openapi-contract.json` can set `path` to `openapi.json` and `codeProjectPath` to the intended CodeProject subject. `path` selects source bytes; `codeProjectPath` selects a graph subject. They use different resolvers. A relative `path` without a local file origin is invalid; require an unambiguous absolute local path or a supported source origin and retain a configuration diagnostic. Source access remains within the declared access boundary.
 
@@ -25,8 +26,9 @@ Automatic discovery already knows the raw document's file location and does not 
 
 | State | Type | Meaning |
 |---|---|---|
-| Inherited state | [Contract state](contract.md#state-properties-proposed-schema) | Resolved CodeProject, source/provenance, diagnostics, and referring subjects. |
+| Inherited own state | [Contract state](contract.md#state-properties-proposed-schema) | Source/provenance and diagnostics. |
 | `surface` | Optional structured OpenAPI data | Operations, parameters, requests/responses, and schemas when a selected parser supports them. Exact member name, data types, and public ABI remain proposed. |
+| Inherited reference state | [Contract state](contract.md#state-properties-proposed-schema) | Resolved CodeProject and referring subjects. |
 
 Raw document access is useful before parsing exists and after a parse error. An unsupported document must not appear as a successfully parsed empty API.
 

@@ -17,7 +17,7 @@ Authored enrichment and relationships use the [existing metadata envelope](../sh
 | Property | Type | Meaning and source |
 |---|---|---|
 | `name` | `string` | Readable output name; proposed required field if Artifact is selected. |
-| `kind` | `string?` | Optional extensible output kind; omitted means unspecified. |
+| `kind` | [Identifier](../shared/identifiers.md) (optional) | Optional extensible output kind; omitted means unspecified. |
 | `version` | `string?` | Authored version label when known; version identity and comparison semantics remain open. |
 | `location` | `string?` | Optional readable artifact location or source descriptor; storage/feed resolution remains open. |
 | `producerPaths` | Subject-path collection targeting [CodeProject](code-project.md) | Optional explicit producer references; absent or empty selects no known producer. The canonical producer relationship remains proposed. |
@@ -28,9 +28,9 @@ For a discovered Artifact, analyzer-owned identity/version/location facts would 
 
 | Property | Type | Meaning and source |
 |---|---|---|
-| `producers` | Reference collection of [CodeProject](code-project.md) | Resolved producer references, without transferring project ownership. |
 | `provenance` | Provenance records | Supporting source, build, or feed facts when supplied by an analyzer; none is fabricated from the artifact name. |
 | `diagnostics` | Diagnostic collection | Unresolved producer/location inputs and validation issues. |
+| `producers` | Reference collection of [CodeProject](code-project.md) | Resolved producer references, without transferring project ownership. |
 
 ## Implementation readiness
 

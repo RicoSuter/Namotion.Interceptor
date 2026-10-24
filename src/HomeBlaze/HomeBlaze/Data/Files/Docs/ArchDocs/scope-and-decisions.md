@@ -44,7 +44,7 @@ Proposed default: allow manual descriptions of hosts whose source is unavailable
 
 CodeSolution represents a source/build grouping and references repository-owned CodeProjects. Projects can belong to several solutions or none; this does not establish a Service or deployment boundary. The first proposed solution input is basic `.slnx` XML, alongside literal `.csproj` XML. Other formats require explicit analyzer support.
 
-An authored OpenApiContract or ProtobufContract selects raw source through `path`. Contract.codeProjectPath is the explicit primary project association, and CodeProject.contracts is its read-only inverse. Without an explicit association, only a unique CodeProject in the raw document's own directory is selected; do not search parents or infer through a Host. Missing or ambiguous associations need explicit configuration and visible diagnostics. Automatic discovery never writes descriptor JSON. Explicit definitions take precedence over automatic same-source candidates; exact identity handover and conflict handling remain open in [contract discovery](analyzers/contract-discovery.md).
+An authored OpenApiContract or ProtobufContract selects raw source through `path`. Contract.codeProjectPath holds an explicit project Identifier; only a compatible target supplies the typed association and CodeProject.contracts inverse. Without an explicit identifier, only a unique CodeProject in the raw document's own directory is selected; do not search parents or infer through a Host. Missing or ambiguous inference needs explicit configuration and visible diagnostics. Plain identifiers or generic subject links remain valid descriptive alternatives. Automatic discovery never writes descriptor JSON. Explicit definitions take precedence over automatic same-source candidates; exact identity handover and conflict handling remain open in [contract discovery](analyzers/contract-discovery.md).
 
 ### Storage access
 
@@ -63,6 +63,12 @@ Structured selectors, named selections, and compact query syntax were discussed.
 The alternatives considered were making the document itself a Service, giving a specialized MarkdownFile subclass a Service property, using existing inline subject blocks only, and defining named children generically in frontmatter. The user selected generic named frontmatter children: `$service` defines a child named `service`, `$environment` defines one named `environment`, and each value contains a `$type` plus normal subject configuration. A document defines subjects rather than becoming one of those domain types. This supersedes both service-as-MarkdownFile and ServiceMarkdownFile wrapper designs. Compared with existing inline blocks, the benefit is defining a subject outside the authored body without placing its widget there. It is an additional authoring location, not a different domain model.
 
 Use the inline child name directly for scoped metadata too: `metadata.$subjects.service`, matching `Path=service`. Existing InlinePaths resolution and registered path writing support this shape. Frontmatter parsing/persistence is planned. Expanded collection keys do not normalize into bare child names automatically; any compatibility route needs owner-aware resolution and conflict handling.
+
+### Master data and identifiers
+
+Present a subject's own master data first, then structural references and selections, within configuration and state tables. Group by semantic role rather than serialization shape: kind and technology remain master data even when linked.
+
+The user selected three levels for scalar [Identifiers](shared/identifiers.md): a plain string, a path to any subject or ordinary Markdown page providing a generic link, and a path to the expected subject type enabling rich UI and applicable domain behavior. All three are identifiers. A corresponding subject or subject type is optional for descriptive data; typed structural operations still require their actual compatible subjects. Exact syntax is deferred, with a compact options list in the identifier specification. Automatic name resolution, equality/grouping, and rename behavior remain open.
 
 ## Implementation constraints
 

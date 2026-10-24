@@ -17,7 +17,7 @@ Authored enrichment and relationships use the [existing metadata envelope](../sh
 | Property | Type | Meaning and source |
 |---|---|---|
 | `name` | `string` | Readable person or role name; proposed required field if Actor is selected. |
-| `kind` | `string?` | Optional extensible distinction such as person or role; omitted means unspecified. |
+| `kind` | [Identifier](../shared/identifiers.md) (optional) | Optional extensible distinction such as person or role; omitted means unspecified. |
 
 Descriptions, notes, links, tags, and relationship records remain authored metadata. Identity, allowed kind values, and relationship endpoint rules remain open.
 
@@ -25,8 +25,8 @@ Descriptions, notes, links, tags, and relationship records remain authored metad
 
 | Property | Type | Meaning and source |
 |---|---|---|
-| `relationships` | Relationship references to [Service](service.md) and other supported subjects | Read-only architectural interactions resolved from the existing metadata records; endpoint validation remains proposed. |
 | `diagnostics` | Diagnostic collection | Invalid authored fields or unresolved relationship targets; empty after successful validation with no issues. |
+| `relationships` | Relationship references to [Service](service.md) and other supported subjects | Read-only architectural interactions resolved from the existing metadata records; endpoint validation remains proposed. |
 
 ## Implementation readiness
 

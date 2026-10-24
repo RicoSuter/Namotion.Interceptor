@@ -26,14 +26,14 @@ No analyzer execution, source mount, or traversal policy is implied by an omitte
 
 | Property | Type | Meaning and source |
 |---|---|---|
-| `solutions` | Keyed owned collection of [CodeSolution](code-solution.md) | Solution-file discovery results with stable repository-relative identity; grouping only. |
-| `projects` | Keyed owned collection of [CodeProject](code-project.md) | Discovered code/build projects, shared by all referring solutions. |
-| `hosts` | Keyed owned collection of [Host](host.md) | Supported runnable process definitions; discovery does not select Service/release membership. |
-| `contracts` | Keyed owned collection of [Contract](contract.md) | Optional raw-file discovery results; explicit authored definitions take precedence according to the [contract discovery rules](../analyzers/contract-discovery.md). |
 | `analysisStatus` | Analysis-status value | Distinguishes not analyzed, current work, success, failure, and cancellation; exact vocabulary remains proposed. |
 | `diagnostics` | Diagnostic collection | Readable source-located configuration and analyzer findings, kept separate from last successful results. |
 | `lastSuccessfulAnalysis` | Optional UTC timestamp | Time of the last complete successful publication; absent before any successful pass. |
 | `provenance` | Provenance records | Analyzer identities and supporting source locations for the published graph. |
+| `solutions` | Keyed owned collection of [CodeSolution](code-solution.md) | Solution-file discovery results with stable repository-relative identity; grouping only. |
+| `projects` | Keyed owned collection of [CodeProject](code-project.md) | Discovered code/build projects, shared by all referring solutions. |
+| `hosts` | Keyed owned collection of [Host](host.md) | Supported runnable process definitions; discovery does not select Service/release membership. |
+| `contracts` | Keyed owned collection of [Contract](contract.md) | Optional raw-file discovery results; explicit authored definitions take precedence according to the [contract discovery rules](../analyzers/contract-discovery.md). |
 
 A successful empty result is distinct from failure. A failed pass retains the entire last successful graph, including solution/project memberships, under [reconciliation](../shared/reconciliation.md) and [publication rules](../shared/path-queries.md).
 

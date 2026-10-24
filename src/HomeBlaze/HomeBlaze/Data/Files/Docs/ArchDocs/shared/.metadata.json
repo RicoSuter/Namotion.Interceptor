@@ -1,5 +1,6 @@
 {
   "order": [
+    "identifiers.md",
     "path-queries.md",
     "metadata-and-relationships.md",
     "reconciliation.md"

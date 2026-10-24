@@ -22,15 +22,15 @@ Authored enrichment and relationships use the [existing metadata envelope](../sh
 
 | Property | Type | Meaning and source |
 |---|---|---|
+| `version` | `string?` | Intended version from typed owner metadata; omitted means unknown. Metadata remains the editable source. |
+| `urls` | `string` collection | Relevant manually supplied access links from owner metadata; absent or empty provides no known links. |
+| `observedStatus` | Optional observation record | Read-only observation only when an integration supplies evidence; otherwise unavailable. |
+| `diagnostics` | Diagnostic collection | Selection, enrichment, or binding validation issues. |
 | `environment` | Reference to [Environment](environment.md) | Canonical owner and intended installation context. |
 | `deploymentUnit` | Reference to [DeploymentUnit](deployment-unit.md) | Selected release unit; the pair with Environment establishes generated identity. |
 | `components` | Reference collection of [Component](component.md) | Current release participants from the selected unit, without transferring their ownership. |
-| `version` | `string?` | Intended version from typed owner metadata; omitted means unknown. Metadata remains the editable source. |
-| `urls` | `string` collection | Relevant manually supplied access links from owner metadata; absent or empty provides no known links. |
 | `endpoints` | Reference collection of [Endpoint](endpoint.md) | Related environment access bindings; canonical binding ownership/persistence remains open. |
 | `resourceMappings` | Binding records referencing [Resource](resource.md) | Proposed intended concrete resource mappings, without replacing logical Resource identity; record schema remains open. |
-| `observedStatus` | Optional observation record | Read-only observation only when an integration supplies evidence; otherwise unavailable. |
-| `diagnostics` | Diagnostic collection | Selection, enrichment, or binding validation issues. |
 
 Typed metadata accessors expose intended enrichment as readable subject state; they do not make it discovered or observed data. Component-specific version bindings, endpoint bindings, and resource mapping records still require a chosen schema.
 

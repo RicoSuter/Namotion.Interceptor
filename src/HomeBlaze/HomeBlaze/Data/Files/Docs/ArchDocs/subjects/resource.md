@@ -17,8 +17,8 @@ Authored enrichment and relationships use the [existing metadata envelope](../sh
 | Property | Type | Meaning and source |
 |---|---|---|
 | `name` | `string` | Readable logical resource name. |
-| `kind` | `string` | Extensible capability kind rather than a mandatory platform-specific subtype. |
-| `technology` | `string?` | Optional descriptive technology; omitted means unknown. |
+| `kind` | [Identifier](../shared/identifiers.md) | Extensible capability kind rather than a mandatory platform-specific subtype. |
+| `technology` | [Identifier](../shared/identifiers.md) (optional) | Optional descriptive technology; omitted means unknown. |
 
 Descriptions and typed provide/consume/exposure relationships use existing metadata. Their canonical authored source, inverse-navigation rules, and environment mapping records remain proposed; there are no competing editable relationship collections on both endpoints.
 
@@ -26,13 +26,13 @@ Descriptions and typed provide/consume/exposure relationships use existing metad
 
 | Property | Type | Meaning and source |
 |---|---|---|
+| `diagnostics` | Diagnostic collection | Unresolved relationship targets and invalid binding or configuration inputs. |
 | `hosts` | Reference collection of [Host](host.md) | Zero or many providing processes from canonical provision relationships. No Host is required. |
 | `interfaces` | Reference collection of [Interface](interface.md) | Logical exposed capabilities from canonical exposure relationships. |
 | `consumers` | Reference collection of [Component](component.md) | Consumers resolved from typed dependency relationships, distinct from membership and release participation. |
 | `services` | Reference collection of [Service](service.md) | Inverse direct logical memberships; shared membership preserves resource identity. |
 | `endpoints` | Reference collection of [Endpoint](endpoint.md) | Access bindings through exposed Interfaces where known. |
 | `deployments` | Reference collection of [Deployment](deployment.md) | Related intended installations and resource mappings where supplied; no provisioning or health implication. |
-| `diagnostics` | Diagnostic collection | Unresolved relationship targets and invalid binding or configuration inputs. |
 
 ## Implementation readiness
 

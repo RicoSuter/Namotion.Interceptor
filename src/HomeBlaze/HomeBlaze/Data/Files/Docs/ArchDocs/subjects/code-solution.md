@@ -25,11 +25,11 @@ Authored enrichment and relationships use the [existing metadata envelope](../sh
 | `key` | `string` | Stable repository-relative identity in the analyzer namespace, independent of display name and discovery order. |
 | `name` | `string` | Discovered readable solution name. |
 | `sourcePath` | `string` | Normalized repository-relative solution-file location. |
-| `repository` | Reference to [SourceRepository](source-repository.md) | Canonical discovery owner. |
-| `projects` | Reference collection of [CodeProject](code-project.md) | Resolved existing repository projects in this solution; zero or many, without ownership transfer. |
 | `projectLocations` | Read-only source-location records | Literal solution project entries, including unresolved/unsupported entries with provenance; exact record shape remains open. |
 | `provenance` | Provenance records | Analyzer identity, solution file, and supporting locations for membership facts. |
 | `diagnostics` | Diagnostic collection | Unresolved project locations, unsupported entries, malformed source, and scope findings. |
+| `repository` | Reference to [SourceRepository](source-repository.md) | Canonical discovery owner. |
+| `projects` | Reference collection of [CodeProject](code-project.md) | Resolved existing repository projects in this solution; zero or many, without ownership transfer. |
 
 ## Implementation readiness
 

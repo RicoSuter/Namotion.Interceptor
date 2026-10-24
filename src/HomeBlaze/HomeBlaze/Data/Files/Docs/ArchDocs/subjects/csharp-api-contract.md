@@ -16,10 +16,11 @@ Authored enrichment and relationships use the [existing metadata envelope](../sh
 
 | Property | Type | Meaning and source |
 |---|---|---|
-| Inherited Contract fields | [Contract configuration](contract.md#configuration-properties-proposed-schema) | Optional `name`, `version`, and `codeProjectPath`; do not duplicate them in this subtype. |
+| Inherited master data | [Contract configuration](contract.md#configuration-properties-proposed-schema) | Optional `name` and `version`; do not duplicate them in this subtype. |
 | `snapshotPath` | `string?` | Optional explicitly supplied API snapshot input; its format and resolution contract remain open. |
 | `revision` | `string?` | Optional source/snapshot revision selector; omitted means unspecified, not the latest remote revision. |
 | `targetFramework` | `string?` | Optional framework surface selector. Unspecified framework behavior must be settled before extraction is implemented. |
+| Inherited project identifier | [Contract configuration](contract.md#configuration-properties-proposed-schema) | Optional `codeProjectPath`; see Contract for identifier resolution. |
 
 Snapshot input and analyzer extraction are alternative proposed input capabilities. Source-symbol versus compiled-metadata extraction, precedence, defaults, and validation remain open; no restore, build, or execution is authorized by these field proposals.
 
@@ -27,10 +28,11 @@ Snapshot input and analyzer extraction are alternative proposed input capabiliti
 
 | Property | Type | Meaning and source |
 |---|---|---|
-| Inherited Contract state | [Contract state](contract.md#state-properties-proposed-schema) | Common resolved source/project references, provenance, and diagnostics. |
+| Inherited own state | [Contract state](contract.md#state-properties-proposed-schema) | Source/provenance and diagnostics. |
 | `publicTypes` | Read-only public-type records | Available extracted or snapshot types with member/signature records. Exact parsed shape remains proposed; unavailable extraction is distinct from a known empty surface. |
 | `surfaceRevision` | `string?` | Revision actually represented by the available surface. |
 | `surfaceTargetFramework` | `string?` | Framework actually represented by the available surface. |
+| Inherited reference state | [Contract state](contract.md#state-properties-proposed-schema) | Resolved CodeProject and referring subjects. |
 
 ## Implementation readiness
 

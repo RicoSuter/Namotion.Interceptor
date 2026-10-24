@@ -17,8 +17,8 @@ Authored enrichment and relationships use the [existing metadata envelope](../sh
 | Property | Type | Meaning and source |
 |---|---|---|
 | `name` | `string` | Readable logical capability name. |
-| `protocol` | `string?` | Optional extensible access mechanism; omitted means unspecified and does not default to HTTP. |
-| `technology` | `string?` | Optional descriptive technology. |
+| `protocol` | [Identifier](../shared/identifiers.md) (optional) | Optional extensible access mechanism; omitted means unspecified and does not default to HTTP. |
+| `technology` | [Identifier](../shared/identifiers.md) (optional) | Optional descriptive technology. |
 | `contractPaths` | Subject-path collection targeting [Contract](contract.md) | Proposed public-surface references; absent or empty declares no known Contracts. Exact canonical authored association remains open. |
 
 Description and exposure records use authored metadata where that canonical relationship source is selected. Discovered name/protocol/technology facts remain read-only analyzer state; explicit overrides and the final association schema remain open.
@@ -27,11 +27,11 @@ Description and exposure records use authored metadata where that canonical rela
 
 | Property | Type | Meaning and source |
 |---|---|---|
+| `provenance` | Provenance records | Defining-file/analyzer source for authored or discovered facts. |
+| `diagnostics` | Diagnostic collection | Unresolved references and exposure/public-surface validation issues. |
 | `contracts` | Reference collection of [Contract](contract.md) | Resolved public-surface references; no cloning or ownership transfer. |
 | `exposingSubjects` | References to [Service](service.md), [Host](host.md), or [Resource](resource.md) | Subjects exposing this logical capability, resolved from canonical exposure records; cardinalities remain proposed. |
 | `endpoints` | Reference collection of [Endpoint](endpoint.md) | Environment-specific access bindings for this Interface. |
-| `provenance` | Provenance records | Defining-file/analyzer source for authored or discovered facts. |
-| `diagnostics` | Diagnostic collection | Unresolved references and exposure/public-surface validation issues. |
 
 ## Implementation readiness
 

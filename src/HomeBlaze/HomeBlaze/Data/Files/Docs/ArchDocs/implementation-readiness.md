@@ -31,6 +31,7 @@ Delivery readiness is a separate axis: **Extension** can use existing host contr
 | Inline paths for named Markdown children and registered path writing | [Implemented] | Reuse child names such as `service`; frontmatter loading/persistence remains separate planned work |
 | Plain links and manual CanvasLayout nodes | [Implemented] | Normal navigation/placement; no semantic connector lines |
 | All ArchDocs subject types and contract specializations | [Planned] | Extension; capability model, references, and registration |
+| Identifiers with plain-text, generic-link, and typed presentation | [Planned] | Shared authoring/resolution/presentation behavior; existing path resolution and pickers are primitives; exact syntax remains deferred |
 | Repository/solution/project discovery and contract-file association/parsing | [Planned] | Extension; selected read-only source and analyzer contracts; file recognition/association does not require full parsing |
 | Generic wildcard selection and typed relationship readers | [Planned] | Extension/shared services; existing resolver alone is insufficient |
 | Reconciled repository children and Environment Deployments | [Planned] | Extension; lifecycle, identity, worker, and metadata prerequisites |

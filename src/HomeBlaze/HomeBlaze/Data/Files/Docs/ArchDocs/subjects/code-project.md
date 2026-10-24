@@ -27,13 +27,13 @@ Authored enrichment and relationships use the [existing metadata envelope](../sh
 | `sourcePath` | `string` | Normalized repository-relative project-file location; distinct from a subject path. |
 | `language` | `string?` | Discovered language when established; null means unknown. |
 | `classification` | `string?` | Supported library, executable, test, or other classification; unresolved inputs remain unknown. |
+| `provenance` | Provenance records | Analyzer identity and supporting source locations for discovered facts. |
+| `diagnostics` | Diagnostic collection | Unresolved references, conditions, and incomplete source facts. |
 | `repository` | Reference to [SourceRepository](source-repository.md) | Canonical discovery owner. |
 | `solutions` | Reference collection of [CodeSolution](code-solution.md) | Inverse memberships from discovered solutions. Zero or many; membership does not change project identity or ownership. |
 | `projectReferences` | Reference collection of [CodeProject](code-project.md) | Resolved literal code dependencies; unresolved literal inputs remain available with diagnostics. |
 | `hosts` | Reference collection of [Host](host.md) | Zero or many process definitions that use this entry or supporting project; never a required one-to-one wrapper. |
 | `contracts` | Reference collection of [Contract](contract.md) | Inverse references to Contracts whose explicit or inferred primary project association resolves to this project; read-only, without a competing editable project-side association. |
-| `provenance` | Provenance records | Analyzer identity and supporting source locations for discovered facts. |
-| `diagnostics` | Diagnostic collection | Unresolved references, conditions, and incomplete source facts. |
 
 The [Contract](contract.md) owns its optional `codeProjectPath` association and resolved `codeProject` reference. A project can therefore have Contracts while `hosts` is empty. Project references are code dependencies and do not imply runtime calls.
 
