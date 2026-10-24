@@ -21,6 +21,7 @@ Use the design in [PR #257, HomeBlaze: ArchDocs](https://github.com/RicoSuter/Na
 - Select discovered subjects by scope, kind, name, and other properties instead of maintaining lists of every discovered item.
 - Keep generated subjects stable across successful refreshes and preserve authored enrichment.
 - Reuse existing storage, registry, expressions, lifecycle, metadata, and subject UI capabilities where they fit.
+- Provide rich previews, contextual exploration, and useful service and deployment views while keeping Markdown portable and UI configuration out of authored metadata.
 
 ## Non-goals for the MVP
 
@@ -95,6 +96,14 @@ UI modules register contributions based on the current subject's type or interfa
 Support multiple applicable contributors with deterministic ordering and stable identities. Empty or inapplicable contributions occupy no space. Contributions refresh when the metadata or the facts they read change, and release subscriptions and resources when the page or contribution leaves. Visibility and placement are application/user preferences unless an author explicitly embeds a widget. An extension failure should leave the document readable and identify the failed contribution rather than replace the whole page.
 
 The current component registry resolves one Page/Edit/Setup/Widget component, with inheritance/interface fallback; its GetComponents enumeration only matches the exact subject type. Reuse the registration and context patterns, while defining ordered multi-contributor discovery for the new slots. Do not assume the existing single-component lookup already implements those semantics. Keep page-specific contribution dependencies in the UI layers rather than Namotion.Interceptor.Utils.
+
+### Markdown link previews
+
+The user confirmed that the context slot provides information without authored blocks and also wants ordinary Markdown links to act as entry points to richer information. When a link resolves to a subject, offer an overlay card with its title, subtitle, description, and applicable information. The Markdown source remains a standard link, with normal navigation preserved. This presentation does not turn a document reference into a typed architectural dependency.
+
+Proposed default: provide a generic subject preview with an explicit open action and allow subject UI modules to contribute a compact summary through the same registration patterns. Reuse subject presentation data between previews and the context slot. Pointer hover and keyboard focus should expose the preview; touch needs an accessible explicit preview interaction. Unresolved or external links retain ordinary link behavior. Preview errors must not prevent navigation. Exact gesture behavior and card layout remain visual-design decisions; ordinary images keep their image semantics.
+
+The user emphasized that rich, useful UI is part of the feature. Compact previews limit the initial footprint, not the information available: offer relevant facts and navigation into the context slot or an applicable additional view. The context slot, previews, service summary, and deployment matrix belong to the MVP rather than being deferred behind a generic property editor. Proposed default: compose reusable subject presentation and contributions across these surfaces, with progressive disclosure for larger lists and details. Service UI makes selected hosts/projects, dependencies, and deployments explorable; deployment UI makes units, environments, manual versions, and links explorable. Provide clear loading, empty, unresolved, and error states and preserve the provenance of displayed facts. Exact styling and interactions remain visual-design decisions.
 
 ## Domain
 
@@ -246,6 +255,8 @@ The user selected existing subject UI plus an optional Markdown service-summary 
 12. Define a service in typed Markdown frontmatter; resolve it as the declared MarkdownFile subclass, render and edit it through the normal Markdown UI, and embed its optional summary without recursive rendering.
 13. Edit metadata and authored relationships on ordinary and typed Markdown through the metadata API; preserve the body and unrelated frontmatter, reapply descendant enrichment on later attach, and retain that data across refresh and restart.
 14. Open an ordinary Markdown document with relationship metadata and no blocks or `$type`; expose applicable subject information through page UI slots while leaving its source and normal Markdown rendering intact.
+15. Follow an ordinary Markdown link to a resolvable subject; offer a rich preview with title, subtitle, description, applicable facts, and navigation while retaining standard Markdown source and normal link navigation.
+16. Explore service membership, dependencies, and deployments through the context slot and summary, and navigate from deployment-matrix entries to their units, environments, and deployments. Surface unavailable or uncertain facts explicitly.
 
 These are requirements for future implementation and testing. No product code, tests, dependencies, or projects are added by this design document.
 
@@ -253,10 +264,10 @@ These are requirements for future implementation and testing. No product code, t
 
 Follow the repository's subject-creation guidance and existing conventions: partial intercepted properties, configuration versus state, internal setters for owned state, dictionaries for stable discovered identity, replaced published collections, headless domain code, and separate UI code. Reuse title, icon, monitoring, last-updated, path-reference, and metadata interfaces where applicable.
 
-The builder chooses exact project names, concrete interfaces, JSON property names, worker primitives, caching strategy, and the smallest reusable helper API that satisfies the contracts above. A proposed Namotion.ArchDocs name is inherited from PR #257, not a new user decision. An implementation plan must identify required public API changes, tests for selector and lifecycle correctness, and targeted UI tests if custom UI enters scope. Long-running benchmarks or connector verification require agreement before they are scheduled; neither is implied by this design.
+The builder chooses exact project names, concrete interfaces, JSON property names, worker primitives, caching strategy, and the smallest reusable helper API that satisfies the contracts above. A proposed Namotion.ArchDocs name is inherited from PR #257, not a new user decision. An implementation plan must identify required public API changes, tests for selector and lifecycle correctness, and targeted UI tests for page contributions, link previews, and widgets. Long-running benchmarks or connector verification require agreement before they are scheduled; neither is implied by this design.
 
 ## Review status and remaining presentation work
 
 The user selected basic `.csproj` XML discovery, existing subject UI plus optional summary/matrix widgets, and reuse of metadata for enrichment and authored relationships. Typed Markdown subjects inherit MarkdownFile, keep its normal UI, and store configuration beside `$type` and enrichment under `metadata` in frontmatter. Ordinary Markdown gains the same frontmatter metadata support. The shared reconciliation approach and Environment declaring deployment units are agreed. A builder check identified the partial-analysis failure boundary; the proposed default in this document retains the entire last successful graph of a repository whose pass fails, while other repositories can publish independently.
 
-The description and exact visual contents of the service summary and deployment matrix need user review. Their proposed behavior above is sufficient to discuss scope, not approval of a visual design. This domain and MVP draft must be approved before implementation planning begins.
+The user confirmed the context slot and rich link-preview overlays, and emphasized rich UI as an MVP requirement. Exact visual contents and interactions of the preview, context slot, service summary, and deployment matrix still need visual review. Their proposed behavior above defines scope, not approval of a visual design. This domain and MVP draft must be approved before implementation planning begins.
