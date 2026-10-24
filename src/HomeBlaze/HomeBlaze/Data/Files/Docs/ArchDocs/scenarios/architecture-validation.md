@@ -54,7 +54,7 @@ archdocs check --docs ./docs --format text
 archdocs check --docs ./docs --format json --output ./artifacts/architecture-checks.json
 ```
 
-The command names are illustrative and not runnable today. A CI job would install/configure the selected future CLI and analyzers, run against its checkout, and fail on the configured severity threshold. The local agent loop is run, inspect findings and guides, edit canonical definitions, and rerun. Validation itself does not modify documentation or start HomeBlaze.
+The command names are illustrative and not runnable today. A CI job would install/configure the selected future CLI and analyzers, run against its checkout, and fail on the configured severity threshold. The CLI starts the normal subject graph headlessly, loads storage and metadata, and lets SourceRepositories invoke their selected analyzers. It waits for discovery and memberships to settle before checking; it needs no separate parser/scanner or running web server. A proposed `--config ./Root.json` option reuses an explicit normal root configuration. The local agent loop is run, inspect findings and guides, edit canonical definitions, and rerun. Validation itself does not modify documentation.
 
 ## Reuse the results in documents
 

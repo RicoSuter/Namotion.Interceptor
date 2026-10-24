@@ -43,7 +43,7 @@ Area names identify implementation responsibility. ArchDocs covers the domain ex
 | Dependency/layer grouping and impact views | ArchDocs | [Planned] | Shared graph queries, evidence-preserving aggregation, reverse-reference traversal, and supported documentation backlinks; see [DependencyDiagram](widgets/dependency-diagram.md) and [ImpactView](widgets/impact-view.md) |
 | Linked authored interaction scenarios | ArchDocs | [Planned] | [ScenarioDiagram](widgets/scenario-diagram.md), participant validation, and sequence rendering; trace ingestion is separate |
 | File-authored architecture rules and actionable findings | ArchDocs | [Planned] | Headless [rule evaluator](shared/architecture-checks.md), current graph, source provenance, remediation/help links, and supported rule kinds |
-| CLI/CI architecture validation and agent-readable reports | ArchDocs; HomeBlaze if shared loading needs extraction | [Planned] | Separate [headless entry point](integration/cli-and-ci.md), deterministic file/graph loading and analyzer publication, shared rules, text/JSON reports, and unsuccessful exits for violations or incomplete validation |
+| CLI/CI architecture validation and agent-readable reports | ArchDocs / HomeBlaze | [Planned] | [Headless command adapter](integration/cli-and-ci.md) over normal shared graph loading, lifecycle, and analyzer publication; explicit readiness for current discovery/reconciliation, shared rules, text/JSON reports, and unsuccessful exits for violations or incomplete validation |
 | Supported Markdown-reference indexing and backlinks | ArchDocs | [Planned] | Link parsing, file/subject target mapping, invalidation, and reference provenance; distinct from runtime relationships and a general prose-extraction engine |
 | Architecture-check result widgets and diagram annotations | ArchDocs | [Planned] | Reuse shared findings through [ArchitectureCheckResults](widgets/architecture-check-results.md); automatic surrounding-page placement separately needs host work |
 | Generic $name frontmatter subject children | HomeBlaze | [Planned] | HomeBlaze change: parsing, lifecycle, collision handling, and writeback |
@@ -65,6 +65,9 @@ Readiness for extension implementation does not waive the [file-authoring requir
 
 - [Subject registration and JSON configuration](../../../../../HomeBlaze.Abstractions/IConfigurable.cs)
 - [JSON configuration serializer](../../../../../HomeBlaze.Services/ConfigurableSubjectSerializer.cs)
+- [Root loading and context attachment](../../../../../HomeBlaze.Services/RootManager.cs)
+- [Shared subject context with tracking, registry, lifecycle, and hosted services](../../../../../HomeBlaze.Services/SubjectContextFactory.cs)
+- [Hosted storage loading](../../../../../HomeBlaze.Storage/FluentStorageContainer.cs)
 - [Explicit body-block subjects](../../../../../HomeBlaze.Storage/Internal/MarkdownContentParser.cs)
 - [Widget/Page/Edit resolution](../../../../../HomeBlaze.Services/Components/SubjectComponentRegistry.cs)
 - [Page navigation interface](../../../../../HomeBlaze.Components.Abstractions/Pages/IPage.cs)
