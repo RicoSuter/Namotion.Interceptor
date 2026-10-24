@@ -6,7 +6,7 @@ status: Planned
 
 # Architecture Checks [Planned]
 
-Evaluate selected architecture-test subjects against the current discovered and authored graph. The shared evaluator serves HomeBlaze and a headless CLI/CI host and produces actionable findings for humans and agents. [Rule definitions, families, and selection](../rules/overview.md) are specified in rules/; this page owns common execution and diagnostic behavior.
+Evaluate selected architecture-test subjects against the current discovered and authored graph. The shared evaluator serves HomeBlaze and a headless CLI/CI host and produces actionable findings for humans and agents. [Rule definitions, families, and selection](overview.md) are specified in rules/; this page owns common execution and diagnostic behavior.
 
 ## Implementation readiness
 
@@ -18,11 +18,11 @@ Evaluate selected architecture-test subjects against the current discovered and 
 
 ## Definitions and run ownership [Planned]
 
-A [Rule](../subjects/rule.md) has one canonical JSON or Markdown owner. The [authoring reference](../rules/authoring.md) shows named JSON-configured children in `rules.md`, one JSON file per definition, and page/directory/global suites. Repositories select existing definitions through `rules` and expose read-only `resolvedRules`; configuration stays on the definition, while per-invocation findings and cancellation stay with the repository/runner.
+A [Rule](../subjects/rule.md) has one canonical JSON or Markdown owner. The [authoring reference](authoring.md) shows named JSON-configured children in `rules.md`, one JSON file per definition, and page/directory/global suites. Repositories select existing definitions through `rules` and expose read-only `resolvedRules`; configuration stays on the definition, while per-invocation findings and cancellation stay with the repository/runner.
 
 Generic and predefined check kinds consume the invocation's repository, explicit architecture/documentation scope, and available current facts. Rule definitions declare requirements and cannot assume that a plain name or unavailable analyzer supplies evidence. A documented preset can provide defaults for the invoking repository without rewriting explicit absolute selectors.
 
-The initial concrete policy is [every Host belongs to a Service](../rules/predefined-rules.md#every-host-belongs-to-a-service-planned). Naming, category-based dependency constraints, coverage, cycles, required metadata, and reference checks are documented in the [generic family catalog](../rules/generic-rules.md). Enabling many selected tests should produce a combined report rather than hiding all but the first violation.
+The initial concrete policy is [every Host belongs to a Service](predefined-rules.md#every-host-belongs-to-a-service-planned). Naming, category-based dependency constraints, coverage, cycles, required metadata, and reference checks are documented in the [generic family catalog](generic-rules.md). Enabling many selected tests should produce a combined report rather than hiding all but the first violation.
 
 ## Findings [Planned]
 
@@ -40,4 +40,4 @@ A valid empty selection is distinct from an unresolved explicit path or failed d
 
 Use the same evaluation and findings in UI and CLI. Presentation, command arguments, and serialization are adapters. Deterministic ordering and stable finding keys make reports reviewable. Time, revision, and freshness are explicit report context rather than hidden inputs to rule truth. Changes during evaluation invalidate obsolete results; canceled or superseded work cannot publish a current pass. Warning thresholds, exclusions, and any future suppressions must be explicit; baseline/suppression syntax remains deferred.
 
-[Architecture tests](../rules/overview.md) · [CLI and CI](../integration/cli-and-ci.md) · [Results widget](../widgets/architecture-check-results.md) · [Validation scenario](../scenarios/architecture-validation.md)
+[Architecture tests](overview.md) · [CLI and CI](../integration/cli-and-ci.md) · [Results widget](../widgets/architecture-check-results.md) · [Validation scenario](../scenarios/architecture-validation.md)

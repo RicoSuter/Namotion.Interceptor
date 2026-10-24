@@ -6,7 +6,7 @@ status: Planned
 
 # ArchitectureCheckResults [Planned]
 
-Display the shared [architecture-check](../shared/architecture-checks.md) results with useful errors, source links, and remediation guidance. Reuse the same finding records produced by the [CLI](../integration/cli-and-ci.md); rendering a widget must not introduce a second rule evaluator or silently fix inputs.
+Display the shared [architecture-check](../rules/architecture-checks.md) results with useful errors, source links, and remediation guidance. Reuse the same finding records produced by the [CLI](../integration/cli-and-ci.md); rendering a widget must not introduce a second rule evaluator or silently fix inputs.
 
 ## Configuration properties [Proposed schema]
 

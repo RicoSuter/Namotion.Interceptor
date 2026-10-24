@@ -14,7 +14,7 @@ Run architecture validation from a local terminal or CI job by starting the same
 
 **Delivery:** Planned headless command-line entry point. Exact executable/package names, argument syntax, distribution, and report schema are proposed. No runnable ArchDocs CLI exists in this PR.
 
-**Prerequisites:** [Architecture checks](../shared/architecture-checks.md), normal subject/type registration, storage and metadata loading, shared graph lifecycle, a completion contract for required discovery/reconciliation, deterministic root mapping, and source-located diagnostics. UI component registration and rendering are not prerequisites.
+**Prerequisites:** [Architecture checks](../rules/architecture-checks.md), normal subject/type registration, storage and metadata loading, shared graph lifecycle, a completion contract for required discovery/reconciliation, deterministic root mapping, and source-located diagnostics. UI component registration and rendering are not prerequisites.
 
 ## Execution contract [Planned]
 
@@ -107,4 +107,4 @@ A person or agent runs the check, follows the finding to its rule and guide, edi
 
 CI runs against its checked-out revision and retains the report as an artifact if desired. Checks based on local static source do not need GitHub credentials. Provider observations, trace-based rules, and other remote capabilities must be explicitly selected and are outside the basic local validation path. Parallel runs must not depend on another UI session's mutable graph or cached stale state.
 
-[Architecture checks](../shared/architecture-checks.md) · [Validation scenario](../scenarios/architecture-validation.md) · [Readiness](../implementation-readiness.md)
+[Architecture checks](../rules/architecture-checks.md) · [Validation scenario](../scenarios/architecture-validation.md) · [Readiness](../implementation-readiness.md)

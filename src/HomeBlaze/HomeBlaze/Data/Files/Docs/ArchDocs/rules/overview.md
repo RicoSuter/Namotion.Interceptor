@@ -22,7 +22,7 @@ ArchDocs is an architecture-validation framework with documentation and linked v
 - [Authoring and selection](authoring.md): `rules.md`, one JSON file per rule, exact paths, and wildcard suites.
 - [Generic rule families](generic-rules.md): naming, metadata, coverage, dependencies, cycles, references, and contracts.
 - [Predefined policies](predefined-rules.md): domain-specific defaults over the generic capabilities.
-- [Evaluation and findings](../shared/architecture-checks.md): shared execution semantics and actionable diagnostics.
+- [Evaluation and findings](architecture-checks.md): shared execution semantics and actionable diagnostics.
 - [CLI and CI](../integration/cli-and-ci.md): normal graph loading, readiness, reports, and exit status.
 
 ## Repository selection [Planned]

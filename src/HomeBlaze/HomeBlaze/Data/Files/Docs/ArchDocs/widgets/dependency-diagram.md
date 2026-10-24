@@ -30,7 +30,7 @@ Existing project membership selectors provide reusable grouping rules. A source-
 
 Render resolved `projectReferences`, unresolved dependencies, source links, provenance, and analysis freshness. Allow reverse-dependency exploration and cycle highlighting. Preserve outside-scope dependencies as external references without adding them to selected membership. A view can use a matrix/table presentation when that makes large graphs easier to read.
 
-Aggregated edges retain the underlying project endpoints and evidence. Overlapping Service/group membership must remain visible and must not imply exclusive ownership or create artificial inter-Service runtime edges. Exact multi-group rendering and aggregation controls remain open. [Architecture checks](../shared/architecture-checks.md) can annotate known violations using the same snapshot; incomplete checks remain distinguishable from passes.
+Aggregated edges retain the underlying project endpoints and evidence. Overlapping Service/group membership must remain visible and must not imply exclusive ownership or create artificial inter-Service runtime edges. Exact multi-group rendering and aggregation controls remain open. [Architecture checks](../rules/architecture-checks.md) can annotate known violations using the same snapshot; incomplete checks remain distinguishable from passes.
 
 Reuse [common diagram infrastructure](architecture-diagram.md). This view supports building-block and layer documentation in arc42 and other styles. Basic project-file analysis supplies literal references only; it does not establish all effective build dependencies, type usage, or runtime interactions.
 
@@ -42,4 +42,4 @@ Reuse [common diagram infrastructure](architecture-diagram.md). This view suppor
 
 **Prerequisites:** Repository/project discovery, shared queries, source provenance, a dependency reader, and a renderer. Logical grouping additionally needs resolved Service memberships or explicit view groups. No new page-shell capability is required for explicit embedding.
 
-[General widgets](overview.md) · [ImpactView](impact-view.md) · [Architecture checks](../shared/architecture-checks.md)
+[General widgets](overview.md) · [ImpactView](impact-view.md) · [Architecture checks](../rules/architecture-checks.md)

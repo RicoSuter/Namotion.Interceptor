@@ -40,7 +40,7 @@ Names are proposed camelCase serialized names; existing Markdown body-block conf
 
 **Delivery:** Planned configurable subject and registered evaluator contracts using existing subject/loading/component extension points. The Rule type and all evaluators are unimplemented. Generic frontmatter declarations still need the documented HomeBlaze extension; existing named body blocks and standalone JSON are available entry points after Rule registration.
 
-**Prerequisites:** Normal subject identity/loading, check schemas and registration, source provenance, repository selection, invocation context, and shared [evaluation/finding contracts](../shared/architecture-checks.md).
+**Prerequisites:** Normal subject identity/loading, check schemas and registration, source provenance, repository selection, invocation context, and shared [evaluation/finding contracts](../rules/architecture-checks.md).
 
 ## UI [Planned]
 

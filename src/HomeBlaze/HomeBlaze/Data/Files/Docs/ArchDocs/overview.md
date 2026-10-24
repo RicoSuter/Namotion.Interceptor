@@ -30,7 +30,7 @@ ArchDocs is an architecture-validation framework with documentation and linked v
 - Subjects below: canonical semantics, configuration/state boundaries, references, subject-specific widgets/detail pages/editors, and unresolved schemas.
 - [Analyzers](analyzers/overview.md): read-only source and contract analysis.
 - [General widgets](widgets/overview.md): reusable aggregating views such as tables, deployment matrices, and architecture diagrams. Subject-specific presentation stays in each subject file.
-- [Architecture tests and rules](rules/overview.md), [shared evaluation](shared/architecture-checks.md), and [CLI/CI validation](integration/cli-and-ci.md): selectable Rule subjects with actionable, source-located errors for humans and agents. Start with the [discovery and validation scenario](scenarios/architecture-validation.md).
+- [Architecture tests and rules](rules/overview.md), [shared evaluation](rules/architecture-checks.md), and [CLI/CI validation](integration/cli-and-ci.md): selectable Rule subjects with actionable, source-located errors for humans and agents. Start with the [discovery and validation scenario](scenarios/architecture-validation.md).
 - [Identifiers](shared/identifiers.md), [path queries](shared/path-queries.md), [metadata and relationships](shared/metadata-and-relationships.md), and [reconciliation](shared/reconciliation.md): shared behavior.
 - [Markdown authoring](integration/markdown-authoring.md) and [page contributions](integration/page-contributions.md): optional host extensions.
 - [Release and deployment integration](integration/delivery-pipelines.md): proposed connections to GitHub Actions and other pipeline providers, with explicit architecture mappings.

@@ -83,4 +83,4 @@ Select edge kinds explicitly. Project references, runtime API calls, messages, a
 
 Each evaluator should explain the expected condition, actual evidence, source locations, and the relevant correction path. Missing authored metadata may be repaired through the owning sidecar/frontmatter. Missing Service assignment may be repaired through component selectors. A real code naming/dependency violation needs a code change or an explicit decision to change the intended architecture. Changing a label to misrepresent the code or silently lowering a rule's severity is not a valid automatic documentation repair.
 
-[Authoring](authoring.md) · [Predefined policies](predefined-rules.md) · [Evaluation and findings](../shared/architecture-checks.md)
+[Authoring](authoring.md) · [Predefined policies](predefined-rules.md) · [Evaluation and findings](architecture-checks.md)
