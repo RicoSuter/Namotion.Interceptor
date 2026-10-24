@@ -1,11 +1,11 @@
 ---
-title: ArchDocs Domain and MVP Design
-navTitle: ArchDocs Domain and MVP
+title: ArchDocs Working Domain Specification
+navTitle: ArchDocs Domain Specification
 ---
 
-# ArchDocs Domain and MVP Design
+# ArchDocs Working Domain Specification
 
-Status: draft for review. This document records the agreed domain and the proposed first implementation boundary. It does not authorize implementation. Choices labeled "Proposed default" are recommendations, not decisions made by the user.
+Status: working specification under active discussion. This is the canonical reference for entities, their data, relationships, ownership, authoring, and presentation contracts. The [working sample](../../ArchDocs/README.md) supplies concrete Markdown and JSON files for refining those contracts. It is not a finalized schema or implementation plan. The latest user direction is to refine the sample first, then select the MVP and plan implementation. Earlier first-iteration boundaries remain candidates until that review. Choices labeled "Proposed default" are recommendations, not decisions made by the user; unresolved choices are listed at the end.
 
 ## Intent
 
@@ -23,7 +23,7 @@ Use the design in [PR #257, HomeBlaze: ArchDocs](https://github.com/RicoSuter/Na
 - Reuse existing storage, registry, expressions, lifecycle, metadata, and subject UI capabilities where they fit.
 - Provide rich previews, contextual exploration, and useful service and deployment views while keeping Markdown portable and UI configuration out of authored metadata.
 
-## Non-goals for the MVP
+## Candidate first-iteration exclusions
 
 - Cloning, fetching, checking out, or updating Git repositories.
 - Namespace, type, method, or call-graph analysis.
@@ -33,7 +33,7 @@ Use the design in [PR #257, HomeBlaze: ArchDocs](https://github.com/RicoSuter/Na
 - A configurable projection entity or a general transformation language.
 - Shared storage connections with separately configurable subject-tree views.
 
-An analyzer extension can add additional discovery later. These exclusions constrain the first implementation, not the domain vocabulary.
+An analyzer extension can add additional discovery later. These are the earlier proposed exclusions, retained for choosing the first implementation after the sample and domain review; they do not constrain the full domain vocabulary.
 
 ## Approaches
 
@@ -120,9 +120,60 @@ The user confirmed that the context slot provides information without authored b
 
 Proposed default: provide a generic subject preview with an explicit open action and allow subject UI modules to contribute a compact summary through the same registration patterns. Reuse subject presentation data between previews and the context slot. Pointer hover and keyboard focus should expose the preview; touch needs an accessible explicit preview interaction. Unresolved or external links retain ordinary link behavior. Preview errors must not prevent navigation. Exact gesture behavior and card layout remain visual-design decisions; ordinary images keep their image semantics.
 
-The user emphasized that rich, useful UI is part of the feature. Compact previews limit the initial footprint, not the information available: offer relevant facts and navigation into the context slot or an applicable additional view. The context slot, previews, service summary, and deployment matrix belong to the MVP rather than being deferred behind a generic property editor. Proposed default: compose reusable subject presentation and contributions across these surfaces, with progressive disclosure for larger lists and details. Service UI makes selected hosts/projects, dependencies, and deployments explorable; deployment UI makes units, environments, manual versions, and links explorable. Provide clear loading, empty, unresolved, and error states and preserve the provenance of displayed facts. Exact styling and interactions remain visual-design decisions.
+The user emphasized that rich, useful UI is part of the feature. Compact previews limit the initial footprint, not the information available: offer relevant facts and navigation into the context slot or an applicable additional view. Context slots, previews, service summaries, and deployment matrices are intended capabilities; their first-iteration boundary will be selected after the sample review. Proposed default: compose reusable subject presentation and contributions across these surfaces, with progressive disclosure for larger lists and details. Service UI makes selected hosts/projects, resources, relationships, and deployments explorable; deployment UI makes units, environments, manual versions, and links explorable. Provide clear loading, empty, unresolved, and error states and preserve the provenance of displayed facts. Exact styling and interactions remain visual-design decisions.
+
+### Subject detail pages
+
+The user asked whether JSON-defined subjects such as Resource should also have pages. Proposed direction: architecture subjects expose useful full-page details as well as compact widgets, previews, and context contributions, regardless of whether their configuration lives in JSON, a Markdown child declaration, or an inline block. Reuse a common detail presentation where practical and specialize for the available capabilities. Page availability and sidebar placement are separate decisions.
+
+The current IPage interface supplies navigation title, icon, location, and alignment; it does not itself render a page. Rendering requires a registered Page component, and the component registry supports interface and base-class fallbacks. Keep UI registrations in UI assemblies. Exact shared presentation interfaces and whether each domain type implements a navigation interface are not yet decided. Resource does not need to inherit Service to reuse its page infrastructure.
+
+### Generic widgets and architecture documents
+
+Widgets are reusable architecture views independent of documentation format. Path queries and optional filters select data; presentation controls can select grouping, labels, visible subject and relationship kinds, detail, and layout. Services, Components, Context, and Deployment are proposed diagram presets, not arc42 section types or a fixed hierarchy imposed on the model. Exact configuration options remain under discussion. ServiceTable and DeploymentMatrix can supply domain-specific defaults over shared query and subject-presentation infrastructure.
+
+Crosscutting pages can aggregate several services, deployment units, environments, and resources. Proposed master-detail behavior keeps the document visible while selection reveals details alongside the list, using the context slot where appropriate. Selection is local UI state and does not create a new domain subject. Links, previews, and drill-down views address the same underlying subjects.
+
+The user wants one ordinary arc42 Markdown document with authored explanations and embedded tables, diagrams, and summaries over the shared domain. The same widgets also work in service pages, guides, ADRs, or other architecture documentation. The sample's arc42.md demonstrates all twelve headings without a special document type or one subject per section. It is a composition of reusable views, not a separate architecture model.
+
+Manual canvases and generated diagrams share subjects and semantic relationships. A semantic connection authored on a diagram should create or edit the typed model relationship; position, size, grouping, and visual annotations belong to that view. Existing CanvasLayout supports positioned Widget references, dragging, snapping, and scaling, but connector lines need additional support. Auto-layout, manual arrangement, and their combination remain presentation choices. Runtime scenario order is authored separately from static relationships.
+
+## Current data-model reference
+
+The tables below record the logical model and current field proposals. Lowercase names match the sample's serialized configuration and illustrative graph paths; exact CLR names, path casing/aliases, identifiers, and public API signatures are not fixed. Authored query entries are separate from resolved collections, and references never transfer ownership or clone subjects. Existing title, icon, description, notes, tags, and links should be reused through the appropriate subject interfaces and metadata rather than repeated in a new generic enrichment store.
+
+| Entity | Authored configuration | Resolved or discovered data | Ownership and cardinality |
+|---|---|---|---|
+| SourceRepository | `sourceRoot`; analyzer/scan options remain to be specified | `projects`, `hosts`, analysis status, diagnostics, last successful analysis, fact provenance | Owns discovered CodeProject and Host subjects; several repositories per graph |
+| CodeProject | Discovered by an analyzer; manual enrichment through owner metadata | Stable repository-relative identity, `name`, source path, language, project classification, literal project references and other supported facts | Owned once by its SourceRepository; referenced by services, hosts, and other projects |
+| Host | Discovered by an analyzer; manual enrichment through owner metadata | Stable identity, `name`, entry CodeProject reference, known source/runtime/packaging facts | Owned once by its SourceRepository; can appear in several services or units |
+| Service | `name`, `componentSources: PathQuery[]` | `components`, the Host subset `hosts`, query diagnostics | Logical membership references code, hosts, and resources; does not own copies of discovered subjects |
+| Resource | `name`, extensible `kind`, optional `technology` | Relationships and reverse-use views; environment-instance mappings remain open | Authored once in JSON or as a child definition; service-specific or shared |
+| DeploymentUnit | `name`, `hostSources: PathQuery[]` | Resolved `hosts`, query diagnostics | References hosts from one or several services; does not own the Host subjects |
+| Environment | `name`, `deploymentUnitSources: PathQuery[]` | Resolved `deploymentUnits`, generated `deployments`, query diagnostics | Owns one enduring Deployment for each selected unit |
+| Deployment | Generated environment and deployment-unit references; authored enrichment through the environment's metadata | Environment/unit identity, access to the unit's selected hosts; version and URLs through metadata | Owned by its Environment; common case is one per environment/unit pair |
+| MarkdownFile, existing | Ordinary display frontmatter, `$<name>` child declarations, `metadata`, and Markdown content | Named configured children, parsed content blocks, and normal page rendering | Owns its declared subject children; remains distinct from a Service or Resource it defines |
+
+Stable identity is a required semantic contract, not a decision to add an `id` field to every configuration. The generated-child lifecycle section defines identity requirements; exact serialized reference and identifier representations remain open. Discovered facts need provenance, uncertainty, and diagnostics; manual values must not silently overwrite them. A Deployment describes intent until observed data is supplied.
+
+### Supporting records
+
+| Record | Fields | Meaning |
+|---|---|---|
+| PathQuery | `path: string`, optional `where: string` | Resolve a subject, collection, or wildcard pattern, then filter matches; source lists combine and deduplicate results |
+| Authored relationship | `kind`, `target`; optional `source`, `technology`, `label`, `message` | Metadata record; source defaults to the subject owning the scoped relationship list |
+| Discovered fact or relationship | Value/endpoints plus source location, analyzer identity, uncertainty, and diagnostics as applicable | Analyzer result with provenance; concrete representation remains to be designed |
+| View configuration | Data scope/query plus presentation settings | Widget or document-owned configuration; does not redefine subjects or imply architectural relationships |
+
+Relationship kinds describe interaction semantics, such as calls, publishes, consumes, reads, writes, or documents. Technology describes the mechanism, such as HTTPS, AMQP, or PostgreSQL; a queue is a target Resource rather than an interaction kind. The sample uses `message` for OrderPlaced. These are extensible values, not a closed runtime dependency taxonomy. Source overrides allow service-scoped authored metadata to describe known Host endpoints. Service-level edges retain unknown host endpoints rather than assigning them to guessed processes.
+
+Authored relationships use the existing metadata API. JSON definitions persist through their metadata sidecar; Markdown persists the same envelope under frontmatter `metadata`. In the sample, `metadata.$subjects["Children[service]"].relationships` scopes the list to the defined Service child. This serialization is a working example of the existing metadata envelope; frontmatter persistence and its relationship readers are proposed functionality. Page-level metadata remains separate from child-level metadata. Analyzer-produced relationships remain discovered state.
 
 ## Domain
+
+### Root, scope, and organization
+
+The existing loaded HomeBlaze root remains the runtime graph root. Queries and widgets can use an arbitrary supplied subject/folder scope. A mandatory ArchitectureModel or System root has not been selected. Documentation structure can follow services, topics, crosscutting concerns, or a mixture. The sample groups each service document and its dedicated resources in one folder and keeps shared resources in a root resources folder; explicit references, not folder names, establish membership.
 
 ### SourceRepository
 
@@ -146,7 +197,23 @@ Common classification must allow selectors to express "library named `*.Test`" w
 
 A configurable subject representing a logical software capability or bounded context. "Application" is not an additional entity. A service can be implemented by several hosts and can select libraries or other code elements as well.
 
-A service contains path-based component-source configuration and architectural descriptions and relationships. Its resolved components refer to repository-owned subjects; they do not clone them. It exposes its selected Host components through a resolved hosts collection, so a deployment unit can reference `service/hosts` directly. Additional typed subsets can be queried with ordinary paths and filters rather than a named-selection dictionary. Membership can overlap when explicitly configured. Shared code remains one discovered element.
+A service contains path-based component-source configuration and architectural descriptions and relationships. Its resolved components reference repository-owned code/hosts and authored resources; they do not clone them. It exposes its selected Host components through a resolved hosts collection, so a deployment unit can reference `service/hosts` directly. Additional typed subsets can be queried with ordinary paths and filters rather than a named-selection dictionary. Membership can overlap when explicitly configured. Shared code and shared resources retain one subject identity.
+
+A neighboring software system can be documented without known repositories or hosts. The user proposed an internal/external kind to represent such systems. The meaning and representation of that classification remain open, as described below; no fixed Service kind flag has been accepted yet.
+
+### Resource
+
+A reusable authored dependency such as a database, queue, topic, or storage bucket. The current sample uses generic Resource subjects with kind Database or Queue and technology PostgreSQL or RabbitMQ. Services can include resources in components, and typed relationships can originate at a Service or a particular Host. A resource can be referenced by several services, and membership does not imply exclusive ownership. Including it in a service does not automatically provision it or include it in a host-only DeploymentUnit.
+
+The user asked whether Resource is also Service. Proposed distinction: Service describes a logical software capability, while Resource describes something consumed or accessed. A database or messaging platform can be modeled as a Service that provides database/queue Resources when its implementation and deployment matter. Shared capabilities and presentation can be expressed through interfaces; automatic Resource-to-Service inheritance has not been chosen. The exact role/interface arrangement remains open.
+
+The sample resources are logical definitions independent of environments. Whether to represent environment-specific instances as separate subjects, mappings, or other data is not decided. Do not imply resource provisioning or a particular deployment lifecycle from the presence of a Resource subject.
+
+### Internal/external classification and neighboring systems
+
+The requirement to represent neighboring systems, including ones with no modeled internals, is under discussion. Open question: does internal/external describe membership in the documented system boundary, or management by an organization? These meanings must not be silently combined.
+
+Proposed direction: kind describes what an element is, while inside/outside is evaluated relative to a selected view boundary. Payments can be internal to Commerce and outside an Orders-only context; an external provider can be outside both. If organizational ownership is also needed, model it separately. The user has not yet confirmed this distinction or the serialized fields. No System, Actor, or context-boundary subject type is finalized. The sample's Context view demonstrates the desired presentation, but its external participants and exact boundary configuration remain incomplete.
 
 ### DeploymentUnit
 
@@ -254,11 +321,13 @@ Enrichment has one canonical persisted home per owner, as specified in Markdown 
 
 The basic subject UI should expose applicable configuration, state, diagnostics, and refresh operations through existing interfaces and generated editors. Project reference edges and selection membership must be traversable through the subject graph without requiring a custom visual graph renderer.
 
-The user selected existing subject UI plus an optional Markdown service-summary widget and a deployment matrix for the MVP. A service summary reads a Service subject and summarizes its selected code/hosts and deployments. Proposed default: show its name and description, selected host/project counts, and links to corresponding subjects and deployments. A document defining a service retains the normal Markdown UI; an author can embed a summary explicitly, and page UI slots can make the same information accessible without blocks. The deployment matrix shows units against environments using declared deployments and manual versions/links; it must not display an unobserved deployment as healthy. Exact widget presentation remains to be designed. An interactive dependency-graph renderer is deferred; project-reference edges remain navigable through the subject graph.
+The earlier UI slice used existing subject UI plus a service-summary widget and deployment matrix. Discussion has since expanded the desired capability to include resource details, master-detail exploration, manual canvases, and generated diagrams at several levels. Their first-iteration placement is now open pending the sample review. A service summary reads the Service and its selected code/hosts, resources, relationships, and deployments. Proposed default: show useful descriptive facts, counts, and links without duplicating the domain configuration. A document defining a service retains normal Markdown rendering; summaries are optional embeds or page contributions. The deployment matrix shows units against environments using declared deployments and manual versions/links; it must not display an unobserved deployment as healthy. Project-reference edges remain navigable independently of a custom diagram renderer.
 
 The user also proposed a ServiceTable widget scoped to a subject subtree, illustratively `ServiceTable Path=Project1/`. It finds Service subjects within that scope regardless of whether their definitions came from JSON, frontmatter, or inline blocks, and presents a service-oriented overview. Proposed default: include owned descendants recursively, deduplicate subject identities, and do not expand scope by following architectural relationship edges or selection references. Use shared scope/type-selection infrastructure rather than a separate filesystem scan or analyzer. Proposed columns include service name and description, host/project counts, and deployment summaries with navigation and previews. Rows and displayed facts follow graph changes. Existing SubjectTable already supports a source and type filter, but lists the source's immediate subjects rather than recursively discovering services under document children, and does not provide architecture-specific presentation. Reuse suitable table and query primitives; exact component names, path-property naming, and presentation remain builder choices.
 
-## MVP acceptance scenarios
+## Candidate acceptance scenarios
+
+These scenarios capture intended behavior for the evolving capability. They are not a decision to include every scenario in the first implementation; select that boundary after reviewing the working sample.
 
 1. Mount only a repository's documentation folder, configure a source root relative to a JSON file there, and analyze the surrounding checkout without mounting every source file as a subject.
 2. Configure two repositories; discover their project-level elements without duplicating shared elements within one repository's graph.
@@ -278,8 +347,12 @@ The user also proposed a ServiceTable widget scoped to a subject subtree, illust
 16. Explore service membership, dependencies, and deployments through the context slot and summary, and navigate from deployment-matrix entries to their units, environments, and deployments. Surface unavailable or uncertain facts explicitly.
 17. Author the same Service type using standalone JSON or a Markdown child definition with the same configuration schema; after manually moving a definition, its enrichment, and updating references, keep the original document as documentation of the standalone subject.
 18. Place a ServiceTable in an overview document, scoped to a project subtree; find nested services defined through JSON, frontmatter, and inline blocks, show each once with useful summaries and navigation, and update rows when subjects enter or leave the scope without rerunning source analysis.
+19. Include service-specific and shared Resources through component-source paths; retain one shared resource identity and show typed API, database, and messaging relationships from services or explicit hosts.
+20. Use the same widget configuration in an ordinary service page and an arc42 document; render a service overview and a detailed host/resource view from the same graph, with explicit scope and preserved relationship endpoints.
+21. Place referenced service widgets on a manual canvas; keep layout local to that document and semantic connections in shared relationship metadata. Existing canvas limitations remain until connector support is implemented.
+22. Open a JSON-defined Resource or DeploymentUnit through useful detail presentation and reuse its compact presentation in previews, context panels, and diagram boxes. This is the proposed page direction, subject to the open presentation-interface decision.
 
-These are requirements for future implementation and testing. No product code, tests, dependencies, or projects are added by this design document.
+These scenarios describe future implementation and testing. The working sample contains fixture projects and proposed data definitions, but no ArchDocs product implementation has been authorized by this specification.
 
 ## Constraints and builder choices
 
@@ -287,8 +360,19 @@ Follow the repository's subject-creation guidance and existing conventions: part
 
 The builder chooses exact project names, concrete interfaces, JSON property names, worker primitives, caching strategy, and the smallest reusable helper API that satisfies the contracts above. A proposed Namotion.ArchDocs name is inherited from PR #257, not a new user decision. An implementation plan must identify required public API changes, tests for selector and lifecycle correctness, and targeted UI tests for page contributions, link previews, and widgets. Long-running benchmarks or connector verification require agreement before they are scheduled; neither is implied by this design.
 
-## Review status and remaining presentation work
+## Open decisions and review status
 
-The user selected basic `.csproj` XML discovery, existing subject UI plus optional summary/matrix widgets, and reuse of metadata for enrichment and authored relationships. The latest decision defines named children through top-level `$<name>` frontmatter entries, each containing `$type` and ordinary domain configuration. `$service` and `$environment` are examples of names, not special architecture parser keywords. This replaces service-as-MarkdownFile and specialized Markdown wrapper designs. Ordinary MarkdownFile supports multiple definitions without a page discriminator or generic `subjects` envelope. Frontmatter metadata supports both page and scoped descendant enrichment. The shared reconciliation approach and Environment declaring deployment units are agreed. A builder check identified the partial-analysis failure boundary; the proposed default in this document retains the entire last successful graph of a repository whose pass fails, while other repositories can publish independently.
+The sample files and this specification should be updated together as the model changes. Entity semantics, field proposals, metadata shape, and view behavior are recorded here; the sample README explains how its concrete arrangement works. Earlier builder checks found no remaining planning questions for the narrower design at that point. Subsequent resources, diagrams, page presentation, and boundary discussion extend it, so that result is not approval of the current broader specification.
 
-The user confirmed the context slot and rich link-preview overlays, and emphasized rich UI as an MVP requirement. Exact visual contents and interactions of the preview, context slot, service summary, and deployment matrix still need visual review. Their proposed behavior above defines scope, not approval of a visual design. This domain and MVP draft must be approved before implementation planning begins.
+The following decisions remain open:
+
+- Internal/external: boundary-relative membership versus organizational management, the corresponding serialized fields, and representation of neighboring systems and actors.
+- Service and Resource roles: their exact shared interfaces and whether an element can expose both capabilities. There is no approved inheritance relationship between them.
+- Resource realization: environment-specific resource instances, infrastructure targets, and their mappings to logical resources and deployments.
+- Presentation contracts: useful subject detail pages, navigation participation, shared page/widget/preview components, and exact UI slot registration.
+- Final schemas and identity: CLR/serialized names, path casing and aliases, generated keys, persistent identity and rename behavior, and raw-source path matching where graph paths are insufficient.
+- View configuration: generic diagram presets and customization, boundary selection, grouping shared components, manual/automatic layout interaction, and semantic connector editing.
+- Runtime scenarios: plain authored Markdown suffices for the current example; a structured scenario/sequence model is not selected.
+- Initial implementation: which candidate behaviors, exclusions, and UI surfaces form the MVP after sample review, including any long-running verification that must be agreed during planning.
+
+Useful rich UI, format-independent widgets, ordinary Markdown authoring, named frontmatter children, generic path queries, repository-owned discovery, and Environment-owned deployments are the current direction. Remaining open decisions must not be presented as implemented or user-approved schema. Finalize the domain and MVP, obtain design approval, and only then produce the implementation plan.

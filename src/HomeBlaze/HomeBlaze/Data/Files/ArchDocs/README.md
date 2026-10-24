@@ -7,6 +7,8 @@ navTitle: ArchDocs Sample
 
 Use this folder to refine the authoring experience before finalizing the domain design, implementation plan, and MVP. It lives under the existing HomeBlaze Files root as ArchDocs, containing normal Markdown, proposed subject JSON definitions, and an internal .source directory with buildable source fixtures. The ArchDocs types, frontmatter child declarations, path queries, and architecture widgets are proposed functionality. The .NET projects are fixtures, not an implementation of that functionality.
 
+The [working domain specification](../Docs/plans/2026-10-24-archdocs-domain-design.md) tracks the entity and field model, relationships, authoring rules, presentation contracts, and open decisions. Update it alongside these sample files when a model decision changes. The concrete sample field names remain proposals.
+
 ## Start here
 
 Read [Architecture.md](Architecture.md) for the overview, [services/Orders/Service.md](services/Orders/Service.md) for a service defined in Markdown frontmatter, and [deployment-units/Orders.json](deployment-units/Orders.json) for a standalone subject definition. Revise these actual files while discussing the model. Type names, property names, and generated graph keys are working proposals.

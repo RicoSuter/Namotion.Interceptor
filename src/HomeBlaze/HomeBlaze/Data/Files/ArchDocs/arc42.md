@@ -20,7 +20,7 @@ The code is organized into .NET projects. Orders uses a shared contracts library
 
 The Commerce boundary includes Orders, Payments, and their selected components. External users and neighboring systems still need to be added to the model before this context view can show their interactions.
 
-:: Namotion.ArchDocs.ArchitectureDiagram#context Path=/services View=Context
+:: Namotion.ArchDocs.ArchitectureDiagram#context Path=/ArchDocs/services View=Context
 ::
 
 ## 4. Solution strategy
@@ -31,10 +31,10 @@ Orders separates its entry API from background processing. Payments has an indep
 
 ### Services
 
-:: Namotion.ArchDocs.ServiceTable#services Path=/services
+:: Namotion.ArchDocs.ServiceTable#services Path=/ArchDocs/services
 ::
 
-:: Namotion.ArchDocs.ArchitectureDiagram#serviceOverview Path=/services View=Services
+:: Namotion.ArchDocs.ArchitectureDiagram#serviceOverview Path=/ArchDocs/services View=Services
 ::
 
 ### Inside Orders
@@ -66,7 +66,7 @@ The ordering above is authored scenario information. Static relationships provid
 
 Both environments include the declared Orders and Payments deployment units. Their installations can have different versions and URLs.
 
-:: Namotion.ArchDocs.DeploymentMatrix#deployments Path=/environments
+:: Namotion.ArchDocs.DeploymentMatrix#deployments Path=/ArchDocs/environments
 ::
 
 :: Namotion.ArchDocs.ArchitectureDiagram#productionDeployment Path=/ArchDocs/environments/Production View=Deployment
