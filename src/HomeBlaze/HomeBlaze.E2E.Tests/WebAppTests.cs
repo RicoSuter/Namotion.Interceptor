@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using HomeBlaze.E2E.Tests.Infrastructure;
 using Microsoft.Playwright;
 
@@ -75,7 +76,9 @@ public class WebAppTests
         await page.GetByTestId("app-bar-menu-home").ClickAsync();
 
         // Assert: the start page redirects to the first page of the app bar.
-        await page.WaitForURLAsync(url => url.EndsWith("pages/Dashboard.md", StringComparison.Ordinal), new() { Timeout = Timeout });
+        // Polls the URL: the redirect lands after a round trip to the server, and WaitForURLAsync misses a navigation
+        // that lands between its check of the URL and its subscription to the navigation events.
+        await Assertions.Expect(page).ToHaveURLAsync(new Regex("pages/Dashboard\\.md$"), new() { Timeout = Timeout });
     }
 
     [Fact]
