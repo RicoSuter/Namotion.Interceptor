@@ -69,7 +69,7 @@ The switch exposes a local HTTP API on port 80:
 
 | Endpoint | Purpose |
 |----------|---------|
-| `GET /info` | Device information (MAC, firmware, network) |
+| `GET /info` | Device information (MAC, firmware, network), read on connect and again when the uptime falls, so a restart after a firmware update shows the new version |
 | `GET /report` | Power, relay state, temperature, energy |
 | `GET /api/v1/temperature` | Detailed temperature with compensation |
 | `GET /relay?state=1` | Turn relay on |
