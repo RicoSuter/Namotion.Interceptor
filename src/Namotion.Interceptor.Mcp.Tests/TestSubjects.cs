@@ -76,3 +76,11 @@ public partial class TestMixedGroup
         Items = new Dictionary<string, IInterceptorSubject>();
     }
 }
+
+[InterceptorSubject]
+public partial class TestHouse
+{
+    public partial string Address { get; set; }
+    public partial TestDevice? Private { get; set; }
+    public partial TestDevice? Public { get; set; }
+}
