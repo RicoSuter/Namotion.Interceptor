@@ -86,6 +86,7 @@ public class IncomingOccurrenceRemovalTests
     {
         public bool ThrowOnComparison { get; set; }
         public override int GetHashCode() => value;
+        [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S3877", Justification = "The throw is the probe: it fails the test if an ownership mutation compares user keys.")]
         public override bool Equals(object? obj)
         {
             if (ThrowOnComparison) throw new InvalidOperationException("Ownership mutation invoked a user key comparison.");

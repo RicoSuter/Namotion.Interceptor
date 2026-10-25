@@ -21,71 +21,85 @@ public class ContextConcurrencyTests
     {
         for (var attempt = 1; attempt <= Attempts; attempt++)
         {
-            var subjectContext = InterceptorSubjectContext.Create();
+            await RunAttemptAsync(mutation, attempt);
+        }
+    }
 
-            var car = new Car(subjectContext);
-            using var start = new ManualResetEventSlim(false);
+    private static async Task RunAttemptAsync(string mutation, int attempt)
+    {
+        // Arrange
+        var subjectContext = InterceptorSubjectContext.Create();
+        var car = new Car(subjectContext);
+        using var start = new ManualResetEventSlim(false);
 
-            var writer = Task.Factory.StartNew(() =>
+        var writer = Task.Factory.StartNew(() =>
+        {
+            start.Wait();
+            for (var index = 0; index < 2_000; index++)
             {
-                start.Wait();
-                for (var index = 0; index < 2_000; index++)
-                {
-                    car.Speed = index;
-                }
-            }, TaskCreationOptions.LongRunning);
-
-            var mutator = Task.Factory.StartNew(() =>
-            {
-                start.Wait();
-                for (var index = 0; index < Mutations; index++)
-                {
-                    switch (mutation)
-                    {
-                        case nameof(IInterceptorSubjectContext.AddService):
-                            subjectContext.AddService<IWriteInterceptor>(new CountingWriteInterceptor());
-                            break;
-
-                        case nameof(IInterceptorSubjectContext.TryAddService):
-                            subjectContext.TryAddService<IWriteInterceptor>(() => new CountingWriteInterceptor(), _ => false);
-                            break;
-
-                        default:
-                            throw new InvalidOperationException($"Unknown mutation {mutation}.");
-                    }
-                }
-            }, TaskCreationOptions.LongRunning);
-
-            // Act
-            start.Set();
-            var both = Task.WhenAll(writer, mutator);
-            try
-            {
-                await both.WaitAsync(TimeSpan.FromSeconds(15));
+                car.Speed = index;
             }
-            catch (TimeoutException exception)
-            {
-                throw new TimeoutException(
-                    $"Deadlock on attempt {attempt} of {Attempts}: writing a property and calling {mutation} " +
-                    "on the subject's context blocked each other.",
-                    exception);
-            }
+        }, TaskCreationOptions.LongRunning);
 
-            // Assert: one settled write runs every registered interceptor exactly once.
-            var interceptors = new List<CountingWriteInterceptor>();
-            foreach (var interceptor in subjectContext.GetServices<IWriteInterceptor>())
+        var mutator = Task.Factory.StartNew(() =>
+        {
+            start.Wait();
+            for (var index = 0; index < Mutations; index++)
             {
-                interceptors.Add((CountingWriteInterceptor)interceptor);
+                ApplyMutation(subjectContext, mutation);
             }
+        }, TaskCreationOptions.LongRunning);
 
-            Assert.Equal(Mutations, interceptors.Count);
+        // Act
+        start.Set();
+        try
+        {
+            await Task.WhenAll(writer, mutator).WaitAsync(TimeSpan.FromSeconds(15));
+        }
+        catch (TimeoutException exception)
+        {
+            throw new TimeoutException(
+                $"Deadlock on attempt {attempt} of {Attempts}: writing a property and calling {mutation} " +
+                "on the subject's context blocked each other.",
+                exception);
+        }
 
-            var countsBefore = interceptors.ConvertAll(interceptor => interceptor.WriteCount);
-            car.Speed = -1;
-            for (var index = 0; index < interceptors.Count; index++)
-            {
-                Assert.Equal(countsBefore[index] + 1, interceptors[index].WriteCount);
-            }
+        // Assert
+        AssertSettledWriteRunsEveryInterceptorOnce(subjectContext, car);
+    }
+
+    private static void ApplyMutation(InterceptorSubjectContext subjectContext, string mutation)
+    {
+        switch (mutation)
+        {
+            case nameof(IInterceptorSubjectContext.AddService):
+                subjectContext.AddService<IWriteInterceptor>(new CountingWriteInterceptor());
+                break;
+
+            case nameof(IInterceptorSubjectContext.TryAddService):
+                subjectContext.TryAddService<IWriteInterceptor>(() => new CountingWriteInterceptor(), _ => false);
+                break;
+
+            default:
+                throw new InvalidOperationException($"Unknown mutation {mutation}.");
+        }
+    }
+
+    private static void AssertSettledWriteRunsEveryInterceptorOnce(InterceptorSubjectContext subjectContext, Car car)
+    {
+        var interceptors = new List<CountingWriteInterceptor>();
+        foreach (var interceptor in subjectContext.GetServices<IWriteInterceptor>())
+        {
+            interceptors.Add((CountingWriteInterceptor)interceptor);
+        }
+
+        Assert.Equal(Mutations, interceptors.Count);
+
+        var countsBefore = interceptors.ConvertAll(interceptor => interceptor.WriteCount);
+        car.Speed = -1;
+        for (var index = 0; index < interceptors.Count; index++)
+        {
+            Assert.Equal(countsBefore[index] + 1, interceptors[index].WriteCount);
         }
     }
 

@@ -20,6 +20,7 @@ public class AdversarialGateFalsePositiveTests
     /// </summary>
     [Fact]
     [Trait("Category", "Concurrency")]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S2925", Justification = "The sleep is the scenario, not a wait: a third thread holds what the gate holder blocks on for a bounded time, so the holder is blocked yet guaranteed to progress.")]
     public void WhenTheGateHolderBlocksOnALockThatIsGuaranteedToBeReleased_ThenTheContendingWriteStillSucceeds()
     {
         // Arrange
@@ -90,6 +91,7 @@ public class AdversarialGateFalsePositiveTests
     /// </summary>
     [Fact]
     [Trait("Category", "Concurrency")]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S2925", Justification = "The sleep is the scenario, not a wait: a third thread holds what the gate holder blocks on for a bounded time, so the holder is blocked yet guaranteed to progress.")]
     public void WhenTheGateHolderBlocksOnAnUnattachedSubjectsAttachmentMonitor_ThenTheContendingWriteStillSucceeds()
     {
         // Arrange

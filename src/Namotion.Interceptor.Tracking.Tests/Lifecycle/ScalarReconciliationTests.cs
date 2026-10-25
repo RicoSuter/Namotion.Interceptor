@@ -15,63 +15,79 @@ public class ScalarReconciliationTests
     public void WhenAGetterSupersedesAScalarReplacement_ThenItsHistoryMatchesASingleOccurrenceCollection(
         bool reattachOwner, bool throwAfterNestedWrite)
     {
-        // Arrange
-        string[] Run(bool collection)
-        {
-            var context = InterceptorSubjectContext.Create().WithRegistry();
-            var root = new CallbackSpikeNode();
-            root.AttachToContext(context);
-            var old = new CallbackSpikeNode();
-            var final = new CallbackSpikeNode();
-            var trigger = new CallbackSpikeSegmentWrapper();
-            var history = new List<string>();
-            object Value(IInterceptorSubject subject) => collection ? new[] { subject } : subject;
-            string Identity(IInterceptorSubject subject)
-            {
-                if (ReferenceEquals(subject, root)) return "root";
-                if (ReferenceEquals(subject, old)) return "old";
-                return ReferenceEquals(subject, final) ? "final" : "trigger";
-            }
-            var lifecycle = context.TryGetLifecycleInterceptor()!;
-            lifecycle.SubjectAttached += change => history.Add(Identity(change.Subject) + ":attached");
-            lifecycle.SubjectDetaching += change => history.Add(Identity(change.Subject) + ":detached");
-            root.Payload = Value(old);
-            history.Clear();
-            var failure = new InvalidOperationException("getter failed after replacement");
-            trigger.OnRead = () =>
-            {
-                if (trigger.GetReferenceCount() == 0) return;
-                trigger.OnRead = null;
-                if (reattachOwner) root.DetachFromContext(context);
-                root.Payload = Value(final);
-                if (reattachOwner) root.AttachToContext(context);
-                if (throwAfterNestedWrite) throw failure;
-            };
-
-            // Act
-            var exception = Record.Exception(() => root.Payload = Value(trigger));
-
-            // Assert
-            Assert.Same(throwAfterNestedWrite ? failure : null, exception);
-            Assert.Null(old.TryGetContext());
-            Assert.Null(trigger.TryGetContext());
-            Assert.Equal(1, final.GetReferenceCount());
-            var parent = Assert.Single(final.GetParents());
-            Assert.Same(root, parent.Property.Subject);
-            Assert.Equal(collection ? 0 : (object?)null, parent.Index);
-            Assert.NotNull(context.GetService<ISubjectRegistry>().TryGetRegisteredSubject(final));
-            root.Payload = null;
-            Assert.Null(final.TryGetContext());
-            root.DetachFromContext(context);
-            Assert.Empty(context.GetService<ISubjectRegistry>().KnownSubjects);
-            return history.ToArray();
-        }
-
         // Act
-        var scalarHistory = Run(collection: false);
-        var collectionHistory = Run(collection: true);
+        var scalarHistory = RunReplacement(collection: false, reattachOwner, throwAfterNestedWrite);
+        var collectionHistory = RunReplacement(collection: true, reattachOwner, throwAfterNestedWrite);
 
         // Assert
         Assert.Equal(collectionHistory, scalarHistory);
     }
+
+    /// <summary>
+    /// Replaces the root's payload with a trigger whose first read while attached replaces it again with a
+    /// final subject, and returns the attach and detach history of that replacement.
+    /// </summary>
+    private static string[] RunReplacement(bool collection, bool reattachOwner, bool throwAfterNestedWrite)
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var root = new CallbackSpikeNode();
+        root.AttachToContext(context);
+        var old = new CallbackSpikeNode();
+        var final = new CallbackSpikeNode();
+        var trigger = new CallbackSpikeSegmentWrapper();
+        var history = new List<string>();
+        var identities = new Dictionary<IInterceptorSubject, string>(ReferenceEqualityComparer.Instance)
+        {
+            [root] = "root",
+            [old] = "old",
+            [final] = "final"
+        };
+        var lifecycle = context.TryGetLifecycleInterceptor()!;
+        lifecycle.SubjectAttached += change => history.Add(identities.GetValueOrDefault(change.Subject, "trigger") + ":attached");
+        lifecycle.SubjectDetaching += change => history.Add(identities.GetValueOrDefault(change.Subject, "trigger") + ":detached");
+        root.Payload = Wrap(old, collection);
+        history.Clear();
+        var failure = throwAfterNestedWrite ? new InvalidOperationException("getter failed after replacement") : null;
+        trigger.OnRead = CreateSupersedingRead(trigger, root, context, Wrap(final, collection), reattachOwner, failure);
+
+        // Act
+        var exception = Record.Exception(() => root.Payload = Wrap(trigger, collection));
+
+        // Assert
+        Assert.Same(failure, exception);
+        Assert.Null(old.TryGetContext());
+        Assert.Null(trigger.TryGetContext());
+        Assert.Equal(1, final.GetReferenceCount());
+        var parent = Assert.Single(final.GetParents());
+        Assert.Same(root, parent.Property.Subject);
+        Assert.Equal(collection ? 0 : (object?)null, parent.Index);
+        Assert.NotNull(context.GetService<ISubjectRegistry>().TryGetRegisteredSubject(final));
+        root.Payload = null;
+        Assert.Null(final.TryGetContext());
+        root.DetachFromContext(context);
+        Assert.Empty(context.GetService<ISubjectRegistry>().KnownSubjects);
+        return history.ToArray();
+    }
+
+    private static Action CreateSupersedingRead(
+        CallbackSpikeSegmentWrapper trigger,
+        CallbackSpikeNode root,
+        IInterceptorSubjectContext context,
+        object finalPayload,
+        bool reattachOwner,
+        Exception? failure)
+    {
+        return () =>
+        {
+            if (trigger.GetReferenceCount() == 0) return;
+            trigger.OnRead = null;
+            if (reattachOwner) root.DetachFromContext(context);
+            root.Payload = finalPayload;
+            if (reattachOwner) root.AttachToContext(context);
+            if (failure is not null) throw failure;
+        };
+    }
+
+    private static object Wrap(IInterceptorSubject subject, bool collection) => collection ? new[] { subject } : subject;
 }

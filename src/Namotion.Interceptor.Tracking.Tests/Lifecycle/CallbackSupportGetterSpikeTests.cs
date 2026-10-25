@@ -101,7 +101,12 @@ public sealed class CallbackSpikeSegmentWrapper : IInterceptorSubject
     public IReadOnlyDictionary<string, SubjectPropertyMetadata> Properties => Metadata;
     public ArraySegment<CallbackSpikeNode> Children
     {
-        get => Executor.GetPropertyValue(nameof(Children), static subject => ((CallbackSpikeSegmentWrapper)subject).ReadChildren());
+        get => Executor.GetPropertyValue(nameof(Children), static subject =>
+            {
+                var owner = (CallbackSpikeSegmentWrapper)subject;
+                owner.OnRead?.Invoke();
+                return owner._children;
+            });
         set => Executor.SetPropertyValue(nameof(Children), value, _children,
             static (subject, newValue) => ((CallbackSpikeSegmentWrapper)subject)._children = newValue);
     }

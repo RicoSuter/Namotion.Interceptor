@@ -128,7 +128,12 @@ public class CallbackActiveSeedGetterSpikeTests
         public IReadOnlyDictionary<string, SubjectPropertyMetadata> Properties => Metadata;
         public ArraySegment<CallbackSpikeNode> Children
         {
-            get => Executor.GetPropertyValue(nameof(Children), static subject => ((ActiveSeedGetterRoot)subject).ReadChildren());
+            get => Executor.GetPropertyValue(nameof(Children), static subject =>
+            {
+                var owner = (ActiveSeedGetterRoot)subject;
+                owner.OnRead?.Invoke();
+                return owner._children;
+            });
             set => Executor.SetPropertyValue(nameof(Children), value, _children, static (subject, newValue) =>
             {
                 var root = (ActiveSeedGetterRoot)subject;
