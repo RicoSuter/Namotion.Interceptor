@@ -28,9 +28,6 @@ internal static class HomeBlazeMcpConfigurationFactory
     internal const string SetMetadataArgumentsMessage =
         "SetMetadata takes path, a string, an optional property and values, a JSON object, for example {\"path\": \"Devices/Pump\", \"values\": {\"navTitle\": \"Pump\"}}.";
 
-    private static readonly Func<RegisteredSubjectProperty, string?> RefuseConfigurationWrite =
-        property => property.IsConfigurationProperty() ? "It is a configuration property; set_property cannot change configuration, an operation of the subject may." : null;
-
     /// <summary>
     /// Creates a configuration with the HomeBlaze path provider, enrichers, type providers, method tools, Markdown tools, the Markdown
     /// search tool, the Markdown page hints of browse and search, the Percent hint of search and every registered
@@ -90,9 +87,9 @@ internal static class HomeBlazeMcpConfigurationFactory
             {
                 ["browse"] = HomeBlazeMcpInstructions.MarkdownSubjectsToolHint,
                 ["search"] = HomeBlazeMcpInstructions.MarkdownSubjectsToolHint + " " + HomeBlazeMcpInstructions.PercentFractionsSearchHint,
-                ["set_property"] = HomeBlazeMcpInstructions.ChangeCaution
+                ["set_property"] = HomeBlazeMcpInstructions.ChangeCaution + " " + HomeBlazeMcpInstructions.ConfigurationWriteHint
             },
-            PropertyWriteFilter = RefuseConfigurationWrite,
+            AccessPolicy = ConfigurationWriteAccessPolicy.Instance,
             IsReadOnly = isReadOnly
         };
 

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Mcp.Models;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
@@ -269,11 +270,11 @@ internal static class McpToolHelper
     /// Whether set_property may write the property: <see cref="GetWriteError"/> returns null for it.
     /// </summary>
     internal static bool IsWritable(RegisteredSubjectProperty property, McpServerConfiguration configuration) =>
-        !configuration.IsReadOnly && property.HasPublicSetter && configuration.PropertyWriteFilter?.Invoke(property) is null;
+        !configuration.IsReadOnly && property.HasPublicSetter && configuration.IsAllowed(property, McpAccessActions.Write);
 
     /// <summary>
     /// The error set_property returns for the property, or null when it may be written: the server is read-only, the
-    /// property has no public setter, or the <see cref="McpServerConfiguration.PropertyWriteFilter"/> refuses it.
+    /// property has no public setter, or the <see cref="McpServerConfiguration.AccessPolicy"/> does not allow writing it.
     /// </summary>
     /// <param name="property">The property.</param>
     /// <param name="path">The path of the property as the client gave it, for the message.</param>
@@ -290,9 +291,9 @@ internal static class McpToolHelper
             return $"Property is not writable: {path}";
         }
 
-        return configuration.PropertyWriteFilter?.Invoke(property) is { } reason
-            ? $"Property is not writable: {path}. {reason}"
-            : null;
+        return configuration.IsAllowed(property, McpAccessActions.Write)
+            ? null
+            : $"Property is not writable: {path}. The access policy does not allow it.";
     }
 
     private static string[]? ToStringArray(object? value)

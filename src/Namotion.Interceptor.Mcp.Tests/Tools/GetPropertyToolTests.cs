@@ -1,3 +1,5 @@
+using Namotion.Interceptor.Mcp.Abstractions;
+using Namotion.Interceptor.Mcp.Tests.Tools.Access;
 using System.Text.Json;
 using Namotion.Interceptor.Mcp.Tools;
 using Namotion.Interceptor.Registry;
@@ -64,7 +66,7 @@ public class GetPropertyToolTests
     }
 
     [Fact]
-    public async Task WhenTheWriteFilterRefusesTheProperty_ThenIsWritableIsOmitted()
+    public async Task WhenThePolicyDeniesWrite_ThenIsWritableIsOmitted()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create()
@@ -76,7 +78,7 @@ public class GetPropertyToolTests
         {
             PathProvider = DefaultPathProvider.Instance,
             IsReadOnly = false,
-            PropertyWriteFilter = property => property.Name == "Temperature" ? "Protected." : null
+            AccessPolicy = TestAccessPolicy.DenyWrite("Temperature")
         };
         var tool = new McpToolFactory(room, config).CreateTools().First(t => t.Name == "get_property");
 

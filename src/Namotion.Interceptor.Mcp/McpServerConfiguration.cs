@@ -59,13 +59,11 @@ public class McpServerConfiguration
     public Type[] ExcludeTypes { get; init; } = [];
 
     /// <summary>
-    /// Decides whether set_property may write a property. Returns null to allow the write, or the reason it is refused,
-    /// which set_property returns to the client after the property path, in which case nothing is written.
-    /// Null (the default) allows every writable property. Not consulted when <see cref="IsReadOnly"/> is true.
-    /// Also decides whether get_property, browse and search report a property as writable. May be called
-    /// concurrently, so it must be thread-safe.
+    /// Decides per member and action what the tools show and change, see "Access Policy" in the MCP documentation. A
+    /// member the policy does not allow to read reads as missing, and set_property refuses a member it does not allow
+    /// to write. Null (the default) allows every action. Applies in addition to <see cref="IsReadOnly"/>.
     /// </summary>
-    public Func<RegisteredSubjectProperty, string?>? PropertyWriteFilter { get; init; }
+    public IMcpAccessPolicy? AccessPolicy { get; init; }
 
     /// <summary>
     /// When true, set_property is blocked.
