@@ -13,7 +13,7 @@
 #   pwsh scripts/benchmark.ps1 -MemoryRandomization:$false  # Disable heap-layout randomization (on by default)
 #   pwsh scripts/benchmark.ps1 -BaseBranch performance/foo  # Compare against a non-master base
 #   pwsh scripts/benchmark.ps1 -Filter "*Write*" -Stash -Short
-#   pwsh scripts/benchmark.ps1 -Project src/HomeBlaze/HomeBlaze.Benchmark/HomeBlaze.Benchmark.csproj -Filter "*AuthorizationBenchmark*" -LocalOnly
+#   pwsh scripts/benchmark.ps1 -Project src/Other.Benchmark/Other.Benchmark.csproj -LocalOnly  # Run another benchmark project
 #
 # Output: benchmark_YYYY-MM-DD_HHmmss.md in current directory
 
