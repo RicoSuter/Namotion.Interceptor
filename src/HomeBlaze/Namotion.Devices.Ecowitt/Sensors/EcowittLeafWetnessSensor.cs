@@ -1,14 +1,12 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Common;
-using HomeBlaze.Abstractions.Devices.Energy;
 using Namotion.Interceptor.Attributes;
 
 namespace Namotion.Devices.Ecowitt.Sensors;
 
 [InterceptorSubject]
 public partial class EcowittLeafWetnessSensor :
-    IBatteryState,
     ITitleProvider,
     IIconProvider,
     ILastUpdatedProvider
@@ -18,17 +16,14 @@ public partial class EcowittLeafWetnessSensor :
     [State(Unit = StateUnit.Percent)]
     public partial decimal? LeafWetness { get; internal set; }
 
-    [State(Unit = StateUnit.Percent)]
-    public partial decimal? BatteryLevel { get; internal set; }
-
     [State]
     public partial DateTimeOffset? LastUpdated { get; internal set; }
 
+    /// <summary>
+    /// Gets the paired sensors that can feed these readings, the same subjects as in the gateway's <c>Sensors</c>.
+    /// </summary>
     [State]
-    public partial string? SensorId { get; internal set; }
-
-    [State]
-    public partial int? SignalStrength { get; internal set; }
+    public partial Dictionary<string, EcowittSensor> Sources { get; internal set; }
 
     [Derived]
     public string? Title => $"Leaf {Channel}";
@@ -42,9 +37,7 @@ public partial class EcowittLeafWetnessSensor :
     {
         Channel = channel;
         LeafWetness = null;
-        BatteryLevel = null;
         LastUpdated = null;
-        SensorId = null;
-        SignalStrength = null;
+        Sources = new Dictionary<string, EcowittSensor>(StringComparer.Ordinal);
     }
 }
