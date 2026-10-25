@@ -80,8 +80,9 @@ public partial class EcowittSensor :
     [Derived]
     public string IconName => IsOnline ? "Sensors" : "SensorsOff";
 
+    // The gateway lists only paired sensors, so an offline one is a fault, usually a dead battery.
     [Derived]
-    public string? IconColor => IsOnline ? null : "Warning";
+    public string IconColor => IsOnline ? "Success" : "Error";
 
     public EcowittSensor(string sensorId)
     {
