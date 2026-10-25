@@ -116,12 +116,8 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
             var array = context.GetServices<ILifecycleInterceptor>();
             for (var index = 0; index < array.Length; index++)
             {
-                // An interceptor that another fallback context reaches as well intercepts the subject already.
                 var interceptor = array[index];
-                if (!IsServiceReachableWithout(interceptor, context))
-                {
-                    interceptor.AttachSubjectToContext(_subject);
-                }
+                interceptor.AttachSubjectToContext(_subject);
             }
         }
 
@@ -135,13 +131,8 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
             var array = context.GetServices<ILifecycleInterceptor>();
             for (var index = 0; index < array.Length; index++)
             {
-                // An interceptor that another fallback context reaches as well keeps intercepting the subject, such as
-                // when a subject that is held by two parents inherits the context of the other one.
                 var interceptor = array[index];
-                if (!IsServiceReachableWithout(interceptor, context))
-                {
-                    interceptor.DetachSubjectFromContext(_subject);
-                }
+                interceptor.DetachSubjectFromContext(_subject);
             }
 
             return base.RemoveFallbackContext(context);

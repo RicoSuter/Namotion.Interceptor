@@ -162,8 +162,7 @@ public class ContextInheritanceHandlerTests
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
-            .WithContextInheritance()
-            .WithParents();
+            .WithContextInheritance();
 
         var shared = new Person { FirstName = "Shared" };
         var first = new Person { FirstName = "First", Mother = shared };
@@ -187,8 +186,7 @@ public class ContextInheritanceHandlerTests
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
-            .WithContextInheritance()
-            .WithParents();
+            .WithContextInheritance();
 
         var shared = new Person { FirstName = "Shared" };
         var first = new Person { FirstName = "First", Mother = shared };
@@ -208,13 +206,62 @@ public class ContextInheritanceHandlerTests
     }
 
     [Fact]
+    public void WhenParentReleasesSharedChildThatItStillHoldsInAnotherProperty_ThenChildKeepsItsContext()
+    {
+        // Arrange: a service of the first parent's context tells which context the child inherits.
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance();
+
+        var shared = new Person { FirstName = "Shared" };
+        var first = new Person { FirstName = "First" };
+        var second = new Person { FirstName = "Second" };
+        _ = new Person(context) { Mother = first, Father = second };
+        ((IInterceptorSubject)first).Context.AddService("first");
+        first.Mother = shared;
+        first.Father = shared;
+        second.Mother = shared;
+
+        // Act
+        first.Mother = null;
+
+        // Assert
+        Assert.Equal("first", Assert.Single(shared.GetServices<string>()));
+    }
+
+    [Fact]
+    public void WhenSharedChildMovesWithinTheArrayOfTheParentThatAttachedItBeforeItIsReleased_ThenChildInheritsContextOfRemainingParent()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance();
+
+        var other = new Person { FirstName = "Other" };
+        var shared = new Person { FirstName = "Shared" };
+        var first = new Person { FirstName = "First" };
+        var second = new Person { FirstName = "Second" };
+        var root = new Person(context) { Mother = first, Father = second };
+        first.Children = [other, shared];
+        second.Mother = shared;
+
+        // Act
+        first.Children = [shared];
+        first.Children = [];
+        root.Mother = null;
+
+        // Assert
+        Assert.Equal(context.GetServices<ILifecycleInterceptor>(), shared.GetServices<ILifecycleInterceptor>());
+        Assert.True(context.TryGetLifecycleInterceptor()!.TryRunWhileAttached(shared, () => { }));
+    }
+
+    [Fact]
     public void WhenParentReleasesSubjectThatOnlyItsOwnChildStillHolds_ThenSubjectKeepsItsContextAndCanBeAssignedAgain()
     {
         // Arrange: the child of the subject holds it as well, which would make a cycle of their contexts.
         var context = InterceptorSubjectContext
             .Create()
-            .WithContextInheritance()
-            .WithParents();
+            .WithContextInheritance();
 
         var subject = new Person { FirstName = "Subject" };
         var child = new Person { FirstName = "Child" };
@@ -229,6 +276,35 @@ public class ContextInheritanceHandlerTests
         // Assert
         Assert.Equal(context.GetServices<ILifecycleInterceptor>(), subject.GetServices<ILifecycleInterceptor>());
         Assert.Equal(context.GetServices<ILifecycleInterceptor>(), child.GetServices<ILifecycleInterceptor>());
+    }
+
+    [Fact]
+    public void WhenRemainingParentFallsBackOnTheSubjectThroughAnOldFallbackContext_ThenSubjectsKeepTheServicesOfTheGraph()
+    {
+        // Arrange: after the first release the subject keeps the context of the parent that released it, because only
+        // its own child still holds it. That parent then becomes a child of the subject.
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance();
+
+        var parent = new Person { FirstName = "Parent" };
+        var subject = new Person { FirstName = "Subject" };
+        var child = new Person { FirstName = "Child" };
+        var root = new Person(context) { Mother = parent };
+        parent.Mother = subject;
+        subject.Mother = child;
+        child.Mother = subject;
+        root.Father = child;
+        parent.Mother = null;
+        subject.Father = parent;
+
+        // Act
+        root.Mother = null;
+        parent.FirstName = "Changed";
+
+        // Assert
+        Assert.Equal(context.GetServices<ILifecycleInterceptor>(), parent.GetServices<ILifecycleInterceptor>());
+        Assert.Equal(context.GetServices<ILifecycleInterceptor>(), subject.GetServices<ILifecycleInterceptor>());
     }
 
     [Fact]

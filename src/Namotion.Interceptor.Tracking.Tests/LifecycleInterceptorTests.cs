@@ -164,10 +164,12 @@ public class LifecycleInterceptorTests
     }
 
     [Fact]
-    public void WhenOneOfTwoFallbackContextsThatReachTheInterceptorIsRemoved_ThenSubjectAndItsChildrenStayAttached()
+    public void WhenFallbackContextIsReplacedByOneThatReachesTheSameInterceptor_ThenSubjectAndItsChildrenStayAttached()
     {
         // Arrange
+        var handler = new TestLifecycleHandler();
         var context = InterceptorSubjectContext.Create().WithLifecycle();
+        context.AddService(handler);
         var interceptor = context.GetServices<LifecycleInterceptor>().Single();
         var first = InterceptorSubjectContext.Create();
         var second = InterceptorSubjectContext.Create();
@@ -176,14 +178,33 @@ public class LifecycleInterceptorTests
 
         var child = new Person { FirstName = "Child" };
         var person = new Person(first) { Mother = child };
-        ((IInterceptorSubject)person).Context.AddFallbackContext(second);
+        var eventCount = handler.GetEvents().Length;
 
         // Act
-        ((IInterceptorSubject)person).Context.RemoveFallbackContext(first);
+        var isReplaced = ((InterceptorSubjectContext)((IInterceptorSubject)person).Context).ReplaceFallbackContext(first, second);
 
         // Assert
+        Assert.True(isReplaced);
+        Assert.Equal(eventCount, handler.GetEvents().Length);
         Assert.True(interceptor.TryRunWhileAttached(person, () => { }));
         Assert.True(interceptor.TryRunWhileAttached(child, () => { }));
+    }
+
+    [Fact]
+    public void WhenFallbackContextIsReplacedByOneThatReachesAnotherInterceptor_ThenItIsKept()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithLifecycle();
+        var otherContext = InterceptorSubjectContext.Create().WithLifecycle();
+        var interceptor = context.GetServices<LifecycleInterceptor>().Single();
+        var person = new Person(context) { FirstName = "Person" };
+
+        // Act
+        var isReplaced = ((InterceptorSubjectContext)((IInterceptorSubject)person).Context).ReplaceFallbackContext(context, otherContext);
+
+        // Assert
+        Assert.False(isReplaced);
+        Assert.True(interceptor.TryRunWhileAttached(person, () => { }));
     }
 
     [Fact]

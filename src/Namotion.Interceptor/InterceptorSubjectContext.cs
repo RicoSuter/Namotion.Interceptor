@@ -152,41 +152,6 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
                Volatile.Read(ref _state).FallbackContexts.Contains(contextImpl);
     }
 
-    /// <summary>
-    /// Whether <paramref name="service"/> is a service of this context or of a fallback context other than
-    /// <paramref name="excludedContext"/>.
-    /// </summary>
-    private protected bool IsServiceReachableWithout<TInterface>(TInterface service, IInterceptorSubjectContext excludedContext)
-        where TInterface : class
-    {
-        var state = Volatile.Read(ref _state);
-        foreach (var ownService in state.Services)
-        {
-            if (ReferenceEquals(ownService, service))
-            {
-                return true;
-            }
-        }
-
-        foreach (var fallbackContext in state.FallbackContexts)
-        {
-            if (ReferenceEquals(fallbackContext, excludedContext))
-            {
-                continue;
-            }
-
-            foreach (var fallbackService in fallbackContext.GetServices<TInterface>())
-            {
-                if (ReferenceEquals(fallbackService, service))
-                {
-                    return true;
-                }
-            }
-        }
-
-        return false;
-    }
-
     public virtual bool RemoveFallbackContext(IInterceptorSubjectContext context)
     {
         var contextImpl = (InterceptorSubjectContext)context;
@@ -216,6 +181,99 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         }
 
         InvalidateUsingContexts();
+        return true;
+    }
+
+    /// <summary>
+    /// Replaces a fallback context by another one in a single step, so that a query always sees one of them. Lifecycle
+    /// interceptors are not notified, so both contexts must reach the same ones.
+    /// </summary>
+    /// <param name="oldContext">The fallback context to replace.</param>
+    /// <param name="newContext">The context that takes its place.</param>
+    /// <returns>
+    /// True if replaced, false if <paramref name="oldContext"/> is not a fallback context, <paramref name="newContext"/>
+    /// is one already or falls back on this context, or the two reach different lifecycle interceptors.
+    /// </returns>
+    public bool ReplaceFallbackContext(IInterceptorSubjectContext oldContext, IInterceptorSubjectContext newContext)
+    {
+        var oldContextImpl = (InterceptorSubjectContext)oldContext;
+        var newContextImpl = (InterceptorSubjectContext)newContext;
+
+        lock (_mutationLock)
+        {
+            var state = Volatile.Read(ref _state);
+            var index = state.FallbackContexts.IndexOf(oldContextImpl);
+            if (index < 0 ||
+                state.FallbackContexts.Contains(newContextImpl) ||
+                newContextImpl.FallsBackOn(this) ||
+                !HaveSameItems(oldContext.GetServices<ILifecycleInterceptor>(), newContext.GetServices<ILifecycleInterceptor>()))
+            {
+                return false;
+            }
+
+            // R4: register into the new fallback before publishing and unregister from the old one after (see
+            // AddFallbackContext and RemoveFallbackContext).
+            var newUsedByContexts = newContextImpl.GetOrCreateUsedByContexts();
+            lock (newUsedByContexts)
+            {
+                newUsedByContexts.Add(this);
+            }
+
+            PublishState(new ContextState(state.Services, state.FallbackContexts.SetItem(index, newContextImpl)));
+
+            var oldUsedByContexts = Volatile.Read(ref oldContextImpl._usedByContexts);
+            if (oldUsedByContexts is not null)
+            {
+                lock (oldUsedByContexts)
+                {
+                    oldUsedByContexts.Remove(this);
+                }
+            }
+        }
+
+        InvalidateUsingContexts();
+        return true;
+    }
+
+    private bool FallsBackOn(InterceptorSubjectContext context)
+    {
+        var visited = new HashSet<InterceptorSubjectContext>(ReferenceEqualityComparer.Instance);
+        var pending = new Stack<InterceptorSubjectContext>();
+        pending.Push(this);
+        while (pending.TryPop(out var current))
+        {
+            if (ReferenceEquals(current, context))
+            {
+                return true;
+            }
+
+            if (visited.Add(current))
+            {
+                foreach (var fallbackContext in Volatile.Read(ref current._state).FallbackContexts)
+                {
+                    pending.Push(fallbackContext);
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static bool HaveSameItems(ImmutableArray<ILifecycleInterceptor> first, ImmutableArray<ILifecycleInterceptor> second)
+    {
+        if (first.Length != second.Length)
+        {
+            return false;
+        }
+
+        foreach (var item in first)
+        {
+            if (!second.Contains(item))
+            {
+                return false;
+            }
+        }
+
         return true;
     }
 

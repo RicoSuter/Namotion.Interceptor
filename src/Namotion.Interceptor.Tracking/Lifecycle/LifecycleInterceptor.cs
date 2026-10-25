@@ -260,7 +260,8 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             Index = index,
             ReferenceCount = count,
             IsPropertyReferenceRemoved = true,
-            IsContextDetach = isLastDetach
+            IsContextDetach = isLastDetach,
+            RemainingReferences = set
         };
 
         if (isLastDetach)
