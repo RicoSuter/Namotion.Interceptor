@@ -1,5 +1,6 @@
 using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Tracking;
 
@@ -121,5 +122,31 @@ public class PropertyReadAccessTests
 
         // Assert
         Assert.Equal(DefaultPathProvider.Instance.TryGetPropertyFromPath(root, "Device.DeviceName"), result);
+    }
+
+    [Fact]
+    public async Task WhenThePathProviderDoesNotIncludeAttributes_ThenGetPropertyStillListsTheReadableOnes()
+    {
+        // Arrange
+        var room = CreateRoom();
+        var configuration = new McpServerConfiguration
+        {
+            PathProvider = new PropertiesWithoutAttributesPathProvider(),
+            AccessPolicy = new TestAccessPolicy((_, _) => true),
+            IsReadOnly = false
+        };
+
+        // Act
+        var result = await McpToolCaller.CallAsync(room, configuration, "get_property", new { path = "Temperature" });
+
+        // Assert
+        var attributes = result.GetProperty("attributes");
+        Assert.Equal("Celsius", attributes.GetProperty("Unit").GetString());
+        Assert.Equal("Sensor", attributes.GetProperty("Source").GetString());
+    }
+
+    private sealed class PropertiesWithoutAttributesPathProvider : PathProviderBase
+    {
+        public override bool IsPropertyIncluded(RegisteredSubjectProperty property) => !property.IsAttribute;
     }
 }

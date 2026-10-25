@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Registry;
 
 namespace Namotion.Interceptor.Mcp.Tools;
@@ -61,7 +62,7 @@ internal class GetPropertyTool
         var attributes = new Dictionary<string, object?>();
         foreach (var attribute in property.Attributes)
         {
-            if (_configuration.AccessPolicy is not null && !pathProvider.IsPropertyIncluded(attribute))
+            if (!_configuration.IsAllowed(attribute, McpAccessActions.Read))
             {
                 continue;
             }

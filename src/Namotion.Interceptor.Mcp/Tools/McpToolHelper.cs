@@ -245,7 +245,7 @@ internal static class McpToolHelper
             attributes = [];
             foreach (var attribute in property.Attributes)
             {
-                if (configuration.AccessPolicy is not null && !configuration.ToolPathProvider.IsPropertyIncluded(attribute))
+                if (!configuration.IsAllowed(attribute, McpAccessActions.Read))
                 {
                     continue;
                 }
