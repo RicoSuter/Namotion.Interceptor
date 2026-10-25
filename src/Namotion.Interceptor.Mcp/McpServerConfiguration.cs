@@ -1,4 +1,5 @@
 using Namotion.Interceptor.Mcp.Abstractions;
+using Namotion.Interceptor.Mcp.Tools;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
 
@@ -69,4 +70,13 @@ public class McpServerConfiguration
     /// When true, set_property is blocked.
     /// </summary>
     public bool IsReadOnly { get; init; } = true;
+
+    private PathProviderBase? _toolPathProvider;
+
+    /// <summary>
+    /// The path provider the tools resolve and list through: <see cref="PathProvider"/>, which must extend
+    /// <see cref="PathProviderBase"/>, restricted to what <see cref="AccessPolicy"/> allows to read.
+    /// </summary>
+    // Racing first calls create equal providers, so whichever one is kept is correct.
+    internal PathProviderBase ToolPathProvider => _toolPathProvider ??= McpAccessPathProvider.Create(PathProvider, AccessPolicy);
 }

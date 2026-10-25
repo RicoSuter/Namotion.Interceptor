@@ -245,6 +245,11 @@ internal static class McpToolHelper
             attributes = [];
             foreach (var attribute in property.Attributes)
             {
+                if (configuration.AccessPolicy is not null && !configuration.ToolPathProvider.IsPropertyIncluded(attribute))
+                {
+                    continue;
+                }
+
                 // A read-only attribute without a value says nothing about its property; a writable one can be set.
                 var value = attribute.GetValue();
                 if (value is not null || attribute.HasSetter)

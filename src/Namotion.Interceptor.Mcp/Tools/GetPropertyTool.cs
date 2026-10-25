@@ -1,6 +1,5 @@
 using System.Text.Json;
 using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Registry.Paths;
 
 namespace Namotion.Interceptor.Mcp.Tools;
 
@@ -37,14 +36,13 @@ internal class GetPropertyTool
 
     private Task<object?> HandleGetPropertyAsync(JsonElement input, CancellationToken cancellationToken)
     {
-        var pathProvider = _configuration.PathProvider as PathProviderBase
-            ?? throw new InvalidOperationException("PathProvider must extend PathProviderBase.");
+        var pathProvider = _configuration.ToolPathProvider;
 
         var rootRegistered = _rootSubjectProvider().TryGetRegisteredSubject()
             ?? throw new InvalidOperationException("Root subject is not registered.");
 
         var path = input.GetProperty("path").GetString()!;
-        var result = pathProvider.TryGetPropertyFromPath(rootRegistered, path);
+        var result = _configuration.TryGetReadableProperty(rootRegistered, path);
 
         if (result is null)
         {
@@ -63,6 +61,11 @@ internal class GetPropertyTool
         var attributes = new Dictionary<string, object?>();
         foreach (var attribute in property.Attributes)
         {
+            if (_configuration.AccessPolicy is not null && !pathProvider.IsPropertyIncluded(attribute))
+            {
+                continue;
+            }
+
             // A read-only attribute without a value says nothing about its property; a writable one can be set.
             var value = attribute.GetValue();
             if (value is not null || attribute.HasSetter)

@@ -56,8 +56,7 @@ internal class BrowseTool
 
     private Task<object?> HandleBrowseAsync(JsonElement input, CancellationToken cancellationToken)
     {
-        var pathProvider = _configuration.PathProvider as PathProviderBase
-            ?? throw new InvalidOperationException("PathProvider must extend PathProviderBase for path resolution.");
+        var pathProvider = _configuration.ToolPathProvider;
 
         var rootSubject = _rootSubjectProvider();
         var rootRegisteredSubject = rootSubject.TryGetRegisteredSubject()

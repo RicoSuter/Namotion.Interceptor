@@ -2,7 +2,6 @@ using System.Text.Json;
 using Namotion.Interceptor.Mcp.Models;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Registry.Paths;
 
 namespace Namotion.Interceptor.Mcp.Tools;
 
@@ -55,8 +54,7 @@ internal class SearchTool
 
     private Task<object?> HandleSearchAsync(JsonElement input, CancellationToken cancellationToken)
     {
-        var pathProvider = _configuration.PathProvider as PathProviderBase
-            ?? throw new InvalidOperationException("PathProvider must extend PathProviderBase.");
+        var pathProvider = _configuration.ToolPathProvider;
 
         var registry = _rootSubjectProvider().Context.TryGetService<ISubjectRegistry>();
         if (registry is null)
