@@ -465,73 +465,110 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
                 }
 
                 var property = new PropertyReference(subject, entry.Key);
-                var hadBaseline = _baselines.TryGetValue(property, out var previousBaseline);
 
                 // A nested write to another property already committed and published it.
-                if (hadBaseline)
+                if (_baselines.TryGetValue(property, out var previousBaseline))
                 {
                     continue;
                 }
 
-                if (ownership is null || epoch != _epoch)
+                if (RevalidateSeed(subject, ownership, property, previousBaseline.Revision, checkBaseline: false, ref epoch) == SeedValidity.OwnerLost)
                 {
-                    if (!IsSeedOwnerCurrent(subject, ownership))
-                    {
-                        return;
-                    }
-
-                    epoch = _epoch;
+                    return;
                 }
 
                 var value = ReadSeedingGetter(property, metadata, ownership);
-                if (ownership is null || epoch != _epoch)
+                var validity = RevalidateSeed(subject, ownership, property, previousBaseline.Revision, checkBaseline: true, ref epoch);
+                if (validity == SeedValidity.Current)
                 {
-                    if (!IsSeedOwnerCurrent(subject, ownership))
-                    {
-                        return;
-                    }
+                    occurrences.Clear();
+                    StructuralValueScanner.CollectOccurrences(metadata.Type, value, occurrences);
 
-                    if (previousBaseline.Revision != GetBaselineRevision(property))
-                    {
-                        continue;
-                    }
-
-                    epoch = _epoch;
+                    // Getters and enumerators can release this owner or publish a newer property.
+                    // Neither continuation may recreate their obsolete edges.
+                    validity = RevalidateSeed(subject, ownership, property, previousBaseline.Revision, checkBaseline: true, ref epoch);
                 }
 
-                occurrences.Clear();
-                StructuralValueScanner.CollectOccurrences(metadata.Type, value, occurrences);
-                // Getters and enumerators can release this owner or publish a newer property.
-                // Neither continuation may recreate their obsolete edges.
-                if (ownership is null || epoch != _epoch)
+                if (validity == SeedValidity.OwnerLost)
                 {
-                    if (!IsSeedOwnerCurrent(subject, ownership))
-                    {
-                        return;
-                    }
-
-                    if (previousBaseline.Revision != GetBaselineRevision(property))
-                    {
-                        continue;
-                    }
+                    return;
                 }
 
-                var journal = occurrences.Count > 0 ? BeginPropertyJournal(property, ownership!) : null;
-                var revision = SetBaseline(property, value, occurrences);
+                if (validity == SeedValidity.PropertySuperseded)
+                {
+                    continue;
+                }
+
+                PublishSeed(property, value, occurrences, ownership, children, ref seedingJournals);
                 epoch = _epoch;
-                if (journal is not null)
-                {
-                    journal.IsComplete = false;
-                    (seedingJournals ??= LifecycleScratch.RentJournalList()).Add((journal, revision));
-                }
-
-                foreach (var occurrence in occurrences) children.Add((property, occurrence, revision));
             }
         }
         finally
         {
             LifecycleScratch.Return(occurrences);
         }
+    }
+
+    /// <summary>
+    /// Commits a seeded value as the property's baseline and appends its occurrences, opening an
+    /// incomplete journal for them that the caller completes once their attach finishes.
+    /// </summary>
+    private void PublishSeed(
+        PropertyReference property,
+        object? value,
+        List<SubjectOccurrence> occurrences,
+        SubjectOwnership? ownership,
+        List<(PropertyReference Property, SubjectOccurrence Occurrence, long BaselineRevision)> children,
+        ref List<(PropertyEdgeJournal Journal, long Revision)>? seedingJournals)
+    {
+        var journal = occurrences.Count > 0 ? BeginPropertyJournal(property, ownership!) : null;
+        var revision = SetBaseline(property, value, occurrences);
+        if (journal is not null)
+        {
+            journal.IsComplete = false;
+            (seedingJournals ??= LifecycleScratch.RentJournalList()).Add((journal, revision));
+        }
+
+        foreach (var occurrence in occurrences) children.Add((property, occurrence, revision));
+    }
+
+    private enum SeedValidity
+    {
+        Current,
+        OwnerLost,
+        PropertySuperseded
+    }
+
+    /// <summary>
+    /// Re-validates a seed after user code may have run. An epoch that has not moved proves that
+    /// neither the owner nor any baseline changed; otherwise the owner and, when asked, the
+    /// property's baseline revision are checked, and the epoch is refreshed when both still hold.
+    /// </summary>
+    private SeedValidity RevalidateSeed(
+        IInterceptorSubject subject,
+        SubjectOwnership? ownership,
+        PropertyReference property,
+        long previousRevision,
+        bool checkBaseline,
+        ref long epoch)
+    {
+        if (ownership is not null && epoch == _epoch)
+        {
+            return SeedValidity.Current;
+        }
+
+        if (!IsSeedOwnerCurrent(subject, ownership))
+        {
+            return SeedValidity.OwnerLost;
+        }
+
+        if (checkBaseline && previousRevision != GetBaselineRevision(property))
+        {
+            return SeedValidity.PropertySuperseded;
+        }
+
+        epoch = _epoch;
+        return SeedValidity.Current;
     }
 
     public bool IsEvaluatingSeedingGetter(PropertyReference property)
@@ -793,53 +830,71 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
                     continue;
                 }
 
-                var attachedContext = subject.Executor.AttachedContext;
-                if (attachedContext is not null)
+                if (IsAttachedToThisContext(subject))
                 {
-                    if (!ReferenceEquals(attachedContext, Context))
-                    {
-                        throw new InvalidOperationException(
-                            $"The subject '{subject.GetType().Name}' is owned by a different context and cannot " +
-                            "join this graph. Detach it from that context first.");
-                    }
-
                     continue;
                 }
 
                 unattached.Add(subject);
-
-                foreach (var entry in subject.Properties)
-                {
-                    if (!IsStructural(entry.Value))
-                    {
-                        continue;
-                    }
-
-                    var childValue = entry.Value.GetValue?.Invoke(subject);
-                    if (childValue is null)
-                    {
-                        continue;
-                    }
-
-                    var occurrences = LifecycleScratch.RentOccurrenceList();
-                    try
-                    {
-                        StructuralValueScanner.CollectOccurrences(entry.Value.Type, childValue, occurrences);
-                        foreach (var occurrence in occurrences)
-                        {
-                            pending.Push(occurrence.Subject);
-                        }
-                    }
-                    finally
-                    {
-                        LifecycleScratch.Return(occurrences);
-                    }
-                }
+                PushStructuralChildren(subject, pending);
             }
         }
         finally
         {
             LifecycleScratch.Return(pending);
+        }
+    }
+
+    /// <summary>
+    /// Whether discovery stops at an attached subject of this context; a subject of another context
+    /// cannot join the graph and throws.
+    /// </summary>
+    private bool IsAttachedToThisContext(IInterceptorSubject subject)
+    {
+        var attachedContext = subject.Executor.AttachedContext;
+        if (attachedContext is null)
+        {
+            return false;
+        }
+
+        if (!ReferenceEquals(attachedContext, Context))
+        {
+            throw new InvalidOperationException(
+                $"The subject '{subject.GetType().Name}' is owned by a different context and cannot " +
+                "join this graph. Detach it from that context first.");
+        }
+
+        return true;
+    }
+
+    private static void PushStructuralChildren(IInterceptorSubject subject, Stack<IInterceptorSubject> pending)
+    {
+        foreach (var entry in subject.Properties)
+        {
+            if (!IsStructural(entry.Value))
+            {
+                continue;
+            }
+
+            var childValue = entry.Value.GetValue?.Invoke(subject);
+            if (childValue is null)
+            {
+                continue;
+            }
+
+            var occurrences = LifecycleScratch.RentOccurrenceList();
+            try
+            {
+                StructuralValueScanner.CollectOccurrences(entry.Value.Type, childValue, occurrences);
+                foreach (var occurrence in occurrences)
+                {
+                    pending.Push(occurrence.Subject);
+                }
+            }
+            finally
+            {
+                LifecycleScratch.Return(occurrences);
+            }
         }
     }
 

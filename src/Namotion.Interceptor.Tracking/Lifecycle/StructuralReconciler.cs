@@ -37,22 +37,38 @@ internal sealed class StructuralReconciler(LifecycleNotifier notifier, Ownership
             newValue = baseline.Value;
         }
 
-        if (existingJournal is null && ReferenceEquals(oldValue, newValue))
+        if (existingJournal is null)
         {
-            return;
+            if (CannotChangeEdges(oldValue, newValue))
+            {
+                return;
+            }
+
+            if (oldValue is null or IInterceptorSubject && newValue is null or IInterceptorSubject)
+            {
+                ReconcileScalar(property, ownership, (IInterceptorSubject?)oldValue, (IInterceptorSubject?)newValue);
+                return;
+            }
         }
 
-        if (existingJournal is null && !StructuralValueScanner.CanHoldSubjects(oldValue) && !StructuralValueScanner.CanHoldSubjects(newValue))
-        {
-            return;
-        }
+        ReconcileJournaled(property, metadata.Type, newValue, useCapturedBaseline, ownership, existingJournal, baseline);
+    }
 
-        if (existingJournal is null && (oldValue is null or IInterceptorSubject) && (newValue is null or IInterceptorSubject))
-        {
-            ReconcileScalar(property, ownership, (IInterceptorSubject?)oldValue, (IInterceptorSubject?)newValue);
-            return;
-        }
+    private static bool CannotChangeEdges(object? oldValue, object? newValue)
+    {
+        return ReferenceEquals(oldValue, newValue) ||
+            (!StructuralValueScanner.CanHoldSubjects(oldValue) && !StructuralValueScanner.CanHoldSubjects(newValue));
+    }
 
+    private void ReconcileJournaled(
+        PropertyReference property,
+        Type declaredType,
+        object? newValue,
+        bool useCapturedBaseline,
+        SubjectOwnership ownership,
+        PropertyEdgeJournal? existingJournal,
+        PropertyBaseline baseline)
+    {
         var previousRevision = baseline.Revision;
         var oldOccurrences = LifecycleScratch.RentOccurrenceList();
         var newOccurrences = LifecycleScratch.RentOccurrenceList();
@@ -69,7 +85,7 @@ internal sealed class StructuralReconciler(LifecycleNotifier notifier, Ownership
                 baseline.CopyTo(newOccurrences);
             }
 
-            else StructuralValueScanner.CollectOccurrences(metadata.Type, newValue, newOccurrences);
+            else StructuralValueScanner.CollectOccurrences(declaredType, newValue, newOccurrences);
 
             if (!graph.StillOwnsPublication(property, ownership, previousRevision)) return;
 
@@ -152,60 +168,13 @@ internal sealed class StructuralReconciler(LifecycleNotifier notifier, Ownership
         var newCounts = LifecycleScratch.RentSubjectCounter();
         try
         {
-            foreach (var occurrence in oldOccurrences)
-            {
-                oldCounts[occurrence.Subject] = oldCounts.GetValueOrDefault(occurrence.Subject) + 1;
-            }
+            CountOccurrences(oldOccurrences, oldCounts);
+            CountOccurrences(newOccurrences, newCounts);
 
-            foreach (var occurrence in newOccurrences)
-            {
-                newCounts[occurrence.Subject] = newCounts.GetValueOrDefault(occurrence.Subject) + 1;
-            }
-
-            // Removals run in reverse so the surviving occurrences are the leading ones, which is what
-            // makes retained duplicates match in enumeration order. Reverse order is also what the
-            // existing collection-child bookkeeping expects.
-            for (var i = oldOccurrences.Count - 1; i >= 0; i--)
-            {
-                var occurrence = oldOccurrences[i];
-                var remaining = oldCounts[occurrence.Subject];
-                if (remaining <= newCounts.GetValueOrDefault(occurrence.Subject))
-                {
-                    continue;
-                }
-
-                oldCounts[occurrence.Subject] = remaining - 1;
-                release.RemoveEdge(occurrence.Subject, property, occurrence.Index, ownership);
-                if (!graph.StillOwnsPublication(property, ownership, revision))
-                {
-                    // Reachability and child discovery can invoke user code. A nested write owns
-                    // the remaining publication once it replaces this baseline or ownership epoch.
-                    return;
-                }
-            }
-
-            // After the removal pass oldCounts holds min(old, new) per subject, which is exactly how
-            // many leading new occurrences are already covered by a retained edge.
-            foreach (var occurrence in newOccurrences)
-            {
-                var retained = oldCounts.GetValueOrDefault(occurrence.Subject);
-                if (retained > 0)
-                {
-                    oldCounts[occurrence.Subject] = retained - 1;
-                    if (attach.ResumeFailedSeed(occurrence.Subject) &&
-                        !graph.StillOwnsPublication(property, ownership, revision))
-                        return;
-                    continue;
-                }
-
-                attach.AttachEdge(occurrence.Subject, property, occurrence.Index, ownership);
-                if (!graph.StillOwnsPublication(property, ownership, revision))
-                {
-                    return;
-                }
-            }
-
-            if (!graph.StillOwnsPublication(property, ownership, revision))
+            // A false return means a nested write took over the remaining publication.
+            if (!RemoveSurplusOccurrences(property, oldOccurrences, oldCounts, newCounts, ownership, revision) ||
+                !AddNewOccurrences(property, newOccurrences, oldCounts, ownership, revision) ||
+                !graph.StillOwnsPublication(property, ownership, revision))
             {
                 return;
             }
@@ -217,6 +186,86 @@ internal sealed class StructuralReconciler(LifecycleNotifier notifier, Ownership
             LifecycleScratch.Return(oldCounts);
             LifecycleScratch.Return(newCounts);
         }
+    }
+
+    private static void CountOccurrences(List<SubjectOccurrence> occurrences, Dictionary<IInterceptorSubject, int> counts)
+    {
+        foreach (var occurrence in occurrences)
+        {
+            counts[occurrence.Subject] = counts.GetValueOrDefault(occurrence.Subject) + 1;
+        }
+    }
+
+    /// <summary>
+    /// Removes the old occurrences a subject has more of than the new value, and leaves
+    /// <paramref name="oldCounts"/> holding min(old, new) per subject.
+    /// </summary>
+    private bool RemoveSurplusOccurrences(
+        PropertyReference property,
+        List<SubjectOccurrence> oldOccurrences,
+        Dictionary<IInterceptorSubject, int> oldCounts,
+        Dictionary<IInterceptorSubject, int> newCounts,
+        SubjectOwnership ownership,
+        long revision)
+    {
+        // Removals run in reverse so the surviving occurrences are the leading ones, which is what
+        // makes retained duplicates match in enumeration order. Reverse order is also what the
+        // existing collection-child bookkeeping expects.
+        for (var i = oldOccurrences.Count - 1; i >= 0; i--)
+        {
+            var occurrence = oldOccurrences[i];
+            var remaining = oldCounts[occurrence.Subject];
+            if (remaining <= newCounts.GetValueOrDefault(occurrence.Subject))
+            {
+                continue;
+            }
+
+            oldCounts[occurrence.Subject] = remaining - 1;
+            release.RemoveEdge(occurrence.Subject, property, occurrence.Index, ownership);
+
+            // Reachability and child discovery can invoke user code. A nested write owns the
+            // remaining publication once it replaces this baseline or ownership epoch.
+            if (!graph.StillOwnsPublication(property, ownership, revision))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Attaches the new occurrences that no retained edge covers. <paramref name="retainedCounts"/>
+    /// holds min(old, new) per subject, which is exactly how many leading new occurrences are
+    /// already covered by a retained edge.
+    /// </summary>
+    private bool AddNewOccurrences(
+        PropertyReference property,
+        List<SubjectOccurrence> newOccurrences,
+        Dictionary<IInterceptorSubject, int> retainedCounts,
+        SubjectOwnership ownership,
+        long revision)
+    {
+        foreach (var occurrence in newOccurrences)
+        {
+            var retained = retainedCounts.GetValueOrDefault(occurrence.Subject);
+            if (retained > 0)
+            {
+                retainedCounts[occurrence.Subject] = retained - 1;
+                if (attach.ResumeFailedSeed(occurrence.Subject) &&
+                    !graph.StillOwnsPublication(property, ownership, revision))
+                    return false;
+                continue;
+            }
+
+            attach.AttachEdge(occurrence.Subject, property, occurrence.Index, ownership);
+            if (!graph.StillOwnsPublication(property, ownership, revision))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /// <summary>
@@ -236,17 +285,7 @@ internal sealed class StructuralReconciler(LifecycleNotifier notifier, Ownership
             return;
         }
 
-        var hasRetained = false;
-        foreach (var occurrence in oldOccurrences)
-        {
-            if (newCounts.ContainsKey(occurrence.Subject))
-            {
-                hasRetained = true;
-                break;
-            }
-        }
-
-        if (!hasRetained)
+        if (!HasRetainedOccurrence(oldOccurrences, newCounts))
         {
             return;
         }
@@ -254,17 +293,7 @@ internal sealed class StructuralReconciler(LifecycleNotifier notifier, Ownership
         var groups = LifecycleScratch.RentIndexGroups();
         try
         {
-            foreach (var occurrence in newOccurrences)
-            {
-                if (!groups.TryGetValue(occurrence.Subject, out var indices))
-                {
-                    indices = LifecycleScratch.RentIndexList();
-                    groups.Add(occurrence.Subject, indices);
-                }
-
-                indices.Add(occurrence.Index);
-            }
-
+            GroupIndices(newOccurrences, groups);
             foreach (var group in groups)
             {
                 var ownership = graph.TryGetOwnership(group.Key);
@@ -283,5 +312,32 @@ internal sealed class StructuralReconciler(LifecycleNotifier notifier, Ownership
         }
 
         notifier.RefreshCollectionProperty(property, newValue);
+    }
+
+    private static bool HasRetainedOccurrence(List<SubjectOccurrence> oldOccurrences, Dictionary<IInterceptorSubject, int> newCounts)
+    {
+        foreach (var occurrence in oldOccurrences)
+        {
+            if (newCounts.ContainsKey(occurrence.Subject))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static void GroupIndices(List<SubjectOccurrence> occurrences, Dictionary<IInterceptorSubject, List<object?>> groups)
+    {
+        foreach (var occurrence in occurrences)
+        {
+            if (!groups.TryGetValue(occurrence.Subject, out var indices))
+            {
+                indices = LifecycleScratch.RentIndexList();
+                groups.Add(occurrence.Subject, indices);
+            }
+
+            indices.Add(occurrence.Index);
+        }
     }
 }

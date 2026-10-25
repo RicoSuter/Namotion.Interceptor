@@ -1,3 +1,5 @@
+using System.Runtime.CompilerServices;
+
 namespace Namotion.Interceptor.Tracking.Lifecycle;
 
 /// <summary>
@@ -42,44 +44,71 @@ internal sealed class ReachabilityWalk(OwnershipGraph graph)
         var current = start;
         for (var step = 0; step < MaximumReductionSteps; step++)
         {
-            var ownership = graph.TryGetOwnership(current);
-            if (ownership is null || ownership.IncomingCount == 0)
+            switch (ReduceToParent(ref current, start, excluded))
             {
-                // Nothing above it, and so nothing above the subjects reduced to reach it either.
-                return false;
+                case Reduction.Reachable:
+                    return true;
+                case Reduction.Unreachable:
+                    return false;
+                case Reduction.Branches:
+                    return SearchAncestors(current, excluded);
             }
-
-            if (!ownership.TryGetSingleIncoming(out var incoming))
-            {
-                break;
-            }
-
-            // The same validation the search applies to every candidate parent; its sole edge being
-            // uncommitted leaves the closure empty rather than merely dropping one candidate.
-            if (!graph.CommitsEdgeTo(incoming, current))
-            {
-                return false;
-            }
-
-            var parent = incoming.Subject;
-            if (ReferenceEquals(parent, start))
-            {
-                // Back where it began, so the closure is exactly the chain just walked and every
-                // subject on it was tested. The step bound is what ends a cycle the start is not on.
-                return false;
-            }
-
-            if (!ReferenceEquals(parent, excluded) && graph.IsAnchored(parent))
-            {
-                return true;
-            }
-
-            current = parent;
         }
 
         // Correct to resume from here rather than from the start: the reduction proved the closure
         // of every subject it left behind to be the closure of this one, and anchored none of them.
         return SearchAncestors(current, excluded);
+    }
+
+    private enum Reduction
+    {
+        Continued,
+        Reachable,
+        Unreachable,
+        Branches
+    }
+
+    /// <summary>
+    /// Moves <paramref name="current"/> to the parent of its only committed edge, or reports why the
+    /// reduction ends at it.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private Reduction ReduceToParent(ref IInterceptorSubject current, IInterceptorSubject start, IInterceptorSubject? excluded)
+    {
+        var ownership = graph.TryGetOwnership(current);
+        if (ownership is null || ownership.IncomingCount == 0)
+        {
+            // Nothing above it, and so nothing above the subjects reduced to reach it either.
+            return Reduction.Unreachable;
+        }
+
+        if (!ownership.TryGetSingleIncoming(out var incoming))
+        {
+            return Reduction.Branches;
+        }
+
+        // The same validation the search applies to every candidate parent; its sole edge being
+        // uncommitted leaves the closure empty rather than merely dropping one candidate.
+        if (!graph.CommitsEdgeTo(incoming, current))
+        {
+            return Reduction.Unreachable;
+        }
+
+        var parent = incoming.Subject;
+        if (ReferenceEquals(parent, start))
+        {
+            // Back where it began, so the closure is exactly the chain just walked and every
+            // subject on it was tested. The step bound is what ends a cycle the start is not on.
+            return Reduction.Unreachable;
+        }
+
+        if (!ReferenceEquals(parent, excluded) && graph.IsAnchored(parent))
+        {
+            return Reduction.Reachable;
+        }
+
+        current = parent;
+        return Reduction.Continued;
     }
 
     private bool SearchAncestors(IInterceptorSubject start, IInterceptorSubject? excluded)
@@ -103,32 +132,9 @@ internal sealed class ReachabilityWalk(OwnershipGraph graph)
 
                 edges.Clear();
                 ownership.CopyIncomingEdges(edges);
-
-                foreach (var edge in edges)
+                if (ExpandParents(current, edges, visited, expandable, excluded))
                 {
-                    var parent = edge.Property.Subject;
-                    if (visited.Contains(parent))
-                    {
-                        continue;
-                    }
-
-                    // A recorded incoming edge only counts once the parent still commits the
-                    // matching outgoing edge: a reconcile commits the new property value before it
-                    // updates the incoming records, so the two legitimately disagree in that window.
-                    // A rejected parent is deliberately not marked visited, because it can still be
-                    // a valid parent of another subject later in this same walk.
-                    if (!graph.CommitsEdgeTo(edge.Property, current))
-                    {
-                        continue;
-                    }
-
-                    visited.Add(parent);
-                    if (!ReferenceEquals(parent, excluded) && graph.IsAnchored(parent))
-                    {
-                        return true;
-                    }
-
-                    expandable.Push(parent);
+                    return true;
                 }
             }
 
@@ -140,5 +146,42 @@ internal sealed class ReachabilityWalk(OwnershipGraph graph)
             LifecycleScratch.Return(expandable);
             LifecycleScratch.Return(edges);
         }
+    }
+
+    /// <summary>
+    /// Pushes the unvisited parents that still commit their edge to <paramref name="current"/>, and
+    /// reports whether one of them is anchored.
+    /// </summary>
+    private bool ExpandParents(
+        IInterceptorSubject current,
+        List<IncomingEdge> edges,
+        HashSet<IInterceptorSubject> visited,
+        Stack<IInterceptorSubject> expandable,
+        IInterceptorSubject? excluded)
+    {
+        foreach (var edge in edges)
+        {
+            var parent = edge.Property.Subject;
+
+            // A recorded incoming edge only counts once the parent still commits the matching
+            // outgoing edge: a reconcile commits the new property value before it updates the
+            // incoming records, so the two legitimately disagree in that window. A rejected parent
+            // is deliberately not marked visited, because it can still be a valid parent of another
+            // subject later in this same walk.
+            if (visited.Contains(parent) || !graph.CommitsEdgeTo(edge.Property, current))
+            {
+                continue;
+            }
+
+            visited.Add(parent);
+            if (!ReferenceEquals(parent, excluded) && graph.IsAnchored(parent))
+            {
+                return true;
+            }
+
+            expandable.Push(parent);
+        }
+
+        return false;
     }
 }

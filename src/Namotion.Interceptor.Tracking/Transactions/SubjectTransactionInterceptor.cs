@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
@@ -79,31 +80,11 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
             return;
         }
 
-        var transaction = SubjectTransaction.Current;
-        if (transaction is null || transaction.IsDisposed || transaction.IsCommitted)
-        {
-            next(ref context);
-            return;
-        }
-
-        if (transaction.IsCommitting)
-        {
-            if (transaction.IsCommitModelAccessAuthorized)
-            {
-                next(ref context);
-                return;
-            }
-
-            if (transaction.IsInactiveUnderLockOrThrowIfCommitting())
-            {
-                next(ref context);
-                return;
-            }
-        }
-
         // Settable-derived writes are immediate and outside the transaction. This access linearizes at the
-        // non-committing observation above; do not hold the transaction lock while a user setter executes.
-        if (context.Property.Metadata.IsDerived)
+        // non-committing observation in WritesThrough; do not hold the transaction lock while a user setter
+        // executes.
+        var transaction = SubjectTransaction.Current;
+        if (WritesThrough(transaction) || context.Property.Metadata.IsDerived)
         {
             next(ref context);
             return;
@@ -112,8 +93,7 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
         // Singleton per context, so instance identity is context identity.
         if (!ReferenceEquals(this, transaction.Interceptor))
         {
-            throw new InvalidOperationException(
-                $"Cannot modify property '{context.Property.Metadata.Name}': Transaction is bound to a different context.");
+            ThrowBoundToDifferentContext(context.Property);
         }
 
         // Origin comparison can run user equality code, so resolve it before taking the transaction lock.
@@ -133,6 +113,29 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
         }
 
         next(ref context);
+    }
+
+    /// <summary>
+    /// Whether a write passes straight through: no transaction, a finished one, or a committing one
+    /// that either authorized model access or is no longer active.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool WritesThrough([NotNullWhen(false)] SubjectTransaction? transaction)
+    {
+        if (transaction is null || transaction.IsDisposed || transaction.IsCommitted)
+        {
+            return true;
+        }
+
+        return transaction.IsCommitting &&
+            (transaction.IsCommitModelAccessAuthorized || transaction.IsInactiveUnderLockOrThrowIfCommitting());
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ThrowBoundToDifferentContext(PropertyReference property)
+    {
+        throw new InvalidOperationException(
+            $"Cannot modify property '{property.Metadata.Name}': Transaction is bound to a different context.");
     }
 
     private sealed class LockReleaser(SemaphoreSlim semaphore) : IDisposable

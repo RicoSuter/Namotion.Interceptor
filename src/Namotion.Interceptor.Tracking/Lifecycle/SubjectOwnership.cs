@@ -30,6 +30,7 @@ internal readonly struct IncomingEdge(PropertyReference property, object? index)
 /// <see cref="OwnershipGraph.GetParents"/>). It is a leaf lock: nothing foreign is called while it
 /// is held, and the type is internal and never handed out, so no other code can take it.
 /// </remarks>
+[System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S2551", Justification = "The instance is the leaf monitor: the type is internal and never handed out, so no other code can lock it, and a dedicated lock object would add an allocation to every attached subject.")]
 internal sealed class SubjectOwnership
 {
     // The single-edge case stays inline: most subjects have exactly one parent, and a list would
