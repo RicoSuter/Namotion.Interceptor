@@ -16,8 +16,9 @@ public interface ILifecycleHandler
 {
     /// <summary>
     /// Called when a lifecycle event occurs for a subject.
-    /// Check the IsContextAttach, IsPropertyReferenceAdded, IsPropertyReferenceRemoved, and IsContextDetach flags
-    /// to determine which events occurred.
+    /// Check the <see cref="SubjectLifecycleChange.IsContextAttach"/>, <see cref="SubjectLifecycleChange.IsPropertyReferenceAdded"/>,
+    /// <see cref="SubjectLifecycleChange.IsPropertyReferenceRemoved"/>, and <see cref="SubjectLifecycleChange.IsContextDetach"/>
+    /// flags to determine which events occurred.
     /// </summary>
     void HandleLifecycleChange(SubjectLifecycleChange change);
 }

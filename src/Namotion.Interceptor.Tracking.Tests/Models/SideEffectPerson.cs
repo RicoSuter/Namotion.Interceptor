@@ -46,6 +46,7 @@ public partial class SideEffectPerson
         }
         catch (LifecycleContractViolationException)
         {
+            // Absorbed on purpose, see above.
         }
 
         return $"Hello, {Name}";

@@ -1,6 +1,6 @@
 ﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.WebSocket.Tests")]
-[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v9.0", FrameworkDisplayName=".NET 9.0")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
 namespace Namotion.Interceptor.WebSocket.Client
 {
     public class WebSocketClientConfiguration
@@ -164,7 +164,9 @@ namespace Namotion.Interceptor.WebSocket.Server
     public sealed class WebSocketSubjectChangeProcessor : Microsoft.Extensions.Hosting.BackgroundService
     {
         public WebSocketSubjectChangeProcessor(Namotion.Interceptor.WebSocket.Server.WebSocketSubjectHandler handler, Microsoft.Extensions.Logging.ILogger<Namotion.Interceptor.WebSocket.Server.WebSocketSubjectChangeProcessor> logger) { }
+        public override void Dispose() { }
         protected override System.Threading.Tasks.Task ExecuteAsync(System.Threading.CancellationToken stoppingToken) { }
+        public override System.Threading.Tasks.Task StartAsync(System.Threading.CancellationToken cancellationToken) { }
     }
     public sealed class WebSocketSubjectHandler
     {

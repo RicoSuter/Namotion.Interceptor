@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using HomeBlaze.Abstractions;
@@ -13,8 +14,10 @@ using Namotion.Interceptor.Attributes;
 
 namespace Namotion.Devices.Shelly;
 
-[Category("Devices")]
-[Description("Shelly Gen2 device with dynamic component discovery (switches, covers, energy meters, inputs, temperature sensors)")]
+[Category("Switches")]
+[Description("Shelly Gen2 device with dynamic component discovery (switches, covers, energy meters, inputs, temperature sensors, phase netted energy counters)")]
+[DisplayName("Shelly device")]
+[SubjectIcon("Hub")]
 [InterceptorSubject]
 public partial class ShellyDevice : BackgroundService,
     IConfigurable,
@@ -24,17 +27,22 @@ public partial class ShellyDevice : BackgroundService,
     ILastUpdatedProvider,
     IConnectionState,
     INetworkAdapter,
+    INetworkHost,
     ISoftwareState,
-    IDeviceInfo
+    IDeviceInfo,
+    IUptimeState
 {
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<ShellyDevice> _logger;
     private readonly SemaphoreSlim _configChangedSignal = new(0, 1);
     private readonly Lock _updateLock = new();
+    private readonly ShellyVirtualEnergyCounters _virtualEnergyCounters = new();
 
-    private ShellyDeviceInfo? _deviceInfo;
-    private ShellyWifiStatus? _wifiStatus;
-    private string? _availableSoftwareUpdate;
+    private string? _ethernetIpAddress;
+    private string? _wifiIpAddress;
+    private int? _wifiSignalStrength;
+    private string? _stateHostAddress;
+    private bool _isVirtualEnergyCounterReadFailing;
     
     [Configuration]
     public partial string Name { get; set; }
@@ -53,6 +61,9 @@ public partial class ShellyDevice : BackgroundService,
 
     [State(IsDiscrete = true)]
     public partial bool IsConnected { get; internal set; }
+
+    // Tracked, so that the derived properties that read it change when it is fetched or reset.
+    internal partial ShellyDeviceInfo? DeviceInfo { get; set; }
 
     [State(IsDiscrete = true)]
     public partial ServiceStatus Status { get; internal set; }
@@ -79,35 +90,35 @@ public partial class ShellyDevice : BackgroundService,
     public partial ShellyEnergyMeter? EnergyMeter { get; internal set; }
 
     [State(Position = 402)]
+    [Category("Device")]
     public partial TimeSpan? Uptime { get; internal set; }
     
     [Derived]
     [State]
-    public string? SoftwareVersion => _deviceInfo?.Version;
+    public string? SoftwareVersion => DeviceInfo?.Version;
+
+    [State]
+    public partial string? AvailableSoftwareUpdate { get; internal set; }
 
     [Derived]
     [State]
-    public string? AvailableSoftwareUpdate => _availableSoftwareUpdate;
+    public string? MacAddress => DeviceInfo?.Mac;
 
-    [Derived]
     [State]
-    public string? MacAddress => _deviceInfo?.Mac;
-
-    [Derived]
-    [State]
-    public string? IpAddress => _wifiStatus?.StationIp;
+    public partial string? IpAddress { get; internal set; }
 
     public string? SubnetMask => null;
     public string? Gateway => null;
-    public bool? IsWireless => true;
 
-    [Derived]
     [State]
-    public int? SignalStrength => _wifiStatus?.Rssi;
+    public partial bool? IsWireless { get; internal set; }
+
+    [State]
+    public partial int? SignalStrength { get; internal set; }
     
     [Derived]
     public string? Title => !string.IsNullOrEmpty(Name) ? Name :
-        _deviceInfo?.Name ?? _deviceInfo?.Application ?? HostAddress;
+        DeviceInfo?.Name ?? DeviceInfo?.Application ?? HostAddress;
 
     [Derived]
     public string IconName => IsConnected ? "Hub" : "HubOutlined";
@@ -117,7 +128,7 @@ public partial class ShellyDevice : BackgroundService,
     
     [Derived]
     [State(Position = 400)]
-    public string? DeviceName => _deviceInfo?.Name;
+    public string? DeviceName => DeviceInfo?.Name;
 
     // IDeviceInfo
 
@@ -127,23 +138,24 @@ public partial class ShellyDevice : BackgroundService,
 
     [Derived]
     [State]
-    public string? Model => _deviceInfo?.Model;
+    public string? Model => DeviceInfo?.Model;
 
     [Derived]
     [State]
-    public string? ProductCode => _deviceInfo?.Application;
+    public string? ProductCode => DeviceInfo?.Application;
 
     [Derived]
     [State]
-    public string? SerialNumber => _deviceInfo?.Mac;
+    public string? SerialNumber => DeviceInfo?.Mac;
 
     [Derived]
     [State]
-    public string? HardwareRevision => _deviceInfo?.Generation?.ToString();
+    public string? HardwareRevision => DeviceInfo?.Generation?.ToString();
 
     [Derived]
     [State(Position = 401)]
-    public int? Generation => _deviceInfo?.Generation;
+    [Category("Device")]
+    public int? Generation => DeviceInfo?.Generation;
 
     public ShellyDevice(IHttpClientFactory httpClientFactory, ILogger<ShellyDevice> logger)
     {
@@ -166,6 +178,9 @@ public partial class ShellyDevice : BackgroundService,
         TemperatureSensors = [];
         EnergyMeter = null;
         Uptime = null;
+        IpAddress = null;
+        IsWireless = null;
+        SignalStrength = null;
     }
 
     internal HttpClient CreateHttpClient()
@@ -179,8 +194,17 @@ public partial class ShellyDevice : BackgroundService,
     {
         while (!stoppingToken.IsCancellationRequested)
         {
-            if (string.IsNullOrEmpty(HostAddress))
+            // Another host can be another device (or none); the same host keeps its children and counters.
+            var hostAddress = HostAddress;
+            if (hostAddress != _stateHostAddress)
             {
+                ResetForConfigurationChange();
+                _stateHostAddress = hostAddress;
+            }
+
+            if (string.IsNullOrEmpty(hostAddress))
+            {
+                IsConnected = false;
                 Status = ServiceStatus.Stopped;
                 StatusMessage = "No host address configured";
                 try
@@ -202,7 +226,8 @@ public partial class ShellyDevice : BackgroundService,
                 using var client = CreateHttpClient();
                 await FetchDeviceInfoAsync(client, stoppingToken);
 
-                if (_deviceInfo?.Generation < 2)
+                // Gen1 devices do not report "gen".
+                if (DeviceInfo?.Generation is null or < 2)
                 {
                     Status = ServiceStatus.Error;
                     StatusMessage = "Only Gen2+ Shelly devices are supported";
@@ -250,7 +275,7 @@ public partial class ShellyDevice : BackgroundService,
                 StatusMessage = exception.Message;
                 ResetState();
 
-                await Task.Delay(RetryInterval, stoppingToken);
+                await WaitForConfigurationChangeAsync(RetryInterval, stoppingToken);
             }
         }
 
@@ -258,6 +283,9 @@ public partial class ShellyDevice : BackgroundService,
         StatusMessage = null;
     }
 
+    /// <summary>
+    /// Polls until a poll fails (after waiting <see cref="RetryInterval"/>), the configuration changes, or the service stops.
+    /// </summary>
     private async Task RunPollingLoopAsync(HttpClient client, CancellationToken stoppingToken)
     {
         while (!stoppingToken.IsCancellationRequested)
@@ -265,6 +293,7 @@ public partial class ShellyDevice : BackgroundService,
             try
             {
                 await PollStatusAsync(client, stoppingToken);
+                await ReadVirtualEnergyCountersAsync(client, stoppingToken);
                 LastUpdated = DateTimeOffset.UtcNow;
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -277,6 +306,9 @@ public partial class ShellyDevice : BackgroundService,
                 IsConnected = false;
                 Status = ServiceStatus.Error;
                 StatusMessage = exception.Message;
+
+                // Reconnecting at once would loop without pause when /shelly answers but RPC calls fail (e.g. authentication).
+                await WaitForConfigurationChangeAsync(RetryInterval, stoppingToken);
                 return;
             }
 
@@ -284,20 +316,21 @@ public partial class ShellyDevice : BackgroundService,
                 ? TimeSpan.FromSeconds(1)
                 : PollingInterval;
 
-            try
-            {
-                var signaled = await _configChangedSignal.WaitAsync(pollingInterval, stoppingToken);
-                if (signaled)
-                {
-                    _deviceInfo = null;
-                    _wifiStatus = null;
-                    return;
-                }
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                break;
-            }
+            if (await WaitForConfigurationChangeAsync(pollingInterval, stoppingToken))
+                return;
+        }
+    }
+
+    /// <returns><c>true</c> when the configuration changed within <paramref name="timeout"/>.</returns>
+    private async Task<bool> WaitForConfigurationChangeAsync(TimeSpan timeout, CancellationToken stoppingToken)
+    {
+        try
+        {
+            return await _configChangedSignal.WaitAsync(timeout, stoppingToken);
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            return false;
         }
     }
 
@@ -305,7 +338,7 @@ public partial class ShellyDevice : BackgroundService,
     {
         using var response = await client.GetAsync($"http://{HostAddress}/shelly", cancellationToken);
         response.EnsureSuccessStatusCode();
-        _deviceInfo = await response.Content.ReadFromJsonAsync<ShellyDeviceInfo>(cancellationToken);
+        DeviceInfo = await response.Content.ReadFromJsonAsync<ShellyDeviceInfo>(cancellationToken);
     }
 
     private async Task PollStatusAsync(HttpClient client, CancellationToken cancellationToken)
@@ -317,6 +350,73 @@ public partial class ShellyDevice : BackgroundService,
         ParseStatusComponents(statusJson);
 
         IsConnected = true;
+    }
+
+    /// <summary>
+    /// Reads the names and values of the virtual energy counters when the device has an energy meter and a read is required.
+    /// </summary>
+    internal async Task ReadVirtualEnergyCountersAsync(HttpClient client, CancellationToken cancellationToken)
+    {
+        ShellyEnergyMeter? energyMeter;
+        lock (_updateLock)
+        {
+            energyMeter = EnergyMeter;
+            if (energyMeter == null || !_virtualEnergyCounters.IsReadRequired)
+                return;
+        }
+
+        try
+        {
+            var numbers = new List<ShellyVirtualNumber>();
+
+            // The first page's revision is recorded: if the configuration changes while paging, the newer revision
+            // observed in the next status differs from it and triggers another read.
+            var (offset, total, configurationRevision) = await ReadVirtualNumbersPageAsync(client, 0, numbers, cancellationToken);
+            while (offset < total)
+            {
+                var requestedOffset = offset;
+                (offset, total, _) = await ReadVirtualNumbersPageAsync(client, offset, numbers, cancellationToken);
+
+                // Requiring progress stops a device that ignores the offset parameter from repeating the same page forever.
+                if (offset <= requestedOffset)
+                    break;
+            }
+
+            lock (_updateLock)
+            {
+                _virtualEnergyCounters.Apply(numbers, configurationRevision, energyMeter);
+            }
+
+            _isVirtualEnergyCounterReadFailing = false;
+        }
+        catch (HttpRequestException exception) when (exception.StatusCode == HttpStatusCode.NotFound)
+        {
+            // Firmware without Shelly.GetComponents; reads wait for the next configuration change, so this is logged once per revision.
+            _logger.LogWarning(exception, "Shelly device {HostAddress} does not support virtual components, retrying after the next configuration change", HostAddress);
+            lock (_updateLock)
+            {
+                _virtualEnergyCounters.ApplyUnsupported(energyMeter);
+            }
+        }
+        catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            // Only the first failure of a streak is a warning, so a persistent failure does not log one per poll.
+            _logger.Log(_isVirtualEnergyCounterReadFailing ? LogLevel.Debug : LogLevel.Warning, exception,
+                "Shelly device {HostAddress} virtual components could not be read, retrying on next poll", HostAddress);
+            _isVirtualEnergyCounterReadFailing = true;
+        }
+    }
+
+    private async Task<(int NextOffset, int Total, int? ConfigurationRevision)> ReadVirtualNumbersPageAsync(
+        HttpClient client, int offset, List<ShellyVirtualNumber> numbers, CancellationToken cancellationToken)
+    {
+        using var response = await client.GetAsync(
+            $"http://{HostAddress}/rpc/Shelly.GetComponents?dynamic_only=true&include=%5B%22config%22,%22status%22%5D&offset={offset}",
+            cancellationToken);
+        response.EnsureSuccessStatusCode();
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+        return ShellyVirtualEnergyCounters.ReadVirtualNumbers(document.RootElement, numbers);
     }
 
     internal void ParseStatusComponents(JsonElement root, bool isPartialUpdate = false)
@@ -335,6 +435,7 @@ public partial class ShellyDevice : BackgroundService,
         List<(int index, ShellyTemperatureStatus status)>? temperatures = null;
         ShellyEmStatus? emStatus = null;
         ShellyEmDataStatus? emDataStatus = null;
+        var isNetworkChanged = false;
 
         foreach (var property in root.EnumerateObject())
         {
@@ -379,11 +480,25 @@ public partial class ShellyDevice : BackgroundService,
                         UpdateSysStatus(sysStatus);
                     break;
 
+                // Pushes contain only the changed fields (e.g. rssi alone), so a missing field keeps its value.
+                case "eth":
+                    if (property.Value.TryGetProperty("ip", out var ethernetIp))
+                        _ethernetIpAddress = GetStringOrNull(ethernetIp);
+                    isNetworkChanged = true;
+                    break;
+
                 case "wifi":
-                    _wifiStatus = property.Value.Deserialize<ShellyWifiStatus>();
+                    if (property.Value.TryGetProperty("sta_ip", out var wifiIp))
+                        _wifiIpAddress = GetStringOrNull(wifiIp);
+                    if (property.Value.TryGetProperty("rssi", out var rssi))
+                        _wifiSignalStrength = rssi.ValueKind == JsonValueKind.Number ? rssi.GetInt32() : null;
+                    isNetworkChanged = true;
                     break;
             }
         }
+
+        if (isNetworkChanged)
+            UpdateNetworkAdapter();
 
         // Only update component types that were actually present in the response.
         // WebSocket NotifyStatus messages contain only changed components —
@@ -396,9 +511,19 @@ public partial class ShellyDevice : BackgroundService,
             UpdateInputs(inputs, isPartialUpdate);
         if (temperatures != null)
             UpdateTemperatureSensors(temperatures, isPartialUpdate);
-        if (emStatus != null)
+        if (emStatus != null || emDataStatus != null)
             UpdateEnergyMeter(emStatus, emDataStatus);
     }
+
+    private void UpdateNetworkAdapter()
+    {
+        IpAddress = _ethernetIpAddress ?? _wifiIpAddress;
+        IsWireless = _ethernetIpAddress != null ? false : _wifiIpAddress != null ? true : null;
+        SignalStrength = IsWireless == true ? _wifiSignalStrength : null;
+    }
+
+    private static string? GetStringOrNull(JsonElement element) =>
+        element.ValueKind == JsonValueKind.String ? element.GetString() : null;
 
     internal static (string componentType, int index) ParseComponentKey(string key)
     {
@@ -434,16 +559,17 @@ public partial class ShellyDevice : BackgroundService,
                 var status = ordered[i].status;
                 var previousIsOn = Switches[i].IsOn;
 
-                Switches[i].IsOn = status.Output;
+                Switches[i].IsOn = status.IsOutputOn;
                 Switches[i].Source = status.Source;
                 Switches[i].MeasuredPower = status.ActivePower;
-                Switches[i].MeasuredEnergyConsumed = status.ActiveEnergy?.Total;
+                Switches[i].TotalImportedEnergy = status.ActiveEnergy?.Total;
+                Switches[i].TotalExportedEnergy = status.ReturnedActiveEnergy?.Total;
                 Switches[i].ElectricalVoltage = status.Voltage;
                 Switches[i].ElectricalCurrent = status.Current;
                 Switches[i].Temperature = status.Temperature?.TemperatureCelsius;
                 Switches[i].LastUpdated = DateTimeOffset.UtcNow;
 
-                if (previousIsOn != status.Output && status.Output != null)
+                if (previousIsOn != status.IsOutputOn && status.IsOutputOn != null)
                     Switches[i].PublishSwitchEvent();
             }
         }
@@ -455,10 +581,11 @@ public partial class ShellyDevice : BackgroundService,
                 if (sw == null) continue;
 
                 var previousIsOn = sw.IsOn;
-                if (status.Output != null) sw.IsOn = status.Output;
+                if (status.IsOutputOn != null) sw.IsOn = status.IsOutputOn;
                 if (status.Source != null) sw.Source = status.Source;
                 if (status.ActivePower != null) sw.MeasuredPower = status.ActivePower;
-                if (status.ActiveEnergy != null) sw.MeasuredEnergyConsumed = status.ActiveEnergy.Total;
+                if (status.ActiveEnergy != null) sw.TotalImportedEnergy = status.ActiveEnergy.Total;
+                if (status.ReturnedActiveEnergy != null) sw.TotalExportedEnergy = status.ReturnedActiveEnergy.Total;
                 if (status.Voltage != null) sw.ElectricalVoltage = status.Voltage;
                 if (status.Current != null) sw.ElectricalCurrent = status.Current;
                 if (status.Temperature != null) sw.Temperature = status.Temperature.TemperatureCelsius;
@@ -488,7 +615,7 @@ public partial class ShellyDevice : BackgroundService,
             {
                 var status = ordered[i].status;
                 Covers[i].MeasuredPower = status.ActivePower;
-                Covers[i].MeasuredEnergyConsumed = status.ActiveEnergy?.Total;
+                Covers[i].TotalImportedEnergy = status.ActiveEnergy?.Total;
                 Covers[i].ElectricalVoltage = status.Voltage;
                 Covers[i].ElectricalCurrent = status.Current;
                 Covers[i].ElectricalFrequency = status.Frequency;
@@ -498,7 +625,7 @@ public partial class ShellyDevice : BackgroundService,
                 Covers[i].LastDirection = status.LastDirection;
                 Covers[i].CurrentPosition = status.CurrentPosition;
                 Covers[i].ApiState = status.State;
-                Covers[i].IsCalibrating = status.PositionControl == false;
+                Covers[i].IsCalibrating = status.HasPositionControl == false;
                 Covers[i].LastUpdated = DateTimeOffset.UtcNow;
             }
         }
@@ -510,7 +637,7 @@ public partial class ShellyDevice : BackgroundService,
                 if (cover == null) continue;
 
                 if (status.ActivePower != null) cover.MeasuredPower = status.ActivePower;
-                if (status.ActiveEnergy != null) cover.MeasuredEnergyConsumed = status.ActiveEnergy.Total;
+                if (status.ActiveEnergy != null) cover.TotalImportedEnergy = status.ActiveEnergy.Total;
                 if (status.Voltage != null) cover.ElectricalVoltage = status.Voltage;
                 if (status.Current != null) cover.ElectricalCurrent = status.Current;
                 if (status.Frequency != null) cover.ElectricalFrequency = status.Frequency;
@@ -520,7 +647,7 @@ public partial class ShellyDevice : BackgroundService,
                 if (status.LastDirection != null) cover.LastDirection = status.LastDirection;
                 if (status.CurrentPosition != null) cover.CurrentPosition = status.CurrentPosition;
                 if (status.State != null) cover.ApiState = status.State;
-                if (status.PositionControl != null) cover.IsCalibrating = status.PositionControl == false;
+                if (status.HasPositionControl != null) cover.IsCalibrating = status.HasPositionControl == false;
                 cover.LastUpdated = DateTimeOffset.UtcNow;
             }
         }
@@ -543,8 +670,8 @@ public partial class ShellyDevice : BackgroundService,
             for (var i = 0; i < ordered.Count; i++)
             {
                 var status = ordered[i].status;
-                Inputs[i].State = status.State;
-                Inputs[i].CountTotal = status.Counts?.Total;
+                Inputs[i].IsActive = status.IsActive;
+                Inputs[i].TotalCount = status.Counts?.Total;
                 Inputs[i].CountFrequency = status.Frequency;
                 Inputs[i].LastUpdated = DateTimeOffset.UtcNow;
             }
@@ -556,8 +683,8 @@ public partial class ShellyDevice : BackgroundService,
                 var input = Inputs.FirstOrDefault(inp => inp.Index == componentIndex);
                 if (input == null) continue;
 
-                if (status.State != null) input.State = status.State;
-                if (status.Counts != null) input.CountTotal = status.Counts.Total;
+                if (status.IsActive != null) input.IsActive = status.IsActive;
+                if (status.Counts != null) input.TotalCount = status.Counts.Total;
                 if (status.Frequency != null) input.CountFrequency = status.Frequency;
                 input.LastUpdated = DateTimeOffset.UtcNow;
             }
@@ -599,16 +726,15 @@ public partial class ShellyDevice : BackgroundService,
 
     private void UpdateEnergyMeter(ShellyEmStatus? emStatus, ShellyEmDataStatus? emDataStatus)
     {
-        if (emStatus == null)
-            return;
-
-        EnergyMeter ??= new ShellyEnergyMeter();
-        EnergyMeter.UpdateFromStatus(emStatus);
+        // Only em:0 creates the meter; the device pushes emdata:0 on its own once per minute.
+        if (emStatus != null)
+        {
+            EnergyMeter ??= new ShellyEnergyMeter();
+            EnergyMeter.UpdateFromStatus(emStatus);
+        }
 
         if (emDataStatus != null)
-        {
-            EnergyMeter.UpdateFromDataStatus(emDataStatus);
-        }
+            EnergyMeter?.UpdateFromDataStatus(emDataStatus);
     }
 
     private void UpdateSysStatus(ShellySysStatus sysStatus)
@@ -616,20 +742,46 @@ public partial class ShellyDevice : BackgroundService,
         if (sysStatus.Uptime != null)
             Uptime = TimeSpan.FromSeconds(sysStatus.Uptime.Value);
 
-        _availableSoftwareUpdate = sysStatus.AvailableUpdates?.Stable?.Version;
+        if (sysStatus.ConfigurationRevision is { } configurationRevision)
+            _virtualEnergyCounters.ObserveConfigurationRevision(configurationRevision);
+
+        // Partial updates omit available_updates; a full status always contains it, possibly empty.
+        if (sysStatus.AvailableUpdates != null)
+            AvailableSoftwareUpdate = sysStatus.AvailableUpdates.Stable?.Version;
+    }
+
+    /// <summary>
+    /// Clears all device state, so the next connection starts like a new device.
+    /// </summary>
+    internal void ResetForConfigurationChange()
+    {
+        lock (_updateLock)
+        {
+            DeviceInfo = null;
+            ResetState();
+        }
     }
 
     private void ResetState()
     {
-        foreach (var sw in Switches)
-            sw.Dispose();
+        lock (_updateLock)
+        {
+            foreach (var sw in Switches)
+                sw.Dispose();
 
-        Switches = [];
-        Covers = [];
-        Inputs = [];
-        TemperatureSensors = [];
-        EnergyMeter = null;
-        Uptime = null;
+            Switches = [];
+            Covers = [];
+            Inputs = [];
+            TemperatureSensors = [];
+            EnergyMeter = null;
+            Uptime = null;
+            _virtualEnergyCounters.Reset();
+
+            _ethernetIpAddress = null;
+            _wifiIpAddress = null;
+            _wifiSignalStrength = null;
+            UpdateNetworkAdapter();
+        }
     }
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default)

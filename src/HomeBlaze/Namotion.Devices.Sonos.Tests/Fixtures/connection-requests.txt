@@ -1,0 +1,247 @@
+### ReadZoneInfo
+POST http://speaker/DeviceProperties/Control
+  soapaction: urn:schemas-upnp-org:service:DeviceProperties:1#GetZoneInfo
+  Content-Type: text/xml; charset="utf-8"
+  <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:GetZoneInfo xmlns:u="urn:schemas-upnp-org:service:DeviceProperties:1" /></s:Body></s:Envelope>
+### ReadZoneGroupState
+POST http://speaker/ZoneGroupTopology/Control
+  soapaction: urn:schemas-upnp-org:service:ZoneGroupTopology:1#GetZoneGroupState
+  Content-Type: text/xml; charset="utf-8"
+  <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:GetZoneGroupState xmlns:u="urn:schemas-upnp-org:service:ZoneGroupTopology:1" /></s:Body></s:Envelope>
+### ReadFavorites
+POST http://speaker/MediaServer/ContentDirectory/Control
+  soapaction: urn:schemas-upnp-org:service:ContentDirectory:1#Browse
+  Content-Type: text/xml; charset="utf-8"
+  <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:Browse xmlns:u="urn:schemas-upnp-org:service:ContentDirectory:1"><ObjectID>FV:2</ObjectID><BrowseFlag>BrowseDirectChildren</BrowseFlag><Filter>*</Filter><StartingIndex>0</StartingIndex><RequestedCount>100</RequestedCount><SortCriteria /></u:Browse></s:Body></s:Envelope>
+### ReadPlayer
+POST http://speaker/MediaRenderer/AVTransport/Control
+  soapaction: urn:schemas-upnp-org:service:AVTransport:1#GetTransportInfo
+  Content-Type: text/xml; charset="utf-8"
+  <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:GetTransportInfo xmlns:u="urn:schemas-upnp-org:service:AVTransport:1"><InstanceID>0</InstanceID></u:GetTransportInfo></s:Body></s:Envelope>
+POST http://speaker/MediaRenderer/AVTransport/Control
+  soapaction: urn:schemas-upnp-org:service:AVTransport:1#GetTransportSettings
+  Content-Type: text/xml; charset="utf-8"
+  <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:GetTransportSettings xmlns:u="urn:schemas-upnp-org:service:AVTransport:1"><InstanceID>0</InstanceID></u:GetTransportSettings></s:Body></s:Envelope>
+POST http://speaker/MediaRenderer/AVTransport/Control
+  soapaction: urn:schemas-upnp-org:service:AVTransport:1#GetMediaInfo
+  Content-Type: text/xml; charset="utf-8"
+  <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:GetMediaInfo xmlns:u="urn:schemas-upnp-org:service:AVTransport:1"><InstanceID>0</InstanceID></u:GetMediaInfo></s:Body></s:Envelope>
+POST http://speaker/MediaRenderer/AVTransport/Control
+  soapaction: urn:schemas-upnp-org:service:AVTransport:1#GetPositionInfo
+  Content-Type: text/xml; charset="utf-8"
+  <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:GetPositionInfo xmlns:u="urn:schemas-upnp-org:service:AVTransport:1"><InstanceID>0</InstanceID></u:GetPositionInfo></s:Body></s:Envelope>
+POST http://speaker/MediaRenderer/AVTransport/Control
+  soapaction: urn:schemas-upnp-org:service:AVTransport:1#GetRemainingSleepTimerDuration
+  Content-Type: text/xml; charset="utf-8"
+  <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:GetRemainingSleepTimerDuration xmlns:u="urn:schemas-upnp-org:service:AVTransport:1"><InstanceID>0</InstanceID></u:GetRemainingSleepTimerDuration></s:Body></s:Envelope>
+POST http://speaker/MediaRenderer/RenderingControl/Control
+  soapaction: urn:schemas-upnp-org:service:RenderingControl:1#GetVolume
+  Content-Type: text/xml; charset="utf-8"
+  <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:GetVolume xmlns:u="urn:schemas-upnp-org:service:RenderingControl:1"><InstanceID>0</InstanceID><Channel>Master</Channel></u:GetVolume></s:Body></s:Envelope>
+POST http://speaker/MediaRenderer/RenderingControl/Control
+  soapaction: urn:schemas-upnp-org:service:RenderingControl:1#GetMute
+  Content-Type: text/xml; charset="utf-8"
+  <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:GetMute xmlns:u="urn:schemas-upnp-org:service:RenderingControl:1"><InstanceID>0</InstanceID><Channel>Master</Channel></u:GetMute></s:Body></s:Envelope>
+POST http://speaker/MediaRenderer/RenderingControl/Control
+  soapaction: urn:schemas-upnp-org:service:RenderingControl:1#GetBass
+  Content-Type: text/xml; charset="utf-8"
+  <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:GetBass xmlns:u="urn:schemas-upnp-org:service:RenderingControl:1"><InstanceID>0</InstanceID></u:GetBass></s:Body></s:Envelope>
+POST http://speaker/MediaRenderer/RenderingControl/Control
+  soapaction: urn:schemas-upnp-org:service:RenderingControl:1#GetTreble
+  Content-Type: text/xml; charset="utf-8"
+  <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:GetTreble xmlns:u="urn:schemas-upnp-org:service:RenderingControl:1"><InstanceID>0</InstanceID></u:GetTreble></s:Body></s:Envelope>
+POST http://speaker/MediaRenderer/RenderingControl/Control
+  soapaction: urn:schemas-upnp-org:service:RenderingControl:1#GetLoudness
+  Content-Type: text/xml; charset="utf-8"
+  <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:GetLoudness xmlns:u="urn:schemas-upnp-org:service:RenderingControl:1"><InstanceID>0</InstanceID><Channel>Master</Channel></u:GetLoudness></s:Body></s:Envelope>
+POST http://speaker/MediaRenderer/RenderingControl/Control
+  soapaction: urn:schemas-upnp-org:service:RenderingControl:1#GetEQ
+  Content-Type: text/xml; charset="utf-8"
+  <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:GetEQ xmlns:u="urn:schemas-upnp-org:service:RenderingControl:1"><InstanceID>0</InstanceID><EQType>NightMode</EQType></u:GetEQ></s:Body></s:Envelope>
+POST http://speaker/MediaRenderer/RenderingControl/Control
+  soapaction: urn:schemas-upnp-org:service:RenderingControl:1#GetEQ
+  Content-Type: text/xml; charset="utf-8"
+  <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:GetEQ xmlns:u="urn:schemas-upnp-org:service:RenderingControl:1"><InstanceID>0</InstanceID><EQType>DialogLevel</EQType></u:GetEQ></s:Body></s:Envelope>
+### ReadGroup
+POST http://speaker/MediaRenderer/GroupRenderingControl/Control
+  soapaction: urn:schemas-upnp-org:service:GroupRenderingControl:1#GetGroupVolume
+  Content-Type: text/xml; charset="utf-8"
+  <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:GetGroupVolume xmlns:u="urn:schemas-upnp-org:service:GroupRenderingControl:1"><InstanceID>0</InstanceID></u:GetGroupVolume></s:Body></s:Envelope>
+POST http://speaker/MediaRenderer/GroupRenderingControl/Control
+  soapaction: urn:schemas-upnp-org:service:GroupRenderingControl:1#GetGroupMute
+  Content-Type: text/xml; charset="utf-8"
+  <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:GetGroupMute xmlns:u="urn:schemas-upnp-org:service:GroupRenderingControl:1"><InstanceID>0</InstanceID></u:GetGroupMute></s:Body></s:Envelope>
+### Play
+POST http://speaker/MediaRenderer/AVTransport/Control
+  soapaction: urn:schemas-upnp-org:service:AVTransport:1#Play
+  Content-Type: text/xml; charset="utf-8"
+  <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:Play xmlns:u="urn:schemas-upnp-org:service:AVTransport:1"><InstanceID>0</InstanceID><Speed>1</Speed></u:Play></s:Body></s:Envelope>
+### Pause
+POST http://speaker/MediaRenderer/AVTransport/Control
+  soapaction: urn:schemas-upnp-org:service:AVTransport:1#Pause
+  Content-Type: text/xml; charset="utf-8"
+  <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:Pause xmlns:u="urn:schemas-upnp-org:service:AVTransport:1"><InstanceID>0</InstanceID></u:Pause></s:Body></s:Envelope>
+### Stop
+POST http://speaker/MediaRenderer/AVTransport/Control
+  soapaction: urn:schemas-upnp-org:service:AVTransport:1#Stop
+  Content-Type: text/xml; charset="utf-8"
+  <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:Stop xmlns:u="urn:schemas-upnp-org:service:AVTransport:1"><InstanceID>0</InstanceID></u:Stop></s:Body></s:Envelope>
+### Next
+POST http://speaker/MediaRenderer/AVTransport/Control
+  soapaction: urn:schemas-upnp-org:service:AVTransport:1#Next
+  Content-Type: text/xml; charset="utf-8"
+  <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:Next xmlns:u="urn:schemas-upnp-org:service:AVTransport:1"><InstanceID>0</InstanceID></u:Next></s:Body></s:Envelope>
+### Previous
+POST http://speaker/MediaRenderer/AVTransport/Control
+  soapaction: urn:schemas-upnp-org:service:AVTransport:1#Previous
+  Content-Type: text/xml; charset="utf-8"
+  <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:Previous xmlns:u="urn:schemas-upnp-org:service:AVTransport:1"><InstanceID>0</InstanceID></u:Previous></s:Body></s:Envelope>
+### TogglePlayback
+POST http://speaker/MediaRenderer/AVTransport/Control
+  soapaction: urn:schemas-upnp-org:service:AVTransport:1#GetTransportInfo
+  Content-Type: text/xml; charset="utf-8"
+  <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:GetTransportInfo xmlns:u="urn:schemas-upnp-org:service:AVTransport:1"><InstanceID>0</InstanceID></u:GetTransportInfo></s:Body></s:Envelope>
+POST http://speaker/MediaRenderer/AVTransport/Control
+  soapaction: urn:schemas-upnp-org:service:AVTransport:1#Play
+  Content-Type: text/xml; charset="utf-8"
+  <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:Play xmlns:u="urn:schemas-upnp-org:service:AVTransport:1"><InstanceID>0</InstanceID><Speed>1</Speed></u:Play></s:Body></s:Envelope>
+### Seek
+POST http://speaker/MediaRenderer/AVTransport/Control
+  soapaction: urn:schemas-upnp-org:service:AVTransport:1#Seek
+  Content-Type: text/xml; charset="utf-8"
+  <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:Seek xmlns:u="urn:schemas-upnp-org:service:AVTransport:1"><InstanceID>0</InstanceID><Unit>REL_TIME</Unit><Target>01:02:05</Target></u:Seek></s:Body></s:Envelope>
+### SetVolume
+POST http://speaker/MediaRenderer/RenderingControl/Control
+  soapaction: urn:schemas-upnp-org:service:RenderingControl:1#SetVolume
+  Content-Type: text/xml; charset="utf-8"
+  <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:SetVolume xmlns:u="urn:schemas-upnp-org:service:RenderingControl:1"><InstanceID>0</InstanceID><Channel>Master</Channel><DesiredVolume>33</DesiredVolume></u:SetVolume></s:Body></s:Envelope>
+### ChangeVolume
+POST http://speaker/MediaRenderer/RenderingControl/Control
+  soapaction: urn:schemas-upnp-org:service:RenderingControl:1#SetRelativeVolume
+  Content-Type: text/xml; charset="utf-8"
+  <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:SetRelativeVolume xmlns:u="urn:schemas-upnp-org:service:RenderingControl:1"><InstanceID>0</InstanceID><Channel>Master</Channel><Adjustment>-5</Adjustment></u:SetRelativeVolume></s:Body></s:Envelope>
+### RampVolume
+POST http://speaker/MediaRenderer/RenderingControl/Control
+  soapaction: urn:schemas-upnp-org:service:RenderingControl:1#RampToVolume
+  Content-Type: text/xml; charset="utf-8"
+  <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:RampToVolume xmlns:u="urn:schemas-upnp-org:service:RenderingControl:1"><InstanceID>0</InstanceID><Channel>Master</Channel><RampType>SLEEP_TIMER_RAMP_TYPE</RampType><DesiredVolume>20</DesiredVolume><ResetVolumeAfter>false</ResetVolumeAfter><ProgramURI /></u:RampToVolume></s:Body></s:Envelope>
+### SetMute true
+POST http://speaker/MediaRenderer/RenderingControl/Control
+  soapaction: urn:schemas-upnp-org:service:RenderingControl:1#SetMute
+  Content-Type: text/xml; charset="utf-8"
+  <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:SetMute xmlns:u="urn:schemas-upnp-org:service:RenderingControl:1"><InstanceID>0</InstanceID><Channel>Master</Channel><DesiredMute>true</DesiredMute></u:SetMute></s:Body></s:Envelope>
+### SetMute false
+POST http://speaker/MediaRenderer/RenderingControl/Control
+  soapaction: urn:schemas-upnp-org:service:RenderingControl:1#SetMute
+  Content-Type: text/xml; charset="utf-8"
+  <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:SetMute xmlns:u="urn:schemas-upnp-org:service:RenderingControl:1"><InstanceID>0</InstanceID><Channel>Master</Channel><DesiredMute>false</DesiredMute></u:SetMute></s:Body></s:Envelope>
+### SetTransportUri plain
+POST http://speaker/MediaRenderer/AVTransport/Control
+  soapaction: urn:schemas-upnp-org:service:AVTransport:1#SetAVTransportURI
+  Content-Type: text/xml; charset="utf-8"
+  <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:SetAVTransportURI xmlns:u="urn:schemas-upnp-org:service:AVTransport:1"><InstanceID>0</InstanceID><CurrentURI>x-rincon-mp3radio://example.org/a?b=1&amp;c=2</CurrentURI><CurrentURIMetaData /></u:SetAVTransportURI></s:Body></s:Envelope>
+### SetTransportUri metadata
+POST http://speaker/MediaRenderer/AVTransport/Control
+  soapaction: urn:schemas-upnp-org:service:AVTransport:1#SetAVTransportURI
+  Content-Type: text/xml; charset="utf-8"
+  <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:SetAVTransportURI xmlns:u="urn:schemas-upnp-org:service:AVTransport:1"><InstanceID>0</InstanceID><CurrentURI>x-sonosapi-stream:s1?sid=254&amp;flags=32</CurrentURI><CurrentURIMetaData>&lt;DIDL-Lite xmlns:dc=&quot;http://purl.org/dc/elements/1.1/&quot;&gt;&lt;item id=&quot;1&quot;&gt;&lt;dc:title&gt;Tom &amp; Jerry's &quot;best&quot; &lt;3&lt;/dc:title&gt;&lt;/item&gt;&lt;/DIDL-Lite&gt;</CurrentURIMetaData></u:SetAVTransportURI></s:Body></s:Envelope>
+### PlayFromQueue
+POST http://speaker/MediaRenderer/AVTransport/Control
+  soapaction: urn:schemas-upnp-org:service:AVTransport:1#RemoveAllTracksFromQueue
+  Content-Type: text/xml; charset="utf-8"
+  <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:RemoveAllTracksFromQueue xmlns:u="urn:schemas-upnp-org:service:AVTransport:1"><InstanceID>0</InstanceID></u:RemoveAllTracksFromQueue></s:Body></s:Envelope>
+POST http://speaker/MediaRenderer/AVTransport/Control
+  soapaction: urn:schemas-upnp-org:service:AVTransport:1#AddURIToQueue
+  Content-Type: text/xml; charset="utf-8"
+  <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:AddURIToQueue xmlns:u="urn:schemas-upnp-org:service:AVTransport:1"><InstanceID>0</InstanceID><EnqueuedURI>x-rincon-cpcontainer:1006206ccatalog%2fplaylists?sid=201&amp;flags=8300</EnqueuedURI><EnqueuedURIMetaData>&lt;DIDL-Lite xmlns:dc=&quot;http://purl.org/dc/elements/1.1/&quot;&gt;&lt;item id=&quot;1&quot;&gt;&lt;dc:title&gt;Tom &amp; Jerry's &quot;best&quot; &lt;3&lt;/dc:title&gt;&lt;/item&gt;&lt;/DIDL-Lite&gt;</EnqueuedURIMetaData><DesiredFirstTrackNumberEnqueued>0</DesiredFirstTrackNumberEnqueued><EnqueueAsNext>false</EnqueueAsNext></u:AddURIToQueue></s:Body></s:Envelope>
+POST http://speaker/MediaRenderer/AVTransport/Control
+  soapaction: urn:schemas-upnp-org:service:AVTransport:1#SetAVTransportURI
+  Content-Type: text/xml; charset="utf-8"
+  <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:SetAVTransportURI xmlns:u="urn:schemas-upnp-org:service:AVTransport:1"><InstanceID>0</InstanceID><CurrentURI>x-rincon-queue:RINCON_A0000000000601400#0</CurrentURI><CurrentURIMetaData /></u:SetAVTransportURI></s:Body></s:Envelope>
+POST http://speaker/MediaRenderer/AVTransport/Control
+  soapaction: urn:schemas-upnp-org:service:AVTransport:1#Play
+  Content-Type: text/xml; charset="utf-8"
+  <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:Play xmlns:u="urn:schemas-upnp-org:service:AVTransport:1"><InstanceID>0</InstanceID><Speed>1</Speed></u:Play></s:Body></s:Envelope>
+### SwitchToTv
+POST http://speaker/MediaRenderer/AVTransport/Control
+  soapaction: urn:schemas-upnp-org:service:AVTransport:1#SetAVTransportURI
+  Content-Type: text/xml; charset="utf-8"
+  <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:SetAVTransportURI xmlns:u="urn:schemas-upnp-org:service:AVTransport:1"><InstanceID>0</InstanceID><CurrentURI>x-sonos-htastream:RINCON_A0000000000601400:spdif</CurrentURI><CurrentURIMetaData /></u:SetAVTransportURI></s:Body></s:Envelope>
+### SwitchToLineIn
+POST http://speaker/MediaRenderer/AVTransport/Control
+  soapaction: urn:schemas-upnp-org:service:AVTransport:1#SetAVTransportURI
+  Content-Type: text/xml; charset="utf-8"
+  <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:SetAVTransportURI xmlns:u="urn:schemas-upnp-org:service:AVTransport:1"><InstanceID>0</InstanceID><CurrentURI>x-rincon-stream:RINCON_A0000000000601400</CurrentURI><CurrentURIMetaData /></u:SetAVTransportURI></s:Body></s:Envelope>
+### SetPlayMode
+POST http://speaker/MediaRenderer/AVTransport/Control
+  soapaction: urn:schemas-upnp-org:service:AVTransport:1#SetPlayMode
+  Content-Type: text/xml; charset="utf-8"
+  <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:SetPlayMode xmlns:u="urn:schemas-upnp-org:service:AVTransport:1"><InstanceID>0</InstanceID><NewPlayMode>SHUFFLE_NOREPEAT</NewPlayMode></u:SetPlayMode></s:Body></s:Envelope>
+### SetSleepTimer
+POST http://speaker/MediaRenderer/AVTransport/Control
+  soapaction: urn:schemas-upnp-org:service:AVTransport:1#ConfigureSleepTimer
+  Content-Type: text/xml; charset="utf-8"
+  <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:ConfigureSleepTimer xmlns:u="urn:schemas-upnp-org:service:AVTransport:1"><InstanceID>0</InstanceID><NewSleepTimerDuration>01:30:00</NewSleepTimerDuration></u:ConfigureSleepTimer></s:Body></s:Envelope>
+### SetSleepTimer off
+POST http://speaker/MediaRenderer/AVTransport/Control
+  soapaction: urn:schemas-upnp-org:service:AVTransport:1#ConfigureSleepTimer
+  Content-Type: text/xml; charset="utf-8"
+  <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:ConfigureSleepTimer xmlns:u="urn:schemas-upnp-org:service:AVTransport:1"><InstanceID>0</InstanceID><NewSleepTimerDuration /></u:ConfigureSleepTimer></s:Body></s:Envelope>
+### SetBass
+POST http://speaker/MediaRenderer/RenderingControl/Control
+  soapaction: urn:schemas-upnp-org:service:RenderingControl:1#SetBass
+  Content-Type: text/xml; charset="utf-8"
+  <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:SetBass xmlns:u="urn:schemas-upnp-org:service:RenderingControl:1"><InstanceID>0</InstanceID><DesiredBass>-3</DesiredBass></u:SetBass></s:Body></s:Envelope>
+### SetTreble
+POST http://speaker/MediaRenderer/RenderingControl/Control
+  soapaction: urn:schemas-upnp-org:service:RenderingControl:1#SetTreble
+  Content-Type: text/xml; charset="utf-8"
+  <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:SetTreble xmlns:u="urn:schemas-upnp-org:service:RenderingControl:1"><InstanceID>0</InstanceID><DesiredTreble>4</DesiredTreble></u:SetTreble></s:Body></s:Envelope>
+### SetLoudness
+POST http://speaker/MediaRenderer/RenderingControl/Control
+  soapaction: urn:schemas-upnp-org:service:RenderingControl:1#SetLoudness
+  Content-Type: text/xml; charset="utf-8"
+  <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:SetLoudness xmlns:u="urn:schemas-upnp-org:service:RenderingControl:1"><InstanceID>0</InstanceID><Channel>Master</Channel><DesiredLoudness>true</DesiredLoudness></u:SetLoudness></s:Body></s:Envelope>
+### SetEqualizer on
+POST http://speaker/MediaRenderer/RenderingControl/Control
+  soapaction: urn:schemas-upnp-org:service:RenderingControl:1#SetEQ
+  Content-Type: text/xml; charset="utf-8"
+  <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:SetEQ xmlns:u="urn:schemas-upnp-org:service:RenderingControl:1"><InstanceID>0</InstanceID><EQType>NightMode</EQType><DesiredValue>1</DesiredValue></u:SetEQ></s:Body></s:Envelope>
+### SetEqualizer off
+POST http://speaker/MediaRenderer/RenderingControl/Control
+  soapaction: urn:schemas-upnp-org:service:RenderingControl:1#SetEQ
+  Content-Type: text/xml; charset="utf-8"
+  <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:SetEQ xmlns:u="urn:schemas-upnp-org:service:RenderingControl:1"><InstanceID>0</InstanceID><EQType>DialogLevel</EQType><DesiredValue>0</DesiredValue></u:SetEQ></s:Body></s:Envelope>
+### Join
+POST http://speaker/MediaRenderer/AVTransport/Control
+  soapaction: urn:schemas-upnp-org:service:AVTransport:1#SetAVTransportURI
+  Content-Type: text/xml; charset="utf-8"
+  <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:SetAVTransportURI xmlns:u="urn:schemas-upnp-org:service:AVTransport:1"><InstanceID>0</InstanceID><CurrentURI>x-rincon:RINCON_000000000001</CurrentURI><CurrentURIMetaData /></u:SetAVTransportURI></s:Body></s:Envelope>
+### LeaveGroup
+POST http://speaker/MediaRenderer/AVTransport/Control
+  soapaction: urn:schemas-upnp-org:service:AVTransport:1#BecomeCoordinatorOfStandaloneGroup
+  Content-Type: text/xml; charset="utf-8"
+  <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:BecomeCoordinatorOfStandaloneGroup xmlns:u="urn:schemas-upnp-org:service:AVTransport:1"><InstanceID>0</InstanceID></u:BecomeCoordinatorOfStandaloneGroup></s:Body></s:Envelope>
+### SetGroupVolume
+POST http://speaker/MediaRenderer/GroupRenderingControl/Control
+  soapaction: urn:schemas-upnp-org:service:GroupRenderingControl:1#SnapshotGroupVolume
+  Content-Type: text/xml; charset="utf-8"
+  <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:SnapshotGroupVolume xmlns:u="urn:schemas-upnp-org:service:GroupRenderingControl:1"><InstanceID>0</InstanceID></u:SnapshotGroupVolume></s:Body></s:Envelope>
+POST http://speaker/MediaRenderer/GroupRenderingControl/Control
+  soapaction: urn:schemas-upnp-org:service:GroupRenderingControl:1#SetGroupVolume
+  Content-Type: text/xml; charset="utf-8"
+  <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:SetGroupVolume xmlns:u="urn:schemas-upnp-org:service:GroupRenderingControl:1"><InstanceID>0</InstanceID><DesiredVolume>25</DesiredVolume></u:SetGroupVolume></s:Body></s:Envelope>
+### ChangeGroupVolume
+POST http://speaker/MediaRenderer/GroupRenderingControl/Control
+  soapaction: urn:schemas-upnp-org:service:GroupRenderingControl:1#SnapshotGroupVolume
+  Content-Type: text/xml; charset="utf-8"
+  <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:SnapshotGroupVolume xmlns:u="urn:schemas-upnp-org:service:GroupRenderingControl:1"><InstanceID>0</InstanceID></u:SnapshotGroupVolume></s:Body></s:Envelope>
+POST http://speaker/MediaRenderer/GroupRenderingControl/Control
+  soapaction: urn:schemas-upnp-org:service:GroupRenderingControl:1#SetRelativeGroupVolume
+  Content-Type: text/xml; charset="utf-8"
+  <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:SetRelativeGroupVolume xmlns:u="urn:schemas-upnp-org:service:GroupRenderingControl:1"><InstanceID>0</InstanceID><Adjustment>3</Adjustment></u:SetRelativeGroupVolume></s:Body></s:Envelope>
+### SetGroupMute
+POST http://speaker/MediaRenderer/GroupRenderingControl/Control
+  soapaction: urn:schemas-upnp-org:service:GroupRenderingControl:1#SetGroupMute
+  Content-Type: text/xml; charset="utf-8"
+  <s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:SetGroupMute xmlns:u="urn:schemas-upnp-org:service:GroupRenderingControl:1"><InstanceID>0</InstanceID><DesiredMute>true</DesiredMute></u:SetGroupMute></s:Body></s:Envelope>

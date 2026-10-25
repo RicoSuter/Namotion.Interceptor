@@ -30,7 +30,7 @@ public class LifecycleConfigurationTests
         person.Mother = new Person { FirstName = "Mother" };
 
         // Assert
-        Assert.Equal(context.GetServices<ILifecycleInterceptor>(), person.Mother!.GetResolvedServices<ILifecycleInterceptor>());
+        Assert.Equal(context.GetServices<ILifecycleInterceptor>(), person.Mother.GetResolvedServices<ILifecycleInterceptor>());
     }
 
     [Fact]
@@ -221,7 +221,7 @@ public class LifecycleConfigurationTests
         child1.FirstName = "Child1";
         child1.Mother = mother;
 
-        var child2 = new Person(context)
+        _ = new Person(context)
         {
             FirstName = "Child2",
             Mother = mother

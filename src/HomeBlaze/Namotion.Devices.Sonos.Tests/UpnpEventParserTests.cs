@@ -1,0 +1,203 @@
+using Namotion.Devices.Sonos.Parsing;
+using Namotion.Devices.Sonos.Tests.Testing;
+using System.Xml;
+using Xunit;
+
+namespace Namotion.Devices.Sonos.Tests;
+
+public class UpnpEventParserTests
+{
+    private const string SpotifyUri = TestFixtures.SpotifyConnectUri;
+
+    [Fact]
+    public void WhenAvTransportEventHasSpotifyTrack_ThenAllFieldsAreRead()
+    {
+        // Arrange
+        var body = SonosEventBodies.AvTransport(
+            ("TransportState", "PLAYING"),
+            ("CurrentPlayMode", "SHUFFLE_NOREPEAT"),
+            ("CurrentTrackURI", SpotifyUri),
+            ("CurrentTrackDuration", "0:03:25"),
+            ("CurrentTrackMetaData", SonosEventBodies.Didl("Song", "Artist", "Album", "/getaa?s=1&u=x")),
+            ("AVTransportURI", SpotifyUri));
+
+        // Act
+        var change = UpnpEventParser.ParseAvTransport(body);
+
+        // Assert
+        Assert.Equal("PLAYING", change.TransportState);
+        Assert.Equal("SHUFFLE_NOREPEAT", change.PlayMode);
+        Assert.Equal(SpotifyUri, change.TrackUri);
+        Assert.Equal(SpotifyUri, change.MediaUri);
+        Assert.Equal("0:03:25", change.TrackDuration);
+        Assert.Equal("Song", DidlParser.ParseTrack(change.TrackMetaData)?.Title);
+    }
+
+    [Fact]
+    public void WhenAvTransportEventHasMediaMetadata_ThenTheEnqueuedMetadataIsPreferred()
+    {
+        // Arrange
+        var body = SonosEventBodies.AvTransport(
+            ("AVTransportURIMetaData", SonosEventBodies.Didl("Transport")),
+            ("EnqueuedTransportURIMetaData", SonosEventBodies.Didl("Playlist")));
+
+        // Act
+        var change = UpnpEventParser.ParseAvTransport(body);
+
+        // Assert
+        Assert.Equal("Playlist", DidlParser.ParseTitle(change.MediaMetaData));
+    }
+
+    [Fact]
+    public void WhenAvTransportEventHasOnlyTransportMetadata_ThenItIsTheMediaMetadata()
+    {
+        // Arrange
+        var body = SonosEventBodies.AvTransport(
+            ("AVTransportURIMetaData", SonosEventBodies.Didl("SRF 3")),
+            ("EnqueuedTransportURIMetaData", ""));
+
+        // Act
+        var change = UpnpEventParser.ParseAvTransport(body);
+
+        // Assert
+        Assert.Equal("SRF 3", DidlParser.ParseTitle(change.MediaMetaData));
+    }
+
+    [Fact]
+    public void WhenAvTransportEventOmitsFields_ThenTheyAreNull()
+    {
+        // Arrange
+        var body = SonosEventBodies.AvTransport(("TransportState", "STOPPED"));
+
+        // Act
+        var change = UpnpEventParser.ParseAvTransport(body);
+
+        // Assert
+        Assert.Equal("STOPPED", change.TransportState);
+        Assert.Null(change.PlayMode);
+        Assert.Null(change.TrackUri);
+        Assert.Null(change.TrackMetaData);
+    }
+
+    [Fact]
+    public void WhenRenderingControlEvent_ThenOnlyMasterChannelValuesAreRead()
+    {
+        // Arrange
+        var body = SonosEventBodies.RenderingControl(
+            ("Volume", "LF", "100"),
+            ("Volume", "Master", "22"),
+            ("Mute", "Master", "1"),
+            ("Bass", null, "-2"),
+            ("Treble", null, "3"),
+            ("Loudness", "Master", "1"),
+            ("NightMode", null, "1"),
+            ("DialogLevel", null, "0"));
+
+        // Act
+        var change = UpnpEventParser.ParseRenderingControl(body);
+
+        // Assert
+        Assert.Equal(new RenderingControlChange(22, true, -2, 3, true, true, false), change);
+    }
+
+    [Theory]
+    [InlineData("0", false)]
+    [InlineData("1", true)]
+    [InlineData("3", true)]
+    public void WhenRenderingControlEventReportsDialogLevel_ThenAnyLevelAboveZeroEnablesSpeechEnhancement(string level, bool expected)
+    {
+        // Arrange
+        var body = SonosEventBodies.RenderingControl(("DialogLevel", null, level));
+
+        // Act
+        var change = UpnpEventParser.ParseRenderingControl(body);
+
+        // Assert
+        Assert.Equal(expected, change.SpeechEnhancement);
+    }
+
+    [Fact]
+    public void WhenGroupRenderingControlEvent_ThenGroupVolumeAndMuteAreRead()
+    {
+        // Arrange
+        var body = SonosEventBodies.Properties(("GroupMute", "0"), ("GroupVolume", "35"), ("GroupVolumeChangeable", "1"));
+
+        // Act
+        var change = UpnpEventParser.ParseGroupRenderingControl(body);
+
+        // Assert
+        Assert.Equal(new GroupRenderingControlChange(35, false), change);
+    }
+
+    [Fact]
+    public void WhenTopologyEvent_ThenZoneGroupStateIsReturned()
+    {
+        // Arrange
+        var zoneGroupState = TestFixtures.Read("zone-group-state.xml");
+        var body = SonosEventBodies.Properties(("ZoneGroupState", zoneGroupState), ("ThirdPartyMediaServersX", "x"));
+
+        // Act
+        var result = UpnpEventParser.ParseZoneGroupState(body);
+
+        // Assert
+        Assert.Equal(zoneGroupState, result);
+    }
+
+    [Fact]
+    public void WhenRenderingControlEventHasNotImplementedBooleans_ThenTheyAreNull()
+    {
+        // Arrange
+        var body = SonosEventBodies.RenderingControl(
+            ("Mute", "Master", "NOT_IMPLEMENTED"),
+            ("NightMode", null, "NOT_IMPLEMENTED"),
+            ("Volume", "Master", "NOT_IMPLEMENTED"));
+
+        // Act
+        var change = UpnpEventParser.ParseRenderingControl(body);
+
+        // Assert
+        Assert.Null(change.Mute);
+        Assert.Null(change.NightMode);
+        Assert.Null(change.Volume);
+    }
+
+    [Fact]
+    public void WhenAvTransportEventHasUnknownStrings_ThenTheyPassThroughRaw()
+    {
+        // Arrange
+        var body = SonosEventBodies.AvTransport(
+            ("CurrentTrackURI", "NOT_IMPLEMENTED"),
+            ("CurrentTrackMetaData", ""));
+
+        // Act
+        var change = UpnpEventParser.ParseAvTransport(body);
+
+        // Assert
+        Assert.Equal("NOT_IMPLEMENTED", change.TrackUri);
+        Assert.Equal("", change.TrackMetaData);
+    }
+
+    [Fact]
+    public void WhenBodyIsMalformed_ThenParsingThrowsXmlException()
+    {
+        // Arrange
+        var body = "<e:propertyset xmlns:e=\"urn:schemas-upnp-org:event-1-0\"><e:property>";
+
+        // Act & Assert
+        Assert.Throws<XmlException>(() => UpnpEventParser.ParseAvTransport(body));
+        Assert.Throws<XmlException>(() => UpnpEventParser.ParseRenderingControl(body));
+    }
+
+    [Fact]
+    public void WhenBodyDeclaresADocumentType_ThenParsingThrowsXmlException()
+    {
+        // Arrange
+        const string body = """
+            <!DOCTYPE e:propertyset [<!ENTITY volume "50">]>
+            <e:propertyset xmlns:e="urn:schemas-upnp-org:event-1-0"><e:property><GroupVolume>&volume;</GroupVolume></e:property></e:propertyset>
+            """;
+
+        // Act & Assert
+        Assert.Throws<XmlException>(() => UpnpEventParser.ParseGroupRenderingControl(body));
+    }
+}

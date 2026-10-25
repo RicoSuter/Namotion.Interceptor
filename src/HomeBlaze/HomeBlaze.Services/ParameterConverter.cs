@@ -1,5 +1,12 @@
 using System.ComponentModel;
 using System.Globalization;
+using System.Runtime.CompilerServices;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
+using HomeBlaze.Abstractions.Attributes;
+using Namotion.Interceptor;
 
 namespace HomeBlaze.Services;
 
@@ -23,6 +30,19 @@ public static class ParameterConverter
         typeof(TimeSpan)
     ];
 
+    private static readonly JsonSerializerOptions ObjectSerializerOptions = new()
+    {
+        TypeInfoResolver = new DefaultJsonTypeInfoResolver(),
+        PropertyNameCaseInsensitive = true,
+        UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
+        RespectRequiredConstructorParameters = true,
+        NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals,
+        Converters = { new JsonStringEnumConverter(allowIntegerValues: false) }
+    };
+
+    // Weak keys do not hold the type, but the shared serializer options cache its metadata for the process lifetime.
+    private static readonly ConditionalWeakTable<Type, ObjectParameterMember[]> ObjectMembersByType = new();
+
     /// <summary>
     /// Checks if a type is supported for UI parameter input.
     /// </summary>
@@ -30,6 +50,198 @@ public static class ParameterConverter
     {
         var underlyingType = Nullable.GetUnderlyingType(type) ?? type;
         return SupportedPrimitives.Contains(underlyingType) || underlyingType.IsEnum;
+    }
+
+    /// <summary>
+    /// Checks if a type is an object whose members are all supported for UI input, so that it can be entered member by
+    /// member. A collection or array has no members; it stays enterable as JSON through <see cref="IsJsonObject"/>.
+    /// </summary>
+    public static bool IsSupportedObject(Type type)
+    {
+        if (!IsJsonObject(type))
+        {
+            return false;
+        }
+
+        var members = GetObjectMembers(type);
+        return members.Count > 0 && members.All(member => IsSupported(member.Type));
+    }
+
+    /// <summary>
+    /// Checks if a value of the type can be entered as JSON: a concrete, non-delegate type that is no supported
+    /// simple value, no by-ref, pointer or by-ref-like type and has no open generic parameters.
+    /// </summary>
+    public static bool IsJsonObject(Type type)
+    {
+        var actualType = Nullable.GetUnderlyingType(type) ?? type;
+        return IsSerializable(actualType) && !IsSupported(actualType) && actualType != typeof(object) && !actualType.IsPrimitive &&
+               !actualType.IsAbstract && !actualType.IsInterface && !typeof(Delegate).IsAssignableFrom(actualType) &&
+               !typeof(IInterceptorSubject).IsAssignableFrom(actualType);
+    }
+
+    // System.Text.Json throws an ArgumentException for any other type instead of describing it.
+    private static bool IsSerializable(Type type) =>
+        !type.IsByRef && !type.IsPointer && !type.IsByRefLike && !type.ContainsGenericParameters;
+
+    /// <summary>
+    /// Gets the members System.Text.Json sets when it reads an object type, including init-only members and members set
+    /// only through the constructor, or none for
+    /// a type that is not read as a JSON object or that System.Text.Json cannot describe. The result is cached per type.
+    /// </summary>
+    public static IReadOnlyList<ObjectParameterMember> GetObjectMembers(Type type) =>
+        ObjectMembersByType.GetValue(Nullable.GetUnderlyingType(type) ?? type, BuildObjectMembers);
+
+    private static ObjectParameterMember[] BuildObjectMembers(Type type)
+    {
+        if (!IsSerializable(type))
+        {
+            return [];
+        }
+
+        JsonTypeInfo typeInfo;
+        try
+        {
+            typeInfo = ObjectSerializerOptions.GetTypeInfo(type);
+        }
+        // Such as colliding member names; the JSON input it falls back to reports the error when parsing.
+        catch (InvalidOperationException)
+        {
+            return [];
+        }
+
+        return typeInfo.Kind != JsonTypeInfoKind.Object ? [] : typeInfo.Properties
+            .Where(property => property.Set is not null || property.AssociatedParameter is not null)
+            .Select(property => new ObjectParameterMember(property.Name, property.PropertyType, IsRequired(property)))
+            .ToArray();
+    }
+
+    // Mirrors how RespectRequiredConstructorParameters requires a constructor parameter.
+    private static bool IsRequired(JsonPropertyInfo property) =>
+        property.IsRequired || property.AssociatedParameter is { HasDefaultValue: false, IsMemberInitializer: false };
+
+    /// <summary>
+    /// Tries to create an object from the string inputs of its members, keyed by <see cref="ObjectParameterMember.Name"/>.
+    /// A member without input keeps its default value; a required member without input fails.
+    /// </summary>
+    public static bool TryCreateObject(
+        Type type, IReadOnlyDictionary<string, string?> inputs, out object? value, out string? error)
+    {
+        value = null;
+        var json = new JsonObject();
+        foreach (var member in GetObjectMembers(type))
+        {
+            var input = inputs.GetValueOrDefault(member.Name);
+            if (string.IsNullOrEmpty(input))
+            {
+                if (member.IsRequired)
+                {
+                    error = $"{member.Name} is required";
+                    return false;
+                }
+
+                continue;
+            }
+
+            if (!TryConvert(input, member.Type, out var memberValue))
+            {
+                error = $"Invalid value for {member.Name}";
+                return false;
+            }
+
+            try
+            {
+                json[member.Name] = JsonSerializer.SerializeToNode(memberValue, member.Type, ObjectSerializerOptions);
+            }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                error = $"Invalid value for {member.Name}";
+                return false;
+            }
+        }
+
+        return TryDeserialize(json, static (node, type) => node.Deserialize(type, ObjectSerializerOptions), type, out value, out error);
+    }
+
+    /// <summary>
+    /// Tries to read an object from JSON text. Member names match in any case, an unknown member is rejected and enums
+    /// are read by name only. Empty text, and a JSON <c>null</c> literal, are null, which only a nullable parameter
+    /// accepts.
+    /// </summary>
+    public static bool TryParseJson(string? input, Type type, bool isNullable, out object? value, out string? error)
+    {
+        if (string.IsNullOrWhiteSpace(input))
+        {
+            value = null;
+            error = isNullable ? null : "This field is required";
+            return isNullable;
+        }
+
+        if (!TryDeserialize(input, static (text, type) => JsonSerializer.Deserialize(text, type, ObjectSerializerOptions), type, out value, out error))
+        {
+            return false;
+        }
+
+        if (value is null && !isNullable)
+        {
+            error = "This field is required";
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool TryDeserialize<TJson>(
+        TJson json, Func<TJson, Type, object?> deserialize, Type type, out object? value, out string? error)
+    {
+        try
+        {
+            value = deserialize(json, type);
+            error = null;
+            return true;
+        }
+        // Setters and constructors run during deserialization and may throw anything; a Try method must not let it escape.
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            value = null;
+            error = exception.Message;
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Tries to convert a string input to the value of a parameter with the given unit. A
+    /// <see cref="StateUnit.Percent"/> input is entered from 0 to 100 and returned as the fraction from 0 to 1 the
+    /// parameter expects; integer types cannot hold a fraction and are returned unscaled.
+    /// </summary>
+    public static bool TryConvert(string? input, Type targetType, StateUnit? unit, out object? value)
+    {
+        if (!TryConvert(input, targetType, out value))
+        {
+            return false;
+        }
+
+        if (unit != StateUnit.Percent)
+        {
+            return true;
+        }
+
+        try
+        {
+            // Through decimal, so 33.3 becomes 0.333 and not 0.33299999999999996.
+            value = value switch
+            {
+                decimal percent => percent / 100m,
+                double percent => (double)((decimal)percent / 100m),
+                float percent => (float)((decimal)percent / 100m),
+                _ => value
+            };
+            return true;
+        }
+        catch (OverflowException)
+        {
+            value = null;
+            return false;
+        }
     }
 
     /// <summary>

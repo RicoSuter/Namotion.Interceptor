@@ -1,6 +1,7 @@
 using HomeBlaze.Abstractions;
-using HomeBlaze.Components.Abstractions.Pages;
+using HomeBlaze.Services;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Registry.Abstractions;
 
 namespace HomeBlaze.Host.Services.Display;
 
@@ -9,8 +10,6 @@ namespace HomeBlaze.Host.Services.Display;
 /// </summary>
 public static class SubjectDisplayExtensions
 {
-    private const string DefaultIconName = "Article";
-
     /// <summary>
     /// Gets the display title for a subject.
     /// Falls back to type name if ITitleProvider not implemented.
@@ -24,98 +23,43 @@ public static class SubjectDisplayExtensions
     }
 
     /// <summary>
-    /// Gets the icon name for a subject (e.g., "Folder", "Article").
-    /// This returns the semantic name, not the MudBlazor icon string.
-    /// Use SubjectIconExtensions.GetIcon() in HomeBlaze.Host for MudBlazor resolution.
+    /// Gets whether the browser shows the property as a value of its subject: a property with state metadata that is
+    /// no attribute, holds no subjects and is no secret configuration property.
     /// </summary>
-    public static string GetNavigationIconName(this IInterceptorSubject subject)
-    {
-        if (subject is IPage page && !string.IsNullOrEmpty(page.NavigationIconName))
-            return page.NavigationIconName;
-
-        if (subject is IIconProvider iconProvider && !string.IsNullOrEmpty(iconProvider.IconName))
-            return iconProvider.IconName;
-
-        return DefaultIconName;
-    }
+    public static bool IsShownAsValue(this RegisteredSubjectProperty property)
+        => property is { IsAttribute: false, CanContainSubjects: false } &&
+           property.GetStateMetadata() is not null &&
+           property.GetConfigurationMetadata()?.IsSecret != true;
 
     /// <summary>
-    /// Gets the navigation title for a subject.
-    /// Fallback chain: IPage → ITitleProvider → propertyKey → type name
+    /// Gets the label of a child subject listed under its parent property.
+    /// A direct subject reference is labeled with the property display name.
+    /// A collection or dictionary item is labeled with its <see cref="ITitleProvider"/> title,
+    /// else its index or key, else its type name.
     /// </summary>
-    public static string GetNavigationTitle(this IInterceptorSubject subject, string? propertyKey = null)
+    public static string GetChildDisplayName(this RegisteredSubjectProperty property, SubjectPropertyChild child)
     {
-        if (subject is IPage page && !string.IsNullOrEmpty(page.NavigationTitle))
-            return page.NavigationTitle;
+        if (child.Index is null)
+            return property.GetDisplayName();
 
-        if (subject is ITitleProvider titleProvider && !string.IsNullOrEmpty(titleProvider.Title))
+        if (child.Subject is ITitleProvider titleProvider && !string.IsNullOrEmpty(titleProvider.Title))
             return titleProvider.Title;
 
-        if (!string.IsNullOrEmpty(propertyKey))
-            return FormatPropertyKey(propertyKey);
-
-        return subject.GetType().Name;
+        var key = child.Index.ToString();
+        return string.IsNullOrEmpty(key) ? child.Subject.GetType().Name : key;
     }
 
     /// <summary>
-    /// Gets the navigation order for a subject.
-    /// Fallback chain: IPage → filename-based defaults
+    /// Gets a label that identifies a collection or dictionary item: the display name followed by
+    /// the index or key in parentheses when they differ, else the display name.
     /// </summary>
-    public static int GetNavigationOrder(this IInterceptorSubject subject, string? propertyKey = null)
+    public static string GetIdentifyingDisplayName(string displayName, object? index)
     {
-        if (subject is IPage page && page.PagePosition.HasValue)
-            return page.PagePosition.Value;
+        var key = index?.ToString();
+        if (string.IsNullOrEmpty(key) || key == displayName)
+            return displayName;
 
-        if (!string.IsNullOrEmpty(propertyKey))
-        {
-            var name = Path.GetFileNameWithoutExtension(propertyKey).ToLower();
-            return name switch
-            {
-                "readme" => 0,
-                "index" => 1,
-                _ => 100
-            };
-        }
-
-        return 100;
+        return string.IsNullOrEmpty(displayName) ? key : $"{displayName} ({key})";
     }
 
-    /// <summary>
-    /// Gets the navigation location for a subject.
-    /// Defaults to NavBar if IPage not implemented.
-    /// </summary>
-    public static NavigationLocation GetNavigationLocation(this IInterceptorSubject subject)
-    {
-        if (subject is IPage page)
-            return page.PageLocation;
-
-        return NavigationLocation.NavBar;
-    }
-
-    /// <summary>
-    /// Gets the AppBar alignment for a subject.
-    /// Defaults to Left if IPage not implemented.
-    /// </summary>
-    public static AppBarAlignment GetAppBarAlignment(this IInterceptorSubject subject)
-    {
-        if (subject is IPage page)
-            return page.AppBarAlignment;
-
-        return AppBarAlignment.Left;
-    }
-
-    private static string FormatPropertyKey(string key)
-    {
-        var name = Path.GetFileNameWithoutExtension(key);
-        if (string.IsNullOrEmpty(name))
-            return key;
-
-        var words = name
-            .Replace("-", " ")
-            .Replace("_", " ")
-            .Split(' ', StringSplitOptions.RemoveEmptyEntries);
-
-        return string.Join(" ", words.Select(word =>
-            word.Length > 0 ? char.ToUpper(word[0]) + word[1..].ToLower() : word));
-    }
 }

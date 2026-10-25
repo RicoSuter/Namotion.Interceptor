@@ -21,8 +21,10 @@ namespace Namotion.Devices.Philips.Hue;
 /// Philips Hue Bridge for controlling lights, sensors, and buttons.
 /// Discovers and manages child devices via the Hue API.
 /// </summary>
-[Category("Devices")]
+[Category("Lighting")]
 [Description("Philips Hue Bridge for controlling lights, sensors, and buttons")]
+[DisplayName("Philips Hue bridge")]
+[SubjectIcon("Hub")]
 [InterceptorSubject]
 public partial class HueBridge : BackgroundService,
     IConfigurable,
@@ -44,6 +46,26 @@ public partial class HueBridge : BackgroundService,
 
     private const int MaxConsecutivePollFailures = 3;
 
+    /// <summary>
+    /// The default <see cref="PollingInterval"/>, in seconds.
+    /// </summary>
+    public const int DefaultPollingIntervalSeconds = 60;
+
+    /// <summary>
+    /// The default <see cref="RetryInterval"/>, in seconds.
+    /// </summary>
+    public const int DefaultRetryIntervalSeconds = 30;
+
+    /// <summary>
+    /// The shortest <see cref="PollingInterval"/> and <see cref="RetryInterval"/>, in seconds; a shorter one is raised to it.
+    /// </summary>
+    public const int MinimumIntervalSeconds = 5;
+
+    /// <summary>
+    /// The longest <see cref="PollingInterval"/> and <see cref="RetryInterval"/>, in seconds; a longer one is lowered to it.
+    /// </summary>
+    public const int MaximumIntervalSeconds = 3600;
+
     private readonly ILogger<HueBridge> _logger;
     private readonly SemaphoreSlim _configChangedSignal = new(0, 1);
     private readonly Lock _clientLock = new();
@@ -52,7 +74,6 @@ public partial class HueBridge : BackgroundService,
     // nothing is left to release.
     private bool _disposed;
 
-    private LocatedBridge? _bridge;
     private HttpClient? _httpClient;
     private LocalHueApi? _client;
 
@@ -97,11 +118,14 @@ public partial class HueBridge : BackgroundService,
     [State]
     public partial ServiceStatus Status { get; internal set; }
 
+    // Tracked, so that the derived properties that read it change when it is fetched or reset.
+    internal partial LocatedBridge? Bridge { get; set; }
+
     [State]
     public partial string? StatusMessage { get; internal set; }
 
     [Derived]
-    public string? Title => "Hue Bridge (" + (_bridge?.IpAddress ?? "?") + ")";
+    public string? Title => "Hue Bridge (" + (Bridge?.IpAddress ?? "?") + ")";
 
     [Derived]
     public string IconName => IsConnected ? "Hub" : "HubOutlined";
@@ -113,11 +137,11 @@ public partial class HueBridge : BackgroundService,
     public decimal? Power => IsConnected ? 3.0m : null;
 
     [Derived]
-    public decimal? EnergyConsumed => null;
+    public decimal? TotalConsumedEnergy => null;
 
     [Derived]
     [State(Unit = StateUnit.Watt)]
-    public decimal? TotalPower =>
+    public decimal? CombinedPower =>
         IsConnected ? Power + Lights.Values.Sum(light => light.Power ?? 0m) : null;
 
     public HueBridge(ILogger<HueBridge> logger)
@@ -125,9 +149,9 @@ public partial class HueBridge : BackgroundService,
         _logger = logger;
 
         // The event stream carries state changes; this poll only reconciles the device set, so it is
-        // deliberately slow. This is the interval the loop hardcoded while the setting was ignored.
-        PollingInterval = TimeSpan.FromSeconds(60);
-        RetryInterval = TimeSpan.FromSeconds(30);
+        // deliberately slow.
+        PollingInterval = TimeSpan.FromSeconds(DefaultPollingIntervalSeconds);
+        RetryInterval = TimeSpan.FromSeconds(DefaultRetryIntervalSeconds);
 
         Lights = new();
         MotionSensors = new();
@@ -179,7 +203,7 @@ public partial class HueBridge : BackgroundService,
                 return _client;
             }
 
-            if (AppKey == null || _bridge == null)
+            if (AppKey == null || Bridge == null)
             {
                 throw new InvalidOperationException("Bridge is not configured or not discovered.");
             }
@@ -197,7 +221,7 @@ public partial class HueBridge : BackgroundService,
 
             try
             {
-                var client = new LocalHueApi(_bridge.IpAddress, AppKey, httpClient);
+                var client = new LocalHueApi(Bridge.IpAddress, AppKey, httpClient);
                 _httpClient = httpClient;
                 _client = client;
                 return client;
@@ -286,7 +310,7 @@ public partial class HueBridge : BackgroundService,
                     StatusMessage = "Bridge not found on network";
                     try
                     {
-                        await Task.Delay(RetryInterval, stoppingToken);
+                        await Task.Delay(EffectiveRetryInterval, stoppingToken);
                     }
                     catch (OperationCanceledException)
                     {
@@ -296,7 +320,7 @@ public partial class HueBridge : BackgroundService,
                     continue;
                 }
 
-                _bridge = bridge;
+                Bridge = bridge;
 
                 client = ConnectClient();
 
@@ -335,7 +359,7 @@ public partial class HueBridge : BackgroundService,
 
                 try
                 {
-                    await Task.Delay(RetryInterval, stoppingToken);
+                    await Task.Delay(EffectiveRetryInterval, stoppingToken);
                 }
                 catch (OperationCanceledException)
                 {
@@ -419,10 +443,29 @@ public partial class HueBridge : BackgroundService,
         }
     }
 
-    // A zero interval would spin the loop and a negative one is rejected outright, so fall back to the
-    // default rather than trusting a hand-edited configuration file.
-    private TimeSpan EffectivePollingInterval =>
-        PollingInterval > TimeSpan.Zero ? PollingInterval : TimeSpan.FromSeconds(60);
+    private TimeSpan EffectivePollingInterval => GetEffectiveInterval(PollingInterval, DefaultPollingIntervalSeconds);
+
+    private TimeSpan EffectiveRetryInterval => GetEffectiveInterval(RetryInterval, DefaultRetryIntervalSeconds);
+
+    /// <summary>
+    /// Gets the interval a bridge runs with for a configured interval: the configured interval clamped to
+    /// <see cref="MinimumIntervalSeconds"/> through <see cref="MaximumIntervalSeconds"/>, or the default when it is
+    /// zero or negative.
+    /// </summary>
+    /// <param name="configured">The configured interval, such as <see cref="PollingInterval"/>.</param>
+    /// <param name="defaultSeconds">The interval in seconds to use when the configured one is zero or negative.</param>
+    /// <returns>The effective interval.</returns>
+    public static TimeSpan GetEffectiveInterval(TimeSpan configured, int defaultSeconds)
+    {
+        if (configured <= TimeSpan.Zero)
+        {
+            return TimeSpan.FromSeconds(defaultSeconds);
+        }
+
+        var minimum = TimeSpan.FromSeconds(MinimumIntervalSeconds);
+        var maximum = TimeSpan.FromSeconds(MaximumIntervalSeconds);
+        return configured < minimum ? minimum : configured > maximum ? maximum : configured;
+    }
 
     private async Task RunPollingLoopAsync(LocalHueApi client, CancellationToken cancellationToken)
     {

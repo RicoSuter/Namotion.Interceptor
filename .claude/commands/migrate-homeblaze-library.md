@@ -54,9 +54,9 @@ Search for projects in `../HomeBlaze/src/` matching the argument. If multiple ma
 Read these directories thoroughly -- they define how v2 subjects must be built:
 
 - `docs/*.md` -- all interceptor system docs (subject guidelines, registry, lifecycle, tracking, derived properties, etc.)
-- `src/HomeBlaze/HomeBlaze/Data/Docs/*.md` -- HomeBlaze architecture and general docs
-- `src/HomeBlaze/HomeBlaze/Data/Docs/development/*.md` -- building subjects guide, conventions
-- `src/HomeBlaze/HomeBlaze/Data/Docs/devices/*.md` -- existing device documentation as examples
+- `src/HomeBlaze/HomeBlaze/Data/Files/Docs/*.md` -- HomeBlaze architecture and general docs
+- `src/HomeBlaze/HomeBlaze/Data/Files/Docs/development/*.md` -- building subjects guide, conventions
+- `src/HomeBlaze/HomeBlaze/Data/Files/Docs/devices/*.md` -- existing device documentation as examples
 
 ### Step 3: Read v2 reference implementations
 
@@ -124,6 +124,7 @@ Examples of generic interfaces that emerged from migrations:
 - Follow existing pattern: `I{Concept}Sensor` for sensors, `I{Concept}Controller` for controllable capabilities, `I{Concept}State` for status interfaces
 - Use `Electrical` prefix for electrical measurements to avoid ambiguity (e.g., `ElectricalCurrent` not `Current`)
 - Keep property names consistent with the interface name
+- Name cumulative properties `Total<Modifier><Quantity>` (for example `TotalImportedEnergy`), see [Naming Cumulative Properties](../../src/HomeBlaze/HomeBlaze/Data/Files/Docs/development/building-subjects.md#naming-cumulative-properties)
 
 ### Step 10: Present migration plan
 
@@ -170,8 +171,8 @@ These are critical conventions the implementation MUST follow:
    - Widget component (`{SubjectName}Widget.razor`) -- implements `ISubjectComponent`, compact display
    - Edit component (`{SubjectName}EditComponent.razor`) -- implements `ISubjectEditComponent`, configuration form with local state, dirty tracking, `OnInitialized` (NOT `OnParametersSet`)
    - Setup component (`{SubjectName}SetupComponent.razor`) -- only if initial discovery/registration is needed (e.g., API key pairing). Not needed for simple IP-based devices.
-4. **Device documentation** -- `src/HomeBlaze/HomeBlaze/Data/Docs/devices/{Name}.md`
-5. **JSON config** -- `src/HomeBlaze/HomeBlaze/Data/Devices/{Name}.json`
+4. **Device documentation** -- `src/HomeBlaze/HomeBlaze/Data/Files/Docs/devices/{Name}.md`
+5. **JSON config** -- `src/HomeBlaze/HomeBlaze/Data/Files/Devices/{Name}.json`
 6. **Solution integration** -- add all projects to `src/Namotion.Interceptor.slnx`
 7. **HomeBlaze registration** -- add project references to `src/HomeBlaze/HomeBlaze/HomeBlaze.csproj` and register assemblies in `src/HomeBlaze/HomeBlaze/Program.cs` (both the device assembly and the `.HomeBlaze` UI assembly via `TypeProvider.AddAssembly`)
 8. **Tests** -- `src/HomeBlaze/Namotion.Devices.{Name}.Tests/` where applicable

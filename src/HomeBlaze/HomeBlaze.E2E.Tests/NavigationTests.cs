@@ -1,5 +1,10 @@
 using HomeBlaze.E2E.Tests.Infrastructure;
+using HomeBlaze.Services;
+using HomeBlaze.Storage;
+using HomeBlaze.Storage.Files;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Playwright;
+using Namotion.Interceptor;
 
 namespace HomeBlaze.E2E.Tests;
 
@@ -82,5 +87,173 @@ public class NavigationTests
 
         // Assert
         Assert.Contains("/browser", page.Url);
+    }
+
+    [Fact]
+    public async Task WhenPageIsAddedToExpandedFolder_ThenNavMenuShowsIt()
+    {
+        // Arrange
+        var (services, root, folder) = await GetDemoFolderAsync();
+        var originalChildren = folder.Children;
+        var navigation = await OpenWithDemoFolderExpandedAsync();
+
+        try
+        {
+            // Act
+            folder.Children = new Dictionary<string, IInterceptorSubject>(originalChildren)
+            {
+                ["AddedLater.md"] = CreatePage(services, root, "Demo/AddedLater.md")
+            };
+
+            // Assert
+            await Assertions.Expect(navigation.GetByRole(AriaRole.Link, new() { Name = "AddedLater" }))
+                .ToBeVisibleAsync(new() { Timeout = 30000 });
+        }
+        finally
+        {
+            folder.Children = originalChildren;
+        }
+    }
+
+    [Fact]
+    public async Task WhenPageIsRemovedFromExpandedFolder_ThenNavMenuDropsIt()
+    {
+        // Arrange
+        var (services, root, folder) = await GetDemoFolderAsync();
+        var originalChildren = folder.Children;
+
+        try
+        {
+            folder.Children = new Dictionary<string, IInterceptorSubject>(originalChildren)
+            {
+                ["RemovedLater.md"] = CreatePage(services, root, "Demo/RemovedLater.md")
+            };
+
+            var navigation = await OpenWithDemoFolderExpandedAsync();
+            var link = navigation.GetByRole(AriaRole.Link, new() { Name = "RemovedLater" });
+            await Assertions.Expect(link).ToBeVisibleAsync(new() { Timeout = 30000 });
+
+            // Act
+            folder.Children = originalChildren;
+
+            // Assert
+            await Assertions.Expect(link).ToHaveCountAsync(0, new() { Timeout = 30000 });
+        }
+        finally
+        {
+            folder.Children = originalChildren;
+        }
+    }
+
+    [Fact]
+    public async Task WhenFolderAppearsBeforeExpandedFolder_ThenExpandedStateStaysWithItsFolder()
+    {
+        // Arrange
+        var (services, root, _) = await GetDemoFolderAsync();
+        var originalRootChildren = root.Children;
+        var navigation = await OpenWithDemoFolderExpandedAsync();
+
+        try
+        {
+            // Act
+            root.Children = new Dictionary<string, IInterceptorSubject>(originalRootChildren)
+            {
+                ["Aaa"] = CreateFolderWithPage(services, root, "Aaa", "InsertedInner.md")
+            };
+
+            // Assert
+            await Assertions.Expect(navigation.GetByRole(AriaRole.Button, new() { Name = "Aaa" }))
+                .ToBeVisibleAsync(new() { Timeout = 30000 });
+            await Assertions.Expect(navigation.GetByRole(AriaRole.Link, new() { Name = "Grid Demo" }))
+                .ToBeVisibleAsync();
+            await Assertions.Expect(navigation.GetByRole(AriaRole.Link, new() { Name = "InsertedInner" }))
+                .ToHaveCountAsync(0);
+        }
+        finally
+        {
+            root.Children = originalRootChildren;
+        }
+    }
+
+    [Fact]
+    public async Task WhenTopBarPageIsInSubfolder_ThenTopBarShowsItAndSidebarDoesNot()
+    {
+        // Arrange
+        const string folderName = "Shortcuts";
+        const string pageTitle = "Nested Top Bar Page";
+        var folderPath = _fixture.GetPagePath(folderName);
+        Directory.CreateDirectory(folderPath);
+
+        try
+        {
+            await File.WriteAllTextAsync(
+                Path.Combine(folderPath, "Nested.md"),
+                $"---\ntitle: {pageTitle}\nicon: Star\nlocation: AppBar\n---\n\n# {pageTitle}\n");
+            await _fixture.ReconcileStorageAsync();
+
+            // Act
+            var page = await _fixture.CreatePageAsync();
+            await page.GotoAsync(_fixture.ServerAddress);
+            await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+
+            // Assert
+            await Assertions.Expect(page.GetByRole(AriaRole.Banner).GetByTitle(pageTitle, new() { Exact = true }))
+                .ToBeVisibleAsync(new() { Timeout = 30000 });
+
+            var navigation = page.Locator(".mud-navmenu");
+            await Assertions.Expect(navigation.GetByRole(AriaRole.Button, new() { Name = "Demo" }))
+                .ToBeVisibleAsync(new() { Timeout = 30000 });
+            await Assertions.Expect(navigation.GetByRole(AriaRole.Button, new() { Name = folderName }))
+                .ToHaveCountAsync(0);
+            await Assertions.Expect(navigation.GetByText(pageTitle)).ToHaveCountAsync(0);
+        }
+        finally
+        {
+            Directory.Delete(folderPath, recursive: true);
+            await _fixture.ReconcileStorageAsync();
+        }
+    }
+
+    private async Task<(IServiceProvider Services, FluentStorageContainer Root, VirtualFolder Folder)> GetDemoFolderAsync()
+    {
+        await _fixture.ReconcileStorageAsync();
+
+        var services = _fixture.ServerServices;
+        var root = (FluentStorageContainer)services.GetRequiredService<RootManager>().Root!;
+        return (services, root, (VirtualFolder)root.Children["Demo"]);
+    }
+
+    private async Task<ILocator> OpenWithDemoFolderExpandedAsync()
+    {
+        var page = await _fixture.CreatePageAsync();
+        await page.GotoAsync(_fixture.ServerAddress);
+        await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+        await page.WaitUntilInteractiveAsync();
+
+        var navigation = page.Locator(".mud-navmenu");
+        var folderHeader = navigation.GetByRole(AriaRole.Button, new() { Name = "Demo" });
+        await Assertions.Expect(folderHeader).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await folderHeader.ClickAsync();
+        await Assertions.Expect(navigation.GetByRole(AriaRole.Link, new() { Name = "Grid Demo" }))
+            .ToBeVisibleAsync(new() { Timeout = 30000 });
+
+        return navigation;
+    }
+
+    private static MarkdownFile CreatePage(IServiceProvider services, FluentStorageContainer root, string path)
+    {
+        return (MarkdownFile)ActivatorUtilities.CreateInstance(services, typeof(MarkdownFile), root, path);
+    }
+
+    private static VirtualFolder CreateFolderWithPage(
+        IServiceProvider services, FluentStorageContainer root, string folderPath, string pageName)
+    {
+        return new VirtualFolder(root, folderPath + "/")
+        {
+            Children = new Dictionary<string, IInterceptorSubject>
+            {
+                [pageName] = CreatePage(services, root, $"{folderPath}/{pageName}")
+            }
+        };
     }
 }

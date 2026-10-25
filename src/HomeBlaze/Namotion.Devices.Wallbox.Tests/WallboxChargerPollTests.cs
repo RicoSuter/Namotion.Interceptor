@@ -26,7 +26,7 @@ public class WallboxChargerPollTests
     {
         // Arrange
         var charger = CreateCharger();
-        var status = new ChargerStatusResponse { StatusId = statusId, Finished = finished };
+        var status = new ChargerStatusResponse { StatusId = statusId, IsFinished = finished };
 
         // Act
         ApplyStatus(charger, status);
@@ -369,7 +369,7 @@ public class WallboxChargerPollTests
             StatusId = 193,
             ConfigData = new ChargerConfiguration
             {
-                Ecosmart = new ChargerEcoSmart { Enabled = true, Mode = 1 }
+                Ecosmart = new ChargerEcoSmart { IsEnabled = true, Mode = 1 }
             }
         };
 
@@ -377,7 +377,7 @@ public class WallboxChargerPollTests
         ApplyStatus(charger, status);
 
         // Assert
-        Assert.True(charger.EcoSmartEnabled);
+        Assert.True(charger.IsEcoSmartEnabled);
         Assert.Equal(WallboxEcoSmartMode.Eco, charger.EcoSmartMode);
     }
 
@@ -391,7 +391,7 @@ public class WallboxChargerPollTests
             StatusId = 193,
             ConfigData = new ChargerConfiguration
             {
-                Ecosmart = new ChargerEcoSmart { Enabled = false, Mode = 1 }
+                Ecosmart = new ChargerEcoSmart { IsEnabled = false, Mode = 1 }
             }
         };
 
@@ -399,7 +399,7 @@ public class WallboxChargerPollTests
         ApplyStatus(charger, status);
 
         // Assert
-        Assert.False(charger.EcoSmartEnabled);
+        Assert.False(charger.IsEcoSmartEnabled);
         Assert.Equal(WallboxEcoSmartMode.Disabled, charger.EcoSmartMode);
     }
 
@@ -418,7 +418,7 @@ public class WallboxChargerPollTests
                 Software = new ChargerSoftware
                 {
                     CurrentVersion = "5.5.10",
-                    UpdateAvailable = true,
+                    IsUpdateAvailable = true,
                     LatestVersion = "5.6.0"
                 }
             }
@@ -445,7 +445,7 @@ public class WallboxChargerPollTests
                 Software = new ChargerSoftware
                 {
                     CurrentVersion = "5.6.0",
-                    UpdateAvailable = false,
+                    IsUpdateAvailable = false,
                     LatestVersion = "5.6.0"
                 }
             }
@@ -467,7 +467,7 @@ public class WallboxChargerPollTests
 
         charger.IsPluggedIn = charger.ChargerStatus is WallboxChargerStatus.Disconnected or WallboxChargerStatus.Ready
             ? false
-            : !status.Finished;
+            : !status.IsFinished;
 
         charger.IsCharging = charger.ChargerStatus is WallboxChargerStatus.Charging or WallboxChargerStatus.Discharging;
         charger.ChargingPower = status.ChargingPowerInKw * 1000m;
@@ -503,13 +503,13 @@ public class WallboxChargerPollTests
         charger.Session.ChargingTime = TimeSpan.FromSeconds(status.ChargingTime);
         charger.Session.SessionCost = status.AddedEnergy > 0 && status.Cost == 0 ? null : status.Cost;
 
-        charger.EcoSmartEnabled = status.ConfigData?.Ecosmart?.Enabled;
+        charger.IsEcoSmartEnabled = status.ConfigData?.Ecosmart?.IsEnabled;
         charger.EcoSmartMode = status.ConfigData?.Ecosmart is { } eco
-            ? eco.Enabled ? (WallboxEcoSmartMode)eco.Mode : WallboxEcoSmartMode.Disabled
+            ? eco.IsEnabled ? (WallboxEcoSmartMode)eco.Mode : WallboxEcoSmartMode.Disabled
             : null;
 
         charger.SoftwareVersion = status.ConfigData?.Software?.CurrentVersion;
-        charger.AvailableSoftwareUpdate = status.ConfigData?.Software?.UpdateAvailable == true
+        charger.AvailableSoftwareUpdate = status.ConfigData?.Software?.IsUpdateAvailable == true
             ? status.ConfigData.Software.LatestVersion
             : null;
 

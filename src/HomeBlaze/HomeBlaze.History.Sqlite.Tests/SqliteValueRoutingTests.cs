@@ -16,7 +16,7 @@ public class SqliteValueRoutingTests
         Assert.Equal(0.1d, routed.Row.Double);
         Assert.Equal("0.1", routed.Row.Json);
         Assert.Null(routed.Row.Long);
-        Assert.False(routed.Oversized);
+        Assert.False(routed.IsOversized);
     }
 
     [Fact]

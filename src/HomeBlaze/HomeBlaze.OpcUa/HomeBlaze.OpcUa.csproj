@@ -1,11 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-    <PropertyGroup>
-        <TargetFramework>net10.0</TargetFramework>
-        <ImplicitUsings>enable</ImplicitUsings>
-        <Nullable>enable</Nullable>
-    </PropertyGroup>
-
     <ItemGroup>
         <ProjectReference Include="..\HomeBlaze.Abstractions\HomeBlaze.Abstractions.csproj" />
         <ProjectReference Include="..\HomeBlaze.Services\HomeBlaze.Services.csproj" />
@@ -14,7 +8,7 @@
         <ProjectReference Include="..\..\Namotion.Interceptor.OpcUa\Namotion.Interceptor.OpcUa.csproj" />
         <ProjectReference Include="..\..\Namotion.Interceptor.Connectors\Namotion.Interceptor.Connectors.csproj" />
         <ProjectReference Include="..\..\Namotion.Interceptor\Namotion.Interceptor.csproj" />
-        <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.*" />
+        <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
     </ItemGroup>
 
 </Project>

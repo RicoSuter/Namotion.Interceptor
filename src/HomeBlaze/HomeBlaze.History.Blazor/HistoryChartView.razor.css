@@ -1,0 +1,23 @@
+/* MudChart draws its value labels once left of the chart before it has measured them, and only then makes room for
+   them, so they are not cut while they are there. */
+[data-testid="history-chart-lines"] ::deep svg {
+    overflow: visible;
+}
+
+/* The chart and its bands appear only once the script of the view has seen MudChart place its value labels, so they
+   appear where they stay, see HistoryChartView.razor.js. Without the script they appear after a few seconds. */
+[data-plot="pending"] [data-testid="history-chart-band-group"] {
+    visibility: hidden;
+}
+
+[data-plot="drawn"]:not([data-plot-ready]) [data-testid="history-chart-lines"] ::deep svg,
+[data-plot="drawn"]:not([data-plot-ready]) [data-testid="history-chart-band-group"] {
+    visibility: hidden;
+    animation: history-chart-show 0s 3s forwards;
+}
+
+@keyframes history-chart-show {
+    to {
+        visibility: visible;
+    }
+}

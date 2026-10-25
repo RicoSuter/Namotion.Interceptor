@@ -499,29 +499,11 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             StartRecordingTouchedProperties(property);
             ownsActiveRecording = true;
             var result = property.Metadata.GetValue?.Invoke(property.Subject);
-            var recordedDeps = _recorder!.FinishRecording();
+            var recordedDependencies = _recorder!.FinishRecording();
             ownsActiveRecording = false;
 
-            bool dependenciesChanged;
-            if (callerHoldsLock)
-            {
-                dependenciesChanged = data.UpdateDependencies(property, recordedDeps, _recorder);
-            }
-            else
-            {
-                lock (data)
-                {
-                    if (!data.IsAttached || data.RecalculationNeeded)
-                    {
-                        _recorder.ClearLastRecording();
-                        return result;
-                    }
-
-                    dependenciesChanged = data.UpdateDependencies(property, recordedDeps, _recorder);
-                }
-            }
-
-            if (!dependenciesChanged || Volatile.Read(ref _writeGeneration) == generationBefore)
+            var dependencyUpdate = ReconcileDependencies(data, property, recordedDependencies, callerHoldsLock);
+            if (dependencyUpdate != DependencyUpdate.Changed || Volatile.Read(ref _writeGeneration) == generationBefore)
             {
                 return result;
             }
@@ -532,31 +514,18 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                 StartRecordingTouchedProperties(property);
                 ownsActiveRecording = true;
                 result = property.Metadata.GetValue?.Invoke(property.Subject);
-                recordedDeps = _recorder.FinishRecording();
+                recordedDependencies = _recorder.FinishRecording();
                 ownsActiveRecording = false;
 
-                if (callerHoldsLock)
+                dependencyUpdate = ReconcileDependencies(data, property, recordedDependencies, callerHoldsLock);
+                if (dependencyUpdate == DependencyUpdate.Abandoned)
                 {
-                    if (!data.UpdateDependencies(property, recordedDeps, _recorder))
-                    {
-                        break;
-                    }
+                    return result;
                 }
-                else
-                {
-                    lock (data)
-                    {
-                        if (!data.IsAttached || data.RecalculationNeeded)
-                        {
-                            _recorder.ClearLastRecording();
-                            return result;
-                        }
 
-                        if (!data.UpdateDependencies(property, recordedDeps, _recorder))
-                        {
-                            break;
-                        }
-                    }
+                if (dependencyUpdate == DependencyUpdate.Unchanged)
+                {
+                    return result;
                 }
             }
 
@@ -569,6 +538,44 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         finally
         {
             DiscardActiveRecording(ownsActiveRecording);
+        }
+    }
+
+    private enum DependencyUpdate
+    {
+        Changed,
+        Unchanged,
+        Abandoned
+    }
+
+    /// <summary>
+    /// Reconciles dependencies under the caller's lock or a brief lock acquired here, then clears the recording.
+    /// When acquiring the lock, abandons the recording if attachment or recalculation state changed.
+    /// </summary>
+    private static DependencyUpdate ReconcileDependencies(
+        DerivedPropertyData data,
+        in PropertyReference property,
+        ReadOnlySpan<PropertyReference> recordedDependencies,
+        bool callerHoldsLock)
+    {
+        if (callerHoldsLock)
+        {
+            return data.UpdateDependencies(property, recordedDependencies, _recorder!)
+                ? DependencyUpdate.Changed
+                : DependencyUpdate.Unchanged;
+        }
+
+        lock (data)
+        {
+            if (!data.IsAttached || data.RecalculationNeeded)
+            {
+                _recorder!.ClearLastRecording();
+                return DependencyUpdate.Abandoned;
+            }
+
+            return data.UpdateDependencies(property, recordedDependencies, _recorder!)
+                ? DependencyUpdate.Changed
+                : DependencyUpdate.Unchanged;
         }
     }
 

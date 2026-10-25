@@ -69,7 +69,7 @@ public readonly struct TransactionAwaitable
 /// <summary>
 /// Custom awaiter that sets AsyncLocal in the caller's context after GetResult.
 /// </summary>
-public readonly struct TransactionAwaiter : INotifyCompletion, ICriticalNotifyCompletion
+public readonly struct TransactionAwaiter : ICriticalNotifyCompletion
 {
     private readonly ValueTaskAwaiter<SubjectTransaction> _awaiter;
 
@@ -80,6 +80,7 @@ public readonly struct TransactionAwaiter : INotifyCompletion, ICriticalNotifyCo
 
     public bool IsCompleted => _awaiter.IsCompleted;
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S5034", Justification = "The awaiter protocol consumes the completed operation here and sets the transaction in the caller's execution context; an async wrapper would isolate that AsyncLocal assignment.")]
     public SubjectTransaction GetResult()
     {
         SubjectTransaction? transaction = null;

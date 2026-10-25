@@ -165,7 +165,7 @@ public class AdversarialRollbackTests
         Assert.Equal([SubjectAttachmentAnchorKind.None, SubjectAttachmentAnchorKind.None], anchorsAtRefusal);
         Assert.Equal(SubjectAttachmentAnchorKind.None, ((IInterceptorSubject)first).Executor.AttachmentAnchor);
         Assert.Equal(SubjectAttachmentAnchorKind.None, ((IInterceptorSubject)second).Executor.AttachmentAnchor);
-        IInterceptorSubject[] subjects = [root, first, second, first.Father!, second.Father!, refused];
+        IInterceptorSubject[] subjects = [root, first, second, first.Father, second.Father, refused];
         SupportContractAssertions.Settled(context, [root], subjects);
         root.DetachFromContext(context);
         SupportContractAssertions.Settled(context, [], subjects);
@@ -210,7 +210,7 @@ public class AdversarialRollbackTests
         Assert.Equal(SubjectAttachmentAnchorKind.Explicit, ((IInterceptorSubject)outerRoot).Executor.AttachmentAnchor);
         Assert.Equal(SubjectAttachmentAnchorKind.None, ((IInterceptorSubject)innerProvisional).Executor.AttachmentAnchor);
         Assert.Equal(SubjectAttachmentAnchorKind.None, ((IInterceptorSubject)outerProvisional).Executor.AttachmentAnchor);
-        IInterceptorSubject[] subjects = [innerRoot, outerRoot, innerProvisional, outerProvisional, innerProvisional.Father!, refused];
+        IInterceptorSubject[] subjects = [innerRoot, outerRoot, innerProvisional, outerProvisional, innerProvisional.Father, refused];
         SupportContractAssertions.Settled(context, [innerRoot, outerRoot], subjects);
         innerRoot.DetachFromContext(context);
         SupportContractAssertions.Settled(context, [outerRoot], subjects);
@@ -304,7 +304,7 @@ public class AdversarialRollbackTests
         Assert.Equal("callback refuses X", exception.Message);
         Assert.True(promotionReturned);
         Assert.Equal(SubjectAttachmentAnchorKind.Explicit, ((IInterceptorSubject)provisional).Executor.AttachmentAnchor);
-        IInterceptorSubject[] subjects = [root, provisional, provisional.Father!, refused];
+        IInterceptorSubject[] subjects = [root, provisional, provisional.Father, refused];
         SupportContractAssertions.Settled(context, [root, provisional], subjects);
         root.DetachFromContext(context);
         SupportContractAssertions.Settled(context, [provisional], subjects);

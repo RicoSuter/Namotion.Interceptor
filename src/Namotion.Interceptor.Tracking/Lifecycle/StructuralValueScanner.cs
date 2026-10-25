@@ -37,14 +37,7 @@ internal static class StructuralValueScanner
                 return;
 
             case IDictionary dictionary:
-                foreach (DictionaryEntry entry in dictionary)
-                {
-                    if (entry.Value is IInterceptorSubject subjectItem)
-                    {
-                        occurrences.Add(new SubjectOccurrence(subjectItem, entry.Key));
-                    }
-                }
-
+                CollectDictionaryOccurrences(dictionary, occurrences);
                 return;
 
             case string:
@@ -75,6 +68,27 @@ internal static class StructuralValueScanner
 
                 return;
             }
+        }
+    }
+
+    private static void CollectDictionaryOccurrences(IDictionary dictionary, List<SubjectOccurrence> occurrences)
+    {
+        // IDictionaryEnumerator hands out key and value separately, where foreach
+        // would box a DictionaryEntry per entry.
+        var enumerator = dictionary.GetEnumerator();
+        try
+        {
+            while (enumerator.MoveNext())
+            {
+                if (enumerator.Value is IInterceptorSubject subjectItem)
+                {
+                    occurrences.Add(new SubjectOccurrence(subjectItem, enumerator.Key));
+                }
+            }
+        }
+        finally
+        {
+            (enumerator as IDisposable)?.Dispose();
         }
     }
 

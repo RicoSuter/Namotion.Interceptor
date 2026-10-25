@@ -31,7 +31,8 @@ internal class SetPropertyTool
         Description = "Write a property value by its full path (e.g. /Devices/Motor/TargetSpeed). " +
                       "Only writable properties can be set. Blocked when server is read-only.",
         InputSchema = Schema,
-        Handler = HandleSetPropertyAsync
+        Handler = HandleSetPropertyAsync,
+        Annotations = McpToolAnnotations.Destructive
     };
 
     private Task<object?> HandleSetPropertyAsync(JsonElement input, CancellationToken cancellationToken)
@@ -52,7 +53,7 @@ internal class SetPropertyTool
 
         if (result is null)
         {
-            return Task.FromResult<object?>(new { error = $"Path not found: {path}" });
+            return Task.FromResult<object?>(McpToolHelper.GetPathNotFoundError(pathProvider, path));
         }
 
         var (property, _) = result.Value;
@@ -64,24 +65,19 @@ internal class SetPropertyTool
             });
         }
 
-        if (!property.HasSetter || !McpToolHelper.HasPublicSetter(property))
+        if (McpToolHelper.GetWriteError(property, path, _configuration) is { } writeError)
         {
-            return Task.FromResult<object?>(new { error = $"Property is not writable: {path}" });
+            return Task.FromResult<object?>(new { error = writeError });
         }
 
-        var valueElement = input.GetProperty("value");
-
-        // The MCP SDK may pass values as strings (e.g., "true" instead of true).
-        // If the value is a string but the target type is not, try to deserialize the string content.
         object? newValue;
-        if (valueElement.ValueKind == JsonValueKind.String && property.Type != typeof(string))
+        try
         {
-            var stringValue = valueElement.GetString()!;
-            newValue = JsonSerializer.Deserialize(stringValue, property.Type);
+            newValue = McpValueConverter.Deserialize(input.GetProperty("value"), property.Type);
         }
-        else
+        catch (JsonException exception)
         {
-            newValue = JsonSerializer.Deserialize(valueElement.GetRawText(), property.Type);
+            return Task.FromResult<object?>(new { error = $"Invalid value for {path}: {exception.Message}" });
         }
 
         var previousValue = property.GetValue();

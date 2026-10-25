@@ -256,7 +256,7 @@ public class CallbackContractTests
 
         // Assert
         Assert.NotNull(subject.FirstChild);
-        Assert.NotNull(subject.FirstChild!.TryGetContext());
+        Assert.NotNull(subject.FirstChild.TryGetContext());
     }
 
     [Fact]

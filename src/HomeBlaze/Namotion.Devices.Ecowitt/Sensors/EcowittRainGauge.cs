@@ -1,7 +1,7 @@
+using System.ComponentModel;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Common;
-using HomeBlaze.Abstractions.Devices.Energy;
 using HomeBlaze.Abstractions.Sensors;
 using Namotion.Interceptor.Attributes;
 
@@ -10,7 +10,6 @@ namespace Namotion.Devices.Ecowitt.Sensors;
 [InterceptorSubject]
 public partial class EcowittRainGauge :
     IRainSensor,
-    IBatteryState,
     ITitleProvider,
     IIconProvider,
     ILastUpdatedProvider
@@ -18,37 +17,50 @@ public partial class EcowittRainGauge :
     private readonly string _name;
 
     [State(Unit = StateUnit.Millimeter)]
+    [Category("Rainfall")]
     public partial decimal? RainEvent { get; internal set; }
 
     [State(Unit = StateUnit.MillimeterPerHour)]
     public partial decimal? RainRate { get; internal set; }
 
+    /// <summary>
+    /// Gets the rain over the last hour.
+    /// </summary>
     [State(Unit = StateUnit.Millimeter)]
+    [Category("Rainfall")]
     public partial decimal? HourlyRain { get; internal set; }
 
+    /// <summary>
+    /// Gets the rain over the last 24 hours.
+    /// </summary>
     [State(Unit = StateUnit.Millimeter)]
+    [Category("Rainfall")]
+    public partial decimal? Last24HoursRain { get; internal set; }
+
+    [State(Unit = StateUnit.Millimeter)]
+    [Category("Rainfall")]
     public partial decimal? DailyRain { get; internal set; }
 
     [State(Unit = StateUnit.Millimeter)]
+    [Category("Rainfall")]
     public partial decimal? WeeklyRain { get; internal set; }
 
     [State(Unit = StateUnit.Millimeter)]
+    [Category("Rainfall")]
     public partial decimal? MonthlyRain { get; internal set; }
 
     [State(Unit = StateUnit.Millimeter)]
+    [Category("Rainfall")]
     public partial decimal? YearlyRain { get; internal set; }
-
-    [State(Unit = StateUnit.Percent)]
-    public partial decimal? BatteryLevel { get; internal set; }
 
     [State]
     public partial DateTimeOffset? LastUpdated { get; internal set; }
 
+    /// <summary>
+    /// Gets the paired sensors that can feed these readings, the same subjects as in the gateway's <c>Sensors</c>.
+    /// </summary>
     [State]
-    public partial string? SensorId { get; internal set; }
-
-    [State]
-    public partial int? SignalStrength { get; internal set; }
+    public partial Dictionary<string, EcowittSensor> Sources { get; internal set; }
 
     [State(Unit = StateUnit.Millimeter, IsCumulative = true)]
     public partial decimal? TotalRain { get; internal set; }
@@ -71,14 +83,13 @@ public partial class EcowittRainGauge :
         RainEvent = null;
         RainRate = null;
         HourlyRain = null;
+        Last24HoursRain = null;
         DailyRain = null;
         WeeklyRain = null;
         MonthlyRain = null;
         YearlyRain = null;
         TotalRain = null;
-        BatteryLevel = null;
         LastUpdated = null;
-        SensorId = null;
-        SignalStrength = null;
+        Sources = new Dictionary<string, EcowittSensor>(StringComparer.Ordinal);
     }
 }

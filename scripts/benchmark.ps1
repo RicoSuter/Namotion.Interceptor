@@ -93,7 +93,8 @@ function Run-Benchmark {
     param([string]$Label, [string]$OutputPath)
 
     Write-Host "Running benchmark on $Label (filter: $script:FilterDisplay)..."
-    dotnet run --project $BenchmarkProject -c Release -- @script:FilterArgs --exporters markdown --join @script:ExtraArgs | Out-Host
+    # Leaves no MSBuild node or compiler server behind to exit on its own timer mid-arm
+    dotnet run --disable-build-servers --project $BenchmarkProject -c Release -- @script:FilterArgs --exporters markdown --join @script:ExtraArgs | Out-Host
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Benchmark failed on $Label"
         return $false

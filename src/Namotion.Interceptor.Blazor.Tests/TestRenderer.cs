@@ -1,0 +1,242 @@
+using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.RenderTree;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+
+// A custom renderer is the only way to control when a batch completes and in which async flow a batch renders.
+#pragma warning disable BL0006
+
+namespace Namotion.Interceptor.Blazor.Tests;
+
+public enum TestRenderMode
+{
+    /// <summary>A render request renders at once and the batch completes synchronously, as on WebAssembly.</summary>
+    WebAssembly,
+
+    /// <summary>
+    /// A batch completes when the client acknowledges it, as on a server. While the maximum number of batches is
+    /// unacknowledged, a render request is only queued, and the queue renders when an acknowledgement arrives, in the
+    /// async flow of the acknowledgement, which shares nothing with the flow that asked for the render.
+    /// </summary>
+    Server,
+
+    /// <summary>A batch never completes, so <c>OnAfterRender</c> never runs, as when a page is prerendered.</summary>
+    Prerender
+}
+
+/// <summary>
+/// Renders components as the given <see cref="TestRenderMode"/> does and counts the render requests it defers.
+/// </summary>
+internal sealed class TestRenderer : Renderer
+{
+    private readonly TestRenderMode _mode;
+    private readonly int _maximumUnacknowledgedBatches;
+
+    // Accessed on the dispatcher only.
+    private readonly Queue<TaskCompletionSource> _unacknowledgedBatches = new();
+    private bool _hasDeferredRender;
+
+    private volatile bool _holdAcknowledgements;
+    private int _unacknowledgedBatchCount;
+    private int _activeRenderCount;
+    private int _deferredRenderRequests;
+    private int _batchCount;
+
+    /// <param name="mode">How batches render and complete.</param>
+    /// <param name="maximumUnacknowledgedBatches">
+    /// The number of unacknowledged batches from which a render request waits in <see cref="TestRenderMode.Server"/>
+    /// mode. The default is the default of a server circuit.
+    /// </param>
+    /// <param name="configureServices">Adds services, for example component tracking, which the renderer resolves.</param>
+    public TestRenderer(TestRenderMode mode, int maximumUnacknowledgedBatches = 10, Action<IServiceCollection>? configureServices = null)
+        : this(mode, maximumUnacknowledgedBatches, CreateServices(configureServices))
+    {
+    }
+
+    private TestRenderer(TestRenderMode mode, int maximumUnacknowledgedBatches, ServiceProvider services)
+        : base(services, NullLoggerFactory.Instance)
+    {
+        _mode = mode;
+        _maximumUnacknowledgedBatches = maximumUnacknowledgedBatches;
+        Services = services;
+        RendererInfo = mode == TestRenderMode.Prerender
+            ? new RendererInfo("Static", isInteractive: false)
+            : new RendererInfo(mode.ToString(), isInteractive: true);
+    }
+
+    public IServiceProvider Services { get; }
+
+    protected override RendererInfo RendererInfo { get; }
+
+    /// <summary>Gets the number of batches rendered so far.</summary>
+    public int BatchCount => Volatile.Read(ref _batchCount);
+
+    public override Dispatcher Dispatcher { get; } = Dispatcher.CreateDefault();
+
+    public List<Exception> Exceptions { get; } = [];
+
+    /// <summary>Gets the number of exceptions the renderer has handled so far.</summary>
+    public int ExceptionCount
+    {
+        get
+        {
+            lock (Exceptions)
+            {
+                return Exceptions.Count;
+            }
+        }
+    }
+
+    /// <summary>Gets the number of render requests that waited for an acknowledgement.</summary>
+    public int DeferredRenderRequests => Volatile.Read(ref _deferredRenderRequests);
+
+    /// <summary>Gets the number of batches the client has not acknowledged yet.</summary>
+    public int UnacknowledgedBatchCount => Volatile.Read(ref _unacknowledgedBatchCount);
+
+    /// <summary>Gets whether no render or acknowledgement is in progress and the client has acknowledged every batch.</summary>
+    /// <remarks>
+    /// Evaluate it after a condition on what rendered: a component renders before its batch counts as unacknowledged, so
+    /// <see cref="UnacknowledgedBatchCount"/> alone can be zero while that batch is still on its way.
+    /// </remarks>
+    public bool IsSettled => Volatile.Read(ref _activeRenderCount) == 0 && UnacknowledgedBatchCount == 0;
+
+    public async Task<TComponent> RenderAsync<TComponent>(Dictionary<string, object?> parameters)
+        where TComponent : IComponent, new()
+    {
+        TComponent component = default!;
+        await Dispatcher.InvokeAsync(() =>
+        {
+            // Through the activator, as the root component of a circuit is.
+            component = (TComponent)InstantiateComponent(typeof(TComponent));
+            var componentId = AssignRootComponentId(component);
+            _ = RenderRootComponentAsync(componentId, ParameterView.FromDictionary(parameters));
+        });
+
+        return component;
+    }
+
+    /// <summary>Disposes the renderer and with it every component, as when the circuit or the prerendering ends.</summary>
+    public ValueTask EndAsync() => DisposeAsync();
+
+    /// <summary>Stops acknowledging the batches that render from now on, until <see cref="ReleaseAcknowledgements"/>.</summary>
+    public void HoldAcknowledgements() => _holdAcknowledgements = true;
+
+    /// <summary>Acknowledges the held batches, in another async flow, and every later batch as it renders.</summary>
+    public void ReleaseAcknowledgements()
+    {
+        _holdAcknowledgements = false;
+        AcknowledgeInOtherFlow(null);
+    }
+
+    protected override void ProcessPendingRender()
+    {
+        if (_mode == TestRenderMode.Server && _unacknowledgedBatches.Count >= _maximumUnacknowledgedBatches)
+        {
+            _hasDeferredRender = true;
+            Interlocked.Increment(ref _deferredRenderRequests);
+            return;
+        }
+
+        Interlocked.Increment(ref _activeRenderCount);
+        try
+        {
+            base.ProcessPendingRender();
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _activeRenderCount);
+        }
+    }
+
+    protected override Task UpdateDisplayAsync(in RenderBatch renderBatch)
+    {
+        Interlocked.Increment(ref _batchCount);
+        switch (_mode)
+        {
+            case TestRenderMode.WebAssembly:
+                return Task.CompletedTask;
+
+            case TestRenderMode.Prerender:
+                // A canceled display update is how a prerendering renderer tells that the batch never completes.
+                return Task.FromCanceled(new CancellationToken(canceled: true));
+
+            default:
+                var acknowledgement = new TaskCompletionSource();
+                _unacknowledgedBatches.Enqueue(acknowledgement);
+                Interlocked.Increment(ref _unacknowledgedBatchCount);
+                if (!_holdAcknowledgements)
+                {
+                    AcknowledgeInOtherFlow(acknowledgement);
+                }
+
+                return acknowledgement.Task;
+        }
+    }
+
+    protected override void HandleException(Exception exception)
+    {
+        lock (Exceptions)
+        {
+            Exceptions.Add(exception);
+        }
+    }
+
+    private void AcknowledgeInOtherFlow(TaskCompletionSource? lastBatch)
+    {
+        using (ExecutionContext.SuppressFlow())
+        {
+            _ = Task.Run(() => Dispatcher.InvokeAsync(() => Acknowledge(lastBatch)));
+        }
+    }
+
+    // Acknowledges the batches in order up to the given one, or all of them, and then renders what waited for them.
+    private void Acknowledge(TaskCompletionSource? lastBatch)
+    {
+        if (lastBatch?.Task.IsCompleted == true)
+        {
+            return;
+        }
+
+        // Until the deferred render below has rendered, a batch count of zero does not mean that nothing renders.
+        Interlocked.Increment(ref _activeRenderCount);
+        try
+        {
+            AcknowledgeAndRenderDeferred(lastBatch);
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _activeRenderCount);
+        }
+    }
+
+    private void AcknowledgeAndRenderDeferred(TaskCompletionSource? lastBatch)
+    {
+        // Completing a batch runs its OnAfterRender, which can render a new batch that must wait for its own acknowledgement.
+        var batchCount = _unacknowledgedBatches.Count;
+        for (var index = 0; index < batchCount; index++)
+        {
+            var batch = _unacknowledgedBatches.Dequeue();
+            Interlocked.Decrement(ref _unacknowledgedBatchCount);
+            batch.TrySetResult();
+            if (batch == lastBatch)
+            {
+                break;
+            }
+        }
+
+        if (_hasDeferredRender && _unacknowledgedBatches.Count < _maximumUnacknowledgedBatches)
+        {
+            _hasDeferredRender = false;
+            base.ProcessPendingRender();
+        }
+    }
+
+    private static ServiceProvider CreateServices(Action<IServiceCollection>? configureServices)
+    {
+        var services = new ServiceCollection()
+            .AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
+        configureServices?.Invoke(services);
+        return services.BuildServiceProvider();
+    }
+}

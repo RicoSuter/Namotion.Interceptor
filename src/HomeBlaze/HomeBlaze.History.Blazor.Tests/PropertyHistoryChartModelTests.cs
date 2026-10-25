@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using HomeBlaze.History.Abstractions;
 using HomeBlaze.History.Blazor;
 using Xunit;
@@ -6,6 +7,8 @@ namespace HomeBlaze.History.Blazor.Tests;
 
 public class PropertyHistoryChartModelTests
 {
+    private static readonly IReadOnlyList<string> NumberAggregations = HistoryAggregations.All;
+
     [Theory]
     [InlineData(1, 0, 0, 30)]    // 1h range / 200 = 18s -> 30s
     [InlineData(168, 1, 0, 0)]   // 7d range / 200 = ~50m -> 1h
@@ -149,25 +152,30 @@ public class PropertyHistoryChartModelTests
         var coverage = TimeSpan.FromMinutes(5);
 
         // Act
-        var bucket = PropertyHistoryChartModel.ResolveBucket(auto, range, coverage);
+        var bucket = PropertyHistoryChartModel.ResolveBucket(auto, range, TimeZoneInfo.Utc, coverage);
 
         // Assert: pulled down by the 5 minute coverage, but held at the point cap's floor of 24h / 999,
         // which rounds up to the 2m rung. A golden value for the same reason as above.
-        Assert.Equal(TimeSpan.FromMinutes(2), bucket);
+        Assert.Equal(HistoryBucket.Fixed(TimeSpan.FromMinutes(2)), bucket);
     }
 
     [Theory]
-    [InlineData(10, "10s")]
-    [InlineData(5 * 60, "5m")]
-    [InlineData(60 * 60, "1h")]
-    [InlineData(24 * 60 * 60, "1d")]
-    public void WhenFormatBucket_ThenReturnsShortHumanLabel(int totalSeconds, string expected)
+    [InlineData(10, 10d, "s")]
+    [InlineData(30, 30d, "s")]
+    [InlineData(120, 2d, "m")]
+    [InlineData(5 * 60, 5d, "m")]
+    [InlineData(60 * 60, 1d, "h")]
+    [InlineData(90 * 60, 1.5, "h")]
+    [InlineData(24 * 60 * 60, 1d, "d")]
+    [InlineData(36 * 60 * 60, 1.5, "d")]
+    [InlineData(7 * 24 * 60 * 60, 7d, "d")]
+    public void WhenADurationIsFormatted_ThenItIsInItsLargestUnitUpToDays(int totalSeconds, double number, string unit)
     {
         // Act
-        var label = PropertyHistoryChartModel.FormatBucket(TimeSpan.FromSeconds(totalSeconds));
+        var label = PropertyHistoryChartModel.FormatDuration(TimeSpan.FromSeconds(totalSeconds));
 
         // Assert
-        Assert.Equal(expected, label);
+        Assert.Equal(number.ToString("0.#") + unit, label);
     }
 
     [Theory]
@@ -239,6 +247,42 @@ public class PropertyHistoryChartModelTests
     }
 
     [Fact]
+    public void WhenCumulative_ThenDeltaIsOfferedAfterTheLastValue()
+    {
+        // Act
+        var result = PropertyHistoryChartModel.GateAggregations(
+            ValueColumn.Double, isCumulative: true, HistoryEligibilityUnionAll());
+
+        // Assert
+        Assert.Equal(HistoryAggregations.Last, result[0]);
+        Assert.Equal(HistoryAggregations.Delta, result[^1]);
+    }
+
+    [Fact]
+    public void WhenNumericNonCumulative_ThenDeltaIsNotOffered()
+    {
+        // Act
+        var result = PropertyHistoryChartModel.GateAggregations(
+            ValueColumn.Double, isCumulative: false, HistoryEligibilityUnionAll());
+
+        // Assert
+        Assert.DoesNotContain(HistoryAggregations.Delta, result);
+    }
+
+    [Fact]
+    public void WhenNoStoreSupportsDelta_ThenACounterDoesNotOfferIt()
+    {
+        // Arrange
+        var union = new HashSet<string>(StringComparer.Ordinal) { HistoryAggregations.Last, HistoryAggregations.Maximum };
+
+        // Act
+        var result = PropertyHistoryChartModel.GateAggregations(ValueColumn.Double, isCumulative: true, union);
+
+        // Assert
+        Assert.DoesNotContain(HistoryAggregations.Delta, result);
+    }
+
+    [Fact]
     public void WhenCumulative_ThenExcludesAverageAndSum()
     {
         // Act
@@ -299,13 +343,159 @@ public class PropertyHistoryChartModelTests
         };
 
         // Act
-        var runs = PropertyHistoryChartModel.SplitIntoGapRuns(points);
+        var runs = PropertyHistoryChartModel.SplitIntoGapRuns(points, bucket: null, points[^1].Timestamp);
 
         // Assert
         Assert.Equal(2, runs.Count);
-        Assert.Single(runs[0]);
+        Assert.Equal(new[] { t, t.AddSeconds(10) }, runs[0].Select(point => point.Timestamp));
+        Assert.All(runs[0], point => Assert.Equal(1d, point.Number));
         Assert.Equal(2, runs[1].Count);
         Assert.Equal(3d, runs[1][0].Number);
+    }
+
+    [Theory]
+    [InlineData(HistoryAggregations.Count)]
+    [InlineData(HistoryAggregations.Sum)]
+    public void WhenATotalBucketIsPartlyCovered_ThenItIsHiddenAsAGap(string aggregation)
+    {
+        // Arrange - 10 s buckets up to 35 s; coverage [5,12) and [15,40): [0,10) and [10,20) are partial, [20,30) is
+        // full, and [30,35) ends at the query end, which is not a gap.
+        var start = new DateTimeOffset(2026, 6, 22, 12, 0, 0, TimeSpan.Zero);
+        HistoryPoint[] points =
+        [
+            new(start, 1d, null), new(start.AddSeconds(10), 2d, null),
+            new(start.AddSeconds(20), 3d, null), new(start.AddSeconds(30), 4d, null)
+        ];
+        ImmutableArray<HistoryCoverage> coverage =
+        [
+            new(start.AddSeconds(5), start.AddSeconds(12)),
+            new(start.AddSeconds(15), start.AddSeconds(40))
+        ];
+
+        // Act
+        var shown = PropertyHistoryChartModel.HidePartialTotals(
+            points, aggregation, TimeSpan.FromSeconds(10), start.AddSeconds(35), coverage);
+
+        // Assert
+        Assert.Equal(new double?[] { null, null, 3d, 4d }, shown.Select(point => point.Number));
+        Assert.Equal(points.Select(point => point.Timestamp), shown.Select(point => point.Timestamp));
+    }
+
+    [Theory]
+    [InlineData(0, 1d)]
+    [InlineData(4, null)]
+    public void WhenTheOldestBucketStartsBeforeTheWindow_ThenItIsMeasuredFromItsOwnStart(int coverageStartSeconds, double? expected)
+    {
+        // Arrange - a window starting at 4 s; the series coverage of a bucketed query starts at the oldest bucket start
+        // when that bucket is covered, and later when it is covered only partly.
+        var start = new DateTimeOffset(2026, 6, 22, 12, 0, 0, TimeSpan.Zero);
+        HistoryPoint[] points = [new(start, 1d, null), new(start.AddSeconds(10), 2d, null)];
+        ImmutableArray<HistoryCoverage> coverage = [new(start.AddSeconds(coverageStartSeconds), start.AddSeconds(20))];
+
+        // Act
+        var shown = PropertyHistoryChartModel.HidePartialTotals(
+            points, HistoryAggregations.Count, TimeSpan.FromSeconds(10), start.AddSeconds(20), coverage);
+
+        // Assert
+        Assert.Equal(new double?[] { expected, 2d }, shown.Select(point => point.Number));
+    }
+
+    [Fact]
+    public void WhenTheAggregationIsNotATotal_ThenPartlyCoveredBucketsAreShown()
+    {
+        // Arrange
+        var start = new DateTimeOffset(2026, 6, 22, 12, 0, 0, TimeSpan.Zero);
+        HistoryPoint[] points = [new(start, 1d, null), new(start.AddSeconds(10), 2d, null)];
+        ImmutableArray<HistoryCoverage> coverage = [new(start.AddSeconds(5), start.AddSeconds(20))];
+
+        // Act
+        var shown = PropertyHistoryChartModel.HidePartialTotals(
+            points, HistoryAggregations.Maximum, TimeSpan.FromSeconds(10), start.AddSeconds(20), coverage);
+
+        // Assert
+        Assert.Same(points, shown);
+    }
+
+    [Fact]
+    public void WhenARawSinglePointIsLastInTheSeries_ThenItHoldsToTheWindowEnd()
+    {
+        // Arrange
+        var start = new DateTimeOffset(2026, 6, 22, 12, 0, 0, TimeSpan.Zero);
+        HistoryPoint[] points = [new HistoryPoint(start, 4d, null)];
+
+        // Act
+        var runs = PropertyHistoryChartModel.SplitIntoGapRuns(points, bucket: null, start.AddHours(1));
+
+        // Assert
+        var heldRun = Assert.Single(runs);
+        Assert.Equal(new[] { start, start.AddHours(1) }, heldRun.Select(point => point.Timestamp));
+        Assert.All(heldRun, point => Assert.Equal(4d, point.Number));
+    }
+
+    [Fact]
+    public void WhenARunHasASinglePoint_ThenItIsWidenedIntoAFlatSegment()
+    {
+        // Arrange
+        var start = new DateTimeOffset(2026, 6, 22, 12, 0, 0, TimeSpan.Zero);
+        HistoryPoint[] points = [new HistoryPoint(start, 4d, null)];
+
+        // Act
+        var runs = PropertyHistoryChartModel.SplitIntoGapRuns(points, TimeSpan.FromMinutes(10), start.AddHours(1));
+
+        // Assert
+        var widenedRun = Assert.Single(runs);
+        Assert.Equal(new[] { start, start.AddMinutes(10) }, widenedRun.Select(point => point.Timestamp));
+        Assert.All(widenedRun, point => Assert.Equal(4d, point.Number));
+    }
+
+    [Fact]
+    public void WhenASinglePointIsNearTheWindowEnd_ThenTheSegmentStopsAtTheEnd()
+    {
+        // Arrange
+        var start = new DateTimeOffset(2026, 6, 22, 12, 0, 0, TimeSpan.Zero);
+        HistoryPoint[] points = [new HistoryPoint(start, 4d, null)];
+
+        // Act
+        var runs = PropertyHistoryChartModel.SplitIntoGapRuns(points, TimeSpan.FromMinutes(10), start.AddMinutes(3));
+
+        // Assert
+        Assert.Equal(start.AddMinutes(3), Assert.Single(runs)[^1].Timestamp);
+    }
+
+    [Fact]
+    public void WhenASinglePointIsFollowedByANullPointWithinTheWidth_ThenTheSegmentStopsAtTheNullPoint()
+    {
+        // Arrange
+        var start = new DateTimeOffset(2026, 6, 22, 12, 0, 0, TimeSpan.Zero);
+        HistoryPoint[] points =
+        [
+            new HistoryPoint(start, 4d, null),
+            new HistoryPoint(start.AddMinutes(2), null, null),
+            new HistoryPoint(start.AddMinutes(20), 5d, null),
+            new HistoryPoint(start.AddMinutes(21), 6d, null)
+        ];
+
+        // Act
+        var runs = PropertyHistoryChartModel.SplitIntoGapRuns(points, TimeSpan.FromMinutes(10), start.AddHours(1));
+
+        // Assert
+        Assert.Equal(2, runs.Count);
+        Assert.Equal(new[] { start, start.AddMinutes(2) }, runs[0].Select(point => point.Timestamp));
+        Assert.All(runs[0], point => Assert.Equal(4d, point.Number));
+    }
+
+    [Fact]
+    public void WhenARunHasSeveralPoints_ThenItIsNotWidened()
+    {
+        // Arrange
+        var start = new DateTimeOffset(2026, 6, 22, 12, 0, 0, TimeSpan.Zero);
+        HistoryPoint[] points = [new HistoryPoint(start, 1d, null), new HistoryPoint(start.AddMinutes(1), 2d, null)];
+
+        // Act
+        var runs = PropertyHistoryChartModel.SplitIntoGapRuns(points, TimeSpan.FromMinutes(10), start.AddHours(1));
+
+        // Assert
+        Assert.Equal(points, Assert.Single(runs));
     }
 
     [Fact]
@@ -316,7 +506,7 @@ public class PropertyHistoryChartModelTests
 
         // Assert
         Assert.Equal(
-            new[] { "Auto", "None (raw samples)", "1s", "10s", "60s", "5m", "10m", "15m", "1h", "4h", "6h", "12h", "24h" },
+            new[] { "Auto", "None (raw samples)", "1s", "10s", "60s", "5m", "10m", "15m", "1h", "4h", "6h", "12h", "24h", "Day", "Week", "Month" },
             labels);
     }
 
@@ -363,10 +553,53 @@ public class PropertyHistoryChartModelTests
         var auto = PropertyHistoryChartModel.Periods[0];
 
         // Act
-        var bucket = PropertyHistoryChartModel.ResolveBucket(auto, range);
+        var bucket = PropertyHistoryChartModel.ResolveBucket(auto, range, TimeZoneInfo.Utc);
 
         // Assert
-        Assert.Equal(PropertyHistoryChartModel.AutoBucket(range), bucket);
+        Assert.Equal(HistoryBucket.Fixed(PropertyHistoryChartModel.AutoBucket(range)), bucket);
+    }
+
+    [Theory]
+    [InlineData(24, 30)]
+    [InlineData(1, 2)]
+    public void WhenResolveBucketAutoForBars_ThenItAimsAtFewerBucketsThanForLines(int rangeHours, int expectedMinutes)
+    {
+        // Arrange
+        var auto = PropertyHistoryChartModel.Periods[0];
+
+        // Act
+        var bucket = PropertyHistoryChartModel.ResolveBucket(auto, TimeSpan.FromHours(rangeHours), TimeZoneInfo.Utc, isBars: true);
+
+        // Assert
+        Assert.Equal(HistoryBucket.Fixed(TimeSpan.FromMinutes(expectedMinutes)), bucket);
+    }
+
+    [Theory]
+    [InlineData(30, HistoryCalendarUnit.Day)]
+    [InlineData(90, HistoryCalendarUnit.Week)]
+    [InlineData(365, HistoryCalendarUnit.Month)]
+    public void WhenResolveBucketAutoForBarsSpansADayOrMore_ThenItIsTheCalendarPeriod(int rangeDays, HistoryCalendarUnit expected)
+    {
+        // Arrange
+        var auto = PropertyHistoryChartModel.Periods[0];
+        var zone = TimeZoneInfo.FindSystemTimeZoneById("Europe/Zurich");
+
+        // Act
+        var bucket = PropertyHistoryChartModel.ResolveBucket(auto, TimeSpan.FromDays(rangeDays), zone, isBars: true);
+
+        // Assert
+        Assert.Equal(HistoryBucket.Calendar(expected, zone), bucket);
+    }
+
+    [Fact]
+    public void WhenResolveBucketAutoForLinesSpansADay_ThenItStaysFixed()
+    {
+        // Act
+        var bucket = PropertyHistoryChartModel.ResolveBucket(
+            PropertyHistoryChartModel.Periods[0], TimeSpan.FromDays(365), TimeZoneInfo.Utc);
+
+        // Assert
+        Assert.Equal(HistoryBucket.Fixed(TimeSpan.FromDays(7)), bucket);
     }
 
     [Fact]
@@ -376,7 +609,7 @@ public class PropertyHistoryChartModelTests
         var none = PropertyHistoryChartModel.Periods.Single(period => period.Label == "None (raw samples)");
 
         // Act
-        var bucket = PropertyHistoryChartModel.ResolveBucket(none, TimeSpan.FromHours(1));
+        var bucket = PropertyHistoryChartModel.ResolveBucket(none, TimeSpan.FromHours(1), TimeZoneInfo.Utc);
 
         // Assert
         Assert.Null(bucket);
@@ -389,10 +622,10 @@ public class PropertyHistoryChartModelTests
         var fiveMinutes = PropertyHistoryChartModel.Periods.Single(period => period.Label == "5m");
 
         // Act
-        var bucket = PropertyHistoryChartModel.ResolveBucket(fiveMinutes, TimeSpan.FromHours(24));
+        var bucket = PropertyHistoryChartModel.ResolveBucket(fiveMinutes, TimeSpan.FromHours(24), TimeZoneInfo.Utc);
 
         // Assert
-        Assert.Equal(TimeSpan.FromMinutes(5), bucket);
+        Assert.Equal(HistoryBucket.Fixed(TimeSpan.FromMinutes(5)), bucket);
     }
 
     // Treats a wall-clock pick as already being in UTC, isolating the day-inclusion logic from time-zone conversion.
@@ -462,6 +695,218 @@ public class PropertyHistoryChartModelTests
     {
         HistoryAggregations.Last, HistoryAggregations.First, HistoryAggregations.SampleAverage,
         HistoryAggregations.TimeWeightedAverage, HistoryAggregations.Minimum, HistoryAggregations.Maximum,
-        HistoryAggregations.Sum, HistoryAggregations.Count, HistoryAggregations.StandardDeviation
+        HistoryAggregations.Sum, HistoryAggregations.Count, HistoryAggregations.StandardDeviation, HistoryAggregations.Delta
     };
+
+    [Fact]
+    public void WhenRangePresetsAreListed_ThenTheyGoFromTheShortestToTheLongest()
+    {
+        // Act
+        var shortNames = PropertyHistoryChartModel.RangePresets.Select(preset => preset.ShortName).ToArray();
+
+        // Assert
+        Assert.Equal(["1h", "6h", "24h", "7d", "30d", "90d", "1y"], shortNames);
+        Assert.Equal("Last hour", PropertyHistoryChartModel.RangePresets[0].Label);
+    }
+
+    [Theory]
+    [InlineData("1h", 1)]
+    [InlineData("6h", 6)]
+    [InlineData("24h", 24)]
+    [InlineData("7d", 168)]
+    [InlineData("30d", 720)]
+    [InlineData("24H", 24)]
+    public void WhenRangeShortNameIsKnown_ThenTryGetRangeReturnsItsSpan(string shortName, int expectedHours)
+    {
+        // Act
+        var found = PropertyHistoryChartModel.TryGetRange(shortName, out var range);
+
+        // Assert
+        Assert.True(found);
+        Assert.Equal(TimeSpan.FromHours(expectedHours), range);
+    }
+
+    [Theory]
+    [InlineData("2h")]
+    [InlineData("Custom")]
+    [InlineData("")]
+    [InlineData(null)]
+    public void WhenRangeShortNameIsUnknown_ThenTryGetRangeFails(string? shortName)
+    {
+        // Act
+        var found = PropertyHistoryChartModel.TryGetRange(shortName, out _);
+
+        // Assert
+        Assert.False(found);
+    }
+
+    [Theory]
+    [InlineData("Auto", true, false, null)]
+    [InlineData("Raw", false, true, null)]
+    [InlineData("raw", false, true, null)]
+    [InlineData("1s", false, false, 1)]
+    [InlineData("60s", false, false, 60)]
+    [InlineData("5m", false, false, 300)]
+    [InlineData("24h", false, false, 86400)]
+    public void WhenPeriodShortNameIsKnown_ThenTryGetPeriodReturnsThePeriod(
+        string shortName, bool expectedIsAuto, bool expectedIsRaw, int? expectedBucketSeconds)
+    {
+        // Arrange
+        TimeSpan? expectedBucket = expectedBucketSeconds is { } seconds ? TimeSpan.FromSeconds(seconds) : null;
+
+        // Act
+        var found = PropertyHistoryChartModel.TryGetPeriod(shortName, out var period);
+
+        // Assert
+        Assert.True(found);
+        Assert.Equal(expectedIsAuto, period.IsAuto);
+        Assert.Equal(expectedIsRaw, period.IsRaw);
+        Assert.Equal(expectedBucket, period.Bucket);
+    }
+
+    [Theory]
+    [InlineData("2m")]
+    [InlineData("None")]
+    [InlineData("")]
+    [InlineData(null)]
+    public void WhenPeriodShortNameIsUnknown_ThenTryGetPeriodFails(string? shortName)
+    {
+        // Act
+        var found = PropertyHistoryChartModel.TryGetPeriod(shortName, out _);
+
+        // Assert
+        Assert.False(found);
+    }
+
+    [Fact]
+    public void WhenEveryPeriodIsLookedUpByItsShortName_ThenItIsFoundAndTheNamesAreDistinct()
+    {
+        // Act & Assert
+        Assert.All(PropertyHistoryChartModel.Periods, period =>
+        {
+            Assert.True(PropertyHistoryChartModel.TryGetPeriod(period.ShortName, out var match));
+            Assert.Equal(period, match);
+        });
+        Assert.Equal(
+            PropertyHistoryChartModel.Periods.Count,
+            PropertyHistoryChartModel.Periods.Select(period => period.ShortName.ToUpperInvariant()).Distinct().Count());
+    }
+
+    [Theory]
+    [InlineData("Maximum", HistoryAggregations.Maximum)]
+    [InlineData("timeweightedaverage", HistoryAggregations.TimeWeightedAverage)]
+    [InlineData("STANDARDDEVIATION", HistoryAggregations.StandardDeviation)]
+    [InlineData("average", HistoryAggregations.TimeWeightedAverage)]
+    [InlineData("delta", HistoryAggregations.Delta)]
+    public void WhenAnAggregationNameIsKnownInAnyCase_ThenTryGetAggregationReturnsItsIdentifier(string name, string expected)
+    {
+        // Act
+        var found = PropertyHistoryChartModel.TryGetAggregation(name, out var aggregation);
+
+        // Assert
+        Assert.True(found);
+        Assert.Equal(expected, aggregation);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("Median")]
+    public void WhenAnAggregationNameIsUnknown_ThenTryGetAggregationFails(string? name)
+    {
+        // Act
+        var found = PropertyHistoryChartModel.TryGetAggregation(name, out _);
+
+        // Assert
+        Assert.False(found);
+    }
+
+    [Fact]
+    public void WhenTheDialogOpensWithoutSettings_ThenItShowsTheLastHourAutoAndTheFirstOfferedAggregation()
+    {
+        // Act
+        var selection = PropertyHistoryChartModel.GetInitialSelection(null, NumberAggregations, isDiscrete: false);
+
+        // Assert
+        Assert.Equal(new PropertyHistoryChartModel.DialogSelection(0, 0, HistoryAggregations.TimeWeightedAverage), selection);
+    }
+
+    [Fact]
+    public void WhenTheDialogOfADiscretePropertyOpensWithoutSettings_ThenItShowsRawSamplesAndTheLastValue()
+    {
+        // Arrange
+        string[] offered = [HistoryAggregations.Last, HistoryAggregations.First, HistoryAggregations.Count];
+
+        // Act
+        var selection = PropertyHistoryChartModel.GetInitialSelection(null, offered, isDiscrete: true);
+
+        // Assert
+        Assert.True(PropertyHistoryChartModel.Periods[selection.PeriodIndex].IsRaw);
+        Assert.Equal(HistoryAggregations.Last, selection.Aggregation);
+    }
+
+    [Fact]
+    public void WhenTheDialogOpensWithTheSettingsOfAChart_ThenItSelectsThePresetThePeriodAndTheAggregation()
+    {
+        // Arrange
+        PropertyHistoryChartModel.TryGetPeriod("10m", out var period);
+        var settings = new PropertyHistoryDialogSettings(TimeSpan.FromHours(6), period, HistoryAggregations.Maximum);
+
+        // Act
+        var selection = PropertyHistoryChartModel.GetInitialSelection(settings, NumberAggregations, isDiscrete: false);
+
+        // Assert
+        Assert.Equal("Last 6 hours", PropertyHistoryChartModel.RangePresets[selection.RangeIndex].Label);
+        Assert.Equal("10m", PropertyHistoryChartModel.Periods[selection.PeriodIndex].ShortName);
+        Assert.Equal(HistoryAggregations.Maximum, selection.Aggregation);
+    }
+
+    [Theory]
+    [InlineData("Auto")]
+    [InlineData("Raw")]
+    public void WhenTheDialogOpensWithAnAutoOrRawPeriod_ThenItSelectsThatPeriod(string shortName)
+    {
+        // Arrange
+        PropertyHistoryChartModel.TryGetPeriod(shortName, out var period);
+
+        // Act
+        var selection = PropertyHistoryChartModel.GetInitialSelection(
+            new PropertyHistoryDialogSettings(Period: period), NumberAggregations, isDiscrete: false);
+
+        // Assert
+        Assert.Equal(period, PropertyHistoryChartModel.Periods[selection.PeriodIndex]);
+    }
+
+    [Theory]
+    [InlineData(30, "Last hour")]
+    [InlineData(3 * 60, "Last 6 hours")]
+    [InlineData(60 * 24 * 60, "Last 90 days")]
+    [InlineData(60 * 24 * 400, "Last year")]
+    public void WhenTheDialogOpensWithARangeThatIsNoPreset_ThenItSelectsTheShortestPresetAtLeastAsLongOrTheLongest(
+        int rangeMinutes, string expectedLabel)
+    {
+        // Arrange
+        var settings = new PropertyHistoryDialogSettings(TimeSpan.FromMinutes(rangeMinutes));
+
+        // Act
+        var selection = PropertyHistoryChartModel.GetInitialSelection(settings, NumberAggregations, isDiscrete: false);
+
+        // Assert
+        Assert.Equal(expectedLabel, PropertyHistoryChartModel.RangePresets[selection.RangeIndex].Label);
+    }
+
+    [Fact]
+    public void WhenTheDialogOfACounterOpensWithSum_ThenItSelectsItsDefault()
+    {
+        // Arrange
+        var offered = PropertyHistoryChartModel.GateAggregations(
+            HistoryColumns.GetValueColumnFor(typeof(double)), isCumulative: true, new HashSet<string>(HistoryAggregations.All));
+        var settings = new PropertyHistoryDialogSettings(Aggregation: HistoryAggregations.Sum);
+
+        // Act
+        var selection = PropertyHistoryChartModel.GetInitialSelection(settings, offered, isDiscrete: false);
+
+        // Assert
+        Assert.Equal(HistoryAggregations.Last, selection.Aggregation);
+    }
 }

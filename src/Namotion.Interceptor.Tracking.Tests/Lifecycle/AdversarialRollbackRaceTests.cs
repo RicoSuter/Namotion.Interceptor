@@ -49,7 +49,7 @@ public class AdversarialRollbackRaceTests
                 return;
             }
 
-            mutationException = Record.Exception(() => holder!.Children = new List<Person> { foreignChild });
+            mutationException = Record.Exception(() => holder.Children = new List<Person> { foreignChild });
             mutationApplied.Set();
         }) { IsBackground = true };
 

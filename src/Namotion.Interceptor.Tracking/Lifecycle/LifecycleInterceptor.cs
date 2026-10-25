@@ -849,5 +849,36 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         return _graph.GetParents(subject);
     }
 
+    /// <summary>
+    /// Runs <paramref name="whenAttached"/> while the subject is provably in this interceptor's object
+    /// graph, holding the topology gate that serializes graph mutation for the duration, and reports
+    /// whether it ran.
+    /// </summary>
+    /// <remarks>
+    /// A callback rather than a plain predicate, because the answer is only usable while it still
+    /// holds: a caller that reads membership and then acts on it has released the gate in between, and
+    /// a graph mutation that lands in that gap makes the action land on the opposite answer. Anything
+    /// derived from membership therefore has to be written here.
+    /// <para>
+    /// The callback runs under the topology gate, so it must not block, must not mutate the graph, and
+    /// must not wait on anything that does. The gate is re-entrant on the calling thread, so an
+    /// <see cref="ILifecycleHandler"/> may reach this while being invoked.
+    /// </para>
+    /// </remarks>
+    /// <param name="subject">The subject.</param>
+    /// <param name="whenAttached">Runs only if the subject is attached.</param>
+    /// <returns>True when the subject was attached and the callback ran.</returns>
+    public bool TryRunWhileAttached(IInterceptorSubject subject, Action whenAttached)
+    {
+        using var gate = EnterGate();
+        if (!_graph.IsOwned(subject))
+        {
+            return false;
+        }
+
+        whenAttached();
+        return true;
+    }
+
     #endregion
 }

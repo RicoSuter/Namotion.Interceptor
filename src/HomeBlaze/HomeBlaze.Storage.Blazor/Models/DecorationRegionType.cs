@@ -11,7 +11,7 @@ public enum DecorationRegionType
     Expression,
 
     /// <summary>
-    /// A subject block like ```subject(name) ... ```.
+    /// The head line of a block with its type name and arguments, together with its json fence.
     /// </summary>
     SubjectBlock
 }

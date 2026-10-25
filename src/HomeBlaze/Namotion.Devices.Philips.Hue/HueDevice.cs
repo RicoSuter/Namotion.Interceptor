@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Common;
@@ -57,18 +58,22 @@ public partial class HueDevice :
 
     [Derived]
     [State]
+    [Category("Device")]
     public bool? IsCertified => Device?.ProductData?.Certified;
 
     [Derived]
     [State]
+    [Category("Device")]
     public string? ProductName => Device?.ProductData?.ProductName;
 
     [Derived]
     [State]
+    [Category("Device")]
     public string? HardwarePlatformType => Device?.ProductData?.HardwarePlatformType;
 
     [Derived]
     [State]
+    [Category("Device")]
     public string? SoftwareVersion => Device?.ProductData?.SoftwareVersion;
 
     // IDeviceInfo

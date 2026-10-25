@@ -86,10 +86,10 @@ public class IncomingOccurrenceRemovalTests
     {
         public bool ThrowOnComparison { get; set; }
         public override int GetHashCode() => value;
-        public override bool Equals(object? other)
+        public override bool Equals(object? obj)
         {
             if (ThrowOnComparison) throw new InvalidOperationException("Ownership mutation invoked a user key comparison.");
-            return other is ThrowingKey key && key.GetHashCode() == value;
+            return obj is ThrowingKey key && key.GetHashCode() == value;
         }
     }
 }

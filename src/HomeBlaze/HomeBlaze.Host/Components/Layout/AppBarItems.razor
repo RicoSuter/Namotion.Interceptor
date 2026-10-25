@@ -1,0 +1,101 @@
+@using System.Collections.Immutable
+@using HomeBlaze.Components.Abstractions.Pages
+@using Microsoft.Extensions.Logging
+
+@inject NavigationItemResolver NavigationResolver
+@inject NavigationManager NavigationManager
+@inject ILogger<AppBarItems> Logger
+
+@implements IDisposable
+
+@{
+    var items = GetItems();
+}
+
+@foreach (var item in items.Where(item => item.Alignment == AppBarAlignment.Left))
+{
+    @RenderButton(item)
+}
+<MudSpacer/>
+@foreach (var item in items.Where(item => item.Alignment == AppBarAlignment.Right))
+{
+    @RenderButton(item)
+}
+<AppBarMenu Pages="@items.Where(item => item.Alignment == AppBarAlignment.Menu).ToList()"
+            IsDarkMode="@IsDarkMode" OnToggleDarkMode="@OnToggleDarkMode"/>
+
+@code {
+    // A parameter for the same reason as the one of NavMenu: the root can appear after the first render.
+    [Parameter]
+    public IInterceptorSubject? Root { get; set; }
+
+    /// <summary>Whether the dark mode is on.</summary>
+    [Parameter]
+    public bool IsDarkMode { get; set; }
+
+    /// <summary>Raised when the dark mode entry of the menu is clicked.</summary>
+    [Parameter]
+    public EventCallback OnToggleDarkMode { get; set; }
+
+    private static readonly TimeSpan RefreshInterval = TimeSpan.FromSeconds(5);
+
+    private Timer? _refreshTimer;
+    private ImmutableArray<NavigationItem> _items = [];
+
+    protected override void OnInitialized()
+    {
+        // Refreshed as NavMenu is, so that a change of the tree or of metadata shows, and rendered only on a change.
+        _refreshTimer = new Timer(_ => InvokeAsync(RefreshItems),
+            null, RefreshInterval, RefreshInterval);
+
+        NavigationManager.LocationChanged += OnLocationChanged;
+    }
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void RefreshItems()
+    {
+        var shownItems = _items;
+        if (GetItems() != shownItems)
+            StateHasChanged();
+    }
+
+    private ImmutableArray<NavigationItem> GetItems()
+    {
+        if (Root == null)
+            return [];
+
+        try
+        {
+            // Shared with every other tab, so that the tree is not walked once per tab. At most half an interval old,
+            // so that a tab shows a change within one and a half intervals.
+            _items = NavigationResolver.GetRecentAppBarItems(Root, RefreshInterval / 2);
+        }
+        catch (Exception exception)
+        {
+            // The graph changes on other threads while this reads it. An exception escaping here would end the
+            // circuit or fail the prerendering, also of the error page, so the previous items stay until the next render.
+            Logger.LogWarning(exception, "Error getting the top bar items");
+        }
+
+        return _items;
+    }
+
+    private bool IsActive(NavigationItem item) =>
+        item.IsPageUrlOf(NavigationManager.ToBaseRelativePath(NavigationManager.Uri));
+
+    private RenderFragment RenderButton(NavigationItem item) =>
+        @<MudIconButton Icon="@SubjectIconExtensions.ResolveMudBlazorIcon(item.Icon)"
+                        Href="@item.PageUrl"
+                        Color="@(IsActive(item) ? Color.Primary : Color.Inherit)"
+                        title="@item.Title"/>;
+
+    public void Dispose()
+    {
+        _refreshTimer?.Dispose();
+        NavigationManager.LocationChanged -= OnLocationChanged;
+    }
+}

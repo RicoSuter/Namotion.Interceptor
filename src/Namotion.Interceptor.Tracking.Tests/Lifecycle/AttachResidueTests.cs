@@ -78,7 +78,7 @@ public class AttachResidueTests
                 return;
             }
 
-            mutationException = Record.Exception(() => holder!.Children = new List<Person> { foreignChild });
+            mutationException = Record.Exception(() => holder.Children = new List<Person> { foreignChild });
             mutationApplied.Set();
         })
         {
@@ -149,7 +149,7 @@ public class AttachResidueTests
                 return;
             }
 
-            holder!.Children = new List<Person> { legalSibling, foreignChild };
+            holder.Children = new List<Person> { legalSibling, foreignChild };
             mutationApplied.Set();
         })
         {

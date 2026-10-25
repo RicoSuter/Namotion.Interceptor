@@ -379,7 +379,7 @@ public class MqttConnectionMonitorTests
             "monitor did not verify the disconnect signal with a ping");
 
         // Assert: disconnect handler should NOT be called because ping confirmed healthy
-        Assert.True(logger.ContainsMessage(StaleSignalIgnoredMessage),
+        Assert.True(HasLogged(logger, StaleSignalIgnoredMessage),
             "the stale signal was not reported as ignored");
         Assert.Equal(0, disconnectedCount);
         client.Verify(c => c.ConnectAsync(It.IsAny<MqttClientOptions>(), It.IsAny<CancellationToken>()), Times.Never);
@@ -417,7 +417,7 @@ public class MqttConnectionMonitorTests
         // Act: run until the breaker refuses an attempt
         await RunMonitorUntilAsync(
             monitor,
-            () => logger.ContainsMessage("Circuit breaker open"),
+            () => HasLogged(logger, "Circuit breaker open"),
             "circuit breaker never blocked a reconnect attempt");
 
         // Assert: the threshold number of attempts reaches the client, everything after it is blocked
@@ -514,7 +514,7 @@ public class MqttConnectionMonitorTests
 
         // Assert: the stale signal was drained, so the loop went back to periodic health checks instead of
         // processing a signal it had raised itself, and the client never saw a second disconnect.
-        Assert.False(logger.ContainsMessage(StaleSignalIgnoredMessage),
+        Assert.False(HasLogged(logger, StaleSignalIgnoredMessage),
             "the disconnect signal raised during reconnection was not drained");
         Assert.Equal(1, disconnectedCount);
     }
@@ -590,28 +590,7 @@ public class MqttConnectionMonitorTests
             client.Object, configuration, optionsBuilder, onReconnected, onDisconnected, onError, null!));
     }
 
-    /// <summary>
-    /// Captures log messages so a test can observe a monitor decision that leaves no trace on the mocked client.
-    /// </summary>
-    private sealed class RecordingLogger : ILogger
-    {
-        private readonly ConcurrentQueue<string> _messages = new();
-
-        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
-
-        public bool IsEnabled(LogLevel logLevel) => true;
-
-        public void Log<TState>(
-            LogLevel logLevel,
-            EventId eventId,
-            TState state,
-            Exception? exception,
-            Func<TState, Exception?, string> formatter)
-        {
-            _messages.Enqueue(formatter(state, exception));
-        }
-
-        public bool ContainsMessage(string fragment)
-            => _messages.Any(message => message.Contains(fragment, StringComparison.Ordinal));
-    }
+    // A monitor decision leaves no trace on the mocked client, only in the log.
+    private static bool HasLogged(RecordingLogger logger, string fragment)
+        => logger.Entries.Any(entry => entry.Message.Contains(fragment, StringComparison.Ordinal));
 }

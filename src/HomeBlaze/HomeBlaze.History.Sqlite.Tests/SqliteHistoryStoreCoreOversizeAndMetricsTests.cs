@@ -19,8 +19,6 @@ public sealed class SqliteHistoryStoreCoreOversizeAndMetricsTests : IDisposable
     {
         try { if (Directory.Exists(_directory)) Directory.Delete(_directory, recursive: true); }
         catch { /* best effort temp cleanup */ }
-        try { if (File.Exists(_directory)) File.Delete(_directory); }
-        catch { /* the failure-injection test replaces the directory with a file */ }
     }
 
     [Fact]
@@ -78,26 +76,33 @@ public sealed class SqliteHistoryStoreCoreOversizeAndMetricsTests : IDisposable
         Assert.True(core.EstimatedStorageBytes > 0);
     }
 
+    // Occupies the partition's file path with a directory, which SQLite cannot open as a database on
+    // any platform. The database directory itself cannot be swapped out instead: the store holds
+    // metadata.db open from construction, and Windows refuses to delete a directory with an open file.
+    private string BlockPartitionFile(DateTimeOffset timestamp)
+    {
+        var partitionFilePath = Path.Combine(
+            _directory, SqlitePartition.PartitionKey(timestamp, PartitionInterval.Weekly) + ".db");
+        Directory.CreateDirectory(partitionFilePath);
+        return partitionFilePath;
+    }
+
     [Fact]
     public async Task WhenFlushThrows_ThenPendingSamplesAreRetainedForRetry()
     {
-        // Arrange - construct the core (its directory is created), then replace the directory with a
-        // FILE at the same path. OpenPartition opens "Data Source=<file>\<key>.db", which cannot open
-        // because its parent is a file, so the flush write throws deterministically on Windows.
+        // Arrange - block the partition file so the flush write throws deterministically
         using var core = NewCore();
         core.Record("/a/V", Base.AddSeconds(1), 1d, typeof(double));
         core.Record("/a/V", Base.AddSeconds(2), 2d, typeof(double));
-        Directory.Delete(_directory, recursive: true);
-        await File.WriteAllTextAsync(_directory, "collision");
+        var blockedPartitionFilePath = BlockPartitionFile(Base.AddSeconds(1));
 
         // Act & Assert - the flush throws and records the error, but does NOT drop the batch
         await Assert.ThrowsAnyAsync<SqliteException>(() => core.FlushAsync(CancellationToken.None));
         Assert.NotNull(core.LastError);
         Assert.Equal(2, core.QueueDepth);
 
-        // Replace the colliding file with a real directory so a subsequent flush can persist the batch
-        File.Delete(_directory);
-        Directory.CreateDirectory(_directory);
+        // Unblock the partition file so a subsequent flush can persist the batch
+        Directory.Delete(blockedPartitionFilePath);
         await core.FlushAsync(CancellationToken.None);
 
         Assert.Equal(0, core.QueueDepth);
@@ -109,18 +114,16 @@ public sealed class SqliteHistoryStoreCoreOversizeAndMetricsTests : IDisposable
     [Fact]
     public async Task WhenFlushThrows_ThenPendingMovesAreRetainedForRetry()
     {
-        // Arrange - queue a move and a sample, then collide the directory with a file (see above).
+        // Arrange - queue a move and a sample, then block the sample's partition file
         using var core = NewCore();
         core.Record("/a/V", Base.AddSeconds(1), 1d, typeof(double));
         core.RecordMove(Base.AddSeconds(2), "/a/V", "/b/V");
-        Directory.Delete(_directory, recursive: true);
-        await File.WriteAllTextAsync(_directory, "collision");
+        var blockedPartitionFilePath = BlockPartitionFile(Base.AddSeconds(1));
 
         // Act & Assert - the flush throws; the move is not dropped, so the later read sees it
         await Assert.ThrowsAnyAsync<SqliteException>(() => core.FlushAsync(CancellationToken.None));
 
-        File.Delete(_directory);
-        Directory.CreateDirectory(_directory);
+        Directory.Delete(blockedPartitionFilePath);
         await core.FlushAsync(CancellationToken.None);
 
         // The move re-routes the sample recorded under /a/V to the queried current path /b/V.

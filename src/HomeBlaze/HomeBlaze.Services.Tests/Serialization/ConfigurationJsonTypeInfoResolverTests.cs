@@ -2,6 +2,7 @@ using System.Text.Json;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Services.Lifecycle;
 using HomeBlaze.Services.Serialization;
+using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
@@ -33,7 +34,7 @@ public class ConfigurationJsonTypeInfoResolverTests
 
         _options = new JsonSerializerOptions
         {
-            TypeInfoResolver = new ConfigurationJsonTypeInfoResolver(typeProvider),
+            TypeInfoResolver = new ConfigurationJsonTypeInfoResolver(typeProvider, new ServiceCollection().BuildServiceProvider()),
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
             WriteIndented = false
         };

@@ -20,5 +20,5 @@ public interface IPowerSensor
     /// The total energy consumed.
     /// </summary>
     [State(Unit = StateUnit.WattHour, IsCumulative = true, Position = 301)]
-    decimal? EnergyConsumed { get; }
+    decimal? TotalConsumedEnergy { get; }
 }

@@ -4,7 +4,7 @@ This file provides guidance to AI coding agents (Claude Code, Codex, GitHub Copi
 
 ## Overview
 
-Namotion.Interceptor is a .NET library for creating trackable object models through automatic property interception using C# 13 partial properties and source generation. It enables property change tracking, derived property updates, and object graph management with zero runtime reflection.
+Namotion.Interceptor is a .NET library for creating trackable object models through automatic property interception using C# partial properties and source generation. It enables property change tracking, derived property updates, and object graph management with zero runtime reflection.
 
 ## Priorities
 
@@ -41,9 +41,9 @@ Always read [Benchmarking](docs/benchmarking.md) before running or interpreting 
 ## Architecture
 
 ### Core Components
-- **Core Library**: `Namotion.Interceptor` - Base interfaces and execution engine (.NET Standard 2.0)
+- **Core Library**: `Namotion.Interceptor` - Base interfaces and execution engine
 - **Source Generator**: `Namotion.Interceptor.Generator` - Compile-time code generation for `[InterceptorSubject]` classes
-- **Extension Libraries**: Tracking, Registry, Validation, Hosting, Sources, Dynamic (.NET 9.0)
+- **Extension Libraries**: Tracking, Registry, Validation, Hosting, Sources, Dynamic
 
 ### Key Design Patterns
 - **Chain of Responsibility**: `IReadInterceptor`/`IWriteInterceptor` middleware chain
@@ -67,7 +67,7 @@ docs/                                 # Feature and connector documentation
 
 ## Language Requirements
 
-This codebase requires **C# 13 preview features** for partial properties. The `[InterceptorSubject]` attribute triggers source generation that creates interception logic at compile-time.
+This codebase requires C# 13 or later for partial properties; .NET 10's default C# 14 covers it. The `[InterceptorSubject]` attribute triggers source generation that creates interception logic at compile-time.
 
 ### Basic Usage Pattern
 ```csharp
@@ -98,10 +98,17 @@ The library uses a fluent configuration API:
 ## Build Configuration
 
 - **Global Settings**: `Directory.Build.props` with nullable enabled, warnings as errors
-- **Target Frameworks**: .NET Standard 2.0 (core), .NET 9.0 (extensions)
+- **Target Frameworks**: `net10.0` for every project, set once in `src/Directory.Build.props`; the Generator assembly alone targets `netstandard2.0` because compilers built on .NET Framework load it. Package versions live in `src/Directory.Packages.props`.
 - **Package Version**: released on NuGet, breaking changes are fine when justified but need user approval
 - **CI/CD**: GitHub Actions with xUnit testing, coverage reporting, and NuGet publishing
 - **Native AOT**: full compatibility where possible is the target (#516). New code prefers static alternatives to runtime code generation and reflection, and existing sites are fixed when a change already touches them.
+- **InternalsVisibleTo**: only for test and benchmark projects. A library uses another library's public API; the existing exceptions are removed when that code is touched next.
+
+## Analyzer Policy
+
+Sonar diagnostics (`S`-prefixed IDs) may appear as build errors under warnings-as-errors. Preserve correctness, performance, and intentional test scenarios over analyzer suggestions. Do not add complexity, allocations, or CPU overhead merely to satisfy a rule; propose a narrow, documented exception instead. Compiler errors and correctness defects still require fixes. Get user approval before adding or broadening exceptions; prior approval remains valid. Document shared exceptions and reuse guidance in [src/.editorconfig](src/.editorconfig), and findings or deferred work in the main rollout issue.
+
+New projects reference `SonarAnalyzer.CSharp` with `PrivateAssets="all"`, as `Namotion.Interceptor.Tracking` does; Sonar is opt-in per project, not global.
 
 ## Key Dependencies
 
@@ -131,11 +138,13 @@ The library has specialized support for:
 ## Coding Style
 
 - **Avoid abbreviations** in variable and parameter names unless the name is very long. Use descriptive names (e.g., `attribute` not `attr`).
+- **US English spelling** in code, comments and documentation (e.g., `color`, `behavior`, `canceled`, `center`).
 - **No em dashes** in docs, READMEs, or PR descriptions. Restructure into plain sentences instead.
 - **No hard wrapping** in markdown. Keep a paragraph on one line instead of breaking at a column.
 - **Inline comments: the why a reader cannot derive.** Length is earned by preventing a plausible wrong edit, such as a lock discipline, a pooled buffer that must not be read after release, or an ordering constraint. It is not earned by defending a decision against alternatives, which belongs in the pull request or `docs/design/`. Never restate the line below.
 - **XML docs state the contract**, not the reasoning. `<remarks>` is for a caveat a caller must act on.
 - **One canonical location per concept**, cross-referenced. Three copies drift.
+- **No application references in the library.** Code, comments, tests and docs outside `src/HomeBlaze` never mention HomeBlaze; describe the scenario generically instead.
 
 ## Git Rules
 

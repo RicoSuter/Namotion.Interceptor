@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Devices.Ecowitt.Models;
 using Xunit;
@@ -30,7 +31,7 @@ public class EcowittGatewayTests
         };
 
         // Act
-        gateway.UpdateFromLiveData(data);
+        gateway.Update(data);
 
         // Assert
         Assert.NotNull(gateway.OutdoorSensor);
@@ -58,7 +59,7 @@ public class EcowittGatewayTests
         };
 
         // Act
-        gateway.UpdateFromLiveData(data);
+        gateway.Update(data);
 
         // Assert
         Assert.NotNull(gateway.IndoorSensor);
@@ -82,7 +83,7 @@ public class EcowittGatewayTests
         };
 
         // Act
-        gateway.UpdateFromLiveData(data);
+        gateway.Update(data);
 
         // Assert
         Assert.NotNull(gateway.RainGauge);
@@ -92,13 +93,98 @@ public class EcowittGatewayTests
     }
 
     [Fact]
+    public void WhenGw2000RainParsed_ThenGaugeExposesEachBucket()
+    {
+        // Arrange
+        var gateway = CreateGateway();
+        var data = EcowittClient.ParseLiveData(JsonSerializer.Deserialize<JsonElement>(EcowittClientTests.Gw2000RainJson));
+
+        // Act
+        gateway.Update(data);
+
+        // Assert
+        var gauge = gateway.RainGauge!;
+        Assert.Equal(0.3m, gauge.HourlyRain);
+        Assert.Equal(2.4m, gauge.Last24HoursRain);
+        Assert.Equal(0.9m, gauge.DailyRain);
+        Assert.Equal(14.8m, gauge.WeeklyRain);
+        Assert.Equal(20.5m, gauge.MonthlyRain);
+        Assert.Equal(506.1m, gauge.YearlyRain);
+        Assert.Equal(506.1m, gauge.TotalRain);
+    }
+
+    [Fact]
+    public void WhenStatePersistedBeforeIdRemap_ThenTotalRainDoesNotJump()
+    {
+        // Arrange
+        // The previous mapping read 0x13 as MonthlyRain and, without 0x14, accumulated it.
+        var gateway = CreateGateway();
+        gateway.RainCumulativeOffset = 120m;
+        gateway.RainLastMonthlyValue = 506.1m;
+        gateway.PiezoRainCumulativeOffset = 40m;
+        gateway.PiezoRainLastMonthlyValue = 294.9m;
+        var data = EcowittClient.ParseLiveData(JsonSerializer.Deserialize<JsonElement>(EcowittClientTests.Gw2000RainJson));
+
+        // Act
+        var configChanged = gateway.Update(data);
+
+        // Assert
+        Assert.False(configChanged);
+        Assert.Equal(626.1m, gateway.RainGauge!.TotalRain);
+        Assert.Equal(120m, gateway.RainCumulativeOffset);
+        Assert.Equal(334.9m, gateway.PiezoRainGauge!.TotalRain);
+        Assert.Equal(40m, gateway.PiezoRainCumulativeOffset);
+    }
+
+    [Fact]
+    public void WhenGatewayReportsTotalRain_ThenTotalRainAccumulatesFromItInsteadOfYearly()
+    {
+        // Arrange
+        // The previous mapping read 0x14 as YearlyRain and accumulated it.
+        var gateway = CreateGateway();
+        gateway.RainLastMonthlyValue = 1834.7m;
+
+        // Act
+        gateway.Update(new EcowittLiveData
+        {
+            Rain = new EcowittRainData { MonthlyRain = 20.5m, YearlyRain = 506.1m, TotalRain = 1840.2m }
+        });
+
+        // Assert
+        Assert.Equal(1840.2m, gateway.RainGauge!.TotalRain);
+        Assert.Equal(0m, gateway.RainCumulativeOffset);
+        Assert.Equal(1840.2m, gateway.RainLastMonthlyValue);
+    }
+
+    [Fact]
+    public void WhenYearlyRainMissingForOnePoll_ThenShorterBucketIsNotCountedAsReset()
+    {
+        // Arrange
+        var gateway = CreateGateway();
+        gateway.RainCumulativeOffset = 120m;
+        gateway.RainLastMonthlyValue = 506.1m;
+
+        // Act
+        var configChanged = gateway.Update(new EcowittLiveData
+        {
+            Rain = new EcowittRainData { DailyRain = 0.9m, WeeklyRain = 14.8m, MonthlyRain = 20.5m }
+        });
+
+        // Assert
+        Assert.False(configChanged);
+        Assert.Null(gateway.RainGauge!.TotalRain);
+        Assert.Equal(120m, gateway.RainCumulativeOffset);
+        Assert.Equal(506.1m, gateway.RainLastMonthlyValue);
+    }
+
+    [Fact]
     public void WhenYearlyRainIncreases_ThenTotalRainAccumulates()
     {
         // Arrange
         var gateway = CreateGateway();
 
         // Act — first poll: yearly rain is 50mm
-        gateway.UpdateFromLiveData(new EcowittLiveData
+        gateway.Update(new EcowittLiveData
         {
             Rain = new EcowittRainData { YearlyRain = 50m }
         });
@@ -107,7 +193,7 @@ public class EcowittGatewayTests
         Assert.Equal(50m, gateway.RainGauge!.TotalRain);
 
         // Act — second poll: yearly rain increased to 60mm
-        gateway.UpdateFromLiveData(new EcowittLiveData
+        gateway.Update(new EcowittLiveData
         {
             Rain = new EcowittRainData { YearlyRain = 60m }
         });
@@ -121,14 +207,14 @@ public class EcowittGatewayTests
     {
         // Arrange
         var gateway = CreateGateway();
-        gateway.UpdateFromLiveData(new EcowittLiveData
+        gateway.Update(new EcowittLiveData
         {
             Rain = new EcowittRainData { YearlyRain = 150m }
         });
         Assert.Equal(150m, gateway.RainGauge!.TotalRain);
 
         // Act — year rolls over, yearly counter resets to 5mm
-        gateway.UpdateFromLiveData(new EcowittLiveData
+        gateway.Update(new EcowittLiveData
         {
             Rain = new EcowittRainData { YearlyRain = 5m }
         });
@@ -143,19 +229,19 @@ public class EcowittGatewayTests
     {
         // Arrange
         var gateway = CreateGateway();
-        gateway.UpdateFromLiveData(new EcowittLiveData
+        gateway.Update(new EcowittLiveData
         {
             Rain = new EcowittRainData { YearlyRain = 100m }
         });
 
         // Act — first reset
-        gateway.UpdateFromLiveData(new EcowittLiveData
+        gateway.Update(new EcowittLiveData
         {
             Rain = new EcowittRainData { YearlyRain = 20m }
         });
 
         // Act — second reset
-        gateway.UpdateFromLiveData(new EcowittLiveData
+        gateway.Update(new EcowittLiveData
         {
             Rain = new EcowittRainData { YearlyRain = 10m }
         });
@@ -180,7 +266,7 @@ public class EcowittGatewayTests
         };
 
         // Act
-        gateway.UpdateFromLiveData(data);
+        gateway.Update(data);
 
         // Assert
         Assert.Equal(2, gateway.ChannelSensors.Length);
@@ -198,7 +284,7 @@ public class EcowittGatewayTests
         {
             Channels = [new EcowittChannelData { Channel = 1, Temperature = 21.3m }]
         };
-        gateway.UpdateFromLiveData(data1);
+        gateway.Update(data1);
         var originalSensor = gateway.ChannelSensors[0];
 
         var data2 = new EcowittLiveData
@@ -207,7 +293,7 @@ public class EcowittGatewayTests
         };
 
         // Act
-        gateway.UpdateFromLiveData(data2);
+        gateway.Update(data2);
 
         // Assert
         Assert.Same(originalSensor, gateway.ChannelSensors[0]);
@@ -223,7 +309,7 @@ public class EcowittGatewayTests
         {
             Channels = [new EcowittChannelData { Channel = 1 }]
         };
-        gateway.UpdateFromLiveData(data1);
+        gateway.Update(data1);
         var originalSensor = gateway.ChannelSensors[0];
 
         var data2 = new EcowittLiveData
@@ -236,7 +322,7 @@ public class EcowittGatewayTests
         };
 
         // Act
-        gateway.UpdateFromLiveData(data2);
+        gateway.Update(data2);
 
         // Assert
         Assert.Equal(2, gateway.ChannelSensors.Length);
@@ -259,7 +345,7 @@ public class EcowittGatewayTests
         };
 
         // Act
-        gateway.UpdateFromLiveData(data);
+        gateway.Update(data);
 
         // Assert
         Assert.Single(gateway.ChannelSensors);
@@ -274,7 +360,7 @@ public class EcowittGatewayTests
         var data = new EcowittLiveData();
 
         // Act
-        gateway.UpdateFromLiveData(data);
+        gateway.Update(data);
 
         // Assert
         Assert.Null(gateway.OutdoorSensor);
@@ -294,7 +380,7 @@ public class EcowittGatewayTests
         {
             Outdoor = new EcowittOutdoorData { Temperature = 18.0m }
         };
-        gateway.UpdateFromLiveData(data1);
+        gateway.Update(data1);
         var original = gateway.OutdoorSensor;
 
         var data2 = new EcowittLiveData
@@ -303,7 +389,7 @@ public class EcowittGatewayTests
         };
 
         // Act
-        gateway.UpdateFromLiveData(data2);
+        gateway.Update(data2);
 
         // Assert
         Assert.Same(original, gateway.OutdoorSensor);
@@ -320,13 +406,12 @@ public class EcowittGatewayTests
             Lightning = new EcowittLightningData
             {
                 Distance = 15m,
-                StrikeCount = 3,
-                Battery = 5
+                StrikeCount = 3
             }
         };
 
         // Act
-        gateway.UpdateFromLiveData(data);
+        gateway.Update(data);
 
         // Assert
         Assert.NotNull(gateway.LightningSensor);
@@ -343,43 +428,38 @@ public class EcowittGatewayTests
         {
             Rain = new EcowittRainData { DailyRain = 3.8m }
         };
-        gateway.UpdateFromLiveData(data);
+        gateway.Update(data);
         Assert.NotNull(gateway.RainGauge);
 
         // Act
         gateway.HiddenSensors = ["rain"];
-        gateway.UpdateFromLiveData(data);
+        gateway.Update(data);
 
         // Assert
         Assert.Null(gateway.RainGauge);
     }
 
     [Fact]
-    public void WhenSensorInfoProvided_ThenMapsToCorrectSensors()
+    public void WhenOutdoorAndIndoorHiddenAfterCreation_ThenNulledOut()
     {
         // Arrange
         var gateway = CreateGateway();
-        var liveData = new EcowittLiveData
+        var data = new EcowittLiveData
         {
             Outdoor = new EcowittOutdoorData { Temperature = 18.0m },
-            Channels = [new EcowittChannelData { Channel = 1, Temperature = 21.0m }]
+            Indoor = new EcowittIndoorData { Temperature = 22.5m }
         };
-        gateway.UpdateFromLiveData(liveData);
-
-        var sensorsInfo = new[]
-        {
-            new EcowittSensorInfo { SensorId = "0x9637", TypeCode = 48, Rssi = -48 },
-            new EcowittSensorInfo { SensorId = "0xA6", TypeCode = 6, Rssi = -69 }
-        };
+        gateway.Update(data);
+        Assert.NotNull(gateway.OutdoorSensor);
+        Assert.NotNull(gateway.IndoorSensor);
 
         // Act
-        gateway.UpdateSensorInfo(sensorsInfo);
+        gateway.HiddenSensors = ["outdoor", "indoor"];
+        gateway.Update(data);
 
         // Assert
-        Assert.Equal("0x9637", gateway.OutdoorSensor!.SensorId);
-        Assert.Equal(-48, gateway.OutdoorSensor.SignalStrength);
-        Assert.Equal("0xA6", gateway.ChannelSensors[0].SensorId);
-        Assert.Equal(-69, gateway.ChannelSensors[0].SignalStrength);
+        Assert.Null(gateway.OutdoorSensor);
+        Assert.Null(gateway.IndoorSensor);
     }
 
     [Fact]
@@ -391,63 +471,15 @@ public class EcowittGatewayTests
         {
             Lightning = new EcowittLightningData { Distance = 15m }
         };
-        gateway.UpdateFromLiveData(data);
+        gateway.Update(data);
         Assert.NotNull(gateway.LightningSensor);
 
         // Act
         gateway.HiddenSensors = ["lightning"];
-        gateway.UpdateFromLiveData(data);
+        gateway.Update(data);
 
         // Assert
         Assert.Null(gateway.LightningSensor);
-    }
-
-    [Fact]
-    public void WhenSensorInfoHasIndoorBattery_ThenMapsToIndoorSensor()
-    {
-        // Arrange
-        var gateway = CreateGateway();
-        gateway.UpdateFromLiveData(new EcowittLiveData
-        {
-            Indoor = new EcowittIndoorData { Temperature = 19.3m }
-        });
-
-        var sensorsInfo = new[]
-        {
-            new EcowittSensorInfo { SensorId = "0xAB", TypeCode = 4, Rssi = -55, Battery = 0 }
-        };
-
-        // Act
-        gateway.UpdateSensorInfo(sensorsInfo);
-
-        // Assert
-        Assert.Equal("0xAB", gateway.IndoorSensor!.SensorId);
-        Assert.Equal(-55, gateway.IndoorSensor.SignalStrength);
-        Assert.Equal(1.0m, gateway.IndoorSensor.BatteryLevel); // binary: 0 = OK = full
-    }
-
-    [Fact]
-    public void WhenWs90SensorInfo_ThenPiezoRainGaugeGetsBattery()
-    {
-        // Arrange
-        var gateway = CreateGateway();
-        gateway.UpdateFromLiveData(new EcowittLiveData
-        {
-            Outdoor = new EcowittOutdoorData { Temperature = 18.0m },
-            PiezoRain = new EcowittRainData { DailyRain = 1.0m }
-        });
-
-        var sensorsInfo = new[]
-        {
-            new EcowittSensorInfo { SensorId = "0x9637", TypeCode = 48, Rssi = -48, Battery = 4 }
-        };
-
-        // Act
-        gateway.UpdateSensorInfo(sensorsInfo);
-
-        // Assert
-        Assert.Equal("0x9637", gateway.PiezoRainGauge!.SensorId);
-        Assert.Equal(0.8m, gateway.PiezoRainGauge.BatteryLevel); // 4/5 = 0.8
     }
 
     [Fact]
@@ -464,7 +496,7 @@ public class EcowittGatewayTests
         };
 
         // Act
-        gateway.UpdateFromLiveData(data);
+        gateway.Update(data);
 
         // Assert
         Assert.Equal("Living Room", gateway.ChannelSensors[0].Name);
@@ -485,7 +517,7 @@ public class EcowittGatewayTests
         };
 
         // Act
-        gateway.UpdateFromLiveData(data);
+        gateway.Update(data);
 
         // Assert
         Assert.Null(gateway.ChannelSensors[0].Name);
@@ -497,13 +529,13 @@ public class EcowittGatewayTests
     {
         // Arrange
         var gateway = CreateGateway();
-        gateway.UpdateFromLiveData(new EcowittLiveData
+        gateway.Update(new EcowittLiveData
         {
             Rain = new EcowittRainData { YearlyRain = 50m }
         });
 
         // Act — bucket value increased from 50 to 60
-        var configChanged = gateway.UpdateFromLiveData(new EcowittLiveData
+        var configChanged = gateway.Update(new EcowittLiveData
         {
             Rain = new EcowittRainData { YearlyRain = 60m }
         });
@@ -518,13 +550,13 @@ public class EcowittGatewayTests
     {
         // Arrange
         var gateway = CreateGateway();
-        gateway.UpdateFromLiveData(new EcowittLiveData
+        gateway.Update(new EcowittLiveData
         {
             Rain = new EcowittRainData { YearlyRain = 50m }
         });
 
         // Act — same value, no change
-        var configChanged = gateway.UpdateFromLiveData(new EcowittLiveData
+        var configChanged = gateway.Update(new EcowittLiveData
         {
             Rain = new EcowittRainData { YearlyRain = 50m }
         });
@@ -532,10 +564,4 @@ public class EcowittGatewayTests
         // Assert
         Assert.False(configChanged);
     }
-
-    private class TestHttpClientFactory : IHttpClientFactory
-    {
-        public HttpClient CreateClient(string name) => new();
-    }
-
 }

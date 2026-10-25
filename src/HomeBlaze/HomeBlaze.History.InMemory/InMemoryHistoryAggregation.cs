@@ -14,12 +14,12 @@ internal static class InMemoryHistoryAggregation
     public static bool IsNumeric(string aggregation) =>
         aggregation is HistoryAggregations.SampleAverage or HistoryAggregations.TimeWeightedAverage
             or HistoryAggregations.Minimum or HistoryAggregations.Maximum
-            or HistoryAggregations.Sum or HistoryAggregations.StandardDeviation;
+            or HistoryAggregations.Sum or HistoryAggregations.StandardDeviation or HistoryAggregations.Delta;
 
     public static HistoryPoint AggregateBucket(
         string aggregation,
         DateTimeOffset bucketStart,
-        DateTimeOffset bucketEnd,
+        HistoryCoverage measured,
         ReadOnlySpan<Sample> samples,
         bool isUlong,
         ref double? carriedNumber,
@@ -45,9 +45,12 @@ internal static class InMemoryHistoryAggregation
                     ? ToPoint(samples[0], isUlong) with { Timestamp = bucketStart }
                     : new HistoryPoint(bucketStart, null, null);
 
+            case HistoryAggregations.Delta:
+                return Delta(bucketStart, samples, isUlong, ref carriedNumber);
+
             case HistoryAggregations.TimeWeightedAverage:
                 return TimeWeightedAverage(
-                    bucketStart, bucketEnd, samples, isUlong, ref carriedNumber);
+                    bucketStart, measured, samples, isUlong, ref carriedNumber);
 
             default:
                 return AggregateNumeric(aggregation, bucketStart, samples, isUlong);
@@ -79,14 +82,14 @@ internal static class InMemoryHistoryAggregation
 
     private static HistoryPoint TimeWeightedAverage(
         DateTimeOffset bucketStart,
-        DateTimeOffset bucketEnd,
+        HistoryCoverage measured,
         ReadOnlySpan<Sample> samples,
         bool isUlong,
         ref double? carriedNumber)
     {
         double weightedSum = 0;
         double totalDuration = 0;
-        var previousTimestamp = bucketStart;
+        var previousTimestamp = measured.From;
         var previousValue = carriedNumber;
 
         foreach (var sample in samples)
@@ -103,7 +106,7 @@ internal static class InMemoryHistoryAggregation
             previousTimestamp = sample.Timestamp;
         }
 
-        var tailDuration = (bucketEnd - previousTimestamp).TotalSeconds;
+        var tailDuration = (measured.To - previousTimestamp).TotalSeconds;
         if (previousValue is { } tailHeld && tailDuration > 0)
         {
             weightedSum += tailHeld * tailDuration;
@@ -115,6 +118,32 @@ internal static class InMemoryHistoryAggregation
             bucketStart,
             totalDuration > 0 ? weightedSum / totalDuration : null,
             null);
+    }
+
+    private static HistoryPoint Delta(
+        DateTimeOffset bucketStart, ReadOnlySpan<Sample> samples, bool isUlong, ref double? carriedNumber)
+    {
+        // Without a held value the first sample is the baseline and adds nothing. A NaN or infinite reading is no
+        // counter reading, as in the SQLite store, which cannot hold NaN as a number.
+        var hasValue = carriedNumber is not null;
+        var increase = 0d;
+        foreach (var sample in samples)
+        {
+            if (Numeric(sample, isUlong) is not { } value || !double.IsFinite(value))
+            {
+                continue;
+            }
+
+            if (carriedNumber is { } previous)
+            {
+                increase += HistoryDelta.Step(previous, value);
+            }
+
+            carriedNumber = value;
+            hasValue = true;
+        }
+
+        return new HistoryPoint(bucketStart, hasValue ? increase : null, null);
     }
 
     // One pass over the bucket's samples, accumulating everything the numeric aggregations need. The
@@ -180,7 +209,7 @@ internal static class InMemoryHistoryAggregation
         return new HistoryPoint(bucketStart, result, null);
     }
 
-    private static double? Numeric(Sample sample, bool isUlong)
+    internal static double? Numeric(Sample sample, bool isUlong)
     {
         if (sample.Double is { } doubleValue)
         {

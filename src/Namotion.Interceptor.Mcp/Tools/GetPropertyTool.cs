@@ -31,7 +31,8 @@ internal class GetPropertyTool
         Description = "Read a single property value by its full path (e.g. /Devices/Sensor/Temperature). " +
                       "Returns the value, type, and any attributes. Use browse or search to discover paths first.",
         InputSchema = Schema,
-        Handler = HandleGetPropertyAsync
+        Handler = HandleGetPropertyAsync,
+        Annotations = McpToolAnnotations.ReadOnly
     };
 
     private Task<object?> HandleGetPropertyAsync(JsonElement input, CancellationToken cancellationToken)
@@ -47,7 +48,7 @@ internal class GetPropertyTool
 
         if (result is null)
         {
-            return Task.FromResult<object?>(new { error = $"Path not found: {path}" });
+            return Task.FromResult<object?>(McpToolHelper.GetPathNotFoundError(pathProvider, path));
         }
 
         var (property, _) = result.Value;
@@ -62,7 +63,12 @@ internal class GetPropertyTool
         var attributes = new Dictionary<string, object?>();
         foreach (var attribute in property.Attributes)
         {
-            attributes[attribute.BrowseName] = attribute.GetValue();
+            // A read-only attribute without a value says nothing about its property; a writable one can be set.
+            var value = attribute.GetValue();
+            if (value is not null || attribute.HasSetter)
+            {
+                attributes[attribute.BrowseName] = value;
+            }
         }
 
         var response = new Dictionary<string, object?>
@@ -71,7 +77,7 @@ internal class GetPropertyTool
             ["type"] = JsonSchemaTypeMapper.ToJsonSchemaType(property.Type)
         };
 
-        if (!_configuration.IsReadOnly && property.HasSetter)
+        if (McpToolHelper.IsWritable(property, _configuration))
         {
             response["isWritable"] = true;
         }

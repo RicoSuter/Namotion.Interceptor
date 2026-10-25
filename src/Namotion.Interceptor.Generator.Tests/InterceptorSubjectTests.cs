@@ -44,10 +44,11 @@ public class InterceptorSubjectTests
         
         // Act
         var result = calculator.Sum(1, 2);
-        var result2 = calculator.Sum(1, 2);
+        var secondResult = calculator.Sum(1, 2);
         
         // Assert
         Assert.Equal(3, result);
+        Assert.Equal(3, secondResult);
         Assert.Equal(2, interceptor.Contexts.Count);
     }
 }

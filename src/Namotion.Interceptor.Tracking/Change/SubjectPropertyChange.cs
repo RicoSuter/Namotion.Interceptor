@@ -1,4 +1,5 @@
-﻿using System.Runtime.CompilerServices;
+﻿using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Tracking.Change.Performance;
 
 namespace Namotion.Interceptor.Tracking.Change;
@@ -11,6 +12,7 @@ public readonly struct SubjectPropertyChange : IEquatable<SubjectPropertyChange>
     private readonly object? _oldBoxedHolder; // IBoxedValueHolder or null
     private readonly object? _newBoxedHolder; // IBoxedValueHolder or null
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S107", Justification = "The private constructor explicitly initializes the complete immutable change state, including both inline and boxed value representations.")]
     private SubjectPropertyChange(
         PropertyReference property,
         ChangeOrigin origin,
@@ -106,16 +108,34 @@ public readonly struct SubjectPropertyChange : IEquatable<SubjectPropertyChange>
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public TValue GetOldValue<TValue>() =>
-        TryGetValue(_oldValueStorage, _oldBoxedHolder, out TValue value)
-            ? value
-            : throw new InvalidCastException($"Old value of property '{Property.Name}' is of type '{_oldValueStorage.StoredType?.FullName ?? _oldBoxedHolder?.GetType().FullName ?? "null"}' and cannot be cast to '{typeof(TValue).FullName}'.");
+    public TValue GetOldValue<TValue>()
+    {
+        if (!TryGetValue(_oldValueStorage, _oldBoxedHolder, out TValue value))
+        {
+            ThrowValueNotCastable("Old", Property.Name, _oldValueStorage.StoredType, _oldBoxedHolder, typeof(TValue));
+        }
+
+        return value;
+    }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public TValue GetNewValue<TValue>() =>
-        TryGetValue(_newValueStorage, _newBoxedHolder, out TValue value)
-            ? value
-            : throw new InvalidCastException($"New value of property '{Property.Name}' is of type '{_newValueStorage.StoredType?.FullName ?? _newBoxedHolder?.GetType().FullName ?? "null"}' and cannot be cast to '{typeof(TValue).FullName}'.");
+    public TValue GetNewValue<TValue>()
+    {
+        if (!TryGetValue(_newValueStorage, _newBoxedHolder, out TValue value))
+        {
+            ThrowValueNotCastable("New", Property.Name, _newValueStorage.StoredType, _newBoxedHolder, typeof(TValue));
+        }
+
+        return value;
+    }
+
+    // Kept out of the inlined getters: an interpolated message there would zero stack in every caller.
+    [DoesNotReturn]
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ThrowValueNotCastable(string valueKind, string propertyName, Type? storedType, object? boxedHolder, Type targetType)
+    {
+        throw new InvalidCastException($"{valueKind} value of property '{propertyName}' is of type '{storedType?.FullName ?? boxedHolder?.GetType().FullName ?? "null"}' and cannot be cast to '{targetType.FullName}'.");
+    }
 
     /// <summary>
     /// Reads the property's value now, rather than the value captured when this change was created.
@@ -162,33 +182,7 @@ public readonly struct SubjectPropertyChange : IEquatable<SubjectPropertyChange>
         // Fast path: inline storage (zero allocation retrieval)
         if (boxedHolder == null)
         {
-            if (storage.TryGetValue(out value))
-            {
-                return true;
-            }
-
-            // Support casting to object (will box the value)
-            if (typeof(TValue) == typeof(object))
-            {
-                // If no inline storage was used, this was a null string/reference
-                if (storage.StoredType == null)
-                {
-                    value = default!;
-                    return true;
-                }
-                value = (TValue)storage.GetValueBoxed()!;
-                return true;
-            }
-
-            // Handle null strings: boxedHolder is null AND no inline storage was used
-            if (typeof(TValue) == typeof(string) && storage.StoredType == null)
-            {
-                value = default!;
-                return true;
-            }
-
-            value = default!;
-            return false;
+            return TryGetInlineValue(in storage, out value);
         }
 
         // Fast path: direct string retrieval (strings stored without wrapper)
@@ -219,6 +213,38 @@ public readonly struct SubjectPropertyChange : IEquatable<SubjectPropertyChange>
         if (typeof(TValue) == typeof(object) && boxedHolder is string)
         {
             value = (TValue)boxedHolder;
+            return true;
+        }
+
+        value = default!;
+        return false;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool TryGetInlineValue<TValue>(in InlineValueStorage storage, out TValue value)
+    {
+        if (storage.TryGetValue(out value))
+        {
+            return true;
+        }
+
+        // Support casting to object (will box the value)
+        if (typeof(TValue) == typeof(object))
+        {
+            // If no inline storage was used, this was a null string/reference
+            if (storage.StoredType == null)
+            {
+                value = default!;
+                return true;
+            }
+            value = (TValue)storage.GetValueBoxed()!;
+            return true;
+        }
+
+        // Handle null strings: no inline storage was used
+        if (typeof(TValue) == typeof(string) && storage.StoredType == null)
+        {
+            value = default!;
             return true;
         }
 

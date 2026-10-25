@@ -1,9 +1,11 @@
+using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Services.Lifecycle;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
@@ -19,14 +21,10 @@ public class RegisteredSubjectMethodExtensionsTests
         var registered = subject.TryGetRegisteredSubject()!;
 
         // Act
-        var all = registered.GetAllMethods();
-        var operations = registered.GetOperationMethods();
-        var queries = registered.GetQueryMethods();
+        var all = registered.GetAllMethods(ExclusionTarget.UserInterface);
 
         // Assert
         Assert.Equal(new[] { "Object", "Interface", "Subclass" }, all.Select(method => method.Title));
-        Assert.Equal(new[] { "Object", "Subclass" }, operations.Select(method => method.Title));
-        Assert.Equal("Interface", Assert.Single(queries).Title);
     }
 
     private static IInterceptorSubjectContext CreateContext()
@@ -49,7 +47,7 @@ public class RegisteredSubjectMethodExtensionsTests
         var registered = subject.TryGetRegisteredSubject()!;
 
         // Act
-        var methods = registered.GetAllMethods();
+        var methods = registered.GetAllMethods(ExclusionTarget.UserInterface);
 
         // Assert
         Assert.Equal(3, methods.Count);
@@ -58,37 +56,6 @@ public class RegisteredSubjectMethodExtensionsTests
         Assert.Equal("Third", methods[2].Title);
     }
 
-    [Fact]
-    public void GetOperationMethods_ReturnsOnlyOperations()
-    {
-        // Arrange
-        var context = CreateContext();
-        var subject = new MethodExtTestSubject(context);
-        var registered = subject.TryGetRegisteredSubject()!;
-
-        // Act
-        var operations = registered.GetOperationMethods();
-
-        // Assert
-        Assert.Equal(2, operations.Count);
-        Assert.All(operations, m => Assert.Equal(MethodKind.Operation, m.Kind));
-    }
-
-    [Fact]
-    public void GetQueryMethods_ReturnsOnlyQueries()
-    {
-        // Arrange
-        var context = CreateContext();
-        var subject = new MethodExtTestSubject(context);
-        var registered = subject.TryGetRegisteredSubject()!;
-
-        // Act
-        var queries = registered.GetQueryMethods();
-
-        // Assert
-        Assert.Single(queries);
-        Assert.Equal(MethodKind.Query, queries[0].Kind);
-    }
     [Fact]
     public void GetAllMethods_IncludesDynamicallyAddedMethodMetadata()
     {
@@ -107,7 +74,7 @@ public class RegisteredSubjectMethodExtensionsTests
         registered.AddProperty("DynamicOp", typeof(MethodMetadata), _ => dynamicMetadata, null);
 
         // Act
-        var methods = registered.GetAllMethods();
+        var methods = registered.GetAllMethods(ExclusionTarget.UserInterface);
 
         // Assert — dynamic method should appear first (Position = 0) alongside the 3 attribute-based methods
         Assert.Equal(4, methods.Count);
@@ -115,28 +82,122 @@ public class RegisteredSubjectMethodExtensionsTests
     }
 
     [Fact]
-    public void GetOperationMethods_IncludesDynamicallyAddedOperationMetadata()
+    public void WhenMethodHasAnIsEnabledAttribute_ThenItsValueSaysWhetherTheMethodIsEnabled()
     {
         // Arrange
-        var context = CreateContext();
-        var subject = new MethodExtTestSubject(context);
-        var registered = subject.TryGetRegisteredSubject()!;
-
-        var dynamicMetadata = new MethodMetadata(_ => Task.CompletedTask)
-        {
-            Title = "DynamicOp",
-            Kind = MethodKind.Operation,
-            PropertyName = "DynamicOp",
-        };
-        registered.AddProperty("DynamicOp", typeof(MethodMetadata), _ => dynamicMetadata, null);
+        var subject = new EnabledMethodTestSubject(CreateContext());
+        var start = subject.TryGetRegisteredSubject()!.TryGetProperty("Start")!;
 
         // Act
-        var operations = registered.GetOperationMethods();
+        var isEnabledWhileStopped = start.IsMethodEnabled();
+        subject.IsRunning = true;
+        var isEnabledWhileRunning = start.IsMethodEnabled();
 
-        // Assert — should include both attribute-based operations and the dynamic one
-        Assert.Equal(3, operations.Count);
-        Assert.All(operations, m => Assert.Equal(MethodKind.Operation, m.Kind));
+        // Assert
+        Assert.True(isEnabledWhileStopped);
+        Assert.False(isEnabledWhileRunning);
     }
+
+    [Fact]
+    public void WhenMethodHasNoIsEnabledAttribute_ThenItIsEnabled()
+    {
+        // Arrange
+        var subject = new EnabledMethodTestSubject(CreateContext());
+        var reset = subject.TryGetRegisteredSubject()!.TryGetProperty("Reset")!;
+
+        // Act
+        var isEnabled = reset.IsMethodEnabled();
+
+        // Assert
+        Assert.True(isEnabled);
+    }
+
+    [Fact]
+    public void WhenIsEnabledAttributeHoldsNoBoolean_ThenTheMethodIsEnabled()
+    {
+        // Arrange
+        var subject = new EnabledMethodTestSubject(CreateContext());
+        var stop = subject.TryGetRegisteredSubject()!.TryGetProperty("Stop")!;
+
+        // Act
+        var isEnabled = stop.IsMethodEnabled();
+
+        // Assert
+        Assert.True(isEnabled);
+    }
+
+    [Fact]
+    public void WhenAPropertyHoldsAMethod_ThenTryGetMethodMetadataReturnsIt()
+    {
+        // Arrange
+        var registered = new MethodExtTestSubject(CreateContext()).TryGetRegisteredSubject()!;
+        var property = registered.TryGetProperty("First")!;
+
+        // Act
+        var metadata = property.TryGetMethodMetadata();
+
+        // Assert
+        Assert.NotNull(metadata);
+        Assert.Equal("First", metadata.Title);
+    }
+
+    [Fact]
+    public void WhenAPropertyTypeCannotHoldAMethod_ThenTryGetMethodMetadataReturnsNullWithoutReadingTheValue()
+    {
+        // Arrange
+        var registered = new MethodDiscoveryGetterSubject(CreateContext()).TryGetRegisteredSubject()!;
+        var unavailable = registered.TryGetProperty(nameof(MethodDiscoveryGetterSubject.UnavailableValue))!;
+        var objectMethod = registered.TryGetProperty(nameof(MethodDiscoveryGetterSubject.ObjectMethod))!;
+
+        // Act
+        var unavailableMetadata = unavailable.TryGetMethodMetadata();
+        var objectMetadata = objectMethod.TryGetMethodMetadata();
+
+        // Assert
+        Assert.Null(unavailableMetadata);
+        Assert.Equal("Object", objectMetadata?.Title);
+    }
+
+    [Fact]
+    public void WhenMethodsAreListedForTheUserInterface_ThenTheMethodsExcludedFromItAreLeftOut()
+    {
+        // Arrange
+        var registered = new MethodExclusionTestSubject(CreateContext()).TryGetRegisteredSubject()!;
+
+        // Act
+        var methods = registered.GetAllMethods(ExclusionTarget.UserInterface);
+
+        // Assert
+        Assert.Equal(new[] { "Everywhere", "Not For Agents" }, methods.Select(method => method.Title));
+    }
+
+    [Fact]
+    public void WhenMethodsAreListedForAgents_ThenTheMethodsExcludedFromThemAreLeftOut()
+    {
+        // Arrange
+        var registered = new MethodExclusionTestSubject(CreateContext()).TryGetRegisteredSubject()!;
+
+        // Act
+        var methods = registered.GetAllMethods(ExclusionTarget.Agents);
+
+        // Assert
+        Assert.Equal(new[] { "Everywhere", "Not In User Interface" }, methods.Select(method => method.Title));
+    }
+}
+
+[InterceptorSubject]
+public partial class MethodExclusionTestSubject
+{
+    [Operation(Title = "Everywhere", Position = 1)]
+    public void Everywhere() { }
+
+    [Operation(Title = "Not In User Interface", Position = 2)]
+    [ExcludeFrom(ExclusionTarget.UserInterface)]
+    public void NotInUserInterface() { }
+
+    [Query(Title = "Not For Agents", Position = 3)]
+    [ExcludeFrom(ExclusionTarget.Agents)]
+    public string NotForAgents() => "result";
 }
 
 [InterceptorSubject]
@@ -178,4 +239,26 @@ public partial class MethodDiscoveryGetterSubject
     {
         Title = "Subclass", Position = 2, Kind = MethodKind.Operation
     };
+}
+
+[InterceptorSubject]
+public partial class EnabledMethodTestSubject
+{
+    public partial bool IsRunning { get; set; }
+
+    [Derived]
+    [PropertyAttribute("Start", KnownAttributes.IsEnabled)]
+    public bool Start_IsEnabled => !IsRunning;
+
+    [PropertyAttribute("Stop", KnownAttributes.IsEnabled)]
+    public partial string? Stop_IsEnabled { get; set; }
+
+    [Operation(Title = "Start")]
+    public void Start() => IsRunning = true;
+
+    [Operation(Title = "Stop")]
+    public void Stop() => IsRunning = false;
+
+    [Operation(Title = "Reset")]
+    public Task ResetAsync() => Task.CompletedTask;
 }

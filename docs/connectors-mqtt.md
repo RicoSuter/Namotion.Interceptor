@@ -2,6 +2,8 @@
 
 The `Namotion.Interceptor.Mqtt` package provides integration between Namotion.Interceptor and MQTT (Message Queuing Telemetry Transport), enabling bidirectional synchronization between C# objects and MQTT brokers. It supports both client and server modes.
 
+Dependencies: [MQTTnet](https://github.com/dotnet/MQTTnet) (MIT)
+
 ## Key Features
 
 - Bidirectional synchronization between C# objects and MQTT topics
@@ -212,6 +214,8 @@ public partial class Sensor
 }
 ```
 
+Dictionary keys become topic levels or bracketed indices as described in [Path Syntax](registry.md#path-syntax). MQTT reserves `+` and `#` as wildcards, so a key containing either produces a topic that cannot be published to.
+
 ### [MqttTopic] attribute
 
 `[MqttTopic]` is a `[Path]` for the `mqtt` context plus optional per-topic QoS and Retain metadata. The string is a single relative path segment composed hierarchically with parent property segments (and the optional `TopicPrefix`), exactly like `[Path]`. The QoS and Retain values are layered on top by the `MqttAttributeMapper`.
@@ -387,6 +391,10 @@ The MQTT integration hooks into the interceptor lifecycle system (see [Subject L
 - Cache lookups validate subject attachment AFTER cache access
 - Stale entries are detected and removed even if the detach event already fired
 - This ensures we never return stale data even with concurrent attach/detach
+
+## Known Limitations
+
+- **Client structural changes**: The client subscribes to the topics of the subject graph and claims their properties when it connects, and does not follow [structural changes](connectors.md#structural-changes) after that. A subject attached later gets no subscription, so its values are not received and its local writes are not published until the next reconnect binds the current graph. Detached subjects are released immediately, see [Automatic Cleanup on Subject Detach](#automatic-cleanup-on-subject-detach).
 
 ## Performance
 

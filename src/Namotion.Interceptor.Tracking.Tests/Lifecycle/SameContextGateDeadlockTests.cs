@@ -63,7 +63,7 @@ public class SameContextGateDeadlockTests
 
         // Assert: only the dispatched write failed. The holder's own write went through, and the
         // subject the worker could not attach is untouched.
-        Assert.Equal("fromHolder", ((Person)trigger.Mother!).FirstName);
+        Assert.Equal("fromHolder", trigger.Mother.FirstName);
         Assert.Null(workerTarget.Father);
     }
 

@@ -107,7 +107,7 @@ public class ReentrantStructuralWriteTests
         Assert.Same(committedValue, baselineAtReentry);
 
         // The nested write is the newer one and its value is what the property holds afterwards.
-        Assert.Equal([nestedChild], holder.Children!);
+        Assert.Equal([nestedChild], holder.Children);
         Assert.Same(context, ((IInterceptorSubject)nestedChild).TryGetContext());
 
         // The outer write committed its own baseline over the newer one, then published an edge

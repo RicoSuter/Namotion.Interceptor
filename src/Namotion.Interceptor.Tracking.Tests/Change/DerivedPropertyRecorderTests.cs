@@ -60,7 +60,7 @@ public class DerivedPropertyRecorderTests
 
         // Assert
         Assert.Single(recorded.ToArray());
-        Assert.Equal(property, recorded.ToArray()[0]);
+        Assert.Equal(property, recorded[0]);
     }
 
     [Fact]
@@ -129,7 +129,7 @@ public class DerivedPropertyRecorderTests
 
         // Assert - only the real dependency is recorded
         Assert.Single(recorded.ToArray());
-        Assert.Equal(firstNameProperty, recorded.ToArray()[0]);
+        Assert.Equal(firstNameProperty, recorded[0]);
     }
 
     [Fact]
@@ -146,8 +146,7 @@ public class DerivedPropertyRecorderTests
         var innerSelf = new PropertyReference(person, "InnerDerived");
         var firstNameProperty = new PropertyReference(person, nameof(Person.FirstName));
 
-        // Act - outer frame touches inner's self-ref (legitimate dependency on the inner derived);
-        //       inner frame touches its own self-ref (must be filtered).
+        // Act: the outer frame touches the inner derived property, while the inner frame touches itself.
         recorder.StartRecording(outerSelf);
         recorder.TouchProperty(ref innerSelf);
 
@@ -160,10 +159,10 @@ public class DerivedPropertyRecorderTests
 
         // Assert
         Assert.Single(innerRecorded.ToArray());
-        Assert.Equal(firstNameProperty, innerRecorded.ToArray()[0]);
+        Assert.Equal(firstNameProperty, innerRecorded[0]);
 
         Assert.Single(outerRecorded.ToArray());
-        Assert.Equal(innerSelf, outerRecorded.ToArray()[0]);
+        Assert.Equal(innerSelf, outerRecorded[0]);
     }
 
     [Fact]

@@ -1,0 +1,43 @@
+@using System.Globalization
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(Progress))]
+@implements ISubjectComponent
+@inject SubjectPathResolver PathResolver
+
+@{
+    var progress = Subject as Progress;
+}
+
+@if (progress is not null)
+{
+    // Read once per render and never kept: its render records the reads, so that it renders again when one changes.
+    var path = progress.Path;
+    var property = ValueReader.ResolveProperty(PathResolver, progress, path);
+    var state = ValueRangeResolver.GetState(property, property?.GetValue(), progress.Minimum, progress.Maximum);
+
+    if (state.Error is not null)
+    {
+        <WidgetArgumentError Message="@state.Error" />
+    }
+    else if (state.Percent is not { } percent)
+    {
+        // A missing value, a value that is no number and a path that leads nowhere have no bar.
+        <ValueText Reading="@ValueReading.Missing" Path="@path" />
+    }
+    else
+    {
+        @* In a row the bar fills the room between the label and the value. The minimum width keeps it visible when that room is small. *@
+        <MudProgressLinear Value="@percent"
+                           Min="0"
+                           Max="100"
+                           Color="@progress.Color"
+                           Rounded="true"
+                           Style="min-width: 48px;"
+                           data-testid="progress"
+                           data-percent="@percent.ToString("0.##", CultureInfo.InvariantCulture)" />
+    }
+}
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+}

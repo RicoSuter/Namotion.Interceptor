@@ -160,7 +160,7 @@ internal sealed class PropertyEdgeJournal
             return;
         }
 
-        for (var index = _first; index >= 0; index = _entries![index].Next)
+        for (var index = _first; index >= 0; index = _entries[index].Next)
         {
             var entry = _entries![index];
             target.Add(new SubjectOccurrence(entry.Subject!, entry.Index));

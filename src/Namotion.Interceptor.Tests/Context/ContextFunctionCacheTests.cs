@@ -194,11 +194,6 @@ public class ContextFunctionCacheTests
         Assert.NotSame(stateBefore, GetState(context));
     }
 
-    private static Type[] CreatePropertyTypes(int count)
-    {
-        return CreatePropertyTypes(count, typeof(PropertyType<>), typeof(PropertyTypeRoot));
-    }
-
     private static Type[] CreateDoublingPropertyTypes(int count)
     {
         return CreatePropertyTypes(count, typeof(DoublingPropertyType<>), typeof(DoublingPropertyTypeRoot));
@@ -207,6 +202,11 @@ public class ContextFunctionCacheTests
     private static Type[] CreateHighIndexPropertyTypes(int count)
     {
         return CreatePropertyTypes(count, typeof(HighIndexPropertyType<>), typeof(HighIndexPropertyTypeRoot));
+    }
+
+    private static Type[] CreatePropertyTypes(int count)
+    {
+        return CreatePropertyTypes(count, typeof(PropertyType<>), typeof(PropertyTypeRoot));
     }
 
     private static Type[] CreatePropertyTypes(int count, Type openGenericType, Type rootType)

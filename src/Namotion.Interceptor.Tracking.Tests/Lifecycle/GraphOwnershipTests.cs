@@ -284,7 +284,7 @@ public class GraphOwnershipTests
         var context = CreateContext();
         var shared = new Person { FirstName = "S" };
         var root1 = new Person(context) { FirstName = "R1", Father = shared };
-        var root2 = new Person(context) { FirstName = "R2", Father = shared };
+        _ = new Person(context) { FirstName = "R2", Father = shared };
         Assert.Equal(2, shared.GetReferenceCount());
 
         // Act

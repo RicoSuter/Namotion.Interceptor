@@ -68,7 +68,7 @@ public class TopologyTransactionTests
         // Assert
         Assert.IsType<LifecycleContractViolationException>(interceptor.CrossContextWriteException);
         Assert.Null(pinnedInSecond.Father);
-        Assert.Same(firstContext, ((IInterceptorSubject)trigger.Mother!).TryGetContext());
+        Assert.Same(firstContext, ((IInterceptorSubject)trigger.Mother).TryGetContext());
         Assert.Null(laterException);
         Assert.Same(secondContext, ((IInterceptorSubject)pinnedInSecond.Mother!).TryGetContext());
     }

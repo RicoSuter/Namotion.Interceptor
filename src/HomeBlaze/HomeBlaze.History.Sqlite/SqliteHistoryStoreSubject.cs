@@ -23,6 +23,8 @@ namespace HomeBlaze.History.Sqlite;
 /// </summary>
 [Category("History")]
 [Description("Persists [State] history to partitioned SQLite files (priority 50).")]
+[DisplayName("SQLite history")]
+[SubjectIcon("History")]
 [InterceptorSubject]
 public partial class SqliteHistoryStoreSubject :
     BackgroundService, IConfigurable, ITitleProvider, IHistoryStore, ILifecycleHandler
@@ -84,9 +86,8 @@ public partial class SqliteHistoryStoreSubject :
     public partial PartitionInterval PartitionInterval { get; set; }
 
     /// <summary>
-    /// Directory that holds the partition database files. Relative paths resolve under the application data
-    /// directory (outside the HomeBlaze Data folder); absolute paths are used as-is; empty uses the default
-    /// "History" folder.
+    /// Directory that holds the partition database files. Relative paths resolve under the <c>History</c> folder of
+    /// the instance data directory; absolute paths are used as-is; empty uses the default "Sqlite" folder.
     /// </summary>
     [Configuration]
     public partial string DatabasePath { get; set; }
@@ -115,12 +116,14 @@ public partial class SqliteHistoryStoreSubject :
     /// Total number of samples recorded since start.
     /// </summary>
     [State]
+    [Category("Statistics")]
     public partial long RecordedCount { get; set; }
 
     /// <summary>
     /// Number of oversize string values replaced with a placeholder.
     /// </summary>
     [State]
+    [Category("Statistics")]
     public partial long OversizeCount { get; set; }
 
     /// <summary>
@@ -133,6 +136,7 @@ public partial class SqliteHistoryStoreSubject :
     /// Cumulative number of samples dropped after the pending persistence queue reached its limit.
     /// </summary>
     [State]
+    [Category("Statistics")]
     public partial long DropCount { get; set; }
 
     /// <summary>
@@ -157,12 +161,14 @@ public partial class SqliteHistoryStoreSubject :
     /// Average incoming changes per second (eligible [State] changes observed).
     /// </summary>
     [State]
+    [Category("Statistics")]
     public partial double IncomingChangesPerSecond { get; set; }
 
     /// <summary>
     /// Average recorded changes per second (samples written to the engine).
     /// </summary>
     [State]
+    [Category("Statistics")]
     public partial double RecordedChangesPerSecond { get; set; }
 
     // IHistoryStore
@@ -200,6 +206,14 @@ public partial class SqliteHistoryStoreSubject :
         return new ValueTask<HistoryPoint?>(_engine?.GetSampleAtOrBefore(propertyPath, asOf));
     }
 
+    /// <inheritdoc />
+    public ValueTask<HistoryPoint?> GetLastNumericSampleBeforeAsync(
+        string propertyPath, DateTimeOffset before, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return new ValueTask<HistoryPoint?>(_engine?.GetLastNumericSampleBefore(propertyPath, before));
+    }
+
     /// <summary>
     /// Test-only hook that forces the engine to flush its pending samples immediately, so queued
     /// changes become queryable without waiting for the interval flush. Returns a completed task
@@ -232,7 +246,8 @@ public partial class SqliteHistoryStoreSubject :
             return;
         }
 
-        var directory = SqliteDatabaseLocation.Resolve(DatabasePath, SqliteDatabaseLocation.DefaultBaseDirectory());
+        var dataDirectory = context.TryGetService<IDataDirectoryProvider>()?.DataDirectory;
+        var directory = SqliteDatabaseLocation.Resolve(DatabasePath, SqliteDatabaseLocation.DefaultBaseDirectory(dataDirectory));
 
         SqliteHistoryStore engine;
         try
@@ -254,9 +269,9 @@ public partial class SqliteHistoryStoreSubject :
             return;
         }
 
-        // The change-queue subscription is live from construction, before the first await
-        // (BackgroundService.StartAsync returns at that point). The coverage session starts only
-        // afterwards, so no change can fall inside claimed coverage without reaching the engine.
+        // The change-queue subscription is live from construction, before the first await. The
+        // coverage session starts only afterwards, so no change can fall inside claimed coverage
+        // without reaching the engine.
         var recorder = new HistoryChangeRecorder(engine, resolver);
         _recorder = recorder;
 

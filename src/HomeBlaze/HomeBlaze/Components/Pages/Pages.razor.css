@@ -1,0 +1,5 @@
+/* In the split mode the button of the page menu stands above the editor, so the title of the preview needs no room for
+   it (see MarkdownFilePageComponent.razor.css of HomeBlaze.Storage.Blazor). */
+.page-split-preview ::deep .markdown-content > h1:first-of-type {
+    padding-right: 0;
+}

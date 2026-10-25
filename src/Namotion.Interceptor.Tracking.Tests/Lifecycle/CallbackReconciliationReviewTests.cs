@@ -57,7 +57,7 @@ public class CallbackReconciliationReviewTests
         root.Payload = new[] { branch, retained };
 
         // Assert
-        Assert.Same(retained, Assert.Single((CallbackSpikeNode[])root.Payload!));
+        Assert.Same(retained, Assert.Single((CallbackSpikeNode[])root.Payload));
         Assert.Same(context, retained.TryGetContext());
         Assert.Equal(1, retained.GetReferenceCount());
         Assert.Null(branch.TryGetContext());

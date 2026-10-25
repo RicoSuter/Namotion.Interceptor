@@ -1,3 +1,4 @@
+@using HomeBlaze.Components.Controls
 @using HomeBlaze.Components.Dialogs
 
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(GridLayout))]
@@ -7,51 +8,40 @@
 @inject SubjectFactory SubjectFactory
 @inject SubjectComponentRegistry ComponentRegistry
 @inject RootManager RootManager
+@inject ISnackbar Snackbar
 
-<div class="grid-layout-container"
+@{
+    var rows = Grid?.Rows ?? 1;
+    var columns = Grid?.Columns ?? 1;
+    var cellAspectRatio = Grid?.CellAspectRatio;
+    var rowTemplate = GridRows.GetTemplate(rows, columns, cellAspectRatio, out var ratioError);
+    var hasAspectRatio = !string.IsNullOrWhiteSpace(cellAspectRatio);
+
+    RenderFragment grid = @<div class="@(hasAspectRatio ? "grid-layout-container has-cell-aspect-ratio" : "grid-layout-container")"
      style="display: grid;
-            grid-template-rows: repeat(@(Grid?.Rows ?? 1), 1fr);
-            grid-template-columns: repeat(@(Grid?.Columns ?? 1), 1fr);
-            gap: 8px;
+            grid-template-rows: @rowTemplate;
+            grid-template-columns: repeat(@columns, 1fr);
+            gap: @(GridRows.Gap)px;
             width: 100%;
-            min-height: 400px;
+            @(hasAspectRatio ? null : "min-height: 400px;")
             position: relative;">
 
-    @* Layout edit button - top right of container *@
-    @if (IsEditing)
-    {
-        <MudIconButton Icon="@Icons.Material.Filled.Settings"
-                       Size="Size.Small"
-                       Color="Color.Primary"
-                       Class="layout-edit-button"
-                       title="Edit Layout"
-                       OnClick="EditLayout" />
-    }
-
     @* Render cells *@
-    @if (Grid?.Cells != null)
+    @foreach (var cell in Cells)
     {
-        foreach (var cell in Grid.Cells)
-        {
-            <div class="grid-cell @(IsEditing ? "editing" : "")" style="@GetCellStyle(cell)">
-                <div class="grid-cell-content">
-                    <SubjectComponent Subject="@cell.Child"
-                                      Type="SubjectComponentType.Widget">
-                        <ActionButtons>
-                            <MudIconButton Icon="@Icons.Material.Filled.Settings"
-                                           Size="Size.Small"
-                                           title="Edit Cell"
-                                           OnClick="() => EditCell(cell)" />
-                            <MudIconButton Icon="@Icons.Material.Filled.Delete"
-                                           Size="Size.Small"
-                                           Color="Color.Error"
-                                           title="Delete"
-                                           OnClick="() => DeleteCell(cell)" />
-                        </ActionButtons>
-                    </SubjectComponent>
-                </div>
+        <div class="grid-cell @(IsEditing ? "editing" : "")" style="@GetCellStyle(cell)">
+            <div class="grid-cell-content">
+                <SubjectComponent Subject="@cell.Child"
+                                  Type="SubjectComponentType.Widget" />
             </div>
-        }
+            @* After the content, so that Tab reaches them right after a selected widget in the cell. *@
+            @if (IsEditing)
+            {
+                <LayoutItemActions EditTitle="Edit Cell"
+                                   OnEdit="() => EditCell(cell)"
+                                   OnDelete="() => DeleteCell(cell)" />
+            }
+        </div>
     }
 
     @* Render empty cells for adding in edit mode *@
@@ -59,7 +49,7 @@
     {
         @foreach (var (row, col) in GetEmptyCellPositions())
         {
-            <div class="grid-cell empty"
+            <div class="grid-cell empty edit-mode-selected-interactive"
                  style="grid-row: @(row + 1); grid-column: @(col + 1);"
                  @onclick="() => AddCellAt(row, col)">
                 <MudIcon Icon="@Icons.Material.Filled.Add"
@@ -68,35 +58,40 @@
             </div>
         }
     }
-</div>
+</div>;
+}
+
+@if (ratioError is not null)
+{
+    <WidgetArgumentError Message="@ratioError" />
+}
+else if (hasAspectRatio)
+{
+    @* The sizer is the container that 100cqw of a row template with an aspect ratio refers to. A grid without a ratio
+       needs none and stays a direct child of its widget, where the styles and the tests of the layouts expect it. *@
+    <div class="grid-layout-sizer" style="container-type: inline-size; width: 100%;">
+        @grid
+    </div>
+}
+else
+{
+    @grid
+}
 
 <style>
-    .grid-layout-container {
-        background: rgba(0,0,0,0.02);
-        border: 1px dashed rgba(128,128,128,0.3);
-        padding: 8px;
-    }
-
-    .layout-edit-button {
-        position: absolute;
-        top: -36px;
-        right: 4px;
-        z-index: 20;
-        background: rgba(255,255,255,0.9);
-        border-radius: 4px;
-    }
-
+    /* Clips content that needs more room. A clipping cell is no scroll container, so without min-width: 0 its content
+       would widen its column. */
     .grid-cell {
-        background: var(--mud-palette-surface);
-        border: 1px solid rgba(128,128,128,0.2);
-        border-radius: 4px;
+        min-width: 0;
         min-height: 100px;
-        overflow: hidden;
+        overflow: clip;
+        position: relative;
     }
 
     /* In edit mode: disable widget interaction */
     .grid-cell.editing {
         border: 2px dashed var(--mud-palette-primary);
+        border-radius: 4px;
     }
 
     .grid-cell.editing .grid-cell-content {
@@ -108,12 +103,18 @@
         height: 100%;
     }
 
+    /* The rows of the grid are as high as a column is wide times the ratio, which a minimum height would exceed. */
+    .grid-layout-container.has-cell-aspect-ratio > .grid-cell {
+        min-height: 0;
+    }
+
     .grid-cell.empty {
         display: flex;
         align-items: center;
         justify-content: center;
         cursor: pointer;
-        border-style: dashed;
+        border: 1px dashed rgba(128,128,128,0.2);
+        border-radius: 4px;
     }
 
     .grid-cell.empty:hover {
@@ -133,6 +134,8 @@
     public bool IsEditing { get; set; }
 
     private GridLayout? Grid => Subject as GridLayout;
+
+    private GridCell[] Cells => Grid?.Cells ?? [];
 
     private string GetCellStyle(GridCell cell)
     {
@@ -155,7 +158,7 @@
         var occupied = new HashSet<(int, int)>();
 
         // Mark all occupied cells (accounting for spans)
-        foreach (var cell in Grid.Cells)
+        foreach (var cell in Cells)
         {
             if (!cell.Row.HasValue || !cell.Column.HasValue) continue;
 
@@ -181,29 +184,26 @@
 
     private async Task AddCellAt(int row, int column)
     {
-        await SubjectSetupDialog.ShowAsync(DialogService, subject =>
+        await SubjectSetupDialog.ShowAsync(DialogService, new SubjectSetupOptions
         {
-            if (Grid == null) return;
+            BeforeSave = subject =>
+            {
+                if (Grid == null) return;
 
-            var cell = SubjectFactory.CreateSubject<GridCell>();
-            cell.Row = row;
-            cell.Column = column;
-            cell.Child = subject;
+                var cell = SubjectFactory.CreateSubject<GridCell>();
+                cell.Row = row;
+                cell.Column = column;
+                cell.Child = subject;
 
-            // Replace list to trigger property setter and parent tracking
-            Grid.Cells = [.. Grid.Cells, cell];
+                Grid.Cells = [.. Cells, cell];
+            }
         });
-    }
-
-    private async Task EditLayout()
-    {
-        if (Grid == null) return;
-        await SubjectEditDialog.ShowAsync(DialogService, ComponentRegistry, Grid, "Edit Grid Layout");
     }
 
     private async Task EditCell(GridCell cell)
     {
-        await SubjectEditDialog.ShowAsync(DialogService, ComponentRegistry, cell, "Edit Cell");
+        var title = cell.Child is { } child ? SubjectNames.TryGetContentTitle(child) : null;
+        await SubjectEditDialog.ShowAsync(DialogService, ComponentRegistry, cell, SubjectEditDialog.GetTitle("Cell", title));
     }
 
     private async Task DeleteCell(GridCell cell)
@@ -218,12 +218,9 @@
 
         if (confirmed == true)
         {
-            // Replace list to trigger property setter and parent tracking
-            Grid.Cells = Grid.Cells.Where(c => c != cell).ToList();
+            Grid.Cells = Cells.Where(existing => existing != cell).ToArray();
 
-            // Persist the change
-            var configurationWriter = RootManager.GetConfigurationWriter(Grid);
-            await configurationWriter.WriteConfigurationAsync(Grid, CancellationToken.None);
+            await RootManager.WriteConfigurationOrWarnAsync(Grid, Snackbar, CancellationToken.None);
         }
     }
 }

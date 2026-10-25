@@ -104,7 +104,7 @@ public class TerminalStoreContractTests
 
         // Assert: the kept subjects are owned in the terminal's order, not the caller's, and the
         // dropped one's provisional claim was handed back rather than becoming ownership.
-        Assert.Equal(["a", "b"], parent.Children!.Select(child => child.Name));
+        Assert.Equal(["a", "b"], parent.Children.Select(child => child.Name));
         Assert.Same(context, ((IInterceptorSubject)kept).TryGetContext());
         Assert.Same(context, ((IInterceptorSubject)alsoKept).TryGetContext());
         Assert.Null(((IInterceptorSubject)dropped).TryGetContext());

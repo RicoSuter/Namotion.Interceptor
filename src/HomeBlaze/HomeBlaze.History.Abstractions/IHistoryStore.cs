@@ -39,11 +39,22 @@ public interface IHistoryStore
 
     /// <summary>
     /// Gets the most recent sample at or before <paramref name="asOf"/> for the property path
-    /// (following move chains), or null if none. Used by TimeWeightedAverage integration
+    /// (following move chains), or null if none. The result is coverage-scoped: null when
+    /// <paramref name="asOf"/> is not covered, and never a sample older than the start of the
+    /// coverage range containing <paramref name="asOf"/>. Coverage ranges are half-open, so an
+    /// <paramref name="asOf"/> exactly at a range's end is not covered. Used by TimeWeightedAverage integration
     /// and Last LOCF gap-fill.
     /// </summary>
     ValueTask<HistoryPoint?> GetSampleAtOrBeforeAsync(
         string propertyPath, DateTimeOffset asOf, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Gets the most recent sample with a finite numeric value strictly before <paramref name="before"/> for the property
+    /// path (following move chains), regardless of coverage, or null if none. The result's <see cref="HistoryPoint.Json"/>
+    /// is null.
+    /// </summary>
+    ValueTask<HistoryPoint?> GetLastNumericSampleBeforeAsync(
+        string propertyPath, DateTimeOffset before, CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -99,6 +110,50 @@ public readonly record struct HistoryCoverage(DateTimeOffset From, DateTimeOffse
             .Select(range => range.Intersect(window))
             .Where(range => range is not null)
             .Select(range => range!.Value));
+
+    /// <summary>
+    /// Returns how much of <paramref name="window"/> the normalized <paramref name="ranges"/> cover.
+    /// </summary>
+    public static TimeSpan CoveredDuration(ImmutableArray<HistoryCoverage> ranges, HistoryCoverage window)
+    {
+        var covered = TimeSpan.Zero;
+        foreach (var range in ranges)
+        {
+            if (range.From >= window.To)
+            {
+                break;
+            }
+
+            if (range.Intersect(window) is { } overlap)
+            {
+                covered += overlap.To - overlap.From;
+            }
+        }
+
+        return covered;
+    }
+
+    /// <summary>
+    /// Returns the start of the range in the normalized <paramref name="ranges"/> that contains
+    /// <paramref name="instant"/>, or null when no range contains it.
+    /// </summary>
+    public static DateTimeOffset? CoverageStartAt(ImmutableArray<HistoryCoverage> ranges, DateTimeOffset instant)
+    {
+        foreach (var range in ranges)
+        {
+            if (range.From > instant)
+            {
+                break;
+            }
+
+            if (instant < range.To)
+            {
+                return range.From;
+            }
+        }
+
+        return null;
+    }
 }
 
 /// <summary>
@@ -108,7 +163,7 @@ public record HistoryQuery(
     string PropertyPath,
     DateTimeOffset From,
     DateTimeOffset To,
-    TimeSpan? Bucket = null,
+    HistoryBucket? Bucket = null,
     string Aggregation = HistoryAggregations.Last,
     int MaxPoints = 10_000,
     HistoryPoint? CarrySeed = null)
@@ -128,9 +183,14 @@ public record HistoryQuery(
             throw new ArgumentException("The query start must be earlier than its end.", nameof(From));
         }
 
-        if (Bucket is { } bucket && bucket <= TimeSpan.Zero)
+        if (Bucket is { FixedSize: { } size } && size <= TimeSpan.Zero)
         {
             throw new ArgumentOutOfRangeException(nameof(Bucket), "The bucket size must be positive.");
+        }
+
+        if (Bucket is { FixedSize: null, CalendarUnit: var unit } && (unit is null || !Enum.IsDefined(unit.Value)))
+        {
+            throw new ArgumentOutOfRangeException(nameof(Bucket), "The bucket needs a positive size or a calendar unit.");
         }
 
         if (string.IsNullOrWhiteSpace(Aggregation))
@@ -155,10 +215,11 @@ public record HistoryPoint(DateTimeOffset Timestamp, double? Number, JsonElement
 /// <summary>
 /// The result of a history query: the points for a property path, ascending by timestamp,
 /// whether the result was truncated to fit the point cap, and the effective store coverage
-/// within the requested range.
+/// within the requested range. A bucketed result of the merger reports the coverage from the
+/// start of its first bucket instead, so it spans what the oldest bucket aggregated (history.md).
 /// </summary>
 public record HistorySeries(
     string PropertyPath,
     ImmutableArray<HistoryPoint> Points,
-    bool Truncated,
+    bool IsTruncated,
     ImmutableArray<HistoryCoverage> CoverageRanges);

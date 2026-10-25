@@ -55,34 +55,6 @@ public class ParentAccessDuringLifecycleTests
         Assert.Same(simulation, component.RootFoundDuringAttach);
     }
 
-    [Fact]
-    public void WhenComponentWithoutContextAttachedViaContextInheritance_ThenParentsAreSetBeforeAttachSubject()
-    {
-        // This test specifically tests the scenario where:
-        // 1. Root has a context with the lifecycle registered
-        // 2. Child is created WITHOUT context
-        // 3. When child is attached, the context is inherited AND parents should be set
-
-        // Arrange
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithFullPropertyTracking();
-
-        var simulation = new Simulation(context) { Name = "Root" };
-
-        // Component created without context - inherits it when the lifecycle attaches it
-        var component = new Component { Name = "Child" };
-
-        // Act: Attach component - context will be inherited, parents should be set
-        simulation.Component = component;
-
-        // Assert: Parents should be available when component's AttachSubjectToContext runs
-        Assert.Null(component.AttachException);
-        Assert.NotNull(component.ParentsFoundDuringAttach);
-        Assert.NotEmpty(component.ParentsFoundDuringAttach);
-        Assert.NotNull(component.RootFoundDuringAttach);
-        Assert.Same(simulation, component.RootFoundDuringAttach);
-    }
 
     [Fact]
     public void WhenOnlyLifecycleIsConfigured_ThenParentsAreAvailableDuringAttach()

@@ -172,42 +172,59 @@ internal sealed class CollectionDiffBuilder
         HashSet<object>? keysToRemove = null;
         if (oldDictionary is not null)
         {
-            foreach (DictionaryEntry entry in oldDictionary)
+            // Not foreach, which would box a DictionaryEntry per entry.
+            var oldEnumerator = oldDictionary.GetEnumerator();
+            try
             {
-                if (entry.Value is IInterceptorSubject)
+                while (oldEnumerator.MoveNext())
                 {
-                    keysToRemove ??= [];
-                    keysToRemove.Add(entry.Key);
+                    if (oldEnumerator.Value is IInterceptorSubject)
+                    {
+                        keysToRemove ??= [];
+                        keysToRemove.Add(oldEnumerator.Key);
+                    }
                 }
+            }
+            finally
+            {
+                (oldEnumerator as IDisposable)?.Dispose();
             }
         }
 
-        foreach (DictionaryEntry entry in newDictionary)
+        var newEnumerator = newDictionary.GetEnumerator();
+        try
         {
-            if (entry.Value is not IInterceptorSubject newItem) continue;
-            var key = entry.Key;
-
-            if (oldDictionary is not null && oldDictionary.Contains(key) &&
-                oldDictionary[key] is IInterceptorSubject oldItem)
+            while (newEnumerator.MoveNext())
             {
-                if (ReferenceEquals(oldItem, newItem))
+                if (newEnumerator.Value is not IInterceptorSubject newItem) continue;
+                var key = newEnumerator.Key;
+
+                if (oldDictionary is not null && oldDictionary.Contains(key) &&
+                    oldDictionary[key] is IInterceptorSubject oldItem)
                 {
-                    keysToRemove?.Remove(key);
-                    _retainedDictionaryItems.Add((key, newItem));
+                    if (ReferenceEquals(oldItem, newItem))
+                    {
+                        keysToRemove?.Remove(key);
+                        _retainedDictionaryItems.Add((key, newItem));
+                    }
+                    else
+                    {
+                        // Different object at same key - treat as Remove + Insert
+                        newItemsToProcess ??= [];
+                        newItemsToProcess.Add((key, newItem));
+                    }
                 }
                 else
                 {
-                    // Different object at same key - treat as Remove + Insert
+                    // New key
                     newItemsToProcess ??= [];
                     newItemsToProcess.Add((key, newItem));
                 }
             }
-            else
-            {
-                // New key
-                newItemsToProcess ??= [];
-                newItemsToProcess.Add((key, newItem));
-            }
+        }
+        finally
+        {
+            (newEnumerator as IDisposable)?.Dispose();
         }
 
         // Only return removedKeys if there are actually keys to remove

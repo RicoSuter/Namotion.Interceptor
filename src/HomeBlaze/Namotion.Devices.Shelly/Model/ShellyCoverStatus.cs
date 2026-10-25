@@ -38,7 +38,7 @@ internal class ShellyCoverStatus
     public ShellyTemperatureData? Temperature { get; set; }
 
     [JsonPropertyName("pos_control")]
-    public bool? PositionControl { get; set; }
+    public bool? HasPositionControl { get; set; }
 
     [JsonPropertyName("last_direction")]
     public string? LastDirection { get; set; }

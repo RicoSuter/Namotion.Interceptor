@@ -1,0 +1,244 @@
+---
+title: ValueMap
+navTitle: ValueMap
+---
+
+# ValueMap
+
+Says what text, color and icon a value gets in the widgets that refer to it. A case can be for a value, for a condition, or for every value. It shows nothing itself. Type name: `HomeBlaze.Components.ValueMap`. Slot blocks: `Case`.
+
+## Arguments
+
+A `ValueMap` has no arguments.
+
+## Slots
+
+| Slot | Blocks | Holds |
+|------|--------|-------|
+| `Case` | Any number | One case per block. It holds no content |
+
+The arguments of a `Case` block:
+
+| Argument | Kind of value | Default | Meaning |
+|----------|---------------|---------|---------|
+| `Value` | Text | None | The value that the case is for, as raw text, see below |
+| `When` | Condition | None | The condition of the case, such as `subject/IsCharging and value > 1000`, see [Conditions](#conditions) |
+| `Text` | Text | None | The text to show, in which an expression between double braces shows a value, such as `{{ subject/ChargingPower }}`. Without it the formatted value stays |
+| `Color` | Color | `Default` | The [color](basics.md#colors) of the value: a theme color such as `Success`, a theme color with transparency such as `"Surface 30%"`, or a CSS color such as `"#ffffff80"` |
+| `Icon` | Text | None | The [icon](basics.md#icons) to show. It replaces the icon of the widget |
+| `TextColor` | Color | None | The text color on a tile or a chip that the case fills, in the same forms as `Color`, such as `"#ffffff"`. Without it, the text has the color that goes with the fill |
+
+## Conditions
+
+A case with `When` matches while its condition is true. A condition is an expression as in the text of a page, see [Conditions](../pages.md#conditions), with two names of its own:
+
+- **`value`**: the value the widget shows, with its unit, such as the charging power of a tile with `Path=../Charger/ChargingPower`.
+- **`subject`**: the subject the value belongs to, such as the charger. `subject/IsCharging` reads another state of it. When the `Path` of the widget leads to a subject itself, such as `Path=../Charger`, `subject` is that subject and there is no `value`.
+
+The names `value` and `subject` are lower case: `When="Value > 5"` reads the page path called `Value`. In a `Select` and a `DoorLock`, `value` is the name of the option or of the state, such as `Locked`. Every other path resolves from the page that holds the map, so a map on a shared page reads the same subjects for every page that uses it. A case with `Value` and `When` needs both. A case with neither is the default case: it matches every value and must be the last case. A bare `value` or `subject` after an operator is the variable and not a text, as in `subject/Maximum < value`. `value` has no members, so `value/IsCharging` is an error: write `subject/IsCharging`. A path after `subject/` needs a name and cannot start with a slash, so `subject/` and `subject//IsCharging` are errors too. `When` is written without braces and takes no pipes. The text of a case can show values with expressions between double braces, such as `Text="{{ subject/ChargingPower }}"`, with the pipes `display` and `raw`, but not with the pipe `map`. A `}}` inside a quoted text ends the expression early, so keep it out of the text between the quotes.
+
+## Samples
+
+A map for the status of a motor. The cases are the values of `MotorStatus`. The block below the source shows nothing, because a map is only read by other widgets. The other widget pages refer to it from their folder as `Map=../value-map.md/motorstate`:
+
+<!-- sample: live -->
+~~~~markdown
+:: HomeBlaze.Components.ValueMap#motorstate
+::: Case Value=Stopped Text="Off" Icon=StopCircle
+::: Case Value=Starting Text="Starting up" Color=Warning Icon=PlayCircle
+::: Case Value=Running Text="Running" Color=Success Icon=CheckCircle
+::: Case Value=Stopping Text="Shutting down" Color=Warning Icon=PauseCircle
+::: Case Value=Error Text="Fault" Color=Error Icon=Error
+::
+~~~~
+
+:: HomeBlaze.Components.ValueMap#motorstate
+::: Case Value=Stopped Text="Off" Icon=StopCircle
+::: Case Value=Starting Text="Starting up" Color=Warning Icon=PlayCircle
+::: Case Value=Running Text="Running" Color=Success Icon=CheckCircle
+::: Case Value=Stopping Text="Shutting down" Color=Warning Icon=PauseCircle
+::: Case Value=Error Text="Fault" Color=Error Icon=Error
+::
+
+A map with CSS colors for a badge on a tile that is always filled. The switch tile of the fan is filled with the warning color while the fan runs and with a dark CSS color while it is off. The speed icon in its badge is white while the fan is at its target speed and half transparent white otherwise:
+
+<!-- sample: live -->
+~~~~markdown
+:: HomeBlaze.Components.ValueMap#fanfill
+::: Case Value=True Text="Running" Color=Warning Icon=Bolt
+::: Case Value=False Text="Off" Color="#37474f" Icon=PowerOff
+::
+
+:: HomeBlaze.Components.ValueMap#speedbadge
+::: Case Value=True Text="At target speed" Color="#ffffff"
+::: Case Value=False Text="Below target speed" Color="#ffffff80"
+::
+
+:: HomeBlaze.Components.GridLayout#cssgrid Rows=1 Columns=3 CellAspectRatio=1:1
+::: Cell Row=0 Column=0
+:::: HomeBlaze.Components.Switch Kind=Tile Path=../Fan/IsPowered On=../Fan/PowerOn Off=../Fan/PowerOff Map=fanfill Label="Fan"
+::::: Badge
+:::::: HomeBlaze.Components.Indicator Path=../Fan/IsAtTargetSpeed Map=speedbadge Kind=Icon Icon=Speed
+::
+~~~~
+
+:: HomeBlaze.Components.ValueMap#fanfill
+::: Case Value=True Text="Running" Color=Warning Icon=Bolt
+::: Case Value=False Text="Off" Color="#37474f" Icon=PowerOff
+::
+
+:: HomeBlaze.Components.ValueMap#speedbadge
+::: Case Value=True Text="At target speed" Color="#ffffff"
+::: Case Value=False Text="Below target speed" Color="#ffffff80"
+::
+
+:: HomeBlaze.Components.GridLayout#cssgrid Rows=1 Columns=3 CellAspectRatio=1:1
+::: Cell Row=0 Column=0
+:::: HomeBlaze.Components.Switch Kind=Tile Path=../Fan/IsPowered On=../Fan/PowerOn Off=../Fan/PowerOff Map=fanfill Label="Fan"
+::::: Badge
+:::::: HomeBlaze.Components.Indicator Path=../Fan/IsAtTargetSpeed Map=speedbadge Kind=Icon Icon=Speed
+::
+
+A map with a text color for a dashboard of light tiles. In the dark theme, where the status colors have dark text, the tiles of the fan are filled with the info color and have white text while it is off, and are filled with the warning color and keep the dark text that goes with it while it runs. In the light theme the text on both fills is white already:
+
+<!-- sample: live -->
+~~~~markdown
+:: HomeBlaze.Components.ValueMap#fanlight
+::: Case Value=False Text="Off" Color=Info TextColor="#ffffff" Icon=PowerOff
+::: Case Value=True Text="Running" Color=Warning Icon=Bolt
+::
+
+:: HomeBlaze.Components.GridLayout#textcolorgrid Rows=1 Columns=3 CellAspectRatio=1:1
+::: Cell Row=0 Column=0
+:::: HomeBlaze.Components.Switch Kind=Tile Path=../Fan/IsPowered On=../Fan/PowerOn Off=../Fan/PowerOff Map=fanlight Label="Fan"
+::: Cell Row=0 Column=1
+:::: HomeBlaze.Components.ValueTile Kind=Tile Path=../Fan/IsPowered Map=fanlight Label="Fan"
+::
+~~~~
+
+:: HomeBlaze.Components.ValueMap#fanlight
+::: Case Value=False Text="Off" Color=Info TextColor="#ffffff" Icon=PowerOff
+::: Case Value=True Text="Running" Color=Warning Icon=Bolt
+::
+
+:: HomeBlaze.Components.GridLayout#textcolorgrid Rows=1 Columns=3 CellAspectRatio=1:1
+::: Cell Row=0 Column=0
+:::: HomeBlaze.Components.Switch Kind=Tile Path=../Fan/IsPowered On=../Fan/PowerOn Off=../Fan/PowerOff Map=fanlight Label="Fan"
+::: Cell Row=0 Column=1
+:::: HomeBlaze.Components.ValueTile Kind=Tile Path=../Fan/IsPowered Map=fanlight Label="Fan"
+::
+
+A map with a theme color with transparency, which follows the theme. The speed icon in the badge of the fan has the surface color while the fan is at its target speed and the surface color at 30 percent otherwise, dark in the dark theme and white in the light theme. The case for the target speed uses `Surface 100%`, because MudBlazor colors no icon with the theme color `Surface`, which leaves the icon in the text color of the tile:
+
+<!-- sample: live -->
+~~~~markdown
+:: HomeBlaze.Components.ValueMap#fanfaint
+::: Case Value=True Text="Running" Color=Warning Icon=Bolt
+::: Case Value=False Text="Off" Color=Info TextColor="#ffffff" Icon=PowerOff
+::
+
+:: HomeBlaze.Components.ValueMap#speedfaint
+::: Case Value=True Text="At target speed" Color="Surface 100%"
+::: Case Value=False Text="Below target speed" Color="Surface 30%"
+::
+
+:: HomeBlaze.Components.GridLayout#faintgrid Rows=1 Columns=3 CellAspectRatio=1:1
+::: Cell Row=0 Column=0
+:::: HomeBlaze.Components.Switch Kind=Tile Path=../Fan/IsPowered On=../Fan/PowerOn Off=../Fan/PowerOff Map=fanfaint Label="Fan"
+::::: Badge
+:::::: HomeBlaze.Components.Indicator Path=../Fan/IsAtTargetSpeed Map=speedfaint Kind=Icon Icon=Speed
+::
+~~~~
+
+:: HomeBlaze.Components.ValueMap#fanfaint
+::: Case Value=True Text="Running" Color=Warning Icon=Bolt
+::: Case Value=False Text="Off" Color=Info TextColor="#ffffff" Icon=PowerOff
+::
+
+:: HomeBlaze.Components.ValueMap#speedfaint
+::: Case Value=True Text="At target speed" Color="Surface 100%"
+::: Case Value=False Text="Below target speed" Color="Surface 30%"
+::
+
+:: HomeBlaze.Components.GridLayout#faintgrid Rows=1 Columns=3 CellAspectRatio=1:1
+::: Cell Row=0 Column=0
+:::: HomeBlaze.Components.Switch Kind=Tile Path=../Fan/IsPowered On=../Fan/PowerOn Off=../Fan/PowerOff Map=fanfaint Label="Fan"
+::::: Badge
+:::::: HomeBlaze.Components.Indicator Path=../Fan/IsAtTargetSpeed Map=speedfaint Kind=Icon Icon=Speed
+::
+
+A map for ranges of a number. The speed of the fan is green up to 700 RPM and yellow above, and the tile shows the speed in both cases:
+
+<!-- sample: live -->
+~~~~markdown
+:: HomeBlaze.Components.ValueMap#fanrange
+::: Case When="value > 700" Color=Warning Icon=Speed
+::: Case Color=Success Icon=Speed
+::
+
+:: HomeBlaze.Components.GridLayout#rangegrid Rows=1 Columns=3 CellAspectRatio=1:1
+::: Cell Row=0 Column=0
+:::: HomeBlaze.Components.ValueTile Kind=Tile Path=../Fan/CurrentSpeed Map=fanrange Label="Fan speed"
+::
+~~~~
+
+:: HomeBlaze.Components.ValueMap#fanrange
+::: Case When="value > 700" Color=Warning Icon=Speed
+::: Case Color=Success Icon=Speed
+::
+
+:: HomeBlaze.Components.GridLayout#rangegrid Rows=1 Columns=3 CellAspectRatio=1:1
+::: Cell Row=0 Column=0
+:::: HomeBlaze.Components.ValueTile Kind=Tile Path=../Fan/CurrentSpeed Map=fanrange Label="Fan speed"
+::
+
+A map for the state of a subject. The tile has the fan itself as its path, so its cases read the states of the fan, and the second case shows its speed in its text:
+
+<!-- sample: live -->
+~~~~markdown
+:: HomeBlaze.Components.ValueMap#fanstate
+::: Case When="subject/IsPowered and subject/IsAtTargetSpeed" Text="At speed" Color=Success Icon=CheckCircle
+::: Case When="subject/IsPowered" Text="{{ subject/CurrentSpeed }} RPM" Color=Warning Icon=Speed
+::: Case Text="Off" Icon=PowerOff
+::
+
+:: HomeBlaze.Components.GridLayout#stategrid Rows=1 Columns=3 CellAspectRatio=1:1
+::: Cell Row=0 Column=0
+:::: HomeBlaze.Components.ValueTile Kind=Tile Path=../Fan Map=fanstate Label="Fan"
+::
+~~~~
+
+:: HomeBlaze.Components.ValueMap#fanstate
+::: Case When="subject/IsPowered and subject/IsAtTargetSpeed" Text="At speed" Color=Success Icon=CheckCircle
+::: Case When="subject/IsPowered" Text="{{ subject/CurrentSpeed }} RPM" Color=Warning Icon=Speed
+::: Case Text="Off" Icon=PowerOff
+::
+
+:: HomeBlaze.Components.GridLayout#stategrid Rows=1 Columns=3 CellAspectRatio=1:1
+::: Cell Row=0 Column=0
+:::: HomeBlaze.Components.ValueTile Kind=Tile Path=../Fan Map=fanstate Label="Fan"
+::
+
+## Behavior and Limits
+
+- **How a widget refers to a map**: With `Map=motorstate`, the name of the block, on the same page. The pages of the other widgets refer to the map of this page as `Map=../value-map.md/motorstate`: `..` is the folder of the page, `value-map.md` the page in it and `motorstate` the name of the block. A map on another page is reached through that page. For a page `Shared.md` in the folder `Demo`, which you have made yourself and which has a map named `motorstate`, that is `Map=/Demo/Shared.md/motorstate`. This works for a map that stands directly on that page, see [Paths on Markdown Pages](../paths.md#paths-on-markdown-pages).
+- **Which case is used**: A case matches when its `Value`, when set, equals the raw text of the value without regard to upper and lower case, and its `When`, when set, is true. The raw text is what the pipe `raw` of an expression shows: `True` and `False` for a boolean, the name for an enum value, a number with a dot as the decimal separator. The first case that matches is used.
+- **No case**: A value without a case keeps the formatted text, the default color and the icon of the widget. A case without `Text` keeps the formatted text of the value. In a widget, a path that leads nowhere tries no case and shows `–`. A missing value is matched by a condition that does not need the value, such as `subject/IsPowered`, or by the default case.
+- **The default case**: A case without `Value` and `When` is the default case, see [Conditions](#conditions). Before other cases it gives the error `Case 1 has no Value and no When, so it matches every value and the cases after it never match. Make it the last case.`
+- **A condition that cannot be decided**: A missing value makes a condition unknown, and an unknown condition does not match, so the next case is tried, see [Conditions](../pages.md#conditions).
+- **In the text of a page**: The pipe `map` shows the text of the matched case in place of a value, such as `{{ mymotor/Status | map:motorstate }}`, see [Pipes](../pages.md#pipes).
+- **Color and icon**: What a case changes depends on the widget, see its page. In a row of a `ValueList` and in a `ValueTile` the case gives the value its text and color and replaces the icon of the row or the tile. An `Indicator` takes text, color and icon. A `Gauge` takes the text in the center and the color of the ring. A `Select` shows the text and the icon of the case for each value, the icon in the color of the case. A column of a `SubjectTable` gives its cells the text and color. A `Control` hands its map to the select, the indicator or the value row that it chooses.
+- **CSS colors**: A [CSS color](basics.md#colors) does what a theme color does in the same place. It colors the value text of a `ValueList` row, of a `ValueTile` box and of a `SubjectTable` cell, the icon of an `Indicator` with `Kind=Icon`, the icon of a value in a `Select`, the ring of a `Gauge` and a toggle `Switch`. It fills the chip of an `Indicator`, a `ValueTile` with `Kind=Tile`, a `Switch` tile and a `DoorLock` tile, whose badge takes the text color of the fill. The text on a fill is black or white, whichever stands out more from the color, without regard to its transparency. On a fill with a `var()` color the text has the text color of the theme, and on a fill with the variable of a theme color the text that theme color has. A theme color with transparency, such as `Surface 30%`, follows the theme like the theme color, and the text on it is the one of that theme color, or the text color of the theme for `Surface`.
+- **Text colors**: `TextColor` colors the text and the icon of a `ValueTile` with `Kind=Tile`, a `Switch` tile and a `DoorLock` tile, also on the surface when the case has no `Color`, and the badge of the tile takes it unless the widget in the badge has a color of its own. It colors the text and the icon of the chip of an `Indicator`. Everywhere else `Color` is already the color of the text or of the icon, so `TextColor` changes nothing in a `ValueList` row, a `ValueTile` box, a `SubjectTable` cell, an `Indicator` with `Kind=Icon`, a `Select`, a `Gauge` and a toggle `Switch`. `TextColor=Default` is the same as no `TextColor`. A text color does not follow the fill: white text on a light fill is hard to read.
+- **A color that is no color**: A `Color` or a `TextColor` that is neither a theme color nor a CSS color of a form that [Colors](basics.md#colors) lists shows `Unknown color 'purple': use a theme color like Success or Surface 30%, or a CSS color like #ffffff80` in a small red alert in place of every widget that refers to the map, with the color as written, also while no value matches that case. The pipe `map` in the text of a page shows the same message as its text. See [Value Widget Errors](../page-errors.md#value-widget-errors).
+- **A map that cannot be resolved**: A `Map` that leads nowhere, or to a subject that is no `ValueMap`, shows `Cannot resolve map: motorstat` in a small red alert in place of the widget, with the name as written. A row of a `ValueList` shows it in place of its value, and a `SubjectTable` shows it once per such column in place of the table. This is a mistake on the page, see [Value Widget Errors](../page-errors.md#value-widget-errors). The rest of the page renders.
+- **A mistake in a case**: A `When` or a `Text` that is not a valid expression, or a default case before other cases, shows its message in a small red alert in place of every widget that refers to the map, such as `Case 2, When: expected a value after '>' at position 7`, and the pipe `map` in the text of a page shows it as its text. See [Value Widget Errors](../page-errors.md#value-widget-errors).
+
+## Related
+
+- [Basics](basics.md) - Type names, paths, value widgets, colors and icons
+- [Overview](overview.md) - All widgets by group
+- [ValueList](value-list.md) - Rows with a label and a value
+- [ValueTile](value-tile.md) - A small box with a label and one large value
+- [Indicator](indicator.md) - A state as a colored chip or as an icon
+- [Select](select.md) - Picks a value of an enum, with the texts of a map

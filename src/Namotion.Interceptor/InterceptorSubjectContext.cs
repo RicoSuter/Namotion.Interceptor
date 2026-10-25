@@ -242,7 +242,7 @@ public sealed class InterceptorSubjectContext : IInterceptorSubjectContext
     /// <see cref="TryGetService{TInterface}"/> against a pinned snapshot instead of the current
     /// state.
     /// </summary>
-    internal TInterface? TryGetServiceFromState<TInterface>(ContextState state)
+    internal static TInterface? TryGetServiceFromState<TInterface>(ContextState state)
     {
         var services = GetServicesFromState<TInterface>(state);
         return services.Length switch
@@ -305,7 +305,7 @@ public sealed class InterceptorSubjectContext : IInterceptorSubjectContext
         return CreateReadInterceptorFunction<TProperty>(state);
     }
 
-    private ReadFunc<TProperty> CreateReadInterceptorFunction<TProperty>(ContextState state)
+    private static ReadFunc<TProperty> CreateReadInterceptorFunction<TProperty>(ContextState state)
     {
         // Services are resolved from the same snapshot that caches the compiled chain, so a
         // registration (which publishes a new state with fresh caches) can never keep a chain
@@ -328,7 +328,7 @@ public sealed class InterceptorSubjectContext : IInterceptorSubjectContext
         return CreateWriteInterceptorFunction<TProperty>(state, propertyTypeIndex);
     }
 
-    private WriteAction<TProperty> CreateWriteInterceptorFunction<TProperty>(ContextState state, int propertyTypeIndex)
+    private static WriteAction<TProperty> CreateWriteInterceptorFunction<TProperty>(ContextState state, int propertyTypeIndex)
     {
         var writeInterceptors = GetServicesFromState<IWriteInterceptor>(state);
         var action = WriteInterceptorFactory<TProperty>.Create(writeInterceptors);
@@ -348,7 +348,7 @@ public sealed class InterceptorSubjectContext : IInterceptorSubjectContext
         return CreateMethodInvocationFunction(state);
     }
 
-    private InvokeFunc CreateMethodInvocationFunction(ContextState state)
+    private static InvokeFunc CreateMethodInvocationFunction(ContextState state)
     {
         var methodInterceptors = GetServicesFromState<IMethodInterceptor>(state);
         var function = MethodInvocationFactory.Create(methodInterceptors);
@@ -364,7 +364,7 @@ public sealed class InterceptorSubjectContext : IInterceptorSubjectContext
     /// snapshot that owns the cache, so a registration (which publishes a new state) can never
     /// receive a stale entry.
     /// </summary>
-    private ImmutableArray<TInterface> GetServicesFromState<TInterface>(ContextState state)
+    private static ImmutableArray<TInterface> GetServicesFromState<TInterface>(ContextState state)
     {
         // An empty context allocates no service cache. The compiled chain arrays are unaffected:
         // an empty state that answers intercepted access still fills those.

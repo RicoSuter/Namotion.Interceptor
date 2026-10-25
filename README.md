@@ -4,28 +4,28 @@
 
 # Namotion.Interceptor for .NET
 
-Namotion.Interceptor is a .NET library for building reactive applications with automatic property tracking and change propagation. It uses **C# 13 partial properties** and **source generation** to transform your classes into observable object graphs, without runtime reflection or proxy objects.
+Namotion.Interceptor is a .NET library for building reactive applications with automatic property tracking and change propagation. It uses **C# 13 partial properties** and **source generation** to transform your classes into observable object graphs, without reflection on property access or proxy objects.
 
 Mark your classes with `[InterceptorSubject]` and declare properties as `partial`. The source generator handles the rest: creating interception logic, change detection, derived property updates, and lifecycle management. Your domain models remain clean POCOs while gaining reactive capabilities.
 
-The library supports **bidirectional synchronization** with external systems. When a property changes locally, connectors propagate the change outward. When external data arrives, your object model updates and triggers change notifications. Built-in integrations include MQTT, OPC UA, ASP.NET Core, Blazor, and GraphQL. Typical use cases are IoT dashboards, industrial HMIs, real-time web apps, and data synchronization services.
+The library supports **bidirectional synchronization** with external systems. When a property changes locally, connectors propagate the change outward. When external data arrives, your object model updates and triggers change notifications. Built-in integrations include MQTT, OPC UA, WebSocket, ASP.NET Core, Blazor, GraphQL, and MCP. Typical use cases are IoT dashboards, industrial HMIs, real-time web apps, and data synchronization services.
 
 ![](features.png)
 
 ## Why Namotion.Interceptor?
 
 - **Reactive object graphs** - Property changes automatically propagate to derived properties and external systems
-- **Zero runtime reflection** - All interception logic is generated at compile-time for maximum performance
+- **No reflection on property access** - All interception logic is generated at compile-time for maximum performance
 - **Bidirectional synchronization** - Connect your object model to MQTT brokers, OPC UA servers, or databases with minimal code
 - **Clean domain models** - Your classes stay as POCOs with simple attributes
-- **INotifyPropertyChanged built-in** - Generated classes implement it automatically, including derived properties, for UI data binding
+- **INotifyPropertyChanged built-in** - Generated classes implement it automatically for UI data binding, including derived properties when derived property change detection is enabled
 
 ## Packages
 
 Namotion.Interceptor is structured as Core, Tracking, Validation, Registry, Connectors, and Integrations. Each builds on the previous, so you can adopt only what you need.
 
 1. **Core**: `[InterceptorSubject]`, the source generator, and the read/write interceptor pipeline. Everything else plugs into this.
-2. **Tracking**: observable and queue-based change streams, derived property recalculation, lifecycle attach/detach, transactions.
+2. **Tracking**: observable, queue-based, and per-property change subscriptions, derived property recalculation, lifecycle attach/detach, transactions.
 3. **Validation**: data-annotation and custom property validators that reject invalid writes before they reach your model.
 4. **Registry**: runtime subject and property discovery, property metadata via attributes, dynamic properties, stable subject IDs.
 5. **Connectors**: bidirectional synchronization with external systems (MQTT, OPC UA, WebSocket).
@@ -44,22 +44,18 @@ The rest of this README walks through each, then lists every package with a docu
 
 ## Requirements
 
-- **.NET 9.0** or later (extensions and integrations)
-- **.NET Standard 2.0** (core library only)
-- **C# 13** with partial properties support
+- **.NET 10.0** or later
+- **C# 14** (the .NET 10 default; partial properties need C# 13 or later)
 - IDE with source generator support (Visual Studio 2022, Rider, VS Code with C# extension)
 
 ## Installation
 
 Add the core library and the source generator. Most projects also want the Tracking package for change events and derived properties.
 
-```xml
-<ItemGroup>
-    <PackageReference Include="Namotion.Interceptor" Version="0.1.0" />
-    <PackageReference Include="Namotion.Interceptor.Generator" Version="0.1.0"
-                      OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
-    <PackageReference Include="Namotion.Interceptor.Tracking" Version="0.1.0" />
-</ItemGroup>
+```bash
+dotnet add package Namotion.Interceptor
+dotnet add package Namotion.Interceptor.Generator
+dotnet add package Namotion.Interceptor.Tracking
 ```
 
 Additional packages are listed in the [Package Reference](#package-reference) at the bottom.
@@ -117,12 +113,12 @@ For the patterns that work, the patterns that don't (collection mutation, explic
 
 The source generator (`Namotion.Interceptor.Generator`) is the bridge between your `partial` declarations and the interception pipeline. It runs at compile-time.
 
-For each partial property, the generator expands the declaration into a real getter and setter that route through the subject's context. A read passes through the chain of `IReadInterceptor`s. A write first runs your optional `OnXxxChanging` hook (which can cancel or coerce the value), then the chain of `IWriteInterceptor`s (where validation, change tracking, and source synchronization plug in), then the backing-field write, then `OnXxxChanged`, and finally raises `INotifyPropertyChanged`.
+For each partial property, the generator expands the declaration into a real getter and setter that route through the subject's context. A read passes through the chain of `IReadInterceptor`s. A write first runs your optional `OnXxxChanging` hook (which can cancel or coerce the value), then the chain of `IWriteInterceptor`s (where validation, change tracking, and source synchronization plug in), whose innermost step writes the backing field. Only if that field write happened does the setter call `OnXxxChanged` and raise `INotifyPropertyChanged`.
 
 Concretely, for each `[InterceptorSubject]` class the generator emits:
 
 - A backing field paired with the expanded getter and setter for every partial property.
-- A constructor accepting `IInterceptorSubjectContext`, plus a mirror of every constructor you declare with that parameter appended.
+- A constructor accepting `IInterceptorSubjectContext`, plus a mirror of every constructor you declare with that parameter appended (see [Constructors](docs/generator.md#constructors) for when each is generated).
 - `IInterceptorSubject`, `INotifyPropertyChanged`, and `IRaisePropertyChanged` implementations.
 - Static metadata describing the class's properties.
 
@@ -136,15 +132,17 @@ partial void OnFirstNameChanging(ref string newValue, ref bool cancel)
 }
 ```
 
-Because everything is generated at compile-time, there is no runtime reflection or proxy creation. See [Generator](docs/generator.md) for supported features (inheritance, init-only, virtual/override, partial-class spanning) and limitations.
+Because the interception code is generated at compile-time, property access involves no reflection and no proxy creation. See [Generator](docs/generator.md) for supported features (inheritance, init-only, virtual/override, partial-class spanning) and limitations.
 
 If partial properties aren't an option (for example, you need to add interfaces to a subject at runtime), the [Dynamic](docs/dynamic.md) package builds equivalent subjects from interfaces using Castle DynamicProxy. For advanced scenarios where neither path fits, `IInterceptorSubject` can also be implemented by hand.
 
 ### Interception Pipeline
 
-Property reads and writes flow through a configurable chain of interceptors. Each interceptor receives the value plus a `next` delegate, so it can run code before and after the actual field access. This is how tracking, validation, sources, transactions, and everything else plug in.
+Property reads and writes flow through a configurable chain of interceptors. Each interceptor receives a context and a `next` delegate, so it can run code before and after the actual field access. A write interceptor finds the new value in the context; a read interceptor gets the value back from `next`. This is how tracking, validation, sources, transactions, and everything else plug in.
 
 ```csharp
+using Namotion.Interceptor.Interceptors;
+
 public class LoggingInterceptor : IWriteInterceptor
 {
     public void WriteProperty<T>(ref PropertyWriteContext<T> context, WriteInterceptionDelegate<T> next)
@@ -173,7 +171,7 @@ var context = InterceptorSubjectContext
     .WithFullPropertyTracking();
 ```
 
-`WithFullPropertyTracking()` registers equality checking, derived-property change detection, the property-change observable and queue, and context inheritance for child subjects.
+`WithFullPropertyTracking()` registers equality checking, derived-property change detection, the property-change subscriptions (observable, queue, and per-property), lifecycle tracking, and context inheritance for child subjects.
 
 The samples below use the `Person` class from the Core section above.
 
@@ -200,7 +198,9 @@ person.LastName = "Doe";
 // Property 'FullName' changed from 'John ' to 'John Doe'.
 ```
 
-For high-throughput scenarios (>1000 changes/second, source synchronization, IoT pipelines), use the lock-free queue instead of the observable. It avoids per-event allocations and is the mechanism the connectors use internally. Both mechanisms are described in [Tracking](docs/tracking.md).
+By default the callbacks run on the thread pool, so the lines above appear shortly after each assignment, in order. Pass `ImmediateScheduler.Instance` to `GetPropertyChangeObservable` to run them synchronously inside the setter.
+
+For high-throughput scenarios (>1000 changes/second, source synchronization, IoT pipelines), use the lock-free queue instead of the observable. It avoids per-event allocations and is the mechanism the connectors use internally. To follow a single property, subscribe to it directly instead of filtering the whole stream. All three mechanisms are described in [Tracking](docs/tracking.md#change-tracking).
 
 ### Derived Properties
 
@@ -211,14 +211,20 @@ When `[Derived]` properties read other properties during evaluation, the trackin
 The tracking package also reports when subjects enter or leave the object graph:
 
 ```csharp
+var lifecycle = context.TryGetLifecycleInterceptor()!;
+lifecycle.SubjectAttached += change => Console.WriteLine($"Attached: {((Person)change.Subject).FirstName}");
+lifecycle.SubjectDetaching += change => Console.WriteLine($"Detaching: {((Person)change.Subject).FirstName}");
+
 person.Children = [new Person { FirstName = "Alice" }, new Person { FirstName = "Bob" }];
 // Attached: Alice
 // Attached: Bob
 
 person.Children = [];
-// Detached: Alice
-// Detached: Bob
+// Detaching: Bob
+// Detaching: Alice
 ```
+
+Collection items detach in reverse order. Handlers registered at startup implement `ILifecycleHandler` instead, see [Tracking](docs/tracking.md#subject-lifecycle-tracking).
 
 Higher-level features rely on this to start and stop work as the graph grows and shrinks: the registry inserts and removes entries, the hosting package starts and stops services, and connectors subscribe and unsubscribe from external sources.
 
@@ -278,7 +284,7 @@ var context = InterceptorSubjectContext
     .WithRegistry();
 
 var person = new Person(context);
-var registered = person.TryGetRegisteredSubject();
+var registered = person.TryGetRegisteredSubject()!;
 
 foreach (var property in registered.Properties)
 {
@@ -300,13 +306,15 @@ A **connector** synchronizes a subject graph with an external system. It comes i
 - **Sources** (`ISubjectSource`): the external system is the source of truth. The connector loads initial state, subscribes to inbound updates, and writes local changes back. Each property has at most one source.
 - **Servers**: the C# graph is the source of truth. The connector exposes properties to external clients and applies their incoming writes.
 
-Both directions use the same path-mapping infrastructure (`[Path]` attributes, customizable path providers) and route through the property-change queue for backpressure-friendly delivery. The shared connector infrastructure also handles loop prevention (echoed values are deduplicated by source filtering), write retry queues during disconnection, and reconnection with state replay.
+Both directions use the same path-mapping infrastructure (`[Path]` attributes, customizable path providers) and route outbound changes through the property-change queue, which batches and merges them before they are written. The shared connector infrastructure also handles loop prevention (echoed values are deduplicated by source filtering), write retry queues during disconnection, and reconnection with state replay.
 
 Writes are **local-first** by default: the in-process model updates immediately and the change is sent to the external system asynchronously. This keeps the local model responsive but means it can be temporarily ahead of the source. For scenarios that need the source to confirm before the local model updates (industrial control, financial data), wrap the writes in a [source transaction](docs/tracking-transactions.md): the local model only changes if the source accepts the write.
 
 The MQTT connector illustrates a typical setup. Define your subject with topic mappings:
 
 ```csharp
+using Namotion.Interceptor.Registry.Attributes;
+
 [InterceptorSubject]
 public partial class Sensor
 {
@@ -356,7 +364,7 @@ sensor.Temperature = 25.5m;
 // Inbound MQTT messages update the property and trigger change notifications
 ```
 
-The same pattern applies to [OPC UA](docs/connectors-opcua.md) (industrial automation, dynamic property discovery, companion specifications) and [WebSocket](docs/connectors-websocket.md) (digital twin synchronization with sequence numbers and heartbeats). Implementation details for sources, servers, ownership, and write retry are in [Connectors](docs/connectors.md). The wire format used for partial state synchronization is documented in [Subject Updates](docs/connectors-subject-updates.md).
+The same pattern applies to [OPC UA](docs/connectors-opcua.md) (industrial automation, dynamic property discovery, companion specifications), [Modbus](docs/connectors-modbus.md) (read-only polling of Modbus TCP devices) and [WebSocket](docs/connectors-websocket.md) (digital twin synchronization with sequence numbers and heartbeats). Implementation details for sources, servers, ownership, and write retry are in [Connectors](docs/connectors.md). The wire format used for partial state synchronization is documented in [Subject Updates](docs/connectors-subject-updates.md).
 
 ## Integrations
 
@@ -375,7 +383,7 @@ Integrations expose subjects through .NET host frameworks. They reuse the tracki
 | Package | Description | Documentation |
 |---------|-------------|---------------|
 | **Namotion.Interceptor** | Core interfaces and the read/write interceptor pipeline | [Interceptors](docs/interceptor.md) |
-| **Namotion.Interceptor.Generator** | Source generator for `[InterceptorSubject]` classes (add as analyzer) | [Generator](docs/generator.md) |
+| **Namotion.Interceptor.Generator** | Source generator for `[InterceptorSubject]` classes | [Generator](docs/generator.md) |
 | **Namotion.Interceptor.Dynamic** | Create subjects from interfaces at runtime | [Dynamic](docs/dynamic.md) |
 
 ### Tracking
@@ -395,6 +403,7 @@ Integrations expose subjects through .NET host frameworks. They reuse the tracki
 | Package | Description | Documentation |
 |---------|-------------|---------------|
 | **Namotion.Interceptor.Registry** | Runtime property discovery, metadata, and dynamic properties | [Registry](docs/registry.md) |
+| **Namotion.Interceptor.Expressions** | Expressions over property values: comparisons, conditions and templates | [Expressions](docs/expressions.md) |
 
 ### Connectors
 
@@ -403,6 +412,7 @@ Integrations expose subjects through .NET host frameworks. They reuse the tracki
 | **Namotion.Interceptor.Connectors** | Base infrastructure for external system integration | [Connectors](docs/connectors.md) |
 | **Namotion.Interceptor.Mqtt** | Bidirectional MQTT synchronization | [MQTT](docs/connectors-mqtt.md) |
 | **Namotion.Interceptor.OpcUa** | OPC UA client and server integration | [OPC UA](docs/connectors-opcua.md) |
+| **Namotion.Interceptor.Modbus** | Read-only Modbus TCP polling | [Modbus](docs/connectors-modbus.md) |
 | **Namotion.Interceptor.WebSocket** | Real-time WebSocket synchronization | [WebSocket](docs/connectors-websocket.md) |
 | **Connector Tester** | Chaos and load testing for connector verification | [Connector Tester](docs/connector-tester.md) |
 

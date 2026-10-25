@@ -18,7 +18,7 @@ public class InterceptorTests
         var car = new Car(context);
 
         // Act
-        var speed = car.Speed;
+        _ = car.Speed;
 
         // Assert
         return Verify(logs);

@@ -17,6 +17,7 @@
   </Folder>
   <Folder Name="/Connectors/">
     <Project Path="Namotion.Interceptor.ConnectorTester/Namotion.Interceptor.ConnectorTester.csproj" />
+    <Project Path="Namotion.Interceptor.Modbus/Namotion.Interceptor.Modbus.csproj" />
     <Project Path="Namotion.Interceptor.Mqtt.SampleClient/Namotion.Interceptor.Mqtt.SampleClient.csproj" />
     <Project Path="Namotion.Interceptor.Mqtt.SampleServer/Namotion.Interceptor.Mqtt.SampleServer.csproj" />
     <Project Path="Namotion.Interceptor.Mqtt/Namotion.Interceptor.Mqtt.csproj" />
@@ -36,20 +37,26 @@
   </Folder>
   <Folder Name="/HomeBlaze/">
     <Project Path="HomeBlaze/HomeBlaze.AI/HomeBlaze.AI.csproj" />
+    <Project Path="HomeBlaze/HomeBlaze.AI.Blazor/HomeBlaze.AI.Blazor.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Components/HomeBlaze.Components.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Host.Services/HomeBlaze.Host.Services.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Host/HomeBlaze.Host.csproj" />
+    <Project Path="HomeBlaze/HomeBlaze.Installation/HomeBlaze.Installation.csproj" />
+    <Project Path="HomeBlaze/HomeBlaze.Installation.Blazor/HomeBlaze.Installation.Blazor.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Plugins/HomeBlaze.Plugins.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Samples/HomeBlaze.Samples.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.OpcUa/HomeBlaze.OpcUa.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.OpcUa.Blazor/HomeBlaze.OpcUa.Blazor.csproj" />
+    <Project Path="HomeBlaze/HomeBlaze.ServiceDefaults/HomeBlaze.ServiceDefaults.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Services/HomeBlaze.Services.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Storage.Blazor/HomeBlaze.Storage.Blazor.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Storage/HomeBlaze.Storage.csproj" />
     <Project Path="HomeBlaze/HomeBlaze/HomeBlaze.csproj" />
+    <Project Path="HomeBlaze/HomeBlaze.AppHost/HomeBlaze.AppHost.csproj" />
   </Folder>
   <Folder Name="/HomeBlaze/Abstractions/">
     <Project Path="HomeBlaze/HomeBlaze.Abstractions/HomeBlaze.Abstractions.csproj" />
+    <Project Path="HomeBlaze/HomeBlaze.Abstractions.Tests/HomeBlaze.Abstractions.Tests.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Components.Abstractions/HomeBlaze.Components.Abstractions.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Components.Tests/HomeBlaze.Components.Tests.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Storage.Abstractions/HomeBlaze.Storage.Abstractions.csproj" />
@@ -64,6 +71,12 @@
     <Project Path="HomeBlaze/Namotion.Devices.MyStrom/Namotion.Devices.MyStrom.csproj" />
     <Project Path="HomeBlaze/Namotion.Devices.MyStrom.Tests/Namotion.Devices.MyStrom.Tests.csproj" />
     <Project Path="HomeBlaze/Namotion.Devices.MyStrom.HomeBlaze/Namotion.Devices.MyStrom.HomeBlaze.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.Nuki/Namotion.Devices.Nuki.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.Nuki.Tests/Namotion.Devices.Nuki.Tests.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.Nuki.HomeBlaze/Namotion.Devices.Nuki.HomeBlaze.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.Sonos/Namotion.Devices.Sonos.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.Sonos.Tests/Namotion.Devices.Sonos.Tests.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.Sonos.HomeBlaze/Namotion.Devices.Sonos.HomeBlaze.csproj" />
     <Project Path="HomeBlaze/Namotion.Devices.Shelly/Namotion.Devices.Shelly.csproj" />
     <Project Path="HomeBlaze/Namotion.Devices.Shelly.Tests/Namotion.Devices.Shelly.Tests.csproj" />
     <Project Path="HomeBlaze/Namotion.Devices.Shelly.HomeBlaze/Namotion.Devices.Shelly.HomeBlaze.csproj" />
@@ -73,6 +86,21 @@
     <Project Path="HomeBlaze/Namotion.Devices.Ecowitt/Namotion.Devices.Ecowitt.csproj" />
     <Project Path="HomeBlaze/Namotion.Devices.Ecowitt.Tests/Namotion.Devices.Ecowitt.Tests.csproj" />
     <Project Path="HomeBlaze/Namotion.Devices.Ecowitt.HomeBlaze/Namotion.Devices.Ecowitt.HomeBlaze.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.Luxtronik/Namotion.Devices.Luxtronik.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.Luxtronik.Tests/Namotion.Devices.Luxtronik.Tests.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.Luxtronik.HomeBlaze/Namotion.Devices.Luxtronik.HomeBlaze.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.SunSpec/Namotion.Devices.SunSpec.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.SunSpec.Generator/Namotion.Devices.SunSpec.Generator.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.SunSpec.HomeBlaze/Namotion.Devices.SunSpec.HomeBlaze.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.SunSpec.Tests/Namotion.Devices.SunSpec.Tests.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.Upnp/Namotion.Devices.Upnp.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.Upnp.Tests/Namotion.Devices.Upnp.Tests.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.FritzBox/Namotion.Devices.FritzBox.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.FritzBox.Tests/Namotion.Devices.FritzBox.Tests.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.FritzBox.HomeBlaze/Namotion.Devices.FritzBox.HomeBlaze.csproj" />
+    <Project Path="HomeBlaze/Namotion.Services.Pushover/Namotion.Services.Pushover.csproj" />
+    <Project Path="HomeBlaze/Namotion.Services.Pushover.Tests/Namotion.Services.Pushover.Tests.csproj" />
+    <Project Path="HomeBlaze/Namotion.Services.Pushover.HomeBlaze/Namotion.Services.Pushover.HomeBlaze.csproj" />
   </Folder>
   <Folder Name="/HomeBlaze/History/">
     <Project Path="HomeBlaze/HomeBlaze.History/HomeBlaze.History.csproj" />
@@ -106,6 +134,7 @@
     <Project Path="HomeBlaze/HomeBlaze.AI.Tests/HomeBlaze.AI.Tests.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.E2E.Tests/HomeBlaze.E2E.Tests.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Host.Services.Tests/HomeBlaze.Host.Services.Tests.csproj" />
+    <Project Path="HomeBlaze/HomeBlaze.Installation.Tests/HomeBlaze.Installation.Tests.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Services.Tests/HomeBlaze.Services.Tests.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Storage.Blazor.Tests/HomeBlaze.Storage.Blazor.Tests.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Storage.Tests/HomeBlaze.Storage.Tests.csproj" />
@@ -121,9 +150,12 @@
     <Project Path="Namotion.Interceptor.Dynamic.Tests/Namotion.Interceptor.Dynamic.Tests.csproj" />
     <Project Path="Namotion.Interceptor.Generator.Tests/Namotion.Interceptor.Generator.Tests.csproj" />
     <Project Path="Namotion.Interceptor.Hosting.Tests/Namotion.Interceptor.Hosting.Tests.csproj" />
+    <Project Path="Namotion.Interceptor.Modbus.Tests/Namotion.Interceptor.Modbus.Tests.csproj" />
     <Project Path="Namotion.Interceptor.Mqtt.Tests/Namotion.Interceptor.Mqtt.Tests.csproj" />
     <Project Path="Namotion.Interceptor.OpcUa.Tests/Namotion.Interceptor.OpcUa.Tests.csproj" />
+    <Project Path="Namotion.Interceptor.Expressions.Tests/Namotion.Interceptor.Expressions.Tests.csproj" />
     <Project Path="Namotion.Interceptor.Registry.Tests/Namotion.Interceptor.Registry.Tests.csproj" />
+    <Project Path="Namotion.Interceptor.Blazor.Tests/Namotion.Interceptor.Blazor.Tests.csproj" />
     <Project Path="Namotion.Interceptor.Connectors.Tests/Namotion.Interceptor.Connectors.Tests.csproj" />
     <Project Path="Namotion.Interceptor.Mcp.Tests/Namotion.Interceptor.Mcp.Tests.csproj" />
     <Project Path="Namotion.Interceptor.Tests/Namotion.Interceptor.Tests.csproj" />
@@ -135,6 +167,7 @@
   <Project Path="Namotion.Interceptor.Dynamic/Namotion.Interceptor.Dynamic.csproj" />
   <Project Path="Namotion.Interceptor.Generator/Namotion.Interceptor.Generator.csproj" />
   <Project Path="Namotion.Interceptor.Hosting/Namotion.Interceptor.Hosting.csproj" />
+  <Project Path="Namotion.Interceptor.Expressions/Namotion.Interceptor.Expressions.csproj" />
   <Project Path="Namotion.Interceptor.Registry/Namotion.Interceptor.Registry.csproj" />
   <Project Path="Namotion.Interceptor.Benchmark/Namotion.Interceptor.Benchmark.csproj" />
   <Project Path="Namotion.Interceptor.Connectors/Namotion.Interceptor.Connectors.csproj" />

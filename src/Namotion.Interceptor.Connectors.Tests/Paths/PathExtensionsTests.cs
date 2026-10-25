@@ -3,6 +3,7 @@ using Namotion.Interceptor.Connectors.Paths;
 using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
@@ -488,6 +489,159 @@ public class PathExtensionsTests
         Assert.Equal("Children[1].FirstName", paths[2].path);
     }
 
+    [Fact]
+    public void WhenPathWithFactoryHasMalformedTail_ThenNoSubjectIsCreated()
+    {
+        // Arrange
+        var person = CreateTestGraph();
+        person.Mother = null;
+
+        // Act
+        var (property, _) = person.TryGetPropertyFromPath(
+            "Mother.FirstName[x", DefaultPathProvider.Instance, DefaultSubjectFactory.Instance);
+
+        // Assert
+        Assert.Null(property);
+        Assert.Null(person.Mother);
+    }
+
+    [Fact]
+    public void WhenSeveralPathsShareAPrefix_ThenEachResolvesItsOwnKey()
+    {
+        // Arrange
+        var person = CreateTestGraph();
+        var plain = new Person { FirstName = "Plain" };
+        var embedded = new Person { FirstName = "Embedded" };
+        person.Relationships = new Dictionary<string, Person> { ["x"] = plain, ["x.FirstName[y"] = embedded };
+
+        // Act
+        var results = person
+            .GetPropertiesFromPaths(
+                ["Relationships[x].FirstName[y]", "Relationships[x.FirstName[y].FirstName"],
+                DefaultPathProvider.Instance)
+            .ToList();
+
+        // Assert
+        Assert.Equal(2, results.Count);
+        Assert.Same(embedded, results[1].property?.Subject);
+        Assert.Equal("FirstName", results[1].property?.Name);
+    }
+
+    [Theory]
+    [MemberData(nameof(GetProviders))]
+    public void WhenPathUsesInlineKey_ThenTryGetPropertyFromPathResolves(string _, PathProviderBase pathProvider)
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var member = new Person { FirstName = "Ann" };
+        var root = new InlineRoot(context) { Members = new Dictionary<int, Person> { [7] = member } };
+
+        // Act
+        var (property, _) = root.TryGetPropertyFromPath("7.FirstName", pathProvider);
+        var (_, index) = root.TryGetPropertyFromPath("7", pathProvider);
+
+        // Assert
+        Assert.NotNull(property);
+        Assert.Same(member, property.Subject);
+        Assert.Equal((object)7, index);
+    }
+
+    [Fact]
+    public void WhenUpdatingValueThroughIntegerLookingKey_ThenValueIsApplied()
+    {
+        // Arrange
+        var person = CreateTestGraph();
+        var five = new Person { FirstName = "Five" };
+        person.Relationships = new Dictionary<string, Person> { ["5"] = five };
+
+        // Act
+        var applied = person.UpdatePropertyValueFromPath(
+            "Relationships[5].FirstName", DateTimeOffset.UtcNow, "Neo", DefaultPathProvider.Instance, source: null);
+
+        // Assert
+        Assert.True(applied);
+        Assert.Equal("Neo", five.FirstName);
+    }
+
+    [Fact]
+    public void WhenEarlierPathEndsWhereLaterPathContinues_ThenLaterPathIsNotFound()
+    {
+        // Arrange
+        var person = CreateTestGraph();
+
+        // Act
+        var results = person
+            .GetPropertiesFromPaths(["Relationships[missing]", "Relationships[missing].FirstName"], DefaultPathProvider.Instance)
+            .ToList();
+
+        // Assert
+        Assert.Equal(2, results.Count);
+        Assert.Equal("Relationships", results[0].property?.Name);
+        Assert.Null(results[1].property);
+    }
+
+    [Fact]
+    public void WhenLaterPathContinuesThroughNullReference_ThenItIsNotFound()
+    {
+        // Arrange
+        var person = CreateTestGraph();
+        person.Mother = null;
+
+        // Act
+        var results = person
+            .GetPropertiesFromPaths(["Mother", "Mother.FirstName"], DefaultPathProvider.Instance)
+            .ToList();
+
+        // Assert
+        Assert.Equal(2, results.Count);
+        Assert.Equal("Mother", results[0].property?.Name);
+        Assert.Null(results[1].property);
+    }
+
+    [Fact]
+    public void WhenPropertyIsExcludedByProvider_ThenConnectorsResolverIgnoresItAndRegistryResolverFindsIt()
+    {
+        // Arrange
+        var person = CreateTestGraph();
+        var pathProvider = new ExcludingLastNamePathProvider();
+
+        // Act
+        var (connectorsProperty, _) = person.TryGetPropertyFromPath("LastName", pathProvider);
+        var registryResult = pathProvider.TryGetPropertyFromPath(person.TryGetRegisteredSubject()!, "LastName");
+
+        // Assert
+        Assert.Null(connectorsProperty);
+        Assert.NotNull(registryResult);
+    }
+
+    [Fact]
+    public void WhenReferenceIsMissingAndFactoryIsGiven_ThenSubjectIsCreatedAndAssigned()
+    {
+        // Arrange
+        var person = CreateTestGraph();
+        person.Mother = null;
+
+        // Act
+        var (property, _) = person.TryGetPropertyFromPath("Mother.FirstName", DefaultPathProvider.Instance, DefaultSubjectFactory.Instance);
+
+        // Assert
+        Assert.NotNull(person.Mother);
+        Assert.Same(person.Mother, property?.Subject);
+    }
+
+    [Fact]
+    public void WhenKeyedItemIsMissingAndFactoryIsGiven_ThenPathIsNotFound()
+    {
+        // Arrange
+        var person = CreateTestGraph();
+
+        // Act
+        var (property, _) = person.TryGetPropertyFromPath("Children[99].FirstName", DefaultPathProvider.Instance, DefaultSubjectFactory.Instance);
+
+        // Assert
+        Assert.Null(property);
+    }
+
     private static Person CreateTestGraph()
     {
         var context = InterceptorSubjectContext
@@ -517,5 +671,10 @@ public class PathExtensionsTests
         };
 
         return person;
+    }
+
+    private sealed class ExcludingLastNamePathProvider : PathProviderBase
+    {
+        public override bool IsPropertyIncluded(RegisteredSubjectProperty property) => property.Name != nameof(Person.LastName);
     }
 }

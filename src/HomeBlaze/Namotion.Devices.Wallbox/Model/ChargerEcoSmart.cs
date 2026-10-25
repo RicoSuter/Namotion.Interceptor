@@ -5,7 +5,7 @@ namespace Namotion.Devices.Wallbox.Model;
 internal class ChargerEcoSmart
 {
     [JsonPropertyName("enabled")]
-    public bool Enabled { get; set; }
+    public bool IsEnabled { get; set; }
 
     [JsonPropertyName("mode")]
     public int Mode { get; set; }

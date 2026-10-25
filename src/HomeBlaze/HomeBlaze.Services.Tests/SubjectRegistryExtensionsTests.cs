@@ -1,12 +1,16 @@
+using System.ComponentModel;
+using System.Reflection;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
+using HomeBlaze.Abstractions.Sensors;
 using HomeBlaze.Services.Lifecycle;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Lifecycle;
+using Namotion.Interceptor.Tracking.Parent;
 
 namespace HomeBlaze.Services.Tests;
 
@@ -187,6 +191,151 @@ public class SubjectRegistryExtensionsTests
     }
 
     [Fact]
+    public void WhenSubjectIsConfigurable_ThenConfigurationOwnerIsTheSubject()
+    {
+        // Arrange
+        var context = CreateContext().WithLifecycle();
+        var parent = new ConfigurationOwnerTestParent(context);
+        var subject = new ConfigurationOwnerTestParent(context);
+        parent.StateChild = subject;
+
+        // Act
+        var owner = subject.TryGetConfigurationOwner();
+
+        // Assert
+        Assert.Same(subject, owner);
+    }
+
+    [Fact]
+    public void WhenSubjectIsHeldThroughConfigurationProperty_ThenConfigurationOwnerIsTheParent()
+    {
+        // Arrange
+        var context = CreateContext().WithLifecycle();
+        var subject = new ConfigurationOwnerTestChild(context);
+        var parent = new ConfigurationOwnerTestParent(context) { ConfigurationChildren = [subject] };
+
+        // Act
+        var owner = subject.TryGetConfigurationOwner();
+
+        // Assert
+        Assert.Same(parent, owner);
+    }
+
+    [Fact]
+    public void WhenSubjectIsNestedThroughConfigurationProperties_ThenConfigurationOwnerIsTheNearestConfigurableParent()
+    {
+        // Arrange
+        var context = CreateContext().WithLifecycle();
+        var subject = new ConfigurationOwnerTestChild(context);
+        var intermediate = new ConfigurationOwnerTestChild(context) { ConfigurationChild = subject };
+        var parent = new ConfigurationOwnerTestParent(context) { ConfigurationChildren = [intermediate] };
+        _ = new ConfigurationOwnerTestParent(context) { ConfigurationChildren = [parent] };
+
+        // Act
+        var owner = subject.TryGetConfigurationOwner();
+
+        // Assert
+        Assert.Same(parent, owner);
+    }
+
+    [Fact]
+    public void WhenSubjectIsHeldThroughStateProperty_ThenThereIsNoConfigurationOwner()
+    {
+        // Arrange
+        var context = CreateContext().WithLifecycle();
+        var subject = new ConfigurationOwnerTestChild(context);
+        var parent = new ConfigurationOwnerTestParent(context) { StateChild = subject };
+
+        // Act
+        var owner = subject.TryGetConfigurationOwner();
+
+        // Assert
+        Assert.Same(parent, subject.TryGetFirstParent<IConfigurable>());
+        Assert.Null(owner);
+    }
+
+    [Fact]
+    public void WhenStatePropertyIsAboveConfigurationProperty_ThenThereIsNoConfigurationOwner()
+    {
+        // Arrange
+        var context = CreateContext().WithLifecycle();
+        var subject = new ConfigurationOwnerTestChild(context);
+        var intermediate = new ConfigurationOwnerTestChild(context) { ConfigurationChild = subject };
+        var parent = new ConfigurationOwnerTestParent(context) { StateChild = intermediate };
+
+        // Act
+        var owner = subject.TryGetConfigurationOwner();
+
+        // Assert
+        Assert.Same(parent, subject.TryGetFirstParent<IConfigurable>());
+        Assert.Null(owner);
+    }
+
+    [Fact]
+    public void WhenSubjectHasNoParent_ThenThereIsNoConfigurationOwner()
+    {
+        // Arrange
+        var context = CreateContext().WithLifecycle();
+        var subject = new ConfigurationOwnerTestChild(context);
+
+        // Act
+        var owner = subject.TryGetConfigurationOwner();
+
+        // Assert
+        Assert.Null(owner);
+    }
+
+    [Fact]
+    public void WhenOwnerPredicateSkipsNearestConfigurableParent_ThenConfigurationOwnerIsTheMatchingParent()
+    {
+        // Arrange
+        var context = CreateContext().WithLifecycle();
+        var subject = new ConfigurationOwnerTestParent(context);
+        var intermediate = new ConfigurationOwnerTestParent(context) { ConfigurationChildren = [subject] };
+        var parent = new ConfigurationOwnerTestParent(context) { ConfigurationChildren = [intermediate] };
+
+        // Act
+        var owner = subject.TryGetConfigurationOwner(candidate => ReferenceEquals(candidate, parent));
+
+        // Assert
+        Assert.Same(parent, owner);
+    }
+
+    [Fact]
+    public void WhenAnInterfaceDefaultStatePropertyIsDerived_ThenItIsDisplayableAndFollowsItsSource()
+    {
+        // Arrange
+        var context = CreateContext();
+        var subject = new DoorSensorTestSubject(context);
+        var property = subject.TryGetRegisteredSubject()!.TryGetProperty(nameof(IDoorSensor.IsDoorClosed))!;
+
+        // Act
+        subject.DoorState = DoorState.Closed;
+
+        // Assert
+        Assert.True(property.IsDisplayable());
+        Assert.Equal(true, property.GetValue());
+    }
+
+    [Fact]
+    public void WhenAnAbstractionHasADefaultStateProperty_ThenItIsDerived()
+    {
+        // Arrange
+        var interfaces = typeof(IServerSubject).Assembly.GetTypes().Where(type => type.IsInterface);
+
+        // Act
+        var notDerived = interfaces
+            .SelectMany(type => type.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly))
+            .Where(property => property.GetMethod is { IsAbstract: false } &&
+                property.IsDefined(typeof(StateAttribute), inherit: false) &&
+                !property.IsDefined(typeof(DerivedAttribute), inherit: false))
+            .Select(property => property.DeclaringType!.Name + "." + property.Name);
+
+        // Assert
+        Assert.Empty(notDerived);
+    }
+
+    [Fact]
     public void DynamicSubject_WithProgrammaticAttributes_WorksIdentically()
     {
         // Arrange
@@ -207,6 +356,128 @@ public class SubjectRegistryExtensionsTests
         Assert.Equal(StateUnit.Watt, metadata.Unit);
         Assert.Equal(5, metadata.Position);
     }
+
+    [Fact]
+    public void WhenAPropertyHasACategory_ThenTheStateMetadataHasIt()
+    {
+        // Arrange
+        var subject = new CategorizedTestSubject(CreateContext());
+        var property = subject.TryGetRegisteredProperty(nameof(CategorizedTestSubject.Bass))!;
+
+        // Act
+        var category = property.GetStateMetadata()?.Category;
+
+        // Assert
+        Assert.Equal("Sound", category);
+    }
+
+    [Fact]
+    public void WhenAPropertyHasNoCategory_ThenTheStateMetadataHasNone()
+    {
+        // Arrange
+        var subject = new CategorizedTestSubject(CreateContext());
+        var property = subject.TryGetRegisteredProperty(nameof(CategorizedTestSubject.Status))!;
+
+        // Act
+        var category = property.GetStateMetadata()?.Category;
+
+        // Assert
+        Assert.Null(category);
+    }
+
+    [Fact]
+    public void WhenOnlyTheInterfacePropertyHasACategory_ThenTheStateMetadataHasIt()
+    {
+        // Arrange
+        var subject = new CategorizedTestSubject(CreateContext());
+        var property = subject.TryGetRegisteredProperty(nameof(CategorizedTestSubject.Volume))!;
+
+        // Act
+        var category = property.GetStateMetadata()?.Category;
+
+        // Assert
+        Assert.Equal("Volume", category);
+    }
+
+    [Fact]
+    public void WhenTheClassAndTheInterfacePropertyHaveACategory_ThenTheStateMetadataHasTheOneOfTheClass()
+    {
+        // Arrange
+        var subject = new CategorizedTestSubject(CreateContext());
+        var property = subject.TryGetRegisteredProperty(nameof(CategorizedTestSubject.IsMuted))!;
+
+        // Act
+        var category = property.GetStateMetadata()?.Category;
+
+        // Assert
+        Assert.Equal("Sound", category);
+    }
+
+    [Fact]
+    public void WhenTheClassPropertyHasAnEmptyCategory_ThenTheStateMetadataHasNoneInsteadOfTheOneOfTheInterfaceProperty()
+    {
+        // Arrange
+        var subject = new CategorizedTestSubject(CreateContext());
+        var property = subject.TryGetRegisteredProperty(nameof(CategorizedTestSubject.Balance))!;
+
+        // Act
+        var category = property.GetStateMetadata()?.Category;
+
+        // Assert
+        Assert.Null(category);
+    }
+
+    [Fact]
+    public void WhenACategoryHasSurroundingWhitespace_ThenTheStateMetadataHasTheTrimmedName()
+    {
+        // Arrange
+        var subject = new CategorizedTestSubject(CreateContext());
+        var property = subject.TryGetRegisteredProperty(nameof(CategorizedTestSubject.Treble))!;
+
+        // Act
+        var category = property.GetStateMetadata()?.Category;
+
+        // Assert
+        Assert.Equal("Sound", category);
+    }
+}
+
+public interface ICategorizedTestInterface
+{
+    [State]
+    [Category("Volume")]
+    decimal? Volume { get; }
+
+    [State]
+    [Category("Volume")]
+    bool? IsMuted { get; }
+
+    [State]
+    [Category("Volume")]
+    decimal? Balance { get; }
+}
+
+[InterceptorSubject]
+public partial class CategorizedTestSubject : ICategorizedTestInterface
+{
+    [State]
+    public partial string? Status { get; set; }
+
+    [State]
+    [Category("Sound")]
+    public partial int? Bass { get; set; }
+
+    public partial decimal? Volume { get; set; }
+
+    [Category("Sound")]
+    public partial bool? IsMuted { get; set; }
+
+    [Category("")]
+    public partial decimal? Balance { get; set; }
+
+    [State]
+    [Category(" Sound ")]
+    public partial int? Treble { get; set; }
 }
 
 [InterceptorSubject]
@@ -223,6 +494,12 @@ public partial class ExtensionsTestSubject
 }
 
 [InterceptorSubject]
+public partial class DoorSensorTestSubject : IDoorSensor
+{
+    public partial DoorState? DoorState { get; set; }
+}
+
+[InterceptorSubject]
 public partial class StateOnlyTestSubject
 {
     [State]
@@ -233,4 +510,23 @@ public partial class StateOnlyTestSubject
 public partial class DynamicTestSubject
 {
     public partial decimal Value { get; set; }
+}
+
+[InterceptorSubject]
+public partial class ConfigurationOwnerTestParent : IConfigurable
+{
+    [Configuration]
+    public partial List<IInterceptorSubject> ConfigurationChildren { get; set; }
+
+    [State]
+    public partial IInterceptorSubject? StateChild { get; set; }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+}
+
+[InterceptorSubject]
+public partial class ConfigurationOwnerTestChild
+{
+    [Configuration]
+    public partial ConfigurationOwnerTestChild? ConfigurationChild { get; set; }
 }

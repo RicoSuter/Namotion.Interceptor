@@ -7,6 +7,10 @@ namespace Namotion.Interceptor.Tracking.Tests.Transactions;
 [CollectionDefinition(WriterContractValidationCollection.Name, DisableParallelization = true)]
 public sealed class WriterContractValidationCollection
 {
+    private WriterContractValidationCollection()
+    {
+    }
+
     public const string Name = "WriterContractValidation";
 }
 
@@ -66,14 +70,14 @@ public class SubjectTransactionWriterContractValidationTests
 
             // Act & Assert
             var exception = await Assert.ThrowsAsync<SubjectTransactionException>(
-                () => transaction.CommitAsync(CancellationToken.None).AsTask());
+                async () => await transaction.CommitAsync(CancellationToken.None));
             Assert.Contains(exception.Errors, error =>
                 error is InvalidOperationException && error.Message.Contains("contract"));
 
             // The violation is detected after source writes already happened and nothing was reverted,
             // so the transaction must be terminal: a retry would write to the sources a second time.
             var retryException = await Assert.ThrowsAsync<InvalidOperationException>(
-                () => transaction.CommitAsync(CancellationToken.None).AsTask());
+                async () => await transaction.CommitAsync(CancellationToken.None));
             Assert.Contains("already been committed", retryException.Message);
         }
         finally

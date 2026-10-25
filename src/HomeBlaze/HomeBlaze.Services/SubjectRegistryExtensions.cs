@@ -1,8 +1,11 @@
 using HomeBlaze.Abstractions;
+using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Tracking.Parent;
 
 namespace HomeBlaze.Services;
 
@@ -64,6 +67,41 @@ public static class SubjectRegistryExtensions
     }
 
     /// <summary>
+    /// Gets whether a page expression may show the value of the property: an intercepted (partial) property, a derived
+    /// property or a property with <see cref="StateMetadata"/> (marked with <see cref="StateAttribute"/>, also through an
+    /// interface), that is no secret configuration property and is not marked with
+    /// <see cref="ExcludeFromExpressionsAttribute"/>.
+    /// </summary>
+    /// <remarks>
+    /// A plain public property without state metadata is registered as well, but it is no tracked value of the subject
+    /// and can hold internal data, such as the text of an answer while an agent writes it, so it is not shown.
+    /// </remarks>
+    public static bool IsDisplayable(this RegisteredSubjectProperty property)
+    {
+        if (property.GetConfigurationMetadata()?.IsSecret == true)
+        {
+            return false;
+        }
+
+        var isDerived = false;
+        foreach (var attribute in property.ReflectionAttributes)
+        {
+            if (attribute is ExcludeFromExpressionsAttribute)
+            {
+                return false;
+            }
+
+            isDerived |= attribute is DerivedAttribute;
+        }
+
+        return isDerived || property.Reference.Metadata.IsIntercepted || property.GetStateMetadata() is not null;
+    }
+
+    /// <summary>Gets the property when it is <see cref="IsDisplayable"/>, else null.</summary>
+    internal static RegisteredSubjectProperty? AsDisplayable(this RegisteredSubjectProperty? property) =>
+        property is not null && property.IsDisplayable() ? property : null;
+
+    /// <summary>
     /// Gets the <see cref="ConfigurationMetadata"/> for a property, or null if not present.
     /// Uses registry attribute lookup instead of reflection.
     /// </summary>
@@ -73,7 +111,7 @@ public static class SubjectRegistryExtensions
     }
 
     /// <summary>
-    /// Gets the display name for a property (from StateMetadata or camelCase split).
+    /// Gets the display name for a property: its <see cref="StateMetadata"/> title, else the property name.
     /// </summary>
     public static string GetDisplayName(this RegisteredSubjectProperty property)
     {
@@ -108,5 +146,56 @@ public static class SubjectRegistryExtensions
                 return true;
         }
         return false;
+    }
+
+    /// <summary>
+    /// Finds the configurable subject whose configuration contains the subject: the subject itself when it is
+    /// configurable, else the nearest configurable parent that holds it through [Configuration] properties only.
+    /// </summary>
+    /// <returns>Null when the subject is part of no configuration, such as a file in a storage.</returns>
+    public static IInterceptorSubject? TryGetConfigurationOwner(this IInterceptorSubject subject)
+    {
+        return subject.TryGetConfigurationOwner(static candidate => candidate is IConfigurable);
+    }
+
+    /// <summary>
+    /// Finds the nearest subject that matches the predicate and whose configuration contains this subject: the
+    /// subject itself when it matches, else a parent that holds it through [Configuration] properties only.
+    /// </summary>
+    /// <param name="subject">The subject to start from.</param>
+    /// <param name="isOwner">Decides whether a subject is the owner that is looked for.</param>
+    /// <returns>Null when there is none.</returns>
+    public static IInterceptorSubject? TryGetConfigurationOwner(
+        this IInterceptorSubject subject,
+        Func<IInterceptorSubject, bool> isOwner)
+    {
+        if (isOwner(subject))
+            return subject;
+
+        var visited = new HashSet<IInterceptorSubject>(ReferenceEqualityComparer.Instance) { subject };
+        var queue = new Queue<IInterceptorSubject>();
+        queue.Enqueue(subject);
+
+        while (queue.TryDequeue(out var current))
+        {
+            foreach (var parent in current.GetParents())
+            {
+                // Only [Configuration] properties are serialized, so a parent beyond any other property does not
+                // persist the subject.
+                if (parent.Property.TryGetRegisteredProperty()?.IsConfigurationProperty() != true)
+                    continue;
+
+                var parentSubject = parent.Property.Subject;
+                if (!visited.Add(parentSubject))
+                    continue;
+
+                if (isOwner(parentSubject))
+                    return parentSubject;
+
+                queue.Enqueue(parentSubject);
+            }
+        }
+
+        return null;
     }
 }

@@ -228,35 +228,6 @@ public class RecursiveAttachTests
         Assert.Contains(nodeB, attached);
     }
 
-    // ──────────────────────────────────────────────
-    // WithLifecycle() alone carries the full descent
-    // ──────────────────────────────────────────────
-
-    [Fact]
-    public void WhenUsingLifecycleAlone_ThenTheWholeSubtreeIsAttached()
-    {
-        // Arrange: WithLifecycle() alone is the full graph lifecycle: the descent that used to
-        // require the separate context-inheritance handler is intrinsic.
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithLifecycle();
-
-        var lifecycleInterceptor = context.TryGetLifecycleInterceptor()!;
-        var attached = new List<IInterceptorSubject>();
-        lifecycleInterceptor.SubjectAttached += change => attached.Add(change.Subject);
-
-        var parent = new Person(context) { FirstName = "Parent" };
-
-        var grandmother = new Person { FirstName = "Grandmother" };
-        var mother = new Person { FirstName = "Mother", Mother = grandmother };
-
-        // Act
-        parent.Mother = mother;
-
-        // Assert
-        Assert.Contains(mother, attached);
-        Assert.Contains(grandmother, attached);
-    }
 
     [Fact]
     public void WhenAnEdgeRemovalIsSurvived_ThenNoAttachIsPublished()

@@ -110,6 +110,7 @@ public readonly record struct SubjectPropertyMetadata
     {
     }
     
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S107", Justification = "The private constructor combines the existing public metadata shapes without an intermediate allocation.")]
     private SubjectPropertyMetadata(
         string name, 
         Type type, 
@@ -128,7 +129,8 @@ public readonly record struct SubjectPropertyMetadata
         IsIntercepted = isIntercepted;
         IsDynamic = isDynamic;
         IsDerived = attributes.Any(a => a is DerivedAttribute);
-        IsStructural = isIntercepted && !(IsDerived && isDynamic && setValue is null) && type.CanContainSubjects();
+        var isDynamicProjection = IsDerived && isDynamic && setValue is null;
+        IsStructural = isIntercepted && !isDynamicProjection && type.CanContainSubjects();
         PropertyInfo = propertyInfo;
         IsPublic =
             PropertyInfo is null ||

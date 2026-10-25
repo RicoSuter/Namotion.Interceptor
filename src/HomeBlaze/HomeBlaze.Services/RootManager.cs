@@ -4,25 +4,27 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Hosting;
 
 namespace HomeBlaze.Services;
 
 /// <summary>
 /// Manages loading and access to the root subject.
-/// Bootstraps the system from root.json configuration.
+/// Bootstraps the system from the root configuration file and provides the instance data directory.
 /// </summary>
-public class RootManager : BackgroundService, IConfigurationWriter
+public class RootManager : BackgroundService, IConfigurationWriter, IDataDirectoryProvider
 {
     private readonly SubjectTypeRegistry _typeRegistry;
     private readonly ConfigurableSubjectSerializer _serializer;
     private readonly IInterceptorSubjectContext _context;
-    private readonly IConfiguration? _configuration;
     private readonly ILogger<RootManager>? _logger;
 
     // Continuations run off the loading thread so a UI waiter cannot resume inline inside the load.
     private readonly TaskCompletionSource<IInterceptorSubject> _rootLoaded = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    private string? _configurationPath;
+    // Serializes the writes of the root configuration file. Two at once would both open the file, and the one that
+    // serialized the earlier state could write last.
+    private readonly SemaphoreSlim _writeLock = new(1, 1);
 
     /// <summary>
     /// The root subject loaded from configuration.
@@ -34,6 +36,14 @@ public class RootManager : BackgroundService, IConfigurationWriter
     /// is a state probe rather than a gate. Wait on <see cref="RootLoaded"/> to use the graph.
     /// </summary>
     public bool IsLoaded => Root != null;
+
+    /// <summary>
+    /// Full path of the root configuration file.
+    /// </summary>
+    public string ConfigurationPath { get; }
+
+    /// <inheritdoc />
+    public string DataDirectory { get; }
 
     public RootManager(
         SubjectTypeRegistry typeRegistry,
@@ -47,10 +57,13 @@ public class RootManager : BackgroundService, IConfigurationWriter
         _typeRegistry = typeRegistry;
         _serializer = serializer;
         _context = context;
-        _configuration = configuration;
         _logger = logger;
 
-        // Register self with context for subjects to access
+        ConfigurationPath = HomeBlazePaths.GetRootConfigurationPath(configuration);
+        DataDirectory = Path.GetDirectoryName(ConfigurationPath)!;
+
+        // Register self with context for subjects to access, which also serves IDataDirectoryProvider
+        // lookups: storage, history and connectors resolve their relative paths against it.
         context.AddService(this);
 
         // Subjects loaded below resolve their own canonical path (the history stores do it on every
@@ -101,16 +114,15 @@ public class RootManager : BackgroundService, IConfigurationWriter
             return Root;
         }
 
-        var configFileName = _configuration?["HomeBlaze:RootConfigFile"] ?? "root.json";
-        _configurationPath = Path.GetFullPath(configFileName);
-        _logger?.LogInformation("Loading root configuration from: {Path}", _configurationPath);
+        _logger?.LogInformation("Loading root configuration from: {Path}", ConfigurationPath);
 
-        if (!File.Exists(_configurationPath))
+        if (!File.Exists(ConfigurationPath))
         {
-            throw new FileNotFoundException($"Root configuration file not found: {_configurationPath}", _configurationPath);
+            throw new FileNotFoundException($"Root configuration file not found: {ConfigurationPath}", ConfigurationPath);
         }
 
-        var json = await File.ReadAllTextAsync(_configurationPath, cancellationToken);
+        var json = await File.ReadAllTextAsync(ConfigurationPath, cancellationToken);
+        using var startup = _context.DeferHostedServiceStarts();
         var root = _serializer.Deserialize(json);
 
         // All IConfigurable implementations are also IInterceptorSubject (via [InterceptorSubject] attribute).
@@ -131,27 +143,37 @@ public class RootManager : BackgroundService, IConfigurationWriter
         _logger?.LogInformation("Root loaded: {Type}", Root.GetType().FullName);
         _context.AddService(Root);
 
+        // Publish readiness before deferral disposal releases deferred starts.
+        _rootLoaded.TrySetResult(Root);
+
         return Root;
     }
 
     /// <summary>
-    /// Writes the root subject configuration to disk if this is the root subject.
-    /// Called by ConfigurationManager when [Configuration] properties change.
+    /// Writes the root configuration to disk when the subject is the root or nested in its configuration.
+    /// Writes run one after the other.
     /// </summary>
     public async Task<bool> WriteConfigurationAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
     {
-        if (subject != Root)
+        var root = Root;
+        if (root == null || subject.TryGetConfigurationOwner(candidate => ReferenceEquals(candidate, root)) == null)
             return false;
 
-        if (string.IsNullOrEmpty(_configurationPath))
-            throw new InvalidOperationException("Cannot save: config path is not set");
+        await _writeLock.WaitAsync(cancellationToken);
+        try
+        {
+            _logger?.LogInformation("Saving root configuration to: {Path}", ConfigurationPath);
 
-        _logger?.LogInformation("Saving root configuration to: {Path}", _configurationPath);
+            var json = _serializer.Serialize(root);
+            await File.WriteAllTextAsync(ConfigurationPath, json, cancellationToken);
 
-        var json = _serializer.Serialize(Root);
-        await File.WriteAllTextAsync(_configurationPath, json, cancellationToken);
+            _logger?.LogInformation("Root configuration saved successfully");
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
 
-        _logger?.LogInformation("Root configuration saved successfully");
         return true;
     }
 }

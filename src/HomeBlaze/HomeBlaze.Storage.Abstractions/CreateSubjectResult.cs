@@ -3,6 +3,8 @@ using Namotion.Interceptor;
 namespace HomeBlaze.Storage.Abstractions;
 
 /// <summary>
-/// Result from the CreateSubjectWizard containing the created subject and chosen name.
+/// Result of the create subject dialog.
 /// </summary>
-public record CreateSubjectResult(IInterceptorSubject Subject, string Name);
+/// <param name="Subject">The created subject.</param>
+/// <param name="Name">The chosen name without file extension, or null when the caller asked for no name.</param>
+public record CreateSubjectResult(IInterceptorSubject Subject, string? Name);

@@ -12,14 +12,9 @@ public static class JsonSchemaTypeMapper
             return null;
         }
 
-        // Unwrap Nullable<T>
-        var underlying = Nullable.GetUnderlyingType(type);
-        if (underlying is not null)
-        {
-            type = underlying;
-        }
+        type = Nullable.GetUnderlyingType(type) ?? type;
 
-        if (type == typeof(string) || type == typeof(DateTime) || type == typeof(DateTimeOffset) || type == typeof(Guid))
+        if (IsWrittenAsString(type))
         {
             return "string";
         }
@@ -40,9 +35,11 @@ public static class JsonSchemaTypeMapper
             return "number";
         }
 
-        if (type.IsEnum)
+        // A dictionary is also IEnumerable, so this check must run before the array check below;
+        // its JSON value is a map (a JSON object), not a sequence.
+        if (IsDictionary(type))
         {
-            return "string";
+            return "object";
         }
 
         if (type.IsArray || (type.IsGenericType && typeof(System.Collections.IEnumerable).IsAssignableFrom(type)))
@@ -52,4 +49,45 @@ public static class JsonSchemaTypeMapper
 
         return "object";
     }
+
+    private static bool IsDictionary(Type type)
+    {
+        if (typeof(System.Collections.IDictionary).IsAssignableFrom(type) || IsGenericDictionaryDefinition(type))
+        {
+            return true;
+        }
+
+        return Array.Exists(TypeInterfaces.Get(type), IsGenericDictionaryDefinition);
+    }
+
+    private static bool IsGenericDictionaryDefinition(Type type) =>
+        type.IsGenericType &&
+        (type.GetGenericTypeDefinition() == typeof(IDictionary<,>) || type.GetGenericTypeDefinition() == typeof(IReadOnlyDictionary<,>));
+
+    /// <summary>
+    /// Gets the format label of the string a value of <paramref name="type"/> is written and read as by System.Text.Json:
+    /// the standard JSON Schema format name where one matches (<c>date-time</c>, <c>date</c>, <c>uuid</c>, <c>uri</c>),
+    /// otherwise a short label (<c>hh:mm:ss</c> for <see cref="TimeSpan"/>, <c>HH:mm:ss</c> for
+    /// <see cref="TimeOnly"/>, <c>base64</c> for a byte array). Null when the type has no format.
+    /// </summary>
+    internal static string? GetFormat(Type? type)
+    {
+        type = UnwrapNullable(type);
+        return type == typeof(DateTime) || type == typeof(DateTimeOffset) ? "date-time"
+            : type == typeof(DateOnly) ? "date"
+            : type == typeof(Guid) ? "uuid"
+            : type == typeof(Uri) ? "uri"
+            : type == typeof(TimeSpan) ? "hh:mm:ss"
+            : type == typeof(TimeOnly) ? "HH:mm:ss"
+            : type == typeof(byte[]) ? "base64"
+            : null;
+    }
+
+    private static Type? UnwrapNullable(Type? type) =>
+        type is null ? null : Nullable.GetUnderlyingType(type) ?? type;
+
+    // The types System.Text.Json writes as JSON strings by default; enums are listed and read by name. Every type
+    // with a format label is one of them, so GetFormat stays the single list of those.
+    internal static bool IsWrittenAsString(Type type) =>
+        type == typeof(string) || type == typeof(char) || type.IsEnum || GetFormat(type) is not null;
 }

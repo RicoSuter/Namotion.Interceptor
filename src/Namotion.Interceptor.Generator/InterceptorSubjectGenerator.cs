@@ -16,13 +16,8 @@ public class InterceptorSubjectGenerator : IIncrementalGenerator
     {
         var classWithAttributeProvider = context.SyntaxProvider
             .CreateSyntaxProvider(
-                // A struct or interface can never be a valid subject (InterceptorSubjectAttribute's
-                // AttributeUsage is Class-only, so the compiler already reports CS0592 on those);
-                // this predicate has never matched them, so nothing here is skipping GetDeclaredSymbol
-                // or GetSemanticModel work that would otherwise run for them. Records are the one
-                // deliberate addition: the compiler accepts the attribute on a record class, so
-                // NI0003 below is the only report that case gets, at a measured cost of about 3
-                // milliseconds per 150 attributed records.
+                // The attribute permits classes, so the compiler rejects structs and interfaces.
+                // Record classes reach this predicate so extraction can report NI0003.
                 predicate: (node, _) =>
                     node is ClassDeclarationSyntax { AttributeLists.Count: > 0 } or
                     RecordDeclarationSyntax { AttributeLists.Count: > 0 },
@@ -31,12 +26,10 @@ public class InterceptorSubjectGenerator : IIncrementalGenerator
                     var model = ctx.SemanticModel;
                     var typeDeclaration = (TypeDeclarationSyntax)ctx.Node;
 
-                    // Get the type symbol to access all partial declarations
                     var typeSymbol = model.GetDeclaredSymbol(typeDeclaration, ct);
                     if (typeSymbol is null)
                         return null;
 
-                    // Check if ANY partial declaration has the InterceptorSubjectAttribute
                     var hasAttributeInAnyPartial = typeSymbol.DeclaringSyntaxReferences
                         .Select(r => r.GetSyntax(ct))
                         .OfType<TypeDeclarationSyntax>()
@@ -75,66 +68,72 @@ public class InterceptorSubjectGenerator : IIncrementalGenerator
             .Collect()
             .SelectMany((items, _) => items
                 .GroupBy(x => x!.TypeName)
-                .Select(g => g.First())); // take only one per type name to avoid duplicates
+                .Select(g => g.First()));
 
-        context.RegisterSourceOutput(classWithAttributeProvider, (spc, cls) =>
+        // Cache availability as a bool so unrelated compilation changes do not invalidate this input.
+        // Consumers without a System.Text.Json reference cannot compile the emitted attribute.
+        var jsonIgnoreAvailableProvider = context.CompilationProvider.Select((compilation, _) =>
+            compilation.GetTypeByMetadataName("System.Text.Json.Serialization.JsonIgnoreAttribute") is not null);
+
+        context.RegisterSourceOutput(classWithAttributeProvider.Combine(jsonIgnoreAvailableProvider), (spc, pair) =>
         {
+            var (cls, isJsonIgnoreAvailable) = pair;
             if (cls is null) return;
 
-            try
-            {
-                var extraction = SubjectMetadataExtractor.Extract(
-                    cls.TypeSymbol,
-                    cls.TypeDeclaration,
-                    cls.Model,
-                    spc.CancellationToken);
-
-                foreach (var diagnostic in extraction.Diagnostics)
-                {
-                    spc.ReportDiagnostic(diagnostic);
-                }
-
-                if (extraction.Metadata is null)
-                {
-                    return;
-                }
-
-                var fileName = SubjectCodeGenerator.GetFileName(extraction.Metadata);
-                var generatedCode = SubjectCodeGenerator.Generate(extraction.Metadata);
-
-                spc.AddSource(fileName, SourceText.From(generatedCode, Encoding.UTF8));
-            }
-            catch (Exception exception)
-            {
-                var className = cls.TypeDeclaration.Identifier.ValueText;
-
-                spc.ReportDiagnostic(Diagnostic.Create(
-                    Diagnostics.GeneratorFailed,
-                    cls.TypeDeclaration.Identifier.GetLocation(),
-                    className,
-                    exception.GetType().Name,
-                    exception.Message));
-
-                // The file keeps the full frames; a diagnostic message renders as one line. The
-                // hint name must be unique across the whole generator run, not just readable: two
-                // failing subjects that share a simple class name, or a failing "N.Foo" alongside a
-                // succeeding global-namespace "Foo" (a pair GetFileName's own namespace-qualified
-                // naming never produces), collide on the bare class name, and AddSource throws
-                // ArgumentException on a duplicate hint name from inside this very catch block.
-                // Roslyn turns that into CS8785, which drops every generated file for the run, not
-                // just this subject's. cls.TypeName is the fully-qualified display name already used
-                // to de-duplicate subjects upstream, so it is unique per type; sanitise it into a
-                // valid hint name instead.
-                spc.AddSource(GetFailureHintName(cls.TypeName), SourceText.From($"/* {exception} */", Encoding.UTF8));
-            }
+            EmitSource(spc, cls.Model, cls.TypeDeclaration, cls.TypeSymbol, cls.TypeName, isJsonIgnoreAvailable);
         });
     }
 
+    private static void EmitSource(
+        SourceProductionContext sourceProductionContext,
+        SemanticModel semanticModel,
+        TypeDeclarationSyntax typeDeclaration,
+        INamedTypeSymbol typeSymbol,
+        string fullyQualifiedTypeName,
+        bool isJsonIgnoreAvailable)
+    {
+        try
+        {
+            var extraction = SubjectMetadataExtractor.Extract(
+                typeSymbol,
+                typeDeclaration,
+                semanticModel,
+                sourceProductionContext.CancellationToken);
+
+            foreach (var diagnostic in extraction.Diagnostics)
+            {
+                sourceProductionContext.ReportDiagnostic(diagnostic);
+            }
+
+            if (extraction.Metadata is null)
+            {
+                return;
+            }
+
+            var fileName = SubjectCodeGenerator.GetFileName(extraction.Metadata);
+            var generatedCode = SubjectCodeGenerator.Generate(extraction.Metadata, isJsonIgnoreAvailable);
+
+            sourceProductionContext.AddSource(fileName, SourceText.From(generatedCode, Encoding.UTF8));
+        }
+        catch (Exception exception)
+        {
+            var className = typeDeclaration.Identifier.ValueText;
+
+            sourceProductionContext.ReportDiagnostic(Diagnostic.Create(
+                Diagnostics.GeneratorFailed,
+                typeDeclaration.Identifier.GetLocation(),
+                className,
+                exception.GetType().Name,
+                exception.Message));
+
+            // Preserve full exception details in a file. Qualify failure hint names so subjects sharing
+            // a simple name do not collide and cause Roslyn to discard the entire generated output.
+            sourceProductionContext.AddSource(GetFailureHintName(fullyQualifiedTypeName), SourceText.From($"/* {exception} */", Encoding.UTF8));
+        }
+    }
+
     /// <summary>
-    /// Turns a fully-qualified type display name (e.g. "global::N.Foo&lt;string&gt;") into a hint
-    /// name that <c>SourceProductionContext.AddSource</c> accepts and that stays unique per type,
-    /// by replacing every character AddSource would reject with '_' and keeping everything else,
-    /// including the dots that make the origin still readable in build output.
+    /// Creates a failure hint name from a fully qualified type name, replacing unsupported characters.
     /// </summary>
     internal static string GetFailureHintName(string fullyQualifiedTypeName)
     {

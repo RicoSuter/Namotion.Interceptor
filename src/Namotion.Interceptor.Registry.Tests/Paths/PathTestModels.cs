@@ -59,3 +59,126 @@ public partial class TestBroadContainer
         Items = new Dictionary<string, TestItem>();
     }
 }
+
+[InterceptorSubject]
+public partial class TestDoubleKeyedContainer
+{
+    public partial Dictionary<double, TestItem> Items { get; set; }
+
+    public TestDoubleKeyedContainer()
+    {
+        Items = new Dictionary<double, TestItem>();
+    }
+}
+
+public enum TestColor
+{
+    Red = 1,
+    Green = 2,
+    Blue = 4
+}
+
+[Flags]
+public enum TestPermissions
+{
+    None = 0,
+    Read = 1,
+    Write = 2,
+    Execute = 4
+}
+
+[InterceptorSubject]
+public partial class TestKeyedContainer
+{
+    public partial Dictionary<int, TestItem> ByNumber { get; set; }
+    public partial Dictionary<TestColor, TestItem> ByColor { get; set; }
+    public partial Dictionary<TestPermissions, TestItem> ByPermissions { get; set; }
+    public partial Dictionary<Guid, TestItem> ById { get; set; }
+    public partial Dictionary<object, TestItem> ByAnything { get; set; }
+    public partial IReadOnlyDictionary<int, TestItem> ReadOnlyByNumber { get; set; }
+    public partial List<TestItem> Items { get; set; }
+
+    public TestKeyedContainer()
+    {
+        ByNumber = new Dictionary<int, TestItem>();
+        ByColor = new Dictionary<TestColor, TestItem>();
+        ByPermissions = new Dictionary<TestPermissions, TestItem>();
+        ById = new Dictionary<Guid, TestItem>();
+        ByAnything = new Dictionary<object, TestItem>();
+        ReadOnlyByNumber = new Dictionary<int, TestItem>();
+        Items = new List<TestItem>();
+    }
+}
+
+/// <summary>
+/// Test model covering every integer dictionary key width the path resolver recognizes natively.
+/// </summary>
+[InterceptorSubject]
+public partial class TestIntegerKeyedContainer
+{
+    public partial Dictionary<sbyte, TestItem> BySByte { get; set; }
+    public partial Dictionary<byte, TestItem> ByByte { get; set; }
+    public partial Dictionary<short, TestItem> ByInt16 { get; set; }
+    public partial Dictionary<ushort, TestItem> ByUInt16 { get; set; }
+    public partial Dictionary<uint, TestItem> ByUInt32 { get; set; }
+    public partial Dictionary<long, TestItem> ByInt64 { get; set; }
+    public partial Dictionary<ulong, TestItem> ByUInt64 { get; set; }
+
+    public TestIntegerKeyedContainer()
+    {
+        BySByte = new Dictionary<sbyte, TestItem>();
+        ByByte = new Dictionary<byte, TestItem>();
+        ByInt16 = new Dictionary<short, TestItem>();
+        ByUInt16 = new Dictionary<ushort, TestItem>();
+        ByUInt32 = new Dictionary<uint, TestItem>();
+        ByInt64 = new Dictionary<long, TestItem>();
+        ByUInt64 = new Dictionary<ulong, TestItem>();
+    }
+}
+
+[InterceptorSubject]
+public partial class TestNumberedInlineContainer
+{
+    public partial string Name { get; set; }
+
+    [InlinePaths]
+    public partial Dictionary<int, TestNumberedInlineContainer> Children { get; set; }
+
+    public TestNumberedInlineContainer()
+    {
+        Children = new Dictionary<int, TestNumberedInlineContainer>();
+    }
+}
+
+[InterceptorSubject]
+public partial class TestMappedInlineContainer
+{
+    [Path("test", "name")]
+    public partial string Name { get; set; }
+
+    [InlinePaths]
+    public partial Dictionary<string, TestMappedInlineContainer> Children { get; set; }
+
+    public TestMappedInlineContainer()
+    {
+        Children = new Dictionary<string, TestMappedInlineContainer>();
+    }
+}
+
+[InterceptorSubject]
+public partial class TestShadowedInlineContainer
+{
+    [Path("test", "Children")]
+    public partial string Label { get; set; }
+
+    [Path("test", "name")]
+    public partial string Name { get; set; }
+
+    [InlinePaths]
+    public partial Dictionary<string, TestShadowedInlineContainer> Children { get; set; }
+
+    public TestShadowedInlineContainer()
+    {
+        Children = new Dictionary<string, TestShadowedInlineContainer>();
+    }
+}

@@ -26,8 +26,12 @@ public class ScalarReconciliationTests
             var trigger = new CallbackSpikeSegmentWrapper();
             var history = new List<string>();
             object Value(IInterceptorSubject subject) => collection ? new[] { subject } : subject;
-            string Identity(IInterceptorSubject subject) => ReferenceEquals(subject, root) ? "root" :
-                ReferenceEquals(subject, old) ? "old" : ReferenceEquals(subject, final) ? "final" : "trigger";
+            string Identity(IInterceptorSubject subject)
+            {
+                if (ReferenceEquals(subject, root)) return "root";
+                if (ReferenceEquals(subject, old)) return "old";
+                return ReferenceEquals(subject, final) ? "final" : "trigger";
+            }
             var lifecycle = context.TryGetLifecycleInterceptor()!;
             lifecycle.SubjectAttached += change => history.Add(Identity(change.Subject) + ":attached");
             lifecycle.SubjectDetaching += change => history.Add(Identity(change.Subject) + ":detached");

@@ -1,41 +1,89 @@
+using System.Collections.Immutable;
+using System.ComponentModel;
+using System.Text;
+using System.Text.Json;
 using FluentStorage;
 using FluentStorage.Blobs;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Services;
+using HomeBlaze.Services.Metadata;
 using HomeBlaze.Storage.Abstractions;
+using HomeBlaze.Storage.Abstractions.Metadata;
+using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
+using HomeBlaze.Storage.Metadata;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry.Attributes;
+using StoragePath = HomeBlaze.Storage.Internal.StoragePath;
 
 namespace HomeBlaze.Storage;
 
 /// <summary>
-/// Storage root using FluentStorage. Implements IStorageContainer and IConfigurationWriter.
-/// Supports FileSystemWatcher for reactive file monitoring on disk storage.
+/// The root of a storage on a FluentStorage backend. Its subject tree follows the storage through reconcile
+/// passes, and every change of the storage or the tree runs on one worker per connection.
 /// </summary>
+/// <remarks>
+/// Every call on the storage is limited to 30 seconds. An operation whose call hits the limit fails with a
+/// <see cref="TimeoutException"/>, and so does every operation that is called before that call has returned.
+/// A write that failed this way can still reach the storage later.
+/// </remarks>
+[Category("System")]
+[Description("Mounts a storage location and loads the files in it as subjects")]
+[DisplayName("Storage")]
+[SubjectIcon("Storage")]
 [InterceptorSubject]
 public partial class FluentStorageContainer :
     BackgroundService,
-    IStorageContainer, IConfigurationWriter, ITitleProvider, IIconProvider, IConfigurable
+    IStorageContainer, IConfigurationWriter, ITitleProvider, IIconProvider, IConfigurable, IMetadataContainer, IMetadataStore
 {
-    private IBlobStorage? _client;
+    private static readonly IReadOnlySet<string> NoPaths = new HashSet<string>();
 
-    private IBlobStorage Client => _client
-        ?? throw new InvalidOperationException("Storage not connected");
-
-    private readonly StoragePathRegistry _pathRegistry = new();
     private readonly FileSubjectFactory _subjectFactory;
-    private readonly StorageHierarchyManager _hierarchyManager;
+    private readonly IServiceProvider _serviceProvider;
+    private readonly ConfigurableSubjectSerializer _serializer;
     private readonly ILogger<FluentStorageContainer>? _logger;
 
-    private readonly ConfigurableSubjectSerializer _serializer;
+    private readonly SemaphoreSlim _connectGate = new(1, 1);
 
-    private StorageFileWatcher? _fileWatcher;
-    private JsonSubjectSynchronizer? _jsonSyncHelper;
+    // Guards the status together with which connection is the current one, so that neither a pass of an ended
+    // connection nor a connect that a Dispose overtook writes the status. Never held across an await.
+    private readonly Lock _connectionLock = new();
+    private bool _isDisposed;
+
+    // True from StopAsync until the next StartAsync. Read in the same step that publishes a connection, so a
+    // stop either keeps that connection from following its storage or finds it and stops it.
+    private bool _isStopped;
+
+    // Replaced as a whole by a reconnect and kept after it ended. An operation reads the field once and uses
+    // only what it read, so its item never touches the index or the client of a later connection.
+    private volatile StorageConnection? _connection;
+
+    internal StorageConnection Connection => _connection is { IsEnded: false } connection
+        ? connection
+        : throw new StorageRefusedException("Storage not connected");
+
+    /// <summary>The clock for timeouts and timers. Read when the storage connects.</summary>
+    internal TimeProvider TimeProvider { get; set; } = TimeProvider.System;
+
+    /// <summary>Applies and writes the metadata of this storage.</summary>
+    internal StorageMetadataStore MetadataStore { get; }
+
+    /// <summary>Wraps the storage client when the storage connects.</summary>
+    internal Func<IBlobStorage, IBlobStorage>? ClientDecorator { get; set; }
+
+    /// <inheritdoc cref="TimeLimitedBlobStorage.IsUnresponsive"/>
+    internal bool IsStorageUnresponsive => _connection is { IsStorageUnresponsive: true };
+
+    /// <summary>Gets whether the caller runs within work of the worker of the current connection.</summary>
+    internal bool IsCallFromWithinWorkerItem => _connection?.Worker.IsCallFromWithinItem == true;
+
+    /// <inheritdoc cref="StorageConnection.SimulateFileWatcherError"/>
+    internal void SimulateFileWatcherError(Exception exception) => _connection?.SimulateFileWatcherError(exception);
 
     /// <summary>
     /// Storage type identifier (e.g., "disk", "azure-blob").
@@ -62,6 +110,13 @@ public partial class FluentStorageContainer :
     public partial bool EnableFileWatching { get; set; }
 
     /// <summary>
+    /// How often the storage is compared with the subject tree without any file event, in seconds.
+    /// Covers changes the file watcher never reports. Default is 300. Zero or a negative value switches it off.
+    /// </summary>
+    [Configuration]
+    public partial int ReconcileIntervalSeconds { get; set; }
+
+    /// <summary>
     /// Child subjects (files and folders).
     /// </summary>
     [InlinePaths]
@@ -73,6 +128,12 @@ public partial class FluentStorageContainer :
     /// </summary>
     [State]
     public partial StorageStatus Status { get; set; }
+
+    /// <inheritdoc />
+    public partial ImmutableArray<string> ChildOrder { get; private set; }
+
+    /// <inheritdoc />
+    public IReadOnlyCollection<string> ChildNames => [.. Children.Keys];
 
     public string Title => string.IsNullOrEmpty(ConnectionString)
         ? "Storage"
@@ -95,318 +156,537 @@ public partial class FluentStorageContainer :
         ILogger<FluentStorageContainer>? logger = null)
     {
         _subjectFactory = new FileSubjectFactory(typeRegistry, serializer, serviceProvider, logger);
-        _hierarchyManager = new StorageHierarchyManager(logger);
+        _serviceProvider = serviceProvider;
         _serializer = serializer;
         _logger = logger;
+        MetadataStore = new StorageMetadataStore(this, logger);
 
         StorageType = "disk";
         ConnectionString = string.Empty;
         EnableFileWatching = true;
+        ReconcileIntervalSeconds = 300;
         Children = new Dictionary<string, IInterceptorSubject>();
         Status = StorageStatus.Disconnected;
+        ChildOrder = [];
     }
         
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    /// <summary>
+    /// Connects to the storage and follows it from then on.
+    /// </summary>
+    public override Task StartAsync(CancellationToken cancellationToken)
     {
-        await ConnectAsync(stoppingToken);
+        lock (_connectionLock)
+        {
+            _isStopped = false;
+        }
+
+        return base.StartAsync(cancellationToken);
     }
 
+    protected override Task ExecuteAsync(CancellationToken stoppingToken)
+        => ConnectAsync(stoppingToken);
+
     /// <summary>
-    /// IConfigurable implementation - called after configuration properties are updated.
+    /// Stops following the storage: neither a file event nor the periodic timer starts a pass any more, so
+    /// the subject tree stays as it is. The connection stays open, so subjects can still be read and saved.
+    /// <see cref="StartAsync"/> connects again and follows the storage as before.
     /// </summary>
-    public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
+    /// <remarks>
+    /// A pass that is running or already queued on the worker still completes. What such a pass or an earlier
+    /// one created and did not place is released after it, because no pass places it any more. An operation
+    /// after the stop does not place it either.
+    /// </remarks>
+    public override Task StopAsync(CancellationToken cancellationToken)
     {
-        // Reconnect if configuration changed
-        return ConnectAsync(cancellationToken);
+        StorageConnection? connection;
+        lock (_connectionLock)
+        {
+            _isStopped = true;
+            connection = _connection;
+        }
+
+        if (connection != null)
+        {
+            connection.StopTrigger();
+            _ = ReleaseUnplacedSubjectsAsync(connection);
+        }
+
+        return base.StopAsync(cancellationToken);
     }
 
-    /// <summary>
-    /// Initializes the storage client based on configuration.
-    /// </summary>
-    public async Task ConnectAsync(CancellationToken cancellationToken)
+    // Not waited for by the stop: the worker can be held by a pass, or by a storage that does not answer.
+    private async Task ReleaseUnplacedSubjectsAsync(StorageConnection connection)
     {
-        var isInMemory = StorageType == "inmemory";
-        if (!isInMemory && string.IsNullOrWhiteSpace(ConnectionString))
-            throw new InvalidOperationException("ConnectionString is not configured");
-
-        Status = StorageStatus.Initializing;
         try
         {
-            _client = StorageType switch
+            await connection.Worker.RunAsync(
+                _ =>
+                {
+                    connection.Reconciler.ReleaseUnplacedSubjects();
+                    return Task.CompletedTask;
+                },
+                connection.Token);
+        }
+        catch (Exception exception)
+        {
+            // The end of a connection releases them as well.
+            _logger?.LogDebug(exception, "The subjects that are not placed were not released when the storage was stopped");
+        }
+    }
+
+    /// <summary>
+    /// IConfigurable implementation - called after configuration properties are updated. Connects again when a
+    /// setting of the connection has changed or <see cref="Status"/> is not <see cref="StorageStatus.Connected"/>,
+    /// which rebuilds every subject. The status is also not connected after a pass that failed.
+    /// </summary>
+    /// <remarks>A container that was stopped does not follow its storage after this either, see <see cref="StopAsync"/>.</remarks>
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
+        => IsConnectedWith(Settings) ? Task.CompletedTask : ConnectAsync(isOnlyForChangedSettings: true, cancellationToken);
+
+    private bool IsConnectedWith(StorageConnectionSettings settings)
+        => Status == StorageStatus.Connected && _connection is { IsEnded: false } connection && connection.Settings == settings;
+
+    private StorageConnectionSettings Settings
+        => new(StorageType, ConnectionString, ContainerName, EnableFileWatching, ReconcileIntervalSeconds);
+
+    private string ResolveStorageDirectory(string connectionString)
+    {
+        var baseDirectory = ((IInterceptorSubject)this).TryGetContext()?.TryGetService<IDataDirectoryProvider>()?.DataDirectory
+            ?? Directory.GetCurrentDirectory();
+
+        return Path.GetFullPath(connectionString, baseDirectory);
+    }
+
+    /// <summary>
+    /// Initializes the storage client based on configuration and loads the subject tree. A connection that
+    /// exists is ended first, and its running work has finished before the new one starts.
+    /// </summary>
+    /// <remarks>A container that was stopped does not follow its storage after this either, see <see cref="StopAsync"/>.</remarks>
+    /// <exception cref="ObjectDisposedException">The container is disposed.</exception>
+    public Task ConnectAsync(CancellationToken cancellationToken)
+        => ConnectAsync(isOnlyForChangedSettings: false, cancellationToken);
+
+    private async Task ConnectAsync(bool isOnlyForChangedSettings, CancellationToken cancellationToken)
+    {
+        // Read once, so the connection is created with exactly the settings it is later compared by.
+        var settings = Settings;
+        if (!settings.IsInMemory && string.IsNullOrWhiteSpace(settings.ConnectionString))
+            throw new InvalidOperationException("ConnectionString is not configured");
+
+        // One connect at a time: two of them would each end the same connection and both start a new one.
+        await _connectGate.WaitAsync(cancellationToken);
+        try
+        {
+            // Decided here and not before the wait: the connect that this one waited for has done the work.
+            if (!isOnlyForChangedSettings || !IsConnectedWith(settings))
             {
-                "disk" or "filesystem" => StorageFactory.Blobs.DirectoryFiles(
-                    Path.GetFullPath(ConnectionString)),
-                "inmemory" => StorageFactory.Blobs.InMemory(),
-                _ => throw new NotSupportedException($"Storage type '{StorageType}' is not supported")
-            };
-
-            _jsonSyncHelper = new JsonSubjectSynchronizer(_pathRegistry, _serializer, _client, _logger);
-
-            Status = StorageStatus.Connected;
-            _logger?.LogInformation("Connected to storage: {Type} at {Path}", StorageType,
-                isInMemory ? "(in-memory)" : ConnectionString);
-
-            await ScanAsync(cancellationToken);
-
-            if (EnableFileWatching && !isInMemory)
-            {
-                StartFileWatching();
+                await ReplaceConnectionAsync(settings, cancellationToken);
             }
         }
-        catch (Exception ex)
+        finally
         {
-            Status = StorageStatus.Error;
-            _logger?.LogError(ex, "Failed to connect to storage");
+            _connectGate.Release();
+        }
+    }
+
+    private async Task ReplaceConnectionAsync(StorageConnectionSettings settings, CancellationToken cancellationToken)
+    {
+        StorageConnection? previous;
+        lock (_connectionLock)
+        {
+            ObjectDisposedException.ThrowIf(_isDisposed, this);
+            previous = _connection;
+        }
+
+        // Ended before the status is written, so a pass of it that completes now does not overwrite the status.
+        previous?.End();
+
+        lock (_connectionLock)
+        {
+            if (!_isDisposed)
+            {
+                Status = StorageStatus.Initializing;
+            }
+        }
+
+        StorageConnection? connection = null;
+        try
+        {
+            // A reconnect starts from scratch. The item that the previous worker is running still assigns to
+            // the tree, so it has to finish before the first pass of the new connection starts.
+            if (previous != null)
+            {
+                await previous.EndAsync(cancellationToken);
+            }
+
+            var storageDirectory = settings.IsInMemory ? null : ResolveStorageDirectory(settings.ConnectionString);
+            var client = settings.StorageType switch
+            {
+                "disk" or "filesystem" => StorageFactory.Blobs.DirectoryFiles(storageDirectory!),
+                "inmemory" => StorageFactory.Blobs.InMemory(),
+                _ => throw new NotSupportedException($"Storage type '{settings.StorageType}' is not supported")
+            };
+
+            client = ClientDecorator?.Invoke(client) ?? client;
+
+            connection = new StorageConnection(
+                settings, client, storageDirectory, this, _subjectFactory, _serializer, TimeProvider, _logger);
+
+            // Queued before the connection can be found, so that it is the first item of the worker: an
+            // operation that ran before it would assign a tree that holds nothing of the storage yet. It
+            // lists only once the connection follows its storage, so a change during startup leads to
+            // another pass.
+            var isPublished = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            using var passCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, connection.Token);
+            var firstPass = RunFirstPassAsync(connection, isPublished.Task, passCancellation.Token);
+            try
+            {
+                Publish(connection);
+
+                // Before the first listing, so that a change during startup raises an event. Not within
+                // Publish: a watcher on a storage that does not answer can stall while it starts, and would
+                // hold the lock that a stop, a dispose and every change of the status wait for.
+                connection.TryStartFileWatcher();
+                isPublished.SetResult(true);
+            }
+            catch
+            {
+                isPublished.SetResult(false);
+                throw;
+            }
+
+            _logger?.LogInformation("Connected to storage: {Type} at {Path}", settings.StorageType,
+                settings.IsInMemory ? "(in-memory)" : storageDirectory);
+
+            await firstPass;
+        }
+        catch (Exception exception)
+        {
+            var isCancelledByCaller = exception is OperationCanceledException && cancellationToken.IsCancellationRequested;
+            var wasStillInitializing = false;
+            lock (_connectionLock)
+            {
+                // Only where the first pass has not written the status itself. Written here after it, the
+                // status could replace that of a pass that ran in between.
+                if (!_isDisposed && Status == StorageStatus.Initializing)
+                {
+                    Status = isCancelledByCaller ? StorageStatus.Disconnected : StorageStatus.Error;
+                    wasStillInitializing = true;
+                }
+            }
+
+            // The worker does not run an item whose caller has cancelled, so a first pass that was cancelled
+            // before it started has not asked for its retry, as one that is cancelled while it runs does.
+            if (isCancelledByCaller && wasStillInitializing)
+            {
+                connection?.NotifyPassFailed();
+            }
+
+            if (isCancelledByCaller)
+            {
+                _logger?.LogInformation("Connecting to the storage was cancelled");
+            }
+            else
+            {
+                _logger?.LogError(exception, "Failed to connect to storage");
+            }
+
             throw;
         }
     }
 
-    /// <summary>
-    /// Scans the storage and builds the subject hierarchy.
-    /// </summary>
-    private async Task ScanAsync(CancellationToken cancellationToken)
-    {
-        _logger?.LogInformation("Scanning storage...");
-
-        var blobs = await Client.ListAsync(recurse: true, cancellationToken: cancellationToken);
-
-        _pathRegistry.Clear();
-
-        var children = new Dictionary<string, IInterceptorSubject>();
-        foreach (var blob in blobs)
+    private Task RunFirstPassAsync(StorageConnection connection, Task<bool> isPublished, CancellationToken cancellationToken)
+        => connection.Worker.RunAsync(async token =>
         {
-            // Filter out hidden files/folders (e.g. .DS_Store, .idea)
-            var name = Path.GetFileName(blob.FullPath.TrimEnd('/'));
-            if (name.StartsWith('.') || blob.FullPath.Contains("/."))
+            if (!await isPublished)
             {
-                continue;
-            }
-
-            cancellationToken.ThrowIfCancellationRequested();
-
-            if (blob.IsFolder)
-            {
-                _hierarchyManager.PlaceInHierarchy(blob.FullPath, null, children, this);
-                continue;
+                return;
             }
 
             try
             {
-                var subject = await _subjectFactory.CreateFromBlobAsync(Client, this, blob, cancellationToken);
-                if (subject != null)
-                {
-                    _hierarchyManager.PlaceInHierarchy(blob.FullPath, subject, children, this);
-                    _pathRegistry.Register(subject, blob.FullPath);
-
-                    if (Path.GetExtension(blob.FullPath).Equals(FileExtensions.Json, StringComparison.OrdinalIgnoreCase))
-                    {
-                        try
-                        {
-                            var content = await Client.ReadTextAsync(blob.FullPath, cancellationToken: cancellationToken);
-                            _pathRegistry.UpdateHash(blob.FullPath, StoragePathRegistry.ComputeHash(content));
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger?.LogWarning(ex, "Failed to compute hash for: {Path}", blob.FullPath);
-                        }
-                    }
-                }
+                await connection.Reconciler.ReconcileAsync(NoPaths, allNamed: false, token);
             }
-            catch (Exception ex)
+            catch (Exception exception)
             {
-                _logger?.LogWarning(ex, "Failed to create subject for blob: {Path}", blob.FullPath);
+                // Cancelled by the caller of the connect, or with the connection, whose status nobody reads.
+                SetStatus(connection, token.IsCancellationRequested ? StorageStatus.Disconnected : StorageStatus.Error);
+
+                // Also after a cancellation by the caller: unless the storage was stopped, the connection goes
+                // on following it, and only another pass replaces that status.
+                if (connection.GetOutcomeOfFailedPass(exception) == ReconcileOutcome.Failed)
+                {
+                    connection.NotifyPassFailed();
+                }
+
+                throw;
+            }
+
+            SetStatus(connection, StorageStatus.Connected);
+            _logger?.LogInformation("Storage loaded: {Count} entries.", connection.Index.Entries.Count);
+        }, cancellationToken);
+
+    /// <summary>
+    /// Makes the connection the current one and lets it follow its storage, unless the container is stopped.
+    /// </summary>
+    /// <exception cref="ObjectDisposedException">The container is disposed. The connection is then disposed as well.</exception>
+    private void Publish(StorageConnection connection)
+    {
+        lock (_connectionLock)
+        {
+            if (!_isDisposed)
+            {
+                _connection = connection;
+
+                if (!_isStopped)
+                {
+                    connection.StartTrigger((namedPaths, allNamed) => ReconcileAsync(connection, namedPaths, allNamed));
+                }
+
+                return;
             }
         }
 
-        Children = children;
-        _logger?.LogInformation("Scan complete: Found {Count} subjects.", _pathRegistry.Count);
+        // Dispose ran since this connect started and could not end a connection that did not exist yet.
+        connection.Dispose();
+        throw new ObjectDisposedException(nameof(FluentStorageContainer));
     }
 
-    private void StartFileWatching()
+    private void SetStatus(StorageConnection connection, StorageStatus status)
     {
-        _fileWatcher = new StorageFileWatcher(
-            Path.GetFullPath(ConnectionString),
-            ProcessFileEventAsync,
-            () => ScanAsync(CancellationToken.None),
-            _logger);
-
-        _fileWatcher.Start();
-    }
-
-    private Task ProcessFileEventAsync(FileSystemEventArgs e)
-    {
-        var relativePath = _fileWatcher!.GetRelativePath(e.FullPath);
-
-        return e.ChangeType switch
+        lock (_connectionLock)
         {
-            WatcherChangeTypes.Created => HandleFileCreatedAsync(relativePath),
-            WatcherChangeTypes.Changed => HandleFileChangedAsync(relativePath, e.FullPath),
-            WatcherChangeTypes.Deleted => HandleFileDeletedAsync(relativePath),
-            WatcherChangeTypes.Renamed when e is RenamedEventArgs re =>
-                HandleFileRenamedAsync(relativePath, _fileWatcher.GetRelativePath(re.OldFullPath)),
-            _ => Task.CompletedTask
-        };
+            if (!_isDisposed && ReferenceEquals(_connection, connection) && !connection.IsEnded && Status != status)
+            {
+                Status = status;
+            }
+        }
     }
 
-    private async Task HandleFileCreatedAsync(string relativePath)
+    /// <summary>
+    /// Runs one pass on the worker. A pass that fails is logged and sets <see cref="Status"/> to
+    /// <see cref="StorageStatus.Error"/>, and the next pass tries again. A pass of a connection that has ended
+    /// changes nothing.
+    /// </summary>
+    internal Task ReconcileAsync(IReadOnlySet<string>? namedPaths = null, bool allNamed = false)
+        => _connection is { } connection ? ReconcileAsync(connection, namedPaths ?? NoPaths, allNamed) : Task.CompletedTask;
+
+    /// <returns>How the pass ended. A pass that ended with its connection counts as finished.</returns>
+    private async Task<ReconcileOutcome> ReconcileAsync(StorageConnection connection, IReadOnlySet<string> namedPaths, bool allNamed)
     {
-        _logger?.LogDebug("File created: {Path}", relativePath);
+        // Not on the worker, which a watcher that stalls while it starts would hold. Changes since the watcher
+        // stopped have raised no event, so every file counts as named.
+        allNamed |= connection.TryStartFileWatcher();
 
-        var blob = new Blob(relativePath);
-        var subject = await _subjectFactory.CreateFromBlobAsync(_client!, this, blob, CancellationToken.None);
-
-        if (subject != null)
+        var outcome = ReconcileOutcome.Finished;
+        try
         {
-            if (Path.GetExtension(relativePath).Equals(FileExtensions.Json, StringComparison.OrdinalIgnoreCase))
+            await connection.Worker.RunAsync(async token =>
             {
                 try
                 {
-                    var content = await _client!.ReadTextAsync(relativePath);
-                    _pathRegistry.UpdateHash(relativePath, StoragePathRegistry.ComputeHash(content));
+                    await connection.Reconciler.ReconcileAsync(namedPaths, allNamed, token);
+                    SetStatus(connection, StorageStatus.Connected);
                 }
-                catch (Exception ex)
+                catch (Exception exception) when (!token.IsCancellationRequested)
                 {
-                    _logger?.LogWarning(ex, "Failed to compute hash for: {Path}", relativePath);
+                    SetStatus(connection, StorageStatus.Error);
+                    _logger?.LogError(exception, "Failed to reconcile the storage, another pass tries again");
+                    outcome = connection.GetOutcomeOfFailedPass(exception);
                 }
-            }
-
-            // Use reusable helper to add to hierarchy
-            AddToHierarchy(relativePath, subject);
-
-            _logger?.LogInformation("Added file from external: {Path}", relativePath);
+            }, connection.Token);
         }
-    }
-
-    private async Task HandleFileChangedAsync(string relativePath, string fullPath)
-    {
-        if (!_pathRegistry.TryGetSubject(relativePath, out var existingSubject))
-            return;
-
-        if (existingSubject is IStorageFile storageFile)
+        catch (Exception exception) when (connection.IsEnded)
         {
-            try
-            {
-                await storageFile.OnFileChangedAsync(CancellationToken.None);
-                _logger?.LogInformation("Notified file of change: {Path}", relativePath);
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogWarning(ex, "Failed to notify file of change: {Path}", relativePath);
-            }
-        }
-        else if (existingSubject is IConfigurable)
-        {
-            await _jsonSyncHelper!.TryRefreshAsync(existingSubject, relativePath, fullPath, CancellationToken.None);
-        }
-    }
-
-    private Task HandleFileDeletedAsync(string relativePath)
-    {
-        _logger?.LogDebug("File deleted: {Path}", relativePath);
-
-        if (!_pathRegistry.TryGetSubject(relativePath, out var subject))
-        {
-            _logger?.LogDebug("Subject not found for path: {Path}", relativePath);
-            return Task.CompletedTask;
+            _logger?.LogDebug(exception, "A pass ended with its connection");
         }
 
-        // Use reusable helper to remove from hierarchy
-        RemoveFromHierarchy(relativePath, subject);
-
-        _logger?.LogInformation("Removed deleted file: {Path}", relativePath);
-        return Task.CompletedTask;
-    }
-
-    private async Task HandleFileRenamedAsync(string newPath, string oldPath)
-    {
-        await HandleFileDeletedAsync(oldPath);
-        await HandleFileCreatedAsync(newPath);
+        return outcome;
     }
 
     /// <summary>
-    /// IConfigurationWriter - called by ConfigurationManager background thread.
+    /// Takes the metadata and the order from the <c>.metadata.json</c> in the root of the storage, or none without one.
+    /// Called on the worker.
     /// </summary>
+    internal void ApplyMetadata(StorageMetadataFile? file)
+    {
+        if (StorageMetadataValues.SetOwnMetadata(this, ChildOrder, file) is { } childOrder)
+        {
+            ChildOrder = childOrder;
+        }
+    }
+
+    /// <summary>
+    /// IConfigurationWriter - Saves the file of the subject, or of the subject it is nested in through
+    /// [Configuration] properties.
+    /// </summary>
+    /// <returns>False when no file in this storage contains the subject as configuration, such as a subject of a
+    /// document or of a file that is no configurable subject, or the storage is not connected.</returns>
     public async Task<bool> WriteConfigurationAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
     {
-        if (_client == null)
+        var connection = _connection;
+        if (connection is null or { IsEnded: true })
             return false;
 
-        if (!_pathRegistry.TryGetPath(subject, out var path))
-            return false;
+        var isWritten = false;
+        try
+        {
+            await connection.Worker.RunAsync(async token =>
+            {
+                // Only the subject of a file has an entry. A subject nested in its configuration is written with it.
+                StorageEntry? entry = null;
+                var fileSubject = subject.TryGetConfigurationOwner(candidate => connection.Index.TryGetEntry(candidate, out entry));
+                // Only configuration is written here. A document, such as a Markdown page, writes itself, under its own rules.
+                if (fileSubject is not IConfigurable || fileSubject is IStorageFile || entry is null)
+                    return;
 
-        var fullPath = Path.GetFullPath(Path.Combine(ConnectionString, path));
-        _fileWatcher?.MarkAsOwnWrite(fullPath);
+                await WriteAndRecordAsync(connection, entry, Encoding.UTF8.GetBytes(_serializer.Serialize(fileSubject)), token);
+                isWritten = true;
 
-        var json = _subjectFactory.Serialize(subject);
-        _pathRegistry.UpdateHash(path, StoragePathRegistry.ComputeHash(json));
+                _logger?.LogDebug("Saved subject to storage: {Path}", entry.Path);
+            }, cancellationToken);
+        }
+        catch (OperationCanceledException) when (connection.IsEnded && !cancellationToken.IsCancellationRequested)
+        {
+            // The connection ended before the item ran, which is the same as no connection.
+        }
 
-        await Client.WriteTextAsync(path, json, cancellationToken: cancellationToken);
-
-        _logger?.LogDebug("Saved subject to storage: {Path}", path);
-        return true;
+        return isWritten;
     }
 
     /// <summary>
     /// Adds a new subject to storage at the specified path.
     /// </summary>
+    /// <exception cref="ArgumentException">The path is hidden, temporary or the name of a metadata file, and would not be loaded again.</exception>
+    /// <exception cref="InvalidOperationException">A file exists at the path, or its key in the hierarchy is taken.</exception>
     public async Task AddSubjectAsync(string path, IInterceptorSubject subject, CancellationToken cancellationToken)
     {
-        var fullPath = Path.GetFullPath(Path.Combine(ConnectionString, path));
-        _fileWatcher?.MarkAsOwnWrite(fullPath);
+        var relativePath = StoragePath.Normalize(path);
+        if (StoragePathFilter.IsIgnored(relativePath))
+            throw new ArgumentException($"A subject at '{path}' would not be loaded again: the path is hidden or temporary.", nameof(path));
 
-        var json = _subjectFactory.Serialize(subject);
-        _pathRegistry.UpdateHash(path, StoragePathRegistry.ComputeHash(json));
+        if (StorageMetadataPath.IsReservedSubjectPath(relativePath))
+            throw new ArgumentException($"A subject at '{path}' could be read as a metadata file: names that end with '.metadata', in any case, are reserved.", nameof(path));
 
-        await Client.WriteTextAsync(path, json, cancellationToken: cancellationToken);
+        var connection = Connection;
+        await RunOperationAsync(connection, async token =>
+        {
+            if (connection.Index.TryGet(relativePath, out _))
+                throw new InvalidOperationException($"A file already exists at '{path}'.");
 
-        // Update hierarchy - extracted to reusable method
-        AddToHierarchy(path, subject);
+            // Before the storage is asked: on disk, asking about a path creates the folder of that path.
+            if (!connection.Reconciler.IsKeyFree(relativePath, subject))
+                throw new InvalidOperationException($"A subject already exists at '{path}'.");
 
-        _logger?.LogInformation("Added subject to storage: {Path}", path);
+            if (await connection.Client.ExistsAsync(relativePath, token))
+                throw new InvalidOperationException($"A file already exists at '{path}'.");
+
+            var entry = new StorageEntry { Path = relativePath, IsFolder = false, Subject = subject };
+            await WriteAndRecordAsync(connection, entry, Encoding.UTF8.GetBytes(_serializer.Serialize(subject)), token);
+
+            connection.Index.EnsureFolders(relativePath);
+            connection.Index.Set(entry);
+            connection.Reconciler.Apply();
+
+            _logger?.LogInformation("Added subject to storage: {Path}", relativePath);
+        }, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public bool CanStoreMetadata(IInterceptorSubject subject) => MetadataStore.Applier.CanStoreMetadata(subject);
+
+    /// <inheritdoc />
+    public void ApplyStoredMetadata(IInterceptorSubject subject, string? propertyName)
+        => MetadataStore.Applier.ApplyStoredMetadata(subject, propertyName);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Keeps the metadata of this storage and of its folders in their <c>.metadata.json</c>, and that of a subject
+    /// stored as <c>X.json</c>, of the subjects inside it and of their properties in <c>X.metadata.json</c> beside it.
+    /// </remarks>
+    public Task SetMetadataAsync(IInterceptorSubject subject, string? propertyName, JsonElement values, CancellationToken cancellationToken)
+        => MetadataStore.SetMetadataAsync(subject, propertyName, values, cancellationToken);
+
+    // Recording version and hash is what keeps the event that this write raises from reloading the subject.
+    internal async Task WriteAndRecordAsync(
+        StorageConnection connection, StorageEntry entry, byte[] content, CancellationToken cancellationToken)
+    {
+        await WriteAsync(connection, entry.Path, content, cancellationToken);
+
+        entry.Hash = StorageHash.Compute(content);
+        try
+        {
+            entry.Version = await connection.Reconciler.GetVersionAsync(entry.Path, cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            // The file is written, so this is no failure of the write. Without a version the next pass
+            // compares the file by its hash and finds what was written.
+            entry.Version = default;
+            _logger?.LogDebug(exception, "Failed to read the version of the written file: {Path}", entry.Path);
+        }
     }
 
     /// <summary>
-    /// Adds a subject to the hierarchy. Reusable helper for AddSubjectAsync and file watcher events.
+    /// Runs an operation on the worker of the connection it was started for.
     /// </summary>
-    // TODO: Consider adding synchronization (lock) for thread safety if AddSubjectAsync/DeleteSubjectAsync can be called concurrently
-    private void AddToHierarchy(string path, IInterceptorSubject subject)
+    /// <exception cref="InvalidOperationException">
+    /// The connection ended before the operation was done, which is the same as no connection.
+    /// </exception>
+    internal static async Task RunOperationAsync(
+        StorageConnection connection, Func<CancellationToken, Task> operation, CancellationToken cancellationToken)
     {
-        var children = new Dictionary<string, IInterceptorSubject>(Children);
-
-        _pathRegistry.Register(subject, path);
-        _hierarchyManager.PlaceInHierarchy(path, subject, children, this);
-
-        Children = children;
+        try
+        {
+            await connection.Worker.RunAsync(operation, cancellationToken);
+        }
+        catch (OperationCanceledException) when (connection.IsEnded && !cancellationToken.IsCancellationRequested)
+        {
+            throw new StorageRefusedException("Storage not connected");
+        }
     }
 
-    /// <summary>
-    /// Removes a subject from the hierarchy. Reusable helper for delete operations and file watcher events.
-    /// </summary>
-    private void RemoveFromHierarchy(string path, IInterceptorSubject subject)
+    private static async Task WriteAsync(
+        StorageConnection connection, string path, byte[] content, CancellationToken cancellationToken)
     {
-        _pathRegistry.Unregister(path);
+        // Not disposed when the write fails, see TimeLimitedBlobStorage.
+        var stream = new MemoryStream(content);
+        try
+        {
+            await connection.Client.WriteAsync(path, stream, append: false, cancellationToken: cancellationToken);
+        }
+        catch (Exception exception) when (CanHaveReachedStorage(exception))
+        {
+            connection.NotifyChanged(path);
+            throw;
+        }
 
-        var children = new Dictionary<string, IInterceptorSubject>(Children);
-        _hierarchyManager.RemoveFromHierarchy(path, subject, children);
-
-        Children = children;
+        await stream.DisposeAsync();
     }
+
+    // A call that failed can have changed the storage, and one that was given up can still do so. The pass
+    // that finds out is asked for by the operation, because not every storage has a file watcher that would.
+    internal static bool CanHaveReachedStorage(Exception exception)
+        => exception is not (StorageRootUnavailableException or StorageUnresponsiveException { IsRefusal: true });
 
     /// <summary>
     /// IStorageContainer - Gets metadata about a blob.
     /// </summary>
+    /// <remarks>
+    /// On disk, asking for a path in a folder that does not exist creates that folder, as reading the path does.
+    /// </remarks>
     public async Task<BlobMetadata?> GetBlobMetadataAsync(string path, CancellationToken cancellationToken)
     {
-        var blobs = await Client.ListAsync(folderPath: Path.GetDirectoryName(path)?.Replace('\\', '/'),
-            recurse: false, cancellationToken: cancellationToken);
-        var blob = blobs.FirstOrDefault(b =>
-            b.FullPath.Equals(path, StringComparison.OrdinalIgnoreCase) ||
-            b.FullPath.TrimStart('/').Equals(path.TrimStart('/'), StringComparison.OrdinalIgnoreCase));
-
-        if (blob == null)
+        var relativePath = StoragePath.Normalize(path);
+        if (relativePath.Length == 0)
             return null;
 
-        return new BlobMetadata(blob.Size ?? 0, blob.LastModificationTime?.UtcDateTime);
+        // Through the client also for a storage on disk: a file subject can ask from its load on the worker,
+        // and only a call on the client is limited.
+        var blobs = await Connection.Client.GetBlobsAsync([relativePath], cancellationToken);
+        return blobs.FirstOrDefault() is { } blob
+            ? new BlobMetadata(blob.Size ?? 0, blob.LastModificationTime?.UtcDateTime)
+            : null;
     }
 
     /// <summary>
@@ -414,76 +694,352 @@ public partial class FluentStorageContainer :
     /// </summary>
     public async Task<Stream> ReadBlobAsync(string path, CancellationToken cancellationToken)
     {
-        return await Client.OpenReadAsync(path, cancellationToken: cancellationToken);
+        return await Connection.Client.OpenReadAsync(path, cancellationToken: cancellationToken);
     }
 
     /// <summary>
-    /// IStorageContainer - Writes a blob to storage.
+    /// IStorageContainer - Writes a blob to storage and refreshes the subject of the file.
     /// </summary>
+    /// <remarks>
+    /// The content is held in memory while it is written. When the subject cannot be refreshed after the write,
+    /// the write still succeeds, and the next pass loads the file again.
+    /// </remarks>
     public async Task WriteBlobAsync(string path, Stream content, CancellationToken cancellationToken)
     {
-        var fullPath = Path.GetFullPath(Path.Combine(ConnectionString, path));
-        _fileWatcher?.MarkAsOwnWrite(fullPath);
-
-        await Client.WriteAsync(path, content, append: false, cancellationToken: cancellationToken);
-        _logger?.LogDebug("Wrote blob to storage: {Path}", path);
-
-        // Notify the file subject to reload its in-memory state
-        if (_pathRegistry.TryGetSubject(path, out var subject) && subject is IStorageFile file)
-        {
-            await file.OnFileChangedAsync(cancellationToken);
-        }
+        using var buffer = new MemoryStream();
+        await content.CopyToAsync(buffer, cancellationToken);
+        await WriteBlobCoreAsync(path, buffer.ToArray(), cancellationToken);
     }
 
     /// <summary>
-    /// IStorageContainer - Deletes a blob from storage and removes from Children.
+    /// IStorageContainer - Writes a blob to storage and refreshes the subject of the file.
     /// </summary>
+    /// <remarks>
+    /// The content is copied. When the subject cannot be refreshed after the write, the write still succeeds,
+    /// and the next pass loads the file again.
+    /// </remarks>
+    public Task WriteBlobAsync(string path, ReadOnlyMemory<byte> content, CancellationToken cancellationToken)
+        => WriteBlobCoreAsync(path, content.ToArray(), cancellationToken);
+
+    // The bytes belong to the write and are not changed by anyone else, because a write that was given up still
+    // reads them after the caller got its result, see TimeLimitedBlobStorage.
+    private async Task WriteBlobCoreAsync(string path, byte[] bytes, CancellationToken cancellationToken)
+    {
+        var connection = Connection;
+        var relativePath = StoragePath.Normalize(path);
+
+        await RunOperationAsync(connection, async token =>
+        {
+            var entry = connection.Index.TryGet(relativePath, out var found) && !found.IsFolder ? found : null;
+            if (entry != null)
+            {
+                // Recorded again only once everything below has succeeded: whatever fails or is given up in
+                // between, the next pass then loads the file again.
+                entry.Version = default;
+                entry.Hash = null;
+            }
+
+            await WriteAsync(connection, relativePath, bytes, token);
+            _logger?.LogDebug("Wrote blob to storage: {Path}", relativePath);
+
+            // The pass that does the rest is asked for here, because not every storage has a file watcher that
+            // would: it loads a file that has no subject or whose subject could not be refreshed, and after a
+            // subject was replaced it places an entry that waited for the key this freed.
+            var leavesWorkForPass = true;
+            try
+            {
+                leavesWorkForPass = entry?.Subject == null || await connection.Reconciler.RefreshWrittenAsync(entry, bytes, token);
+            }
+            catch (Exception exception) when (!token.IsCancellationRequested)
+            {
+                // The bytes are written, so the caller gets no failure.
+                _logger?.LogWarning(exception, "Failed to refresh the subject after writing: {Path}", relativePath);
+            }
+            finally
+            {
+                if (leavesWorkForPass)
+                {
+                    connection.NotifyChanged(relativePath);
+                }
+            }
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// IStorageContainer - Deletes the file of a subject and removes the subject from Children.
+    /// </summary>
+    /// <remarks>
+    /// A path without a subject in this storage is left alone and only logged: a folder, an ignored file, or a
+    /// file that no pass has loaded yet.
+    /// </remarks>
     public async Task DeleteBlobAsync(string path, CancellationToken cancellationToken)
     {
-        // Get subject BEFORE deleting (needed for hierarchy removal)
-        if (!_pathRegistry.TryGetSubject(path, out var subject))
+        var connection = Connection;
+        var relativePath = StoragePath.Normalize(path);
+        await RunOperationAsync(connection, token =>
         {
-            _logger?.LogWarning("Cannot delete blob - subject not found in registry: {Path}", path);
-            return;
-        }
+            if (connection.Index.TryGet(relativePath, out var entry) && entry is { IsFolder: false, Subject: not null })
+                return DeleteEntryAsync(connection, entry, token);
 
-        var fullPath = Path.GetFullPath(Path.Combine(ConnectionString, path));
-        _fileWatcher?.MarkAsOwnWrite(fullPath);
-
-        await Client.DeleteAsync(path, cancellationToken: cancellationToken);
-
-        // Remove from hierarchy - uses reusable helper
-        RemoveFromHierarchy(path, subject);
-
-        _logger?.LogDebug("Deleted blob from storage: {Path}", path);
+            _logger?.LogWarning("Cannot delete blob - no subject at: {Path}", relativePath);
+            return Task.CompletedTask;
+        }, cancellationToken);
     }
 
     /// <summary>
-    /// Opens the create subject wizard to add a new subject to this storage.
+    /// The name of the method with which agents set metadata,
+    /// <see cref="SetMetadataAsync(string, string?, JsonElement, CancellationToken)"/>.
+    /// </summary>
+    public const string SetMetadataMethodName = "SetMetadata";
+
+    /// <summary>
+    /// Gets the message with which <see cref="SetMetadataAsync(string, string?, JsonElement, CancellationToken)"/>
+    /// refuses a path at which it finds no subject, so that a caller that hides a subject refuses it alike.
+    /// </summary>
+    public static string GetNoSubjectMessage(string path) => $"No subject at {NameList.Format([path])} in this storage.";
+
+    /// <summary>
+    /// Resolves the path that <see cref="SetMetadataAsync(string, string?, JsonElement, CancellationToken)"/> takes,
+    /// relative to <paramref name="storage"/> with the <see cref="ISubjectPathResolver"/> of its context, so that a
+    /// caller that checks the path resolves it alike: the storage itself for a path of only whitespace and slashes,
+    /// and null when no subject is at the path or the context has no resolver.
+    /// </summary>
+    public static IInterceptorSubject? ResolveMetadataPath(IInterceptorSubject storage, string path)
+    {
+        // Without leading slashes, which lead the resolver to the root of the application; "./" keeps the resolution
+        // inside the storage, which a leading "../" would leave.
+        var relativePath = path.AsSpan().Trim().TrimStart('/');
+        return relativePath.IsEmpty
+            ? storage
+            : storage.TryGetContext()?.TryGetService<ISubjectPathResolver>()?.ResolveSubject(string.Concat("./", relativePath), PathStyle.Canonical, storage);
+    }
+
+    /// <summary>
+    /// Gets the message with which a metadata write refuses a property that the subject does not have, so that a
+    /// caller that hides a property refuses it alike.
+    /// </summary>
+    public static string GetNoPropertyMessage(string propertyName) => $"The subject has no property {NameList.Format([propertyName])}.";
+
+    /// <summary>
+    /// Sets metadata of a subject in this storage, or of one of its properties, for agents: see
+    /// <see cref="SetMetadataAsync(IInterceptorSubject, string?, JsonElement, CancellationToken)"/>. A subject that a
+    /// storage inside this one holds is written by that storage.
+    /// </summary>
+    /// <param name="path">The path of the subject relative to this storage, empty for the storage itself.</param>
+    /// <param name="property">The name of a property of the subject, or null for the subject.</param>
+    /// <param name="values">A JSON object.</param>
+    /// <param name="cancellationToken">Cancels the write.</param>
+    /// <exception cref="ArgumentException">
+    /// The path is null or leads to no subject, the values are no JSON object, or the write is refused; the message says why.
+    /// </exception>
+    [Operation(Title = "Set Metadata", Description = StorageMetadataMethods.SetMetadataDescription, Position = 3)]
+    [ExcludeFrom(ExclusionTarget.UserInterface)]
+    public Task SetMetadataAsync(string path, string? property, JsonElement values, CancellationToken cancellationToken)
+        => StorageMetadataMethods.RunAsync(() => MetadataStore.SetMetadataAsync(path, property, values, cancellationToken));
+
+    /// <summary>
+    /// Finds the subjects and properties in this storage whose metadata matches every filter that is given, for agents:
+    /// see <see cref="MetadataSearch.Search"/>.
+    /// </summary>
+    /// <returns>
+    /// Every match, in order, with the path of its subject relative to this storage, as <see cref="SetMetadataAsync(string, string?, JsonElement, CancellationToken)"/>
+    /// takes it; none when <paramref name="path"/> is given and <see cref="ResolveMetadataPath"/> resolves it to no subject.
+    /// </returns>
+    [Query(Title = "Search Metadata", Description = StorageMetadataMethods.SearchMetadataDescription, Position = 6)]
+    [ExcludeFrom(ExclusionTarget.UserInterface)]
+    public MetadataSearchMatch[] SearchMetadata(string? tag, string? key, string? value, string? path)
+    {
+        var start = path is null ? this : ResolveMetadataPath(this, path);
+        return start is null ? [] : [.. MetadataSearch.Search(this, tag, key, value, start)];
+    }
+
+    /// <summary>Gets the names of the children of this storage in the order in which they are shown, for agents.</summary>
+    [Query(Title = "Get Order", Description = StorageMetadataMethods.GetOrderDescription, Position = 4)]
+    [ExcludeFrom(ExclusionTarget.UserInterface)]
+    public string[] GetOrder() => ChildOrdering.GetShownNames(this);
+
+    /// <summary>
+    /// Sets the order of the children of this storage, for agents: see
+    /// <see cref="MetadataStoreExtensions.SetOrderAsync"/>.
+    /// </summary>
+    /// <exception cref="ArgumentException">A name is refused, or the write is refused; the message says why.</exception>
+    [Operation(Title = "Set Order", Description = StorageMetadataMethods.SetOrderDescription, Position = 5)]
+    [ExcludeFrom(ExclusionTarget.UserInterface)]
+    public Task SetOrderAsync(string[] names, CancellationToken cancellationToken)
+        => StorageMetadataMethods.RunAsync(() => MetadataStoreExtensions.SetOrderAsync(this, names, cancellationToken));
+
+    /// <summary>
+    /// Opens the create subject dialog to add a new subject to this storage.
     /// </summary>
     [Operation(Title = "Create", Icon = "Add", Position = 1)]
     public Task CreateAsync([FromServices] ISubjectSetupService subjectSetupService, CancellationToken cancellationToken)
         => subjectSetupService.CreateSubjectAndAddToStorageAsync(this, cancellationToken);
 
     /// <summary>
-    /// IStorageContainer - Deletes a subject by finding its path in the registry.
+    /// Creates a Markdown file in the root folder of this storage and adds it as a page.
     /// </summary>
-    public async Task DeleteSubjectAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
-    {
-        if (!_pathRegistry.TryGetPath(subject, out var path))
-            throw new InvalidOperationException("Subject not found in storage registry");
+    /// <exception cref="ArgumentException">The name is not a plain file name ending in .md, the file exists, or the
+    /// content is larger than <see cref="MarkdownFile.MaxContentSize"/> bytes or has blocks or other
+    /// <see cref="MarkdownFile.ActiveContent"/>.</exception>
+    /// <exception cref="InvalidOperationException">The storage is not connected.</exception>
+    [Operation(Title = "Create Markdown File", Description = "Creates a new markdown file with the given name (ending in .md) and content in this folder.", Icon = "NoteAdd", Position = 2)]
+    public Task CreateMarkdownFileAsync(string name, string content, CancellationToken cancellationToken)
+        => CreateMarkdownFileAsync(folderPath: string.Empty, name, content, cancellationToken);
 
-        // Delegate to DeleteBlobAsync which handles file deletion and hierarchy removal
-        await DeleteBlobAsync(path, cancellationToken);
+    /// <summary>
+    /// Creates a Markdown file in the folder at <paramref name="folderPath"/>, relative to the storage root, and adds it as a page.
+    /// </summary>
+    internal async Task CreateMarkdownFileAsync(string folderPath, string name, string content, CancellationToken cancellationToken)
+    {
+        MarkdownWriteRules.ValidateFileName(name, nameof(name));
+
+        var bytes = MarkdownWriteRules.GetContentBytes(content, nameof(content));
+        MarkdownWriteRules.EnsureActiveContentUnchanged(string.Empty, content, nameof(content), GetPageLayoutRules());
+        var relativePath = StoragePath.Normalize(string.IsNullOrEmpty(folderPath) ? name : $"{folderPath.TrimEnd('/')}/{name}");
+        if (StoragePathFilter.IsIgnored(relativePath))
+            throw new ArgumentException($"A file in '{folderPath}' would not be loaded: the folder is hidden or temporary.", nameof(folderPath));
+
+        var connection = Connection;
+        await RunOperationAsync(connection, async token =>
+        {
+            // On the worker, so the checks, the write and the placement are one step for every other change of the storage.
+            var subject = _subjectFactory.CreateFile(this, StoragePath.ToFullPath(relativePath));
+
+            // A pass only needs to look at the path when the storage may hold a file that the index does not know.
+            var isPassNeeded = false;
+            try
+            {
+                if (subject is not MarkdownFile file)
+                    throw new InvalidOperationException($"'{name}' is not loaded as a Markdown page by this storage.");
+
+                if (connection.Index.TryGet(relativePath, out _))
+                    throw new ArgumentException($"'{name}' already exists in this folder.", nameof(name));
+
+                // Before the storage is asked, as for AddSubjectAsync: on disk, asking about a path creates its folder.
+                if (!connection.Reconciler.IsKeyFree(relativePath, subject))
+                    throw new ArgumentException(GetKeyTakenMessage(connection, relativePath, name), nameof(name));
+
+                if (await connection.Client.ExistsAsync(relativePath, token))
+                {
+                    isPassNeeded = true;
+                    throw new ArgumentException($"'{name}' already exists in this folder.", nameof(name));
+                }
+
+                var entry = new StorageEntry { Path = relativePath, IsFolder = false, Subject = subject };
+                isPassNeeded = true;
+                await WriteAndRecordAsync(connection, entry, bytes, token);
+
+                // Not cancelled from here on: the file is written, and a cancel must not report that it was not.
+                var hasVersion = entry.Version != default;
+                file.FileSize = hasVersion ? entry.Version.Size : bytes.Length;
+                file.LastModified = (hasVersion ? entry.Version.Modified?.UtcDateTime : null) ?? DateTime.UtcNow;
+                await file.OnFileChangedAsync(CancellationToken.None);
+
+                connection.Index.EnsureFolders(relativePath);
+                connection.Index.Set(entry);
+                connection.Reconciler.Apply();
+            }
+            catch
+            {
+                // Not placed, so nothing else would ever detach it. A file that was written is loaded by the next pass.
+                if (!connection.Index.TryGetEntry(subject, out _))
+                {
+                    _subjectFactory.Release(subject);
+                    if (isPassNeeded)
+                    {
+                        connection.NotifyChanged(relativePath);
+                    }
+                }
+
+                throw;
+            }
+
+            _logger?.LogInformation("Created Markdown file: {Path}", relativePath);
+        }, cancellationToken);
     }
 
+    // The rules of the permission to edit page layout when the caller has it. A new page has no names and no place
+    // yet, so a reference path must be absolute.
+    private PageLayoutRules? GetPageLayoutRules()
+    {
+        if (!MarkdownPageLayoutPermission.IsGranted)
+            return null;
 
+        var parser = _serviceProvider.GetRequiredService<MarkdownContentParser>();
+        return new PageLayoutRules(parser.FindType, path => path.StartsWith('/') && parser.ResolvesToSubject(path, this), parser.FindLayoutError);
+    }
+
+    private static string GetKeyTakenMessage(StorageConnection connection, string relativePath, string name)
+    {
+        for (var parent = StoragePath.GetParent(relativePath); parent.Length > 0; parent = StoragePath.GetParent(parent))
+        {
+            if (connection.Index.TryGet(parent, out var folder) && !folder.IsFolder)
+            {
+                return $"'{name}' cannot be created: '{parent}' is a file and not a folder.";
+            }
+        }
+
+        return $"'{name}' cannot be created: another subject in this folder, or the folder itself, already has its name in the tree.";
+    }
+
+    /// <summary>
+    /// IStorageContainer - Deletes a subject by finding its path in the index.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The subject is not the subject of a file in this storage.</exception>
+    public async Task DeleteSubjectAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
+    {
+        var connection = Connection;
+        await RunOperationAsync(connection, token =>
+        {
+            // A folder has an entry too, but no file that could be deleted.
+            if (!connection.Index.TryGetEntry(subject, out var entry) || entry.IsFolder)
+                throw new InvalidOperationException("Subject not found in storage registry");
+
+            return DeleteEntryAsync(connection, entry, token);
+        }, cancellationToken);
+    }
+
+    private async Task DeleteEntryAsync(StorageConnection connection, StorageEntry entry, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await connection.Client.DeleteAsync(entry.Path, cancellationToken: cancellationToken);
+        }
+        catch (Exception exception) when (CanHaveReachedStorage(exception))
+        {
+            connection.NotifyChanged(entry.Path);
+            await MetadataStore.DeleteSidecarAsync(connection, entry, isFileKnownGone: false);
+            throw;
+        }
+
+        // Before the tree follows, so that a failure of the tree cannot leave the metadata file behind.
+        await MetadataStore.DeleteSidecarAsync(connection, entry, isFileKnownGone: true);
+
+        connection.Index.Remove(entry.Path);
+        connection.Reconciler.Apply();
+        _subjectFactory.Release(entry.Subject);
+
+        // The key is free now, and an entry that waited for it is only loaded by a pass.
+        connection.NotifyChanged(entry.Path);
+
+        _logger?.LogDebug("Deleted blob from storage: {Path}", entry.Path);
+    }
+
+    /// <summary>
+    /// Ends the connection for good: a connect after this fails.
+    /// </summary>
     public override void Dispose()
     {
-        _fileWatcher?.Dispose();
-        _client?.Dispose();
-        _client = null;
-        Status = StorageStatus.Disconnected;
+        StorageConnection? connection;
+        lock (_connectionLock)
+        {
+            _isDisposed = true;
+            Status = StorageStatus.Disconnected;
+            connection = _connection;
+        }
+
+        // Ended outside the lock, because cancelling it runs code of the work it cancels.
+        connection?.Dispose();
         base.Dispose();
     }
 }

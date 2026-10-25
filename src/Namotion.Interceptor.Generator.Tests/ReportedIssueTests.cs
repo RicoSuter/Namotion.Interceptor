@@ -1,11 +1,12 @@
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 
-// Shape reported in https://github.com/RicoSuter/Namotion.Interceptor/issues/428, renamed:
+// A user-reported shape, renamed:
 // an enum, a base interface whose property is named after its own type, a sub-interface that
 // supplies the value through an explicit implementation, and an empty subject class with no
 // namespace.
 
+#pragma warning disable S3903 // The reported defect depends on these types living in the global namespace.
 public enum Rank { Junior, Senior }
 
 public interface IEmployee
@@ -22,6 +23,7 @@ public interface ISenior : IEmployee
 public partial class Alice : ISenior
 {
 }
+#pragma warning restore S3903
 
 namespace Namotion.Interceptor.Generator.Tests
 {

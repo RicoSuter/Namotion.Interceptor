@@ -552,6 +552,7 @@ var referenceCount = subject.GetReferenceCount();
 - Subjects created directly with context (root subjects) have `refs: 0` - no edge points at an anchored root
 - Subjects attached via properties have their reference count incremented/decremented per occurrence added or removed
 - `GetReferenceCount()` is never an attachment predicate: an anchored root reports 0 while attached, so use `TryGetContext()` to test attachment and a non-None `Executor.AttachmentAnchor` to test root-ness. An empty `GetParents()` is not a root test either: it answers the same for a root, an unattached subject, and a subject inside its own release
+- Only intercepted properties count: a non-partial `[Derived]` getter that returns a subject adds no reference, because it stores nothing. Dynamic and registry-added properties count when they carry an edge, as described in [Registry](registry.md)
 
 The `SubjectLifecycleChange` includes `ReferenceCount` after the operation. Use the flags to determine the event type:
 
@@ -687,9 +688,14 @@ var tire = new Tire();
 car.Tires = [tire];
 
 var parents = tire.GetParents(); // Returns ImmutableArray with [(car, "Tires", 0)]
+
+var owner = tire.TryGetFirstParent<Car>();      // The nearest parent that is a Car, or null
+var same = car.TryGetFirstParentOrSelf<Car>();  // The car itself, because it is a Car
 ```
 
 Entries are per occurrence: a subject listed twice in one collection has two, one per index. Nothing is materialised for a subject until `GetParents()` is first called on it, so a consumer that never asks pays nothing. The order of the entries is unspecified; only the set of occurrences is meaningful.
+
+Both searches go breadth first over all parents, so the nearest match wins, and neither throws when there is none. `TryGetFirstParent` never returns the subject itself.
 
 This enables scenarios like:
 - Finding the root object of a subject graph
@@ -716,6 +722,15 @@ var accessedProperties = scope.GetPropertiesAndDispose();
 ```
 
 This is primarily used internally by the derived property change detection system but can also be used for custom scenarios.
+
+For synchronous code on one thread, `ReadPropertyRecorder.RecordOnCurrentThread(target)` sends the reads of the current thread to an `IReadPropertyRecorderTarget` instead. Its `OnRead` is called on the reading thread before the value of each intercepted property is read. The method returns a `ref struct` scope that restores the previous target of the thread when disposed, so targets nest, and it must be disposed on the thread that started it. While a target is set, reads on that thread go only to it and are not recorded by the async scopes of `ReadPropertyRecorder.Start`.
+
+```csharp
+using (ReadPropertyRecorder.RecordOnCurrentThread(target))
+{
+    var fullName = person.FullName; // target.OnRead is called for FirstName and LastName
+}
+```
 
 ## Change Origin and Timestamps
 

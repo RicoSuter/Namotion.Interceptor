@@ -408,7 +408,7 @@ public class SubjectAttachmentTests
         // Assert
         Assert.Same(context, subject.TryGetContext());
         Assert.Equal(SubjectAttachmentAnchorKind.Explicit, subject.Executor.AttachmentAnchor);
-        Assert.Null(((IInterceptorSubject)root.Child!).TryGetContext());
+        Assert.Null(((IInterceptorSubject)root.Child).TryGetContext());
 
         // Act: the lifecycle-free detach clears the attachment entirely, because no edge model
         // exists that could still hold the subject.

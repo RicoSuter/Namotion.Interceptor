@@ -43,7 +43,11 @@ internal static class SupportContractAssertions
         string Child(IInterceptorSubject subject, object? index) => $"{Identity(subject)}[{index ?? "-"}]";
         void Collect(PropertyReference property, IInterceptorSubject child, object? index)
         {
-            if (!incoming.TryGetValue(child, out var parents)) incoming.Add(child, parents = []);
+            if (!incoming.TryGetValue(child, out var parents))
+            {
+                parents = [];
+                incoming.Add(child, parents);
+            }
             parents.Add(Edge(property, index));
             outgoing[property].Add(Child(child, index));
             pending.Push(child);

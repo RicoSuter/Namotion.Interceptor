@@ -137,6 +137,43 @@ public sealed class SqliteHistoryStoreCoreTimeWeightedAverageTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenPropertyMovesInsideABucket_ThenTheHeldValueContinuesOnTheNewPath()
+    {
+        // Arrange - 10 at 0 on /old, moved to /new at 5, 20 at 8 on /new: (10*8 + 20*2) / 10 = 12.
+        using var core = NewCore();
+        core.Record("/old/Value", Base, 10d, typeof(double));
+        core.RecordMove(Base.AddSeconds(5), "/old/Value", "/new/Value");
+        core.Record("/new/Value", Base.AddSeconds(8), 20d, typeof(double));
+        await core.FlushAsync(CancellationToken.None);
+
+        // Act
+        var point = core.Query(new HistoryQuery("/new/Value", Base, Base.AddSeconds(10), Bucket,
+            HistoryAggregations.TimeWeightedAverage, MaxPoints: 1000)).Points.Single();
+
+        // Assert
+        Assert.Equal(12d, point.Number!.Value, 6);
+    }
+
+    [Fact]
+    public async Task WhenMaxPointsClipsOlderBuckets_ThenTheHeldValueEntersTheFirstKeptBucket()
+    {
+        // Arrange - 9 is held from 25; [30,40): 9 holds [30,35), 19 holds [35,40) -> 14; [40,50) -> 19.
+        using var core = NewCore();
+        core.Record("/a/Value", Base.AddSeconds(1), 7d, typeof(double));
+        core.Record("/a/Value", Base.AddSeconds(25), 9d, typeof(double));
+        core.Record("/a/Value", Base.AddSeconds(35), 19d, typeof(double));
+        await core.FlushAsync(CancellationToken.None);
+
+        // Act
+        var series = core.Query(new HistoryQuery("/a/Value", Base, Base.AddSeconds(50), Bucket,
+            HistoryAggregations.TimeWeightedAverage, MaxPoints: 2));
+
+        // Assert
+        Assert.True(series.IsTruncated);
+        Assert.Equal(new double?[] { 14, 19 }, series.Points.Select(point => point.Number).ToArray());
+    }
+
+    [Fact]
     public async Task WhenTwaSpansMorePartitionsThanAttachLimit_ThenReadsWithoutAttachError()
     {
         // Arrange - 14 daily partition files (one sample per day at the day's UTC midnight). A single TWA
@@ -191,8 +228,8 @@ public sealed class SqliteHistoryStoreCoreTimeWeightedAverageTests : IDisposable
         var point = core.Query(new HistoryQuery("/a/Value", from, to, bucket,
             HistoryAggregations.TimeWeightedAverage, MaxPoints: 1000)).Points.Single();
 
-        // Assert - leading interval is zero (A sits at bucketStart); 10 over [Sun,Mon)=1 day,
-        // 30 over [Mon,Wed)=2 days: TWA = (10*1 + 30*2) / 3 = 70/3.
+        // Assert - the scan holds A from bucketStart and B from Monday, each up to the next event or
+        // the bucket end: 10 over [Sun,Mon)=1 day, 30 over [Mon,Wed)=2 days: TWA = (10*1 + 30*2) / 3 = 70/3.
         Assert.Equal(70d / 3d, point.Number!.Value, 6);
     }
 }

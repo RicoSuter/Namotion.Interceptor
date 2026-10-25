@@ -281,7 +281,7 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
         {
             var attachedContext = _attachment.Context;
             var contextState = attachedContext?.PinState();
-            var lifecycle = attachedContext?.TryGetServiceFromState<ILifecycleInterceptor>(contextState!);
+            var lifecycle = contextState is null ? null : InterceptorSubjectContext.TryGetServiceFromState<ILifecycleInterceptor>(contextState);
             if (lifecycle is null)
             {
                 // No lifecycle to order against: either the subject is unattached, or the pinned

@@ -31,6 +31,7 @@ public static class SubjectPropertyTypeExtensions
     /// <c>TProperty</c> throughout the interceptor interfaces, not just here).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S1067", Justification = "The single predicate groups JIT-constant exclusions for types that cannot contain subjects, preserving the readable fast path.")]
     public static bool CanContainSubjects<TProperty>(this Type type)
     {
         if (typeof(TProperty).IsPrimitive ||

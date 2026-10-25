@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using HomeBlaze.History.Abstractions;
 using HomeBlaze.History.InMemory;
 using HomeBlaze.History.Sqlite;
@@ -15,6 +16,9 @@ public interface IParityStore : IDisposable
     Task FlushAsync();
     HistorySeries Query(HistoryQuery query);
     HistoryPoint? GetSampleAtOrBefore(string propertyPath, DateTimeOffset asOf);
+    HistoryPoint? GetLastNumericSampleBefore(string propertyPath, DateTimeOffset before);
+    ImmutableArray<HistoryCoverage> CoverageRanges { get; }
+    IHistoryStore AsHistoryStore();
 }
 
 /// <summary>The wall-clock bounds all parity stores share.</summary>
@@ -27,11 +31,13 @@ public static class ParityClock
 
 internal sealed class InMemoryParityStore : IParityStore
 {
-    private DateTimeOffset _now = ParityClock.Start;
+    private DateTimeOffset _now;
     private readonly InMemoryHistoryStore _engine;
 
-    public InMemoryParityStore()
+    // The engine reads the clock at construction to begin coverage there.
+    public InMemoryParityStore(DateTimeOffset coverageStart)
     {
+        _now = coverageStart;
         _engine = new InMemoryHistoryStore(
             priority: 100,
             maxPointsPerProperty: 100_000,
@@ -54,6 +60,13 @@ internal sealed class InMemoryParityStore : IParityStore
     public HistoryPoint? GetSampleAtOrBefore(string propertyPath, DateTimeOffset asOf)
         => _engine.GetSampleAtOrBefore(propertyPath, asOf);
 
+    public HistoryPoint? GetLastNumericSampleBefore(string propertyPath, DateTimeOffset before)
+        => _engine.GetLastNumericSampleBefore(propertyPath, before);
+
+    public ImmutableArray<HistoryCoverage> CoverageRanges => _engine.CoverageRanges;
+
+    public IHistoryStore AsHistoryStore() => _engine;
+
     public void Dispose() { }
 }
 
@@ -62,11 +75,13 @@ internal sealed class SqliteParityStore : IParityStore
     private readonly string _directory =
         Path.Combine(Path.GetTempPath(), "hb-parity-" + Guid.NewGuid().ToString("N"));
 
-    private DateTimeOffset _now = ParityClock.Start;
+    private DateTimeOffset _now;
     private readonly SqliteHistoryStore _engine;
 
-    public SqliteParityStore()
+    // The engine reads the clock at construction to begin coverage there.
+    public SqliteParityStore(DateTimeOffset coverageStart)
     {
+        _now = coverageStart;
         _engine = new SqliteHistoryStore(
             priority: 50, databaseDirectory: _directory, PartitionInterval.Weekly,
             maxAge: TimeSpan.FromDays(36500), maxJsonSize: 8192, getUtcNow: () => _now);
@@ -86,6 +101,13 @@ internal sealed class SqliteParityStore : IParityStore
     public HistoryPoint? GetSampleAtOrBefore(string propertyPath, DateTimeOffset asOf)
         => _engine.GetSampleAtOrBefore(propertyPath, asOf);
 
+    public HistoryPoint? GetLastNumericSampleBefore(string propertyPath, DateTimeOffset before)
+        => _engine.GetLastNumericSampleBefore(propertyPath, before);
+
+    public ImmutableArray<HistoryCoverage> CoverageRanges => _engine.CoverageRanges;
+
+    public IHistoryStore AsHistoryStore() => _engine;
+
     public void Dispose()
     {
         _engine.Dispose();
@@ -97,7 +119,8 @@ internal sealed class SqliteParityStore : IParityStore
 public sealed class ParityStoreFactory
 {
     public required string Name { get; init; }
-    public required Func<IParityStore> Create { get; init; }
+    public required Func<DateTimeOffset, IParityStore> CreateCoveredFrom { get; init; }
+    public IParityStore Create() => CreateCoveredFrom(ParityClock.Start);
     public override string ToString() => Name;
 }
 
@@ -106,9 +129,20 @@ public static class ParityStores
 {
     public static TheoryData<ParityStoreFactory> Stores => new()
     {
-        new ParityStoreFactory { Name = "InMemory", Create = () => new InMemoryParityStore() },
-        new ParityStoreFactory { Name = "Sqlite", Create = () => new SqliteParityStore() },
+        new ParityStoreFactory
+        {
+            Name = "InMemory",
+            CreateCoveredFrom = start => new InMemoryParityStore(start)
+        },
+        new ParityStoreFactory
+        {
+            Name = "Sqlite",
+            CreateCoveredFrom = start => new SqliteParityStore(start)
+        },
     };
+
+    /// <summary>The factories of <see cref="Stores"/>, for building theory data that adds more columns.</summary>
+    public static IEnumerable<ParityStoreFactory> Factories => Stores.Cast<object[]>().Select(row => (ParityStoreFactory)row[0]);
 }
 
 /// <summary>Tolerance-aware comparison of a query result's numeric points against a golden sequence.</summary>

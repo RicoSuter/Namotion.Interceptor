@@ -117,12 +117,12 @@ public class CommitThenNotifyAcceptanceTests
         Assert.Equal(SubjectAttachmentAnchorKind.None, ((IInterceptorSubject)innerProvisional).Executor.AttachmentAnchor);
         Assert.Equal(SubjectAttachmentAnchorKind.None, ((IInterceptorSubject)outerProvisional).Executor.AttachmentAnchor);
         AssertAttached(context, innerProvisional, 1);
-        AssertAttached(context, innerProvisional.Father!, 1);
+        AssertAttached(context, innerProvisional.Father, 1);
         AssertAttached(context, outerProvisional, 1);
         AssertAttached(context, refusedChild, 1);
         AssertEdge(context, innerProvisional, new PropertyReference(innerRoot, nameof(Person.Father)));
         AssertEdge(context, refusedChild, new PropertyReference(innerRoot, nameof(Person.Mother)));
-        AssertEdge(context, innerProvisional.Father!, new PropertyReference(innerProvisional, nameof(Person.Father)));
+        AssertEdge(context, innerProvisional.Father, new PropertyReference(innerProvisional, nameof(Person.Father)));
         AssertEdge(context, outerProvisional, new PropertyReference(outerRoot, nameof(EnumerableChildrenHolder.Children)), 0);
         Assert.Equal(6, Registry(context).KnownSubjects.Count);
 
@@ -130,7 +130,7 @@ public class CommitThenNotifyAcceptanceTests
         innerRoot.DetachFromContext(context);
 
         // Assert
-        AssertReleased(context, innerRoot, innerProvisional, innerProvisional.Father!, refusedChild);
+        AssertReleased(context, innerRoot, innerProvisional, innerProvisional.Father, refusedChild);
         AssertAttached(context, outerRoot, 0);
         AssertAttached(context, outerProvisional, 1);
         Assert.Equal(2, Registry(context).KnownSubjects.Count);

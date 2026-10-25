@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Devices.Light;
 using HomeBlaze.Abstractions.Sensors;
@@ -95,10 +96,11 @@ public partial class HueLightbulb : HueDevice,
         null;
 
     [Derived]
-    public decimal? EnergyConsumed => null;
+    public decimal? TotalConsumedEnergy => null;
 
     [Derived]
     [State]
+    [Category("Device")]
     public string? Socket =>
         Model switch
         {

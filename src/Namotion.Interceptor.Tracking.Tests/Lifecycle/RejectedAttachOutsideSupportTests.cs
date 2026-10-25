@@ -32,7 +32,12 @@ public class RejectedAttachOutsideSupportTests
         // Act
         var exception = Record.Exception(() => root.AttachToContext(context));
         trigger.OnRead = null;
-        if (retry) root.Payload = root.Payload;
+        if (retry)
+        {
+            // Writing the current value again is the retry: the write reconciles the property.
+            var payload = root.Payload;
+            root.Payload = payload;
+        }
 
         // Assert
         Assert.True(triggered);
@@ -88,7 +93,8 @@ public class RejectedAttachOutsideSupportTests
         Assert.Equal(1, root.GetReferenceCount());
         Assert.Equal(1, trigger.GetReferenceCount());
 
-        root.Payload = root.Payload;
+        var payload = root.Payload;
+        root.Payload = payload;
         SupportContractAssertions.Settled(context, [provisional], provisional, root, trigger);
         provisional.Child = null;
         SupportContractAssertions.Settled(context, [provisional], provisional, root, trigger);

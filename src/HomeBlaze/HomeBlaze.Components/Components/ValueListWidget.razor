@@ -1,0 +1,36 @@
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(ValueList))]
+@implements ISubjectComponent
+@inject SubjectPathResolver PathResolver
+@inject ITimeZoneDisplay TimeZone
+
+@{
+    // Read once per render and never kept in a field: its render records the read, so that it renders again when it changes.
+    // The readings come first because a row without an icon needs to know whether another row has one.
+    // Every option of a row is read once, because each read is intercepted and recorded.
+    var rows = (Subject as ValueList)?.Values ?? [];
+    var items = new (string? Path, ValueReading? Reading, string? Icon)[rows.Length];
+    var anyIcon = false;
+    for (var index = 0; index < rows.Length; index++)
+    {
+        var row = rows[index];
+        var path = row.Path;
+        var reading = string.IsNullOrEmpty(path) ? null : ValueReader.Read(PathResolver, row, path, row.Map, TimeZone);
+        var icon = MudBlazorIconResolver.ResolveOrNull(reading?.Icon ?? row.Icon);
+        items[index] = (path, reading, icon);
+        anyIcon |= icon is not null;
+    }
+}
+
+<MudList T="string" Dense="true" ReadOnly="true" Padding="false" Class="value-list" data-testid="value-list">
+    @for (var index = 0; index < rows.Length; index++)
+    {
+        var row = rows[index];
+        var (path, reading, icon) = items[index];
+        <ValueListRow @key="row" Row="@row" Path="@path" Reading="@reading" Icon="@icon" AnyIcon="@anyIcon" />
+    }
+</MudList>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+}

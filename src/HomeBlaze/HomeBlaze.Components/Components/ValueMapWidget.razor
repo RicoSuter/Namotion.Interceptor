@@ -1,0 +1,9 @@
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(ValueMap))]
+@implements ISubjectComponent
+
+@* A map shows nothing. The component exists so that the page does not report a missing one. *@
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+}

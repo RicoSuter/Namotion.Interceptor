@@ -1,0 +1,105 @@
+@using HomeBlaze.Abstractions.Devices.Locks
+@using HomeBlaze.Abstractions.Metadata
+@using HomeBlaze.Abstractions.Sensors
+@using HomeBlaze.Components.Controls
+@using HomeBlaze.Components.Operations
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(DoorLock))]
+@implements ISubjectComponent
+@implements IDisposable
+@inject SubjectPathResolver PathResolver
+@inject ITimeZoneDisplay TimeZone
+@inject IDialogService DialogService
+@inject IServiceProvider ServiceProvider
+
+@{
+    var widget = Subject as DoorLock;
+}
+
+@if (widget is not null)
+{
+    // Read once per render and never kept: its render records the reads, so that it renders again when one changes.
+    var path = widget.Path;
+    var valueMap = ValueReader.ResolveMap(PathResolver, widget, widget.Map, out var mapError);
+    if (mapError is not null)
+    {
+        <WidgetArgumentError Message="@mapError" />
+    }
+    else
+    {
+        var (target, appearance, operation) = Resolve(widget, path, valueMap);
+        var label = !string.IsNullOrEmpty(widget.Label)
+            ? widget.Label
+            : (target is null ? null : SubjectNames.TryGetTitle(target)) ?? path ?? string.Empty;
+        var subtitle = !string.IsNullOrEmpty(widget.Subtitle) ? widget.Subtitle : target is null ? null : appearance.Subtitle;
+        var disabled = IsEditing || _isRunning || operation is null;
+
+        @* The label is the accessible name, which hides the subtitle, so the description carries the state, also under a custom subtitle. *@
+        <TileView TestId="door-lock-tile"
+                  AccessibleName="@label"
+                  AccessibleDescription="@(target is null ? null : disabled ? appearance.Subtitle : appearance.Description)"
+                  Tooltip="@operation?.Title"
+                  Label="@label"
+                  Subtitle="@subtitle"
+                  Icon="@appearance.DoorIcon"
+                  Color="@appearance.Fill"
+                  TextColor="@appearance.TextColor"
+                  Disabled="@disabled"
+                  IsBusy="@_isRunning"
+                  BadgeIcon="@appearance.BadgeIcon"
+                  OnClick="_clickCallback" />
+    }
+}
+
+@code {
+    private readonly CancellationTokenSource _lifetime = new();
+    private bool _isRunning;
+    private EventCallback<MouseEventArgs> _clickCallback;
+
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    [CascadingParameter(Name = "IsEditing")]
+    public bool IsEditing { get; set; }
+
+    protected override void OnInitialized()
+    {
+        _clickCallback = EventCallback.Factory.Create<MouseEventArgs>(this, RunAsync);
+    }
+
+    // The lock at the path of the widget (null when there is none), what the tile shows for it with the map, and the
+    // operation a click invokes (null when there is none or it is not enabled), which the map does not change.
+    private (IInterceptorSubject? Target, DoorLockAppearance Appearance, MethodMetadata? Operation) Resolve(DoorLock widget, string? path, ValueMap? valueMap)
+    {
+        var target = string.IsNullOrEmpty(path)
+            ? null
+            : ValueReader.ResolveSubject(PathResolver, widget, path) as IDoorLockState as IInterceptorSubject;
+        var appearance = DoorLockDisplay.Get((target as IDoorLockState)?.LockState, (target as IDoorSensor)?.DoorState, valueMap, target, PathResolver, TimeZone);
+        var property = target is not null && appearance.Operation is { } name ? target.TryGetRegisteredProperty(name) : null;
+        var operation = property?.TryGetMethodMetadata() is { } method && property.IsMethodEnabled() ? method : null;
+        return (target, appearance, operation);
+    }
+
+    private async Task RunAsync()
+    {
+        if (_isRunning || Subject is not DoorLock widget || Resolve(widget, widget.Path, null).Operation is not { } operation)
+        {
+            return;
+        }
+
+        _isRunning = true;
+        try
+        {
+            await OperationInvoker.InvokeAsync(DialogService, ServiceProvider, operation, _lifetime.Token);
+        }
+        finally
+        {
+            _isRunning = false;
+        }
+    }
+
+    public void Dispose()
+    {
+        _lifetime.Cancel();
+        _lifetime.Dispose();
+    }
+}

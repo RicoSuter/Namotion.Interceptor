@@ -1,0 +1,196 @@
+@using HomeBlaze.Abstractions.Attributes
+@using HomeBlaze.Abstractions.Metadata
+@using HomeBlaze.Components.Controls
+@using HomeBlaze.Components.Operations
+@using HomeBlaze.Services.Display
+@implements IDisposable
+@inject PropertyWriter Writer
+@inject IDialogService DialogService
+@inject IServiceProvider ServiceProvider
+@inject ITimeZoneDisplay TimeZone
+@inject SubjectPathResolver PathResolver
+
+@{
+    // Read once per render and never kept: its render records the reads, so that it renders again when one changes.
+    var property = Property;
+    var value = property?.GetValue();
+    var isOn = value as bool? ?? false;
+    // A pending toggle shows the state it goes to, boxed only then, and is read back from the property when it ends.
+    var shown = _pending is { } target ? target : value;
+    var binding = new ValueBinding(property, shown, property?.Subject);
+    // A path that leads nowhere tries no case, as in ValueReader.Read, so that a default case does not hide a mistake in the path.
+    var matched = binding.IsEmpty ? null : ValueMap?.FindCase(binding, PathResolver);
+    var canToggle = false;
+    if (property is not null && (property.Type == typeof(bool) || property.Type == typeof(bool?)))
+    {
+        if (UsesOperations)
+        {
+            // A toggle can only go to the other state, so only the operation for that state counts.
+            var operation = isOn ? OffProperty : OnProperty;
+            canToggle = operation is not null && operation.GetValue() is MethodMetadata && operation.IsMethodEnabled();
+        }
+        else
+        {
+            canToggle = PropertyWriter.IsWritable(property, value);
+        }
+    }
+
+    var isDisabled = IsEditing || _pending is not null || !canToggle;
+    var label = ValueReader.GetLabel(property, Label, Path);
+}
+
+@if (Kind == SwitchKind.Tile)
+{
+    // The case itself decides the fill: a case without a color is drawn on the surface, while a value without a case
+    // is filled with the primary color when true.
+    var fill = matched?.GetColor() ?? (shown is true ? Color.Primary : Color.Default);
+    var subtitle = !string.IsNullOrEmpty(Subtitle)
+        ? Subtitle
+        : ValueMap is not null && property is not null && shown is not null ? ValueReader.GetText(binding, matched, PathResolver, TimeZone) : null;
+    var icon = shown is null
+        ? Icons.Material.Filled.QuestionMark
+        : MudBlazorIconResolver.ResolveOrNull(string.IsNullOrEmpty(matched?.Icon) ? Icon : matched.Icon);
+    @* The label alone is the accessible name, as for the toggle switch: the subtitle is the state, which aria-checked gives. *@
+    <TileView TestId="switch-tile"
+              Checked="@(_pending ?? isOn)"
+              AccessibleName="@label"
+              Label="@label"
+              Subtitle="@subtitle"
+              Icon="@icon"
+              Color="@fill"
+              TextColor="@(matched?.GetTextColor() ?? ValueColor.Default)"
+              Disabled="@isDisabled"
+              IsBusy="@(_pending is not null)"
+              Badge="@Badge"
+              OnClick="_tileClickCallback" />
+}
+else
+{
+    // A matched case without a color of its own leaves the toggle switch in the primary color.
+    var color = matched?.GetColor() is { IsDefault: false } caseColor ? caseColor : (ValueColor)Color.Primary;
+    <div class="switch-widget" data-testid="switch">
+        <MudSwitch T="bool"
+                   @key="_resetKey"
+                   Value="@(_pending ?? isOn)"
+                   ValueChanged="_toggleCallback"
+                   Label="@label"
+                   Color="@color.Theme"
+                   Style="@color.Style"
+                   Disabled="@isDisabled" />
+    </div>
+}
+
+@code {
+    private readonly CancellationTokenSource _lifetime = new();
+    private bool? _pending;
+    // An object, not a counter: a boxed int as @key would allocate on every render.
+    private object _resetKey = new();
+    private EventCallback<bool> _toggleCallback;
+    private EventCallback<MouseEventArgs> _tileClickCallback;
+
+    /// <summary>
+    /// The boolean property that the switch shows, or null when the path leads nowhere.
+    /// </summary>
+    [Parameter]
+    public RegisteredSubjectProperty? Property { get; set; }
+
+    /// <summary>
+    /// The path as written, the label when the path leads nowhere and no label is given.
+    /// </summary>
+    [Parameter]
+    public string? Path { get; set; }
+
+    /// <summary>
+    /// The label next to the switch, the title that the property declares when it is not set.
+    /// </summary>
+    [Parameter]
+    public string? Label { get; set; }
+
+    /// <summary>
+    /// Whether a toggle invokes <see cref="OnProperty"/> or <see cref="OffProperty"/> instead of writing the property.
+    /// </summary>
+    [Parameter]
+    public bool UsesOperations { get; set; }
+
+    /// <summary>
+    /// The method property of the operation that turns the switch on, or null when it leads nowhere.
+    /// </summary>
+    [Parameter]
+    public RegisteredSubjectProperty? OnProperty { get; set; }
+
+    /// <summary>
+    /// The method property of the operation that turns the switch off, or null when it leads nowhere.
+    /// </summary>
+    [Parameter]
+    public RegisteredSubjectProperty? OffProperty { get; set; }
+
+    /// <summary>Whether the switch is drawn as a toggle switch or as a tile.</summary>
+    [Parameter]
+    public SwitchKind Kind { get; set; }
+
+    /// <summary>The resolved map, or null for none. Without one, true has the primary color.</summary>
+    [Parameter]
+    public ValueMap? ValueMap { get; set; }
+
+    /// <summary>The second line of a tile. Without it, a tile with a map shows the text of the value.</summary>
+    [Parameter]
+    public string? Subtitle { get; set; }
+
+    /// <summary>The name of the icon of a tile, which the icon of the matched case of the map replaces.</summary>
+    [Parameter]
+    public string? Icon { get; set; }
+
+    /// <summary>The content drawn over the top right corner of a tile, or null for none.</summary>
+    [Parameter]
+    public IInterceptorSubject? Badge { get; set; }
+
+    [CascadingParameter(Name = "IsEditing")]
+    public bool IsEditing { get; set; }
+
+    protected override void OnInitialized()
+    {
+        // Created once: binding the method group directly in the markup would allocate a new delegate on every render.
+        _toggleCallback = EventCallback.Factory.Create<bool>(this, ToggleAsync);
+        _tileClickCallback = EventCallback.Factory.Create<MouseEventArgs>(this, ToggleFromTileAsync);
+    }
+
+    private Task ToggleFromTileAsync() => ToggleAsync(!(Property?.GetValue() as bool? ?? false));
+
+    private async Task ToggleAsync(bool requested)
+    {
+        var property = Property;
+        if (property is null || _pending is not null)
+        {
+            return;
+        }
+
+        _pending = requested;
+        try
+        {
+            if (!UsesOperations)
+            {
+                Writer.TryWrite(property, requested);
+            }
+            else if ((requested ? OnProperty : OffProperty)?.GetValue() is MethodMetadata method)
+            {
+                await OperationInvoker.InvokeAsync(DialogService, ServiceProvider, method, _lifetime.Token);
+            }
+        }
+        finally
+        {
+            _pending = null;
+
+            // The switch keeps the state the user gave it, and only a new key makes it show the property again.
+            if ((property.GetValue() as bool? ?? false) != requested)
+            {
+                _resetKey = new object();
+            }
+        }
+    }
+
+    public void Dispose()
+    {
+        _lifetime.Cancel();
+        _lifetime.Dispose();
+    }
+}

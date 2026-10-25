@@ -1,0 +1,208 @@
+/* In edit mode a widget is selected with a click, which shows its actions. The content of a selectable widget takes no
+   pointer input, so that a click selects the widget instead of operating it. A nested widget takes the pointer again and
+   is selected on its own. A part of a widget that is meant to be used in edit mode, like the area of a canvas that moves
+   its nodes, takes the pointer back with the class edit-mode-interactive, and one that the widget offers only once it
+   is selected, like the empty cells of a grid that add a widget, with edit-mode-selected-interactive. */
+.subject-component-wrapper.selectable {
+    pointer-events: auto;
+    cursor: pointer;
+    outline: 1px dashed rgba(var(--mud-palette-primary-rgb), 0.35);
+    outline-offset: 1px;
+}
+
+/* A widget that shows nothing, such as a ValueMap, would otherwise be an invisible tab stop. */
+.subject-component-wrapper.selectable:empty {
+    display: none;
+}
+
+.subject-component-wrapper.selectable > ::deep * {
+    pointer-events: none;
+}
+
+/* A selectable widget that is a direct child of another one, such as the subject of a Widget block, keeps the pointer. */
+.subject-component-wrapper.selectable > .subject-component-wrapper.selectable,
+.subject-component-wrapper.selectable ::deep .edit-mode-interactive,
+.subject-component-wrapper.selected ::deep .edit-mode-selected-interactive {
+    pointer-events: auto;
+}
+
+@media (hover: hover) {
+    .subject-component-wrapper.selectable:not(.selected):hover:not(:has(.subject-component-wrapper.selectable:hover)) {
+        outline: 1px solid rgba(var(--mud-palette-primary-rgb), 0.7);
+    }
+}
+
+.subject-component-wrapper.selectable:focus-visible {
+    outline: 2px solid rgba(var(--mud-palette-primary-rgb), 0.7);
+}
+
+.subject-component-wrapper.selectable.selected {
+    outline: 2px solid var(--mud-palette-primary);
+}
+
+/* The outline of the selection would hide the focus, so a focused selected widget also gets a ring around it. */
+.subject-component-wrapper.selectable.selected:focus-visible {
+    box-shadow: 0 0 0 5px rgba(var(--mud-palette-primary-rgb), 0.35);
+}
+
+/* The bar sits above the top right corner of the selected widget and flips below the widget when there is no room.
+   MudBlazor flips a popover only at the edges of the window, so the anchor reaches up by the height of the fixed app bar
+   and the bar moves down by as much while it is not flipped (see the bar in MainLayout.razor.css of HomeBlaze.Host): the
+   bar flips once the app bar leaves it no room. */
+.subject-action-bar-anchor {
+    position: absolute;
+    top: calc(-1 * var(--mud-appbar-height, 64px));
+    right: 0;
+    bottom: 0;
+    left: 0;
+    pointer-events: none;
+}
+
+/* MudBlazor renders the popover of the bar in its provider, where the rules of this file reach the element around the
+   buttons but not the root of the popover. The rules that place the root are in MainLayout.razor.css of HomeBlaze.Host. */
+.subject-action-bar-content {
+    display: flex;
+    gap: 2px;
+    padding: 2px;
+}
+
+.subject-action-bar-content ::deep .mud-icon-button {
+    padding: 4px;
+}
+
+@media (pointer: coarse) {
+    .subject-action-bar-content ::deep .mud-icon-button {
+        padding: 10px;
+    }
+}
+
+/* A grid cell and a canvas node cut off what does not fit into them, so the outline of a selectable widget in one is
+   drawn inside. */
+:is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper.selectable,
+:is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper.selectable {
+    outline-offset: -2px;
+}
+
+/* The buttons of the cells of a grid and of the nodes of a canvas show only while the layout, or a widget inside it, is
+   selected. A nested layout hides its own buttons while neither applies to it, also when the layout around it is selected.
+   Without a selection no widget is selectable, and the buttons always show. */
+.subject-component-wrapper.selectable:not(.selected):not(:has(.subject-component-wrapper.selected)) > ::deep :is(.grid-layout-container, .grid-layout-sizer, .canvas-layout-container, .canvas-scale-frame) .layout-item-actions {
+    display: none;
+}
+
+/* The widgets below render a MudBlazor component as their root, so no element of their own is around it to scope their
+   styles to. Every widget stands in the wrapper above, which scopes them instead. */
+
+/* Card: it has no outer margin, the page and the layout it stands in space it (see MarkdownFilePageComponent.razor.css of
+   HomeBlaze.Storage.Blazor and FlowLayoutWidget.razor.css, which also makes a card in a flow item as high as its row). */
+::deep .card-widget > .mud-card-header.mud-card-header-padding,
+::deep .card-widget > .mud-card-content.mud-card-content-padding,
+::deep .card-widget > .mud-card-actions.mud-card-actions-padding {
+    padding: 12px;
+}
+
+/* The title and a body that follows it directly sit close together, as the lines of a paragraph. A subtitle is small text
+   like the start of many bodies, such as the first row of a list or the top label of a chart, so a body keeps 8 pixels
+   more from it to be told apart. A picture between them, or a missing body or header, leaves the full padding. */
+::deep .card-widget > .mud-card-header.mud-card-header-padding:has(+ .mud-card-content) {
+    padding-bottom: 4px;
+}
+
+::deep .card-widget > .mud-card-header.mud-card-header-padding:has([data-testid=card-subtitle]):has(+ .mud-card-content) {
+    padding-bottom: 12px;
+}
+
+::deep .card-widget > .mud-card-header + .mud-card-content.mud-card-content-padding {
+    padding-top: 0;
+}
+
+/* A card with a height, and a card that fills a grid cell or a canvas node: the header, the picture and the footer keep
+   their size, and the body takes the rest and scrolls. Without min-height: 0 an aspect ratio would let the content make
+   the card higher. A card fills a cell or a node when it is its child, as in a layout of a configuration file, or the
+   only block of its content on a page. A block that shows nothing has an empty wrapper, which the page hides, so only
+   the wrappers that are not empty count, unlike with :only-child. A card that fills its place gets min-height: 0 from
+   the rule of every place-filler below. */
+::deep .card-widget.card-widget-sized {
+    min-height: 0;
+}
+
+::deep .card-widget.card-widget-sized > *,
+::deep :is(:is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper, :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty))) > .card-widget > * {
+    flex-shrink: 0;
+}
+
+::deep .card-widget.card-widget-sized > .mud-card-content,
+::deep :is(:is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper, :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty))) > .card-widget > .mud-card-content {
+    flex: 1 1 0;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+/* A widget that fills its place (a card, a tile: the class place-filler) or is centered in it (a gauge: the class
+   place-centered) and is the only content of a grid cell or a canvas node takes the whole cell or node, unless a card has
+   a height of its own, which the inline style gives. It ignores its own minimum height, which a place smaller than it
+   would clip, and an aspect ratio, which the inline style also gives. It is a size container and gives its content the
+   sizes of the place, which grow with the smaller side of the place, from their least sizes at about 150 pixels to twice
+   them, so that a tile and a gauge side by side show the
+   same kind of text in the same size: the primary line (the value of a value, the name of a switch), the secondary line
+   (the label of a value, the state of a switch), the icon and the gap between them. A widget inside one of them, such as
+   in the body of a card, has its own sizes again. */
+::deep :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper:has(> :is(.place-filler, .place-centered)),
+::deep :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper:has(> .markdown-fragment > .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty)) > :is(.place-filler, .place-centered)),
+::deep :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .markdown-fragment:has(> .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty)) > :is(.place-filler, .place-centered)),
+::deep :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty)):has(> :is(.place-filler, .place-centered)) {
+    height: 100%;
+}
+
+::deep :is(:is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper, :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty))) > :is(.place-filler, .place-centered) {
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    aspect-ratio: auto !important;
+    container-type: size;
+    --place-primary-text: clamp(1.125rem, 12cqmin, 2.25rem);
+    --place-secondary-text: clamp(1rem, 10.5cqmin, 2rem);
+    --place-icon: clamp(2.5rem, 27cqmin, 5rem);
+    --place-gap: clamp(4px, 2.5cqmin, 8px);
+}
+
+/* A card or a tile that fills a grid cell or a canvas node keeps 8 pixels around it for its shadow, which the cell or
+   the node clips otherwise. Safari has no overflow-clip-margin and clips it. */
+::deep :is(.grid-cell, .canvas-node):has(> :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .place-filler, > :is(.grid-cell-content, .canvas-node-content) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper:nth-child(1 of :not(:empty)):nth-last-child(1 of :not(:empty)) > .place-filler) {
+    overflow-clip-margin: 8px;
+}
+
+::deep :is(.place-filler, .place-centered) .subject-component-wrapper {
+    --place-primary-text: initial;
+    --place-secondary-text: initial;
+    --place-icon: initial;
+    --place-gap: initial;
+}
+
+/* ValueList: a page gives every paragraph a distance above and below. A utility class cannot reach the paragraph that
+   MudListItem wraps its content in or the paragraphs of the content of a row, and this rule removes the distance of both.
+   Content with several paragraphs loses the distance between them. */
+::deep .mud-list-item.value-list-item p {
+    margin: 0;
+}
+
+/* Each row keeps 3 pixels above and below its content, the margin of the text of MudListItem in place of its padding and
+   margin, so rows are 6 pixels apart, closer than blocks, and a row of one line is 30 pixels high. The first and the last
+   row add nothing at the edge of the list, so that a list in a card ends at the padding of the card. */
+::deep .value-list > .value-list-item {
+    padding-top: 0;
+    padding-bottom: 0;
+}
+
+::deep .value-list > .value-list-item > .mud-list-item-text {
+    margin-top: 3px;
+    margin-bottom: 3px;
+}
+
+::deep .value-list > .value-list-item:first-child > .mud-list-item-text {
+    margin-top: 0;
+}
+
+::deep .value-list > .value-list-item:last-child > .mud-list-item-text {
+    margin-bottom: 0;
+}

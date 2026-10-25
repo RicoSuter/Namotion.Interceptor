@@ -568,6 +568,12 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
 
             if (!_ownership.ClaimSource(property.Reference))
             {
+                // A disposal cancels before it disposes the ownership, which then rejects every claim.
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    continue;
+                }
+
                 _logger.LogError(
                     "Property {Subject}.{Property} already owned by another source. Skipping MQTT subscription.",
                     property.Subject.GetType().Name, property.Name);

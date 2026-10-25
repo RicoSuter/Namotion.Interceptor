@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Services.Lifecycle;
@@ -23,7 +24,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public void OperationMethod_CreatesMethodMetadataProperty()
+    public void WhenAMethodHasAnOperationAttribute_ThenAMethodMetadataPropertyIsRegistered()
     {
         // Arrange
         var context = CreateContext();
@@ -43,7 +44,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public void QueryMethod_CreatesMethodMetadataProperty()
+    public void WhenAMethodHasAQueryAttribute_ThenAMethodMetadataPropertyIsRegistered()
     {
         // Arrange
         var context = CreateContext();
@@ -64,7 +65,52 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public void OperationMethod_HasCorrectParameters()
+    public void WhenAMethodIsExcluded_ThenItsMetadataHasTheTargets()
+    {
+        // Arrange
+        var registered = new MethodExclusionTestSubject(CreateContext()).TryGetRegisteredSubject()!;
+
+        // Act
+        var everywhere = registered.TryGetProperty("Everywhere")?.GetValue() as MethodMetadata;
+        var notInUserInterface = registered.TryGetProperty("NotInUserInterface")?.GetValue() as MethodMetadata;
+        var notForAgents = registered.TryGetProperty("NotForAgents")?.GetValue() as MethodMetadata;
+
+        // Assert
+        Assert.Equal(ExclusionTarget.None, everywhere?.ExcludedFrom);
+        Assert.Equal(ExclusionTarget.UserInterface, notInUserInterface?.ExcludedFrom);
+        Assert.Equal(ExclusionTarget.Agents, notForAgents?.ExcludedFrom);
+    }
+
+    [Fact]
+    public void WhenAnInterfaceMethodIsExcludedAndItsImplementationIsAnOperation_ThenTheExclusionApplies()
+    {
+        // Arrange
+        var registered = new ReattributedExclusionMethodSubject(CreateContext()).TryGetRegisteredSubject()!;
+
+        // Act
+        var metadata = registered.TryGetProperty("Mute")?.GetValue() as MethodMetadata;
+
+        // Assert
+        Assert.Equal("Class Mute", metadata?.Title);
+        Assert.Equal(ExclusionTarget.Agents, metadata?.ExcludedFrom);
+    }
+
+    [Fact]
+    public void WhenAnImplementationIsExcludedAndOnlyItsInterfaceMethodIsAnOperation_ThenTheExclusionApplies()
+    {
+        // Arrange
+        var registered = new ReattributedExclusionMethodSubject(CreateContext()).TryGetRegisteredSubject()!;
+
+        // Act
+        var metadata = registered.TryGetProperty("Unmute")?.GetValue() as MethodMetadata;
+
+        // Assert
+        Assert.Equal("Interface Unmute", metadata?.Title);
+        Assert.Equal(ExclusionTarget.UserInterface, metadata?.ExcludedFrom);
+    }
+
+    [Fact]
+    public void WhenAnOperationHasParameters_ThenItsMetadataDescribesThem()
     {
         // Arrange
         var context = CreateContext();
@@ -85,7 +131,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public async Task OperationMethod_InvokeAsync_CallsUnderlyingMethod()
+    public async Task WhenAnOperationIsInvoked_ThenTheUnderlyingMethodIsCalled()
     {
         // Arrange
         var context = CreateContext();
@@ -102,7 +148,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public async Task AsyncMethod_InvokeAsync_ReturnsResult()
+    public async Task WhenAnAsyncMethodIsInvoked_ThenItsResultIsReturned()
     {
         // Arrange
         var context = CreateContext();
@@ -120,7 +166,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public void MethodWithCustomTitle_UsesAttributeTitle()
+    public void WhenTheAttributeSetsATitle_ThenTheMetadataUsesIt()
     {
         // Arrange
         var context = CreateContext();
@@ -136,7 +182,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public void MethodWithoutCustomTitle_UsesMethodNameWithoutAsync()
+    public void WhenTheAttributeSetsNoTitle_ThenTheMethodNameWithoutAsyncIsUsed()
     {
         // Arrange
         var context = CreateContext();
@@ -152,7 +198,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public void MethodFromInterface_IsDiscovered()
+    public void WhenTheAttributeIsOnAnInterfaceMethod_ThenTheMethodIsDiscovered()
     {
         // Arrange
         var context = CreateContext();
@@ -170,7 +216,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public void CancellationTokenParameter_IsRuntimeProvided()
+    public void WhenAParameterIsACancellationToken_ThenItIsRuntimeProvided()
     {
         // Arrange
         var context = CreateContext();
@@ -188,7 +234,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public void FromServicesParameter_IsFromServicesNotAutoInjected()
+    public void WhenAParameterIsFromServices_ThenItIsMarkedFromServicesRatherThanAutoInjected()
     {
         // Arrange
         var context = CreateContext();
@@ -207,7 +253,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public void NullableFromServicesParameter_IsNullable()
+    public void WhenAFromServicesParameterIsNullable_ThenItIsMarkedNullable()
     {
         // Arrange
         var context = CreateContext();
@@ -224,7 +270,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public void NonNullableFromServicesParameter_IsNotNullable()
+    public void WhenAFromServicesParameterIsNotNullable_ThenItIsNotMarkedNullable()
     {
         // Arrange
         var context = CreateContext();
@@ -242,7 +288,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public void RegularParameter_RequiresInput()
+    public void WhenAParameterIsRegular_ThenItRequiresInput()
     {
         // Arrange
         var context = CreateContext();
@@ -261,7 +307,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public async Task MethodWithCancellationToken_InvokeAsync_PassesTokenThrough()
+    public async Task WhenAMethodTakingACancellationTokenIsInvoked_ThenTheTokenIsPassedThrough()
     {
         // Arrange
         var context = CreateContext();
@@ -280,7 +326,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public void ParameterlessMethod_HasEmptyParameters()
+    public void WhenAMethodHasNoParameters_ThenItsParametersAreEmpty()
     {
         // Arrange
         var context = CreateContext();
@@ -296,7 +342,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public async Task ParameterlessMethod_InvokeAsync_WithNullParameters()
+    public async Task WhenAParameterlessMethodIsInvokedWithNullParameters_ThenItIsCalled()
     {
         // Arrange
         var context = CreateContext();
@@ -313,7 +359,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public async Task ParameterlessMethod_InvokeAsync_WithEmptyParameters()
+    public async Task WhenAParameterlessMethodIsInvokedWithEmptyParameters_ThenItIsCalled()
     {
         // Arrange
         var context = CreateContext();
@@ -330,7 +376,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public void VoidMethod_HasNullResultType()
+    public void WhenAMethodReturnsVoid_ThenItsResultTypeIsNull()
     {
         // Arrange
         var context = CreateContext();
@@ -346,7 +392,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public async Task VoidMethod_InvokeAsync_ReturnsNull()
+    public async Task WhenAVoidMethodIsInvoked_ThenItReturnsNull()
     {
         // Arrange
         var context = CreateContext();
@@ -364,7 +410,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public async Task TaskMethod_WithNoGenericResult_HasNullResultType()
+    public async Task WhenAMethodReturnsANonGenericTask_ThenItsResultTypeIsNull()
     {
         // Arrange
         var context = CreateContext();
@@ -380,7 +426,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public async Task InvokeAsync_MethodThrows_ExceptionPropagates()
+    public async Task WhenAnInvokedMethodThrows_ThenTheOriginalExceptionPropagates()
     {
         // Arrange
         var context = CreateContext();
@@ -396,7 +442,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public async Task InvokeAsync_AsyncMethodThrows_ExceptionPropagates()
+    public async Task WhenAnInvokedAsyncMethodThrows_ThenTheOriginalExceptionPropagates()
     {
         // Arrange
         var context = CreateContext();
@@ -412,7 +458,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public async Task InvokeAsync_TooFewUserParameters_ThrowsArgumentException()
+    public async Task WhenInvokedWithTooFewParameters_ThenItThrowsArgumentException()
     {
         // Arrange
         var context = CreateContext();
@@ -428,7 +474,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public async Task InvokeAsync_TooManyUserParameters_ThrowsArgumentException()
+    public async Task WhenInvokedWithTooManyParameters_ThenItThrowsArgumentException()
     {
         // Arrange
         var context = CreateContext();
@@ -445,7 +491,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public void MethodWithDescription_PreservesDescription()
+    public void WhenAMethodHasADescription_ThenTheMetadataKeepsIt()
     {
         // Arrange
         var context = CreateContext();
@@ -461,7 +507,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public void MethodWithoutAttributes_NotDiscovered()
+    public void WhenAMethodHasNoAttribute_ThenItIsNotDiscovered()
     {
         // Arrange
         var context = CreateContext();
@@ -476,7 +522,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public async Task TrulyAsyncMethod_InvokeAsync_PropagatesException()
+    public async Task WhenAnInvokedMethodThrowsAfterAnAwait_ThenTheExceptionPropagates()
     {
         // Arrange — tests that exceptions thrown after an await are correctly propagated
         var context = CreateContext();
@@ -492,7 +538,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public void InterfaceMethodDiscovered_WhenConcreteMethodLacksAttribute()
+    public void WhenOnlyTheInterfaceMethodHasTheAttribute_ThenTheMethodIsRegisteredOnce()
     {
         // Arrange — when both type and interface have the same method name,
         // the concrete type's version is registered (deduplication by name)
@@ -507,12 +553,119 @@ public class MethodPropertyInitializerTests
         var metadata = property!.GetValue() as MethodMetadata;
 
         // Assert — only one property registered for this method name
-        var allMethods = registered.GetAllMethods();
+        var allMethods = registered.GetAllMethods(ExclusionTarget.UserInterface);
         Assert.Equal(1, allMethods.Count(m => m.Title == "Interface Op" || m.Title == "InterfaceOperation"));
     }
 
     [Fact]
-    public void SubjectWithNoMethods_HasNoMethodProperties()
+    public void WhenASubjectWithAnOperationReEntersTheGraph_ThenItsOperationIsRegisteredOnce()
+    {
+        // Arrange
+        var container = new MethodTestContainer(CreateContext());
+        var subject = new MethodTestSubject();
+        container.Child = subject;
+        container.Child = null;
+
+        // Act
+        container.Child = subject;
+
+        // Assert
+        var registered = subject.TryGetRegisteredSubject()!;
+        Assert.Single(registered.Properties, property => property.Name == "Stop");
+    }
+
+    [Theory]
+    [InlineData("Unlock", true)]
+    [InlineData("ToggleLock", true)]
+    [InlineData("Lock", false)]
+    public void WhenASubjectImplementsTheDoorLockController_ThenOperationsThatCanUnlockRequireConfirmation(string methodName, bool expected)
+    {
+        // Arrange
+        var subject = new DoorLockTestSubject(CreateContext());
+
+        // Act
+        var metadata = (MethodMetadata)subject.TryGetRegisteredSubject()!.TryGetProperty(methodName)!.GetValue()!;
+
+        // Assert
+        Assert.Equal(expected, metadata.RequiresConfirmation);
+    }
+
+    [Fact]
+    public void WhenAConcreteOperationImplementsAnInterfaceOperationThatRequiresConfirmation_ThenItStillRequiresConfirmation()
+    {
+        // Arrange
+        var subject = new OwnUnlockDoorLockTestSubject(CreateContext());
+
+        // Act
+        var unlock = GetMethod(subject, "Unlock");
+        var lockMethod = GetMethod(subject, "Lock");
+
+        // Assert
+        Assert.Equal("Open", unlock.Title);
+        Assert.True(unlock.RequiresConfirmation);
+        Assert.Equal("Close", lockMethod.Title);
+        Assert.False(lockMethod.RequiresConfirmation);
+    }
+
+    [Fact]
+    public void WhenAQueryImplementsAnInterfaceOperationThatRequiresConfirmation_ThenItIsAnOperationThatRequiresConfirmation()
+    {
+        // Arrange
+        var subject = new QueryUnlockDoorLockTestSubject(CreateContext());
+
+        // Act
+        var unlock = GetMethod(subject, "Unlock");
+
+        // Assert
+        Assert.Equal(MethodKind.Operation, unlock.Kind);
+        Assert.True(unlock.RequiresConfirmation);
+        Assert.Equal("Peek", unlock.Title);
+    }
+
+    [Fact]
+    public void WhenAnOperationOverridesABaseOperationThatRequiresConfirmation_ThenItStillRequiresConfirmation()
+    {
+        // Arrange
+        var subject = new OwnOperationOverrideSubject(CreateContext());
+
+        // Act
+        var reset = GetMethod(subject, "Reset");
+
+        // Assert
+        Assert.Equal("Reset now", reset.Title);
+        Assert.True(reset.RequiresConfirmation);
+    }
+
+    [Fact]
+    public void WhenAnIntermediateOverrideRequiresConfirmation_ThenAFurtherOverrideStillRequiresConfirmation()
+    {
+        // Arrange
+        var subject = new FurtherOperationOverrideSubject(CreateContext());
+
+        // Act
+        var restart = GetMethod(subject, "Restart");
+
+        // Assert
+        Assert.Equal("Restart now", restart.Title);
+        Assert.True(restart.RequiresConfirmation);
+    }
+
+    [Fact]
+    public void WhenAnIntermediateOverrideOfAGenericMethodRequiresConfirmation_ThenAFurtherOverrideStillRequiresConfirmation()
+    {
+        // Arrange
+        var subject = new FurtherGenericOperationOverrideSubject(CreateContext());
+
+        // Act
+        var apply = GetMethod(subject, "Apply");
+
+        // Assert
+        Assert.Equal("Apply now", apply.Title);
+        Assert.True(apply.RequiresConfirmation);
+    }
+
+    [Fact]
+    public void WhenASubjectHasNoMethods_ThenNoMethodPropertiesAreRegistered()
     {
         // Arrange
         var context = CreateContext();
@@ -520,11 +673,384 @@ public class MethodPropertyInitializerTests
         var registered = subject.TryGetRegisteredSubject()!;
 
         // Act
-        var methods = registered.GetAllMethods();
+        var methods = registered.GetAllMethods(ExclusionTarget.UserInterface);
 
         // Assert
         Assert.Empty(methods);
     }
+
+    [Fact]
+    public void WhenAMethodHasACategory_ThenTheMetadataKeepsIt()
+    {
+        // Arrange
+        var subject = new CategorizedMethodSubject(CreateContext());
+        var registered = subject.TryGetRegisteredSubject()!;
+
+        // Act
+        var operation = registered.TryGetProperty("Play")!.GetValue() as MethodMetadata;
+        var query = registered.TryGetProperty("GetQueue")!.GetValue() as MethodMetadata;
+
+        // Assert
+        Assert.Equal("Playback", operation!.Category);
+        Assert.Equal("Queue", query!.Category);
+    }
+
+    [Fact]
+    public void WhenAMethodHasNoCategory_ThenTheMetadataHasNone()
+    {
+        // Arrange
+        var subject = new CategorizedMethodSubject(CreateContext());
+        var registered = subject.TryGetRegisteredSubject()!;
+
+        // Act
+        var metadata = registered.TryGetProperty("Reboot")!.GetValue() as MethodMetadata;
+
+        // Assert
+        Assert.Null(metadata!.Category);
+    }
+
+    [Fact]
+    public void WhenOnlyTheInterfaceMethodIsAnOperation_ThenTheMetadataHasTheCategoryOfTheInterfaceMethod()
+    {
+        // Arrange
+        var subject = new CategorizedMethodSubject(CreateContext());
+        var registered = subject.TryGetRegisteredSubject()!;
+
+        // Act
+        var metadata = registered.TryGetProperty("Mute")!.GetValue() as MethodMetadata;
+
+        // Assert
+        Assert.Equal("Volume", metadata!.Category);
+    }
+
+    [Fact]
+    public void WhenTheClassMethodIsAnOperationWithoutACategory_ThenTheMetadataHasTheCategoryOfTheInterfaceMethod()
+    {
+        // Arrange
+        var subject = new InheritedCategoryMethodSubject(CreateContext());
+        var registered = subject.TryGetRegisteredSubject()!;
+
+        // Act
+        var metadata = registered.TryGetProperty("SetVolume")!.GetValue() as MethodMetadata;
+
+        // Assert
+        Assert.Equal("Volume", metadata!.Category);
+    }
+
+    [Fact]
+    public void WhenTheClassAndTheInterfaceMethodHaveACategory_ThenTheMetadataHasTheOneOfTheClass()
+    {
+        // Arrange
+        var subject = new InheritedCategoryMethodSubject(CreateContext());
+        var registered = subject.TryGetRegisteredSubject()!;
+
+        // Act
+        var metadata = registered.TryGetProperty("Mute")!.GetValue() as MethodMetadata;
+
+        // Assert
+        Assert.Equal("Sound", metadata!.Category);
+    }
+
+    [Fact]
+    public void WhenOnlyTheInterfaceMethodIsAnOperationAndTheClassMethodHasACategory_ThenTheMetadataHasTheOneOfTheClass()
+    {
+        // Arrange
+        var subject = new InheritedCategoryMethodSubject(CreateContext());
+        var registered = subject.TryGetRegisteredSubject()!;
+
+        // Act
+        var metadata = registered.TryGetProperty("Unmute")!.GetValue() as MethodMetadata;
+
+        // Assert
+        Assert.Equal("Sound", metadata!.Category);
+    }
+
+    [Fact]
+    public void WhenTheClassMethodHasAnEmptyCategory_ThenTheMetadataHasNoCategoryInsteadOfTheOneOfTheInterfaceMethod()
+    {
+        // Arrange
+        var subject = new InheritedCategoryMethodSubject(CreateContext());
+        var registered = subject.TryGetRegisteredSubject()!;
+
+        // Act
+        var metadata = registered.TryGetProperty("Reset")!.GetValue() as MethodMetadata;
+
+        // Assert
+        Assert.Null(metadata!.Category);
+    }
+
+    [Fact]
+    public void WhenACategoryHasSurroundingWhitespace_ThenTheMetadataHasTheTrimmedName()
+    {
+        // Arrange
+        var subject = new CategorizedMethodSubject(CreateContext());
+        var registered = subject.TryGetRegisteredSubject()!;
+
+        // Act
+        var metadata = registered.TryGetProperty("Pause")!.GetValue() as MethodMetadata;
+
+        // Assert
+        Assert.Equal("Playback", metadata!.Category);
+    }
+
+    [Fact]
+    public void WhenTheInterfaceDeclaresOverloads_ThenTheMetadataHasTheCategoryOfTheOneWithTheSameParameterTypes()
+    {
+        // Arrange
+        var subject = new InheritedCategoryMethodSubject(CreateContext());
+        var registered = subject.TryGetRegisteredSubject()!;
+
+        // Act
+        var metadata = registered.TryGetProperty("Set")!.GetValue() as MethodMetadata;
+
+        // Assert
+        Assert.Equal(typeof(int), Assert.Single(metadata!.Parameters).Type);
+        Assert.Equal("Number", metadata.Category);
+    }
+
+    [Fact]
+    public void WhenAnotherInterfaceDeclaresTheSameMethodWithAnotherCategory_ThenTheMetadataHasTheCategoryOfTheInterfaceWithTheOperation()
+    {
+        // Arrange
+        var subject = new TwoInterfaceCategoryMethodSubject(CreateContext());
+        var registered = subject.TryGetRegisteredSubject()!;
+
+        // Act
+        var metadata = registered.TryGetProperty("Mute")!.GetValue() as MethodMetadata;
+
+        // Assert
+        Assert.Equal("Volume", metadata!.Category);
+    }
+
+    [Fact]
+    public void WhenTwoTypesImplementTheSameInterfaceMethod_ThenEachHasItsOwnCategory()
+    {
+        // Arrange
+        var context = CreateContext();
+
+        // Act
+        // Only the interface method is an operation, so both types look up the category of the same method.
+        var withClassCategory = new ClassCategoryMethodSubject(context);
+        var withoutClassCategory = new NoClassCategoryMethodSubject(context);
+
+        // Assert
+        Assert.Equal("Sound", GetMethod(withClassCategory, "Mute").Category);
+        Assert.Equal("Volume", GetMethod(withoutClassCategory, "Mute").Category);
+    }
+
+    [Fact]
+    public void WhenTheInterfaceMethodIsImplementedExplicitly_ThenTheMetadataHasTheCategoryOfTheInterfaceMethod()
+    {
+        // Arrange
+        var subject = new ExplicitCategoryMethodSubject(CreateContext());
+
+        // Act
+        var metadata = GetMethod(subject, "Mute");
+
+        // Assert
+        Assert.Equal("Volume", metadata.Category);
+    }
+
+    [Fact]
+    public void WhenAnOperationIsInheritedFromABaseClass_ThenTheMetadataKeepsItsCategory()
+    {
+        // Arrange
+        var subject = new DerivedCategoryMethodSubject(CreateContext());
+
+        // Act
+        var metadata = GetMethod(subject, "Play");
+
+        // Assert
+        Assert.Equal("Playback", metadata.Category);
+    }
+
+    [Fact]
+    public void WhenABaseClassImplementsTheInterfaceMethod_ThenTheMetadataKeepsTheCategories()
+    {
+        // Arrange
+        var subject = new DerivedCategoryMethodSubject(CreateContext());
+
+        // Act
+        var withoutClassCategory = GetMethod(subject, "Mute");
+        var withClassCategory = GetMethod(subject, "Unmute");
+
+        // Assert
+        Assert.Equal("Volume", withoutClassCategory.Category);
+        Assert.Equal("Sound", withClassCategory.Category);
+    }
+
+    private static MethodMetadata GetMethod(IInterceptorSubject subject, string propertyName)
+    {
+        return (MethodMetadata)subject.TryGetRegisteredSubject()!.TryGetProperty(propertyName)!.GetValue()!;
+    }
+}
+
+public interface IExclusionMethodInterface
+{
+    [Operation(Title = "Interface Mute")]
+    [ExcludeFrom(ExclusionTarget.Agents)]
+    Task MuteAsync();
+
+    [Operation(Title = "Interface Unmute")]
+    Task UnmuteAsync();
+}
+
+[InterceptorSubject]
+public partial class ReattributedExclusionMethodSubject : IExclusionMethodInterface
+{
+    [Operation(Title = "Class Mute")]
+    public Task MuteAsync() => Task.CompletedTask;
+
+    [ExcludeFrom(ExclusionTarget.UserInterface)]
+    public Task UnmuteAsync() => Task.CompletedTask;
+}
+
+public interface ICategoryOnlyMethodInterface
+{
+    [Category("Other")]
+    Task MuteAsync();
+}
+
+public interface IOperationCategoryMethodInterface
+{
+    [Operation]
+    [Category("Volume")]
+    Task MuteAsync();
+
+    [Operation]
+    [Category("Volume")]
+    Task UnmuteAsync();
+}
+
+// The interface without the operation comes first, as it would be found first among the interfaces of the type.
+[InterceptorSubject]
+public partial class TwoInterfaceCategoryMethodSubject : ICategoryOnlyMethodInterface, IOperationCategoryMethodInterface
+{
+    public Task MuteAsync() => Task.CompletedTask;
+
+    public Task UnmuteAsync() => Task.CompletedTask;
+}
+
+[InterceptorSubject]
+public partial class ClassCategoryMethodSubject : IOperationCategoryMethodInterface
+{
+    [Category("Sound")]
+    public Task MuteAsync() => Task.CompletedTask;
+
+    public Task UnmuteAsync() => Task.CompletedTask;
+}
+
+[InterceptorSubject]
+public partial class NoClassCategoryMethodSubject : IOperationCategoryMethodInterface
+{
+    public Task MuteAsync() => Task.CompletedTask;
+
+    public Task UnmuteAsync() => Task.CompletedTask;
+}
+
+[InterceptorSubject]
+public partial class ExplicitCategoryMethodSubject : IOperationCategoryMethodInterface
+{
+    [Category("Sound")]
+    Task IOperationCategoryMethodInterface.MuteAsync() => Task.CompletedTask;
+
+    Task IOperationCategoryMethodInterface.UnmuteAsync() => Task.CompletedTask;
+}
+
+[InterceptorSubject]
+public abstract partial class CategoryMethodSubjectBase : IOperationCategoryMethodInterface
+{
+    [Operation]
+    [Category("Playback")]
+    public Task PlayAsync() => Task.CompletedTask;
+
+    public Task MuteAsync() => Task.CompletedTask;
+
+    [Category("Sound")]
+    public Task UnmuteAsync() => Task.CompletedTask;
+}
+
+[InterceptorSubject]
+public partial class DerivedCategoryMethodSubject : CategoryMethodSubjectBase;
+
+public interface IInheritedCategoryMethodInterface
+{
+    [Category("Volume")]
+    Task SetVolumeAsync(decimal volume);
+
+    [Operation]
+    [Category("Volume")]
+    Task MuteAsync();
+
+    [Operation]
+    [Category("Volume")]
+    Task UnmuteAsync();
+
+    [Category("Volume")]
+    Task ResetAsync();
+
+    [Category("Text")]
+    Task SetAsync(string value);
+
+    [Category("Number")]
+    Task SetAsync(int value);
+}
+
+[InterceptorSubject]
+public partial class InheritedCategoryMethodSubject : IInheritedCategoryMethodInterface
+{
+    [Operation]
+    public Task SetVolumeAsync(decimal volume) => Task.CompletedTask;
+
+    [Operation]
+    [Category("Sound")]
+    public Task MuteAsync() => Task.CompletedTask;
+
+    [Category("Sound")]
+    public Task UnmuteAsync() => Task.CompletedTask;
+
+    [Operation]
+    [Category("")]
+    public Task ResetAsync() => Task.CompletedTask;
+
+    public Task SetAsync(string value) => Task.CompletedTask;
+
+    [Operation]
+    public Task SetAsync(int value) => Task.CompletedTask;
+}
+
+public interface ICategorizedMethodInterface
+{
+    [Operation]
+    [Category("Volume")]
+    Task MuteAsync();
+}
+
+[InterceptorSubject]
+public partial class CategorizedMethodSubject : ICategorizedMethodInterface
+{
+    [Operation]
+    [Category("Playback")]
+    public Task PlayAsync() => Task.CompletedTask;
+
+    [Operation]
+    [Category(" Playback ")]
+    public Task PauseAsync() => Task.CompletedTask;
+
+    [Query]
+    [Category("Queue")]
+    public string GetQueue() => string.Empty;
+
+    [Operation]
+    public Task RebootAsync() => Task.CompletedTask;
+
+    public Task MuteAsync() => Task.CompletedTask;
+}
+
+[InterceptorSubject]
+public partial class MethodTestContainer
+{
+    public partial MethodTestSubject? Child { get; set; }
 }
 
 public interface IMethodTestInterface
@@ -643,4 +1169,83 @@ public partial class MethodWithRequiredServiceSubject
 public partial class NoMethodsSubject
 {
     public partial string? Name { get; set; }
+}
+
+[InterceptorSubject]
+public partial class DoorLockTestSubject : HomeBlaze.Abstractions.Devices.Locks.IDoorLockController
+{
+    public Task LockAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    public Task UnlockAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+}
+
+[InterceptorSubject]
+public partial class OwnUnlockDoorLockTestSubject : HomeBlaze.Abstractions.Devices.Locks.IDoorLockController
+{
+    [Operation(Title = "Close")]
+    public Task LockAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    [Operation(Title = "Open")]
+    public Task UnlockAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+}
+
+[InterceptorSubject]
+public partial class QueryUnlockDoorLockTestSubject : HomeBlaze.Abstractions.Devices.Locks.IDoorLockController
+{
+    public Task LockAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    [Query(Title = "Peek")]
+    public Task UnlockAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+}
+
+[InterceptorSubject]
+public abstract partial class ConfirmedOperationBaseSubject
+{
+    [Operation(RequiresConfirmation = true)]
+    public virtual Task ResetAsync() => Task.CompletedTask;
+}
+
+[InterceptorSubject]
+public partial class OwnOperationOverrideSubject : ConfirmedOperationBaseSubject
+{
+    [Operation(Title = "Reset now")]
+    public override Task ResetAsync() => Task.CompletedTask;
+}
+
+public abstract class UnconfirmedOperationBaseSubject
+{
+    [Operation]
+    public virtual Task RestartAsync() => Task.CompletedTask;
+}
+
+public abstract class ConfirmedOperationOverrideSubject : UnconfirmedOperationBaseSubject
+{
+    [Operation(RequiresConfirmation = true)]
+    public override Task RestartAsync() => Task.CompletedTask;
+}
+
+[InterceptorSubject]
+public partial class FurtherOperationOverrideSubject : ConfirmedOperationOverrideSubject
+{
+    [Operation(Title = "Restart now")]
+    public override Task RestartAsync() => Task.CompletedTask;
+}
+
+public abstract class UnconfirmedGenericOperationBaseSubject
+{
+    [Operation]
+    public virtual Task ApplyAsync<TValue>(TValue value) => Task.CompletedTask;
+}
+
+public abstract class ConfirmedGenericOperationOverrideSubject : UnconfirmedGenericOperationBaseSubject
+{
+    [Operation(RequiresConfirmation = true)]
+    public override Task ApplyAsync<TValue>(TValue value) => Task.CompletedTask;
+}
+
+[InterceptorSubject]
+public partial class FurtherGenericOperationOverrideSubject : ConfirmedGenericOperationOverrideSubject
+{
+    [Operation(Title = "Apply now")]
+    public override Task ApplyAsync<TValue>(TValue value) => Task.CompletedTask;
 }

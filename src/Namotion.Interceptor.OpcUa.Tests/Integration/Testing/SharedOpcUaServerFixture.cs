@@ -19,17 +19,14 @@ public class SharedOpcUaServerFixture : IAsyncLifetime
 
     public SharedOpcUaServerFixture()
     {
-        _logger = new TestLogger(new NullTestOutputHelper());
+        _logger = new TestLogger(ServerLog);
     }
 
     /// <summary>
-    /// A no-op test output helper for when no output is available (like in fixture initialization).
+    /// The server's log. Every test class shares the server, so each test writes out the lines
+    /// logged while it ran rather than the server writing to one test's output.
     /// </summary>
-    private sealed class NullTestOutputHelper : Xunit.Abstractions.ITestOutputHelper
-    {
-        public void WriteLine(string message) { }
-        public void WriteLine(string format, params object[] args) { }
-    }
+    public SharedLogBuffer ServerLog { get; } = new();
 
     /// <summary>
     /// The server's root model with partitioned test areas.
@@ -121,6 +118,15 @@ public class SharedOpcUaServerFixture : IAsyncLifetime
             {
                 Name = "Initial",
                 Number = 0m
+            },
+            SinglePropertyRollback = new TransactionSinglePropertyArea(context)
+            {
+                Name = "InitialValue"
+            },
+            MultiPropertyRollback = new TransactionMultiPropertyArea(context)
+            {
+                Name = "SetupName",
+                Number = 100m
             }
         };
 

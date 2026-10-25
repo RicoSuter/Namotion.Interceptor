@@ -1,0 +1,175 @@
+{
+    "group": {
+        "desc": "Include a digital signature over the response",
+        "groups": [
+            {
+                "count": 0,
+                "name": "repeating",
+                "points": [
+                    {
+                        "access": "RW",
+                        "desc": "Digital Signature",
+                        "label": "DS",
+                        "mandatory": "M",
+                        "name": "DS",
+                        "size": 1,
+                        "type": "uint16"
+                    }
+                ],
+                "type": "group"
+            }
+        ],
+        "label": "Secure Write Response Model (DRAFT 1)",
+        "name": "model_7",
+        "points": [
+            {
+                "desc": "Model identifier",
+                "label": "Model ID",
+                "mandatory": "M",
+                "name": "ID",
+                "size": 1,
+                "static": "S",
+                "type": "uint16",
+                "value": 7
+            },
+            {
+                "desc": "Model length",
+                "label": "Model Length",
+                "mandatory": "M",
+                "name": "L",
+                "size": 1,
+                "static": "S",
+                "type": "uint16"
+            },
+            {
+                "desc": "Sequence number from the request",
+                "label": "Request Sequence",
+                "mandatory": "M",
+                "name": "RqSeq",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "desc": "Status of last write operation",
+                "label": "Status",
+                "mandatory": "M",
+                "name": "Sts",
+                "size": 1,
+                "symbols": [
+                    {
+                        "name": "SUCCESS",
+                        "value": 0
+                    },
+                    {
+                        "name": "DS",
+                        "value": 1,
+                        "detail": "The signature was not valid"
+                    },
+                    {
+                        "name": "ACL",
+                        "value": 2,
+                        "detail": "One or more registers were not writable by this role"
+                    },
+                    {
+                        "name": "OFF",
+                        "value": 3,
+                        "detail": "Offset out of range or missing from multi-register value"
+                    },
+                    {
+                        "name": "VAL",
+                        "value": 4,
+                        "detail": "Value is out of acceptable range"
+                    }
+                ],
+                "type": "enum16"
+            },
+            {
+                "desc": "Timestamp value is the number of seconds since January 1, 2000",
+                "label": "Timestamp",
+                "mandatory": "M",
+                "name": "Ts",
+                "size": 2,
+                "type": "uint32"
+            },
+            {
+                "desc": "Millisecond counter 0-999",
+                "label": "Milliseconds",
+                "mandatory": "M",
+                "name": "Ms",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "desc": "Sequence number of response",
+                "label": "Sequence",
+                "mandatory": "M",
+                "name": "Seq",
+                "size": 1,
+                "type": "uint16",
+                "detail": "Shall be advanced for each response"
+            },
+            {
+                "desc": "Bitmask alarm code",
+                "label": "Alarm",
+                "mandatory": "M",
+                "name": "Alm",
+                "size": 1,
+                "symbols": [
+                    {
+                        "name": "NONE",
+                        "value": 0
+                    },
+                    {
+                        "name": "ALM",
+                        "value": 1,
+                        "detail": "Tampered"
+                    }
+                ],
+                "type": "enum16"
+            },
+            {
+                "mandatory": "M",
+                "name": "Rsrvd",
+                "size": 1,
+                "type": "pad"
+            },
+            {
+                "desc": "Algorithm used to compute the digital signature",
+                "label": "Algorithm",
+                "mandatory": "M",
+                "name": "Alg",
+                "size": 1,
+                "symbols": [
+                    {
+                        "name": "NONE",
+                        "value": 0,
+                        "detail": "For test purposes only"
+                    },
+                    {
+                        "name": "AES-GMAC-64",
+                        "value": 1
+                    },
+                    {
+                        "name": "ECC-256",
+                        "value": 2
+                    }
+                ],
+                "type": "enum16",
+                "detail": "For future proof"
+            },
+            {
+                "access": "RW",
+                "desc": "Number of registers comprising the digital signature.",
+                "label": "N",
+                "mandatory": "M",
+                "name": "N",
+                "size": 1,
+                "type": "uint16",
+                "detail": "The value of N must be at least 4 (64 bits)"
+            }
+        ],
+        "type": "group",
+        "detail": "Used in conjunction with a Secure Write Request"
+    },
+    "id": 7
+}

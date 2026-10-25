@@ -67,12 +67,6 @@ internal static class LifecycleScratch
     public static List<(PropertyEdgeJournal Journal, long Revision)> RentJournalList()
         => TryRent<List<(PropertyEdgeJournal, long)>>(out var list) ? list : new List<(PropertyEdgeJournal, long)>(4);
 
-    public static void Return(PropertyEdgeJournal journal)
-    {
-        journal.Reset();
-        Recycle(journal);
-    }
-
     public static List<(IInterceptorSubject Subject, long Revision)> RentConsumedAnchorList()
         => TryRent<List<(IInterceptorSubject, long)>>(out var list) ? list : new List<(IInterceptorSubject, long)>(4);
 
@@ -113,6 +107,12 @@ internal static class LifecycleScratch
     }
 
     /// <summary>Returns the group map and every index list it handed out.</summary>
+    public static void Return(PropertyEdgeJournal journal)
+    {
+        journal.Reset();
+        Recycle(journal);
+    }
+
     public static void Return(Dictionary<IInterceptorSubject, List<object?>> groups)
     {
         foreach (var group in groups)

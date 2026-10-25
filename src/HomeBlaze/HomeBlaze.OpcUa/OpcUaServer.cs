@@ -17,8 +17,10 @@ namespace HomeBlaze.OpcUa;
 /// <summary>
 /// OPC UA server subject that exposes other subjects via OPC UA protocol.
 /// </summary>
-[Category("Servers")]
+[Category("Integrations")]
 [Description("Exposes subjects via OPC UA protocol")]
+[DisplayName("OPC UA server")]
+[SubjectIcon("Dns")]
 [InterceptorSubject]
 public partial class OpcUaServer : BackgroundService, IConfigurable, ITitleProvider, IIconProvider, IServerSubject
 {
@@ -103,18 +105,21 @@ public partial class OpcUaServer : BackgroundService, IConfigurable, ITitleProvi
     /// Average incoming changes per second (client writes to server). Null when not running.
     /// </summary>
     [State]
+    [Category("Statistics")]
     public partial double? IncomingChangesPerSecond { get; set; }
 
     /// <summary>
     /// Average outgoing changes per second (subject changes pushed to OPC UA nodes). Null when not running.
     /// </summary>
     [State]
+    [Category("Statistics")]
     public partial double? OutgoingChangesPerSecond { get; set; }
 
     /// <summary>
     /// Number of active OPC UA client sessions. Null when not running.
     /// </summary>
     [State]
+    [Category("Statistics")]
     public partial int? ActiveSessionCount { get; set; }
 
     // Operations
@@ -264,6 +269,12 @@ public partial class OpcUaServer : BackgroundService, IConfigurable, ITitleProvi
                 CleanCertificateStore = CleanCertificateStore ?? defaults.CleanCertificateStore,
                 BufferTime = BufferTimeMs.HasValue ? TimeSpan.FromMilliseconds(BufferTimeMs.Value) : defaults.BufferTime,
             };
+
+            // Separate from the client store: the server cleans its own store on start.
+            if (OpcUaCertificateStoreLocation.Resolve(this, "Server") is { } certificateStorePath)
+            {
+                configuration.CertificateStoreBasePath = certificateStorePath;
+            }
 
             _serverService = targetSubject.CreateOpcUaServer(configuration, _logger);
             await this.AttachHostedServiceAsync(_serverService, cancellationToken);

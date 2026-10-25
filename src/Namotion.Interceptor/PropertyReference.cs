@@ -1,4 +1,6 @@
-﻿using System.Runtime.CompilerServices;
+﻿using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
+using Namotion.Interceptor.Interceptors;
 
 namespace Namotion.Interceptor;
 
@@ -22,11 +24,28 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
     /// cache would bloat every copy and force the struct to be mutable (see the readonly-struct
     /// declaration). The lookup is cheap, but hoist it to a local if you read it more than once in a hot path.
     /// </summary>
-    public SubjectPropertyMetadata Metadata =>
-        Subject.Properties.TryGetValue(Name, out var metadata) ? metadata :
-            throw new InvalidOperationException(
-                $"No metadata found for property '{Name}' on {Subject.GetType().Name}. " +
-                $"Available properties ({Subject.Properties.Count}): [{string.Join(", ", Subject.Properties.Keys)}]");
+    public SubjectPropertyMetadata Metadata
+    {
+        get
+        {
+            if (!Subject.Properties.TryGetValue(Name, out var metadata))
+            {
+                ThrowMetadataNotFound(Subject, Name);
+            }
+
+            return metadata;
+        }
+    }
+
+    // Kept out of the getter: an interpolated message there would zero stack on every call.
+    [DoesNotReturn]
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ThrowMetadataNotFound(IInterceptorSubject subject, string name)
+    {
+        throw new InvalidOperationException(
+            $"No metadata found for property '{name}' on {subject.GetType().Name}. " +
+            $"Available properties ({subject.Properties.Count}): [{string.Join(", ", subject.Properties.Keys)}]");
+    }
 
     public void SetPropertyData(string key, object? value)
     {
@@ -93,7 +112,7 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
     {
         if (TryGetWriteState(out var state))
         {
-            var ticks = Interlocked.Read(ref state.TimestampTicks);
+            var ticks = Volatile.Read(ref state.TimestampTicks);
             return ticks == 0 ? null : new DateTimeOffset(ticks, TimeSpan.Zero);
         }
 
@@ -135,16 +154,18 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
     {
         if (TryGetWriteState(out var state))
         {
-            var nonSourceCommitRevision = Interlocked.Read(ref state.LastNonSourceCommitRevision);
+            // Flag first: another sink can mark between the two reads, and a flag seen set must not pair
+            // with a revision read before the commit that preceded the mark.
+            publishedToAnySource = state.PublishedToAnySource;
+            var nonSourceCommitRevision = Volatile.Read(ref state.LastNonSourceCommitRevision);
 
             // Each commit advances exactly one of the two, so the last of any kind is their maximum, and
             // the source slot is read only when it can count. A stale read of either can only lower the
             // result, which delivers a redundant change rather than dropping a live one.
             commitRevision = includeSourceCommitsInRevision
-                ? Math.Max(nonSourceCommitRevision, Interlocked.Read(ref state.LastSourceCommitRevision))
+                ? Math.Max(nonSourceCommitRevision, Volatile.Read(ref state.LastSourceCommitRevision))
                 : nonSourceCommitRevision;
 
-            publishedToAnySource = state.PublishedToAnySource;
             return true;
         }
 
@@ -171,6 +192,33 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
     }
 
     /// <summary>
+    /// Marks the property as published, as <see cref="MarkAsPublishedToSource"/> does, unless it has already
+    /// committed something newer than <paramref name="revision"/>. The check and the mark run under the lock
+    /// the write terminal commits under, so a commit either lands first and supersedes the change, or lands
+    /// after the mark and sees it.
+    /// </summary>
+    /// <param name="revision">The commit revision of the change being published. Zero is never superseded.</param>
+    /// <param name="includeSourceCommitsInRevision">Whether commits applied from a source count, as for
+    /// <see cref="TryGetWriteState(bool, out long, out bool)"/>.</param>
+    /// <returns>False when a newer commit superseded the change and nothing was marked.</returns>
+    public bool TryMarkAsPublishedToSource(long revision, bool includeSourceCommitsInRevision)
+    {
+        // Hard cast: the terminal lock lives on the built-in executor, see SetPropertyValueWithInterception.
+        lock (((InterceptorExecutor)Subject.Executor).SyncRoot)
+        {
+            if (revision != 0 &&
+                TryGetWriteState(includeSourceCommitsInRevision, out var commitRevision, out _) &&
+                revision < commitRevision)
+            {
+                return false;
+            }
+
+            MarkAsPublishedToSource();
+            return true;
+        }
+    }
+
+    /// <summary>
     /// Records what the terminal just committed: the write timestamp and the commit revision, the first
     /// as raw UTC ticks; see <see cref="PropertyWriteState.TimestampTicks"/>. The revision goes to whichever
     /// of the two slots the origin selects, never both, so a commit costs one revision store on top of the
@@ -181,15 +229,15 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
     internal void SetWriteState(long timestamp, long revision, bool isFromSource)
     {
         var state = GetOrAddWriteState();
-        Interlocked.Exchange(ref state.TimestampTicks, timestamp);
+        Volatile.Write(ref state.TimestampTicks, timestamp);
 
         if (isFromSource)
         {
-            Interlocked.Exchange(ref state.LastSourceCommitRevision, revision);
+            Volatile.Write(ref state.LastSourceCommitRevision, revision);
         }
         else
         {
-            Interlocked.Exchange(ref state.LastNonSourceCommitRevision, revision);
+            Volatile.Write(ref state.LastNonSourceCommitRevision, revision);
         }
     }
 
@@ -200,7 +248,7 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal void SetWriteTimestamp(long timestamp)
     {
-        Interlocked.Exchange(ref GetOrAddWriteState().TimestampTicks, timestamp);
+        Volatile.Write(ref GetOrAddWriteState().TimestampTicks, timestamp);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

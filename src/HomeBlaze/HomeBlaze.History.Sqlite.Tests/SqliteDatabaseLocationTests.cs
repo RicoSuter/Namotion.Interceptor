@@ -87,4 +87,42 @@ public sealed class SqliteDatabaseLocationTests
         // Assert
         Assert.Equal(Path.Combine(BaseDirectory, "MyHistory"), resolved);
     }
+
+    [Fact]
+    public void WhenDataDirectoryIsSet_ThenBaseDirectoryIsHistoryUnderDataDirectory()
+    {
+        // Arrange
+        var dataDirectory = Path.Combine(Path.GetTempPath(), "homeblaze-instance");
+
+        // Act
+        var baseDirectory = SqliteDatabaseLocation.DefaultBaseDirectory(dataDirectory);
+
+        // Assert
+        Assert.Equal(Path.Combine(dataDirectory, "History"), baseDirectory);
+    }
+
+    [Fact]
+    public void WhenDataDirectoryIsNull_ThenBaseDirectoryIsLocalApplicationData()
+    {
+        // Act
+        var baseDirectory = SqliteDatabaseLocation.DefaultBaseDirectory(null);
+
+        // Assert
+        Assert.Equal(
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HomeBlaze"),
+            baseDirectory);
+    }
+
+    [Fact]
+    public void WhenDataDirectoryIsSetAndPathIsEmpty_ThenStoreIsHistorySqliteUnderDataDirectory()
+    {
+        // Arrange
+        var dataDirectory = Path.Combine(Path.GetTempPath(), "homeblaze-instance");
+
+        // Act
+        var resolved = SqliteDatabaseLocation.Resolve(string.Empty, SqliteDatabaseLocation.DefaultBaseDirectory(dataDirectory));
+
+        // Assert
+        Assert.Equal(Path.Combine(dataDirectory, "History", "Sqlite"), resolved);
+    }
 }

@@ -393,6 +393,8 @@ Note: In partial updates, `Kind=Collection/Dictionary` entries with no operation
 - **Non-subject collections** (`List<int>`, `Dictionary<string, string>`) use value-replacement semantics (full replacement, no granular diffing). Only `IInterceptorSubject` collections support structural diffs.
 - **Conflict resolution** is last-applied-wins by message arrival order with eventual consistency via reconnection.
 - **Dictionary keys** are normalized to strings during transport. Non-string keys (int, enum) must be convertible via `Convert.ChangeType` or `Enum.Parse`.
+- **Element types** are read from the declared collection or dictionary interfaces and must resolve uniquely. A legacy wrapper implementing only the non-generic `ICollection` or `IDictionary` falls back to its own generic arguments, read by position. A declaration naming several possible item types, of which more than one could hold a subject, and one naming none at all both throw `NotSupportedException`. This runs before any `ISubjectFactory` is consulted, so a factory cannot change which item subject is created for an incoming update or which key type a dictionary update is converted to.
+- **Container types** are the factory's choice. The default factory creates arrays, `List<T>` and `Dictionary<TKey, TValue>`, so a property declared as a more specific container receives one of those instead; supply an `ISubjectFactory` to create the declared type.
 
 ## Attributes
 

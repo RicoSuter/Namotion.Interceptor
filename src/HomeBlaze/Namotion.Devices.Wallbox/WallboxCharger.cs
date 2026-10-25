@@ -14,8 +14,10 @@ using Namotion.Interceptor.Registry.Attributes;
 
 namespace Namotion.Devices.Wallbox;
 
-[Category("Devices")]
+[Category("Energy")]
 [Description("Wallbox EV charger (Pulsar, Commander, Quasar) via cloud API")]
+[DisplayName("Wallbox charger")]
+[SubjectIcon("EvStation")]
 [InterceptorSubject]
 public partial class WallboxCharger : BackgroundService,
     IVehicleCharger,
@@ -36,7 +38,7 @@ public partial class WallboxCharger : BackgroundService,
     private WallboxClient? _client;
     private DateTimeOffset _lastSessionsRetrieval = DateTimeOffset.MinValue;
     private readonly Dictionary<int, decimal> _yearlySessionEnergy = new();
-    private decimal _cachedSessionEnergy;
+    private decimal? _cachedSessionEnergy;
 
     // Configuration
 
@@ -70,49 +72,61 @@ public partial class WallboxCharger : BackgroundService,
     public partial bool? IsCharging { get; internal set; }
 
     [State(Unit = StateUnit.Watt, Position = 4)]
+    [Category("Charging")]
     public partial decimal? ChargingPower { get; internal set; }
 
     // Workaround: Pulsar MAX firmware always returns charging_speed=0.
     // Derived from power and phases assuming 230V nominal (EU/Type 2 markets).
     [State(Unit = StateUnit.Ampere, IsEstimated = true, Position = 5)]
+    [Category("Charging")]
     public partial decimal? ChargingCurrent { get; internal set; }
 
     // max_available_power from the API is actually the hardware max current in amps
     [State(Unit = StateUnit.Ampere, Position = 6)]
+    [Category("Charging")]
     public partial decimal? MaximumAvailableChargingCurrent { get; internal set; }
 
     [State(Unit = StateUnit.Ampere, Position = 7)]
+    [Category("Charging")]
     public partial decimal? MaximumChargingCurrent { get; internal set; }
 
     [State(Unit = StateUnit.Watt, Position = 8)]
+    [Category("Charging")]
     public partial decimal? MaximumChargingPower { get; internal set; }
 
     [State(IsDiscrete = true, Position = 9)]
+    [Category("Lock")]
     public partial bool? IsLocked { get; internal set; }
 
     // IVehicleChargerState (ChargeLevel delegated to Session)
 
     [Derived]
     [State(Unit = StateUnit.Percent, Position = 10)]
+    [Category("Charging")]
     public decimal? ChargeLevel => Session.ChargeLevel;
 
     // Energy
 
     [State(Unit = StateUnit.WattHour, IsCumulative = true, Position = 12)]
-    public partial decimal? TotalEnergyConsumed { get; internal set; }
+    [Category("Energy")]
+    public partial decimal? TotalConsumedEnergy { get; internal set; }
 
     [State(Position = 13)]
+    [Category("Energy")]
     public partial decimal? EnergyPrice { get; internal set; }
 
     [State(Position = 14)]
+    [Category("Energy")]
     public partial string? Currency { get; internal set; }
 
     // Eco-Smart
 
     [State(IsDiscrete = true, Position = 15)]
-    public partial bool? EcoSmartEnabled { get; internal set; }
+    [Category("Energy")]
+    public partial bool? IsEcoSmartEnabled { get; internal set; }
 
     [State(IsDiscrete = true, Position = 16)]
+    [Category("Energy")]
     public partial WallboxEcoSmartMode? EcoSmartMode { get; internal set; }
 
     // IDeviceInfo
@@ -157,13 +171,11 @@ public partial class WallboxCharger : BackgroundService,
     [State]
     public partial WallboxChargingSession Session { get; internal set; }
 
-    // IPowerSensor (delegates to ChargingPower/TotalEnergyConsumed)
+    // IPowerSensor (TotalConsumedEnergy implements it directly)
 
     [Derived]
+    [Category("Energy")]
     public decimal? Power => ChargingPower;
-
-    [Derived]
-    public decimal? EnergyConsumed => TotalEnergyConsumed;
 
     // Derived
 
@@ -177,23 +189,23 @@ public partial class WallboxCharger : BackgroundService,
     public string? IconColor =>
         IsCharging == true ? "Success" : IsPluggedIn == true ? "Warning" : null;
 
-    // Operation enable conditions
+    // Operation enable conditions. An operation is registered without the Async of its method name.
 
     [Derived]
-    [PropertyAttribute("LockAsync", KnownAttributes.IsEnabled)]
-    public bool LockAsync_IsEnabled => IsConnected && IsLocked != true;
+    [PropertyAttribute("Lock", KnownAttributes.IsEnabled)]
+    public bool Lock_IsEnabled => IsConnected && IsLocked != true;
 
     [Derived]
-    [PropertyAttribute("UnlockAsync", KnownAttributes.IsEnabled)]
-    public bool UnlockAsync_IsEnabled => IsConnected && IsLocked == true;
+    [PropertyAttribute("Unlock", KnownAttributes.IsEnabled)]
+    public bool Unlock_IsEnabled => IsConnected && IsLocked == true;
 
     [Derived]
-    [PropertyAttribute("PauseChargingAsync", KnownAttributes.IsEnabled)]
-    public bool PauseChargingAsync_IsEnabled => IsConnected && IsCharging == true;
+    [PropertyAttribute("PauseCharging", KnownAttributes.IsEnabled)]
+    public bool PauseCharging_IsEnabled => IsConnected && IsCharging == true;
 
     [Derived]
-    [PropertyAttribute("ResumeChargingAsync", KnownAttributes.IsEnabled)]
-    public bool ResumeChargingAsync_IsEnabled => IsConnected && ChargerStatus == WallboxChargerStatus.Paused;
+    [PropertyAttribute("ResumeCharging", KnownAttributes.IsEnabled)]
+    public bool ResumeCharging_IsEnabled => IsConnected && ChargerStatus == WallboxChargerStatus.Paused;
 
     // Constructor
 
@@ -222,10 +234,10 @@ public partial class WallboxCharger : BackgroundService,
         MaximumChargingCurrent = null;
         MaximumChargingPower = null;
         IsLocked = null;
-        TotalEnergyConsumed = null;
+        TotalConsumedEnergy = null;
         EnergyPrice = null;
         Currency = null;
-        EcoSmartEnabled = null;
+        IsEcoSmartEnabled = null;
         EcoSmartMode = null;
         Model = null;
         ProductCode = null;
@@ -260,6 +272,7 @@ public partial class WallboxCharger : BackgroundService,
     // Device-specific operations
 
     [Operation(Title = "Lock", Icon = "Lock")]
+    [Category("Lock")]
     public async Task LockAsync(CancellationToken cancellationToken)
     {
         if (_client is not null)
@@ -269,7 +282,8 @@ public partial class WallboxCharger : BackgroundService,
         }
     }
 
-    [Operation(Title = "Unlock", Icon = "LockOpen")]
+    [Operation(Title = "Unlock", Icon = "LockOpen", RequiresConfirmation = true)]
+    [Category("Lock")]
     public async Task UnlockAsync(CancellationToken cancellationToken)
     {
         if (_client is not null)
@@ -279,10 +293,11 @@ public partial class WallboxCharger : BackgroundService,
         }
     }
 
-    [Operation(Title = "Set Maximum Charging Current", RequiresConfirmation = true)]
+    [Operation(Title = "Set Maximum Charging Current")]
+    [Category("Charging")]
     public async Task SetMaximumChargingCurrentAsync(int amperes, CancellationToken cancellationToken)
     {
-        if (_client is not null && amperes >= 6 && amperes <= 32)
+        if (_client is not null && amperes is >= 6 and <= 32)
         {
             await _client.SetMaximumChargingCurrentAsync(SerialNumber, amperes, cancellationToken);
             await PollAsync(cancellationToken);
@@ -290,6 +305,7 @@ public partial class WallboxCharger : BackgroundService,
     }
 
     [Operation(Title = "Set Energy Price")]
+    [Category("Energy")]
     public async Task SetEnergyPriceAsync(decimal pricePerKwh, CancellationToken cancellationToken)
     {
         if (_client is not null)
@@ -300,6 +316,7 @@ public partial class WallboxCharger : BackgroundService,
     }
 
     [Operation(Title = "Set ICP Max Current", RequiresConfirmation = true)]
+    [Category("Charging")]
     public async Task SetIcpMaxCurrentAsync(int amperes, CancellationToken cancellationToken)
     {
         if (_client is not null)
@@ -310,6 +327,7 @@ public partial class WallboxCharger : BackgroundService,
     }
 
     [Operation(Title = "Set Eco-Smart Mode")]
+    [Category("Energy")]
     public async Task SetEcoSmartAsync(WallboxEcoSmartMode mode, CancellationToken cancellationToken)
     {
         if (_client is not null)
@@ -320,6 +338,7 @@ public partial class WallboxCharger : BackgroundService,
     }
 
     [Operation(Title = "Reboot", RequiresConfirmation = true)]
+    [Category("Device")]
     public async Task RebootAsync(CancellationToken cancellationToken)
     {
         if (_client is not null)
@@ -329,6 +348,7 @@ public partial class WallboxCharger : BackgroundService,
     }
 
     [Operation(Title = "Update Firmware", RequiresConfirmation = true)]
+    [Category("Device")]
     public async Task UpdateFirmwareAsync(CancellationToken cancellationToken)
     {
         if (_client is not null)
@@ -342,7 +362,8 @@ public partial class WallboxCharger : BackgroundService,
     // mechanically while a charging session is active and unlocks when paused.
     // These operations therefore toggle pause/resume to control the physical latch.
 
-    [Operation(Title = "Toggle Charge Port Lock")]
+    [Operation(Title = "Toggle Charge Port Lock", RequiresConfirmation = true)]
+    [Category("Lock")]
     public async Task ToggleChargePortLockAsync(CancellationToken cancellationToken)
     {
         if (ChargerStatus == WallboxChargerStatus.Paused)
@@ -352,6 +373,7 @@ public partial class WallboxCharger : BackgroundService,
     }
 
     [Operation(Title = "Lock Charge Port")]
+    [Category("Lock")]
     public async Task LockChargePortAsync(CancellationToken cancellationToken)
     {
         // Resume charging to re-engage the connector latch
@@ -359,7 +381,8 @@ public partial class WallboxCharger : BackgroundService,
             await ResumeChargingAsync(cancellationToken);
     }
 
-    [Operation(Title = "Unlock Charge Port")]
+    [Operation(Title = "Unlock Charge Port", RequiresConfirmation = true)]
+    [Category("Lock")]
     public async Task UnlockChargePortAsync(CancellationToken cancellationToken)
     {
         // The Type 2 connector latch disengages when the session is paused.
@@ -459,7 +482,8 @@ public partial class WallboxCharger : BackgroundService,
                     _client = null;
                     _lastSessionsRetrieval = DateTimeOffset.MinValue;
                     _yearlySessionEnergy.Clear();
-                    _cachedSessionEnergy = 0;
+                    _cachedSessionEnergy = null;
+                    TotalConsumedEnergy = null;
                     return;
                 }
             }
@@ -482,9 +506,7 @@ public partial class WallboxCharger : BackgroundService,
 
         // Only override Finished flag for definitive "not plugged" states;
         // all other statuses (including future ones) fall back to API's Finished flag.
-        IsPluggedIn = ChargerStatus is WallboxChargerStatus.Disconnected or WallboxChargerStatus.Ready
-            ? false
-            : !status.Finished;
+        IsPluggedIn = ChargerStatus is not (WallboxChargerStatus.Disconnected or WallboxChargerStatus.Ready) && !status.IsFinished;
 
         IsCharging = ChargerStatus is WallboxChargerStatus.Charging or WallboxChargerStatus.Discharging;
         ChargingPower = status.ChargingPowerInKw * 1000m;
@@ -493,7 +515,7 @@ public partial class WallboxCharger : BackgroundService,
         // Derive current from power and phases assuming 230V nominal (EU/Type 2 markets).
         ChargingCurrent = status.ChargingCurrent > 0
             ? status.ChargingCurrent
-            : status.CurrentMode > 0 && status.ChargingPowerInKw > 0
+            : status is { CurrentMode: > 0, ChargingPowerInKw: > 0 }
                 ? Math.Round(status.ChargingPowerInKw * 1000m / (230m * status.CurrentMode), 1)
                 : 0;
 
@@ -504,7 +526,7 @@ public partial class WallboxCharger : BackgroundService,
 
         MaximumChargingCurrent = status.ConfigData?.MaximumChargingCurrent;
 
-        MaximumChargingPower = status.MaxAvailablePower > 0 && status.CurrentMode > 0
+        MaximumChargingPower = status is { MaxAvailablePower: > 0, CurrentMode: > 0 }
             ? status.MaxAvailablePower * 230m * status.CurrentMode
             : null;
 
@@ -517,22 +539,22 @@ public partial class WallboxCharger : BackgroundService,
 
         // Current session
         Session.IsCharging = IsCharging == true;
-        Session.ChargeLevel = status.StateOfCharge.HasValue ? status.StateOfCharge.Value / 100m : null;
+        Session.ChargeLevel = status.StateOfCharge / 100m;
         Session.AddedEnergy = status.AddedEnergy * 1000m;
         Session.AddedGreenEnergy = status.AddedGreenEnergy * 1000m;
         Session.AddedGridEnergy = status.AddedGridEnergy * 1000m;
         Session.AddedRange = status.AddedRange;
         Session.ChargingTime = TimeSpan.FromSeconds(status.ChargingTime);
-        Session.SessionCost = status.AddedEnergy > 0 && status.Cost == 0 ? null : status.Cost;
+        Session.SessionCost = status is { AddedEnergy: > 0, Cost: 0 } ? null : status.Cost;
 
         // Energy pricing
         EnergyPrice = status.ConfigData?.EnergyPrice;
         Currency = status.ConfigData?.Currency?.Symbol;
 
         // Eco-Smart
-        EcoSmartEnabled = status.ConfigData?.Ecosmart?.Enabled;
+        IsEcoSmartEnabled = status.ConfigData?.Ecosmart?.IsEnabled;
         EcoSmartMode = status.ConfigData?.Ecosmart is { } eco
-            ? eco.Enabled ? (WallboxEcoSmartMode)eco.Mode : WallboxEcoSmartMode.Disabled
+            ? eco.IsEnabled ? (WallboxEcoSmartMode)eco.Mode : WallboxEcoSmartMode.Disabled
             : null;
 
         // Device info
@@ -542,7 +564,7 @@ public partial class WallboxCharger : BackgroundService,
 
         // Software
         SoftwareVersion = status.ConfigData?.Software?.CurrentVersion;
-        AvailableSoftwareUpdate = status.ConfigData?.Software?.UpdateAvailable == true
+        AvailableSoftwareUpdate = status.ConfigData?.Software?.IsUpdateAvailable == true
             ? status.ConfigData.Software.LatestVersion
             : null;
 
@@ -550,8 +572,7 @@ public partial class WallboxCharger : BackgroundService,
         // and cached for the service lifetime. Only the current year is re-fetched
         // every 30 min. Session energy values are in Wh.
         if (DateTimeOffset.UtcNow > _lastSessionsRetrieval.AddMinutes(30) &&
-            status.ConfigData?.GroupId is > 0 &&
-            status.ConfigData?.ChargerId is > 0)
+            status.ConfigData is { GroupId: > 0, ChargerId: > 0 })
         {
             try
             {
@@ -590,10 +611,23 @@ public partial class WallboxCharger : BackgroundService,
         }
 
         // AddedEnergy from status API is in kWh; add current session energy (not yet in sessions API)
-        TotalEnergyConsumed = _cachedSessionEnergy +
-            (IsPluggedIn == true ? status.AddedEnergy * 1000m : 0);
+        TotalConsumedEnergy = GetTotalConsumedEnergy(TotalConsumedEnergy, _cachedSessionEnergy,
+            IsPluggedIn == true ? status.AddedEnergy * 1000m : 0);
 
         IsConnected = true;
+    }
+
+    /// <summary>
+    /// Gets the lifetime energy from the finished sessions and the current one, or <c>null</c> before the sessions were read.
+    /// </summary>
+    internal static decimal? GetTotalConsumedEnergy(decimal? currentValue, decimal? sessionsEnergy, decimal currentSessionEnergy)
+    {
+        if (sessionsEnergy == null)
+            return null;
+
+        // After unplugging, the finished session appears in the sessions only at the next refresh (up to 30 min).
+        var value = sessionsEnergy.Value + currentSessionEnergy;
+        return currentValue > value ? currentValue : value;
     }
 
     private static string? MapPartNumberToModel(string? partNumber)

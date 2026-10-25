@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using HomeBlaze.Abstractions.Attributes;
+using Namotion.Interceptor.Attributes;
 
 namespace HomeBlaze.Abstractions;
 
@@ -13,18 +14,21 @@ public interface IServerSubject : IMonitoredService
     /// <summary>
     /// The server URL (e.g., "opc.tcp://localhost:4840/").
     /// </summary>
+    [Derived]
     [State(Position = 921)]
     string? ServerUrl => null;
 
     /// <summary>
     /// Whether the server is currently running.
     /// </summary>
+    [Derived]
     [State(Position = 920)]
     bool IsServerRunning => false;
 
     /// <summary>
     /// The server port number.
     /// </summary>
+    [Derived]
     [State(Position = 922)]
     int? Port => null;
 }

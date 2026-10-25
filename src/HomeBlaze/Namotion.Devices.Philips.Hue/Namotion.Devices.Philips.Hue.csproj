@@ -1,24 +1,16 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-    <LangVersion>preview</LangVersion>
-
-  </PropertyGroup>
-
   <ItemGroup>
     <InternalsVisibleTo Include="Namotion.Devices.Philips.Hue.Tests" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="HueApi" Version="3.1.2" />
-    <PackageReference Include="HueApi.ColorConverters" Version="3.1.0" />
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.*" />
-    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="9.*" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.*" />
-    <PackageReference Include="System.Reactive" Version="6.*" />
+    <PackageReference Include="HueApi" />
+    <PackageReference Include="HueApi.ColorConverters" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="System.Reactive" />
   </ItemGroup>
 
   <ItemGroup>

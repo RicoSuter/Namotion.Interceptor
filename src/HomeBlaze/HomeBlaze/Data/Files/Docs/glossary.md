@@ -1,0 +1,297 @@
+---
+title: Glossary
+navTitle: Glossary
+---
+
+# Glossary
+
+Terms and concepts used throughout HomeBlaze documentation and codebase. Each entry links to the page with deeper coverage.
+
+---
+
+## Core Concepts
+
+### Subject
+
+An intercepted object in the HomeBlaze object graph. Classes decorated with `[InterceptorSubject]` participate in property tracking, change detection, and UI integration. See [Concepts — Subjects](concepts.md#subjects) and [Building Subjects](development/building-subjects.md).
+
+```csharp
+[InterceptorSubject]
+public partial class Motor : IInterceptorSubject
+{
+    public partial int Speed { get; set; }
+}
+```
+
+### Object Graph
+
+The hierarchical tree of all subjects in the system, rooted at a storage container. See [Concepts — The Object Graph](concepts.md#the-object-graph).
+
+### Property
+
+A value on a subject. Properties are categorized by attribute:
+
+- **Configuration**: Persisted to JSON (`[Configuration]`)
+- **State**: Displayed in the UI (`[State]`)
+- **Derived**: Computed from other properties (`[Derived]`)
+
+See [Concepts — Three Kinds of Properties](concepts.md#three-kinds-of-properties).
+
+### Context
+
+The `IInterceptorSubjectContext` that manages a subject's lifecycle, dependencies, and interceptors. Created via `InterceptorSubjectContext.Create()` with optional configuration like `.WithFullPropertyTracking()` or `.WithRegistry()`. See [Building Subjects](development/building-subjects.md).
+
+---
+
+## Attributes
+
+All attributes below are documented in full with examples in [Building Subjects](development/building-subjects.md).
+
+### `[InterceptorSubject]`
+Marks a class as an interceptable subject. Class and tracked properties must be `partial`.
+
+### `[Configuration]`
+Marks a property for JSON persistence. See also [Configurable Subject Serialization](development/configurable-subject.md).
+
+### `[State]`
+Marks a property for display in the UI property panel. Options: `Name`, `Position`, `Unit` (e.g., `StateUnit.DegreeCelsius`).
+
+### `[Derived]`
+Marks a computed property that auto-updates when its dependencies change. Must be expression-bodied (`=>`).
+
+### `[Operation]`
+Marks a method as an executable action from the UI. Options: `Title`, `Description`, `Icon`, `Position`, `RequiresConfirmation`; `[ExcludeFrom]` beside it decides where it is offered. An operation with `RequiresConfirmation` asks for confirmation in the UI and cannot be called through MCP, neither by AI agents nor by external clients, see [AI Agents](administration/ai-agents.md#tools-and-permissions).
+
+### `[Query]`
+Marks a method as a read-only query (no side effects). Similar to `[Operation]` but semantically non-mutating.
+
+### `[Slot]`
+Marks a property of a widget type that a markdown page fills with the content of a block. A slot is not configuration and is not saved. See [Building Subjects: Content Slots](development/building-subjects.md#content-slots).
+
+### `[PropertyAttribute]`
+Associates metadata with another property (e.g., minimum/maximum values).
+
+```csharp
+[PropertyAttribute(nameof(TargetSpeed), "Minimum")]
+public partial int TargetSpeed_Minimum { get; set; }
+```
+
+### `[ExcludeFrom]`
+Keeps a subject type or a method out of user interfaces, agents or both: `[ExcludeFrom(ExclusionTarget.UserInterface)]`, `Agents` or `All`. It decides where something is offered, not who may reach it. See [Building Subjects: Excluding Subjects and Methods](development/building-subjects.md#excluding-subjects-and-methods).
+
+---
+
+## Methods
+
+### Operation Method
+
+A method marked with `[Operation]` that can be invoked from the UI. Operations typically have side effects. See [Building Subjects](development/building-subjects.md).
+
+### Query Method
+
+A method marked with `[Query]` that returns data without side effects. Safe to call repeatedly. See [Building Subjects](development/building-subjects.md).
+
+---
+
+## UI Components
+
+Covered in depth in [Building Subjects](development/building-subjects.md) (author side) and [Markdown Pages](administration/pages.md) (consumer side).
+
+### Subject Component
+
+A Blazor component associated with a specific subject type, registered via `[SubjectComponent]`.
+
+### Component Types
+
+| Type | Purpose | Interface |
+|------|---------|-----------|
+| `Widget` | Inline visualization | `ISubjectComponent` |
+| `Edit` | Configuration editor | `ISubjectEditComponent` |
+| `Page` | Full-page view | `ISubjectComponent` |
+
+### Widget
+
+A compact inline visualization of a subject. See [Subjects: Widgets](administration/subjects.md#widgets) and [Markdown Pages: Blocks](administration/pages.md#blocks).
+
+### Page
+
+A full-page component for a subject type. Pages appear in the navigation when the subject is selected.
+
+---
+
+## Navigation
+
+Set in the frontmatter of a page, see [Markdown Pages: Frontmatter](administration/pages.md#frontmatter), and in the metadata of folders and subjects, see [Metadata](administration/metadata.md).
+
+### Metadata
+
+Keys and values that describe a folder, a subject or a property, such as its navigation title, its icon, its notes, links and tags or a comment, stored in `.metadata.json` files. See [Metadata](administration/metadata.md).
+
+### Navigation Location
+
+Where a page appears in the application:
+- `NavBar`: Sidebar navigation (default)
+- `AppBar`: Top application bar
+
+### AppBar Alignment
+
+For `AppBar` items:
+- `Left`: Left side of the top bar (default)
+- `Right`: Right side
+- `Menu`: Entry of the menu behind the ⋮ button at the right end of the top bar
+
+---
+
+## Storage
+
+### Storage Container
+
+A subject that provides blob storage access. The default implementation uses FluentStorage for local or cloud storage. See [Subjects, Storage & Files](administration/subjects.md) and [Storage Design](architecture/design/storage.md).
+
+### `Root.json`
+
+The configuration file at the top of the data folder that defines the storage location and root subject type. See [Subjects: Storage and the Root File](administration/subjects.md#storage-and-the-root-file).
+
+### File Types
+
+| Extension | Subject Type | Description |
+|-----------|--------------|-------------|
+| `.json` | Configured type | Subject defined by `$type` property |
+| `.md` | `MarkdownFile` | Interactive page with expressions and blocks |
+| Other | `GenericFile` | Basic file representation |
+
+See [Subjects — File Types](administration/subjects.md#file-types).
+
+---
+
+## Markdown Pages
+
+### Frontmatter
+
+YAML metadata at the top of markdown files controlling navigation and display. See [Markdown Pages — Frontmatter](administration/pages.md#frontmatter).
+
+### Live Expression
+
+A path or a condition in double curly braces in the text of a markdown page, like `{{ mymotor/CurrentSpeed }}` or `{{ mymotor/CurrentSpeed > 500 }}`. The page shows the value of the property at that path, or Yes or No for a condition, and updates it when the value changes. See [Markdown Pages: Live Expressions](administration/pages.md#live-expressions).
+
+### Block
+
+A part of a markdown page that starts with a head line of two or more colons. It ends at a closing line of as many colons, at the next head line that has as many colons or fewer, at the closing line of a block around it, or at the end of the page. A block inside another block has more colons than the block around it. A widget block has a full type name on its head line. It creates a subject of that type and shows its widget. Its arguments and the names in its `json` block are the property names of the type, like `TargetSpeed`. Configuration files keep camelCase, and a page uses the property names. A slot block has a name without a dot and fills the slot of that name on the widget block directly around it. A style block has attributes in braces in place of a name and becomes a plain `<div>`. See [Markdown Pages: Blocks](administration/pages.md#blocks).
+
+### Slot
+
+A property of a widget type that a markdown page fills with the content of a block, declared with `[Slot]`. A type has at most one default slot, which takes everything in its block that is not a slot block, and any number of named slots. A slot of the type `IInterceptorSubject` holds content. A slot with a subject class as its type gets one instance of that class per block, configured by the arguments of the block. See [Markdown Pages: Content and Slots](administration/pages.md#content-and-slots) for the page side and [Building Subjects: Content Slots](development/building-subjects.md#content-slots) for the declaration.
+
+### Fragment
+
+The subject that holds the content of one slot: text, expressions and the subjects of nested blocks. A widget renders a fragment like any other subject and does not need to know what is inside. The type is `MarkdownFragment`.
+
+### Embedded Subject
+
+A subject that a markdown page creates with a widget block, as opposed to a subject with a JSON file of its own. It belongs to the page and is removed with its block. See [Markdown Pages: Blocks](administration/pages.md#blocks).
+
+---
+
+## Paths
+
+Paths reference subjects and properties in the object graph. Prefixes: `/` (absolute), `./` (relative), `../` (parent). See [Paths](administration/paths.md) for full syntax.
+
+### Path Syntax
+
+Full prefix table, examples, and resolution order: [Paths](administration/paths.md).
+
+### Canonical Notation
+
+For `[InlinePaths]` collections, child keys are inlined as path segments: `/Demo/Conveyor`. See [Paths: Canonical Syntax](administration/paths.md#canonical-syntax-and-inlinepaths).
+
+### Brackets for Collection Indices
+
+Used for non-inlined collections: `/Devices[0]/Temperature`. See [Paths: Brackets for Collection Indices](administration/paths.md#brackets-for-collection-indices).
+
+---
+
+## Interfaces
+
+Implementation-oriented interfaces used by plugin authors. See [Building Subjects](development/building-subjects.md).
+
+### ITitleProvider
+
+Interface for subjects that provide a display title (human-readable name instead of the type name).
+
+### IIconProvider
+
+Interface for subjects that provide a display icon next to the subject name.
+
+### IConfigurable
+
+Interface for subjects that react to configuration changes. Called after `[Configuration]` properties are updated (e.g., after deserialization or editing).
+
+### MethodMetadata
+
+Registry-based metadata for subject methods. Bound to a specific subject instance and registered as a dynamic property by `MethodPropertyInitializer`. Describes kind, title, parameters, and provides direct invocation via `InvokeAsync`. Runtime-provided parameters (e.g., `CancellationToken`) are injected automatically. See [Methods Design](architecture/design/methods.md).
+
+### MethodParameter
+
+Describes a parameter of a subject method. Each parameter knows whether it requires user input, is resolved from DI (`IsFromServices`), or is runtime-provided (`IsRuntimeProvided`). See [Methods Design](architecture/design/methods.md).
+
+### StateMetadata
+
+Registry attribute metadata for `[State]` properties. Auto-registered by `PropertyAttributeInitializer` on subject attach. Contains display name, unit, position, and flags. See [Configurable Subject Serialization](development/configurable-subject.md).
+
+### ConfigurationMetadata
+
+Registry attribute metadata for `[Configuration]` properties. Auto-registered by `PropertyAttributeInitializer` on subject attach. See [Configurable Subject Serialization](development/configurable-subject.md).
+
+---
+
+## Services
+
+### RootManager
+
+Manages loading and saving the root subject tree from `Root.json`. See [Storage Design](architecture/design/storage.md).
+
+### SubjectTypeRegistry
+
+Discovers and resolves subject types by name or file extension. See [Plugin System Design](architecture/design/plugins.md).
+
+### SubjectPathResolver
+
+Resolves path expressions to subjects in the object graph. See [Paths](administration/paths.md).
+
+### SubjectComponentRegistry
+
+Discovers and resolves UI components for subject types. See [Building Subjects](development/building-subjects.md).
+
+### ConfigurableSubjectSerializer
+
+Serializes and deserializes subjects to/from JSON with polymorphic type handling. See [Configurable Subject Serialization](development/configurable-subject.md).
+
+---
+
+## State Units
+
+Units for formatting state values (used via `[State(Unit = StateUnit.X)]`):
+
+| Unit | Display | Example |
+|------|---------|---------|
+| `Percent` | % | 75% |
+| `DegreeCelsius` | °C | 23.5 °C |
+| `Watt` | W | 100 W |
+| `Kilowatt` | kW | 1.5 kW |
+| `Volt` | V | 230 V |
+| `Ampere` | A | 5 A |
+| `Hertz` | Hz | 50 Hz |
+
+See the `StateUnit` enum for the full list, and [Building Subjects](development/building-subjects.md) for attribute usage.
+
+---
+
+## Related Documentation
+
+- [Concepts](concepts.md) — 5-minute mental model
+- [Architecture Overview](architecture/overview.md) — System design (arc42)
+- [Subjects, Storage & Files](administration/subjects.md) — Admin guide
+- [Configuration](administration/configuration.md) — App-level settings
+- [Paths](administration/paths.md) — Path syntax reference
+- [Markdown Pages](administration/pages.md) — Interactive page authoring
+- [Building Subjects](development/building-subjects.md) — Creating custom subject types

@@ -17,6 +17,7 @@ public interface IBrightnessController
     /// <param name="brightness">Brightness level (0..1).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     [Operation]
+    [Category("Light")]
     Task SetBrightnessAsync(
         [OperationParameter(Unit = StateUnit.Percent)] decimal brightness,
         CancellationToken cancellationToken);

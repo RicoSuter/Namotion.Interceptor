@@ -215,7 +215,7 @@ public class WriteTimestampTests
         // Assert: once the writers settle, the stored value and timestamp belong to one write.
         var storedTimestamp = person.GetPropertyReference("FirstName").TryGetWriteTimestamp();
         Assert.NotNull(storedTimestamp);
-        var storedIndex = (int)(storedTimestamp!.Value.UtcTicks - 1);
+        var storedIndex = (int)(storedTimestamp.Value.UtcTicks - 1);
         Assert.Equal($"Name{storedIndex}", person.FirstName);
     }
 

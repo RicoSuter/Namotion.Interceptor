@@ -1,0 +1,50 @@
+using Microsoft.Playwright;
+
+namespace HomeBlaze.E2E.Tests.Infrastructure;
+
+/// <summary>
+/// Selects the widgets of a page in edit mode, which shows the bar with the actions of the selected widget.
+/// </summary>
+internal static class WidgetSelectionExtensions
+{
+    private const int Timeout = 30000;
+
+    /// <summary>
+    /// Switches the page to inline edit mode, in which a click selects a widget.
+    /// </summary>
+    public static async Task SwitchToInlineModeAsync(this IPage page)
+    {
+        await page.SelectEditModeAsync("Inline", Timeout);
+        await Assertions.Expect(page.Locator(".subject-component-wrapper.selectable").First).ToBeVisibleAsync(new() { Timeout = Timeout });
+    }
+
+    /// <summary>
+    /// Clicks the middle of the element, which selects the innermost widget there, and returns the bar with the
+    /// actions of that widget.
+    /// </summary>
+    public static async Task<ILocator> SelectWidgetAsync(this ILocator element)
+    {
+        // A click before the page has rendered in edit mode would not select anything.
+        await Assertions.Expect(element.Page.Locator(".subject-component-wrapper.selectable").First).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(element).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Forced, because in edit mode the content of a widget takes no pointer input, so the click lands on the widget around it.
+        await element.ClickAsync(new() { Force = true });
+
+        var actionBar = GetWidgetActionBar(element.Page);
+        await Assertions.Expect(actionBar).ToBeVisibleAsync(new() { Timeout = Timeout });
+        return actionBar;
+    }
+
+    /// <summary>
+    /// Selects the first grid of the page through a click on its first free cell, which holds no widget, so that its
+    /// cells show their buttons. Returns the bar with the actions of the grid.
+    /// </summary>
+    public static Task<ILocator> SelectGridThroughFreeCellAsync(this IPage page)
+        => page.Locator(".grid-layout-container").First.Locator(":scope > .grid-cell.empty").First.SelectWidgetAsync();
+
+    /// <summary>
+    /// The bar with the actions of the selected widget. A page has at most one.
+    /// </summary>
+    public static ILocator GetWidgetActionBar(this IPage page) => page.GetByTestId("widget-action-bar");
+}

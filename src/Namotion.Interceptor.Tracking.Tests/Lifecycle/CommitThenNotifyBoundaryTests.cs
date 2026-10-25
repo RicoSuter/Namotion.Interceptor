@@ -101,7 +101,7 @@ public class CommitThenNotifyBoundaryTests
 
         // Assert
         Assert.Equal(1, callbackCount);
-        AssertReleased(context, laterRoot, laterRoot.Father!);
+        AssertReleased(context, laterRoot, laterRoot.Father);
         Assert.Empty(Registry(context).KnownSubjects);
     }
 

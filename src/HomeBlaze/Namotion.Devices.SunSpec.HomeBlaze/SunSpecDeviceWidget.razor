@@ -1,0 +1,71 @@
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(SunSpecDevice))]
+@implements ISubjectComponent
+
+<MudPaper Class="pa-4">
+    <MudStack Spacing="2">
+        <MudStack Row="true" AlignItems="AlignItems.Center">
+            <MudIcon Icon="@Icons.Material.Filled.SolarPower" Class="mr-2" />
+            <MudText Typo="Typo.h6">@(Device?.Title ?? "SunSpec Device")</MudText>
+            <MudSpacer />
+            <MudChip T="string"
+                     Size="Size.Small"
+                     Color="@(Device?.IsConnected == true ? Color.Success : Color.Error)"
+                     Variant="Variant.Filled">
+                @(Device?.IsConnected == true ? "Connected" : "Disconnected")
+            </MudChip>
+        </MudStack>
+
+        <MudDivider />
+
+        @if (Device is not null)
+        {
+            @foreach (var logicalDevice in Device.Units.OrderBy(pair => pair.Key).SelectMany(pair => pair.Value.Devices))
+            {
+                <MudStack Row="true" AlignItems="AlignItems.Center">
+                    <MudText Typo="Typo.body1">@logicalDevice.Title</MudText>
+                    <MudSpacer />
+                    <MudText Typo="Typo.h6">@(GetMainValue(logicalDevice) ?? "-")</MudText>
+                </MudStack>
+            }
+
+            @if (Device.StatusMessage is { } statusMessage)
+            {
+                <MudAlert Severity="@GetSeverity(Device.Status)" Dense="true">@statusMessage</MudAlert>
+            }
+        }
+    </MudStack>
+</MudPaper>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private SunSpecDevice? Device => Subject as SunSpecDevice;
+
+    // While running, the status message only reports configured units that were not found.
+    private static Severity GetSeverity(ServiceStatus status) => status switch
+    {
+        ServiceStatus.Error => Severity.Error,
+        ServiceStatus.Running => Severity.Warning,
+        _ => Severity.Info
+    };
+
+    // The first power or battery value of a logical device, found through its capabilities.
+    private static string? GetMainValue(SunSpecLogicalDevice logicalDevice)
+    {
+        foreach (var model in logicalDevice.Models)
+        {
+            if (model is IPowerMeter { MeasuredPower: { } power })
+            {
+                return $"{power:F0} W";
+            }
+
+            if (model is IBatteryState { BatteryLevel: { } level })
+            {
+                return $"{level * 100m:F0} %";
+            }
+        }
+
+        return null;
+    }
+}

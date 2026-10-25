@@ -47,8 +47,7 @@ public class SubjectPropertyChangeOperationsTests
         Assert.Equal("John", person.FirstName);
         Assert.Equal("Doe", person.LastName);
         Assert.Equal("Tesla", car.Name);
-        // On full success with no exclusions the Successful list is returned empty (zero-alloc);
-        // the caller already holds the input span. Full success is detected via Failed.Count == 0.
+        // Full success returns no copied successful list because the caller already holds the input span.
         Assert.Empty(successful);
         Assert.Empty(failed);
         Assert.Empty(errors);

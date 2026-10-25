@@ -55,10 +55,16 @@ public class ReadPropertyRecorderScopeTests
 
         _ = new Person(context);
 
-        // Act & Assert
+        // Act
         var scope = ReadPropertyRecorder.Start();
-        scope.Dispose();
-        scope.Dispose();
+        var exception = Record.Exception(() =>
+        {
+            scope.Dispose();
+            scope.Dispose();
+        });
+
+        // Assert
+        Assert.Null(exception);
     }
 
     [Fact]
@@ -81,6 +87,37 @@ public class ReadPropertyRecorderScopeTests
         // Assert
         Assert.Single(properties);
         Assert.Contains(properties, p => p.Name == nameof(Person.FirstName));
+    }
+
+    [Fact]
+    public async Task WhenScopeIsDisposedInAnotherFlow_ThenItIsRemovedFromTheStartingFlow()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithReadPropertyRecorder()
+            .WithFullPropertyTracking();
+
+        var person = new Person(context) { FirstName = "John", LastName = "Doe" };
+        var scopeCountBefore = ReadPropertyRecorder.ActiveScopeCount;
+
+        var scope = ReadPropertyRecorder.Start();
+        _ = person.FirstName;
+
+        // Act
+        Task disposal;
+        using (ExecutionContext.SuppressFlow())
+        {
+            disposal = Task.Run(scope.Dispose);
+        }
+
+        await disposal;
+        _ = person.LastName;
+        var properties = scope.GetPropertiesAndDispose();
+
+        // Assert
+        Assert.Single(properties);
+        Assert.Contains(properties, p => p.Name == nameof(Person.FirstName));
+        Assert.Equal(scopeCountBefore, ReadPropertyRecorder.ActiveScopeCount);
     }
 
     [Fact]

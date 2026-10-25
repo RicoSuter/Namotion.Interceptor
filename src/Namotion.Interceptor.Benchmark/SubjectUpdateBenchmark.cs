@@ -1,5 +1,7 @@
 ﻿using System;
+using System.Collections.Generic;
 using BenchmarkDotNet.Attributes;
+using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Connectors.Paths;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.Registry;
@@ -12,9 +14,15 @@ namespace Namotion.Interceptor.Benchmark;
 [MemoryDiagnoser]
 public class SubjectUpdateBenchmark
 {
+    private const int DictionaryEntryCount = 100;
+
     private Car _car;
     private SubjectPropertyChange[] _changes;
     private ISubjectUpdateProcessor[] _processors;
+
+    private Garage _garage;
+    private SubjectPropertyChange[] _dictionaryReplacedChanges;
+    private SubjectUpdate _dictionaryItemUpdate;
 
     [GlobalSetup]
     public void Setup()
@@ -33,6 +41,28 @@ public class SubjectUpdateBenchmark
         ];
 
         _processors = [JsonCamelCasePathProcessor.Instance];
+
+        var previousCars = new Dictionary<string, Car>();
+        for (var index = 0; index < DictionaryEntryCount - 1; index++)
+        {
+            previousCars["car" + index] = new Car();
+        }
+
+        var cars = new Dictionary<string, Car>(previousCars) { ["added"] = new Car() };
+
+        _garage = new Garage(context) { ByName = previousCars };
+        _garage.ByName = cars;
+
+        _dictionaryReplacedChanges =
+        [
+            SubjectPropertyChange.Create(new PropertyReference(_garage, nameof(Garage.ByName)), ChangeOrigin.Local, DateTimeOffset.UtcNow, null, previousCars, cars),
+        ];
+
+        // Built without processors: the receiver resolves properties by the names in the update.
+        _dictionaryItemUpdate = SubjectUpdate.CreatePartialUpdateFromChanges(
+            _garage,
+            [SubjectPropertyChange.Create(new PropertyReference(cars["car50"], "Name"), ChangeOrigin.Local, DateTimeOffset.UtcNow, null, "OldName", "NewName")],
+            []);
     }
 
     [Benchmark]
@@ -47,5 +77,25 @@ public class SubjectUpdateBenchmark
     {
         var partialSubjectUpdate = SubjectUpdate
             .CreatePartialUpdateFromChanges(_car, _changes, _processors);    
+    }
+
+    [Benchmark]
+    public void CreateCompleteUpdateWithDictionary()
+    {
+        var subjectUpdate = SubjectUpdate
+            .CreateCompleteUpdate(_garage, _processors);
+    }
+
+    [Benchmark]
+    public void CreatePartialUpdateWithReplacedDictionary()
+    {
+        var partialSubjectUpdate = SubjectUpdate
+            .CreatePartialUpdateFromChanges(_garage, _dictionaryReplacedChanges, _processors);
+    }
+
+    [Benchmark]
+    public void ApplyPartialUpdateBelowDictionary()
+    {
+        _garage.ApplySubjectUpdate(_dictionaryItemUpdate, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
     }
 }

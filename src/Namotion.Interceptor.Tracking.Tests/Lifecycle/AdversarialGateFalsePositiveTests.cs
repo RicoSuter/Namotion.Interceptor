@@ -54,6 +54,7 @@ public class AdversarialGateFalsePositiveTests
                 holderIsInsideCallback.Set();
                 lock (unrelatedLock)
                 {
+                    // Entering is the point: the holder blocks here until the third thread releases.
                 }
             }
         };
@@ -78,7 +79,7 @@ public class AdversarialGateFalsePositiveTests
         // completes, so the contending write must go through rather than be convicted.
         Assert.Null(attachException);
         Assert.Null(contendedException);
-        Assert.Equal("waited", ((Person)contendedTarget.Father!).FirstName);
+        Assert.Equal("waited", contendedTarget.Father!.FirstName);
     }
 
     /// <summary>

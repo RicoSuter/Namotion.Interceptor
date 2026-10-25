@@ -51,7 +51,7 @@ public class ContextConcurrencyTests
                             break;
 
                         default:
-                            throw new ArgumentOutOfRangeException(nameof(mutation), mutation, "Unknown mutation.");
+                            throw new InvalidOperationException($"Unknown mutation {mutation}.");
                     }
                 }
             }, TaskCreationOptions.LongRunning);

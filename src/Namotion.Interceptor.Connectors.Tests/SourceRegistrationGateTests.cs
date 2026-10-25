@@ -56,16 +56,6 @@ public class SourceRegistrationGateTests
 
 }
 
-/// <summary>Always resolves to the same <see cref="RecordingLogger"/>, regardless of category.</summary>
-internal sealed class RecordingLoggerProvider(RecordingLogger logger) : ILoggerProvider
-{
-    public ILogger CreateLogger(string categoryName) => logger;
-
-    public void Dispose()
-    {
-    }
-}
-
 /// <summary>
 /// A minimal IHostApplicationLifetime whose ApplicationStarted token is controlled directly by the
 /// test, instead of going through a full IHost start/stop cycle.

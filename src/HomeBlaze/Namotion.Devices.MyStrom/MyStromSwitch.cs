@@ -14,8 +14,10 @@ using Namotion.Interceptor.Registry.Attributes;
 
 namespace Namotion.Devices.MyStrom;
 
-[Category("Devices")]
+[Category("Switches")]
 [Description("myStrom WiFi Switch with power metering, temperature sensing, and relay control")]
+[DisplayName("myStrom switch")]
+[SubjectIcon("Power")]
 [InterceptorSubject]
 public partial class MyStromSwitch : BackgroundService,
     IConfigurable,
@@ -27,13 +29,14 @@ public partial class MyStromSwitch : BackgroundService,
     IPowerRelay,
     IPowerMeter,
     ITemperatureSensor,
-    INetworkAdapter
+    INetworkAdapter,
+    INetworkHost,
+    IUptimeState
 {
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<MyStromSwitch> _logger;
     private readonly SemaphoreSlim _configChangedSignal = new(0, 1);
 
-    private MyStromSwitchInformation? _information;
 
     [Configuration]
     public partial string Name { get; set; }
@@ -56,6 +59,9 @@ public partial class MyStromSwitch : BackgroundService,
     [State(IsDiscrete = true)]
     public partial ServiceStatus Status { get; internal set; }
 
+    // Tracked, so that the derived properties that read it change when it is fetched or reset.
+    internal partial MyStromSwitchInformation? Information { get; set; }
+
     [State]
     public partial string? StatusMessage { get; internal set; }
 
@@ -69,12 +75,15 @@ public partial class MyStromSwitch : BackgroundService,
     public partial decimal? MeasuredPower { get; internal set; }
 
     [State(Unit = StateUnit.WattHour, IsCumulative = true)]
-    public partial decimal? MeasuredEnergyConsumed { get; internal set; }
+    public partial decimal? TotalImportedEnergy { get; internal set; }
+
+    [Derived]
+    public decimal? TotalExportedEnergy => null;
 
     [State(Unit = StateUnit.DegreeCelsius)]
     public partial decimal? Temperature { get; internal set; }
 
-    [State(Position = 400)]
+    [Category("Device")]
     public partial TimeSpan? Uptime { get; internal set; }
 
     [Derived]
@@ -93,27 +102,29 @@ public partial class MyStromSwitch : BackgroundService,
 
     [Derived]
     [State]
-    public string? MacAddress => _information?.Mac;
+    public string? MacAddress => Information?.Mac;
 
     [Derived]
     [State]
-    public string? IpAddress => _information?.Ip;
+    public string? IpAddress => Information?.Ip;
 
     [Derived]
     [State]
-    public string? SubnetMask => _information?.Mask;
+    public string? SubnetMask => Information?.Mask;
 
     [Derived]
     [State]
-    public string? Gateway => _information?.Gateway;
+    public string? Gateway => Information?.Gateway;
 
     [Derived]
     [State(Position = 401)]
-    public string? DeviceType => _information?.Type;
+    [Category("Device")]
+    public string? DeviceType => Information?.Type;
 
     [Derived]
     [State(Position = 402)]
-    public string? FirmwareVersion => _information?.Version;
+    [Category("Device")]
+    public string? FirmwareVersion => Information?.Version;
 
     public bool? IsWireless => true;
     public int? SignalStrength => null;
@@ -143,7 +154,7 @@ public partial class MyStromSwitch : BackgroundService,
         LastUpdated = null;
         IsOn = null;
         MeasuredPower = null;
-        MeasuredEnergyConsumed = null;
+        TotalImportedEnergy = null;
         Temperature = null;
         Uptime = null;
     }
@@ -250,7 +261,7 @@ public partial class MyStromSwitch : BackgroundService,
                 var signaled = await _configChangedSignal.WaitAsync(PollingInterval, stoppingToken);
                 if (signaled)
                 {
-                    _information = null;
+                    Information = null;
                     return; // Exit polling loop to reinitialize
                 }
             }
@@ -266,7 +277,7 @@ public partial class MyStromSwitch : BackgroundService,
         var response = await client.GetAsync($"http://{HostAddress}/info", cancellationToken);
         response.EnsureSuccessStatusCode();
 
-        _information = await response.Content.ReadFromJsonAsync<MyStromSwitchInformation>(cancellationToken);
+        Information = await response.Content.ReadFromJsonAsync<MyStromSwitchInformation>(cancellationToken);
     }
 
     private async Task RefreshReportAsync(HttpClient client, CancellationToken cancellationToken)
@@ -277,9 +288,9 @@ public partial class MyStromSwitch : BackgroundService,
         var report = await response.Content.ReadFromJsonAsync<MyStromSwitchReport>(cancellationToken);
         if (report != null)
         {
-            IsOn = report.Relay;
+            IsOn = report.IsRelayOn;
             MeasuredPower = Math.Round(report.Power, 1);
-            MeasuredEnergyConsumed = Math.Round(report.EnergySinceBoot / 3600m, 2);
+            TotalImportedEnergy = Math.Round(report.EnergySinceBoot / 3600m, 2);
             Uptime = TimeSpan.FromSeconds(report.TimeSinceBoot);
             IsConnected = true;
         }

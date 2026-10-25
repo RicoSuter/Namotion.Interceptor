@@ -1,5 +1,5 @@
 using System.Reflection;
-using Microsoft.Extensions.Hosting;
+using Namotion.Interceptor.Connectors;
 
 namespace Namotion.Interceptor.Testing;
 
@@ -8,15 +8,15 @@ namespace Namotion.Interceptor.Testing;
 /// </summary>
 public sealed class HostedExecutionGate : IAsyncDisposable
 {
-    private static readonly FieldInfo ExecuteTaskField = typeof(BackgroundService).GetField(
+    private static readonly FieldInfo ExecuteTaskField = typeof(SubjectConnectorBase).GetField(
         "_executeTask",
         BindingFlags.Instance | BindingFlags.NonPublic)
-        ?? throw new InvalidOperationException("BackgroundService._executeTask was not found.");
+        ?? throw new InvalidOperationException("SubjectConnectorBase._executeTask was not found.");
 
-    private static readonly FieldInfo StoppingCtsField = typeof(BackgroundService).GetField(
+    private static readonly FieldInfo StoppingCtsField = typeof(SubjectConnectorBase).GetField(
         "_stoppingCts",
         BindingFlags.Instance | BindingFlags.NonPublic)
-        ?? throw new InvalidOperationException("BackgroundService._stoppingCts was not found.");
+        ?? throw new InvalidOperationException("SubjectConnectorBase._stoppingCts was not found.");
 
     private readonly CancellationTokenSource _stoppingCts = new();
     private readonly TaskCompletionSource _started = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -24,7 +24,7 @@ public sealed class HostedExecutionGate : IAsyncDisposable
     private readonly TaskCompletionSource _allowExit = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly Task _executionTask;
 
-    private HostedExecutionGate(BackgroundService service)
+    private HostedExecutionGate(SubjectConnectorBase service)
     {
         _executionTask = RunAsync();
         StoppingCtsField.SetValue(service, _stoppingCts);
@@ -38,7 +38,7 @@ public sealed class HostedExecutionGate : IAsyncDisposable
     public Task CancellationObserved => _cancellationObserved.Task;
 
     /// <summary>Installs a gated execution in <paramref name="service"/>.</summary>
-    public static HostedExecutionGate Install(BackgroundService service) => new(service);
+    public static HostedExecutionGate Install(SubjectConnectorBase service) => new(service);
 
     /// <summary>Allows the installed execution to exit after it has observed cancellation.</summary>
     public void AllowExit() => _allowExit.TrySetResult();

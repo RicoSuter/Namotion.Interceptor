@@ -1,5 +1,8 @@
+using System.Collections;
 using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Namotion.Interceptor.Mcp.Models;
 
 namespace Namotion.Interceptor.Mcp.Tools;
@@ -15,7 +18,18 @@ internal static class McpTextFormatter
         "# path [Type] $key=value | prop: value | type | @attr: value | Collection/ (Nx Type)\n" +
         "# Use get_property for exact values or browse with format=json for structured data.";
 
+    private const string WarningPrefix = "# warning: ";
+
     private const int MaxStringValueLength = 100;
+
+    private const int MaxCollectionValueLength = 500;
+
+    // The text is read by a model, not embedded in HTML, so non-ASCII characters stay readable instead of escaped.
+    private static readonly JsonSerializerOptions CollectionSerializerOptions = new()
+    {
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        Converters = { new JsonStringEnumConverter() }
+    };
 
     public static string FormatBrowseResult(BrowseResult result)
     {
@@ -23,6 +37,7 @@ internal static class McpTextFormatter
         sb.AppendLine(Legend);
         sb.AppendLine();
         FormatSubjectNode(sb, result.Result, indent: 0);
+        AppendWarnings(sb, result.Warnings);
         AppendFooter(sb, result.SubjectCount, result.Truncated);
         return sb.ToString();
     }
@@ -31,7 +46,19 @@ internal static class McpTextFormatter
     {
         if (result.SubjectCount == 0)
         {
-            return "No subjects found matching the search criteria.";
+            const string noResults = "No subjects found matching the search criteria.";
+            if (result.Warnings is not { Count: > 0 } warnings)
+            {
+                return noResults;
+            }
+
+            var warningText = new StringBuilder(noResults);
+            foreach (var warning in warnings)
+            {
+                warningText.AppendLine().Append(WarningPrefix).Append(warning);
+            }
+
+            return warningText.ToString();
         }
 
         var sb = new StringBuilder();
@@ -50,6 +77,7 @@ internal static class McpTextFormatter
             first = false;
         }
 
+        AppendWarnings(sb, result.Warnings);
         AppendFooter(sb, result.SubjectCount, result.Truncated);
         return sb.ToString();
     }
@@ -129,8 +157,10 @@ internal static class McpTextFormatter
                         FormatCollapsedProperty(sb, propertyName, collapsed.Count, collapsed.ItemType, childIndent);
                         break;
 
-                    case SubjectObjectProperty { IsCollapsed: true }:
-                        // Single reference collapsed — nothing meaningful to show
+                    case SubjectObjectProperty { IsCollapsed: true } collapsed:
+                        sb.Append(childIndent);
+                        sb.Append(propertyName);
+                        sb.AppendLine(collapsed.ItemType is not null ? $"/ ({collapsed.ItemType})" : "/");
                         break;
                 }
             }
@@ -216,9 +246,93 @@ internal static class McpTextFormatter
                 return s.Length > MaxStringValueLength ? s[..MaxStringValueLength] + "..." : s;
             case bool b:
                 return b ? "true" : "false";
+            case byte[] bytes:
+                return $"<{bytes.Length} bytes>";
+            case IEnumerable collection:
+                return FormatCollection(collection);
             default:
                 return value.ToString() ?? "null";
         }
+    }
+
+    /// <summary>
+    /// Renders a collection as compact JSON. Whole items are written until the next one would pass
+    /// <see cref="MaxCollectionValueLength"/>, and the rest is summarized as a count.
+    /// </summary>
+    private static string FormatCollection(IEnumerable collection)
+    {
+        try
+        {
+            var dictionary = collection as IDictionary;
+            var builder = new StringBuilder();
+            builder.Append(dictionary is not null ? '{' : '[');
+
+            var writtenCount = 0;
+            var visitedCount = 0;
+            var remainingCount = 0;
+            var enumerator = dictionary?.GetEnumerator() ?? collection.GetEnumerator();
+            using var disposableEnumerator = enumerator as IDisposable;
+            while (enumerator.MoveNext())
+            {
+                visitedCount++;
+                var itemText = dictionary is not null
+                    ? FormatDictionaryEntry((DictionaryEntry)enumerator.Current!)
+                    : JsonSerializer.Serialize(enumerator.Current, CollectionSerializerOptions);
+
+                var separatorLength = writtenCount > 0 ? 1 : 0;
+                if (builder.Length + separatorLength + itemText.Length <= MaxCollectionValueLength)
+                {
+                    if (writtenCount > 0)
+                    {
+                        builder.Append(',');
+                    }
+
+                    builder.Append(itemText);
+                    writtenCount++;
+                    continue;
+                }
+
+                if (writtenCount == 0)
+                {
+                    builder.Append(itemText, 0, MaxCollectionValueLength - builder.Length);
+                    builder.Append("...");
+                    writtenCount++;
+                }
+
+                var totalCount = collection is ICollection { Count: var count } ? count : visitedCount + CountRest(enumerator);
+                remainingCount = totalCount - writtenCount;
+                break;
+            }
+
+            if (remainingCount > 0)
+            {
+                builder.Append(", ... +");
+                builder.Append(remainingCount);
+                builder.Append(" more");
+            }
+
+            builder.Append(dictionary is not null ? '}' : ']');
+            return builder.ToString();
+        }
+        catch (Exception exception) when (exception is JsonException or NotSupportedException or InvalidOperationException)
+        {
+            return collection.ToString() ?? "null";
+        }
+    }
+
+    private static string FormatDictionaryEntry(DictionaryEntry entry) =>
+        JsonSerializer.Serialize(entry.Key.ToString(), CollectionSerializerOptions) + ":" +
+        JsonSerializer.Serialize(entry.Value, CollectionSerializerOptions);
+
+    private static int CountRest(IEnumerator enumerator)
+    {
+        var count = 0;
+        while (enumerator.MoveNext())
+        {
+            count++;
+        }
+
+        return count;
     }
 
     private static string FormatJsonElement(JsonElement element) => element.ValueKind switch
@@ -238,6 +352,19 @@ internal static class McpTextFormatter
         }
 
         return JsonSerializer.Serialize(value);
+    }
+
+    private static void AppendWarnings(StringBuilder sb, IReadOnlyList<string>? warnings)
+    {
+        if (warnings is null)
+        {
+            return;
+        }
+
+        foreach (var warning in warnings)
+        {
+            sb.Append(WarningPrefix).AppendLine(warning);
+        }
     }
 
     private static void AppendFooter(StringBuilder sb, int subjectCount, bool truncated)

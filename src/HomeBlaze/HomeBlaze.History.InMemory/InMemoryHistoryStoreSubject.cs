@@ -23,6 +23,8 @@ namespace HomeBlaze.History.InMemory;
 /// </summary>
 [Category("History")]
 [Description("Records recent [State] history in memory (priority 100).")]
+[DisplayName("In-memory history")]
+[SubjectIcon("History")]
 [InterceptorSubject]
 public partial class InMemoryHistoryStoreSubject :
     BackgroundService, IConfigurable, ITitleProvider, IHistoryStore, ILifecycleHandler
@@ -99,18 +101,21 @@ public partial class InMemoryHistoryStoreSubject :
     /// Total number of samples recorded since start.
     /// </summary>
     [State]
+    [Category("Statistics")]
     public partial long RecordedCount { get; set; }
 
     /// <summary>
     /// Number of oversize string values replaced with a placeholder.
     /// </summary>
     [State]
+    [Category("Statistics")]
     public partial long OversizeCount { get; set; }
 
     /// <summary>
     /// Cumulative number of samples evicted by age or capacity.
     /// </summary>
     [State]
+    [Category("Statistics")]
     public partial long EvictedCount { get; set; }
 
     /// <summary>
@@ -120,10 +125,10 @@ public partial class InMemoryHistoryStoreSubject :
     public partial int TrackedPropertyCount { get; set; }
 
     /// <summary>
-    /// Total number of samples currently retained across all property paths.
+    /// Number of samples currently retained across all property paths.
     /// </summary>
     [State]
-    public partial long TotalSampleCount { get; set; }
+    public partial long RetainedSampleCount { get; set; }
 
     /// <summary>
     /// Rough estimate of memory used by the retained samples in bytes.
@@ -135,12 +140,14 @@ public partial class InMemoryHistoryStoreSubject :
     /// Average incoming changes per second (eligible [State] changes observed).
     /// </summary>
     [State]
+    [Category("Statistics")]
     public partial double IncomingChangesPerSecond { get; set; }
 
     /// <summary>
     /// Average recorded changes per second (samples written to the engine).
     /// </summary>
     [State]
+    [Category("Statistics")]
     public partial double RecordedChangesPerSecond { get; set; }
 
     // IHistoryStore
@@ -178,6 +185,14 @@ public partial class InMemoryHistoryStoreSubject :
         return new ValueTask<HistoryPoint?>(_engine?.GetSampleAtOrBefore(propertyPath, asOf));
     }
 
+    /// <inheritdoc />
+    public ValueTask<HistoryPoint?> GetLastNumericSampleBeforeAsync(
+        string propertyPath, DateTimeOffset before, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return new ValueTask<HistoryPoint?>(_engine?.GetLastNumericSampleBefore(propertyPath, before));
+    }
+
     // BackgroundService
 
     /// <inheritdoc />
@@ -206,9 +221,9 @@ public partial class InMemoryHistoryStoreSubject :
             maxJsonSize: MaxJsonSize,
             getUtcNow: () => DateTimeOffset.UtcNow);
 
-        // The change-queue subscription is live from construction, before the first await
-        // (BackgroundService.StartAsync returns at that point). The coverage session starts only
-        // afterwards, so no change can fall inside claimed coverage without reaching the engine.
+        // The change-queue subscription is live from construction, before the first await. The
+        // coverage session starts only afterwards, so no change can fall inside claimed coverage
+        // without reaching the engine.
         var recorder = new HistoryChangeRecorder(engine, resolver);
         _recorder = recorder;
 
@@ -276,7 +291,7 @@ public partial class InMemoryHistoryStoreSubject :
         OversizeCount = engine.OversizeCount;
         EvictedCount = engine.EvictedCount;
         TrackedPropertyCount = engine.TrackedPropertyCount;
-        TotalSampleCount = engine.TotalSampleCount;
+        RetainedSampleCount = engine.RetainedSampleCount;
         EstimatedMemorySize = engine.EstimatedMemoryBytes;
         IncomingChangesPerSecond = _recorder?.IncomingChangesPerSecond ?? 0;
         RecordedChangesPerSecond = _recorder?.RecordedChangesPerSecond ?? 0;

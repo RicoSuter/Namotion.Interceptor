@@ -17,7 +17,7 @@ public class HostedServiceHandlerTests
         await RunWithAppLifecycleAsync(async context =>
         {
             person = new PersonWithBackgroundService(context);
-            await AsyncTestHelpers.WaitUntilAsync(() => person.FirstName == "John");
+            await AsyncTestHelpers.WaitUntilAsync(() => person.FirstName == "John" && person.LastName == "Doe");
 
             // Assert
             Assert.Equal("John", person.FirstName);
@@ -41,7 +41,7 @@ public class HostedServiceHandlerTests
             var hostedService = new PersonBackgroundService(person);
             person.AttachHostedService(hostedService);
 
-            await AsyncTestHelpers.WaitUntilAsync(() => person.FirstName == "John");
+            await AsyncTestHelpers.WaitUntilAsync(() => person.FirstName == "John" && person.LastName == "Doe");
 
             // Assert
             Assert.Equal("John", person.FirstName);
@@ -65,7 +65,7 @@ public class HostedServiceHandlerTests
             person.AttachHostedService(hostedService);
             var attachedHostedServices = person.GetAttachedHostedServices();
 
-            await AsyncTestHelpers.WaitUntilAsync(() => person.FirstName == "John");
+            await AsyncTestHelpers.WaitUntilAsync(() => person.FirstName == "John" && person.LastName == "Doe");
 
             Assert.Equal("John", person.FirstName);
             Assert.Equal("Doe", person.LastName);
@@ -95,7 +95,7 @@ public class HostedServiceHandlerTests
             person.AttachHostedService(hostedService);
             var attachedHostedServices = person.GetAttachedHostedServices();
 
-            await AsyncTestHelpers.WaitUntilAsync(() => person.FirstName == "John");
+            await AsyncTestHelpers.WaitUntilAsync(() => person.FirstName == "John" && person.LastName == "Doe");
             Assert.Single(attachedHostedServices);
 
             // Act: promote the constructor's provisional anchor and give it up, which releases
@@ -125,9 +125,8 @@ public class HostedServiceHandlerTests
             // Act - AttachHostedServiceAsync should wait for StartAsync to complete
             await person.AttachHostedServiceAsync(hostedService, CancellationToken.None);
 
-            // Assert - Service should be running immediately after await returns
-            Assert.Equal("John", person.FirstName);
-            Assert.Equal("Doe", person.LastName);
+            // Assert - the service has been started; its execution runs on another thread
+            await AsyncTestHelpers.WaitUntilAsync(() => person.FirstName == "John" && person.LastName == "Doe");
             Assert.Single(person.GetAttachedHostedServices());
         });
 
@@ -147,7 +146,7 @@ public class HostedServiceHandlerTests
 
             // Start the service
             await person.AttachHostedServiceAsync(hostedService, CancellationToken.None);
-            Assert.Equal("John", person.FirstName);
+            await AsyncTestHelpers.WaitUntilAsync(() => person.FirstName == "John");
 
             // Act - DetachHostedServiceAsync should wait for StopAsync to complete
             await person.DetachHostedServiceAsync(hostedService, CancellationToken.None);
@@ -173,7 +172,7 @@ public class HostedServiceHandlerTests
 
             // Assert - Should only be in the collection once
             Assert.Single(person.GetAttachedHostedServices());
-            Assert.Equal("John", person.FirstName);
+            await AsyncTestHelpers.WaitUntilAsync(() => person.FirstName == "John");
         });
     }
 

@@ -1,0 +1,53 @@
+@using HomeBlaze.Abstractions.Metadata
+@using HomeBlaze.Components.Controls
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(Switch))]
+@implements ISubjectComponent
+@inject SubjectPathResolver PathResolver
+@inject ITimeZoneDisplay TimeZone
+
+@{
+    var widget = Subject as Switch;
+}
+
+@if (widget is not null)
+{
+    // Read once per render and never kept: its render records the reads, so that it renders again when one changes.
+    var path = widget.Path;
+    var on = widget.On;
+    var off = widget.Off;
+    var map = widget.Map;
+    var onProperty = ValueReader.ResolveProperty(PathResolver, widget, on);
+    var offProperty = ValueReader.ResolveProperty(PathResolver, widget, off);
+    var valueMap = ValueReader.ResolveMap(PathResolver, widget, map, out var mapError);
+    var label = _label.Render(widget.Label, PathResolver, widget, path, TimeZone, out var labelError);
+    var subtitle = _subtitle.Render(widget.Subtitle, PathResolver, widget, path, TimeZone, out var subtitleError);
+    var error = mapError ?? SwitchArguments.Validate(
+        on, off, onProperty?.GetValue() as MethodMetadata, offProperty?.GetValue() as MethodMetadata) ?? labelError ?? subtitleError;
+
+    if (error is not null)
+    {
+        <WidgetArgumentError Message="@error" />
+    }
+    else
+    {
+        <SwitchView Property="@ValueReader.ResolveProperty(PathResolver, widget, path)"
+                    Path="@path"
+                    Label="@label"
+                    UsesOperations="@(!string.IsNullOrEmpty(on))"
+                    OnProperty="@onProperty"
+                    OffProperty="@offProperty"
+                    Kind="@widget.Kind"
+                    ValueMap="@valueMap"
+                    Subtitle="@subtitle"
+                    Icon="@widget.Icon"
+                    Badge="@widget.Badge" />
+    }
+}
+
+@code {
+    private readonly WidgetText _label = new(nameof(Switch.Label), ExpressionUse.WidgetText);
+    private readonly WidgetText _subtitle = new(nameof(Switch.Subtitle), ExpressionUse.WidgetText);
+
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+}

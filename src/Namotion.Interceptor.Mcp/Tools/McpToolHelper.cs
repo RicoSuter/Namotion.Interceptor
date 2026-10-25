@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Namotion.Interceptor.Mcp.Models;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
@@ -9,6 +10,15 @@ namespace Namotion.Interceptor.Mcp.Tools;
 /// </summary>
 internal static class McpToolHelper
 {
+    /// <summary>
+    /// The error response for a path that did not resolve: the syntax error when <paramref name="path"/> is malformed,
+    /// otherwise "Path not found".
+    /// </summary>
+    internal static object GetPathNotFoundError(PathProviderBase pathProvider, string path)
+        => pathProvider.TryParsePath(path, out _, out var error)
+            ? new { error = $"Path not found: {path}" }
+            : new { error = $"Invalid path syntax: {error}" };
+
     internal static bool ShouldExcludeByType(RegisteredSubject subject, Type[] excludeTypes, string[]? requestExcludeTypes)
     {
         var subjectType = subject.Subject.GetType();
@@ -23,7 +33,7 @@ internal static class McpToolHelper
 
         if (requestExcludeTypes is not null && requestExcludeTypes.Length > 0)
         {
-            var interfaces = subjectType.GetInterfaces();
+            var interfaces = TypeInterfaces.Get(subjectType);
             foreach (var name in requestExcludeTypes)
             {
                 if (subjectType.FullName == name || subjectType.Name == name)
@@ -31,9 +41,12 @@ internal static class McpToolHelper
                     return true;
                 }
 
-                if (interfaces.Any(i => i.FullName == name || i.Name == name))
+                foreach (var interfaceType in interfaces)
                 {
-                    return true;
+                    if (interfaceType.FullName == name || interfaceType.Name == name)
+                    {
+                        return true;
+                    }
                 }
             }
         }
@@ -49,7 +62,8 @@ internal static class McpToolHelper
         bool includeProperties,
         bool includeAttributes,
         bool includeMethods,
-        bool includeInterfaces)
+        bool includeInterfaces,
+        IReadOnlySet<string>? propertyNames = null)
     {
         var path = TryGetSubjectPath(subject, pathProvider, rootSubject, configuration.PathPrefix);
 
@@ -90,20 +104,20 @@ internal static class McpToolHelper
             enrichments.Remove("$interfaces");
         }
 
-        // Build scalar properties
+        // A property selection implies including properties.
         Dictionary<string, SubjectNodeProperty>? properties = null;
-        if (includeProperties)
+        if (includeProperties || propertyNames is not null)
         {
             properties = new Dictionary<string, SubjectNodeProperty>();
             foreach (var property in subject.Properties)
             {
-                if (property.IsAttribute || !pathProvider.IsPropertyIncluded(property) || property.CanContainSubjects)
+                if (TryGetSelectableSegment(property, pathProvider) is not { } segment ||
+                    (propertyNames is not null && !propertyNames.Contains(segment)))
                 {
                     continue;
                 }
 
-                var segment = pathProvider.TryGetPropertySegment(property) ?? property.BrowseName;
-                properties[segment] = BuildScalarPropertyDto(property, includeAttributes, configuration.IsReadOnly);
+                properties[segment] = BuildScalarPropertyDto(property, configuration, includeAttributes);
             }
         }
 
@@ -116,6 +130,86 @@ internal static class McpToolHelper
             Interfaces = interfaces,
             Properties = properties
         };
+    }
+
+    /// <summary>
+    /// Reads the optional <c>properties</c> selection. Returns the error response when it is present but not an
+    /// array of strings, otherwise null.
+    /// </summary>
+    internal static object? TryReadPropertyNames(JsonElement input, out HashSet<string>? propertyNames)
+    {
+        propertyNames = null;
+        if (!input.TryGetProperty("properties", out var element) || element.ValueKind == JsonValueKind.Null)
+        {
+            return null;
+        }
+
+        if (element.ValueKind != JsonValueKind.Array)
+        {
+            return InvalidPropertiesError();
+        }
+
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var item in element.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.String)
+            {
+                return InvalidPropertiesError();
+            }
+
+            names.Add(item.GetString()!);
+        }
+
+        propertyNames = names;
+        return null;
+
+        static object InvalidPropertiesError() => new { error = "Parameter 'properties' must be an array of property names." };
+    }
+
+    /// <summary>
+    /// The name a scalar property is listed and selected under: its path segment, else its browse name. Null for an
+    /// attribute, a property holding subjects or one the path provider excludes.
+    /// </summary>
+    internal static string? TryGetSelectableSegment(RegisteredSubjectProperty property, PathProviderBase pathProvider) =>
+        property.IsAttribute || !pathProvider.IsPropertyIncluded(property) || property.CanContainSubjects
+            ? null
+            : pathProvider.TryGetPropertySegment(property) ?? property.BrowseName;
+
+    /// <summary>
+    /// Resolves <paramref name="segment"/> to a scalar property of <paramref name="subject"/> that the path provider
+    /// exposes, or null when there is none.
+    /// </summary>
+    internal static RegisteredSubjectProperty? TryGetScalarProperty(
+        RegisteredSubject subject,
+        PathProviderBase pathProvider,
+        string segment)
+    {
+        var property = pathProvider.TryGetPropertyFromSegment(subject, segment);
+        return property is null ||
+               property.IsAttribute ||
+               property.CanContainSubjects ||
+               !pathProvider.IsPropertyIncluded(property)
+            ? null
+            : property;
+    }
+
+    /// <summary>
+    /// Resolves a path from the subject through the path provider to a property that a filter can read: every property
+    /// on the way is one the provider includes, and the last one is no attribute and has no index. A property that holds
+    /// subjects is one a filter can read, and its value is the subject, the collection or the dictionary, or null.
+    /// </summary>
+    internal static RegisteredSubjectProperty? TryGetFilterPropertyFromPath(
+        RegisteredSubject subject,
+        PathProviderBase pathProvider,
+        string path)
+    {
+        if (pathProvider.TryGetPropertyFromPath(subject, path, includedPropertiesOnly: true, createMissingSubject: null) is not
+            { Index: null, Property: var property })
+        {
+            return null;
+        }
+
+        return property.IsAttribute ? null : property;
     }
 
     internal static string? TryGetSubjectPath(
@@ -140,7 +234,9 @@ internal static class McpToolHelper
     }
 
     private static ScalarProperty BuildScalarPropertyDto(
-        RegisteredSubjectProperty property, bool includeAttributes, bool isReadOnly)
+        RegisteredSubjectProperty property,
+        McpServerConfiguration configuration,
+        bool includeAttributes)
     {
         List<PropertyAttribute>? attributes = null;
         if (includeAttributes)
@@ -148,7 +244,12 @@ internal static class McpToolHelper
             attributes = [];
             foreach (var attribute in property.Attributes)
             {
-                attributes.Add(new PropertyAttribute(attribute.BrowseName, attribute.GetValue()));
+                // A read-only attribute without a value says nothing about its property; a writable one can be set.
+                var value = attribute.GetValue();
+                if (value is not null || attribute.HasSetter)
+                {
+                    attributes.Add(new PropertyAttribute(attribute.BrowseName, value));
+                }
             }
 
             if (attributes.Count == 0)
@@ -160,13 +261,39 @@ internal static class McpToolHelper
         return new ScalarProperty(
             property.GetValue(),
             JsonSchemaTypeMapper.ToJsonSchemaType(property.Type) ?? "object",
-            IsWritable: !isReadOnly && property.HasSetter && HasPublicSetter(property),
+            IsWritable: IsWritable(property, configuration),
             Attributes: attributes);
     }
 
-    // TODO: Clean up when HasSetter in registry respects access modifiers (see #102)
-    internal static bool HasPublicSetter(RegisteredSubjectProperty property) =>
-        property.Reference.Metadata.PropertyInfo?.SetMethod?.IsPublic != false;
+    /// <summary>
+    /// Whether set_property may write the property: <see cref="GetWriteError"/> returns null for it.
+    /// </summary>
+    internal static bool IsWritable(RegisteredSubjectProperty property, McpServerConfiguration configuration) =>
+        !configuration.IsReadOnly && property.HasPublicSetter && configuration.PropertyWriteFilter?.Invoke(property) is null;
+
+    /// <summary>
+    /// The error set_property returns for the property, or null when it may be written: the server is read-only, the
+    /// property has no public setter, or the <see cref="McpServerConfiguration.PropertyWriteFilter"/> refuses it.
+    /// </summary>
+    /// <param name="property">The property.</param>
+    /// <param name="path">The path of the property as the client gave it, for the message.</param>
+    /// <param name="configuration">The configuration.</param>
+    internal static string? GetWriteError(RegisteredSubjectProperty property, string path, McpServerConfiguration configuration)
+    {
+        if (configuration.IsReadOnly)
+        {
+            return "Server is in read-only mode.";
+        }
+
+        if (!property.HasPublicSetter)
+        {
+            return $"Property is not writable: {path}";
+        }
+
+        return configuration.PropertyWriteFilter?.Invoke(property) is { } reason
+            ? $"Property is not writable: {path}. {reason}"
+            : null;
+    }
 
     private static string[]? ToStringArray(object? value)
     {
