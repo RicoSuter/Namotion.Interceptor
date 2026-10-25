@@ -67,4 +67,39 @@ public class DerivedAttributeReattachTests
         Assert.Contains(changes, change => change.Property == computedA.Reference && change.GetNewValue<int>() == 20);
         Assert.Contains(changes, change => change.Property == computedB.Reference && change.GetNewValue<int>() == 30);
     }
+    [Fact]
+    public void WhenOuterRuntimeDerivedPropertyIsReattachedBeforeTheInnerOne_ThenItStillFollowsTheInnerOne()
+    {
+        // Arrange
+        var changes = new List<SubjectPropertyChange>();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+
+        context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(changes.Add);
+
+        var person = new Person(context);
+        var externalValue = 1;
+        var registeredSubject = person.TryGetRegisteredSubject()!;
+        var inner = registeredSubject.AddDerivedProperty("Inner", typeof(int), _ => externalValue, null);
+        var outer = registeredSubject.AddDerivedProperty("Outer", typeof(int), _ => (int)inner.GetValue()! * 10, null);
+
+        person.DetachSubjectProperty(outer.Reference);
+        person.DetachSubjectProperty(inner.Reference);
+
+        // Act
+        person.AttachSubjectProperty(outer.Reference);
+        person.AttachSubjectProperty(inner.Reference);
+
+        changes.Clear();
+        externalValue = 2;
+        inner.Reference.RecalculateDerivedProperty();
+
+        // Assert
+        Assert.Contains(inner.Reference, outer.Reference.GetRequiredProperties().ToArray());
+        Assert.Contains(changes, change => change.Property == outer.Reference && change.GetNewValue<int>() == 20);
+    }
 }

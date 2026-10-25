@@ -101,10 +101,12 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         // Single lock: set IsAttached=false, clean dependencies (Case 1), snapshot used-by properties (Case 2).
         // Lock serializes with UpdateDependencies' used-by Add on the same depData.
         PropertyReference[] usedBySnapshot;
+        bool isRecalculating;
         lock (data)
         {
             // Signal any in-progress recalculation to re-evaluate after we change state.
-            if (data.IsRecalculating)
+            isRecalculating = data.IsRecalculating;
+            if (isRecalculating)
             {
                 data.RecalculationNeeded = true;
             }
@@ -112,10 +114,10 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             usedBySnapshot = data.DetachAndSnapshotUsedBy(property);
         }
 
-        // A source's data is removed so that a derived property attached before it on re-attach
-        // registers on fresh data instead of skipping it as detached. A derived property keeps its
-        // data: its IsRecalculating and IsAttached guard recalculations still in flight.
-        if (!property.Metadata.IsDerived)
+        // Removed so that a dependent attached before this property on re-attach registers on fresh
+        // data instead of skipping it as detached. Kept while a recalculation is in flight: its
+        // IsRecalculating serializes that recalculation with the ones after a re-attach.
+        if (!isRecalculating)
         {
             property.RemoveDerivedPropertyData(data);
         }
@@ -218,25 +220,11 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     {
         // TODO(perf): Avoid boxing when possible (use TProperty generic parameter?)
 
-        object? oldValue;
-
         // Phase 1: Acquire recalculation ownership (brief lock).
-        var data = derivedProperty.GetDerivedPropertyData();
-        lock (data)
+        var data = TryBeginRecalculation(derivedProperty, out var oldValue);
+        if (data is null)
         {
-            if (data.IsRecalculating)
-            {
-                data.RecalculationNeeded = true;
-                return;
-            }
-
-            if (!data.IsAttached)
-            {
-                return;
-            }
-
-            data.IsRecalculating = true;
-            oldValue = data.LastKnownValue;
+            return;
         }
 
         // Outer loop handles the post-notification RecalculationNeeded check without recursion,
@@ -301,6 +289,42 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             {
                 RecalculateDerivedProperty(ref derivedProperty, storageTimestamp, rawTimestamp);
             }
+        }
+    }
+
+    /// <summary>
+    /// Takes recalculation ownership of an attached derived property. Returns null when there is
+    /// nothing to recalculate or another recalculation owns it, which is then told to re-evaluate.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static DerivedPropertyData? TryBeginRecalculation(in PropertyReference derivedProperty, out object? oldValue)
+    {
+        oldValue = null;
+
+        // TryGet and the IsDerived check: data removed by a detach, or recreated by a dependent's
+        // registration, must not bring a detached derived property back from a stale used-by snapshot.
+        var data = derivedProperty.TryGetDerivedPropertyData();
+        if (data is null || !Volatile.Read(ref data.IsDerived))
+        {
+            return null;
+        }
+
+        lock (data)
+        {
+            if (data.IsRecalculating)
+            {
+                data.RecalculationNeeded = true;
+                return null;
+            }
+
+            if (!data.IsAttached)
+            {
+                return null;
+            }
+
+            data.IsRecalculating = true;
+            oldValue = data.LastKnownValue;
+            return data;
         }
     }
 

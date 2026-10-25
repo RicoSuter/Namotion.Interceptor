@@ -101,7 +101,7 @@ public class DerivedPropertyReattachTests
     }
 
     [Fact]
-    public void WhenSubjectIsDetached_ThenSourceTrackingDataIsRemovedAndDerivedDataIsKeptDetached()
+    public void WhenSubjectIsDetached_ThenItsTrackingDataIsRemoved()
     {
         // Arrange
         var context = InterceptorSubjectContext
@@ -114,14 +114,39 @@ public class DerivedPropertyReattachTests
 
         var fullNameProperty = new PropertyReference(child, nameof(Person.FullName));
         var firstNameProperty = new PropertyReference(child, nameof(Person.FirstName));
+        Assert.NotNull(fullNameProperty.TryGetDerivedPropertyData());
         Assert.NotNull(firstNameProperty.TryGetDerivedPropertyData());
 
         // Act
         parent.Mother = null;
 
         // Assert
+        Assert.Null(fullNameProperty.TryGetDerivedPropertyData());
         Assert.Null(firstNameProperty.TryGetDerivedPropertyData());
-        Assert.False(fullNameProperty.TryGetDerivedPropertyData()!.IsAttached);
+    }
+
+    [Fact]
+    public void WhenDetachedDerivedPropertyDataIsRecreatedByADependent_ThenARecalculationDoesNotReattachIt()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking();
+
+        var car = new Car(context);
+        var averagePressureProperty = new PropertyReference(car, nameof(Car.AveragePressure));
+        var pressureProperty = new PropertyReference(car.Tires[0], nameof(Tire.Pressure));
+        car.DetachSubjectProperty(averagePressureProperty);
+
+        // A dependent registering on the detached property recreates its data, attached but not derived.
+        averagePressureProperty.GetDerivedPropertyData();
+
+        // Act: a write that took its used-by snapshot before the detach recalculates afterwards.
+        DerivedPropertyChangeHandler.RecalculateDerivedProperty(ref averagePressureProperty, 0, 0);
+
+        // Assert
+        Assert.DoesNotContain(averagePressureProperty, pressureProperty.GetUsedByProperties().Items.ToArray());
+        Assert.Empty(averagePressureProperty.GetRequiredProperties().ToArray());
     }
 
     [Theory]
