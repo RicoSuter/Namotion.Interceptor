@@ -21,6 +21,12 @@
     var valueMap = ValueReader.ResolveMap(PathResolver, widget, map, out var mapError);
     var label = _label.Render(widget.Label, PathResolver, widget, path, TimeZone, out var labelError);
     var subtitle = _subtitle.Render(widget.Subtitle, PathResolver, widget, path, TimeZone, out var subtitleError);
+    if (string.IsNullOrEmpty(subtitle))
+    {
+        // Written empty, the subtitle hides the line; empty from a missing value, it leaves the line to the text of the value.
+        subtitle = widget.Subtitle is "" ? "" : null;
+    }
+
     var error = mapError ?? SwitchArguments.Validate(
         on, off, onProperty?.GetValue() as MethodMetadata, offProperty?.GetValue() as MethodMetadata) ?? labelError ?? subtitleError;
 

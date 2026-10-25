@@ -17,7 +17,7 @@ Turns a boolean on and off. It writes the property, or it invokes one operation 
 | `Off` | Path (Operation) | None | The operation that turns the switch off. Set it together with `On` |
 | `Kind` | `Switch` or `Tile` | `Switch` | `Switch` is a toggle switch with its label next to it. `Tile` is a tile that fills its place and is filled by the state, see [Tiles](#tiles) |
 | `Map` | Name or path of a `ValueMap` | None | The map that gives a state its color, icon and text, see [ValueMap](value-map.md). A tile is filled with the color of the matched case, a toggle switch takes it as its color |
-| `Subtitle` | Text with values | None | A second line below the label of a tile, see [Text with Values](basics.md#text-with-values). Without it, a tile with a map shows the text of the value |
+| `Subtitle` | Text with values | None | A second line below the label of a tile, see [Text with Values](basics.md#text-with-values). Without it, a tile with a map shows the text of the value. `Subtitle=""` hides the line |
 | `Icon` | Text | None | The [icon](basics.md#icons) of a tile. The icon of a matched case replaces it |
 
 ## Slots
@@ -88,7 +88,7 @@ Rules of a tile:
 - **One click target**: The whole tile toggles the state, also where the badge stands. A click on the badge reaches the tile.
 - **Room for the badge**: The content of a tile with a badge starts below the badge, so the label never runs under it, see [Spacing](basics.md#spacing).
 - **The fill**: A tile takes the color of the matched case of its map. Without a map, or without a matching case, it has the primary color while the value is true and the color of the surface while it is false. A matched case without a `Color` stays on the surface. A [CSS color](value-map.md#behavior-and-limits) fills the tile with a text color that stands out from it. The `TextColor` of the case replaces the text color of the fill, also for the badge, see [Text colors](value-map.md#behavior-and-limits).
-- **The text**: The subtitle is `Subtitle`. Without it, a tile with a map shows the text of the matched case, else the formatted value.
+- **The text**: The subtitle is `Subtitle`. Without it, a tile with a map shows the text of the matched case, else the formatted value. `Subtitle=""` leaves the line out, for a tile too low for two lines.
 - **A missing value**: A value that is not set shows a `?` in place of the icon. The tile is disabled only when there is nothing to write or invoke, such as a path that leads nowhere. A writable `bool?` without a value, or a switch whose `On` operation is enabled, can still be turned on.
 - **Disabled**: A tile is disabled while the page is edited, while a toggle is pending, and when the write or the operation is not possible, for the same reasons as the toggle switch. A disabled tile keeps the fill of its state and is dimmed, its icon and text more than its fill, so a light that is on stays yellow while it cannot be switched. A progress circle at the bottom right shows a toggle that is pending, and a pending tile shows the state it goes to (fill, icon and subtitle) until the operation ends.
 - **Name**: The accessible name of a tile is its label.

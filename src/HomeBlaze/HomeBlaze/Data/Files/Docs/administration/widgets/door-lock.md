@@ -14,7 +14,7 @@ A tile that shows a door lock and its door, and locks or unlocks the lock with o
 | `Path` | Path (Subject) | None | The [path](basics.md#paths) of the lock |
 | `Label` | Text | The title of the lock, otherwise the path | The label of the tile |
 | `Map` | Name or path of a `ValueMap` | None | The [ValueMap](value-map.md) that gives a lock state its text, fill and badge icon |
-| `Subtitle` | Text | The state of the lock, followed by " · open" while the door is open | The second line of the tile |
+| `Subtitle` | Text | The state of the lock, followed by " · open" while the door is open | The second line of the tile. `Subtitle=""` hides it |
 
 ## Samples
 

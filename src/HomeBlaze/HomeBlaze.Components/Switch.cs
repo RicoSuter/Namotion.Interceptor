@@ -59,7 +59,7 @@ public partial class Switch : IConfigurable, ITitleProvider
     public partial string? Map { get; set; }
 
     /// <summary>
-    /// A second, smaller line below the label of a tile. Without it, a tile with a map shows the text of the value. It can show values with expressions between double braces, such as <c>{{ subject/Name }}</c>.
+    /// A second, smaller line below the label of a tile. Without it, a tile with a map shows the text of the value. An empty subtitle hides the line. It can show values with expressions between double braces, such as <c>{{ subject/Name }}</c>.
     /// </summary>
     [Configuration]
     [TextTemplate]

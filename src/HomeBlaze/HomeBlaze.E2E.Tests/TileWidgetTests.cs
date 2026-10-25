@@ -174,6 +174,21 @@ public class TileWidgetTests
     }
 
     [Fact]
+    public async Task WhenSwitchTileHasAnEmptySubtitle_ThenItShowsNoSecondLine()
+    {
+        // Arrange
+        GetMotor().IsPowered = true;
+        var page = await OpenPageAsync();
+        var tile = GetSwitchTile(page, "No subtitle");
+
+        // Act
+        await Assertions.Expect(tile).ToBeCheckedAsync(new() { Timeout = Timeout });
+
+        // Assert
+        await Assertions.Expect(tile.GetByTestId("tile-subtitle")).ToHaveCountAsync(0);
+    }
+
+    [Fact]
     public async Task WhenSwitchTilePathLeadsNowhere_ThenItShowsAnIconAndIsDisabled()
     {
         // Arrange & Act
