@@ -178,21 +178,35 @@ public sealed class InterceptorSubjectContext : IInterceptorSubjectContext
         var alreadyRegistered = false;
         foreach (var contract in contracts)
         {
-            foreach (var existingService in services)
-            {
-                if (contract.IsInstanceOfType(existingService))
-                {
-                    if (!ReferenceEquals(existingService, service))
-                    {
-                        throw CreateSingletonContractConflictException(contract, existingService, service);
-                    }
-
-                    alreadyRegistered = true;
-                }
-            }
+            alreadyRegistered |= IsRegisteredUnderContract(contract, services, service);
         }
 
         return !alreadyRegistered;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="service"/> itself already holds <paramref name="contract"/>; throws when
+    /// a different instance holds it.
+    /// </summary>
+    private static bool IsRegisteredUnderContract(Type contract, ImmutableArray<object> services, object service)
+    {
+        var isRegistered = false;
+        foreach (var existingService in services)
+        {
+            if (!contract.IsInstanceOfType(existingService))
+            {
+                continue;
+            }
+
+            if (!ReferenceEquals(existingService, service))
+            {
+                throw CreateSingletonContractConflictException(contract, existingService, service);
+            }
+
+            isRegistered = true;
+        }
+
+        return isRegistered;
     }
 
     private static Type[] GetSingletonContracts(Type implementationType)

@@ -282,56 +282,70 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
             var attachedContext = _attachment.Context;
             var contextState = attachedContext?.PinState();
             var lifecycle = contextState is null ? null : InterceptorSubjectContext.TryGetServiceFromState<ILifecycleInterceptor>(contextState);
+
+            // No lifecycle to order against: either the subject is unattached, or the pinned state
+            // has no lifecycle. A lifecycle registered on the attached context after the pin is
+            // invisible to this write as a whole, routing and chain alike, and is seen by the next
+            // write, which pins a fresh state. One assumption remains: interceptors resolved through
+            // a lifecycle-free state must not take another context's lifecycle gate inside this chain.
+            bool? written;
             if (lifecycle is null)
             {
-                // No lifecycle to order against: either the subject is unattached, or the pinned
-                // state has no lifecycle. A lifecycle registered on the attached context after the
-                // pin is invisible to this write as a whole, routing and chain alike, and is seen
-                // by the next write, which pins a fresh state. One assumption remains: interceptors
-                // resolved through a lifecycle-free state must not take another context's lifecycle
-                // gate inside this chain.
-                lock (_attachmentLock)
-                {
-                    if (ReferenceEquals(_attachment.Context, attachedContext))
-                    {
-                        return WriteStructuralValue(attachedContext, contextState, propertyName, newValue, currentValue, writeValue, propertyTypeIndex);
-                    }
-                }
+                written = TryWriteStructuralValueUnderAttachment(attachedContext, contextState, propertyName, newValue, currentValue, writeValue, propertyTypeIndex);
             }
             else
             {
                 lifecycle.EnterStructuralWriteGate();
-                Exception? writeFailure = null;
                 try
                 {
-                    lock (_attachmentLock)
-                    {
-                        // Revalidate under both locks: the attachment may have moved between the
-                        // lock-free read above and the acquisitions. Falling out of the lock scopes
-                        // releases both and retries against the fresh attachment.
-                        if (ReferenceEquals(_attachment.Context, attachedContext))
-                        {
-                            return WriteStructuralValue(attachedContext, contextState, propertyName, newValue, currentValue, writeValue, propertyTypeIndex);
-                        }
-                    }
+                    written = TryWriteStructuralValueUnderAttachment(attachedContext, contextState, propertyName, newValue, currentValue, writeValue, propertyTypeIndex);
                 }
-                catch (Exception exception)
+                catch (Exception writeFailure)
                 {
-                    writeFailure = exception;
+                    // The gate is exited here rather than in a finally, so a failing exit is reported
+                    // together with the write failure instead of replacing it.
+                    ExitStructuralWriteGateAfterFailure(lifecycle, writeFailure);
                     throw;
                 }
-                finally
-                {
-                    try
-                    {
-                        lifecycle.ExitStructuralWriteGate();
-                    }
-                    catch (Exception notificationFailure) when (writeFailure is not null)
-                    {
-                        throw new AggregateException(writeFailure, notificationFailure);
-                    }
-                }
+
+                lifecycle.ExitStructuralWriteGate();
             }
+
+            // Null when the attachment moved between the lock-free read above and the acquisitions:
+            // retry against the fresh attachment.
+            if (written is { } result)
+            {
+                return result;
+            }
+        }
+    }
+
+    private bool? TryWriteStructuralValueUnderAttachment<TProperty>(
+        InterceptorSubjectContext? attachedContext,
+        InterceptorSubjectContext.ContextState? contextState,
+        string propertyName,
+        TProperty newValue,
+        TProperty currentValue,
+        Action<IInterceptorSubject, TProperty> writeValue,
+        int propertyTypeIndex)
+    {
+        lock (_attachmentLock)
+        {
+            return ReferenceEquals(_attachment.Context, attachedContext)
+                ? WriteStructuralValue(attachedContext, contextState, propertyName, newValue, currentValue, writeValue, propertyTypeIndex)
+                : null;
+        }
+    }
+
+    private static void ExitStructuralWriteGateAfterFailure(ILifecycleInterceptor lifecycle, Exception writeFailure)
+    {
+        try
+        {
+            lifecycle.ExitStructuralWriteGate();
+        }
+        catch (Exception exitFailure)
+        {
+            throw new AggregateException(writeFailure, exitFailure);
         }
     }
 
