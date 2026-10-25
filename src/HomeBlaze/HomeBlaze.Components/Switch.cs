@@ -66,6 +66,12 @@ public partial class Switch : IConfigurable, ITitleProvider
     public partial string? Subtitle { get; set; }
 
     /// <summary>
+    /// Whether a tile has a thin border like an outlined card, whatever its fill.
+    /// </summary>
+    [Configuration]
+    public partial bool Outlined { get; set; }
+
+    /// <summary>
     /// Name of the icon of a tile, for example "Lightbulb". The icon of a matched case of the map replaces it.
     /// </summary>
     [Configuration]

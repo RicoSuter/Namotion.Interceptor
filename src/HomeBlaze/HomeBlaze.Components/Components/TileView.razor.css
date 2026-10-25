@@ -15,6 +15,11 @@
     overflow: hidden;
 }
 
+/* The border of an outlined card, drawn over the fill so that it also shows on a filled tile. */
+.tile-widget-outlined {
+    border: 1px solid var(--mud-palette-lines-default);
+}
+
 /* A tile that cannot be used keeps its fill, dimmed with the badge and the progress circle, and its content is dimmed more,
    to about the 38 percent of a disabled control, so that it differs from a usable tile also on the surface, where the
    fill hardly changes, in the light and the dark theme. */

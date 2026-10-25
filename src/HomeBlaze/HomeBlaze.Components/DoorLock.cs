@@ -44,6 +44,12 @@ public partial class DoorLock : IConfigurable, ITitleProvider
     [Configuration]
     public partial string? Subtitle { get; set; }
 
+    /// <summary>
+    /// Whether a tile has a thin border like an outlined card, whatever its fill.
+    /// </summary>
+    [Configuration]
+    public partial bool Outlined { get; set; }
+
     public string? Title => null;
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;

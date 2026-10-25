@@ -48,6 +48,9 @@ This page is changed by the tile widget tests.
 :: HomeBlaze.Components.Switch#nosubtitletile Kind=Tile Path=tilemotor/IsPowered Map=powered Label="No subtitle" Subtitle=""
 ::
 
+:: HomeBlaze.Components.Switch#outlinedtile Kind=Tile Path=tilemotor/IsPowered Map=powered Label="Outlined" Outlined=true
+::
+
 :: HomeBlaze.Components.Switch#unresolvedmaptile Kind=Tile Path=tilemotor/IsPowered Map=unresolvedtilemap Label="Unresolved map"
 ::
 

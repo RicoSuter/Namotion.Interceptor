@@ -172,6 +172,10 @@ Only containers create space: the page, a card, a tab, an expansion panel and th
 - **Card footers**: The blocks of a footer, such as two buttons, stand in a row with 8 pixels between them and wrap when the card is too narrow.
 - **Controls**: A control is aligned by its visible edges: the track of a [Switch](switch.md), the box of a [Select](select.md) and the label of a [Slider](slider.md) start at the edge where text starts. Inside a widget, its own parts keep their room, such as the 16 pixels between the rows of a value list or the small margin around a chip; the first and the last row of a value list add nothing at its edges.
 
+## Tile Borders
+
+A tile of a [ValueTile](value-tile.md#tiles), a [Switch](switch.md#tiles), an [OperationButton](operation-button.md#tiles) and a [DoorLock](door-lock.md) has no border, since a grid cell and a canvas node draw no frame around their content. `Outlined=true` gives it the thin border of an outlined [Card](card.md), in the color of the lines of the theme, on the surface and on a filled tile alike, so that tiles can stand next to cards with the same edge. The `Variant=Outlined` of an `OperationButton` is something else: it draws the edge in the color of the button.
+
 ---
 
 ## Related

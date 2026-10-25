@@ -7,7 +7,7 @@
 @using HomeBlaze.Components.Controls
 @using Microsoft.AspNetCore.Components.Rendering
 
-<div class="@(Disabled ? "tile-widget place-filler tile-widget-disabled" : "tile-widget place-filler")" style="@TileStyle.GetStyle(Color, Variant, TextColor)" data-testid="@TestId">
+<div class="@GetClass()" style="@TileStyle.GetStyle(Color, Variant, TextColor)" data-testid="@TestId">
     @if (OnClick.HasDelegate)
     {
         <button type="button"
@@ -56,6 +56,14 @@
         _content = RenderContent;
     }
 
+    private string GetClass() => (Disabled, Outlined) switch
+    {
+        (true, true) => "tile-widget place-filler tile-widget-disabled tile-widget-outlined",
+        (true, false) => "tile-widget place-filler tile-widget-disabled",
+        (false, true) => "tile-widget place-filler tile-widget-outlined",
+        _ => "tile-widget place-filler"
+    };
+
     [Parameter] public string? TestId { get; set; }
 
     /// <summary>Whether a switch tile is on, which makes the button a switch; null for a plain button.</summary>
@@ -86,6 +94,9 @@
     [Parameter] public ValueColor TextColor { get; set; } = ValueColor.Default;
 
     [Parameter] public Variant Variant { get; set; } = Variant.Filled;
+
+    /// <summary>Whether the tile has a thin border like an outlined card, whatever its fill and its variant.</summary>
+    [Parameter] public bool Outlined { get; set; }
 
     [Parameter] public bool Disabled { get; set; }
 

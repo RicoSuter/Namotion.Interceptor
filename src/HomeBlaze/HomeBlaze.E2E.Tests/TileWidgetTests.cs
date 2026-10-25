@@ -189,6 +189,24 @@ public class TileWidgetTests
     }
 
     [Fact]
+    public async Task WhenAFilledSwitchTileIsOutlined_ThenItHasTheThinBorderOfACardAndOtherTilesHaveNone()
+    {
+        // Arrange
+        GetMotor().IsPowered = true;
+        var page = await OpenPageAsync();
+        var outlined = GetSwitchTile(page, "Outlined");
+        await Assertions.Expect(outlined).ToBeCheckedAsync(new() { Timeout = Timeout });
+
+        // Act
+        var outlinedBorder = await GetTileRoot(outlined).EvaluateAsync<string>("element => getComputedStyle(element).borderTopWidth + ' ' + getComputedStyle(element).borderTopStyle");
+        var plainBorder = await GetTileRoot(GetSwitchTile(page, "Case text")).EvaluateAsync<string>("element => getComputedStyle(element).borderTopWidth");
+
+        // Assert
+        Assert.Equal("1px solid", outlinedBorder);
+        Assert.Equal("0px", plainBorder);
+    }
+
+    [Fact]
     public async Task WhenSwitchTilePathLeadsNowhere_ThenItShowsAnIconAndIsDisabled()
     {
         // Arrange & Act

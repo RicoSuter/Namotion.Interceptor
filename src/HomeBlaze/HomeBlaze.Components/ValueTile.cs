@@ -38,6 +38,12 @@ public partial class ValueTile : IConfigurable, ITitleProvider
     public partial string? Subtitle { get; set; }
 
     /// <summary>
+    /// Whether a tile has a thin border like an outlined card, whatever its fill.
+    /// </summary>
+    [Configuration]
+    public partial bool Outlined { get; set; }
+
+    /// <summary>
     /// Name of the icon, for example "Bolt", placed as <see cref="Kind"/> says. The icon of a matched case of the map
     /// replaces it.
     /// </summary>
