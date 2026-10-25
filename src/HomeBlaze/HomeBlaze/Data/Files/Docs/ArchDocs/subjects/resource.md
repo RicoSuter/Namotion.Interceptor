@@ -8,7 +8,7 @@ status: Planned
 
 ## Class definition [Planned]
 
-**Resource** is a subject class participating in the [Component](component.md) interface capability and representing a logical capability consumed by components, such as a database, queue, bucket, or cloud offering. Its authored definition or discovering analyzer owns it. Providing [Hosts](host.md), consuming subjects, and [Service](service.md) memberships reference one shared logical identity; Resource-to-Service inheritance is not selected.
+**Resource** is a subject class participating in the [Component](component.md) interface capability and representing a logical capability consumed by components, such as a database, queue, bucket, or cloud offering. Its authored definition or discovering provider owns it. Providing [Hosts](host.md), consuming subjects, and [Service](service.md) memberships reference one shared logical identity; Resource-to-Service inheritance is not selected.
 
 Authored enrichment and relationships use the [existing metadata envelope](../shared/metadata-and-relationships.md), through the defining owner. They are not a second configuration store. Names in the tables are proposed serialized camelCase names; concrete CLR signatures remain open. State properties are read-only to authors.
 

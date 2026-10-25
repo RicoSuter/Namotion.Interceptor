@@ -12,7 +12,7 @@ Keep the raw API document separate from an optional authored Contract definition
 
 Mount `repository/docs` as the documentation graph root. `Repository.json` defines a [SourceRepository](../subjects/source-repository.md) with `sourceRoot: ../`. Its illustrative project route is `/Repository/projects/Orders.Api`; exact generated aliases remain proposed.
 
-As in the [JSON catalog](json-catalog.md), the repository explicitly selects shared Analyzer subjects through `analyzers`. For this scenario, select the project analyzer and contract-file discovery capability. Structured OpenAPI/protobuf parsing is an additional optional selection. These are shared singleton capabilities; the repository still owns its discovered Contracts and project associations.
+As in the [JSON catalog](json-catalog.md), the repository explicitly selects shared Provider subjects through `providers`. For this scenario, select the project provider and contract-file discovery capability. Structured OpenAPI/protobuf parsing is an additional optional selection. These are shared singleton capabilities; the repository still owns its discovered Contracts and project associations.
 
 ```text
 repository/
@@ -76,7 +76,7 @@ paths:
           description: Order list
 ```
 
-These examples select files; supported specification revisions and external references still depend on the chosen analyzer. Selecting a file does not establish a deployed Endpoint or health.
+These examples select files; supported specification revisions and external references still depend on the chosen provider. Selecting a file does not establish a deployed Endpoint or health.
 
 ## Protobuf source and explicit descriptor
 
@@ -106,7 +106,7 @@ An adjacent descriptor uses `"path": "orders.proto"`. This input does not requir
 
 ## Without authored descriptors
 
-If the descriptors above are absent, the proposed [discovery rule](../analyzers/contract-discovery.md) recognizes the raw files inside the repository scan scope. With exactly one CodeProject source file in `src/Orders.Api`, both Contracts associate with that same project. The repository owns the generated subjects; their names/keys and raw source remain inspectable. No JSON descriptor is written automatically.
+If the descriptors above are absent, the proposed [discovery analyzer](../providers/contract-discovery.md) recognizes the raw files inside the repository scan scope. With exactly one CodeProject source file in `src/Orders.Api`, both Contracts associate with that same project. The repository owns the generated subjects; their names/keys and raw source remain inspectable. No JSON descriptor is written automatically.
 
 If `openapi.json` moves to `src/Orders.Api/specs`, there is no same-directory project. Discovery keeps it unassociated and reports a diagnostic, even though a project exists in the parent directory. Add an authored descriptor with `path` selecting the moved file and `codeProjectPath` selecting its intended project. The same applies if two project files share the raw document's directory: an explicit typed reference resolves the ambiguity. An unresolved explicit path retains a diagnostic rather than triggering a fallback guess. Plain identifiers and generic subject links remain useful descriptive alternatives without establishing a typed project association.
 

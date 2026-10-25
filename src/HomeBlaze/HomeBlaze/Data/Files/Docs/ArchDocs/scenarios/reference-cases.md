@@ -23,7 +23,7 @@ The Apimundo service and project views were inspected on 2026-10-24. The followi
 | Component/artifact inventory | Service, Host, and Resource cover part of this; people/actors and their relationships remain open |
 | Service-by-environment matrix, deployment detail, version and status | Environment, DeploymentUnit, and Deployment; observed health and monitoring integrations remain separate future choices |
 | Logical API, environment-specific endpoint, and versioned specification | Interface, Endpoint, and reusable Contract are now accepted concepts; exact schema, ownership, and version representation remain open |
-| API operations, schemas, specification view, and version selection | Contract parsing and exploration extend beyond the simple project-file analyzer; MVP inclusion is undecided |
+| API operations, schemas, specification view, and version selection | Contract parsing and exploration extend beyond the simple project-file provider; MVP inclusion is undecided |
 | SDK package references and feeds | Package/artifact identities, versions, and their links to services/projects remain to be designed |
 
 The goal is to make these connected views available through ordinary documentation and the shared subject graph. Rebuilding the reference domain does not require copying its fixed navigation, its global Internal/External taxonomy, or its exact entity hierarchy. The agreed diagram-relative boundary model remains in force.

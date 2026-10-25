@@ -38,7 +38,7 @@ Dependency traversal here is explicit view behavior. It does not change Service 
 
 Resolve supported Markdown links and structured documentation relationships into backlinks. A documentation link establishes a reference, not a runtime dependency. Documents discovered through backlinks are candidates for review after a change; the view cannot establish whether their prose is correct or automatically rewrite it. Missing references and incomplete analysis stay visible.
 
-Selecting starting subjects is sufficient for an initial useful view. Deriving them from changed source files, a Git diff, or contract comparison is an optional later input adapter; no Git integration is required by this widget. Any changed-file mapping needs repository identity and analyzer provenance and must not guess from display names.
+Selecting starting subjects is sufficient for an initial useful view. Deriving them from changed source files, a Git diff, or contract comparison is an optional later input adapter; no Git integration is required by this widget. Any changed-file mapping needs repository identity and provider provenance and must not guess from display names.
 
 ## Implementation readiness
 

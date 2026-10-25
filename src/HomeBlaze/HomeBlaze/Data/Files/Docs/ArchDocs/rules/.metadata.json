@@ -4,12 +4,12 @@
     "overview.md",
     "authoring.md",
     "generic-rules.md",
-    "naming-rule.md",
-    "required-property-rule.md",
-    "membership-rule.md",
-    "allowed-dependencies-rule.md",
+    "naming-analyzer.md",
+    "required-property-analyzer.md",
+    "membership-analyzer.md",
+    "allowed-dependencies-analyzer.md",
     "predefined-rules.md",
-    "hosts-assigned-to-services-rule.md",
+    "hosts-assigned-to-services-analyzer.md",
     "architecture-checks.md"
   ]
 }

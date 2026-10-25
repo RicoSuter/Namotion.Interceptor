@@ -20,7 +20,7 @@ ProtobufContract derives from [Contract](contract.md) and describes protobuf def
 
 For example, `protobuf-contract.json` can set `path` to `orders.proto` and `codeProjectPath` to the intended CodeProject subject. `path` selects source bytes; `codeProjectPath` selects a graph subject. They use different resolvers. A relative `path` without a local file origin is invalid; require an unambiguous absolute local path or a supported source origin and retain a configuration diagnostic. Source access remains within the declared access boundary.
 
-Automatic discovery already knows the raw `.proto` location and does not require or write a descriptor with `path`. See [Contract file discovery](../analyzers/contract-discovery.md) for association and explicit-definition precedence. Binary descriptor input is not part of this initial proposed `path` contract.
+Automatic discovery already knows the raw `.proto` location and does not require or write a descriptor with `path`. See [Contract file discovery](../providers/contract-discovery.md) for association and explicit-definition precedence. Binary descriptor input is not part of this initial proposed `path` contract.
 
 ## State properties [Proposed schema]
 
@@ -36,7 +36,7 @@ Imports require explicit source scope and diagnostics. Missing imports must not 
 
 **Delivery:** Can be implemented through existing subject and component extension points. The ArchDocs feature, proposed fields, file discovery, and protobuf parsing are not implemented.
 
-**Prerequisites:** Contract, local file origins, project reference resolution, and optional protobuf analyzer/presentation.
+**Prerequisites:** Contract, local file origins, project reference resolution, and optional protobuf provider/presentation.
 
 ## Scope and open choices [Proposed]
 
@@ -46,7 +46,7 @@ The initial file input is `.proto` source. Import roots, supported language revi
 
 The specialized widget/detail view extends the [Contract presentation](contract.md#ui-planned) with supported services, RPCs, messages, fields, enums, and import diagnostics. A data-only contract remains useful without a deployed gRPC endpoint.
 
-Retain raw source access and generic presentation when structured parsing is unavailable. Parsed definitions are analyzer state; source selection and explicit project association use the appropriate defining file's writer.
+Retain raw source access and generic presentation when structured parsing is unavailable. Parsed definitions are provider state; source selection and explicit project association use the appropriate defining file's writer.
 
 ## Usage examples
 
@@ -54,4 +54,4 @@ Retain raw source access and generic presentation when structured parsing is una
 
 ## Related specifications
 
-[Protobuf analyzer](../analyzers/protobuf-analyzer.md) · [Overview and status legend](../overview.md) · [Platform readiness](../implementation-readiness.md)
+[Protobuf provider](../providers/protobuf-provider.md) · [Overview and status legend](../overview.md) · [Platform readiness](../implementation-readiness.md)

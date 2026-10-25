@@ -16,18 +16,18 @@ Authored enrichment and relationships use the [existing metadata envelope](../sh
 
 | Property | Type | Meaning and source |
 |---|---|---|
-| None on a discovered CodeProject | Not applicable | Project identity, source facts, and inverse references are analyzer or resolved state. Authored description and relationships use repository-owned descendant metadata. |
+| None on a discovered CodeProject | Not applicable | Project identity, source facts, and inverse references are provider or resolved state. Authored description and relationships use repository-owned descendant metadata. |
 
 ## State properties [Proposed schema]
 
 | Property | Type | Meaning and source |
 |---|---|---|
-| `key` | `string` | Stable repository-relative identity in the analyzer namespace, independent of display name and discovery order. |
+| `key` | `string` | Stable repository-relative identity in the provider namespace, independent of display name and discovery order. |
 | `name` | `string` | Discovered readable project name. |
 | `sourcePath` | `string` | Normalized repository-relative project-file location; distinct from a subject path. |
 | `language` | `string?` | Discovered language when established; null means unknown. |
 | `classification` | `string?` | Supported library, executable, test, or other classification; unresolved inputs remain unknown. |
-| `provenance` | Provenance records | Analyzer identity and supporting source locations for discovered facts. |
+| `provenance` | Provenance records | Provider identity and supporting source locations for discovered facts. |
 | `diagnostics` | Diagnostic collection | Unresolved references, conditions, and incomplete source facts. |
 | `repository` | Reference to [SourceRepository](source-repository.md) | Canonical discovery owner. |
 | `solutions` | Reference collection of [CodeSolution](code-solution.md) | Inverse memberships from discovered solutions. Zero or many; membership does not change project identity or ownership. |
@@ -41,9 +41,9 @@ The [Contract](contract.md) owns its optional `codeProjectPath` association and 
 
 **Delivery:** Can be implemented through existing subject and component extension points. The ArchDocs feature itself is not implemented.
 
-**Prerequisites:** SourceRepository and a project analyzer; optional Contract associations use the Contract's explicit reference or supported discovery rule.
+**Prerequisites:** SourceRepository and a project provider; optional Contract associations use the Contract's explicit reference or supported discovery analyzer.
 
-A CodeProject can contribute to multiple Hosts and Services. Libraries remain CodeProjects. A public programming API can have one or more Contracts without a Host, network Interface, or Endpoint. Basic project XML discovery does not extract public types or members; that is a separate analyzer capability.
+A CodeProject can contribute to multiple Hosts and Services. Libraries remain CodeProjects. A public programming API can have one or more Contracts without a Host, network Interface, or Endpoint. Basic project XML discovery does not extract public types or members; that is a separate provider capability.
 
 ## Invariants [Planned]
 
@@ -55,7 +55,7 @@ Project references establish code dependencies and do not assert runtime calls. 
 
 **Detail page:** project dependencies, related Hosts/Services, public API Contracts, provenance, and unresolved-input diagnostics. Reuse [dependency](../widgets/dependency-diagram.md), [impact](../widgets/impact-view.md), and architecture-check results when those capabilities are available, including evidence-backed backlinks to documentation.
 
-**Editing:** authored enrichment and references through the owning metadata/configuration route. Do not edit analyzer-owned project facts as if they were manually configured values. A library summary needs no Host or Endpoint.
+**Editing:** authored enrichment and references through the owning metadata/configuration route. Do not edit provider-owned project facts as if they were manually configured values. A library summary needs no Host or Endpoint.
 
 ## Usage examples
 

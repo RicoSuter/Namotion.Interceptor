@@ -20,7 +20,7 @@ OpenApiContract derives from [Contract](contract.md) and describes an OpenAPI pu
 
 For example, `openapi-contract.json` can set `path` to `openapi.json` and `codeProjectPath` to the intended CodeProject subject. `path` selects source bytes; `codeProjectPath` selects a graph subject. They use different resolvers. A relative `path` without a local file origin is invalid; require an unambiguous absolute local path or a supported source origin and retain a configuration diagnostic. Source access remains within the declared access boundary.
 
-Automatic discovery already knows the raw document's file location and does not require or write a descriptor with `path`. See [Contract file discovery](../analyzers/contract-discovery.md) for recognized raw filenames, project association, and explicit-definition precedence.
+Automatic discovery already knows the raw document's file location and does not require or write a descriptor with `path`. See [Contract file discovery](../providers/contract-discovery.md) for recognized raw filenames, project association, and explicit-definition precedence.
 
 ## State properties [Proposed schema]
 
@@ -36,7 +36,7 @@ Raw document access is useful before parsing exists and after a parse error. An 
 
 **Delivery:** Can be implemented through existing subject and component extension points. The ArchDocs feature, proposed fields, file discovery, and OpenAPI parsing are not implemented.
 
-**Prerequisites:** Contract, local file origins, project reference resolution, and optional OpenAPI analyzer/presentation.
+**Prerequisites:** Contract, local file origins, project reference resolution, and optional OpenAPI provider/presentation.
 
 ## Scope and open choices [Proposed]
 
@@ -54,4 +54,4 @@ Operation/schema navigation belongs to this subject. Supported revisions, parsin
 
 ## Related specifications
 
-[OpenAPI analyzer](../analyzers/openapi-analyzer.md) · [Overview and status legend](../overview.md) · [Platform readiness](../implementation-readiness.md)
+[OpenAPI provider](../providers/openapi-provider.md) · [Overview and status legend](../overview.md) · [Platform readiness](../implementation-readiness.md)

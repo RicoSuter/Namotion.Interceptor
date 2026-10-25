@@ -1,20 +1,20 @@
 ---
-title: Rule Authoring and Selection
+title: Analyzer Authoring and Selection
 navTitle: Authoring and Selection
 status: Planned
 ---
 
-# Rule Authoring and Selection [Planned]
+# Analyzer Authoring and Selection [Planned]
 
-Keep a rule's explanation, executable configuration, and remediation understandable in ordinary source files. Both named JSON-configured Markdown blocks and one JSON file per Rule use the same [Rule subject](../subjects/rule.md). Concrete rule type names and schemas below are proposed and unimplemented. `$type` or the named block type selects the implementation, and each concrete subject exposes its own typed properties.
+Keep an analyzer's explanation, executable configuration, and remediation understandable in ordinary source files. Both named JSON-configured Markdown blocks and one JSON file per Analyzer use the same [Analyzer subject](../subjects/analyzer.md). Concrete analyzer type names and schemas below are proposed and unimplemented. `$type` or the named block type selects the implementation, and each concrete subject exposes its own typed properties.
 
 ## Implementation readiness
 
 **Area:** ArchDocs. Reuse normal configurable-subject and Markdown child loading.
 
-**Delivery:** Existing standalone JSON and named body-block entry points can load Rule subjects after registration. Rule types/evaluators are planned. Generic frontmatter children are an additional planned HomeBlaze authoring option, not a prerequisite for the body-block examples.
+**Delivery:** Existing standalone JSON and named body-block entry points can load Analyzer subjects after registration. Analyzer types/evaluators are planned. Generic frontmatter children are an additional planned HomeBlaze authoring option, not a prerequisite for the body-block examples.
 
-**Prerequisites:** Concrete Rule registration and typed schemas, shared path queries, definition provenance, and preservation of surrounding prose/configuration.
+**Prerequisites:** Concrete Analyzer registration and typed schemas, shared path queries, definition provenance, and preservation of surrounding prose/configuration.
 
 ## A rules.md document [Proposed]
 
@@ -25,9 +25,9 @@ Assume the documentation folder is mounted as the graph root and contains `/Repo
 
 ## Host assignment
 
-Every discovered Host must belong to at least one Service. Shared membership is allowed. Add a matching componentSources entry or correct the existing Service selection rule, then rerun validation.
+Every discovered Host must belong to at least one Service. Shared membership is allowed. Add a matching componentSources entry or correct the existing Service selection analyzer, then rerun validation.
 
-:: Namotion.ArchDocs.HostsAssignedToServicesRule#hostsHaveService
+:: Namotion.ArchDocs.HostsAssignedToServicesAnalyzer#hostsHaveService
 ```json
 {
   "Name": "Every Host belongs to a Service",
@@ -41,7 +41,7 @@ Every discovered Host must belong to at least one Service. Shared membership is 
 
 Every application Host in this documentation scope should be included in at least one deployment unit. Change the intended release grouping if a newly added Host is missing.
 
-:: Namotion.ArchDocs.MembershipRule#hostsHaveDeploymentUnit
+:: Namotion.ArchDocs.MembershipAnalyzer#hostsHaveDeploymentUnit
 ```json
 {
   "Name": "Hosts have a deployment unit",
@@ -65,15 +65,15 @@ Every application Host in this documentation scope should be included in at leas
 ::
 ````
 
-The graph paths are `/rules.md/hostsHaveService` and `/rules.md/hostsHaveDeploymentUnit`. The page stays an ordinary MarkdownFile; its named children supply Rule identity and registered summaries. A failing test can link to `rules.md#host-assignment`, where a human or agent reads the policy and its correction steps. The generic coverage rule is an example team policy, not a requirement that every Host in the domain be deployable.
+The graph paths are `/rules.md/hostsHaveService` and `/rules.md/hostsHaveDeploymentUnit`. The page stays an ordinary MarkdownFile; its named children supply Analyzer identity and registered summaries. A failing test can link to `rules.md#host-assignment`, where a human or agent reads the policy and its correction steps. The generic coverage analyzer is an example team policy, not a requirement that every Host in the domain be deployable.
 
-## One JSON file per rule [Proposed]
+## One JSON file per analyzer [Proposed]
 
 An alternative `rules/hosts-have-service.json` defines the same policy independently of a Markdown child:
 
 ```json
 {
-  "$type": "Namotion.ArchDocs.HostsAssignedToServicesRule",
+  "$type": "Namotion.ArchDocs.HostsAssignedToServicesAnalyzer",
   "name": "Every Host belongs to a Service",
   "severity": "error",
   "documentation": "../rules.md#host-assignment"
@@ -83,15 +83,15 @@ Its graph path is `/rules/hosts-have-service`, without `.json`. Here `rules.md` 
 
 ## Select tests through paths [Proposed]
 
-SourceRepository configuration can use any of these `rules` entries:
+SourceRepository configuration can use any of these `analyzers` entries:
 
 | Selection | Entry | Meaning |
 |---|---|---|
-| One test | `{ "path": "/rules.md/hostsHaveService" }` | Select that named Rule. |
+| One test | `{ "path": "/rules.md/hostsHaveService" }` | Select that named Analyzer. |
 | All tests on one page | `{ "path": "/rules.md/*" }` | Select compatible immediate named children. |
-| Standalone rules in a directory | `{ "path": "/rules/*" }` | Select compatible direct children such as JSON-defined Rule subjects. |
-| A complete rule subtree | `{ "path": "/rules/**" }` | Include nested Rule subjects, including named children of Markdown pages. |
-| All loaded tests | `{ "path": "/**" }` | Select every Rule definition in the loaded graph, including published catalog rules. |
+| Standalone rules in a directory | `{ "path": "/rules/*" }` | Select compatible direct children such as JSON-defined Analyzer subjects. |
+| A complete analyzer subtree | `{ "path": "/rules/**" }` | Include nested Analyzer subjects, including named children of Markdown pages. |
+| All loaded tests | `{ "path": "/**" }` | Select every Analyzer definition in the loaded graph, including published catalog rules. |
 
 For example:
 
@@ -99,15 +99,15 @@ For example:
 {
   "$type": "Namotion.ArchDocs.SourceRepository",
   "sourceRoot": "../",
-  "analyzers": [{ "path": "/analyzers/CSharpProjects", "config": {} }],
-  "rules": [{ "path": "/rules.md/*" }]
+  "providers": [{ "path": "/providers/CSharpProjects", "config": {} }],
+  "analyzers": [{ "path": "/rules.md/*" }]
 }
 ```
 
-Lists combine by union and deduplicate identities; supported `where` predicates can refine selection. Configuration belongs to each Rule definition. Unlike analyzer invocation entries, rule selectors do not introduce a second per-repository `config` copy or an ambiguous wildcard override scheme. Rule and analyzer selection remain separate; each check declares the facts it needs.
+Lists combine by union and deduplicate identities; supported `where` predicates can refine selection. Configuration belongs to each Analyzer definition. Unlike provider invocation entries, analyzer selectors do not introduce a second per-repository `config` copy or an ambiguous wildcard override scheme. Analyzer and provider selection remain separate; each check declares the facts it needs.
 
 ## Shared definitions and context [Planned]
 
-A shared predefined [HostsAssignedToServicesRule](hosts-assigned-to-services-rule.md) uses the invoking repository and documented architecture scope as inputs. Generic concrete rules expose explicit subject/group queries as typed properties directly on the definition. An explicit absolute path in shared configuration is not rewritten when another repository selects it. If definitions cross documentation roots, configure their normal graph mounts and dependencies explicitly; do not search unrelated folders or silently load a full unrelated application graph.
+A shared predefined [HostsAssignedToServicesAnalyzer](hosts-assigned-to-services-analyzer.md) uses the invoking repository and documented architecture scope as inputs. Generic concrete rules expose explicit subject/group queries as typed properties directly on the definition. An explicit absolute path in shared configuration is not rewritten when another repository selects it. If definitions cross documentation roots, configure their normal graph mounts and dependencies explicitly; do not search unrelated folders or silently load a full unrelated application graph.
 
-[Rule overview](overview.md) · [Generic families](generic-rules.md) · [Predefined policies](predefined-rules.md) · [CLI](../integration/cli-and-ci.md)
+[Analyzer overview](overview.md) · [Generic families](generic-rules.md) · [Predefined policies](predefined-rules.md) · [CLI](../integration/cli-and-ci.md)

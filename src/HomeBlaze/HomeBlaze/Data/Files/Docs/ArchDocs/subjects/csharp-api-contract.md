@@ -8,7 +8,7 @@ status: Planned
 
 ## Class definition [Planned]
 
-**CSharpApiContract** is a subject class derived from [Contract](contract.md) for a public C# programming surface. It retains the Contract defining-file or analyzer owner and its optional primary [CodeProject](code-project.md) association. It does not require a [Host](host.md), network [Interface](interface.md), or [Endpoint](endpoint.md). Concrete extraction and snapshot representations remain proposed.
+**CSharpApiContract** is a subject class derived from [Contract](contract.md) for a public C# programming surface. It retains the Contract defining-file or provider owner and its optional primary [CodeProject](code-project.md) association. It does not require a [Host](host.md), network [Interface](interface.md), or [Endpoint](endpoint.md). Concrete extraction and snapshot representations remain proposed.
 
 Authored enrichment and relationships use the [existing metadata envelope](../shared/metadata-and-relationships.md), through the defining owner. They are not a second configuration store. Names in the tables are proposed serialized camelCase names; concrete CLR signatures remain open. State properties are read-only to authors.
 
@@ -22,7 +22,7 @@ Authored enrichment and relationships use the [existing metadata envelope](../sh
 | `targetFramework` | `string?` | Optional framework surface selector. Unspecified framework behavior must be settled before extraction is implemented. |
 | Inherited project identifier | [Contract configuration](contract.md#configuration-properties-proposed-schema) | Optional `codeProjectPath`; see Contract for identifier resolution. |
 
-Snapshot input and analyzer extraction are alternative proposed input capabilities. Source-symbol versus compiled-metadata extraction, precedence, defaults, and validation remain open; no restore, build, or execution is authorized by these field proposals.
+Snapshot input and provider extraction are alternative proposed input capabilities. Source-symbol versus compiled-metadata extraction, precedence, defaults, and validation remain open; no restore, build, or execution is authorized by these field proposals.
 
 ## State properties [Proposed schema]
 
@@ -38,7 +38,7 @@ Snapshot input and analyzer extraction are alternative proposed input capabiliti
 
 **Delivery:** Can be implemented through existing subject and component extension points. The ArchDocs feature itself is not implemented.
 
-**Prerequisites:** Contract; an optional C# public API analyzer or an explicitly supplied snapshot.
+**Prerequisites:** Contract; an optional C# public API provider or an explicitly supplied snapshot.
 
 ## Inheritance [Planned]
 
@@ -46,7 +46,7 @@ CSharpApiContract derives from Contract. It can describe public types, members, 
 
 ## Scope and open choices [Proposed]
 
-Decide whether extraction uses source symbols or compiled metadata, which surface/revision and target framework it describes, and the snapshot format. The minimal csproj XML analyzer does not implement this. Generating a complete surface must report unresolved inputs rather than invent members. Extraction, comparison, and compatibility assessment are separate capabilities.
+Decide whether extraction uses source symbols or compiled metadata, which surface/revision and target framework it describes, and the snapshot format. The minimal csproj XML provider does not implement this. Generating a complete surface must report unresolved inputs rather than invent members. Extraction, comparison, and compatibility assessment are separate capabilities.
 
 ## UI [Planned]
 

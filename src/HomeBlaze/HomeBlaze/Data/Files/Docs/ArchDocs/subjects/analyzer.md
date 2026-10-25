@@ -8,67 +8,46 @@ status: Planned
 
 ## Class definition [Planned]
 
-**Analyzer** defines the shared subject capability implemented by concrete source and contract analyzers. Each registered analyzer is a singleton subject that can be selected by several [SourceRepositories](source-repository.md). It declares supported inputs and options and performs read-only analysis when a repository invokes it. Selection retains the same subject identity without repository-owned copies. The exact CLR interface/base-class shape remains open.
+**Analyzer** is the abstract base subject for authored architecture tests. Concrete registered subject types implement checks against an invocation's repository, available provider facts, and loaded architecture/documentation scope. `$type` selects the concrete implementation in JSON/frontmatter; the type in a named Markdown block serves the same purpose. Several repositories can select one definition without cloning it or transferring ownership.
 
-Shared configuration and subject metadata belong to the analyzer's defining owner. For repository analysis, source boundaries, run options, analysis status, diagnostics, results, generated subjects, reconciliation workers, and cancellation belong to the invoking SourceRepository. Other consumers, such as authored contract analysis, retain their own result owners; a standalone-contract analyzer-reference API is not selected here. The analyzer is visible and selectable in the subject graph, rather than only an invisible DI service. Its existence does not select it or start repository analysis.
-
-Names in the tables are proposed serialized camelCase names; concrete CLR signatures remain open. State properties are read-only to authors.
+Analyzer definitions have ordinary subject identity and lifecycle; there is no singleton-per-analyzer-type requirement. One `rules.md` can contain several differently configured concrete Analyzer children. Evaluation results, cancellation, and current-run state belong to the invoking [SourceRepository](source-repository.md) or runner, not mutable last-run properties on the shared definition. Concrete types extend the common configuration with their own typed properties. Exact CLR evaluation signatures remain open.
 
 ## Configuration properties [Proposed schema]
 
 | Property | Type | Meaning and source |
 |---|---|---|
-| `name` | Optional `string` | Readable analyzer label. Does not supply persistent identity or select the analyzer for a repository. |
-| `options` | Shared analyzer-option record | Implementation-supported settings shared by every caller. Exact fields and any supported repository-level overrides remain open; repository source roots and mutable per-run state are excluded. |
+| `name` | Optional `string` | Human-readable test name; the owning file and named child identify the definition independently of its display name. |
+| `severity` | Severity value | Proposed default `error`; supported values `error`, `warning`, and `info`. The runner's failure threshold is separate. |
+| `message` | Optional `string` | Analyzer-specific explanation; the evaluator adds concrete affected subjects and evidence. |
+| `remediation` | Optional `string` | Advice for a human or agent; never an automatically applied edit. |
+| `documentation` | Optional documentation link | Explicit guide/section, resolved from the definition's file origin. A Markdown-owned analyzer can fall back to its containing document. |
 
-An implementation may require no editable shared options. Do not add a second configuration copy on each repository. Descriptive metadata uses the [existing metadata envelope](../shared/metadata-and-relationships.md). No repository selector is required on the Analyzer; repositories select it through their own `analyzers`.
+Names are proposed camelCase serialized names; existing Markdown body-block configuration uses PascalCase. [Analyzer authoring](../rules/authoring.md) gives both forms. `$type` is the implementation discriminator; Analyzer has no `kind` dispatch field or generic `config` bag. Concrete properties use the normal subject schema, validation, and editor metadata. Analyzer configuration uses its normal owning file; descriptions and ordinary enrichment retain their metadata/Markdown owner.
+
+Concrete specifications: [NamingAnalyzer](../rules/naming-analyzer.md), [RequiredPropertyAnalyzer](../rules/required-property-analyzer.md), [MembershipAnalyzer](../rules/membership-analyzer.md), [AllowedDependenciesAnalyzer](../rules/allowed-dependencies-analyzer.md), and [HostsAssignedToServicesAnalyzer](../rules/hosts-assigned-to-services-analyzer.md). The abstract Analyzer itself is not an authored `$type` target. Wildcard suites select all compatible concrete Analyzer instances.
 
 ## State properties [Proposed schema]
 
 | Property | Type | Meaning and source |
 |---|---|---|
-| `identity` | Stable analyzer-identity value | Registration identity used in provenance and identity namespaces, independent of display name, option revisions, transient object reference, and current subject path. Exact persistence and representation remain open. |
-| `implementationVersion` | Optional `string` | Available implementation version or equivalent revision for interpreting provenance; does not replace the analyzer's stable identity. |
-| `capabilities` | Read-only capability/option descriptors | Supported source kinds, applicability constraints, produced fact kinds, and supported shared/run options. Exact descriptor schema remains open. |
-| `availability` | Availability value | Whether this shared analyzer can accept supported work, independently of any repository's analysis status. Exact vocabulary remains proposed. |
-| `diagnostics` | Diagnostic collection | Shared analyzer configuration or availability findings only. Repository invocation findings stay on the owning repository. |
-
-There is no mutable `lastRepository`, last-run result graph, repository source boundary, or repository-owned cancellation state on the singleton. A repository detail view can show its own results alongside links to the selected Analyzer subjects.
+| `capabilities` | Check descriptor | Required facts, supported configuration, applicability, and possible finding kinds. Missing required facts cannot be treated as a passing test. |
+| `diagnostics` | Diagnostic collection | Definition/configuration problems only. Per-repository findings and incomplete evaluations remain with their run owner. |
+| `definitionLocation` | Source-origin descriptor | Owning file and named block/child or JSON location, with precise spans only when known. |
 
 ## Implementation readiness
 
-**Delivery:** Planned extension using ordinary subject/type and DI/module registration and existing component registration. No ArchDocs analyzer subject is implemented.
+**Area:** ArchDocs.
 
-**Prerequisites:** Graph publication and authored configuration ownership for shared instances, stable analyzer identity, typed selection, safe concurrent invocation, and invalidation of selecting repositories. No separate executable plugin loader is required.
+**Delivery:** Planned abstract subject contract and concrete configurable types using existing subject/loading/component extension points. All Analyzer types/evaluators are unimplemented. Generic frontmatter declarations still need the documented HomeBlaze extension; existing named body blocks and standalone JSON are available entry points after concrete Analyzer registration.
 
-Existing hosted-subject registration provides a relevant lifetime primitive: `AddHostedSubject<T>` registers `T` with `TryAddSingleton` and resolves that same instance for hosted-service registration. The NukiBridge and LuxtronikHeatPump registration extensions use it. This establishes a DI instance shared within a service provider; it does not establish a selectable graph location or global per-type subject uniqueness. `SubjectFactory.CreateSubject` and configuration deserialization use `ActivatorUtilities.CreateInstance`, so ordinary subject construction does not by itself guarantee singleton reuse. These are existing platform behaviors, not an implemented ArchDocs registration contract.
-
-## Identity and lifetime [Planned]
-
-Proposed scope: one shared analyzer subject for each analyzer registration identity in the loaded application root, reused by all selecting repositories. A root or another shared configuration owner provides its canonical graph ownership; repository references do not take ownership or keep a removed shared input valid. App/root-scoped here does not promise process-global state, one instance across independent roots, or uniqueness of every subject of the same concrete CLR type.
-
-The association between DI registration, graph publication, and the defining configuration owner remains a design choice. Confirm how startup, root replacement, and configuration reload preserve or replace a shared instance before implementation. The user requirement is shared singleton selection; whether separately configured variants of one implementation are supported, and how such variants receive distinct identities, remains open.
-
-Persisted provenance must distinguish the selected analyzer identity, relevant implementation/configuration information, and source evidence from an optional current locator. Display-name edits and graph moves do not silently assign a different analyzer's identity to existing contributions. Exact identity representation and intentional replacement/rename rules remain proposed. The shared [Identifier](../shared/identifiers.md) syntax is still deferred; it does not substitute a plain string or generic subject for the compatible Analyzer subject needed to execute analysis.
-
-## Concurrent calls and configuration [Planned]
-
-Several repositories can invoke the same shared subject concurrently. Each call receives the invoking repository's bounded source access, supported run options, and cancellation, and returns its contribution to that owner. Calls must not leak source inputs, diagnostics, cancellation, or results between repositories. An implementation may coordinate its own resources, but cannot assume callers are serialized globally because each repository serializes its own worker.
-
-Shared option changes and capability/availability changes invalidate all repositories that depend on them. Each invocation must use a consistent effective configuration; a repository cannot publish a result after the selected subject or relevant inputs have been superseded. The exact configuration snapshot/revision mechanism is an implementation decision. Option schemas must state which values are shared settings, which are repository run options, and how any explicitly supported overrides combine before implementation.
-
-Analyzer detach or replacement makes the former selection unavailable and invalidates dependent work. The repository retains last successful results with their original provenance when required analysis cannot complete. Repository detach or cancellation fences that repository's publication and must not stop unrelated calls or dispose the shared analyzer. Shared-subject shutdown must respect its canonical owner and lifecycle while preventing obsolete results from being published. Detailed scheduling and publication rules belong to [SourceRepository](source-repository.md) and [reconciliation](../shared/reconciliation.md).
+**Prerequisites:** Normal subject identity/loading, check schemas and registration, source provenance, repository selection, invocation context, and shared [evaluation/finding contracts](../rules/architecture-checks.md).
 
 ## UI [Planned]
 
-**Summary widget:** analyzer name, supported source/fact kinds, and shared availability/configuration diagnostics. Use the same subject presentation when linked from a repository's resolved analyzer list.
+**Summary widget:** test name, concrete analyzer type, severity, requirements, and definition diagnostics. It can appear at a named block in the Markdown explanation.
 
-**Detail page:** inspect capabilities, option definitions, shared configuration, stable identity, available implementation version, and shared diagnostics. Related repositories may be shown as references when available; their run state and results remain on their own detail pages.
+**Detail page:** inspect policy configuration, source/help document, required facts, and references to selecting repositories. Link to their results without storing one global last-run result on the Analyzer.
 
-**Editing:** edit supported shared settings through the analyzer's defining owner and make their effect on selecting repositories visible. Repository-specific selectors and run options are edited on SourceRepository. Do not create a duplicate singleton as part of picking a reference, or start a repository scan merely by opening or embedding the analyzer's UI.
+**Editing:** write typed properties to the canonical JSON file, named Markdown block, or planned frontmatter entry and preserve surrounding prose. Several configured rules of the same concrete type remain independent definitions. Opening an analyzer does not run it automatically.
 
-These subject-specific components use existing registration and explicit Markdown embedding. Automatic page contributions remain the separate host extension; no new route or reference syntax is selected here.
-
-## Related specifications
-
-[Analyzer extension model](../analyzers/overview.md) · [SourceRepository](source-repository.md) · [Path queries](../shared/path-queries.md) · [Overview and status legend](../overview.md) · [Platform readiness](../implementation-readiness.md)
+[Analyzer overview](../rules/overview.md) · [Generic analyzer families](../rules/generic-rules.md) · [Predefined policies](../rules/predefined-rules.md)

@@ -20,7 +20,7 @@ repository/
     libraries/shared-contracts.md
 ```
 
-Repository.json uses the parent source root as in the JSON catalog. The project analyzer discovers Shared.Contracts as a library CodeProject and does not create a Host merely because the project has a public API.
+Repository.json uses the parent source root as in the JSON catalog. The project provider discovers Shared.Contracts as a library CodeProject and does not create a Host merely because the project has a public API.
 
 ## Source surface
 
@@ -30,7 +30,7 @@ A public source surface might include:
 public sealed record Order(Guid Id, decimal Total);
 ```
 
-The public API Contract can describe that type and its members. A source symbol extractor or compiled-metadata extractor is a separate analyzer choice; the simple csproj XML scan cannot infer the surface.
+The public API Contract can describe that type and its members. A source symbol extractor or compiled-metadata extractor is a separate provider choice; the simple csproj XML scan cannot infer the surface.
 
 ## Contract identity [Planned] / [Proposed schema]
 

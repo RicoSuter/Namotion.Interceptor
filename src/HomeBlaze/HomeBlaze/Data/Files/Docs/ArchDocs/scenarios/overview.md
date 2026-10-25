@@ -6,7 +6,7 @@ status: Planned
 
 # Scenarios [Planned]
 
-The scenarios here are part of the feature reference. They are ordinary Markdown with fenced JSON, YAML, C#, and Markdown source, so reading this documentation does not instantiate the proposed ArchDocs subjects or execute analyzers. Core types, exact field names, generated route aliases, and widgets remain [Planned] or [Proposed] as their element pages specify. These scenarios express the intended authoring experience, not a final supported schema.
+The scenarios here are part of the feature reference. They are ordinary Markdown with fenced JSON, YAML, C#, and Markdown source, so reading this documentation does not instantiate the proposed ArchDocs subjects or execute providers. Core types, exact field names, generated route aliases, and widgets remain [Planned] or [Proposed] as their element pages specify. These scenarios express the intended authoring experience, not a final supported schema.
 
 Every final example must satisfy [file authoring and readability](../file-authoring.md): it must make types, fields, source ownership, and reference resolution understandable to people and agents in a normal editor. Provisional type names, generated routes, and extraction schemas are explicit work still to settle; a UI cannot be required to fill in their meaning.
 
@@ -14,9 +14,9 @@ Every final example must satisfy [file authoring and readability](../file-author
 
 | Scenario | Documentation arrangement | Planned prerequisites |
 |---|---|---|
-| [JSON catalog](json-catalog.md) | Architecture pages reference separately authored subject JSON files | Domain types, project analyzer, queries, explicit widgets; existing JSON/widget entry points |
+| [JSON catalog](json-catalog.md) | Architecture pages reference separately authored subject JSON files | Domain types, project provider, queries, explicit widgets; existing JSON/widget entry points |
 | [Markdown definitions](markdown-authoring.md) | A page defines children in frontmatter, uses an inline block, or only references another subject | Frontmatter declarations/metadata need host changes; body-block subject loading already exists |
-| [Discovery and validation](architecture-validation.md) | Discover code, apply Service membership rules, and fix actionable architecture errors locally or in CI | Shared rule evaluation, headless file-backed loading, source locations, help documents, and text/JSON reports |
+| [Discovery and validation](architecture-validation.md) | Discover code, apply Service membership rules, and fix actionable architecture errors locally or in CI | Shared analyzer evaluation, headless file-backed loading, source locations, help documents, and text/JSON reports |
 | [One arc42 document](arc42.md) | One normal document aggregates graph views between authored sections | Same generic views as other documents; no arc42-specific subject |
 | [Topics, guides, and decisions](topics-and-decisions.md) | Crosscutting pages reference Services/units/resources stored elsewhere | Same queries and widgets; automatic context panes are optional additional host work |
 | [Library public APIs](library-contracts.md) | Library documentation links CodeProject public API Contracts | Contract subjects; optional public API extraction; no Host or deployed Endpoint required |

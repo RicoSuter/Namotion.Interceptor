@@ -1,14 +1,14 @@
 ---
-title: C# Public API Analyzer
-navTitle: C# Public API Analyzer
+title: C# Public API Provider
+navTitle: C# Public API Provider
 status: Planned
 ---
 
-# C# Public API Analyzer [Planned]
+# C# Public API Provider [Planned]
 
 Extract a CodeProject public programming surface as a CSharpApiContract.
 
-Expose this optional capability through a shared singleton [Analyzer subject](../subjects/analyzer.md). A repository selects it independently of basic project discovery; extraction results belong to the requesting owner rather than shared mutable state on the analyzer.
+Expose this optional capability through a shared singleton [Provider subject](../subjects/provider.md). A repository selects it independently of basic project discovery; extraction results belong to the requesting owner rather than shared mutable state on the provider.
 
 ## Implementation readiness
 
@@ -22,7 +22,7 @@ Public types, members, signatures, source/revision provenance, and extraction di
 
 ## Decisions before extraction [Proposed]
 
-Choose source-symbol versus compiled-metadata analysis, visibility rules, target-framework handling, unresolved-input behavior, and snapshot format. Do not make the basic project analyzer build projects to satisfy this capability. Source discovery, extraction, version comparison, and compatibility assessment remain separable.
+Choose source-symbol versus compiled-metadata analysis, visibility rules, target-framework handling, unresolved-input behavior, and snapshot format. Do not make the basic project provider build projects to satisfy this capability. Source discovery, extraction, version comparison, and compatibility assessment remain separable.
 
 ## Verification criteria [Planned]
 

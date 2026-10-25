@@ -24,13 +24,13 @@ Authored enrichment and relationships use the [existing metadata envelope](../sh
 | `entryProjectPath` | Optional [Identifier](../shared/identifiers.md), expected [CodeProject](code-project.md) | Entry project identifier when known. Plain text or a generic subject link remains useful before a typed CodeProject is available. |
 | `supportingProjectPaths` | Subject-path collection targeting [CodeProject](code-project.md) | Optional supporting code references. Absent or empty selects no known supporting project. |
 
-For discovered Hosts, name/runtime/packaging/execution/role and project facts are analyzer-owned state where supported, rather than independently editable configuration. Authored overrides require an explicit future contract. The canonical metadata relationship source for resource provision and interface exposure remains open.
+For discovered Hosts, name/runtime/packaging/execution/role and project facts are provider-owned state where supported, rather than independently editable configuration. Authored overrides require an explicit future contract. The canonical metadata relationship source for resource provision and interface exposure remains open.
 
 ## State properties [Proposed schema]
 
 | Property | Type | Meaning and source |
 |---|---|---|
-| `provenance` | Provenance records | Analyzer and supporting source for discovered facts. |
+| `provenance` | Provenance records | Provider and supporting source for discovered facts. |
 | `diagnostics` | Diagnostic collection | Unresolved project references and invalid relationship/configuration inputs. |
 | `repository` | Optional reference to [SourceRepository](source-repository.md) | Canonical owner for a discovered Host; absent for an independently authored definition. |
 | `entryProject` | Optional reference to [CodeProject](code-project.md) | Resolved or discovered entry project. |
@@ -43,7 +43,7 @@ For discovered Hosts, name/runtime/packaging/execution/role and project facts ar
 
 **Delivery:** Can be implemented through existing subject and component extension points. The ArchDocs feature itself is not implemented.
 
-**Prerequisites:** Manual configuration can start independently; discovered Hosts require SourceRepository and an applicable analyzer.
+**Prerequisites:** Manual configuration can start independently; discovered Hosts require SourceRepository and an applicable provider.
 
 Execution can be continuous or run-to-completion. A worker, migration executable, local orchestration tool, or database process needs no dedicated platform-specific subtype. A managed resource can be modeled without any known Host.
 
@@ -57,7 +57,7 @@ Hosts can provide multiple Resources; a Resource can have multiple providing Hos
 
 **Detail page:** entry/supporting CodeProjects, provided Resources, exposed Interfaces, architectural relationships, and release participation with provenance.
 
-**Editing:** supported authored Host configuration and enrichment. Discovered facts remain analyzer-owned. The widget does not equate a process definition with an observed running replica or infer health from deployment membership.
+**Editing:** supported authored Host configuration and enrichment. Discovered facts remain provider-owned. The widget does not equate a process definition with an observed running replica or infer health from deployment membership.
 
 ## Related specifications
 

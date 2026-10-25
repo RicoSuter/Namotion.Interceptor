@@ -1,20 +1,20 @@
 ---
-title: C# Project Analyzer
-navTitle: C# Project Analyzer
+title: C# Project Provider
+navTitle: C# Project Provider
 status: Planned
 ---
 
-# C# Project Analyzer [Planned]
+# C# Project Provider [Planned]
 
 Discover [CodeSolutions](../subjects/code-solution.md), [CodeProjects](../subjects/code-project.md), supported runnable [Hosts](../subjects/host.md), and literal source/build references from supported solution and project files.
 
-Expose this capability through a shared singleton [Analyzer subject](../subjects/analyzer.md) selected by each SourceRepository. The repository supplies its own source scope and owns its results; selection references the existing analyzer rather than creating a parser instance per repository.
+Expose this capability through a shared singleton [Provider subject](../subjects/provider.md) selected by each SourceRepository. The repository supplies its own source scope and owns its results; selection references the existing provider rather than creating a parser instance per repository.
 
 ## Implementation readiness
 
 **Delivery:** Can be implemented through existing subject and component extension points. The ArchDocs feature itself is not implemented.
 
-**Prerequisites:** SourceRepository raw local access and analyzer registration; XML parsing needs no HomeBlaze platform extension.
+**Prerequisites:** SourceRepository raw local access and provider registration; XML parsing needs no HomeBlaze platform extension.
 
 ## Input and output [Planned]
 
@@ -26,7 +26,7 @@ Read supported solution manifests as literal project lists. The initial proposed
 
 Do not restore, build, run projects, or evaluate MSBuild. Imports, conditions, property expressions, generated references, and missing files can remain unknown with diagnostics. Exclude generated output, caches, and version-control internals according to explicit scan options. Exact exclusion and link policies remain to be settled.
 
-A runnable output is not evidence of production deployment or continuous execution. Do not infer runtime service calls from project references. Public types/members and API Contracts are outside this analyzer; use the separate C# API analyzer capability.
+A runnable output is not evidence of production deployment or continuous execution. Do not infer runtime service calls from project references. Public types/members and API Contracts are outside this provider; use the separate C# API provider capability.
 
 ## Verification criteria [Planned]
 

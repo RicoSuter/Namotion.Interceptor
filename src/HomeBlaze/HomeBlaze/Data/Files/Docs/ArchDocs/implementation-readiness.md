@@ -22,7 +22,7 @@ Delivery readiness is a separate axis: **Extension** can use existing host contr
 
 ## Capability matrix
 
-Area names identify implementation responsibility. ArchDocs covers the domain extension, analyzers, widgets, and provider adapters; HomeBlaze covers generic authoring/storage/UI integration; Namotion.Interceptor covers reusable subject helpers where their dependencies fit. Multiple areas indicate shared work. These are ownership areas, not fixed project/package names, and optional helper extraction does not require moving domain behavior into core.
+Area names identify implementation responsibility. ArchDocs covers the domain extension, providers, widgets, and provider adapters; HomeBlaze covers generic authoring/storage/UI integration; Namotion.Interceptor covers reusable subject helpers where their dependencies fit. Multiple areas indicate shared work. These are ownership areas, not fixed project/package names, and optional helper extraction does not require moving domain behavior into core.
 
 | Capability | Area | Status | Delivery and dependency |
 |---|---|---|---|
@@ -34,17 +34,17 @@ Area names identify implementation responsibility. ArchDocs covers the domain ex
 | Plain links and manual CanvasLayout nodes | HomeBlaze | [Implemented] | Normal navigation/placement; no semantic connector lines |
 | All ArchDocs subject types and contract specializations | ArchDocs | [Planned] | Extension; capability model, references, and registration |
 | Identifiers with plain-text, generic-link, and typed presentation | ArchDocs / HomeBlaze | [Planned] | Shared authoring/resolution/presentation behavior; existing path resolution and pickers are primitives; exact syntax remains deferred |
-| Repository/solution/project discovery and contract-file association/parsing | ArchDocs | [Planned] | Extension; selected read-only source and analyzer contracts; file recognition/association does not require full parsing |
-| Shared singleton Analyzer subjects selectable by repositories | ArchDocs | [Planned] | Extension with singleton registration and graph-publication wiring; DI singleton registration alone does not publish a selectable subject |
+| Repository/solution/project discovery and contract-file association/parsing | ArchDocs | [Planned] | Extension; selected read-only source and provider contracts; file recognition/association does not require full parsing |
+| Shared singleton Provider subjects selectable by repositories | ArchDocs | [Planned] | Extension with singleton registration and graph-publication wiring; DI singleton registration alone does not publish a selectable subject |
 | Generic wildcard selection and typed relationship readers | ArchDocs; optional shared helpers in Namotion.Interceptor | [Planned] | Extension/shared services; existing resolver alone is insufficient |
 | Reconciled repository children and Environment Deployments | ArchDocs | [Planned] | Extension; lifecycle, identity, worker, and metadata prerequisites |
 | Subject-specific widgets, detail pages, and editors | ArchDocs | [Planned] | Extension; specified with each subject, with domain/parser prerequisites as applicable |
 | General tables, matrix, and diagrams | ArchDocs | [Planned] | Extension; specified in widgets/, with domain/query/renderer prerequisites |
 | Dependency/layer grouping and impact views | ArchDocs | [Planned] | Shared graph queries, evidence-preserving aggregation, reverse-reference traversal, and supported documentation backlinks; see [DependencyDiagram](widgets/dependency-diagram.md) and [ImpactView](widgets/impact-view.md) |
 | Linked authored interaction scenarios | ArchDocs | [Planned] | [ScenarioDiagram](widgets/scenario-diagram.md), participant validation, and sequence rendering; trace ingestion is separate |
-| Documented Rule subjects and architecture-test suites | ArchDocs | [Planned] | [Rule definitions](subjects/rule.md), JSON/named Markdown authoring, exact/page/directory/global selection, repository-owned results, and generic/predefined concrete Rule types |
-| File-authored architecture rules and actionable findings | ArchDocs | [Planned] | Headless [rule evaluator](rules/architecture-checks.md), current graph, required-fact validation, source provenance, remediation/help links, and registered concrete Rule types |
-| CLI/CI architecture validation and agent-readable reports | ArchDocs / HomeBlaze | [Planned] | [Headless command adapter](integration/cli-and-ci.md) over normal shared graph loading, lifecycle, and analyzer publication; explicit readiness for current discovery/reconciliation, shared rules, text/JSON reports, and unsuccessful exits for violations or incomplete validation |
+| Documented Analyzer subjects and architecture-test suites | ArchDocs | [Planned] | [Analyzer definitions](subjects/analyzer.md), JSON/named Markdown authoring, exact/page/directory/global selection, repository-owned results, and generic/predefined concrete Analyzer types |
+| File-authored architecture rules and actionable findings | ArchDocs | [Planned] | Headless [analyzer evaluator](rules/architecture-checks.md), current graph, required-fact validation, source provenance, remediation/help links, and registered concrete Analyzer types |
+| CLI/CI architecture validation and agent-readable reports | ArchDocs / HomeBlaze | [Planned] | [Headless command adapter](integration/cli-and-ci.md) over normal shared graph loading, lifecycle, and provider publication; explicit readiness for current discovery/reconciliation, shared rules, text/JSON reports, and unsuccessful exits for violations or incomplete validation |
 | Supported Markdown-reference indexing and backlinks | ArchDocs | [Planned] | Link parsing, file/subject target mapping, invalidation, and reference provenance; distinct from runtime relationships and a general prose-extraction engine |
 | Architecture-check result widgets and diagram annotations | ArchDocs | [Planned] | Reuse shared findings through [ArchitectureCheckResults](widgets/architecture-check-results.md); automatic surrounding-page placement separately needs host work |
 | Generic $name frontmatter subject children | HomeBlaze | [Planned] | HomeBlaze change: parsing, lifecycle, collision handling, and writeback |

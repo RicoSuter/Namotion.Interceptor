@@ -1,13 +1,13 @@
 {
   "$type": "Namotion.ArchDocs.SourceRepository",
   "sourceRoot": ".source",
-  "analyzers": [
+  "providers": [
     {
-      "path": "/analyzers/CSharpProjects",
+      "path": "/providers/CSharpProjects",
       "config": {}
     }
   ],
-  "rules": [
+  "analyzers": [
     { "path": "/ArchDocs/rules.md/*" },
     { "path": "/ArchDocs/rules/**" }
   ]

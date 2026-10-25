@@ -53,8 +53,8 @@ Names, free prose, versions, protocol addresses, and raw source file locations k
 
 The syntax decision is deferred. Candidate representations are:
 
-- **Recognizable path prefixes:** `/`, `./`, or `../` identify a subject path; other strings remain plain identifiers. Familiar and compact, but path-looking literal identifiers need an escaping or explicit-literal rule.
-- **Explicit reference marker:** a prefix such as `@` marks a subject path. Keeps scalar strings and supports otherwise ambiguous paths, but reserves a marker and needs an escaping rule.
+- **Recognizable path prefixes:** `/`, `./`, or `../` identify a subject path; other strings remain plain identifiers. Familiar and compact, but path-looking literal identifiers need an escaping or explicit-literal analyzer.
+- **Explicit reference marker:** a prefix such as `@` marks a subject path. Keeps scalar strings and supports otherwise ambiguous paths, but reserves a marker and needs an escaping analyzer.
 - **Explicit reference object:** a shape such as `{ "$ref": "/environments/Production" }` distinguishes references from plain strings. Clear to tooling, but more verbose and no longer a scalar in the serialized file.
 
 These are options to refine, not accepted reference syntax. Relative reference scope, validation, literal escaping, property naming, and any automatic resolution of plain identifiers remain to be defined. Do not infer support for a candidate merely from these examples.

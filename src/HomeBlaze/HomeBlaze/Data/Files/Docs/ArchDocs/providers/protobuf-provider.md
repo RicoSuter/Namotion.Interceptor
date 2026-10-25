@@ -1,14 +1,14 @@
 ---
-title: Protobuf Analyzer
-navTitle: Protobuf Analyzer
+title: Protobuf Provider
+navTitle: Protobuf Provider
 status: Planned
 ---
 
-# Protobuf Analyzer [Planned]
+# Protobuf Provider [Planned]
 
 Populate a specialized Contract from explicitly selected or discovered protobuf source.
 
-Expose parsing through a shared singleton [Analyzer subject](../subjects/analyzer.md). Repository selection references that subject; parsed state remains with the requesting repository/Contract owner. The exact invocation/selection API for standalone authored Contracts is still open.
+Expose parsing through a shared singleton [Provider subject](../subjects/provider.md). Repository selection references that subject; parsed state remains with the requesting repository/Contract owner. The exact invocation/selection API for standalone authored Contracts is still open.
 
 ## Implementation readiness
 

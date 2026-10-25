@@ -7,7 +7,7 @@ navTitle: ArchDocs Session Notes
 
 This is a disposable brainstorming artifact for the current session. It has no independent normative requirements and can be removed without losing the feature design.
 
-- [Feature reference](../../../src/HomeBlaze/HomeBlaze/Data/Files/Docs/ArchDocs/overview.md): authoritative subject, analyzer, widget, and integration specifications.
+- [Feature reference](../../../src/HomeBlaze/HomeBlaze/Data/Files/Docs/ArchDocs/overview.md): authoritative subject, provider, widget, and integration specifications.
 - [Scenarios](../../../src/HomeBlaze/HomeBlaze/Data/Files/Docs/ArchDocs/scenarios/overview.md): JSON/Markdown authoring and different documentation styles.
 - [Scope and decisions](../../../src/HomeBlaze/HomeBlaze/Data/Files/Docs/ArchDocs/scope-and-decisions.md): rationale and unresolved choices.
 - [Readiness matrix](../../../src/HomeBlaze/HomeBlaze/Data/Files/Docs/ArchDocs/implementation-readiness.md): existing platform support, extension work, and required HomeBlaze changes.

@@ -10,7 +10,7 @@ Use this when a team wants ordinary documentation pages plus a separately manage
 
 ## Assumed layout
 
-Mount repository/docs as the documentation graph root. The analyzer reads the parent repository through an explicit raw source root. The .NET projects here are an analyzer example, not a requirement of Service or Host.
+Mount repository/docs as the documentation graph root. The provider reads the parent repository through an explicit raw source root. The .NET projects here are a provider example, not a requirement of Service or Host.
 
 ```text
 repository/
@@ -35,15 +35,15 @@ Repository.json:
 {
   "$type": "Namotion.ArchDocs.SourceRepository",
   "sourceRoot": "../",
-  "analyzers": [
-    { "path": "/analyzers/CSharpProjects", "config": {} }
+  "providers": [
+    { "path": "/providers/CSharpProjects", "config": {} }
   ]
 }
 ```
 
-Assume the host has registered and published one shared [Analyzer](../subjects/analyzer.md) subject at the illustrative `/analyzers/CSharpProjects` route. This repository selects that existing subject; another repository can select the same instance. Publishing the singleton and its exact route are planned wiring, not an implemented built-in catalog. Repository-owned results stay under `/Repository`; the shared analyzer does not acquire those children. Omitted or empty selection does not silently enable every installed analyzer.
+Assume the host has registered and published one shared [Provider](../subjects/provider.md) subject at the illustrative `/providers/CSharpProjects` route. This repository selects that existing subject; another repository can select the same instance. Publishing the singleton and its exact route are planned wiring, not an implemented built-in catalog. Repository-owned results stay under `/Repository`; the shared provider does not acquire those children. Omitted or empty selection does not silently enable every installed provider.
 
-For an unambiguous executable project, a minimal project input could contain the following literal XML. The analyzer reads it without building or evaluating MSBuild. Projects with only a library output remain CodeProjects.
+For an unambiguous executable project, a minimal project input could contain the following literal XML. The provider reads it without building or evaluating MSBuild. Projects with only a library output remain CodeProjects.
 
 ```xml
 <Project Sdk="Microsoft.NET.Sdk">

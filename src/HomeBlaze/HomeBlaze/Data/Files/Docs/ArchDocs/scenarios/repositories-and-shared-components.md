@@ -32,8 +32,8 @@ repositories/Orders.json:
 {
   "$type": "Namotion.ArchDocs.SourceRepository",
   "sourceRoot": "../../orders-source",
-  "analyzers": [
-    { "path": "/analyzers/CSharpProjects", "config": {} }
+  "providers": [
+    { "path": "/providers/CSharpProjects", "config": {} }
   ]
 }
 ```
@@ -44,15 +44,15 @@ repositories/Shared.json:
 {
   "$type": "Namotion.ArchDocs.SourceRepository",
   "sourceRoot": "../../shared-source",
-  "analyzers": [
-    { "path": "/analyzers/CSharpProjects", "config": {} }
+  "providers": [
+    { "path": "/providers/CSharpProjects", "config": {} }
   ]
 }
 ```
 
-Each sourceRoot resolves from its defining file, not the documentation graph or the process working directory. Different analyzers can later describe different languages under those roots.
+Each sourceRoot resolves from its defining file, not the documentation graph or the process working directory. Different providers can later describe different languages under those roots.
 
-Both definitions select the same shared singleton [Analyzer](../subjects/analyzer.md), assumed to be published at the illustrative `/analyzers/CSharpProjects` route. The host's publication mechanism and route remain proposed. Each repository supplies its own input context and owns its analysis worker, results, diagnostics, and cancellation; neither creates or owns a copy of the Analyzer. Selection can differ by repository when additional analyzer subjects exist.
+Both definitions select the same shared singleton [Provider](../subjects/provider.md), assumed to be published at the illustrative `/providers/CSharpProjects` route. The host's publication mechanism and route remain proposed. Each repository supplies its own input context and owns its analysis worker, results, diagnostics, and cancellation; neither creates or owns a copy of the Provider. Selection can differ by repository when additional provider subjects exist.
 
 ## Logical membership across repositories [Planned]
 
