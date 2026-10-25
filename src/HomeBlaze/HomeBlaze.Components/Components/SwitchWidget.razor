@@ -39,7 +39,7 @@
         <SwitchView Property="@ValueReader.ResolveProperty(PathResolver, widget, path)"
                     Path="@path"
                     Label="@label"
-                    UsesOperations="@(!string.IsNullOrEmpty(on))"
+                    UsesOperations="@(!string.IsNullOrEmpty(on) || !string.IsNullOrEmpty(off))"
                     OnProperty="@onProperty"
                     OffProperty="@offProperty"
                     Kind="@widget.Kind"

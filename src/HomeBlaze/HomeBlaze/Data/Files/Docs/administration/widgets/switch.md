@@ -13,8 +13,8 @@ Turns a boolean on and off. It writes the property, or it invokes one operation 
 |----------|---------------|---------|---------|
 | `Path` | Path (Boolean) | None | The [path](basics.md#paths) of the property whose value the switch shows. Without `On` and `Off` the switch writes this property |
 | `Label` | Text with values | From the property, see [Labels](basics.md#labels) | The label next to the switch, see [Text with Values](basics.md#text-with-values) |
-| `On` | Path (Operation) | None | The operation that turns the switch on. Set it together with `Off` |
-| `Off` | Path (Operation) | None | The operation that turns the switch off. Set it together with `On` |
+| `On` | Path (Operation) | None | The operation that turns the switch on. Without `Off` the switch can only be turned on, see [One direction](#behavior-and-limits) |
+| `Off` | Path (Operation) | None | The operation that turns the switch off. Without `On` the switch can only be turned off, see [One direction](#behavior-and-limits) |
 | `Kind` | `Switch` or `Tile` | `Switch` | `Switch` is a toggle switch with its label next to it. `Tile` is a tile that fills its place and is filled by the state, see [Tiles](#tiles) |
 | `Map` | Name or path of a `ValueMap` | None | The map that gives a state its color, icon and text, see [ValueMap](value-map.md). A tile is filled with the color of the matched case, a toggle switch takes it as its color |
 | `Subtitle` | Text with values | None | A second line below the label of a tile, see [Text with Values](basics.md#text-with-values). Without it, a tile with a map shows the text of the value. `Subtitle=""` hides the line |
@@ -98,10 +98,11 @@ Rules of a tile:
 - **Shows the property**: The switch is on while the value is true. A value that is not set and a path that leads nowhere show the switch off.
 - **Writes the property**: Without `On` and `Off`, a toggle writes true or false to the property. Besides the cases of [Control Writes](basics.md#control-writes), the switch is disabled when the property holds no boolean.
 - **Invokes an operation**: With `On` and `Off`, turning the switch on invokes `On` and turning it off invokes `Off`, and the switch does not write the property. The switch shows the state it goes to until the operation ends, and then shows the property again. A device that reports its new state later moves the switch when it does.
+- **One direction**: With `On` or `Off` alone, the switch invokes it and is disabled in the other direction, for example `Off=../Lights/AllOff` for a tile that may only turn all lights off. It still shows the property, and is disabled once it is in the state the operation leads to.
 - **Enabled state**: With `On` and `Off`, the switch is disabled while the operation that a toggle would invoke is not enabled, for example `PowerOn` while the motor is powered, and while that operation does not exist.
 - **Confirmation**: An operation that asks for confirmation shows its dialog first. Cancel leaves the switch in its state.
 - **Toggle switch with a map**: A `Switch` with `Map` and without `Kind=Tile` takes the color of the matched case as its color, a theme color or a CSS color, and `Primary` when no case matches. Subtitle, icon and badge are for tiles.
-- **Operations without input**: `On` and `Off` are operations whose parameters need no input. One of them alone shows `Set both On and Off, or neither`, and an operation that needs input shows `On needs an operation without input` with its path, in place of the switch, see [Value Widget Errors](../page-errors.md#value-widget-errors).
+- **Operations without input**: `On` and `Off` are operations whose parameters need no input. An operation that needs input shows `On needs an operation without input` with its path, in place of the switch, see [Value Widget Errors](../page-errors.md#value-widget-errors).
 
 ## Related
 
