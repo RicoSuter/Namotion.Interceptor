@@ -22,13 +22,6 @@ internal sealed class McpVisibility
         _root = root;
     }
 
-    /// <summary>
-    /// Whether the subject has a property, other than an attribute, that the path provider includes and the access
-    /// policy allows to read. Always true without a policy.
-    /// </summary>
-    public bool HasReadableMember(RegisteredSubject subject) =>
-        _configuration.AccessPolicy is null || HasReadableMember(subject, _pathProvider);
-
     internal static bool HasReadableMember(RegisteredSubject subject, PathProviderBase pathProvider)
     {
         // Attributes are listed only on a listed property, so they never make a subject shown on their own.
