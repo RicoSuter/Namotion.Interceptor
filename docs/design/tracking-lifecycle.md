@@ -17,6 +17,8 @@ An anchor marks a subject as a root of its context. There are two kinds:
 
 The independent-support rule is what makes ordinary graph building safe. Clearing on the first edge of any kind is unsound: `child.Parent = root` would consume the root's own anchor and the next removal anywhere would release the whole graph. In a mutually referencing pair the first-constructed subject keeps its anchor; that is the same outcome as any root the caller constructed and never removed.
 
+Consuming a provisional anchor queues a recalculation of the subject's derived properties behind the handlers of the consuming edge. The constructor attached the subject and computed those values while it had no parent, and a getter that reads the parents records no dependency on them, so without it the subject would keep values an unanchored subject never computes. Only the subject itself is recalculated (see [Parent-Child Relationship Tracking](../tracking.md#parent-child-relationship-tracking)).
+
 The anchor lives on the executor (`IInterceptorExecutor.AttachmentAnchor`), never mirrored into graph state, so it cannot drift from the attachment it belongs to.
 
 ### Registering the lifecycle behind an attach

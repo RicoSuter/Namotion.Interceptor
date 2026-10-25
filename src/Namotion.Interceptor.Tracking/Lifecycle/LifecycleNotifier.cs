@@ -16,7 +16,7 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 /// </remarks>
 internal sealed class LifecycleNotifier(IInterceptorSubjectContext context, OwnershipGraph graph, ILifecycleHandler descentHandler)
 {
-    private enum NotificationKind { Attached, Detaching, LifecycleHandler, Refresh, AttachProperty, DetachProperty, ReleaseClaim }
+    private enum NotificationKind { Attached, Detaching, LifecycleHandler, Refresh, AttachProperty, DetachProperty, RecalculateDerived, ReleaseClaim }
     private readonly record struct Notification(NotificationKind Kind, SubjectLifecycleChange Change, object? Value = null);
     private readonly List<PropertyChangeInterceptor.Publication> _propertyChanges = [];
     private readonly List<Notification> _notifications = [];
@@ -150,6 +150,7 @@ internal sealed class LifecycleNotifier(IInterceptorSubjectContext context, Owne
     }
     public void RefreshCollectionProperty(PropertyReference property, object? value) => _notifications.Add(new(NotificationKind.Refresh, new SubjectLifecycleChange { Subject = property.Subject, Property = property, ReferenceCount = 0 }, value));
     public void QueueProperty(PropertyReference property, bool attach) => _notifications.Add(new(attach ? NotificationKind.AttachProperty : NotificationKind.DetachProperty, new SubjectLifecycleChange { Subject = property.Subject, Property = property, ReferenceCount = 0 }));
+    public void QueueDerivedRecalculation(IInterceptorSubject subject) => _notifications.Add(new(NotificationKind.RecalculateDerived, new SubjectLifecycleChange { Subject = subject, ReferenceCount = 0 }));
     public void QueueRelease(IInterceptorSubject subject, SubjectOwnership ownership) => _notifications.Add(new(NotificationKind.ReleaseClaim, new SubjectLifecycleChange { Subject = subject, ReferenceCount = 0 }, Value: ownership));
 
     public void PublishEdgeRemoved(IInterceptorSubject subject, PropertyReference property, object? index, int referenceCount)
@@ -216,6 +217,9 @@ internal sealed class LifecycleNotifier(IInterceptorSubjectContext context, Owne
                             InvokePropertyHandler(subjectHandler, in notification, ref failures);
                         }
                         break;
+                    case NotificationKind.RecalculateDerived:
+                        RecalculateDerivedProperties(notification.Change.Subject, ref failures);
+                        break;
                     case NotificationKind.ReleaseClaim:
                         CompleteRelease(in notification);
                         break;
@@ -255,6 +259,23 @@ internal sealed class LifecycleNotifier(IInterceptorSubjectContext context, Owne
         {
             graph.ReleaseClaim(subject);
             graph.ClearReleasing(subject, ownership);
+        }
+    }
+
+    // Out of line for the same reason as CompleteRelease: it runs at most once per subject whose
+    // provisional anchor an edge consumed.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void RecalculateDerivedProperties(IInterceptorSubject subject, ref List<Exception>? failures)
+    {
+        foreach (var entry in subject.Properties)
+        {
+            if (!entry.Value.IsDerived)
+            {
+                continue;
+            }
+
+            try { DerivedPropertyChangeHandler.RecalculateDerivedPropertyIfChanged(new PropertyReference(subject, entry.Key)); }
+            catch (Exception exception) { (failures ??= []).Add(exception); }
         }
     }
 

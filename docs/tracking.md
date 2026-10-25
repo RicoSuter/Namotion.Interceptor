@@ -697,6 +697,8 @@ Entries are per occurrence: a subject listed twice in one collection has two, on
 
 Both searches go breadth first over all parents, so the nearest match wins, and neither throws when there is none. `TryGetFirstParent` never returns the subject itself.
 
+The parents are not a tracked property, so a derived property that reads them records no dependency on them. Its value is computed when its subject enters the graph, which for a subject created with a context is construction, before it has a parent. Such a subject's derived properties are therefore computed again when the first edge from an anchored parent consumes its constructor's anchor, and a value that changed is published then. Any other change of the parents, such as moving a subject or reaching a subject through an ancestor that gained a parent of its own, is not noticed: call `RecalculateDerivedProperty()` on the property for that.
+
 This enables scenarios like:
 - Finding the root object of a subject graph
 - Navigating from child to parent for validation or business logic

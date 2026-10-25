@@ -298,7 +298,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     /// IsRecalculating serializes concurrent recalculations; RecalculationNeeded catches state changes
     /// (writes, attach, detach) that occur during the unlocked evaluation window.
     /// </summary>
-    internal static void RecalculateDerivedProperty(ref PropertyReference derivedProperty, long storageTimestamp, long rawTimestamp)
+    internal static void RecalculateDerivedProperty(ref PropertyReference derivedProperty, long storageTimestamp, long rawTimestamp, bool onlyWhenChanged = false)
     {
         // TODO(perf): Avoid boxing when possible (use TProperty generic parameter?)
 
@@ -370,6 +370,14 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                             continue;
                         }
 
+                        // The dependencies were updated by the evaluation, which is all such a
+                        // caller needs when the value is the one already published. A subject is the
+                        // same value only when it is the same instance, as everywhere in the graph.
+                        if (onlyWhenChanged && IsPublishedValue(newValue, oldValue))
+                        {
+                            return;
+                        }
+
                         data.LastKnownValue = newValue;
                         sequence = ++data.RecalculationSequence;
                         derivedProperty.SetWriteTimestamp(storageTimestamp);
@@ -437,6 +445,28 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                 }
             }
         }
+    }
+
+    private static bool IsPublishedValue(object? newValue, object? oldValue)
+    {
+        return newValue is IInterceptorSubject ? ReferenceEquals(newValue, oldValue) : Equals(newValue, oldValue);
+    }
+
+    /// <summary>
+    /// Evaluates a derived property again to refresh its dependencies, and publishes the value only
+    /// when it differs from the one last published. No-op for a property that is not an attached
+    /// derived property.
+    /// </summary>
+    internal static void RecalculateDerivedPropertyIfChanged(PropertyReference property)
+    {
+        var data = property.TryGetDerivedPropertyData();
+        if (data is null || !Volatile.Read(ref data.IsDerived))
+        {
+            return;
+        }
+
+        var timestamp = SubjectChangeContext.Current.ResolveChangedTimestamp();
+        RecalculateDerivedProperty(ref property, timestamp, timestamp, onlyWhenChanged: true);
     }
 
     /// <summary>

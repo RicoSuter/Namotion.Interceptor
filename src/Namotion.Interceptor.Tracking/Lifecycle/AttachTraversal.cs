@@ -156,7 +156,7 @@ internal sealed class AttachTraversal(LifecycleNotifier notifier, OwnershipGraph
 
         // Authoritative parent and anchor state before the first handler observes the change.
         ownership.RepublishParents();
-        ConsumeProvisionalAnchor(subject, property);
+        var anchorConsumed = ConsumeProvisionalAnchor(subject, property);
 
         var change = new SubjectLifecycleChange
         {
@@ -168,7 +168,20 @@ internal sealed class AttachTraversal(LifecycleNotifier notifier, OwnershipGraph
             IsPropertyReferenceAdded = true
         };
 
-        Publish(subject, change, isContextAttach);
+        try
+        {
+            Publish(subject, change, isContextAttach);
+        }
+        finally
+        {
+            // The constructor computed the derived values while the subject had no parent, and no
+            // dependency records a read of the parents. Queued behind this edge's handlers, so the
+            // getters see the state they publish. See docs/design/tracking-lifecycle.md#anchors.
+            if (anchorConsumed)
+            {
+                notifier.QueueDerivedRecalculation(subject);
+            }
+        }
 
         // The edge may have landed on a subject whose own seed failed earlier. Resuming here rather
         // than at each call site covers every route that can reach one: the attach descent below,
@@ -223,22 +236,23 @@ internal sealed class AttachTraversal(LifecycleNotifier notifier, OwnershipGraph
     /// Clears a provisional anchor once an edge supports the subject independently of that anchor,
     /// meaning the edge's parent has an anchored ancestor other than the subject itself.
     /// </summary>
+    /// <returns>Whether this edge consumed the anchor.</returns>
     /// <remarks>
     /// Clearing on the first edge of any kind is unsound: the everyday back reference
     /// <c>child.Parent = root</c> would consume the root's own anchor, and the next removal anywhere
     /// would release the whole graph. A self edge fails the same test for the same reason.
     /// </remarks>
-    private void ConsumeProvisionalAnchor(IInterceptorSubject subject, PropertyReference property)
+    private bool ConsumeProvisionalAnchor(IInterceptorSubject subject, PropertyReference property)
     {
         subject.Executor.TryGetAttachment(out var attachedContext, out var anchor, out _);
         if (anchor != SubjectAttachmentAnchorKind.Provisional || !ReferenceEquals(attachedContext, graph.Context))
         {
-            return;
+            return false;
         }
 
         if (!reachability.IsAnchorReachable(property.Subject, subject))
         {
-            return;
+            return false;
         }
 
         graph.SetAnchor(subject, SubjectAttachmentAnchorKind.None, onlyFrom: SubjectAttachmentAnchorKind.Provisional);
@@ -250,5 +264,7 @@ internal sealed class AttachTraversal(LifecycleNotifier notifier, OwnershipGraph
                 ConsumedAnchors.Add((subject, consumedRevision));
             }
         }
+
+        return true;
     }
 }
