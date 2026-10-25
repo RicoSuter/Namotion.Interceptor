@@ -18,7 +18,7 @@ Evaluate selected architecture-test subjects against the current discovered and 
 
 ## Definitions and run ownership [Planned]
 
-A [Analyzer](../subjects/analyzer.md) has one canonical JSON or Markdown owner. The [authoring reference](authoring.md) shows named JSON-configured children in `rules.md`, one JSON file per definition, and page/directory/global suites. Repositories select existing definitions through `analyzers` and expose read-only `resolvedAnalyzers`; configuration stays on the definition, while per-invocation findings and cancellation stay with the repository/runner.
+An [Analyzer](../subjects/analyzer.md) has one canonical JSON or Markdown owner. The [authoring reference](authoring.md) shows named JSON-configured children in `rules.md`, one JSON file per definition, and page/directory/global suites. Repositories select existing definitions through `analyzers` and expose read-only `resolvedAnalyzers`; configuration stays on the definition, while per-invocation findings and cancellation stay with the repository/runner.
 
 Generic and predefined concrete Analyzer types consume the invocation's repository, explicit architecture/documentation scope, and available current facts. Analyzer definitions declare requirements and cannot assume that a plain name or unavailable provider supplies evidence. A documented preset can provide defaults for the invoking repository without rewriting explicit absolute selectors.
 

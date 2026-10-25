@@ -8,7 +8,7 @@ status: Planned
 
 ## Class definition [Planned]
 
-**Analyzer** is the abstract base subject for authored architecture tests. Concrete registered subject types implement checks against an invocation's repository, available provider facts, and loaded architecture/documentation scope. `$type` selects the concrete implementation in JSON/frontmatter; the type in a named Markdown block serves the same purpose. Several repositories can select one definition without cloning it or transferring ownership.
+**Analyzer** is the abstract base subject for authored architecture tests. Each configured concrete Analyzer represents one rule and supplies its evaluation behavior. Concrete registered subject types implement checks against an invocation's repository, available provider facts, and loaded architecture/documentation scope. `$type` selects the concrete implementation in JSON/frontmatter; the type in a named Markdown block serves the same purpose. Several repositories can select one definition without cloning it or transferring ownership.
 
 Analyzer definitions have ordinary subject identity and lifecycle; there is no singleton-per-analyzer-type requirement. One `rules.md` can contain several differently configured concrete Analyzer children. Evaluation results, cancellation, and current-run state belong to the invoking [SourceRepository](source-repository.md) or runner, not mutable last-run properties on the shared definition. Concrete types extend the common configuration with their own typed properties. Exact CLR evaluation signatures remain open.
 
