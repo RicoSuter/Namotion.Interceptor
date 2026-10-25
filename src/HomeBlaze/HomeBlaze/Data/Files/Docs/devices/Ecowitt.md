@@ -34,7 +34,7 @@ Weather Station (EcowittGateway)
 │   └── Sources
 │       ├── [0x9637] ──> Sensors[0x9637]
 │       └── [0x51B]  ──> Sensors[0x51B]
-├── IndoorSensor               Temperature, Humidity, pressures (Sources empty for the built-in sensor)
+├── IndoorSensor               Temperature, Humidity, pressures
 ├── RainGauge                  RainRate, DailyRain, TotalRain, ...
 │   └── Sources
 │       └── [0x1C183] ──> Sensors[0x1C183]
@@ -44,7 +44,7 @@ Weather Station (EcowittGateway)
     └── [0x1C183]  WH40, Rain, online, battery 40 %, 4 bars, -69 dBm
 ```
 
-In this example the WS90 is offline, so the outdoor temperature and humidity are empty while the wind and light values still arrive from the WH68.
+With the WS90 offline, temperature and humidity are empty, while wind and light still come from the WH68.
 
 ### Sensor properties
 
@@ -67,7 +67,7 @@ The sensor list is read on every poll, so sensors paired or removed in the gatew
 | Reading | Sources (type codes) |
 |---------|----------------------|
 | OutdoorSensor | 0, 1, 2, 5, 48, 49 |
-| IndoorSensor | 4 (empty for the gateway's built-in sensor) |
+| IndoorSensor | 4 |
 | RainGauge | 0, 3 |
 | PiezoRainGauge | 48, 49 |
 | LightningSensor | 26 |
@@ -98,7 +98,7 @@ The gateway's built-in sensor measures wherever the gateway is placed and is not
 
 ## Hidden Sensors
 
-The gateway may pick up sensors from neighboring stations. Use the Hidden Sensors configuration to exclude unwanted sensors. Sensor keys follow the format: `outdoor`, `indoor`, `rain`, `piezo`, `lightning`, and per channel `ch:1`, `soil:2`, `leaf:1`, `temp:1`, `pm25:1`, `co2:1`, `leak:1`. A sensor in `Sensors` is left out as well when every reading it feeds is hidden, for example the sensor in channel 3 with `ch:3`, or a WS90 with both `outdoor` and `piezo`. To stop the gateway from learning a neighbor's sensor at all, disable its channel in the gateway's web interface by setting the sensor ID to `FFFFFFFE`.
+The gateway may pick up sensors from neighboring stations. Use the Hidden Sensors configuration to exclude unwanted sensors. Sensor keys follow the format: `outdoor`, `indoor`, `rain`, `piezo`, `lightning`, and per channel `ch:1`, `soil:2`, `leaf:1`, `temp:1`, `pm25:1`, `co2:1`, `leak:1`. A sensor in `Sensors` is left out as well when every reading it feeds is hidden, for example the sensor in channel 3 with `ch:3`, or a WS90 with both `outdoor` and `piezo`. `co2:1` hides only the CO2 reading: the WH45 (type 39) stays in `Sensors`, because its slot is not mapped to a reading. The same holds for the other types without a mapped reading, such as the WH54 (66 to 69), the WN20 (70) and the WN38 (71): `HiddenSensors` cannot hide them, only disabling their slot with `FFFFFFFE` does. To stop the gateway from learning a neighbor's sensor at all, disable its channel in the gateway's web interface by setting the sensor ID to `FFFFFFFE`.
 
 ## JSON Configuration Example
 
@@ -172,7 +172,7 @@ The Ecowitt gateway exposes an undocumented but stable local HTTP API. Values ar
 
 In `/get_sensors_info`, each slot has a `type` code, an `img` key naming the model, a `name` describing the type, an `id`, and `batt`, `rssi` and `signal` (0 to 4 bars). A learning slot has the ID `FFFFFFFF`, a disabled one `FFFFFFFE`. A paired sensor that is offline reports `batt` 9 and `--` for `rssi` and `signal`. The battery in `Sensors` comes from the `batt` field.
 
-**Binary battery** (0=OK/full, 1=Low/empty): Only WH31 (types 6-13) and WH25 (type 4).
+**Binary battery** (0=OK/full, 1=Low/empty): WH25 (type 4), WH26 (type 5, per the Ecowitt protocol, not verified on a device) and WH31 (types 6-13).
 
 **0-5 level scale** (0=empty, 5=full, maps to 0-100%): All other sensor types.
 
@@ -195,13 +195,13 @@ In `/get_sensors_info`, each slot has a `type` code, an `img` key naming the mod
 | 39 | WH45 (PM2.5, PM10, CO2) |
 | 40-47 | WH35 leaf 1-8 |
 | 48 | WS90 (temp, humidity, solar, wind, piezo rain; the gateway reports the `img` key `wh90`) |
-| 49 | WH85 (wind, piezo rain) |
+| 49 | WS85 (wind, piezo rain; the gateway reports the `img` key `wh85`) |
 | 58-65 | WH51 soil 9-16 |
 | 66-69 | WH54 ch1-4 |
-| 70 | WN20 (rain mini) |
+| 70 | WN20 (rain mini; whether it feeds `rain` is unconfirmed, so it is no source of `RainGauge`) |
 | 71 | WN38 (BGT) |
 
-A GW2000A on firmware V3.3.2 lists the codes 0 to 13, 22 to 30, 39, 48, 49 and 66 to 71 on pages 1 and 2. For a type code missing from this table, `TypeName` is the slot's `img` key in upper case.
+For a type code missing from this table, `TypeName` is the slot's `img` key in upper case.
 
 Note: The local HTTP API battery format differs from the Ecowitt push/custom server protocol, where sensors like WH34 and WH51 report actual voltage values (e.g., `tf_batt1=1.68`).
 

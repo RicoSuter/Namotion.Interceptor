@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Devices.Ecowitt.Models;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
 using Xunit;
@@ -76,19 +77,6 @@ public class EcowittGatewaySensorsTests
     }
 
     [Fact]
-    public void WhenSlotsAreLearningOrDisabled_ThenTheyHaveNoSensor()
-    {
-        // Arrange
-        var gateway = CreateGateway();
-
-        // Act
-        gateway.Update(EcowittSamples.ParseLiveData(), EcowittSamples.ParseSensorsInfo());
-
-        // Assert
-        Assert.Equal([Wh40, OnlineWh68, OfflineWs90], gateway.Sensors.Keys.Order(StringComparer.Ordinal));
-    }
-
-    [Fact]
     public void WhenSensorGoesOffline_ThenLastSeenStaysAtTheLastReception()
     {
         // Arrange
@@ -148,6 +136,45 @@ public class EcowittGatewaySensorsTests
         Assert.Same(kept, Assert.Single(gateway.OutdoorSensor!.Sources).Value);
         Assert.Null(removed.TryGetRegisteredSubject());
         Assert.NotNull(kept.TryGetRegisteredSubject());
+    }
+
+    [Fact]
+    public void WhenSensorDisappearsFromList_ThenItsContextNoLongerReachesTheGraph()
+    {
+        // Arrange
+        var gateway = CreateGateway();
+        gateway.Update(EcowittSamples.ParseLiveData(), EcowittSamples.ParseSensorsInfo());
+        var removed = gateway.Sensors[OnlineWh68];
+        var unpairedPage1 = EcowittSamples.SensorsInfoPage1Json.Replace("\"id\":\"51B\"", "\"id\":\"FFFFFFFF\"");
+
+        // Act
+        gateway.Update(EcowittSamples.ParseLiveData(), EcowittSamples.ParseSensorsInfo(unpairedPage1));
+
+        // Assert
+        Assert.Null(removed.TryGetRegisteredSubject());
+        Assert.Null(((IInterceptorSubject)removed).Context.TryGetService<ILifecycleInterceptor>());
+    }
+
+    [Fact]
+    public void WhenSensorIsReplacedByAnotherInTheSamePoll_ThenTheOldIsReleasedAndTheNewIsOwnedBySensors()
+    {
+        // Arrange
+        var gateway = CreateGateway();
+        gateway.Update(EcowittSamples.ParseLiveData(), EcowittSamples.ParseSensorsInfo());
+        var removed = gateway.Sensors[OnlineWh68];
+        var replacedPage1 = EcowittSamples.SensorsInfoPage1Json.Replace("\"id\":\"51B\"", "\"id\":\"51C\"");
+
+        // Act
+        gateway.Update(EcowittSamples.ParseLiveData(), EcowittSamples.ParseSensorsInfo(replacedPage1));
+
+        // Assert
+        var added = gateway.Sensors["0x51C"];
+        Assert.False(gateway.Sensors.ContainsKey(OnlineWh68));
+        Assert.Null(removed.TryGetRegisteredSubject());
+        Assert.Null(((IInterceptorSubject)removed).Context.TryGetService<ILifecycleInterceptor>());
+        Assert.Same(added, gateway.OutdoorSensor!.Sources["0x51C"]);
+        Assert.Equal(2, added.TryGetRegisteredSubject()!.Parents.Length);
+        Assert.NotNull(((IInterceptorSubject)added).Context.TryGetService<ILifecycleInterceptor>());
     }
 
     [Fact]
@@ -232,18 +259,194 @@ public class EcowittGatewaySensorsTests
         Assert.Equal("WH99", gateway.Sensors["0x77"].TypeName);
     }
 
-    private static EcowittGateway CreateGateway()
+    [Theory]
+    [InlineData(48, "WS90")]
+    [InlineData(49, "WS85")]
+    public void WhenPiezoSensorIsPaired_ThenItFeedsOutdoorAndPiezoRainAndHasThreeParents(int typeCode, string typeName)
     {
-        var gateway = new EcowittGateway(new TestHttpClientFactory(), NullLogger<EcowittGateway>.Instance);
+        // Arrange
+        var gateway = CreateGateway();
+        var sensorsInfo = new[]
+        {
+            new EcowittSensorInfo { SensorId = "0x9637", TypeCode = typeCode, Battery = 4, Rssi = -48, SignalLevel = 4 }
+        };
+        var data = new EcowittLiveData
+        {
+            Outdoor = new EcowittOutdoorData { WindSpeed = 1.8m },
+            PiezoRain = new EcowittRainData { DailyRain = 1.0m }
+        };
+
+        // Act
+        gateway.Update(data, sensorsInfo);
+
+        // Assert
+        var sensor = gateway.Sensors["0x9637"];
+        Assert.Equal(typeName, sensor.TypeName);
+        Assert.Equal(0.8m, sensor.BatteryLevel);
+        Assert.Same(sensor, Assert.Single(gateway.PiezoRainGauge!.Sources).Value);
+        Assert.Same(sensor, Assert.Single(gateway.OutdoorSensor!.Sources).Value);
+        var parents = sensor.TryGetRegisteredSubject()!.Parents;
+        Assert.Equal(3, parents.Length);
+        Assert.Contains(parents, parent => ReferenceEquals(parent.Property.Subject, gateway));
+        Assert.Contains(parents, parent => ReferenceEquals(parent.Property.Subject, gateway.OutdoorSensor));
+        Assert.Contains(parents, parent => ReferenceEquals(parent.Property.Subject, gateway.PiezoRainGauge));
+    }
+
+    [Theory]
+    [InlineData(0, 1.0)]
+    [InlineData(1, 0.0)]
+    public void WhenWh25IsPaired_ThenIndoorSourcesHoldItWithItsBinaryBattery(int battery, decimal batteryLevel)
+    {
+        // Arrange
+        var gateway = CreateGateway();
+        var sensorsInfo = new[]
+        {
+            new EcowittSensorInfo { SensorId = "0xAB", TypeCode = 4, SensorType = "wh25", Battery = battery, Rssi = -55, SignalLevel = 4 }
+        };
+        var data = new EcowittLiveData { Indoor = new EcowittIndoorData { Temperature = 19.3m } };
+
+        // Act
+        gateway.Update(data, sensorsInfo);
+
+        // Assert
+        var sensor = gateway.Sensors["0xAB"];
+        Assert.Equal("WH25", sensor.TypeName);
+        Assert.Equal(batteryLevel, sensor.BatteryLevel);
+        Assert.Same(sensor, Assert.Single(gateway.IndoorSensor!.Sources).Value);
+    }
+
+    [Theory]
+    [InlineData(new[] { "outdoor" }, true)]
+    [InlineData(new[] { "piezo" }, true)]
+    [InlineData(new[] { "outdoor", "piezo" }, false)]
+    public void WhenWs90ReadingsAreHidden_ThenItIsLeftOutOnlyWhenOutdoorAndPiezoAreBothHidden(string[] hiddenSensors, bool isInSensors)
+    {
+        // Arrange
+        var gateway = CreateGateway();
+        gateway.HiddenSensors = hiddenSensors;
+        var sensorsInfo = new[]
+        {
+            new EcowittSensorInfo { SensorId = "0x9637", TypeCode = 48, Rssi = -48, SignalLevel = 4 }
+        };
+
+        // Act
+        gateway.Update(new EcowittLiveData(), sensorsInfo);
+
+        // Assert
+        Assert.Equal(isInSensors, gateway.Sensors.ContainsKey("0x9637"));
+    }
+
+    [Fact]
+    public void WhenStateIsReset_ThenSensorsAreClearedAndDetached()
+    {
+        // Arrange
+        var gateway = CreateGateway();
+        gateway.Update(EcowittSamples.ParseLiveData(), EcowittSamples.ParseSensorsInfo());
+        var sensor = gateway.Sensors[OnlineWh68];
+
+        // Act
+        gateway.ResetState();
+
+        // Assert
+        Assert.Empty(gateway.Sensors);
+        Assert.Null(gateway.OutdoorSensor);
+        Assert.Null(sensor.TryGetRegisteredSubject());
+        Assert.Null(((IInterceptorSubject)sensor).Context.TryGetService<ILifecycleInterceptor>());
+    }
+
+    [Fact]
+    public void WhenPollFails_ThenSensorsAreOfflineAndKeepLastSeen()
+    {
+        // Arrange
+        var gateway = CreateGateway();
+        gateway.Update(EcowittSamples.ParseLiveData(), EcowittSamples.ParseSensorsInfo());
+        var sensor = gateway.Sensors[OnlineWh68];
+        var lastSeen = sensor.LastSeen;
+
+        // Act
+        gateway.MarkSensorsOffline();
+
+        // Assert
+        Assert.False(sensor.IsOnline);
+        Assert.Null(sensor.Rssi);
+        Assert.Null(sensor.SignalStrength);
+        Assert.Equal(1.0m, sensor.BatteryLevel);
+        Assert.Equal(lastSeen, sensor.LastSeen);
+    }
+
+    [Fact]
+    public void WhenSensorListCannotBeRead_ThenSensorsAreKept()
+    {
+        // Arrange
+        var gateway = CreateGateway();
+        gateway.Update(EcowittSamples.ParseLiveData(), EcowittSamples.ParseSensorsInfo());
+        var sensors = gateway.Sensors;
+        var sources = gateway.OutdoorSensor!.Sources;
+
+        // Act
+        gateway.Update(EcowittSamples.ParseLiveData(), sensorsInfo: null);
+
+        // Assert
+        Assert.Same(sensors, gateway.Sensors);
+        Assert.Same(sources, gateway.OutdoorSensor.Sources);
+    }
+
+    [Fact]
+    public void WhenReadingSubjectIsRebuilt_ThenItsSharedSensorStaysRegistered()
+    {
+        // Arrange
+        var gateway = CreateGateway();
+        var sensorsInfo = new[]
+        {
+            new EcowittSensorInfo { SensorId = "0xA6", TypeCode = 6, Battery = 0, Rssi = -69, SignalLevel = 3 }
+        };
+        gateway.Update(new EcowittLiveData { Channels = [new EcowittChannelData { Channel = 1 }] }, sensorsInfo);
+        var sensor = gateway.Sensors["0xA6"];
+        var originalChannel = gateway.ChannelSensors[0];
+
+        // Act
+        gateway.Update(new EcowittLiveData
+        {
+            Channels = [new EcowittChannelData { Channel = 1 }, new EcowittChannelData { Channel = 2 }]
+        }, sensorsInfo);
+
+        // Assert
+        Assert.NotSame(originalChannel, gateway.ChannelSensors[0]);
+        Assert.Same(sensor, Assert.Single(gateway.ChannelSensors[0].Sources).Value);
+        Assert.Empty(gateway.ChannelSensors[1].Sources);
+        var parents = sensor.TryGetRegisteredSubject()!.Parents;
+        Assert.Equal(2, parents.Length);
+        Assert.Contains(parents, parent => ReferenceEquals(parent.Property.Subject, gateway));
+        Assert.Contains(parents, parent => ReferenceEquals(parent.Property.Subject, gateway.ChannelSensors[0]));
+    }
+
+    [Fact]
+    public void WhenSensorIsOnlineOnASecondPoll_ThenLastSeenAdvances()
+    {
+        // Arrange
+        var clock = new TestClock { Now = new DateTimeOffset(2026, 10, 25, 19, 0, 0, TimeSpan.Zero) };
+        var gateway = CreateGateway(clock);
+        gateway.Update(EcowittSamples.ParseLiveData(), EcowittSamples.ParseSensorsInfo());
+        clock.Now = clock.Now.AddSeconds(30);
+
+        // Act
+        gateway.Update(EcowittSamples.ParseLiveData(), EcowittSamples.ParseSensorsInfo());
+
+        // Assert
+        Assert.Equal(clock.Now, gateway.Sensors[OnlineWh68].LastSeen);
+        Assert.Null(gateway.Sensors[OfflineWs90].LastSeen);
+    }
+
+    private static EcowittGateway CreateGateway(TimeProvider? clock = null)
+    {
+        var gateway = new EcowittGateway(new TestHttpClientFactory(), NullLogger<EcowittGateway>.Instance)
+        {
+            Clock = clock ?? TimeProvider.System
+        };
         ((IInterceptorSubject)gateway).Context.AddFallbackContext(InterceptorSubjectContext
             .Create()
             .WithFullPropertyTracking()
             .WithRegistry());
         return gateway;
-    }
-
-    private class TestHttpClientFactory : IHttpClientFactory
-    {
-        public HttpClient CreateClient(string name) => new();
     }
 }

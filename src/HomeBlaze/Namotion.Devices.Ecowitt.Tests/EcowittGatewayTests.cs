@@ -564,10 +564,4 @@ public class EcowittGatewayTests
         // Assert
         Assert.False(configChanged);
     }
-
-    private class TestHttpClientFactory : IHttpClientFactory
-    {
-        public HttpClient CreateClient(string name) => new();
-    }
-
 }

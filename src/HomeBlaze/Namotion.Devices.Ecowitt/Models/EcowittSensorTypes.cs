@@ -45,7 +45,8 @@ internal static class EcowittSensorTypes
         >= 40 and <= 47 => "WH35",
         // The gateway reports the image key wh90 for the WS90.
         48 => "WS90",
-        49 => "WH85",
+        // The gateway reports the image key wh85 for the WS85.
+        49 => "WS85",
         >= 66 and <= 69 => "WH54",
         70 => "WN20",
         71 => "WN38",
@@ -55,7 +56,7 @@ internal static class EcowittSensorTypes
     /// <summary>
     /// Gets whether the type reports its battery as 0 (OK) or 1 (low) instead of a 0 to 5 level.
     /// </summary>
-    public static bool HasBinaryBattery(int typeCode) => typeCode is 4 or >= 6 and <= 13;
+    public static bool HasBinaryBattery(int typeCode) => typeCode is >= 4 and <= 13;
 
     /// <summary>
     /// Gets whether a sensor of the type feeds a single-instance reading that the gateway merges from all such sensors.

@@ -113,4 +113,14 @@ public partial class EcowittSensor :
             LastSeen = now;
         }
     }
+
+    /// <summary>
+    /// Marks the sensor offline while the gateway is unreachable, keeping its last battery level and LastSeen.
+    /// </summary>
+    internal void MarkOffline()
+    {
+        IsOnline = false;
+        SignalStrength = null;
+        Rssi = null;
+    }
 }

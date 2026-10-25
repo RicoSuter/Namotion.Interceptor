@@ -36,6 +36,14 @@ public partial class EcowittGateway : BackgroundService,
     private readonly ILogger<EcowittGateway> _logger;
     private readonly SemaphoreSlim _configChangedSignal = new(0, 1);
 
+    // HiddenSensors as of the running Update, read once per update.
+    private string[] _hiddenSensors = [];
+
+    internal TimeProvider Clock { get; init; } = TimeProvider.System;
+
+    // Whether the last read of the sensor list failed, so that a failing list is logged once and not on every poll.
+    private bool _isSensorListFailing;
+
     // The rain totals change with every poll while it rains, so of the writes in a row that wrote nothing
     // only the first is logged.
     private bool _isConfigurationUnsaved;
@@ -295,9 +303,11 @@ public partial class EcowittGateway : BackgroundService,
             {
                 // The sensor list is read on every poll, so that LastSeen follows the reception of each sensor and
                 // sensors paired or removed in the gateway appear or disappear.
-                var liveData = await client.GetLiveDataAsync(stoppingToken);
-                var sensorsInfo = await client.GetSensorsInfoAsync(stoppingToken);
-                var configChanged = Update(liveData, sensorsInfo);
+                var liveDataTask = client.GetLiveDataAsync(stoppingToken);
+                var sensorsInfoTask = TryGetSensorsInfoAsync(client, stoppingToken);
+                await Task.WhenAll(liveDataTask, sensorsInfoTask);
+
+                var configChanged = Update(await liveDataTask, await sensorsInfoTask);
                 LastUpdated = DateTimeOffset.UtcNow;
 
                 if (configChanged)
@@ -315,6 +325,7 @@ public partial class EcowittGateway : BackgroundService,
                 IsConnected = false;
                 Status = ServiceStatus.Error;
                 StatusMessage = exception.Message;
+                MarkSensorsOffline();
 
                 try
                 {
@@ -345,6 +356,34 @@ public partial class EcowittGateway : BackgroundService,
         }
     }
 
+    /// <returns>The sensor list, or null when it could not be read, so that the poll keeps the current sensors.</returns>
+    private async Task<EcowittSensorInfo[]?> TryGetSensorsInfoAsync(EcowittClient client, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var sensorsInfo = await client.GetSensorsInfoAsync(cancellationToken);
+            _isSensorListFailing = false;
+            return sensorsInfo;
+        }
+        catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            if (!_isSensorListFailing)
+            {
+                _logger.LogWarning(exception,
+                    "Ecowitt gateway {HostAddress} sensor list could not be read, the sensors keep their last state", HostAddress);
+            }
+
+            _isSensorListFailing = true;
+            return null;
+        }
+    }
+
+    internal void MarkSensorsOffline()
+    {
+        foreach (var sensor in Sensors.Values)
+            sensor.MarkOffline();
+    }
+
     internal async Task SaveConfigurationAsync(CancellationToken cancellationToken)
     {
         var configurationWriter = this.TryGetFirstParent<IConfigurationWriter>();
@@ -369,11 +408,14 @@ public partial class EcowittGateway : BackgroundService,
     /// <returns>Whether the configuration changed and needs to be saved.</returns>
     internal bool Update(EcowittLiveData data, EcowittSensorInfo[]? sensorsInfo = null)
     {
-        var now = DateTimeOffset.UtcNow;
+        var now = Clock.GetUtcNow();
+        _hiddenSensors = HiddenSensors;
 
-        // Sensors owns the sensor subjects, so it adds them before the readings refer to them in Sources.
-        if (sensorsInfo != null)
-            UpdateSensors(sensorsInfo, now);
+        // A sensor takes the context of the parent that attaches it first as fallback, and releases the fallback
+        // with the parent that detaches it last. So Sensors adds a sensor before any Sources refers to it and drops
+        // it only after every Sources has. This holds while the gateway is attached during the update; attaching an
+        // already populated gateway attaches its properties in hash order (#803 and #501 remove this dependency).
+        var sensors = sensorsInfo != null ? UpdateSensors(sensorsInfo, now) : Sensors;
 
         // Single-instance sensors: create on first discovery, mutate in-place
         if (data.Outdoor != null && !IsSensorHidden("outdoor"))
@@ -472,14 +514,16 @@ public partial class EcowittGateway : BackgroundService,
         UpdateCo2Sensors(data.Co2, now);
         UpdateLeakSensors(data.Leaks, now);
 
-        // In the same update as UpdateSensors, so that a removed sensor leaves every collection at once and detaches.
-        UpdateSources();
+        UpdateSources(sensors);
+        if (!ReferenceEquals(Sensors, sensors))
+            Sensors = sensors;
 
         IsConnected = true;
         return configChanged;
     }
 
-    private void UpdateSensors(EcowittSensorInfo[] sensorsInfo, DateTimeOffset now)
+    /// <returns>The sensors after the update, which Update assigns to Sensors after the sources.</returns>
+    private Dictionary<string, EcowittSensor> UpdateSensors(EcowittSensorInfo[] sensorsInfo, DateTimeOffset now)
     {
         var current = Sensors;
         var isChanged = false;
@@ -522,8 +566,31 @@ public partial class EcowittGateway : BackgroundService,
                 next[sensorId] = sensor;
         }
 
-        if (isChanged)
+        if (!isChanged)
+            return current;
+
+        var hasAddedSensors = false;
+        var hasRemovedSensors = false;
+        foreach (var sensorId in next.Keys)
+            hasAddedSensors |= !current.ContainsKey(sensorId);
+        foreach (var sensorId in current.Keys)
+            hasRemovedSensors |= !next.ContainsKey(sensorId);
+
+        if (!hasRemovedSensors)
+        {
             Sensors = next;
+        }
+        else if (hasAddedSensors)
+        {
+            // Update assigns next once the removed sensors have left their Sources; until then the added ones join
+            // the removed ones, so that Sensors still attaches them before any Sources.
+            var union = new Dictionary<string, EcowittSensor>(current, StringComparer.Ordinal);
+            foreach (var (sensorId, sensor) in next)
+                union[sensorId] = sensor;
+            Sensors = union;
+        }
+
+        return next;
     }
 
     private bool ContainsVisibleSensor(EcowittSensorInfo[] sensorsInfo, string sensorId)
@@ -546,6 +613,9 @@ public partial class EcowittGateway : BackgroundService,
     /// </summary>
     private bool IsSensorHidden(int typeCode)
     {
+        if (_hiddenSensors.Length == 0)
+            return false;
+
         if (EcowittSensorTypes.TryGetChannelSlot(typeCode, out var reading, out var channel))
             return IsSensorHidden(GetHiddenSensorKey(reading, channel));
 
@@ -589,40 +659,40 @@ public partial class EcowittGateway : BackgroundService,
         _ => throw new ArgumentOutOfRangeException(nameof(reading), reading, null)
     };
 
-    private void UpdateSources()
+    private void UpdateSources(Dictionary<string, EcowittSensor> sensors)
     {
         if (OutdoorSensor != null)
-            OutdoorSensor.Sources = SelectSources(OutdoorSensor.Sources, EcowittReading.Outdoor, 0);
+            OutdoorSensor.Sources = SelectSources(sensors, OutdoorSensor.Sources, EcowittReading.Outdoor, 0);
         if (IndoorSensor != null)
-            IndoorSensor.Sources = SelectSources(IndoorSensor.Sources, EcowittReading.Indoor, 0);
+            IndoorSensor.Sources = SelectSources(sensors, IndoorSensor.Sources, EcowittReading.Indoor, 0);
         if (RainGauge != null)
-            RainGauge.Sources = SelectSources(RainGauge.Sources, EcowittReading.Rain, 0);
+            RainGauge.Sources = SelectSources(sensors, RainGauge.Sources, EcowittReading.Rain, 0);
         if (PiezoRainGauge != null)
-            PiezoRainGauge.Sources = SelectSources(PiezoRainGauge.Sources, EcowittReading.PiezoRain, 0);
+            PiezoRainGauge.Sources = SelectSources(sensors, PiezoRainGauge.Sources, EcowittReading.PiezoRain, 0);
         if (LightningSensor != null)
-            LightningSensor.Sources = SelectSources(LightningSensor.Sources, EcowittReading.Lightning, 0);
+            LightningSensor.Sources = SelectSources(sensors, LightningSensor.Sources, EcowittReading.Lightning, 0);
 
         foreach (var sensor in ChannelSensors)
-            sensor.Sources = SelectSources(sensor.Sources, EcowittReading.Channel, sensor.Channel);
+            sensor.Sources = SelectSources(sensors, sensor.Sources, EcowittReading.Channel, sensor.Channel);
         foreach (var sensor in SoilMoistureSensors)
-            sensor.Sources = SelectSources(sensor.Sources, EcowittReading.SoilMoisture, sensor.Channel);
+            sensor.Sources = SelectSources(sensors, sensor.Sources, EcowittReading.SoilMoisture, sensor.Channel);
         foreach (var sensor in LeafWetnessSensors)
-            sensor.Sources = SelectSources(sensor.Sources, EcowittReading.LeafWetness, sensor.Channel);
+            sensor.Sources = SelectSources(sensors, sensor.Sources, EcowittReading.LeafWetness, sensor.Channel);
         foreach (var sensor in TemperatureSensors)
-            sensor.Sources = SelectSources(sensor.Sources, EcowittReading.Temperature, sensor.Channel);
+            sensor.Sources = SelectSources(sensors, sensor.Sources, EcowittReading.Temperature, sensor.Channel);
         foreach (var sensor in Pm25Sensors)
-            sensor.Sources = SelectSources(sensor.Sources, EcowittReading.Pm25, sensor.Channel);
+            sensor.Sources = SelectSources(sensors, sensor.Sources, EcowittReading.Pm25, sensor.Channel);
         foreach (var sensor in LeakSensors)
-            sensor.Sources = SelectSources(sensor.Sources, EcowittReading.Leak, sensor.Channel);
+            sensor.Sources = SelectSources(sensors, sensor.Sources, EcowittReading.Leak, sensor.Channel);
     }
 
     /// <returns>The current sources when unchanged, else a new dictionary with the sensors that feed the reading.</returns>
-    private Dictionary<string, EcowittSensor> SelectSources(
-        Dictionary<string, EcowittSensor> current, EcowittReading reading, int channel)
+    private static Dictionary<string, EcowittSensor> SelectSources(
+        Dictionary<string, EcowittSensor> sensors, Dictionary<string, EcowittSensor> current, EcowittReading reading, int channel)
     {
         var count = 0;
         var isChanged = false;
-        foreach (var (sensorId, sensor) in Sensors)
+        foreach (var (sensorId, sensor) in sensors)
         {
             if (!IsSource(sensor.TypeCode, reading, channel))
                 continue;
@@ -636,7 +706,7 @@ public partial class EcowittGateway : BackgroundService,
             return current;
 
         var next = new Dictionary<string, EcowittSensor>(count, StringComparer.Ordinal);
-        foreach (var (sensorId, sensor) in Sensors)
+        foreach (var (sensorId, sensor) in sensors)
         {
             if (IsSource(sensor.TypeCode, reading, channel))
                 next[sensorId] = sensor;
@@ -820,9 +890,9 @@ public partial class EcowittGateway : BackgroundService,
     }
 
     private bool IsSensorHidden(string sensorKey) =>
-        HiddenSensors.Contains(sensorKey, StringComparer.OrdinalIgnoreCase);
+        _hiddenSensors.Contains(sensorKey, StringComparer.OrdinalIgnoreCase);
 
-    private void ResetState()
+    internal void ResetState()
     {
         OutdoorSensor = null;
         IndoorSensor = null;
