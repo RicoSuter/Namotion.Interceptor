@@ -81,7 +81,7 @@ A widget with a `Label` argument shows the label that is set. Without it, a widg
 
 ## Text with Values
 
-The `Label` of a [ValueTile](value-tile.md), a [Gauge](gauge.md), a [Control](control.md), a [Switch](switch.md) and a row of a [ValueList](value-list.md), the `Subtitle` of a `Switch`, and the `Title` and the `Subtitle` of a [Card](card.md) can show values with expressions between double braces, as the text of a page does:
+The `Label` of a [ValueTile](value-tile.md), a [Gauge](gauge.md), a [Control](control.md), a [Switch](switch.md) and a row of a [ValueList](value-list.md), the `Subtitle` of a `Switch` and a `ValueTile`, and the `Title` and the `Subtitle` of a [Card](card.md) can show values with expressions between double braces, as the text of a page does:
 
 <!-- sample: live -->
 ~~~~markdown

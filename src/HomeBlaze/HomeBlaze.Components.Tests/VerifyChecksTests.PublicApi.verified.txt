@@ -932,6 +932,9 @@ namespace HomeBlaze.Components
         [HomeBlaze.Abstractions.Attributes.Configuration]
         [HomeBlaze.Abstractions.Attributes.SubjectPath]
         public string? Path { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        [HomeBlaze.Abstractions.Attributes.TextTemplate]
+        public string? Subtitle { get; set; }
         public string? Title { get; }
         public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
         public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
@@ -1394,6 +1397,8 @@ namespace HomeBlaze.Components.Components
         public bool? Checked { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public HomeBlaze.Components.ValueColor Color { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? Detail { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public bool Disabled { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]

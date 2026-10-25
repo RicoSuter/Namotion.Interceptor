@@ -70,6 +70,12 @@
     line-height: 1.25;
 }
 
+.tile-widget-detail {
+    font-size: calc(var(--place-secondary-text, 1rem) * 0.875);
+    line-height: 1.25;
+    opacity: 0.85;
+}
+
 .tile-widget ::deep .tile-widget-icon {
     font-size: var(--place-icon, 2.5rem);
 }
@@ -122,6 +128,13 @@
 
 @container tile (height < 140px) {
     .tile-widget:has(> .tile-widget-badge) > .tile-widget-face:has(> .tile-widget-label, > .tile-widget-subtitle) ::deep .tile-widget-icon {
+        display: none;
+    }
+}
+
+/* A third line needs the room of one more line, so the icon goes at a higher place. */
+@container tile (height < 150px) {
+    .tile-widget-face:has(> .tile-widget-detail) ::deep .tile-widget-icon {
         display: none;
     }
 }

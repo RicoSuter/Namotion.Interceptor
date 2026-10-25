@@ -1,4 +1,4 @@
-@* A tile that fills its place, with icon, label and subtitle centered. With OnClick it is one click target, with a
+@* A tile that fills its place, with icon, label, subtitle and detail centered. With OnClick it is one click target, with a
    badge (a subject or an icon) over its top right corner and, while it works, a progress circle over its bottom right corner; without OnClick it
    only shows its content and takes no input. The badge and the progress circle are siblings of the button, not inside
    it, so the markup stays valid; they take no pointer input, so a click on them reaches the button below. The style is
@@ -73,6 +73,9 @@
 
     [Parameter] public string? Subtitle { get; set; }
 
+    /// <summary>A third line below the subtitle, smaller than it.</summary>
+    [Parameter] public string? Detail { get; set; }
+
     /// <summary>The icon as resolved by <see cref="MudBlazorIconResolver"/>, or null for none.</summary>
     [Parameter] public string? Icon { get; set; }
 
@@ -110,6 +113,10 @@
         @if (!string.IsNullOrEmpty(Subtitle))
         {
             <span class="tile-widget-subtitle" data-testid="tile-subtitle">@Subtitle</span>
+        }
+        @if (!string.IsNullOrEmpty(Detail))
+        {
+            <span class="tile-widget-detail" data-testid="tile-detail">@Detail</span>
         }
     }
 }
