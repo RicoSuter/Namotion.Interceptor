@@ -284,19 +284,35 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
             "and nothing was changed by this waiting operation; the holder was not aborted.");
     }
 
-    /// <summary>Releases what <see cref="EnterGate"/> took. A struct, so the using costs nothing.</summary>
-    private readonly struct GateScope(LifecycleInterceptor lifecycle) : IDisposable
+    /// <summary>
+    /// Releases what <see cref="EnterGate"/> took, after draining the queued callbacks when this is the
+    /// outermost scope. Call exactly one of the two exits, as
+    /// <c>try { work } catch (Exception failure) { gate.ExitAfterFailure(failure); throw; } gate.Exit();</c>.
+    /// </summary>
+    /// <remarks>
+    /// Not disposable, so it cannot be exited from a using or finally block: the drain rethrows callback
+    /// failures, and .NET 10.0.0 and 10.0.1 skip the catch blocks of the callers for an exception that
+    /// leaves a finally block run on the normal path while a catch block is executing further up the stack.
+    /// </remarks>
+    private readonly struct GateScope(LifecycleInterceptor lifecycle)
     {
-        public void Dispose()
+        public void Exit()
         {
             lifecycle.ExitGate();
         }
 
-        public void DrainOnFailure(Exception operationFailure)
+        public void ExitAfterFailure(Exception operationFailure)
         {
-            if (_heldGateCount == 1)
+            try
             {
-                lifecycle._notifier.Drain(operationFailure);
+                if (_heldGateCount == 1)
+                {
+                    lifecycle._notifier.Drain(operationFailure);
+                }
+            }
+            finally
+            {
+                lifecycle.ReleaseGate();
             }
         }
     }
@@ -337,10 +353,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     [MethodImpl(MethodImplOptions.NoInlining)]
     private void WriteStructuralProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
-        var property = context.Property;
-        var metadata = property.Metadata;
-        var subject = property.Subject;
-        if (!ReferenceEquals(subject.Executor.AttachedContext, _context))
+        if (!ReferenceEquals(context.Property.Subject.Executor.AttachedContext, _context))
         {
             // Not this lifecycle's subject: either unattached, or owned by another context whose own
             // lifecycle reconciles this write.
@@ -351,62 +364,68 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         var gate = EnterGate();
         try
         {
-            if (_graph.IsReleasing(subject))
+            WriteStructuralPropertyUnderGate(ref context, next);
+        }
+        catch (Exception operationFailure)
+        {
+            gate.ExitAfterFailure(operationFailure);
+            throw;
+        }
+
+        gate.Exit();
+    }
+
+    private void WriteStructuralPropertyUnderGate<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+    {
+        var property = context.Property;
+        var metadata = property.Metadata;
+        var subject = property.Subject;
+        if (_graph.IsReleasing(subject))
+        {
+            next(ref context);
+            return;
+        }
+
+        var claimed = LifecycleScratch.RentSubjectList();
+        try
+        {
+            ClaimProposedComponent(metadata.Type, context.NewValue, claimed);
+            if (!_graph.IsOwned(subject) || _graph.IsEvaluatingSeedingGetter(property))
             {
+                // The enclosing seed getter supplies the stored value after this setter returns.
+                // Rereading it here recursively invokes a getter that writes its own property.
                 next(ref context);
                 return;
             }
 
-            var claimed = LifecycleScratch.RentSubjectList();
             try
             {
-                ClaimProposedComponent(metadata.Type, context.NewValue, claimed);
-                if (!_graph.IsOwned(subject) || _graph.IsEvaluatingSeedingGetter(property))
-                {
-                    // The enclosing seed getter supplies the stored value after this setter returns.
-                    // Rereading it here recursively invokes a getter that writes its own property.
-                    next(ref context);
-                    return;
-                }
-
+                next(ref context);
+            }
+            catch (Exception writeException) when (context.IsWritten)
+            {
+                // A downstream interceptor can throw after the terminal committed its value.
                 try
                 {
-                    next(ref context);
+                    ReconcileStoredValue(ref context, metadata, claimed);
                 }
-                catch (Exception writeException) when (context.IsWritten)
+                catch (Exception reconciliationException)
                 {
-                    // A downstream interceptor can throw after the terminal committed its value.
-                    try
-                    {
-                        ReconcileStoredValue(ref context, metadata, claimed);
-                    }
-                    catch (Exception reconciliationException)
-                    {
-                        throw new AggregateException("The write and its lifecycle reconciliation both failed.",
-                            writeException, reconciliationException);
-                    }
-
-                    throw;
+                    throw new AggregateException("The write and its lifecycle reconciliation both failed.",
+                        writeException, reconciliationException);
                 }
 
-                ReconcileStoredValue(ref context, metadata, claimed);
+                throw;
             }
-            finally
-            {
-                // Claims that never became ownership are handed back; see
-                // OwnershipGraph.ReleaseUnusedClaims for what leaves them behind.
-                _graph.ReleaseUnusedClaims(claimed);
-                LifecycleScratch.Return(claimed);
-            }
-        }
-        catch (Exception operationFailure)
-        {
-            gate.DrainOnFailure(operationFailure);
-            throw;
+
+            ReconcileStoredValue(ref context, metadata, claimed);
         }
         finally
         {
-            gate.Dispose();
+            // Claims that never became ownership are handed back; see
+            // OwnershipGraph.ReleaseUnusedClaims for what leaves them behind.
+            _graph.ReleaseUnusedClaims(claimed);
+            LifecycleScratch.Return(claimed);
         }
     }
 
@@ -504,44 +523,49 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         // enumerated and before anything blocks. A same-lifecycle callback re-enters this gate and
         // is the supported dynamic-property-initializer case.
         var gate = EnterGate();
+        bool added;
         try
         {
-            var subject = registration.Subject;
-            if (!ReferenceEquals(subject.Executor.AttachedContext, _context))
-            {
-                // The attachment moved between the caller's routing read and the gate; the caller
-                // re-routes against the fresh attachment.
-                return false;
-            }
-
-            registration.GetProperties();
-            if (!ReferenceEquals(subject.Executor.AttachedContext, _context))
-            {
-                return false;
-            }
-
-            if (_graph.IsOwned(subject))
-            {
-                _admission.Admit(registration);
-            }
-            else
-            {
-                // A claimed subject may never be published, and a releasing subject has no
-                // descent left. Only a future ownership entry may seed these new properties.
-                registration.Publish();
-            }
-
-            return true;
+            added = TryAddPropertiesUnderGate(registration);
         }
         catch (Exception operationFailure)
         {
-            gate.DrainOnFailure(operationFailure);
+            gate.ExitAfterFailure(operationFailure);
             throw;
         }
-        finally
+
+        gate.Exit();
+        return added;
+    }
+
+    private bool TryAddPropertiesUnderGate(SubjectPropertyRegistration registration)
+    {
+        var subject = registration.Subject;
+        if (!ReferenceEquals(subject.Executor.AttachedContext, _context))
         {
-            gate.Dispose();
+            // The attachment moved between the caller's routing read and the gate; the caller
+            // re-routes against the fresh attachment.
+            return false;
         }
+
+        registration.GetProperties();
+        if (!ReferenceEquals(subject.Executor.AttachedContext, _context))
+        {
+            return false;
+        }
+
+        if (_graph.IsOwned(subject))
+        {
+            _admission.Admit(registration);
+        }
+        else
+        {
+            // A claimed subject may never be published, and a releasing subject has no
+            // descent left. Only a future ownership entry may seed these new properties.
+            registration.Publish();
+        }
+
+        return true;
     }
 
     #endregion
@@ -584,89 +608,92 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         var gate = EnterGate();
         try
         {
-            var executor = subject.Executor;
-            executor.TryGetAttachment(out var attachedContext, out var currentAnchor, out var rootAttachmentRevision);
-            InterceptorSubjectExtensions.ValidateRootAnchor(attachedContext, currentAnchor, context, anchor);
-
-            if (attachedContext is not null)
-            {
-                if (anchor == SubjectAttachmentAnchorKind.Provisional)
-                {
-                    return;
-                }
-
-                _graph.SetAnchor(subject, anchor);
-                if (!_graph.IsReleasing(subject))
-                {
-                    // Anchoring reaches an already owned subject without recording an edge, so this
-                    // is the one route that has to resume a failed seed itself.
-                    executor.TryGetAttachment(out _, out _, out var anchoredRevision);
-                    try
-                    {
-                        _attach.ResumeFailedSeed(subject);
-                    }
-                    catch
-                    {
-                        // The anchor is committed before the resume runs user code, so leaving it
-                        // behind would make the caller's retry read as a second explicit attach and
-                        // be rejected as one. The revision guard leaves an anchor the resume itself
-                        // installed alone, exactly as the rejected-attach rollback does.
-                        executor.TryUpdateAttachment(anchoredRevision, context, currentAnchor, out _);
-                        throw;
-                    }
-
-                    return;
-                }
-
-                // A retained teardown claim needs the same seeding rollback and consumed-anchor
-                // tracking as a fresh attach, because a resurrection getter can reject its graph.
-            }
-
-            var claimed = LifecycleScratch.RentSubjectList();
-            var consumedAnchors = LifecycleScratch.RentConsumedAnchorList();
-
-            // Saved and restored rather than assumed null: user code the seed invokes at callback
-            // depth zero can attach another root, and each attach hands back only what it consumed.
-            var enclosingConsumedAnchors = _attach.ConsumedAnchors;
-            _attach.ConsumedAnchors = consumedAnchors;
-
-            var published = false;
-            try
-            {
-                ClaimComponentForRoot(subject, anchor, claimed);
-                executor.TryGetAttachment(out _, out _, out rootAttachmentRevision);
-                _attach.AttachRoot(subject);
-                published = true;
-            }
-            finally
-            {
-                _attach.ConsumedAnchors = enclosingConsumedAnchors;
-                if (published)
-                {
-                    // Seeding rereads what discovery read, so a structural getter that answers
-                    // differently across the two, or a concurrent write landing in the window
-                    // before the claim, leaves a claimed subject no edge points at. It would be
-                    // attached, unowned and out of reach of every release; handing it back is the
-                    // compensation the write path already applies to the same residue.
-                    _graph.ReleaseUnusedClaims(claimed);
-                }
-                else
-                {
-                    RollbackRejectedAttach(subject, anchor, rootAttachmentRevision, claimed, consumedAnchors);
-                }
-
-                LifecycleScratch.Return(claimed);
-                LifecycleScratch.Return(consumedAnchors);
-            }
+            AttachUnderGate(subject, context, anchor);
         }
         catch (Exception operationFailure)
         {
-            gate.DrainOnFailure(operationFailure);
+            gate.ExitAfterFailure(operationFailure);
             throw;
+        }
+
+        gate.Exit();
+    }
+
+    private void AttachUnderGate(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectAttachmentAnchorKind anchor)
+    {
+        var executor = subject.Executor;
+        executor.TryGetAttachment(out var attachedContext, out var currentAnchor, out var rootAttachmentRevision);
+        InterceptorSubjectExtensions.ValidateRootAnchor(attachedContext, currentAnchor, context, anchor);
+
+        if (attachedContext is not null)
+        {
+            if (anchor == SubjectAttachmentAnchorKind.Provisional)
+            {
+                return;
+            }
+
+            _graph.SetAnchor(subject, anchor);
+            if (!_graph.IsReleasing(subject))
+            {
+                // Anchoring reaches an already owned subject without recording an edge, so this
+                // is the one route that has to resume a failed seed itself.
+                executor.TryGetAttachment(out _, out _, out var anchoredRevision);
+                try
+                {
+                    _attach.ResumeFailedSeed(subject);
+                }
+                catch
+                {
+                    // The anchor is committed before the resume runs user code, so leaving it
+                    // behind would make the caller's retry read as a second explicit attach and
+                    // be rejected as one. The revision guard leaves an anchor the resume itself
+                    // installed alone, exactly as the rejected-attach rollback does.
+                    executor.TryUpdateAttachment(anchoredRevision, context, currentAnchor, out _);
+                    throw;
+                }
+
+                return;
+            }
+
+            // A retained teardown claim needs the same seeding rollback and consumed-anchor
+            // tracking as a fresh attach, because a resurrection getter can reject its graph.
+        }
+
+        var claimed = LifecycleScratch.RentSubjectList();
+        var consumedAnchors = LifecycleScratch.RentConsumedAnchorList();
+
+        // Saved and restored rather than assumed null: user code the seed invokes at callback
+        // depth zero can attach another root, and each attach hands back only what it consumed.
+        var enclosingConsumedAnchors = _attach.ConsumedAnchors;
+        _attach.ConsumedAnchors = consumedAnchors;
+
+        var published = false;
+        try
+        {
+            ClaimComponentForRoot(subject, anchor, claimed);
+            executor.TryGetAttachment(out _, out _, out rootAttachmentRevision);
+            _attach.AttachRoot(subject);
+            published = true;
         }
         finally
         {
-            gate.Dispose();
+            _attach.ConsumedAnchors = enclosingConsumedAnchors;
+            if (published)
+            {
+                // Seeding rereads what discovery read, so a structural getter that answers
+                // differently across the two, or a concurrent write landing in the window
+                // before the claim, leaves a claimed subject no edge points at. It would be
+                // attached, unowned and out of reach of every release; handing it back is the
+                // compensation the write path already applies to the same residue.
+                _graph.ReleaseUnusedClaims(claimed);
+            }
+            else
+            {
+                RollbackRejectedAttach(subject, anchor, rootAttachmentRevision, claimed, consumedAnchors);
+            }
+
+            LifecycleScratch.Return(claimed);
+            LifecycleScratch.Return(consumedAnchors);
         }
     }
 
@@ -768,32 +795,35 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         var gate = EnterGate();
         try
         {
-            var executor = subject.Executor;
-            executor.TryGetAttachment(out var attachedContext, out var anchor, out _);
-            InterceptorSubjectExtensions.ValidateDetach(attachedContext, anchor, context);
-
-            _graph.SetAnchor(subject, SubjectAttachmentAnchorKind.None);
-
-            var ownership = _graph.TryGetOwnership(subject);
-            if (ownership is null)
-            {
-                _graph.ReleaseClaim(subject);
-                return;
-            }
-
-            if (ownership.IncomingCount == 0 || !_reachability.IsAnchorReachable(subject, null))
-            {
-                _release.ReleaseRoot(subject);
-            }
+            DetachUnderGate(subject, context);
         }
         catch (Exception operationFailure)
         {
-            gate.DrainOnFailure(operationFailure);
+            gate.ExitAfterFailure(operationFailure);
             throw;
         }
-        finally
+
+        gate.Exit();
+    }
+
+    private void DetachUnderGate(IInterceptorSubject subject, IInterceptorSubjectContext context)
+    {
+        var executor = subject.Executor;
+        executor.TryGetAttachment(out var attachedContext, out var anchor, out _);
+        InterceptorSubjectExtensions.ValidateDetach(attachedContext, anchor, context);
+
+        _graph.SetAnchor(subject, SubjectAttachmentAnchorKind.None);
+
+        var ownership = _graph.TryGetOwnership(subject);
+        if (ownership is null)
         {
-            gate.Dispose();
+            _graph.ReleaseClaim(subject);
+            return;
+        }
+
+        if (ownership.IncomingCount == 0 || !_reachability.IsAnchorReachable(subject, null))
+        {
+            _release.ReleaseRoot(subject);
         }
     }
 
@@ -870,14 +900,24 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     /// <returns>True when the subject was attached and the callback ran.</returns>
     public bool TryRunWhileAttached(IInterceptorSubject subject, Action whenAttached)
     {
-        using var gate = EnterGate();
-        if (!_graph.IsOwned(subject))
+        var gate = EnterGate();
+        bool attached;
+        try
         {
-            return false;
+            attached = _graph.IsOwned(subject);
+            if (attached)
+            {
+                whenAttached();
+            }
+        }
+        catch (Exception operationFailure)
+        {
+            gate.ExitAfterFailure(operationFailure);
+            throw;
         }
 
-        whenAttached();
-        return true;
+        gate.Exit();
+        return attached;
     }
 
     #endregion

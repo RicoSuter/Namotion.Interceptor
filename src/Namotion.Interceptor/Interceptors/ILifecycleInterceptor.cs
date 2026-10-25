@@ -40,9 +40,16 @@ public interface ILifecycleInterceptor :
     void EnterStructuralWriteGate();
 
     /// <summary>
-    /// Exits the gate entered by <see cref="EnterStructuralWriteGate"/>. Call from a finally block
-    /// paired with that enter.
+    /// Exits the gate entered by <see cref="EnterStructuralWriteGate"/>. Call exactly once per enter,
+    /// also when the guarded operation throws. Throws the failures of the lifecycle callbacks that
+    /// the outermost exit runs.
     /// </summary>
+    /// <remarks>
+    /// Call it after the guarded operation rather than from a finally block, and from a catch block
+    /// when the operation throws: .NET 10.0.0 and 10.0.1 skip the catch blocks of the callers for an
+    /// exception that leaves a finally block run on the normal path while a catch block is executing
+    /// further up the stack.
+    /// </remarks>
     void ExitStructuralWriteGate();
 
     /// <summary>
