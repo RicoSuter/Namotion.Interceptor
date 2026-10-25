@@ -147,7 +147,8 @@ public enum StateUnit
     VoltAmpereHour,         // 2.5 kVAh (apparent energy)
     VoltAmpereReactiveHour, // 2.5 kvarh (reactive energy)
     AmpereHour,             // 50 Ah (charge, battery capacity)
-    WattPerSquareMeter      // 850 W/m² (irradiance)
+    WattPerSquareMeter,     // 850 W/m² (irradiance)
+    DecibelMilliwatt        // -75 dBm (received signal strength)
 }
 ```
 

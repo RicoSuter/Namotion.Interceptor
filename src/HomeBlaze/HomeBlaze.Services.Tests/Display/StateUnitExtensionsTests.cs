@@ -41,6 +41,8 @@ public class StateUnitExtensionsTests
     [InlineData(StateUnit.AmpereHour, 50, "50 Ah")]
     [InlineData(StateUnit.AmpereHour, 1500, "1.5 kAh")]
     [InlineData(StateUnit.WattPerSquareMeter, 850, "850 W/m²")]
+    [InlineData(StateUnit.DecibelMilliwatt, -75, "-75 dBm")]
+    [InlineData(StateUnit.DecibelMilliwatt, -1500, "-1500 dBm")]
     [InlineData(StateUnit.WattHour, 10500, "10.5 kWh")]
     [InlineData(StateUnit.WattHour, 500, "500 Wh")]
     [InlineData(StateUnit.KilowattHour, 0.8, "800 Wh")]
