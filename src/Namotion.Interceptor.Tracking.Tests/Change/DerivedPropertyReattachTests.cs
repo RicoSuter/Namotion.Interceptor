@@ -101,6 +101,60 @@ public class DerivedPropertyReattachTests
     }
 
     [Fact]
+    public async Task WhenSourceIsMovedWhileADependentWaitsToRegisterOnIt_ThenTheDependencyIsKept()
+    {
+        // Arrange
+        var changes = new List<SubjectPropertyChange>();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking();
+
+        var holder = new UntrackedReferenceHolder(context);
+        var leaf = new UntrackedReferenceLeaf();
+        holder.First = leaf;
+        holder.Watched = leaf;
+
+        var valueProperty = new PropertyReference(leaf, nameof(UntrackedReferenceLeaf.Value));
+        var observedProperty = new PropertyReference(holder, nameof(UntrackedReferenceHolder.Observed));
+        var valueData = valueProperty.TryGetDerivedPropertyData()!;
+
+        // Act: Observed's recalculation fetches the leaf's data, then waits for its lock while the leaf moves.
+        Thread? writerThread = null;
+        Task writer;
+        Monitor.Enter(valueData);
+        try
+        {
+            writer = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
+            {
+                writerThread = Thread.CurrentThread;
+                holder.Trigger = 1;
+            });
+
+            Assert.True(SpinWait.SpinUntil(
+                () => writerThread is not null && (writerThread.ThreadState & ThreadState.WaitSleepJoin) != 0,
+                TimeSpan.FromSeconds(10)));
+
+            holder.First = null;
+            holder.Second = leaf;
+        }
+        finally
+        {
+            Monitor.Exit(valueData);
+        }
+
+        await writer.WaitAsync(TimeSpan.FromSeconds(10));
+
+        context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(changes.Add);
+        leaf.Value = 5;
+
+        // Assert
+        Assert.Contains(valueProperty, observedProperty.GetRequiredProperties().ToArray());
+        Assert.Contains(changes, change => change.Property == observedProperty && change.GetNewValue<int>() == 5);
+    }
+
+    [Fact]
     public void WhenSubjectIsDetached_ThenItsTrackingDataIsRemoved()
     {
         // Arrange

@@ -254,13 +254,9 @@ internal sealed class DerivedPropertyData
         var liveCount = 0;
         for (var i = 0; i < newItems.Length; i++)
         {
-            // Data that vanished since TryAddNewUsedByProperties fetched it was removed by a detach.
-            var dependencyData = newItems[i].TryGetDerivedPropertyData();
-            if (dependencyData is null)
-            {
-                continue;
-            }
-
+            // Fetched again, not reused: a detach may have removed the data since it was skipped, and a
+            // dependency attached again since then must register on its fresh data, not be dropped.
+            var dependencyData = newItems[i].GetDerivedPropertyData();
             lock (dependencyData)
             {
                 if (dependencyData.IsAttached)

@@ -67,6 +67,7 @@ public class DerivedAttributeReattachTests
         Assert.Contains(changes, change => change.Property == computedA.Reference && change.GetNewValue<int>() == 20);
         Assert.Contains(changes, change => change.Property == computedB.Reference && change.GetNewValue<int>() == 30);
     }
+
     [Fact]
     public void WhenOuterRuntimeDerivedPropertyIsReattachedBeforeTheInnerOne_ThenItStillFollowsTheInnerOne()
     {
