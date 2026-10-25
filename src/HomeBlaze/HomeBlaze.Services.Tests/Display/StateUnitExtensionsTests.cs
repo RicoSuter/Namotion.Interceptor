@@ -25,6 +25,11 @@ public class StateUnitExtensionsTests
     }
 
     [Theory]
+    [InlineData(StateUnit.Watt, 0, "0 W")]
+    [InlineData(StateUnit.Kilometer, 0, "0 km")]
+    [InlineData(StateUnit.Meter, 0, "0 m")]
+    [InlineData(StateUnit.KilowattHour, 0, "0 kWh")]
+    [InlineData(StateUnit.Byte, 0, "0 B")]
     [InlineData(StateUnit.Watt, 500, "500 W")]
     [InlineData(StateUnit.Watt, 1500, "1.5 kW")]
     [InlineData(StateUnit.Watt, 1000, "1 kW")]
@@ -96,6 +101,23 @@ public class StateUnitExtensionsTests
         Assert.True(isScaled);
         Assert.Equal(expectedSuffix, suffix);
         Assert.Equal(Convert.ToDecimal(expectedFactor), factor);
+    }
+
+    [Theory]
+    [InlineData(StateUnit.Kilometer, "km")]
+    [InlineData(StateUnit.Meter, "m")]
+    [InlineData(StateUnit.Millimeter, "mm")]
+    [InlineData(StateUnit.Watt, "W")]
+    [InlineData(StateUnit.KilowattHour, "kWh")]
+    public void WhenAZeroIsScaled_ThenItStaysInTheUnitOfTheProperty(StateUnit unit, string expectedSuffix)
+    {
+        // Act
+        var isScaled = StateUnitExtensions.TryGetScaledUnit(unit, 0m, out var suffix, out var factor);
+
+        // Assert
+        Assert.True(isScaled);
+        Assert.Equal(expectedSuffix, suffix);
+        Assert.Equal(1m, factor);
     }
 
     [Fact]
