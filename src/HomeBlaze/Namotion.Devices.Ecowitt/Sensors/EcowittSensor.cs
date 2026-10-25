@@ -68,9 +68,9 @@ public partial class EcowittSensor :
     public partial int? SignalStrength { get; internal set; }
 
     /// <summary>
-    /// Gets the received signal strength in dBm.
+    /// Gets the received signal strength.
     /// </summary>
-    [State]
+    [State(Unit = StateUnit.DecibelMilliwatt)]
     [Category("Signal")]
     public partial int? Rssi { get; internal set; }
 

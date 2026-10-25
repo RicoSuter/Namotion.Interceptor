@@ -265,6 +265,7 @@ public static class StateUnitExtensions
         StateUnit.VoltAmpereReactiveHour => ("varh", true),
         StateUnit.AmpereHour => ("Ah", true),
         StateUnit.WattPerSquareMeter => ("W/m²", true),
+        StateUnit.DecibelMilliwatt => ("dBm", true),
         _ => null
     };
 
