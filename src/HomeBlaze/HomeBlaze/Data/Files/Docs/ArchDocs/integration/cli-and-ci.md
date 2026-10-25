@@ -66,7 +66,7 @@ Subject: /Repository/hosts/Orders.Worker
 Source: ../src/Orders.Worker/Orders.Worker.csproj
 Analyzer: rules.md block hostsHaveService (/rules.md/hostsHaveService)
 Fix: Update a Service's componentSources to include this Host, adjust its
-     membership analyzer, or define the missing Service.
+     membership query, or define the missing Service.
 Help: rules.md#host-assignment
 ```
 
@@ -91,7 +91,7 @@ JSON output should carry structured fields with equivalent information. This ill
       "sourceLocation": { "path": "../src/Orders.Worker/Orders.Worker.csproj" },
       "analyzerLocation": { "path": "rules.md", "block": "hostsHaveService" },
       "remediation": {
-        "message": "Update a Service's componentSources to include the Host, adjust its membership analyzer, or define the missing Service.",
+        "message": "Update a Service's componentSources to include the Host, adjust its membership query, or define the missing Service.",
         "documentationPath": "rules.md#host-assignment"
       }
     }

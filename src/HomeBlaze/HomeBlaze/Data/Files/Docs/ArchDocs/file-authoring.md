@@ -19,9 +19,9 @@ Existing JSON files, Markdown, sidecars, and explicit blocks provide text author
 - Use descriptive property names, type identifiers, relationship kinds, filenames, and declared child names. Avoid compact encodings that require the renderer or runtime object inspection to interpret.
 - Type discriminators must identify the domain concept clearly and have a documented mapping to its schema. Do not require assembly versions, process-specific identifiers, or generated UI state to understand a type. Exact type names and any readable aliases remain schema decisions.
 - References must have a documented, predictable interpretation from the authored files and the declared source/mount scope. Show the target definition or how discovery produces it. Keep file links, source locations, subject references, and wildcard selections visibly distinguishable in the reference documentation.
-- Prefer meaningful named identities where appropriate. When an opaque stable identifier is necessary, retain a readable name and make its definition/reference discoverable. Do not make ordering or a display label the hidden identity analyzer.
+- Prefer meaningful named identities where appropriate. When an opaque stable identifier is necessary, retain a readable name and make its definition/reference discoverable. Do not make ordering or a display label the hidden identity rule.
 - State defaults, units, allowed values, optional fields, and absent-versus-empty meaning in the element specification. Examples must not depend on hidden UI defaults or an undocumented selection state.
-- Explain what is authored, discovered, derived, or observed. Generated subject references must be traceable to the owning repository/provider or environment analyzer; no UI-only architecture facts or relationship semantics are allowed.
+- Explain what is authored, discovered, derived, or observed. Generated subject references must be traceable to the owning repository or Environment, with the discovering Provider's provenance where applicable; no UI-only architecture facts or relationship semantics are allowed.
 
 Ordinary Markdown prose, links, and document organization remain useful in a regular editor or renderer. Optional widget blocks and metadata must be understandable in source even when their richer presentation is unavailable. Binary source artifacts can be referenced where necessary, but their authored identity, purpose, provenance, and source relationships must remain readable; they must not become opaque substitutes for the authored architecture model.
 
@@ -60,7 +60,7 @@ The current fully qualified $type names, generated keys, and other reference con
 ## Acceptance checks [Planned]
 
 1. Starting only with the reference and a normal file editor, understand and change a subject's type, logical membership, and relationships without opening HomeBlaze.
-2. Trace a link/reference from its source to an authored definition or a documented discovery analyzer, including a Markdown child and a shared component.
+2. Trace a link/reference from its source to an authored definition or a documented discovery provider, including a Markdown child and a shared component.
 3. Load the edited files and obtain the same model as equivalent UI edits, with authored and generated facts still distinct.
 4. Make one UI edit and review a focused diff that preserves unrelated prose, frontmatter, comments, and unknown metadata.
 5. Diagnose malformed types, fields, selectors, and unresolved references from readable source-located diagnostics, while retaining the original source.

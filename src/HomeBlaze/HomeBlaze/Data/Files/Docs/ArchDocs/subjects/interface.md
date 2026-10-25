@@ -8,7 +8,7 @@ status: Planned
 
 ## Class definition [Planned]
 
-**Interface** is a subject class describing a logical exposed capability and its access mechanism or protocol, independently of an address. It can be exposed by [Services](service.md), [Hosts](host.md), or [Resources](resource.md), reference [Contracts](contract.md), and have environment-specific [Endpoints](endpoint.md). Its defining file or provider owns it; exposure ownership and the canonical authored relationship location remain open.
+**Interface** is a subject class describing a logical exposed capability and its access mechanism or protocol, independently of an address. It can be exposed by [Services](service.md), [Hosts](host.md), or [Resources](resource.md), reference [Contracts](contract.md), and have environment-specific [Endpoints](endpoint.md). Authored Interfaces retain their defining owner; repository-discovered Interfaces belong to the invoking [SourceRepository](source-repository.md). The shared Provider supplies facts and provenance. Exposure relationships and their canonical authored location remain open.
 
 Authored enrichment and relationships use the [existing metadata envelope](../shared/metadata-and-relationships.md), through the defining owner. They are not a second configuration store. Names in the tables are proposed serialized camelCase names; concrete CLR signatures remain open. State properties are read-only to authors.
 

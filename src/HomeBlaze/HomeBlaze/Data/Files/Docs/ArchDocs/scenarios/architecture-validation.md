@@ -16,7 +16,7 @@ The [JSON catalog](json-catalog.md) shows `/Repository` and Services under `/cat
 
 Select `/rules.md/*` to enable that page's tests, `/rules/**` for a nested catalog, or `/**` for every Analyzer in the loaded graph. These are repository `analyzers` path queries, not a separate suite entity. A predefined Host-assignment analyzer requires every discovered Host to appear in at least one Service's direct Host set. This is an explicit team policy; overlapping membership remains valid.
 
-A useful policy document explains that an error's Host path can be added to the appropriate Service's `componentSources`, or that an existing broad selection analyzer should be corrected. Selecting a CodeProject alone does not implicitly select its Host. Link to the canonical [Service](../subjects/service.md), [path queries](../shared/path-queries.md), and [file authoring](../file-authoring.md) syntax so a human or agent can make the intended edit.
+A useful policy document explains that an error's Host path can be added to the appropriate Service's `componentSources`, or that an existing broad selection query should be corrected. Selecting a CodeProject alone does not implicitly select its Host. Link to the canonical [Service](../subjects/service.md), [path queries](../shared/path-queries.md), and [file authoring](../file-authoring.md) syntax so a human or agent can make the intended edit.
 
 ## Add a runnable project
 

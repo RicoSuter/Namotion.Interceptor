@@ -106,7 +106,7 @@ An adjacent descriptor uses `"path": "orders.proto"`. This input does not requir
 
 ## Without authored descriptors
 
-If the descriptors above are absent, the proposed [discovery analyzer](../providers/contract-discovery.md) recognizes the raw files inside the repository scan scope. With exactly one CodeProject source file in `src/Orders.Api`, both Contracts associate with that same project. The repository owns the generated subjects; their names/keys and raw source remain inspectable. No JSON descriptor is written automatically.
+If the descriptors above are absent, the proposed [discovery provider](../providers/contract-discovery.md) recognizes the raw files inside the repository scan scope. With exactly one CodeProject source file in `src/Orders.Api`, both Contracts associate with that same project. The repository owns the generated subjects; their names/keys and raw source remain inspectable. No JSON descriptor is written automatically.
 
 If `openapi.json` moves to `src/Orders.Api/specs`, there is no same-directory project. Discovery keeps it unassociated and reports a diagnostic, even though a project exists in the parent directory. Add an authored descriptor with `path` selecting the moved file and `codeProjectPath` selecting its intended project. The same applies if two project files share the raw document's directory: an explicit typed reference resolves the ambiguity. An unresolved explicit path retains a diagnostic rather than triggering a fallback guess. Plain identifiers and generic subject links remain useful descriptive alternatives without establishing a typed project association.
 

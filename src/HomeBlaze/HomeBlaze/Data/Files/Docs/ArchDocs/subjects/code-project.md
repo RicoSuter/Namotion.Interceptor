@@ -41,7 +41,7 @@ The [Contract](contract.md) owns its optional `codeProjectPath` association and 
 
 **Delivery:** Can be implemented through existing subject and component extension points. The ArchDocs feature itself is not implemented.
 
-**Prerequisites:** SourceRepository and a project provider; optional Contract associations use the Contract's explicit reference or supported discovery analyzer.
+**Prerequisites:** SourceRepository and a project provider; optional Contract associations use the Contract's explicit reference or supported discovery provider.
 
 A CodeProject can contribute to multiple Hosts and Services. Libraries remain CodeProjects. A public programming API can have one or more Contracts without a Host, network Interface, or Endpoint. Basic project XML discovery does not extract public types or members; that is a separate provider capability.
 

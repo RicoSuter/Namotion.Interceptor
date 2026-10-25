@@ -24,7 +24,7 @@ Show discovered code/build dependencies and optional aggregation into logical gr
 ::
 ````
 
-Existing project membership selectors provide reusable grouping rules. A source-folder or namespace analyzer is usable only when its predicate and provider capability are supported; graph-path wildcards do not silently match raw source paths. Grouping aggregates visible facts without duplicating authored project lists.
+Existing project membership selectors provide reusable grouping rules. A source-folder or namespace grouping query is usable only when its predicate and provider capability are supported; graph-path wildcards do not silently match raw source paths. Grouping aggregates visible facts without duplicating authored project lists.
 
 ## Behavior and limits [Planned]
 

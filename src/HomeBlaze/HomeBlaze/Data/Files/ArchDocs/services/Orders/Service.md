@@ -44,7 +44,7 @@ Orders is inside this view's boundary. Payments is a neighboring service in this
 ```json
 {
   "InternalSources": [
-    { "Path": "service" }
+    { "Path": "/ArchDocs/services/Orders/Service.md/service" }
   ],
   "ExternalSources": [
     { "Path": "/ArchDocs/services/Payments/Service.md/service" }

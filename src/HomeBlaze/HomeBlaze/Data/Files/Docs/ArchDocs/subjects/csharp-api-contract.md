@@ -8,7 +8,7 @@ status: Planned
 
 ## Class definition [Planned]
 
-**CSharpApiContract** is a subject class derived from [Contract](contract.md) for a public C# programming surface. It retains the Contract defining-file or provider owner and its optional primary [CodeProject](code-project.md) association. It does not require a [Host](host.md), network [Interface](interface.md), or [Endpoint](endpoint.md). Concrete extraction and snapshot representations remain proposed.
+**CSharpApiContract** is a subject class derived from [Contract](contract.md) for a public C# programming surface. It follows [Contract ownership](contract.md#invariants-planned) and retains its optional primary [CodeProject](code-project.md) association. It does not require a [Host](host.md), network [Interface](interface.md), or [Endpoint](endpoint.md). Concrete extraction and snapshot representations remain proposed.
 
 Authored enrichment and relationships use the [existing metadata envelope](../shared/metadata-and-relationships.md), through the defining owner. They are not a second configuration store. Names in the tables are proposed serialized camelCase names; concrete CLR signatures remain open. State properties are read-only to authors.
 

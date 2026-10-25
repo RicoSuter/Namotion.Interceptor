@@ -28,7 +28,7 @@ The following state is read-only. The exact member names beyond the resolved `co
 
 | State | Type | Meaning |
 |---|---|---|
-| `provenance` | Source/provenance records | Raw document location, defining file or provider owner, and available source/revision information. Explicit association and inferred association remain distinguishable. |
+| `provenance` | Source/provenance records | Raw document location, canonical owner, discovering Provider identity when applicable, and available source/revision information. Explicit association and inferred association remain distinguishable. |
 | `diagnostics` | Diagnostic records | Unsupported input, unresolved references, parse failures, ambiguous project association, and conflicting definitions, with readable source locations. |
 | `codeProject` | Optional [CodeProject](code-project.md) reference | The resolved typed association, explicit or inferred from a unique same-directory project. A plain identifier or generic link remains valid without it; unresolved paths and ambiguous inference produce diagnostics. |
 | `referringSubjects` | Subject references, including [CodeProject](code-project.md) and [Interface](interface.md) | Subjects that reference this Contract. These references do not clone it or transfer ownership. |
@@ -51,7 +51,7 @@ Do not search ancestor directories, choose a nearest project, or infer a project
 
 A library API needs no Host, network Interface, or Endpoint. Parsed state must remain tied to its source/revision. Unknown or unsupported input is reported explicitly and retains raw source access. A version label does not implement comparison or compatibility assessment.
 
-Authored definitions take precedence over same-source discovered duplicates. Discovery never writes descriptor JSON. A referencing subject does not take ownership of a Contract. Exact source identity, competing explicit definitions, and authored/generated ownership transitions remain design work, with conflicts reported rather than silently reassigned.
+Authored Contracts retain their defining file owner. The invoking [SourceRepository](source-repository.md) owns repository-discovered Contracts and their reconciliation; the shared Provider supplies facts and provenance. Authored definitions take precedence over same-source discovered duplicates. Discovery never writes descriptor JSON. A referencing subject does not take ownership of a Contract. Exact source identity, competing explicit definitions, and authored/generated ownership transitions remain design work, with conflicts reported rather than silently reassigned.
 
 ## UI [Planned]
 

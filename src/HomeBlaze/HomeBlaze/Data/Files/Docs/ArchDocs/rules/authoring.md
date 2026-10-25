@@ -25,7 +25,7 @@ Assume the documentation folder is mounted as the graph root and contains `/Repo
 
 ## Host assignment
 
-Every discovered Host must belong to at least one Service. Shared membership is allowed. Add a matching componentSources entry or correct the existing Service selection analyzer, then rerun validation.
+Every discovered Host must belong to at least one Service. Shared membership is allowed. Add a matching componentSources entry or correct the existing Service selection query, then rerun validation.
 
 :: Namotion.ArchDocs.HostsAssignedToServicesAnalyzer#hostsHaveService
 ```json

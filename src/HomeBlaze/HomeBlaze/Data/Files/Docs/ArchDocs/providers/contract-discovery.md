@@ -34,7 +34,7 @@ Relative descriptor `path` values resolve from the defining file's directory/loc
 2. Otherwise, compare the raw document's directory with the source directories of discovered CodeProjects in its repository scope. Exactly one project in that directory supplies the association.
 3. If there are zero or multiple same-directory projects, retain an unassociated Contract with a source-located diagnostic. An authored definition must supply `codeProjectPath` to resolve it.
 
-The raw document's directory controls this analyzer, even if the descriptor is stored elsewhere. Do not walk parent directories, select a nearest project, or guess from a Host. A library project is a valid target. The resolved Contract.codeProject reference supplies the read-only CodeProject.contracts inverse; do not author a second `hasContract` fact on the project.
+The raw document's directory controls this association rule, even if the descriptor is stored elsewhere. Do not walk parent directories, select a nearest project, or guess from a Host. A library project is a valid target. The resolved Contract.codeProject reference supplies the read-only CodeProject.contracts inverse; do not author a second `hasContract` fact on the project.
 
 ## Ownership and explicit definitions [Planned]
 
