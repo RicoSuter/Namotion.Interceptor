@@ -81,11 +81,11 @@ public abstract partial class LlmAgentBase
     /// </summary>
     private AuthorizationMcpAccessPolicy GetTurnAccessPolicy(List<string> roles)
     {
-        var result = GetRolesPolicy(roles);
+        var (computation, result) = GetRolesPolicy(roles);
         var rolesError = GetRolesError(result);
         lock (_stateLock)
         {
-            _rolesError = rolesError;
+            StoreRolesErrorIfNewer(computation, rolesError);
         }
 
         return new AuthorizationMcpAccessPolicy(result.Policy, _logger, Title);

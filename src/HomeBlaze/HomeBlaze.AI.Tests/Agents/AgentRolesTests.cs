@@ -249,6 +249,46 @@ public sealed class AgentRolesTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task WhenAnUnknownRoleIsAddedToTheAuthorization_ThenTheErrorClearsWithoutATurn()
+    {
+        // Arrange
+        var graph = await CreateGraphAsync("# Notes");
+        var agent = new FakeAgent(graph.AgentServices) { Roles = ["Late"] };
+        await AttachAndWaitForStartAsync(graph, agent);
+        var statusBefore = (agent.Status, agent.StatusMessage);
+        var authorization = Assert.IsType<Authorization.Authorization>(graph.Root.Children["Authorization"]);
+
+        // Act
+        authorization.Roles = new Dictionary<string, Role> { ["Late"] = new() { Includes = [BuiltInRoles.ReaderName] } };
+
+        // Assert
+        Assert.Equal(ServiceStatus.Error, statusBefore.Status);
+        Assert.Contains("'Late'", statusBefore.StatusMessage);
+        await AsyncTestHelpers.WaitUntilAsync(() => agent.Status == ServiceStatus.Running, message: "The roles error should clear.");
+        Assert.DoesNotContain("'Late'", agent.StatusMessage ?? string.Empty);
+        Assert.Empty(agent.Requests);
+    }
+
+    [Fact]
+    public async Task WhenAUsedRoleIsRemovedFromTheAuthorization_ThenTheAgentShowsTheErrorWithoutATurn()
+    {
+        // Arrange
+        var graph = await CreateGraphAsync("# Notes", ("Custom", new Role { Includes = [BuiltInRoles.ReaderName] }));
+        var agent = new FakeAgent(graph.AgentServices) { Roles = ["Custom"] };
+        await AttachAndWaitForStartAsync(graph, agent);
+        var statusBefore = agent.Status;
+        var authorization = Assert.IsType<Authorization.Authorization>(graph.Root.Children["Authorization"]);
+
+        // Act
+        authorization.Roles = new Dictionary<string, Role>();
+
+        // Assert
+        Assert.Equal(ServiceStatus.Running, statusBefore);
+        await AsyncTestHelpers.WaitUntilAsync(() => agent.Status == ServiceStatus.Error, message: "The roles error should be shown.");
+        Assert.Contains("'Custom'", agent.StatusMessage);
+    }
+
+    [Fact]
     public async Task WhenAToolCallReadsAnEvaluatedPage_ThenAPropertyTheRolesDenyRendersEmpty()
     {
         // Arrange

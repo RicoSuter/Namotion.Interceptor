@@ -67,6 +67,11 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     private string[] _normalizedWatchPaths = [];
     private volatile string? _configurationError;
     private string? _rolesError;
+
+    // Numbers the computations of the roles error, so that the error of a newer one, which saw newer roles, is never
+    // replaced by that of an older one. The stored number is guarded by _stateLock.
+    private long _rolesErrorComputation;
+    private long _storedRolesErrorComputation;
     private string? _storageDirectory;
     private string? _storageName;
     private volatile bool _isStorageLoaded;
@@ -258,13 +263,14 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
     {
         // Outside the state lock: the authorization service may compile and write the statuses of roles.
-        var rolesError = GetRolesError(GetRolesPolicy(Roles));
+        var (computation, rolesResult) = GetRolesPolicy(Roles);
+        var rolesError = GetRolesError(rolesResult);
         lock (_stateLock)
         {
             _configurationVersion++;
             Volatile.Write(ref _normalizedWatchPaths, AgentWatchPaths.Normalize(WatchPaths));
             var previousRolesError = _rolesError;
-            _rolesError = rolesError;
+            StoreRolesErrorIfNewer(computation, rolesError);
             if (_scheduler is not { } scheduler)
             {
                 return Task.CompletedTask;
@@ -279,7 +285,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
             }
             else if (hadConfigurationError ||
                 !string.Equals(previousPauseReason, scheduler.PauseReason, StringComparison.Ordinal) ||
-                !string.Equals(previousRolesError, rolesError, StringComparison.Ordinal))
+                !string.Equals(previousRolesError, _rolesError, StringComparison.Ordinal))
             {
                 if (IsBusy)
                 {
@@ -361,7 +367,21 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         }
 
         ReportPrincipal(generation, isRunning: true);
+        _services.AuthorizationService.PoliciesChanged += OnPoliciesChanged;
+        try
+        {
+            await ExecuteRunAsync(generation, stoppingToken);
+        }
+        finally
+        {
+            _services.AuthorizationService.PoliciesChanged -= OnPoliciesChanged;
+        }
 
+        ReportPrincipal(generation, isRunning: false);
+    }
+
+    private async Task ExecuteRunAsync(int generation, CancellationToken stoppingToken)
+    {
         // Cancelled when this method ends for any reason; chat turns link to it so they end with the agent.
         using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
         var finalStatus = ServiceStatus.Stopped;
@@ -400,8 +420,6 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
                 StatusMessage = finalStatusMessage;
             }
         }
-
-        ReportPrincipal(generation, isRunning: false);
     }
 
     /// <summary>Waits until no turn, upkeep or start holds the turn gate; it never faults.</summary>
@@ -463,7 +481,8 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
             maxQueueDepth: null,
             logger: _logger);
 
-        var rolesError = GetRolesError(GetRolesPolicy(Roles));
+        var (computation, rolesResult) = GetRolesPolicy(Roles);
+        var rolesError = GetRolesError(rolesResult);
 
         // Published before the configuration is read, under the lock ApplyConfigurationAsync takes, so a
         // concurrent configuration change is either read here or applied to this scheduler.
@@ -473,7 +492,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
             stoppingToken.ThrowIfCancellationRequested();
             _scheduler = scheduler;
             _lifetime = lifetime;
-            _rolesError = rolesError;
+            StoreRolesErrorIfNewer(computation, rolesError);
             Volatile.Write(ref _normalizedWatchPaths, AgentWatchPaths.Normalize(WatchPaths));
             TryApplyIntervals(scheduler);
             SetIdle();
@@ -618,7 +637,55 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         LastActivityTime = statistics?.LastActivityTime;
     }
 
-    private AuthorizationResult GetRolesPolicy(List<string> roles) => _services.AuthorizationService.GetPolicy(roles);
+    // Called outside the state lock, as the authorization service may compile and write the statuses of roles.
+    private (long Computation, AuthorizationResult Result) GetRolesPolicy(List<string> roles)
+    {
+        var computation = Interlocked.Increment(ref _rolesErrorComputation);
+        return (computation, _services.AuthorizationService.GetPolicy(roles));
+    }
+
+    // The caller holds _stateLock. Keeps the error of a newer computation.
+    private void StoreRolesErrorIfNewer(long computation, string? rolesError)
+    {
+        if (computation > _storedRolesErrorComputation)
+        {
+            _storedRolesErrorComputation = computation;
+            _rolesError = rolesError;
+        }
+    }
+
+    // Raised on the thread pool when roles were edited, so the status follows them without waiting for a turn.
+    private void OnPoliciesChanged()
+    {
+        try
+        {
+            var (computation, result) = GetRolesPolicy(Roles);
+            var rolesError = GetRolesError(result);
+            lock (_stateLock)
+            {
+                var previousRolesError = _rolesError;
+                StoreRolesErrorIfNewer(computation, rolesError);
+                if (_scheduler is null || string.Equals(previousRolesError, _rolesError, StringComparison.Ordinal))
+                {
+                    return;
+                }
+
+                if (IsBusy)
+                {
+                    // The running turn writes its own status until it ends, and reports this change then.
+                    _isIdleReportPending = true;
+                }
+                else
+                {
+                    SetIdle();
+                }
+            }
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "The roles of agent {Agent} could not be checked after the roles changed.", Title);
+        }
+    }
 
     private static string? GetRolesError(AuthorizationResult result) =>
         result.Error is { } error ? InvalidRolesStatusPrefix + error : null;

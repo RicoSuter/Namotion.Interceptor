@@ -352,6 +352,25 @@ public sealed class AuthorizationServiceTests : IDisposable
         Assert.Contains("'Custom'", role.Status);
     }
 
+    [Fact]
+    public async Task WhenARoleChanges_ThenPoliciesChangedIsRaisedAndTheNextPolicyHasTheChange()
+    {
+        // Arrange
+        var role = new Role { Allow = [ReadPlain()] };
+        AddAuthorization(("Custom", role));
+        var policyBefore = _service.GetPolicy(["Custom"]).Policy;
+        var raised = 0;
+        _service.PoliciesChanged += () => Interlocked.Increment(ref raised);
+
+        // Act
+        role.Allow = [];
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => Volatile.Read(ref raised) > 0, message: "PoliciesChanged should be raised.");
+        Assert.True(policyBefore.CanRead(Member(nameof(TagTestSubject.Plain))));
+        Assert.False(_service.GetPolicy(["Custom"]).Policy.CanRead(Member(nameof(TagTestSubject.Plain))));
+    }
+
     private Authorization AddAuthorization(params (string Name, Role Role)[] roles)
     {
         var authorization = new Authorization

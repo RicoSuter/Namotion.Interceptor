@@ -81,6 +81,14 @@ public sealed class AuthorizationService : IDisposable
     }
 
     /// <summary>
+    /// Raised on the thread pool after the roles were compiled again because an <see cref="Authorization"/> or a
+    /// <see cref="Role"/> changed, so that <see cref="GetPolicy"/> may now give other results for the same names, for
+    /// example to report that a role became known or unknown. Handlers must not throw; an exception is logged and skips the
+    /// handlers after it.
+    /// </summary>
+    public event Action? PoliciesChanged;
+
+    /// <summary>
     /// Gets the policy of a principal holding <paramref name="roleNames"/>, compiled with the built-in roles, the custom
     /// roles of the single <see cref="Authorization"/> subject, the system rules and the known actions. Results are cached
     /// per distinct set of names, ignoring case and order, until an <see cref="Authorization"/> or a <see cref="Role"/>
@@ -199,14 +207,36 @@ public sealed class AuthorizationService : IDisposable
             }
 
             // Built from the version read before the graph, so a change while building leaves it stale.
+            var previous = snapshot;
             snapshot = AuthorizationSnapshot.Build(version, _registry.KnownSubjects.Keys, _pathProvider);
             Volatile.Write(ref _snapshot, snapshot);
             Interlocked.Increment(ref _statusVersion);
+            if (previous is not null)
+            {
+                ThreadPool.UnsafeQueueUserWorkItem(static service => service.RaisePoliciesChanged(), this, preferLocal: false);
+            }
         }
 
         // Outside the lock: a write notifies observers synchronously, which must not wait for a rebuild.
         WriteStatuses();
         return snapshot;
+    }
+
+    private void RaisePoliciesChanged()
+    {
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        try
+        {
+            PoliciesChanged?.Invoke();
+        }
+        catch (Exception exception)
+        {
+            _logger?.LogError(exception, "A handler of changed authorization policies failed.");
+        }
     }
 
     // Repeats until no snapshot was published and no principal changed while writing, so concurrent writers end with
