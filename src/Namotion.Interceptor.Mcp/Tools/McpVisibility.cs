@@ -1,6 +1,7 @@
+using System.Runtime.InteropServices;
 using Namotion.Interceptor.Mcp.Abstractions;
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Registry.Paths;
 
 namespace Namotion.Interceptor.Mcp.Tools;
 
@@ -9,21 +10,35 @@ namespace Namotion.Interceptor.Mcp.Tools;
 /// subject is shown when it is the root, or when it is not empty for the policy and every property on the path the
 /// tools write for it is one the policy allows to read.
 /// </summary>
+/// <remarks>An instance with a policy caches per subject and is not thread-safe, so it serves one call only.</remarks>
 internal sealed class McpVisibility
 {
-    private readonly McpServerConfiguration _configuration;
-    private readonly IMcpAccessPolicy? _policy;
-    private readonly PathProviderBase _pathProvider;
-    private readonly RegisteredSubject _root;
-    private Dictionary<RegisteredSubject, bool>? _isShown;
+    private static readonly McpVisibility ShowsEverySubject = new();
 
-    public McpVisibility(McpServerConfiguration configuration, RegisteredSubject root)
+    private readonly McpServerConfiguration? _configuration;
+    private readonly IMcpAccessPolicy? _policy;
+    private readonly IInterceptorSubject? _rootSubject;
+    private RegisteredSubject? _root;
+    private Dictionary<RegisteredSubject, bool>? _isShown;
+    private List<RegisteredSubject>? _chain;
+
+    private McpVisibility()
+    {
+    }
+
+    private McpVisibility(McpServerConfiguration configuration, IMcpAccessPolicy policy, IInterceptorSubject rootSubject)
     {
         _configuration = configuration;
-        _policy = configuration.AccessPolicy;
-        _pathProvider = configuration.ResolutionPathProvider;
-        _root = root;
+        _policy = policy;
+        _rootSubject = rootSubject;
     }
+
+    /// <summary>
+    /// The visibility for one call from <paramref name="rootSubject"/>. Without a policy it is a shared instance that
+    /// shows every subject; with one, the registered root is looked up only when a path has to be resolved back.
+    /// </summary>
+    public static McpVisibility For(McpServerConfiguration configuration, IInterceptorSubject rootSubject) =>
+        configuration.AccessPolicy is { } policy ? new McpVisibility(configuration, policy, rootSubject) : ShowsEverySubject;
 
     /// <summary>
     /// Whether the subject is empty for the policy: it has at least one property other than an attribute, and the
@@ -56,38 +71,86 @@ internal sealed class McpVisibility
     /// </summary>
     public bool IsShown(RegisteredSubject subject)
     {
-        if (_policy is null || subject == _root)
+        if (_policy is null || subject.Subject == _rootSubject)
         {
             return true;
         }
 
         _isShown ??= [];
-        if (_isShown.TryGetValue(subject, out var isShown))
+        return _isShown.TryGetValue(subject, out var isShown) ? isShown : EvaluateChain(subject, _policy, _isShown);
+    }
+
+    // Walks up while every subject has a single parent: that parent is the one the written path goes through, so a
+    // subject is shown when it is not empty, the property holding it is readable and its owner is shown. The walk ends
+    // at the root, at a subject already decided, at a failed check or at a subject with several parents, and its
+    // result holds for every subject walked, whose own checks passed. Each one is marked hidden while it is evaluated,
+    // so a cycle of parents fails closed.
+    private bool EvaluateChain(RegisteredSubject subject, IMcpAccessPolicy policy, Dictionary<RegisteredSubject, bool> isShownBySubject)
+    {
+        var chain = _chain ??= [];
+        var current = subject;
+        bool isShown;
+        while (true)
         {
-            return isShown;
+            if (current.Subject == _rootSubject)
+            {
+                isShown = true;
+                break;
+            }
+
+            if (isShownBySubject.TryGetValue(current, out isShown))
+            {
+                break;
+            }
+
+            isShownBySubject[current] = false;
+            chain.Add(current);
+            if (IsEmptyForPolicy(current, policy))
+            {
+                isShown = false;
+                break;
+            }
+
+            var parents = current.Parents;
+            if (parents.Length != 1)
+            {
+                isShown = IsWrittenPathResolvedBack(current, policy);
+                break;
+            }
+
+            var parent = parents[0];
+            if (!McpAccessPathProvider.IsReadable(policy, parent.Property))
+            {
+                isShown = false;
+                break;
+            }
+
+            current = parent.Property.Parent;
         }
 
-        // Marked hidden while it is evaluated, so a cycle of parents fails closed instead of recursing.
-        _isShown[subject] = false;
-        isShown = !IsEmptyForPolicy(subject, _policy) && IsWrittenPathReadable(subject, _policy);
-        _isShown[subject] = isShown;
+        foreach (var walked in CollectionsMarshal.AsSpan(chain))
+        {
+            isShownBySubject[walked] = isShown;
+        }
+
+        chain.Clear();
         return isShown;
     }
 
-    private bool IsWrittenPathReadable(RegisteredSubject subject, IMcpAccessPolicy policy)
+    // With several parents the registry picks the chain, so the written path is resolved back through readable
+    // properties. It is written without the configured prefix, which the path reader does not expect. The resolver
+    // does not ask whether subjects are shown, so this never recurses into the walk.
+    private bool IsWrittenPathResolvedBack(RegisteredSubject subject, IMcpAccessPolicy policy)
     {
-        var parents = subject.Parents;
-        if (parents.Length == 1)
+        var configuration = _configuration!;
+        var path = McpToolHelper.TryGetSubjectPath(subject, configuration.ResolutionPathProvider, _rootSubject!);
+        if (path is null)
         {
-            // A single parent is the one the written path goes through, so the path is readable when the property
-            // holding the subject is, and the path of the subject owning that property is.
-            var parent = parents[0];
-            return McpAccessPathProvider.IsReadable(policy, parent.Property) && IsShown(parent.Property.Parent);
+            return false;
         }
 
-        // With several parents the registry picks the chain, so the written path is resolved back. It is written
-        // without the configured prefix, which the path reader does not expect.
-        var path = McpToolHelper.TryGetSubjectPath(subject, _pathProvider, _root.Subject);
-        return path is not null && _configuration.TryGetReadableSubject(_root, path)?.Subject == subject.Subject;
+        _root ??= _rootSubject!.TryGetRegisteredSubject()
+            ?? throw new InvalidOperationException("Root subject is not registered.");
+        return configuration.TryResolveReadableSubject(policy, _root, path)?.Subject == subject.Subject;
     }
 }

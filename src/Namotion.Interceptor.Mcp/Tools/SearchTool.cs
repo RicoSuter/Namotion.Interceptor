@@ -1,6 +1,5 @@
 using System.Text.Json;
 using Namotion.Interceptor.Mcp.Models;
-using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 
 namespace Namotion.Interceptor.Mcp.Tools;
@@ -112,9 +111,7 @@ internal class SearchTool
         var subjects = new Dictionary<string, SubjectNode>();
         var truncated = false;
         var rootSubject = _rootSubjectProvider();
-        var rootRegistered = rootSubject.TryGetRegisteredSubject()
-            ?? throw new InvalidOperationException("Root subject is not registered.");
-        var visibility = new McpVisibility(_configuration, rootRegistered);
+        var visibility = McpVisibility.For(_configuration, rootSubject);
 
         foreach (var (_, registered) in registry.KnownSubjects)
         {

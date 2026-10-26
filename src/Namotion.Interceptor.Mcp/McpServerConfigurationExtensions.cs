@@ -1,3 +1,4 @@
+using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Mcp.Tools;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -38,13 +39,19 @@ public static class McpServerConfigurationExtensions
     /// <returns>The subject, or null when the path does not resolve or something on it is hidden.</returns>
     public static RegisteredSubject? TryGetReadableSubject(
         this McpServerConfiguration configuration, RegisteredSubject root, string path)
-    {
-        if (configuration.AccessPolicy is not { } policy)
-        {
-            return configuration.ResolutionPathProvider.TryGetSubjectFromPath(root, path);
-        }
+        => configuration.AccessPolicy is not { } policy
+            ? configuration.ResolutionPathProvider.TryGetSubjectFromPath(root, path)
+            : configuration.TryResolveReadableSubject(policy, root, path);
 
-        if (configuration.TryGetReadableProperty(root, path) is not { } resolved)
+    /// <summary>
+    /// Resolves a subject path through properties the policy allows to read to a subject that is not empty for the
+    /// policy, without asking whether a subject is shown.
+    /// </summary>
+    internal static RegisteredSubject? TryResolveReadableSubject(
+        this McpServerConfiguration configuration, IMcpAccessPolicy policy, RegisteredSubject root, string path)
+    {
+        if (configuration.ResolutionPathProvider.TryGetPropertyFromPath(root, path, includedPropertiesOnly: true, createMissingSubject: null) is not
+            { } resolved)
         {
             return null;
         }

@@ -86,7 +86,7 @@ internal class BrowseTool
 
         depth = Math.Min(depth, _configuration.MaxDepth);
 
-        var visibility = new McpVisibility(_configuration, rootRegisteredSubject);
+        var visibility = McpVisibility.For(_configuration, rootSubject);
 
         // Resolve starting subject
         RegisteredSubject startSubject;
