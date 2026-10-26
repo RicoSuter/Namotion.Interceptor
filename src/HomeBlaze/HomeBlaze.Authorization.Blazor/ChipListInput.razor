@@ -1,10 +1,12 @@
-@* A list of texts shown as chips, with a field that adds the typed text on Enter, or a picked suggestion. *@
+@* A list of texts shown as chips, with a field that adds the typed text on Enter or when it loses focus, or a picked
+   suggestion. Text that is typed and invalid stays in the field with its error, see HasInvalidText. *@
 
 <div data-testid="@TestId">
     @if (Suggestions is null)
     {
         <div @onkeyup="OnTextKeyUpAsync">
-            <MudTextField T="string" Label="@Label" Value="@_text" ValueChanged="@OnTextChanged" Immediate="true" Placeholder="@Placeholder"
+            <MudTextField T="string" Label="@Label" Value="@_text" ValueChanged="@OnTextChangedAsync" OnBlur="@CommitTextAsync"
+                          Immediate="true" Placeholder="@Placeholder"
                           HelperText="@HelperText" Error="@(_error is not null)" ErrorText="@_error"
                           Adornment="@(Pick is null ? Adornment.None : Adornment.End)" AdornmentIcon="@Icons.Material.Filled.Search"
                           AdornmentAriaLabel="@($"Browse {Label}")" OnAdornmentClick="@PickAsync" />
@@ -15,10 +17,11 @@
         @* The value changes only when a suggestion is picked; typed text is added on Enter, not on every keystroke. The
            keys are seen on the element around the field, as the field passes a key on only after it handled it, which
            can wait for the browser, so that a later key could be seen first. *@
-        <div @onkeydown="OnSuggestionKeyDown">
+        <div @onkeydown="OnSuggestionKeyDown" @onfocusin="OnSuggestionFocusIn">
             <MudAutocomplete T="string" @ref="_autocomplete" Label="@Label" Placeholder="@Placeholder" HelperText="@HelperText"
                              Error="@(_error is not null)" ErrorText="@_error"
-                             ValueChanged="@AddSuggestionAsync" TextChanged="@OnTextChanged" OnKeyUp="@OnSuggestionKeyUpAsync"
+                             ValueChanged="@AddSuggestionAsync" TextChanged="@OnTextChangedAsync" OnKeyUp="@OnSuggestionKeyUpAsync"
+                             OnBlur="@OnSuggestionBlurAsync" OpenChanged="@OnSuggestionOpenChangedAsync"
                              SearchFunc="@SearchAsync" CoerceText="false" />
         </div>
     }
@@ -49,6 +52,10 @@
     private MudAutocomplete<string>? _autocomplete;
     private string? _text;
     private string? _error;
+    private bool _reportedInvalidText;
+
+    // Set when the field lost focus while its suggestions were open, so that the text is added once they close.
+    private bool _isCommitPending;
 
     // Set on Enter to the text to add once the key is released; null when Enter picks a suggestion.
     private string? _enterText;
@@ -87,17 +94,48 @@
     [Parameter]
     public Func<Task<string?>>? Pick { get; set; }
 
+    /// <summary>Raised with <see cref="HasInvalidText"/> when it changes.</summary>
+    [Parameter]
+    public EventCallback<bool> HasInvalidTextChanged { get; set; }
+
     /// <summary>The <c>data-testid</c> of the element around the input; its chips use it followed by <c>-chip</c>.</summary>
     [Parameter]
     public string? TestId { get; set; }
 
-    private void OnTextChanged(string? text)
+    /// <summary>
+    /// Gets whether the field holds text that the validator rejects, which is neither added nor dropped.
+    /// </summary>
+    internal bool HasInvalidText => _error is not null;
+
+    /// <summary>
+    /// Adds the text in the field, unless it is blank or invalid, as Enter would.
+    /// </summary>
+    internal async Task CommitTextAsync()
+    {
+        if (!string.IsNullOrWhiteSpace(_text) && await AddAsync(_text) && _autocomplete is not null)
+        {
+            // The field keeps the text of what it added, which would look like a value not added yet.
+            await _autocomplete.ClearAsync();
+        }
+    }
+
+    private async Task OnTextChangedAsync(string? text)
     {
         _text = text;
         _error = string.IsNullOrWhiteSpace(text) ? null : Validator?.Invoke(text.Trim());
 
         // Typing searches again, which highlights the first suggestion.
         _isSuggestionChosen = false;
+        await ReportInvalidTextAsync();
+    }
+
+    private async Task ReportInvalidTextAsync()
+    {
+        if (HasInvalidText != _reportedInvalidText)
+        {
+            _reportedInvalidText = HasInvalidText;
+            await HasInvalidTextChanged.InvokeAsync(_reportedInvalidText);
+        }
     }
 
     private async Task OnTextKeyUpAsync(KeyboardEventArgs args)
@@ -129,10 +167,12 @@
         if (_error is not null)
         {
             _text = value;
+            await ReportInvalidTextAsync();
             return false;
         }
 
         _text = null;
+        await ReportInvalidTextAsync();
         if (!Values.Contains(value, Comparer))
         {
             await ValuesChanged.InvokeAsync([.. Values, value]);
@@ -161,6 +201,30 @@
         if (await AddAsync(text) && _autocomplete is not null)
         {
             await _autocomplete.ClearAsync();
+        }
+    }
+
+    // A click on a suggestion takes the focus from the field while the suggestions are open, and picks it after; the
+    // typed text is added only when they close without a pick, which clears the text.
+    private async Task OnSuggestionBlurAsync(FocusEventArgs args)
+    {
+        if (_autocomplete?.Open == true)
+        {
+            _isCommitPending = true;
+            return;
+        }
+
+        await CommitTextAsync();
+    }
+
+    private void OnSuggestionFocusIn() => _isCommitPending = false;
+
+    private async Task OnSuggestionOpenChangedAsync(bool isOpen)
+    {
+        if (!isOpen && _isCommitPending)
+        {
+            _isCommitPending = false;
+            await CommitTextAsync();
         }
     }
 

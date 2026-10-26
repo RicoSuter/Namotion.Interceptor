@@ -5,33 +5,33 @@
 <MudPaper Outlined="true" Class="pa-3" data-testid="@TestId">
     <MudGrid Spacing="2">
         <MudItem xs="12" md="6">
-            <ChipListInput Label="Paths" Placeholder="/Devices/**" HelperText="Path patterns; ** matches any depth. Press Enter to add."
-                           Values="@Rule.Paths" ValuesChanged="@(values => ChangeAsync(Rule with { Paths = [.. values] }))"
-                           Validator="@ValidatePath" Pick="@PickPathAsync" TestId="rule-paths" />
+            <ChipListInput @ref="_paths" Label="Paths" Placeholder="/Devices/**" HelperText="Path patterns; ** matches any depth. Press Enter to add."
+                           Values="@_rule.Paths" ValuesChanged="@(values => ChangeAsync(_rule with { Paths = [.. values] }))"
+                           Validator="@ValidatePath" Pick="@PickPathAsync" HasInvalidTextChanged="@ReportInvalidTextAsync" TestId="rule-paths" />
         </MudItem>
         <MudItem xs="12" md="6">
-            <ChipListInput Label="Types" HelperText="Subject types or interfaces, by simple or full name. Press Enter to add."
-                           Values="@Rule.Types" ValuesChanged="@(values => ChangeAsync(Rule with { Types = [.. values] }))"
-                           Suggestions="@TypeNames" TestId="rule-types" />
+            <ChipListInput @ref="_types" Label="Types" HelperText="Subject types or interfaces, by simple or full name. Press Enter to add."
+                           Values="@_rule.Types" ValuesChanged="@(values => ChangeAsync(_rule with { Types = [.. values] }))"
+                           Suggestions="@TypeNames" HasInvalidTextChanged="@ReportInvalidTextAsync" TestId="rule-types" />
         </MudItem>
         <MudItem xs="12" md="6">
-            <ChipListInput Label="Members" Placeholder="Temperature, Set*" HelperText="Member names; * matches any text. Press Enter to add."
-                           Values="@Rule.Members" ValuesChanged="@(values => ChangeAsync(Rule with { Members = [.. values] }))" TestId="rule-members" />
+            <ChipListInput @ref="_members" Label="Members" Placeholder="Temperature, Set*" HelperText="Member names; * matches any text. Press Enter to add."
+                           Values="@_rule.Members" ValuesChanged="@(values => ChangeAsync(_rule with { Members = [.. values] }))" HasInvalidTextChanged="@ReportInvalidTextAsync" TestId="rule-members" />
         </MudItem>
         <MudItem xs="12" md="6">
-            <ChipListInput Label="Tags" HelperText="Tags a member must all carry. Press Enter to add."
-                           Values="@Rule.Tags" ValuesChanged="@(values => ChangeAsync(Rule with { Tags = [.. values] }))"
-                           Suggestions="@TagNames" Validator="@ValidateTag" Comparer="@StringComparer.OrdinalIgnoreCase" TestId="rule-tags" />
+            <ChipListInput @ref="_tags" Label="Tags" HelperText="Tags a member must all carry. Press Enter to add."
+                           Values="@_rule.Tags" ValuesChanged="@(values => ChangeAsync(_rule with { Tags = [.. values] }))"
+                           Suggestions="@TagNames" Validator="@ValidateTag" Comparer="@StringComparer.OrdinalIgnoreCase" HasInvalidTextChanged="@ReportInvalidTextAsync" TestId="rule-tags" />
         </MudItem>
     </MudGrid>
     <MudStack Row="true" Wrap="Wrap.Wrap" AlignItems="AlignItems.Center" Spacing="1" Class="mt-2">
         <MudText Typo="Typo.body2" Class="mr-2">Actions</MudText>
         @foreach (var action in AuthorizationActions.All)
         {
-            <MudCheckBox T="bool" Label="@action.Name" Value="@Rule.Actions.Contains(action)" Color="Color.Primary" Dense="true"
+            <MudCheckBox T="bool" Label="@action.Name" Value="@_rule.Actions.Contains(action)" Color="Color.Primary" Dense="true"
                          ValueChanged="@((bool isChecked) => ToggleActionAsync(action, isChecked))" data-testid="@($"rule-action-{action.Name}")" />
         }
-        @foreach (var action in Rule.Actions.Where(action => !IsKnownAction(action)))
+        @foreach (var action in _rule.Actions.Where(action => !IsKnownAction(action)))
         {
             <MudTooltip Text="Unknown action">
                 <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" Icon="@Icons.Material.Filled.ErrorOutline"
@@ -42,9 +42,15 @@
         <MudButton StartIcon="@Icons.Material.Filled.Delete" Variant="Variant.Text" Color="Color.Error" OnClick="@OnRemove"
                    data-testid="rule-remove">Remove</MudButton>
     </MudStack>
-    @if (Rule.Actions.IsEmpty)
+    @if (_rule.Actions.IsEmpty)
     {
         <MudText Typo="Typo.caption" Color="Color.Error">Select at least one action.</MudText>
+    }
+    @if (_rule.Paths.IsEmpty && _rule.Types.IsEmpty && _rule.Members.IsEmpty && _rule.Tags.IsEmpty)
+    {
+        @* A warning, not an error: a rule for every member is valid, but an allow rule should never be one by accident. *@
+        <MudAlert Severity="@(IsDeny ? Severity.Warning : Severity.Error)" Icon="@Icons.Material.Filled.Warning" Dense="true" Class="mt-2"
+                  data-testid="rule-any-member-warning">This rule applies to every member.</MudAlert>
     }
 </MudPaper>
 
@@ -55,6 +61,13 @@
         MemberTags.RequiresConfirmation, MemberTags.Subjects, MemberTags.Attribute, MemberTags.Metadata
     ];
 
+    private PermissionRule _rule = null!;
+    private ChipListInput? _paths;
+    private ChipListInput? _types;
+    private ChipListInput? _members;
+    private ChipListInput? _tags;
+    private bool _reportedInvalidText;
+
     [Parameter, EditorRequired]
     public PermissionRule Rule { get; set; } = null!;
 
@@ -63,6 +76,14 @@
 
     [Parameter]
     public EventCallback OnRemove { get; set; }
+
+    /// <summary>Whether the rule is a deny rule, for which a rule without selectors is a lesser risk than an allow rule.</summary>
+    [Parameter]
+    public bool IsDeny { get; set; }
+
+    /// <summary>Raised with <see cref="HasInvalidText"/> when it changes.</summary>
+    [Parameter]
+    public EventCallback<bool> HasInvalidTextChanged { get; set; }
 
     /// <summary>The type names suggested for the types selector.</summary>
     [Parameter]
@@ -81,6 +102,27 @@
         rule.Paths.All(path => authorizationService.ValidatePathPattern(path) is null) &&
         rule.Tags.All(tag => ValidateTag(tag) is null);
 
+    /// <summary>
+    /// Gets whether a selector field holds typed text that is invalid, which keeps the rule from being saved, as it is
+    /// neither added nor dropped.
+    /// </summary>
+    internal bool HasInvalidText =>
+        _paths?.HasInvalidText == true || _types?.HasInvalidText == true ||
+        _members?.HasInvalidText == true || _tags?.HasInvalidText == true;
+
+    /// <summary>
+    /// Adds the valid text typed into each selector field and not added yet, so that a save never drops it.
+    /// </summary>
+    internal async Task CommitTextAsync()
+    {
+        foreach (var input in new[] { _paths, _types, _members, _tags }.OfType<ChipListInput>())
+        {
+            await input.CommitTextAsync();
+        }
+    }
+
+    protected override void OnParametersSet() => _rule = Rule;
+
     private static bool IsKnownAction(PermissionAction action) => AuthorizationActions.All.Contains(action);
 
     // Tags compare ignoring case; no member carries another tag, so a rule naming one would never match.
@@ -89,10 +131,25 @@
 
     private string? ValidatePath(string pattern) => AuthorizationService.ValidatePathPattern(pattern);
 
-    private Task ChangeAsync(PermissionRule rule) => RuleChanged.InvokeAsync(rule);
+    // The rule is kept here as changed, as the parameter is set again only once the parent rendered, which a second
+    // change before that, such as committing the text of each field, would otherwise undo.
+    private Task ChangeAsync(PermissionRule rule)
+    {
+        _rule = rule;
+        return RuleChanged.InvokeAsync(rule);
+    }
+
+    private async Task ReportInvalidTextAsync()
+    {
+        if (HasInvalidText != _reportedInvalidText)
+        {
+            _reportedInvalidText = HasInvalidText;
+            await HasInvalidTextChanged.InvokeAsync(_reportedInvalidText);
+        }
+    }
 
     private Task ToggleActionAsync(PermissionAction action, bool isChecked) =>
-        ChangeAsync(Rule with { Actions = isChecked ? Rule.Actions.Add(action) : Rule.Actions.Remove(action) });
+        ChangeAsync(_rule with { Actions = isChecked ? _rule.Actions.Add(action) : _rule.Actions.Remove(action) });
 
     private async Task<string?> PickPathAsync()
     {

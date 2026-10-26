@@ -72,9 +72,10 @@
 
     public bool IsDirty => _isDirty;
 
-    public bool IsValid =>
-        _allow.All(entry => RuleCard.IsValid(entry.Rule, AuthorizationService)) &&
-        _deny.All(entry => RuleCard.IsValid(entry.Rule, AuthorizationService));
+    /// <summary>
+    /// Gets whether every rule can be saved and no selector field holds invalid text, which would otherwise be dropped.
+    /// </summary>
+    public bool IsValid => _allow.All(IsValidEntry) && _deny.All(IsValidEntry);
 
     private Role? Role => Subject as Role;
 
@@ -109,11 +110,22 @@
         _wasValid = IsValid;
     }
 
-    public Task SaveAsync(CancellationToken cancellationToken)
+    public async Task SaveAsync(CancellationToken cancellationToken)
     {
-        if (Role is not { } role || !IsValid)
+        if (Role is not { } role)
         {
-            return Task.CompletedTask;
+            return;
+        }
+
+        // Text typed but not added would be lost, and a rule saved without it applies to more members than intended.
+        foreach (var card in _allow.Concat(_deny).Select(entry => entry.Card).OfType<RuleCard>().ToList())
+        {
+            await card.CommitTextAsync();
+        }
+
+        if (!IsValid)
+        {
+            return;
         }
 
         // New instances, as the authorization service notices only replaced lists.
@@ -123,7 +135,6 @@
 
         _isDirty = false;
         IsDirtyChanged?.Invoke(false);
-        return Task.CompletedTask;
     }
 
     // The key under which an Authorization holds the role.
@@ -152,7 +163,8 @@
             @for (var index = 0; index < rules.Count; index++)
             {
                 var entry = rules[index];
-                <RuleCard @key="entry" Rule="@entry.Rule" RuleChanged="@(rule => ChangeRule(entry, rule))"
+                <RuleCard @key="entry" @ref="entry.Card" Rule="@entry.Rule" RuleChanged="@(rule => ChangeRule(entry, rule))"
+                          HasInvalidTextChanged="@(hasInvalidText => SetInvalidText(entry, hasInvalidText))" IsDeny="@(section == "deny")"
                           OnRemove="@(() => RemoveRule(rules, entry))" TypeNames="@_typeNames" TestId="@($"role-edit-{section}-rule-{index}")" />
             }
         </MudStack>
@@ -179,6 +191,14 @@
         OnChanged();
     }
 
+    private void SetInvalidText(RuleEntry entry, bool hasInvalidText)
+    {
+        entry.HasInvalidText = hasInvalidText;
+        ReportValidity();
+    }
+
+    private bool IsValidEntry(RuleEntry entry) => !entry.HasInvalidText && RuleCard.IsValid(entry.Rule, AuthorizationService);
+
     private void OnChanged()
     {
         _editedRole = null;
@@ -188,6 +208,11 @@
             IsDirtyChanged?.Invoke(true);
         }
 
+        ReportValidity();
+    }
+
+    private void ReportValidity()
+    {
         // Raised on transitions only, because the host re-renders its save button on each event.
         var isValid = IsValid;
         if (isValid != _wasValid)
@@ -201,5 +226,9 @@
     private sealed class RuleEntry(PermissionRule rule)
     {
         public PermissionRule Rule { get; set; } = rule;
+
+        public RuleCard? Card { get; set; }
+
+        public bool HasInvalidText { get; set; }
     }
 }

@@ -278,6 +278,98 @@ public sealed class RoleEditComponentTests : BunitContext, IAsyncLifetime
     }
 
     [Fact]
+    public async Task WhenValidTextIsTypedAndTheFieldLosesFocus_ThenItIsAddedAsAChip()
+    {
+        // Arrange
+        var role = _graph.GetRole("Kitchen");
+        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var component = RenderEditor(role);
+        var selector = "[data-testid='role-edit-allow-rule-0'] [data-testid='rule-paths'] input";
+        await component.Find(selector).InputAsync(new ChangeEventArgs { Value = " /Devices/** " });
+
+        // Act
+        await component.Find(selector).BlurAsync(new FocusEventArgs());
+
+        // Assert
+        Assert.Equal(["/Devices/**"], GetChips(GetCards(component, "allow")[0], "rule-paths"));
+        Assert.Equal(["/Devices/**"], component.Instance.GetEditedRole().Allow[0].Paths.ToArray());
+        Assert.True(component.Instance.IsDirty);
+    }
+
+    [Fact]
+    public async Task WhenValidTextIsTypedButNotAdded_ThenSavingIncludesIt()
+    {
+        // Arrange
+        var role = _graph.GetRole("Kitchen");
+        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var component = RenderEditor(role);
+        await TypeTextAsync(component, "role-edit-allow-rule-0", "rule-paths", "/Devices");
+        await TypeTextAsync(component, "role-edit-allow-rule-0", "rule-types", "TestDevice");
+        await TypeTextAsync(component, "role-edit-allow-rule-0", "rule-members", "Temperature");
+
+        // Act
+        await component.InvokeAsync(() => component.Instance.SaveAsync(CancellationToken.None));
+
+        // Assert
+        Assert.Equal(
+            [new PermissionRule { Paths = ["/Devices"], Types = ["TestDevice"], Members = ["Temperature"], Actions = [PermissionAction.Read] }],
+            role.Allow);
+    }
+
+    [Fact]
+    public async Task WhenInvalidTextIsTypedButNotAdded_ThenTheRoleIsInvalidUntilItIsCleared()
+    {
+        // Arrange
+        var role = _graph.GetRole("Kitchen");
+        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var oldAllow = role.Allow;
+        var component = RenderEditor(role);
+        var validity = new List<bool>();
+        component.Instance.IsValidChanged += validity.Add;
+
+        // Act
+        await TypeTextAsync(component, "role-edit-allow-rule-0", "rule-paths", "Devices");
+        await component.InvokeAsync(() => component.Instance.SaveAsync(CancellationToken.None));
+
+        // Assert
+        Assert.False(component.Instance.IsValid);
+        Assert.Same(oldAllow, role.Allow);
+
+        // Act
+        await TypeTextAsync(component, "role-edit-allow-rule-0", "rule-paths", "");
+
+        // Assert
+        Assert.True(component.Instance.IsValid);
+        Assert.Equal([false, true], validity);
+    }
+
+    [Fact]
+    public void WhenEverySelectorOfARuleIsEmpty_ThenTheCardWarnsThatItAppliesToEveryMember()
+    {
+        // Arrange
+        var role = _graph.GetRole("Kitchen");
+        role.Allow =
+        [
+            new PermissionRule { Actions = [PermissionAction.Read] },
+            new PermissionRule { Tags = [MemberTags.State], Actions = [PermissionAction.Write] }
+        ];
+        role.Deny = [new PermissionRule { Actions = [PermissionAction.Write] }];
+
+        // Act
+        var component = RenderEditor(role);
+
+        // Assert
+        var allowWarning = GetCards(component, "allow")[0].QuerySelector("[data-testid='rule-any-member-warning']");
+        Assert.Equal("This rule applies to every member.", allowWarning?.TextContent.Trim());
+        Assert.Contains("mud-alert-text-error", allowWarning!.ClassName);
+        Assert.Null(GetCards(component, "allow")[1].QuerySelector("[data-testid='rule-any-member-warning']"));
+
+        var denyWarning = GetCards(component, "deny")[0].QuerySelector("[data-testid='rule-any-member-warning']");
+        Assert.Contains("mud-alert-text-warning", denyWarning!.ClassName);
+        Assert.True(component.Instance.IsValid);
+    }
+
+    [Fact]
     public async Task WhenIncludesAreOffered_ThenTheRoleItselfIsNot()
     {
         // Arrange
@@ -389,6 +481,9 @@ public sealed class RoleEditComponentTests : BunitContext, IAsyncLifetime
         var box = GetActionBoxes(component, cardIndex).Single(box => box.Instance.Label == action);
         return component.InvokeAsync(() => box.Instance.ValueChanged.InvokeAsync(isChecked));
     }
+
+    private static Task TypeTextAsync(IRenderedComponent<RoleEditComponent> component, string card, string input, string text) =>
+        component.Find($"[data-testid='{card}'] [data-testid='{input}'] input").InputAsync(new ChangeEventArgs { Value = text });
 
     private static async Task EnterTextAsync(IRenderedComponent<RoleEditComponent> component, string card, string input, string text)
     {
