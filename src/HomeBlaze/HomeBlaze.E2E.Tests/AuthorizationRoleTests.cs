@@ -17,7 +17,7 @@ namespace HomeBlaze.E2E.Tests;
 
 /// <summary>
 /// E2E tests for editing the custom roles in the dialogs of the Authorization subject and its roles, and for giving a
-/// role to an agent.
+/// role to an agent and renaming it.
 /// </summary>
 [Collection(nameof(PlaywrightCollection))]
 [Trait("Category", "Integration")]
@@ -26,6 +26,8 @@ public class AuthorizationRoleTests
     private const int Timeout = 30000;
     private const string AgentPath = "Agents/TestAgent";
     private const string RoleName = "StateReader";
+    private const string RenamedRoleName = "StateWatcher";
+    private const string TypeName = "IConfigurable";
 
     private readonly PlaywrightFixture _fixture;
     private readonly ITestOutputHelper _output;
@@ -37,7 +39,7 @@ public class AuthorizationRoleTests
     }
 
     [Fact]
-    public async Task WhenARoleIsCreatedInTheUiAndGivenToAnAgent_ThenTheAgentShowsItAndTheFileHoldsItsRule()
+    public async Task WhenARoleIsCreatedGivenToAnAgentAndRenamedInTheUi_ThenTheFileHoldsItsRuleAndTheAgentReportsInvalidRoles()
     {
         // Arrange
         var registry = _fixture.ServerServices.GetRequiredService<IInterceptorSubjectContext>().GetService<ISubjectRegistry>();
@@ -101,6 +103,9 @@ public class AuthorizationRoleTests
                 .ClickAsync();
             await Assertions.Expect(rule.GetByTestId("rule-tags-chip")).ToHaveTextAsync(MemberTags.State, new() { Timeout = Timeout });
             await rule.GetByTestId("rule-action-read").CheckAsync();
+
+            // Typed into a field with suggestions and saved at once, without Enter or leaving the field first.
+            await rule.GetByTestId("rule-types").Locator("input").PressSequentiallyAsync(TypeName);
             await SaveAsync(roleDialog);
 
             // Assert
@@ -139,6 +144,40 @@ public class AuthorizationRoleTests
 
             var authorizationFile = JsonNode.Parse(await _fixture.ReadFileAsync(authorizationFilePath))!;
             Assert.True(IsStateReadRule(authorizationFile["roles"]?[RoleName]?["allow"]?.AsArray().SingleOrDefault()));
+
+            // Act: rename the role the agent uses.
+            authorizationDialog = await OpenEditDialogAsync("Authorization");
+            await authorizationDialog.GetByTestId($"authorization-role-rename-{RoleName}").ClickAsync();
+            await authorizationDialog.GetByTestId("authorization-role-name").Locator("input").FillAsync(RenamedRoleName);
+
+            // Assert
+            await Assertions.Expect(authorizationDialog.GetByTestId("authorization-role-rename-warning"))
+                .ToContainTextAsync("1 agent uses this role under its old name.", new() { Timeout = Timeout });
+
+            // Act
+            await authorizationDialog.GetByTestId("authorization-role-name-confirm").ClickAsync();
+            await Assertions.Expect(authorizationDialog.GetByTestId($"authorization-role-row-{RenamedRoleName}"))
+                .ToContainTextAsync($"(was {RoleName})", new() { Timeout = Timeout });
+            await SaveAsync(authorizationDialog);
+
+            // Assert
+            await WaitForAuthorizationFileAsync(
+                authorizationFilePath,
+                roles => roles[RoleName] is null && IsStateReadRule(roles[RenamedRoleName]?["allow"]?.AsArray().SingleOrDefault()),
+                "The renamed role was not written to Authorization.json.");
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => agent.StatusMessage?.StartsWith("Invalid roles: ", StringComparison.Ordinal) == true,
+                TimeSpan.FromSeconds(30),
+                message: "The agent does not report invalid roles.");
+
+            agentPage = await _fixture.CreatePageAsync();
+            await agentPage.GotoAsync($"{_fixture.ServerAddress}pages/{AgentPath}");
+            settingsTab = agentPage.GetByRole(AriaRole.Tab, new() { Name = "Settings" });
+            await Assertions.Expect(settingsTab).ToBeVisibleAsync(new() { Timeout = Timeout });
+            await agentPage.WaitUntilInteractiveAsync(Timeout);
+            await settingsTab.ClickAsync();
+            await Assertions.Expect(agentPage.GetByTestId("agent-settings-roles-error"))
+                .ToContainTextAsync($"Role '{RoleName}' is not defined.", new() { Timeout = Timeout });
             isCompleted = true;
         }
         finally
@@ -168,6 +207,7 @@ public class AuthorizationRoleTests
 
     private static bool IsStateReadRule(JsonNode? rule) =>
         rule is not null &&
+        JsonNode.DeepEquals(rule["types"], new JsonArray(TypeName)) &&
         JsonNode.DeepEquals(rule["tags"], new JsonArray(MemberTags.State)) &&
         JsonNode.DeepEquals(rule["actions"], new JsonArray("read"));
 
