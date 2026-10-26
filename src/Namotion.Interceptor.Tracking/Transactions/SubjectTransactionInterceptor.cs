@@ -152,7 +152,7 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
         var receivedTimestamp = SubjectChangeContext.Current.ReceivedTimestamp;
 
         // Equality can run user code, so resolve it before taking the transaction lock, same as the origin above.
-        var restoresLandedValue = EqualityComparer<TProperty>.Default.Equals(context.CurrentValue, context.NewValue);
+        var restoresLandedValue = IsWriteBackWithEqualityCheck(ref context);
 
         if (transaction.TryCaptureChange(
                 context.Property,
@@ -167,6 +167,16 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
         }
 
         next(ref context);
+    }
+
+    /// <summary>
+    /// Returns true when the write restores the landed value and the subject's context has the equality check. Without
+    /// the equality check every write is captured, as outside a transaction every write lands.
+    /// </summary>
+    private static bool IsWriteBackWithEqualityCheck<TProperty>(ref PropertyWriteContext<TProperty> context)
+    {
+        return EqualityComparer<TProperty>.Default.Equals(context.CurrentValue, context.NewValue) &&
+            !context.Property.Subject.Context.GetServices<PropertyValueEqualityCheckHandler>().IsDefaultOrEmpty;
     }
 
     /// <summary>

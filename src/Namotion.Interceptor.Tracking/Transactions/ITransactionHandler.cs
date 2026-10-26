@@ -22,10 +22,11 @@ namespace Namotion.Interceptor.Tracking.Transactions;
 public interface ITransactionHandler
 {
     /// <summary>
-    /// Called for a write the transaction is about to capture or cancel, without holding the transaction's internal
-    /// capture lock. Throwing rejects the write: nothing is captured and the exception propagates to the setter.
-    /// Handlers must not write properties. A validating handler skips its write-time check when
-    /// <see cref="SubjectTransaction.ValidationMode"/> is <see cref="TransactionValidationMode.Deferred"/>.
+    /// Called for a write the transaction is about to capture, including a write back that removes a pending change,
+    /// without holding the transaction's internal capture lock. Throwing rejects the write: nothing is captured and the
+    /// exception propagates to the setter. Handlers must not write properties. A validating handler skips its
+    /// write-time check when <see cref="SubjectTransaction.ValidationMode"/> is
+    /// <see cref="TransactionValidationMode.Deferred"/>.
     /// </summary>
     /// <typeparam name="TProperty">The property type.</typeparam>
     /// <param name="transaction">The capturing transaction.</param>
