@@ -9,8 +9,8 @@ namespace Namotion.Interceptor.Tracking.Change;
 /// </summary>
 public static class DerivedPropertyChangeHandlerExtensions
 {
-    // Short key to reduce dictionary hash cost on this hot path (verified).
-    private const string DataKey = "ni.dpd";
+    // Shared with the core so the paired value read can find the data without a reference to this handler.
+    private const string DataKey = PropertyReference.DerivedDependenciesKey;
 
     /// <summary>
     /// Gets backward dependencies: Which derived properties depend on this property.
