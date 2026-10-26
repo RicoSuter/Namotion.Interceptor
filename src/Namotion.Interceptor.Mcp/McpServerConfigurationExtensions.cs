@@ -20,29 +20,28 @@ public static class McpServerConfigurationExtensions
 
     /// <summary>
     /// Resolves a property path from <paramref name="root"/> as get_property does. With an
-    /// <see cref="McpServerConfiguration.AccessPolicy"/>, every property on the path must be one the path provider
-    /// includes and the policy allows to read, else the path reads as missing.
+    /// <see cref="McpServerConfiguration.AccessPolicy"/>, every property on the path must be one the policy allows to
+    /// read, an attribute together with its property, else the path reads as missing.
     /// </summary>
     /// <returns>The property and the key of its last segment, as <see cref="PathExtensions.TryGetPropertyFromPath(PathProviderBase, RegisteredSubject, string)"/> returns them, or null.</returns>
     public static (RegisteredSubjectProperty Property, object? Index)? TryGetReadableProperty(
         this McpServerConfiguration configuration, RegisteredSubject root, string path)
-        => configuration.AccessPolicy is null
-            ? configuration.ToolPathProvider.TryGetPropertyFromPath(root, path)
-            : configuration.ToolPathProvider.TryGetPropertyFromPath(root, path, includedPropertiesOnly: true, createMissingSubject: null);
+        => configuration.ResolutionPathProvider.TryGetPropertyFromPath(
+            root, path, includedPropertiesOnly: configuration.AccessPolicy is not null, createMissingSubject: null);
 
     /// <summary>
     /// Resolves a subject path from <paramref name="root"/> as browse does. With an
     /// <see cref="McpServerConfiguration.AccessPolicy"/>, every property on the path must be readable, as for
-    /// <see cref="TryGetReadableProperty"/>, and the subject must have a readable property other than an attribute.
+    /// <see cref="TryGetReadableProperty"/>, and the subject must not be empty for the policy: it has a property other
+    /// than an attribute, and the policy denies read on every one of them.
     /// </summary>
     /// <returns>The subject, or null when the path does not resolve or something on it is hidden.</returns>
     public static RegisteredSubject? TryGetReadableSubject(
         this McpServerConfiguration configuration, RegisteredSubject root, string path)
     {
-        var pathProvider = configuration.ToolPathProvider;
-        if (configuration.AccessPolicy is null)
+        if (configuration.AccessPolicy is not { } policy)
         {
-            return pathProvider.TryGetSubjectFromPath(root, path);
+            return configuration.ResolutionPathProvider.TryGetSubjectFromPath(root, path);
         }
 
         if (configuration.TryGetReadableProperty(root, path) is not { } resolved)
@@ -63,6 +62,6 @@ public static class McpServerConfigurationExtensions
         };
 
         var registered = subject?.TryGetRegisteredSubject();
-        return registered is not null && McpVisibility.HasReadableMember(registered, pathProvider) ? registered : null;
+        return registered is not null && !McpVisibility.IsEmptyForPolicy(registered, policy) ? registered : null;
     }
 }

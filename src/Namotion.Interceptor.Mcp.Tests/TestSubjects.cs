@@ -1,4 +1,5 @@
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Registry.Attributes;
 
 namespace Namotion.Interceptor.Mcp.Tests;
 
@@ -83,4 +84,19 @@ public partial class TestHouse
     public partial string Address { get; set; }
     public partial TestDevice? Private { get; set; }
     public partial TestDevice? Public { get; set; }
+}
+
+[InterceptorSubject]
+public partial class TestFolder
+{
+    public partial string Name { get; set; }
+    public partial string Secret { get; set; }
+
+    [InlinePaths]
+    public partial Dictionary<string, TestFolder> Children { get; set; }
+
+    public TestFolder()
+    {
+        Children = new Dictionary<string, TestFolder>();
+    }
 }
