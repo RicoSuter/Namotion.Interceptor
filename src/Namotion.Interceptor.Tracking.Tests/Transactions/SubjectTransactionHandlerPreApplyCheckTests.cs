@@ -184,7 +184,7 @@ public class SubjectTransactionHandlerPreApplyCheckTests
     }
 
     [Fact]
-    public async Task WhenDisposedFromAnotherFlowDuringSourceWrite_ThenPreApplyCheckIsSkippedAndSnapshotIsApplied()
+    public async Task WhenDisposedFromAnotherFlowDuringSourceWrite_ThenSetIsRejectedAndSourceIsReverted()
     {
         // Arrange
         var writer = new CountingTransactionWriter();
@@ -194,6 +194,26 @@ public class SubjectTransactionHandlerPreApplyCheckTests
         // Act
         using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
         writer.DuringWrite = () => RunOutsideTransactionFlow(transaction.Dispose);
+        person.FirstName = "Bob";
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Assert
+        Assert.Equal(1, handler.CommittingCalls);
+        Assert.IsType<ObjectDisposedException>(Assert.Single(exception.Errors));
+        Assert.Equal("Ann", person.FirstName);
+        Assert.Equal(nameof(Person.FirstName), Assert.Single(writer.Reverted).Property.Name);
+    }
+
+    [Fact]
+    public async Task WhenWriterWritesNoChange_ThenPreApplyCheckIsSkipped()
+    {
+        // Arrange
+        var writer = new CountingTransactionWriter { UnwrittenPropertyNames = { nameof(Person.FirstName) } };
+        var context = CreateContext(out var handler, writer);
+        var person = new Person(context) { FirstName = "Ann" };
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
         person.FirstName = "Bob";
         await transaction.CommitAsync(CancellationToken.None);
 

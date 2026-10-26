@@ -119,6 +119,28 @@ public class CommitWriteMarkerTests
     }
 
     [Fact]
+    public async Task WhenTransactionIsDisposed_ThenMarkDoesNotMatch()
+    {
+        // Arrange
+        var (context, handler, person) = CreateContextWithPerson();
+
+        // Keeps a transaction active in the process after the dispose, so the result does not depend on other tests.
+        using var unrelatedTransaction = await BeginInOwnFlowAsync(TransactionTestContext.CreateContext(out _));
+        var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        var property = new PropertyReference(person, nameof(Person.FirstName));
+        transaction.Dispose();
+
+        using (CommitWriteMarker.Set(transaction, property, "Bob"))
+        {
+            // Act
+            var matches = CommitWriteMarker.TryConsume(handler, property, "Bob");
+
+            // Assert
+            Assert.False(matches);
+        }
+    }
+
+    [Fact]
     public async Task WhenReferenceValueIsOnlyEqual_ThenMarkMatchesOnlyTheSameInstance()
     {
         // Arrange
@@ -233,5 +255,11 @@ public class CommitWriteMarkerTests
         public override bool Equals(object? obj) => obj is AlwaysEqual;
 
         public override int GetHashCode() => 0;
+    }
+
+    private static async Task<SubjectTransaction> BeginInOwnFlowAsync(IInterceptorSubjectContext context)
+    {
+        // An async method does not leak the transaction it begins into the caller's flow.
+        return await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
     }
 }

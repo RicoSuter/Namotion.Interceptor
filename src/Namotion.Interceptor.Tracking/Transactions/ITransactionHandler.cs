@@ -38,11 +38,11 @@ public interface ITransactionHandler
     /// <summary>
     /// Called in the commit check with the final set of changes, before any source write or local apply, and, with a
     /// registered <see cref="ITransactionWriter"/>, in the pre-apply check after the source writes and right before
-    /// the local apply, with only the changes that will be applied (skipped when there are none). Property reads on
-    /// the calling thread return the transaction's values for the passed changes and the landed values otherwise. In
-    /// both checks, property reads and writes from other threads that carry the transaction throw
-    /// <see cref="InvalidOperationException"/>. Handlers must not write properties and must not assume a single call
-    /// per commit.
+    /// the local apply, with only the changes that will be applied (skipped when there are none, or when no change was
+    /// written to a source). Property reads on the calling thread return the transaction's values for the passed
+    /// changes and the landed values otherwise. In both checks, property reads and writes from other threads that carry
+    /// the transaction throw <see cref="InvalidOperationException"/>. Handlers must not write properties and must not
+    /// assume a single call per commit.
     /// </summary>
     /// <remarks>
     /// Throwing in the commit check aborts the commit without writing anything and leaves the transaction retryable

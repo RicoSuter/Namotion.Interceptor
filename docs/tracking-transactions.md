@@ -268,7 +268,7 @@ A failure is retryable when nothing was written yet, or when the commit timeout'
 |---------|-----------|-----------------|-------|
 | Commit check rejects | All old, nothing written. The handler's exception propagates unchanged, for validation a `SubjectTransactionValidationException`. | Validation: the invalid changes | Yes |
 | Conflict detected (`SubjectTransactionConflictException`, see `ConflictingProperties`) | All old, nothing written | Empty | Yes |
-| Optimistic lock wait cancelled (`OperationCanceledException`) | All old, nothing written | n/a | Yes |
+| Optimistic lock wait canceled (`OperationCanceledException`) | All old, nothing written | n/a | Yes |
 | Source write fails or times out, `BestEffort` | Successful writes new at the source and locally, failed ones old | The failed source writes | No |
 | Source write fails or times out, or a custom writer reports errors without failed changes, `Rollback` | All old, written sources reverted | The failed source writes, the changes without a source, and any failed source revert | No |
 | Commit timeout during that `Rollback` revert (`OperationCanceledException`) | Local all old, sources partially reverted | n/a | Yes, a successful retry writes every source again |
@@ -358,7 +358,7 @@ An `ITransactionHandler` is called for each write a transaction captures and che
 - A resolved handler takes part for the rest of the transaction: `OnCapturing` is called for later writes to any subject, and `OnCommitting` receives the whole final set. To handle only some subjects, filter by `property.Subject` (`change.Property.Subject` in `OnCommitting`).
 - Handlers are called in the order they were resolved, each context's in its service order. A handler that `Equals` one already taking part is not added again. `ValidationInterceptor` equals any instance of its type, so validation registered on several contexts of a fallback chain runs once.
 
-**Capture.** `OnCapturing` is called before a write is captured or cancelled. Throwing rejects the write: nothing is captured and the exception propagates to the setter.
+**Capture.** `OnCapturing` is called before a write is captured or canceled. Throwing rejects the write: nothing is captured and the exception propagates to the setter.
 
 **Checks.** `OnCommitting` is called in up to two checks, both on the committing thread while the transaction is committing. The first handler that throws stops the rest. Do not assume a single call per commit.
 
@@ -366,13 +366,13 @@ An `ITransactionHandler` is called for each write a transaction captures and che
 |-|--------------|-----------------|
 | Runs | Before conflict detection, any source write and the local apply | Only with source transactions, after the source writes and right before the local apply |
 | Receives | The final set, in commit order | Only the changes that will be applied, with their captured origins |
-| Skipped | When nothing is pending | When nothing will be applied, when the transaction was disposed, and in `Rollback` mode after a source write failure or writer error, which reverts every source anyway |
-| Throwing | Aborts the commit before anything is written. The exception propagates unchanged, and the transaction stays retryable with its pending changes unless it was disposed. | Rejects the whole set in both failure handling modes: every written source is reverted, nothing from the set lands, every change is reported as failed in a `SubjectTransactionException`, and the transaction is terminal. |
+| Skipped | When nothing is pending | When nothing will be applied, when no change was written to a source, and in `Rollback` mode after a source write failure or writer error, which reverts every source anyway |
+| Throwing | Aborts the commit before anything is written. The exception propagates unchanged, and the transaction stays retryable with its pending changes unless it was disposed. | Rejects the whole set in both failure handling modes: every written source is reverted, nothing from the set lands, every change is reported as failed in a `SubjectTransactionException`, and the transaction is terminal. A transaction disposed from another flow during the commit is rejected the same way, with an `ObjectDisposedException`. |
 
 The pre-apply check exists because inbound updates can change what a handler reads while the sources are written. It rejects the whole set because the other changes were checked against the rejected values. The exception's `Errors` hold the errors of a thrown `SubjectTransactionException` that has any, otherwise the thrown exception itself, after any source write errors and before any revert errors.
 
 **Reads and writes during a check.** Handlers must not write properties.
-- On the committing thread, a read returns the checked value: the pending value of a changed property, and the landed value otherwise. A cancelled change reads the landed value, and in the pre-apply check so does a property whose source write failed.
+- On the committing thread, a read returns the checked value: the pending value of a changed property, and the landed value otherwise. A canceled change reads the landed value, and in the pre-apply check so does a property whose source write failed.
 - On the committing thread, a write throws `InvalidOperationException`, including a write to a settable derived property. A write of a property's landed value is dropped by the equality check, same as outside a transaction.
 - On other threads that carry the transaction, reads and writes throw `InvalidOperationException` because a commit is in progress, so handlers must read synchronously on the calling thread. This includes a write back to the landed value of a pending property; a write of the landed value of a property without a pending change is dropped as unchanged instead.
 - Such a write from another thread, for example a child task, can still call `OnCapturing` while `OnCommitting` runs, before it is rejected, so handlers must tolerate concurrent calls.

@@ -497,9 +497,6 @@ public class TransactionValidationTests
         });
         context.AddService<ITransactionWriter>(writer);
 
-        // Keeps a transaction active in the process after the dispose, so the result does not depend on other tests.
-        using var unrelatedTransaction = await BeginInOwnFlowAsync(CreateContext());
-
         // Act
         using (transaction = await context.BeginTransactionAsync(
             TransactionFailureHandling.BestEffort, validationMode: TransactionValidationMode.Deferred))
@@ -783,12 +780,6 @@ public class TransactionValidationTests
 
         // The attached motor now uses the context, so a later write is validated.
         Assert.Throws<ValidationException>(() => motor.MotorSpeed = 600);
-    }
-
-    private static async Task<SubjectTransaction> BeginInOwnFlowAsync(IInterceptorSubjectContext context)
-    {
-        // An async method does not leak the transaction it begins into the caller's flow.
-        return await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
     }
 
     /// <summary>

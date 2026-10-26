@@ -795,31 +795,6 @@ public class SubjectTransactionHandlerTests
         Assert.Equal(withWriter ? 1 : 0, writer.WriteCalls);
     }
 
-    [Fact]
-    public async Task WhenDisposedFromAnotherFlowDuringSourceWrite_ThenApplyIsNotConsumedAsCommitWrite()
-    {
-        // Arrange
-        var writer = new CountingTransactionWriter();
-        var context = CreateContext(out var handler, writer);
-        var probe = new CommitWriteProbe(handler);
-        context.AddService(probe);
-        var person = new Person(context) { FirstName = "Ann" };
-        probe.Writes.Clear();
-
-        // Keeps a transaction active in the process after the dispose, so the result does not depend on other tests.
-        using var unrelatedTransaction = await BeginInOwnFlowAsync(CreateContext());
-
-        // Act
-        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-        writer.DuringWrite = () => RunOutsideTransactionFlow(transaction.Dispose);
-        person.FirstName = "Bob";
-        await transaction.CommitAsync(CancellationToken.None);
-
-        // Assert
-        Assert.False(Assert.Single(probe.Writes, write => write.Property == nameof(Person.FirstName)).Consumed);
-        Assert.Equal("Bob", person.FirstName);
-    }
-
     private static async Task<SubjectTransaction> BeginInOwnFlowAsync(IInterceptorSubjectContext context)
     {
         // An async method does not leak the transaction it begins into the caller's flow.

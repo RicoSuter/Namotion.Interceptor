@@ -196,7 +196,7 @@ public sealed class SubjectTransaction : IDisposable
     }
 
     /// <summary>
-    /// Gets the number of pending changes that are not cancelled. Must be called under
+    /// Gets the number of pending changes that are not canceled. Must be called under
     /// <see cref="_pendingChangesLock"/>.
     /// </summary>
     private int GetLiveChangeCount()
@@ -205,7 +205,7 @@ public sealed class SubjectTransaction : IDisposable
     }
 
     /// <summary>
-    /// Returns true when <paramref name="property"/> has a pending change that is not cancelled. Must be called under
+    /// Returns true when <paramref name="property"/> has a pending change that is not canceled. Must be called under
     /// <see cref="_pendingChangesLock"/>.
     /// </summary>
     private bool TryGetLiveChange(PropertyReference property, out SubjectPropertyChange change)
@@ -220,7 +220,7 @@ public sealed class SubjectTransaction : IDisposable
     }
 
     /// <summary>
-    /// Copies the pending changes that are not cancelled and whose property is not in <paramref name="excluded"/> to
+    /// Copies the pending changes that are not canceled and whose property is not in <paramref name="excluded"/> to
     /// <paramref name="destination"/> in insertion order, and returns their number. Must be called under
     /// <see cref="_pendingChangesLock"/>.
     /// </summary>
@@ -273,7 +273,7 @@ public sealed class SubjectTransaction : IDisposable
 
     /// <summary>
     /// Reads a pending value for the handlers during the commit check or the pre-apply check. Returns false when the
-    /// property is not part of the transaction, its change was cancelled, or its source write failed.
+    /// property is not part of the transaction, its change was canceled, or its source write failed.
     /// </summary>
     internal bool TryGetCheckedValue<TProperty>(PropertyReference property, out TProperty value)
     {
@@ -790,7 +790,7 @@ public sealed class SubjectTransaction : IDisposable
         // What the handlers read can change while the sources are written (inbound updates, raw writes), so the
         // final set is checked again right before it lands. Its reads return the pending values of every checked
         // change, so a rejection invalidates the whole checked set in both failure handling modes.
-        var rejectionErrors = RunPreApplyCheck(failedSource);
+        var rejectionErrors = RunPreApplyCheck(written, failedSource);
         if (rejectionErrors is not null)
         {
             // Timeout not propagated here: a retry would lose the rejection, and once the local model changed
@@ -1151,10 +1151,13 @@ public sealed class SubjectTransaction : IDisposable
     /// returning the transaction's values for them. Returns null when they accept the set, or otherwise the errors of
     /// a thrown <see cref="SubjectTransactionException"/> that has any, or the thrown exception itself.
     /// </summary>
-    private IReadOnlyList<Exception>? RunPreApplyCheck(IReadOnlyList<SubjectPropertyChange> failedSource)
+    private IReadOnlyList<Exception>? RunPreApplyCheck(
+        IReadOnlyList<SubjectPropertyChange> written,
+        IReadOnlyList<SubjectPropertyChange> failedSource)
     {
-        // A transaction disposed from another flow mid-commit has dropped the pending values the reads need.
-        if (_handlerSet.Handlers.Length == 0 || IsDisposed)
+        // Without a source write the window since the commit check is the same as without a writer, which has no
+        // second check.
+        if (_handlerSet.Handlers.Length == 0 || (written.Count == 0 && failedSource.Count == 0))
         {
             return null;
         }
@@ -1166,22 +1169,23 @@ public sealed class SubjectTransaction : IDisposable
         var (rentedArray, checkedCount) = RentLandingPendingChanges(failedProperties);
         try
         {
-            if (checkedCount == 0)
+            if (checkedCount > 0)
             {
-                return null;
+                try
+                {
+                    RunHandlerCheck(new ReadOnlySpan<SubjectPropertyChange>(rentedArray, 0, checkedCount), failedProperties);
+                }
+                catch (Exception exception)
+                {
+                    return exception is SubjectTransactionException { Errors.Count: > 0 } transactionException
+                        ? transactionException.Errors
+                        : [exception];
+                }
             }
 
-            try
-            {
-                RunHandlerCheck(new ReadOnlySpan<SubjectPropertyChange>(rentedArray, 0, checkedCount), failedProperties);
-                return null;
-            }
-            catch (Exception exception)
-            {
-                return exception is SubjectTransactionException { Errors.Count: > 0 } transactionException
-                    ? transactionException.Errors
-                    : [exception];
-            }
+            // A dispose from another flow mid-commit drops the pending values this check reads, so the set is rejected
+            // instead of landing unchecked.
+            return IsDisposed ? [new ObjectDisposedException(nameof(SubjectTransaction))] : null;
         }
         finally
         {
@@ -1190,7 +1194,7 @@ public sealed class SubjectTransaction : IDisposable
     }
 
     /// <summary>
-    /// Copies the pending changes that are not cancelled and whose property is not in
+    /// Copies the pending changes that are not canceled and whose property is not in
     /// <paramref name="failedProperties"/> into a rented array, in insertion order. The caller returns the array to
     /// <see cref="ArrayPool{T}.Shared"/>.
     /// </summary>
