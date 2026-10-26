@@ -55,7 +55,10 @@ public sealed class AuthorizationEditComponentTests : BunitContext, IAsyncLifeti
         var row = component.Find("[data-testid='authorization-role-row-Kitchen']");
         Assert.Equal("2 allow rules, 1 deny rule", row.QuerySelector("[data-testid='authorization-role-rules']")!.TextContent.Trim());
         Assert.Equal("used by 1 agent", row.QuerySelector("[data-testid='authorization-role-used-by']")!.TextContent.Trim());
-        Assert.Equal("ok", row.QuerySelector("[data-testid='authorization-role-status']")!.GetAttribute("data-status"));
+        var status = row.QuerySelector("[data-testid='authorization-role-status']")!;
+        Assert.Equal("ok", status.GetAttribute("data-status"));
+        Assert.Equal("img", status.GetAttribute("role"));
+        Assert.Equal("Can be used.", status.GetAttribute("aria-label"));
 
         Assert.Equal(3, component.FindAll("[data-testid^='authorization-builtin-role-']").Count);
         Assert.Contains("Reads every member", component.Find($"[data-testid='authorization-builtin-role-{BuiltInRoles.ReaderName}']").TextContent);

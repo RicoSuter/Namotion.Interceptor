@@ -688,6 +688,23 @@ public sealed class RoleEditComponentTests : BunitContext, IAsyncLifetime
         Assert.Equal("Set*", inputs.Single(input => input.Instance.TestId == "rule-members").Instance.Placeholder);
     }
 
+    [Fact]
+    public void WhenRulesAreShown_ThenEachRemoveButtonNamesItsRule()
+    {
+        // Arrange
+        var role = _graph.GetRole("Kitchen");
+        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }, new PermissionRule { Actions = [PermissionAction.Write] }];
+        role.Deny = [new PermissionRule { Actions = [PermissionAction.Write] }];
+
+        // Act
+        var component = RenderEditor(role);
+
+        // Assert
+        Assert.Equal(
+            ["Remove allow rule 1", "Remove allow rule 2", "Remove deny rule 1"],
+            component.FindAll("[data-testid='rule-remove']").Select(button => button.GetAttribute("aria-label")));
+    }
+
     private IRenderedComponent<RoleEditComponent> RenderEditor(Role role) =>
         Render<RoleEditComponent>(parameters => parameters.Add(component => component.Subject, role));
 

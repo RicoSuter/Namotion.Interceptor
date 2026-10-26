@@ -41,7 +41,7 @@
         }
         <MudSpacer />
         <MudButton StartIcon="@Icons.Material.Filled.Delete" Variant="Variant.Text" Color="Color.Error" OnClick="@OnRemove"
-                   data-testid="rule-remove">Remove</MudButton>
+                   aria-label="@($"Remove {AccessibleName}")" data-testid="rule-remove">Remove</MudButton>
     </MudStack>
     @if (_rule.Actions.IsEmpty)
     {
@@ -89,6 +89,10 @@
     /// <summary>The type names suggested for the types selector.</summary>
     [Parameter]
     public IReadOnlyList<string> TypeNames { get; set; } = [];
+
+    /// <summary>The rule as screen readers name it, such as "allow rule 2".</summary>
+    [Parameter]
+    public string AccessibleName { get; set; } = "rule";
 
     [Parameter]
     public string? TestId { get; set; }

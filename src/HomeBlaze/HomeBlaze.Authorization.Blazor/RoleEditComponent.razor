@@ -195,7 +195,8 @@
                 var entry = rules[index];
                 <RuleCard @key="entry" @ref="entry.Card" Rule="@entry.Rule" RuleChanged="@(rule => ChangeRule(entry, rule))"
                           HasInvalidTextChanged="@(hasInvalidText => SetInvalidText(entry, hasInvalidText))" IsDeny="@(section == "deny")"
-                          OnRemove="@(() => RemoveRule(rules, entry))" TypeNames="@_typeNames" TestId="@($"role-edit-{section}-rule-{index}")" />
+                          OnRemove="@(() => RemoveRule(rules, entry))" TypeNames="@_typeNames" AccessibleName="@($"{section} rule {index + 1}")"
+                          TestId="@($"role-edit-{section}-rule-{index}")" />
             }
         </MudStack>
         <MudButton StartIcon="@Icons.Material.Filled.Add" Variant="Variant.Text" Color="Color.Primary" Class="mt-2"
