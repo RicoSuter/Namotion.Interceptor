@@ -14,12 +14,19 @@ public class PropertyValueEqualityCheckHandler : IWriteInterceptor
     /// <inheritdoc />
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
-        // CurrentValue is the landed value, so inside a transaction a write back to it is passed on: the transaction
-        // removes its pending change instead of keeping a value the write meant to undo.
         if (!EqualityComparer<TProperty>.Default.Equals(context.CurrentValue, context.NewValue) ||
-            (SubjectTransaction.HasActiveTransaction && SubjectTransaction.HasPendingChangeInCurrentTransaction(context.Property)))
+            IsWriteBackOfPendingChange(context.Property, context.NewValue))
         {
             next(ref context);
         }
+    }
+
+    // CurrentValue is the landed value, not the transaction's. A write of it is a change when the transaction holds
+    // another value, so it is passed on and the transaction removes its pending change.
+    private static bool IsWriteBackOfPendingChange<TProperty>(PropertyReference property, TProperty newValue)
+    {
+        return SubjectTransaction.HasActiveTransaction &&
+            SubjectTransaction.TryGetPendingValueInCurrentTransaction(property, out TProperty pendingValue) &&
+            !EqualityComparer<TProperty>.Default.Equals(pendingValue, newValue);
     }
 }

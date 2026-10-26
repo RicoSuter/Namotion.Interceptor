@@ -375,7 +375,7 @@ The pre-apply check exists because inbound updates can change what a handler rea
 **Reads and writes during a check.** Handlers must not write properties.
 - On the committing thread, a read returns the checked value: the pending value of a changed property, and the landed value otherwise. In the pre-apply check, so does a property whose source write failed.
 - On the committing thread, a write throws `InvalidOperationException`, including a write to a settable derived property. A write of a property's landed value is dropped by the equality check, same as outside a transaction.
-- On other threads that carry the transaction, reads and writes throw `InvalidOperationException` because a commit is in progress, so handlers must read synchronously on the calling thread. This includes a write back to the landed value of a pending property; a write of the landed value of a property without a pending change is dropped as unchanged instead.
+- On other threads that carry the transaction, reads and writes throw `InvalidOperationException` because a commit is in progress, so handlers must read synchronously on the calling thread. This includes a write back to the landed value of a pending property; a write of the landed value of a property without a pending change, or one equal to its pending value, is dropped as unchanged instead.
 - Such a write from another thread, for example a child task, can still call `OnCapturing` while `OnCommitting` runs, before it is rejected, so handlers must tolerate concurrent calls.
 - A write to a subject whose context does not route through the transaction interceptor is not intercepted and lands immediately, even during a check.
 

@@ -271,7 +271,7 @@ public sealed class SubjectTransaction : IDisposable
     /// <param name="currentValue">The landed model value seen by the write interceptor chain.</param>
     /// <param name="newValue">The value being written.</param>
     /// <param name="restoresLandedValue">
-    /// True when the write restores the landed value and the subject's context has the equality check; the pending
+    /// True when the write restores the landed value and the subject's context has the equality check; a pending
     /// change is then removed, the same as never writing the property.
     /// </param>
     /// <exception cref="InvalidOperationException">
@@ -294,9 +294,8 @@ public sealed class SubjectTransaction : IDisposable
             }
 
             var pendingChanges = _pendingChanges;
-            if (restoresLandedValue)
+            if (restoresLandedValue && pendingChanges.Remove(property))
             {
-                pendingChanges.Remove(property);
                 return true;
             }
 
@@ -314,11 +313,12 @@ public sealed class SubjectTransaction : IDisposable
     }
 
     /// <summary>
-    /// Returns true when the current flow's transaction holds a pending change for <paramref name="property"/> and is
-    /// capturing, or is committing outside this thread's commit scope.
+    /// Returns true with the pending value when the current flow's transaction holds a pending change for
+    /// <paramref name="property"/> and is capturing, or is committing outside this thread's commit scope.
     /// </summary>
-    internal static bool HasPendingChangeInCurrentTransaction(PropertyReference property)
+    internal static bool TryGetPendingValueInCurrentTransaction<TProperty>(PropertyReference property, out TProperty value)
     {
+        value = default!;
         var transaction = CurrentTransaction.Value;
         if (transaction is null || transaction.IsDisposed || transaction._isCommitted)
         {
@@ -335,7 +335,13 @@ public sealed class SubjectTransaction : IDisposable
 
         lock (transaction._pendingChangesLock)
         {
-            return transaction._pendingChanges?.ContainsKey(property) == true;
+            if (transaction._pendingChanges is null || !transaction._pendingChanges.TryGetValue(property, out var change))
+            {
+                return false;
+            }
+
+            value = change.GetNewValue<TProperty>();
+            return true;
         }
     }
 
