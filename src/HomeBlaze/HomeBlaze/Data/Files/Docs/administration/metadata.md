@@ -220,7 +220,7 @@ When a [seed directory](configuration.md#homeblazeseeddirectory) is set, the doc
 
 Agents read metadata with the MCP tools. `browse` and `search` show the metadata of a subject as its property `HomeBlaze:Metadata` with `includeProperties`, and the metadata of a property as its attribute `@HomeBlaze:Metadata` with `includeAttributes`, both only where there is metadata. `get_property` reads paths such as `/Devices/Shelly/HomeBlaze:Metadata` and `/Devices/Shelly/Firmware@HomeBlaze:Metadata`.
 
-`set_property` cannot change metadata. Agents find and change it with these methods through `invoke_query` and `invoke_operation`, when they may use these tools. The browser does not show the methods.
+`set_property` cannot change metadata. Agents find and change it with these methods through `invoke_query` and `invoke_operation`, when they may use these tools and their [roles](authorization.md) allow it. The browser does not show the methods.
 
 | Method | On | Description |
 |--------|----|-------------|
@@ -235,7 +235,7 @@ Agents read metadata with the MCP tools. `browse` and `search` show the metadata
 { "navTitle": "Hall light", "icon": null }
 ```
 
-`SetMetadata` checks the [keys](#keys) that HomeBlaze reads. `title`, `navTitle` and `icon` take a string, and a blank string removes the key. `location` and `alignment` take one of their names. `notes`, `links` and `tags` follow the rules of [Notes, Links and Tags](#notes-links-and-tags), and a blank string or an empty array removes the key. `order`, of a folder or a storage only, takes names of children, which are checked as with `SetOrder`. Other keys are stored as given, within the [limits](#limits). A refused call returns the reason to the agent. Agents cannot change the metadata of an agent or of a subject inside one.
+`SetMetadata` checks the [keys](#keys) that HomeBlaze reads. `title`, `navTitle` and `icon` take a string, and a blank string removes the key. `location` and `alignment` take one of their names. `notes`, `links` and `tags` follow the rules of [Notes, Links and Tags](#notes-links-and-tags), and a blank string or an empty array removes the key. `order`, of a folder or a storage only, takes names of children, which are checked as with `SetOrder`. Other keys are stored as given, within the [limits](#limits). A refused call returns the reason to the agent. `SetMetadata` changes only the metadata of a subject or property the tools show, and needs `write` on its metadata member: "Metadata of 'path' is not writable. The access policy does not allow it." A subject the tools do not show is refused as a missing one. The [system rules](authorization.md#system-rules) hide every agent and the subjects inside one, so no agent or MCP client can change their metadata, and the [roles](authorization.md) of an agent decide the rest; the default role `Operator` allows writing metadata.
 
 `SearchMetadata` takes these filters, each optional:
 
@@ -246,7 +246,7 @@ Agents read metadata with the MCP tools. `browse` and `search` show the metadata
 | `value` | A string that equals the whole value, or a string in an array, of `key` when it is given, else of any key, without regard to case. Numbers and booleans never match |
 | `path` | Subjects and properties at or below this path, relative to the storage |
 
-Each match has the `path` of its subject and, for a property, its `property`, as `SetMetadata` takes them, sorted by path and then property. The MCP tools return at most the first 100 matches and leave out what they do not show. For agents they also leave out what `SetMetadata` would refuse them, such as the metadata of an agent.
+Each match has the `path` of its subject and, for a property, its `property`, as `SetMetadata` takes them, sorted by path and then property. The MCP tools return at most the first 100 matches and leave out what they do not show and metadata the roles do not allow to read, such as the metadata of an agent.
 
 To find text inside notes, agents use `search_markdown`, which searches the notes along with the pages and returns with each match in notes the path that `get_property` reads them with, see [Markdown Tools](../architecture/design/ai.md#markdown-tools).
 

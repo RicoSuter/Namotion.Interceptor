@@ -26,7 +26,8 @@ An agent is a JSON file in the `Files` storage, for example `Files/Agents/Energy
 - answers **chat** messages on its page,
 - records both on one **timeline**, so the chat shows what the background runs found,
 - keeps a **memory** of key-value notes from run to run,
-- can only read by default. Changing devices or pages and sending notifications must be allowed per agent, see [Tools and permissions](#tools-and-permissions).
+- can only read by default. Changing devices or pages and sending notifications must be allowed per agent, see [Tools and permissions](#tools-and-permissions),
+- reaches only what its **roles** allow, see [Authorization](authorization.md).
 
 ---
 
@@ -130,6 +131,7 @@ All settings are `[Configuration]` properties in the agent's JSON file. Time spa
 | `PollInterval` | none | Starts a background run at this interval; at most 365 days |
 | `MinRunInterval` | `00:01:00` | Minimum time between the starts of two automatic runs; at most 365 days |
 | `AllowedTools` | read-only tools | See [Tools and permissions](#tools-and-permissions). An empty list leaves only `update_memory` |
+| `Roles` | `["Operator"]` | The roles that decide what the tools may read, change, run and read the history of, see [Authorization](authorization.md#agents). Also the default when the file has no `Roles` |
 | `TurnTimeout` | `00:05:00` | Time one turn may take; `00:00:00` for no limit, at most about 24 days |
 | `MaxToolCallsPerTurn` | `25` | Tool calls of one turn, see below |
 | `CliPath` | `claude` | CLI only. The executable; a bare name is resolved through `PATH` |
@@ -142,7 +144,7 @@ All settings are `[Configuration]` properties in the agent's JSON file. Time spa
 - **Tool calls** beyond `MaxToolCallsPerTurn` return an error and the model answers with what it has. `update_memory` does not count.
 - **Model rounds** are capped at `MaxToolCallsPerTurn` plus 10. The last round of an `AnthropicAgent` offers no tools, so the model answers; a `ClaudeCliAgent` turn that runs out of rounds fails.
 
-State properties, in the property panel and readable by MCP clients: `Status`, `StatusMessage`, `IsBusy`, `Last Analysis` (newest background result that was not quiet), `Last Activity` (start of the newest turn), `Last Background Run`, `Background Runs` and, for CLI agents, the subscription usage of the last five hours and seven days.
+State properties, in the property panel: `Status`, `StatusMessage`, `IsBusy`, `Last Analysis` (newest background result that was not quiet), `Last Activity` (start of the newest turn), `Last Background Run`, `Background Runs` and, for CLI agents, the subscription usage of the last five hours and seven days. Agents and `/mcp` clients cannot read them, see [System Rules](authorization.md#system-rules).
 
 ---
 
@@ -219,7 +221,7 @@ The header has a status chip, **Run now** and **New conversation** (disabled whi
 
 ## Tools and permissions
 
-Each turn offers exactly the tools in `AllowedTools`, plus `update_memory`. This is enforced where the tools are served, not by what the model is told.
+Each turn offers exactly the tools in `AllowedTools`, plus `update_memory`. What these tools may reach, which subjects and properties they show, which properties they write, which methods they run and which history they read, is decided by the agent's `Roles`, see [Authorization](authorization.md). A call needs both: `invoke_operation` with the role `Reader` runs no operation. Both are enforced where the tools are served, not by what the model is told.
 
 | Tool | Default | What it does |
 |---|---|---|
@@ -249,14 +251,16 @@ Pages and documents, such as these docs under `/Docs`, are the main context abou
 - `ReadEvaluatedContent` of a page, through `invoke_query`, returns the text with every `{{ path }}` replaced by its value. With `includeSourcePaths` true, each value is followed by its property path, such as `21.5 (/Devices/Kitchen/Temperature)`.
 - `ReadRawContent` returns the source with the expressions unevaluated. `search_markdown` searches this view.
 - **Secrets stay hidden**: secret configuration values in blocks show as `***`, and a block that creates no subject, such as an error, hides all its values. Page expressions never show a secret or a page's raw `Content`, and `search_markdown` never matches one. [AI Integration](../architecture/design/ai.md#hidden-values) lists the rules.
+- **Roles apply**: a page expression over a property the agent's roles do not allow to read renders empty, and `search_markdown` searches only the pages the agent may read and run `ReadRawContent` of, see [Page Expressions](authorization.md#page-expressions).
 
 ### Changing devices
 
-With `invoke_operation` or `set_property` allowed, the edit form marks the agent as able to change devices and send notifications. The preamble tells it to change something only when asked or when its instructions call for it, and to say what it changed. These limits always apply:
+With `invoke_operation` or `set_property` allowed, the edit form marks the agent as able to change devices and send notifications. The preamble tells it to change something only when asked or when its instructions call for it, and to say what it changed. The [system rules](authorization.md#system-rules) apply whatever the roles allow, to agents and external MCP clients alike:
 
-- **`set_property` never writes configuration**, for agents and external MCP clients alike. It writes only `[State]` properties and refuses one that is also `[Configuration]`, such as `IsEnabled` of an OPC UA server or the mode of a GPIO pin: "Property is not writable: path. The access policy does not allow it." The `set_property` description tells the client that an operation of the subject may change configuration.
-- **Agent settings** are not reachable at all, and operations of agents, such as Run now, are refused: "Agents cannot run operations of agents." `SetMetadata` of a storage for an agent or a subject inside one is refused as well: "Agents cannot change the metadata of agents." [`SearchMetadata`](metadata.md#agents) leaves out what `SetMetadata` refuses an agent.
-- **Operations that require confirmation** cannot be called through MCP by anyone; run them from the UI. `list_methods` marks them with `requiresConfirmation`. Examples: Wallbox reboot, firmware update, Unlock, Set ICP Max Current and charge port unlock and toggle; door lock unlock, toggle and unlatch; Nuki smart lock Lock 'n' Go and Lock 'n' Go with unlatch; Nuki Opener Open door, Activate ring to open and Activate continuous mode; FRITZ!Box guest WLAN on and toggle; adding and removing plugins; starting and stopping the OPC UA server and client; New conversation of an agent.
+- **`set_property` never writes configuration**. It writes only `[State]` properties and refuses one that is also `[Configuration]`, such as `IsEnabled` of an OPC UA server or the mode of a GPIO pin: "Property is not writable: path. The access policy does not allow it." The `set_property` description tells the client that an operation of the subject may change configuration.
+- **Agents are not reachable at all**, including the agent itself: no tool shows their settings or state, runs their operations, such as Run now, or changes their metadata. A call that names an agent gets the answer for a missing subject, such as "Subject not found." from `invoke_operation` or "No subject at '...' in this storage." from `SetMetadata`, and [`SearchMetadata`](metadata.md#agents) and `search_markdown` leave out their metadata and notes.
+- **Roles are not reachable**: the `Authorization` subject and its roles cannot be read or changed, so no agent can grant itself more.
+- **Operations that require confirmation** cannot be called through MCP by anyone: "'Name' requires confirmation by a person and cannot be called through MCP; run it from the HomeBlaze UI." Run them from the UI. `list_methods` marks them with `requiresConfirmation`. Examples: Wallbox reboot, firmware update, Unlock, Set ICP Max Current and charge port unlock and toggle; door lock unlock, toggle and unlatch; Nuki smart lock Lock 'n' Go and Lock 'n' Go with unlatch; Nuki Opener Open door, Activate ring to open and Activate continuous mode; FRITZ!Box guest WLAN on and toggle; adding and removing plugins; starting and stopping the OPC UA server and client; New conversation of an agent.
 
 `invoke_operation` reaches further than `set_property`: an operation can change anything it touches, including configuration, such as **Set Speed** of the sample motor setting `TargetSpeed`. Grant it as carefully. It can also release a Wallbox's charge port through **Pause Charging**, see [Wallbox](../devices/Wallbox.md#operations). And it can send any number of notifications, which can use up a channel's message quota, see [Pushover](../devices/Pushover.md#limitations).
 
@@ -319,7 +323,7 @@ Before you allow page changes:
 
 ## Security
 
-- **Prompt injection**: names and values from the graph, pages and documents reach the model and can try to steer it. The prompt calls them data, but the real defense is the tool scope: allow `invoke_operation` and `set_property` only to agents whose inputs you trust.
+- **Prompt injection**: names and values from the graph, pages and documents reach the model and can try to steer it. The prompt calls them data, but the real defense is the tool scope: allow `invoke_operation` and `set_property` only to agents whose inputs you trust, and narrow what they reach with a [custom role](authorization.md#custom-roles).
 - **Pages**: pages are the main context of people and other agents, and a `{{ path }}` expression is evaluated whenever a page is shown or read. Allow page changes, including through `invoke_operation`, only to agents whose inputs you trust. No agent can add HTML, scripts or other active content, and with `edit_page_layout` it can rearrange a page and show any subject on it, but not create, change or remove a device.
 - **Web content**: with web tools, anyone who controls a page or search result the agent reads can try to steer it, a far larger group than those who can change your graph. Do not combine them with `invoke_operation`, `set_property` or the page tools unless you accept that risk; a read-only agent can at worst report something wrong.
 - **Privacy and local network**: a web request tells the site or search provider what the agent looked up. A `ClaudeCliAgent` with `web_fetch` can be steered into loading pages from your local network; allow it only for agents whose instructions and inputs you trust.
@@ -381,3 +385,5 @@ Each agent keeps its data in the `Agents` folder of the [data folder](configurat
 | The request is too long for the model | Start a new conversation, or lower `HistoryTokenBudget` |
 | The agent is not running. | The agent is stopped or still starting. Check the status and the log |
 | Invalid configuration: ... | An interval is out of range, such as a poll interval above 365 days. Correct it in the edit form |
+| Invalid roles: ... | A role of the agent cannot be used, such as "Role 'X' is not defined." for a removed custom role. Every tool call is denied until the roles are fixed in the edit form or in `Authorization.json`, see [Invalid Roles](authorization.md#invalid-roles) |
+| ... is not permitted. The access policy does not allow it. | The agent's roles do not allow the call. Give it a role that does, see [Authorization](authorization.md) |
