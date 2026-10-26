@@ -3,6 +3,7 @@
 @implements ISubjectEditComponent
 
 @inject IAgentToolSource ToolSource
+@inject AuthorizationService AuthorizationService
 
 @if (Agent is not null)
 {
@@ -111,6 +112,48 @@
             }
         </MudGrid>
 
+        <MudText Typo="Typo.subtitle2" Class="mt-6">Roles</MudText>
+        <MudText Typo="Typo.body2" Class="mb-2">
+            The roles decide what the agent's tools may read, change, run and read the history of. The Authorization documentation page describes the built-in roles and how to add your own.
+        </MudText>
+        <div data-testid="agent-edit-roles">
+            <MudSelect T="string" Label="Roles" MultiSelection="true" SelectedValues="@_roles" SelectedValuesChanged="@SelectRoles"
+                       MultiSelectionTextFunc="@(_ => _roles.Count == 1 ? "1 role" : $"{_roles.Count} roles")"
+                       HelperText="Select one or more roles." Error="@(_roles.Count == 0)"
+                       ErrorText="Select at least one role. An agent without roles is denied everything.">
+                @foreach (var name in RoleOptions)
+                {
+                    <MudSelectItem T="string" Value="@name">
+                        @if (IsKnownRole(name))
+                        {
+                            @name
+                        }
+                        else
+                        {
+                            <MudText Typo="Typo.body2" Color="Color.Error">@name (unknown)</MudText>
+                        }
+                    </MudSelectItem>
+                }
+            </MudSelect>
+            <MudStack Row="true" Wrap="Wrap.Wrap" Spacing="1" Class="mt-2">
+                @foreach (var role in _roles)
+                {
+                    if (IsKnownRole(role))
+                    {
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Class="ma-0" OnClose="@(() => RemoveRole(role))"
+                                 data-testid="@($"agent-edit-role-{role}")">@role</MudChip>
+                    }
+                    else
+                    {
+                        <MudTooltip Text="Unknown role">
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" Icon="@Icons.Material.Filled.ErrorOutline"
+                                     Class="ma-0" OnClose="@(() => RemoveRole(role))" data-testid="@($"agent-edit-role-{role}")">@role</MudChip>
+                        </MudTooltip>
+                    }
+                }
+            </MudStack>
+        </div>
+
         @if (Agent is ClaudeCliAgent)
         {
             <MudText Typo="Typo.subtitle2" Class="mt-6">Claude CLI</MudText>
@@ -166,6 +209,8 @@
     private string _turnTimeout = string.Empty;
     private HashSet<string> _allowedTools = new(StringComparer.Ordinal);
     private IReadOnlyList<AgentToolOption> _toolOptions = [];
+    private IReadOnlyList<string> _roleNames = [];
+    private List<string> _roles = [];
     private int _maxToolCalls;
     private string _cliPath = string.Empty;
     private string? _fallbackModel;
@@ -195,11 +240,15 @@
         AgentTimeSpanInput.TryParse(_minRunInterval, out _) &&
         AgentTimeSpanInput.TryParseTurnTimeout(_turnTimeout, out _) &&
         _maxToolCalls > 0 &&
+        _roles.Count > 0 &&
         (Agent is not ClaudeCliAgent || !string.IsNullOrWhiteSpace(_cliPath)) &&
         (Agent is not AnthropicAgent ||
             ((_hasStoredApiKey || !string.IsNullOrWhiteSpace(_apiKey)) && !string.IsNullOrWhiteSpace(_model) && _maxTokens >= MinimumMaxTokens && _historyTokenBudget >= 0));
 
     private LlmAgentBase? Agent => Subject as LlmAgentBase;
+
+    // The configured names that are not roles stay selectable, so they can be removed in the list as well.
+    private IEnumerable<string> RoleOptions => _roleNames.Concat(_roles.Where(role => !IsKnownRole(role)));
 
     // Registered only for the CLI and the Anthropic agent.
     private string ModelHelperText => Agent is AnthropicAgent
@@ -227,6 +276,13 @@
         _allowedTools = new HashSet<string>(agent.AllowedTools, StringComparer.Ordinal);
         _toolOptions = AgentToolOptions.Create(ToolSource, agent.AllowedTools, agent.SupportedBackendTools);
         _maxToolCalls = agent.MaxToolCallsPerTurn;
+        _roleNames = AuthorizationService.GetRoleNames();
+        // Role names ignore case, so a configured name is shown as the role it resolves to.
+        _roles = agent.Roles
+            .Where(role => !string.IsNullOrWhiteSpace(role))
+            .Select(role => _roleNames.FirstOrDefault(name => string.Equals(name, role, StringComparison.OrdinalIgnoreCase)) ?? role)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
         if (agent is ClaudeCliAgent cliAgent)
         {
             _cliPath = cliAgent.CliPath;
@@ -268,6 +324,7 @@
             .Select(tool => tool.Name)
             .ToArray();
         agent.MaxToolCallsPerTurn = _maxToolCalls;
+        agent.Roles = [.. _roles];
         if (agent is ClaudeCliAgent cliAgent)
         {
             cliAgent.CliPath = _cliPath.Trim();
@@ -305,6 +362,22 @@
             _allowedTools.Remove(name);
         }
 
+        OnChanged();
+    }
+
+    private bool IsKnownRole(string name) => _roleNames.Contains(name, StringComparer.Ordinal);
+
+    // Keeps the order of the roles already selected and appends new ones; replaced as a whole so the list sees the change.
+    private void SelectRoles(IEnumerable<string>? selected)
+    {
+        var selectedRoles = selected?.ToList() ?? [];
+        _roles = [.. _roles.Where(selectedRoles.Contains), .. selectedRoles.Where(role => !_roles.Contains(role))];
+        OnChanged();
+    }
+
+    private void RemoveRole(string name)
+    {
+        _roles = [.. _roles.Where(role => !string.Equals(role, name, StringComparison.Ordinal))];
         OnChanged();
     }
 
