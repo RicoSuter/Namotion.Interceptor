@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Services;
@@ -11,7 +12,10 @@ namespace HomeBlaze.Authorization;
 /// Tags members from the HomeBlaze markers, see <see cref="MemberTags"/>: state, configuration and secrets, queries,
 /// operations and whether they require confirmation, properties holding subjects, attributes and metadata.
 /// </summary>
-/// <remarks>Thread-safe; returns a shared array per combination of tags, which callers must not change.</remarks>
+/// <remarks>
+/// Thread-safe; returns a shared array per combination of tags, which callers must not change. The tags of a member are
+/// cached until an attribute is added to it. Only a property of type <see cref="MethodMetadata"/> is read.
+/// </remarks>
 public sealed class HomeBlazeMemberTagProvider : IMemberTagProvider
 {
     // In the order of the bits of Markers.
@@ -45,15 +49,25 @@ public sealed class HomeBlazeMemberTagProvider : IMemberTagProvider
         Metadata = 1 << 8
     }
 
+    // The tags of each member with the number of its attributes when they were computed: markers are attributes
+    // registered while a subject attaches, so a changed number computes them again.
+    private static readonly ConditionalWeakTable<RegisteredSubjectProperty, CachedTags> TagsByMember = new();
+
     /// <inheritdoc />
     public IReadOnlyCollection<string> GetTags(RegisteredSubjectProperty member)
     {
+        var attributeCount = member.Attributes.Length;
+        if (TagsByMember.TryGetValue(member, out var cached) && cached.AttributeCount == attributeCount)
+        {
+            return cached.Tags;
+        }
+
         var index = (int)GetMarkers(member);
-        return Volatile.Read(ref TagsByMarkers[index]) ?? CreateTags(index);
+        var tags = Volatile.Read(ref TagsByMarkers[index]) ?? CreateTags(index);
+        TagsByMember.AddOrUpdate(member, new CachedTags(tags, attributeCount));
+        return tags;
     }
 
-    // Computed on every call rather than cached per member: markers are registered while a subject attaches, so a
-    // cached answer could miss one that is added after the first call.
     private static Markers GetMarkers(RegisteredSubjectProperty member)
     {
         var markers = Markers.None;
@@ -71,21 +85,7 @@ public sealed class HomeBlazeMemberTagProvider : IMemberTagProvider
             }
         }
 
-        if (member.TryGetMethodMetadata() is { } method)
-        {
-            if (method.Kind == MethodKind.Query)
-            {
-                markers |= Markers.Query;
-            }
-            else
-            {
-                markers |= Markers.Operation;
-                if (method.RequiresConfirmation)
-                {
-                    markers |= Markers.RequiresConfirmation;
-                }
-            }
-        }
+        markers |= GetMethodMarkers(member);
 
         if (member.CanContainSubjects)
         {
@@ -105,6 +105,23 @@ public sealed class HomeBlazeMemberTagProvider : IMemberTagProvider
         return markers;
     }
 
+    // Only a property of the type that methods are registered with is read, so that a getter of another property, which
+    // may be expensive or throw, is never called.
+    private static Markers GetMethodMarkers(RegisteredSubjectProperty member)
+    {
+        if (member.Type != typeof(MethodMetadata) || member.GetValue() is not MethodMetadata method)
+        {
+            return Markers.None;
+        }
+
+        if (method.Kind == MethodKind.Query)
+        {
+            return Markers.Query;
+        }
+
+        return method.RequiresConfirmation ? Markers.Operation | Markers.RequiresConfirmation : Markers.Operation;
+    }
+
     private static string[] CreateTags(int index)
     {
         var tags = new List<string>(TagNames.Length);
@@ -119,4 +136,6 @@ public sealed class HomeBlazeMemberTagProvider : IMemberTagProvider
         var created = tags.ToArray();
         return Interlocked.CompareExchange(ref TagsByMarkers[index], created, null) ?? created;
     }
+
+    private sealed record CachedTags(string[] Tags, int AttributeCount);
 }

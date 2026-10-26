@@ -172,6 +172,64 @@ public class HomeBlazeMemberTagProviderTests
         Assert.Same(firstTags, secondTags);
     }
 
+    [Fact]
+    public void WhenAPropertyOfAnInterfaceTypeHasAThrowingGetter_ThenItsTagsAreReturnedWithoutReadingIt()
+    {
+        // Arrange
+        var subject = CreateSubject();
+        var isRead = false;
+        var reads = 0;
+        // Registering the property reads it once.
+        var member = subject.AddProperty("Items", typeof(IEnumerable<int>), _ =>
+        {
+            if (!isRead)
+            {
+                return null;
+            }
+
+            reads++;
+            throw new InvalidOperationException("The getter must not be read.");
+        }, null);
+        isRead = true;
+
+        // Act
+        var tags = _provider.GetTags(member);
+
+        // Assert
+        Assert.Empty(tags);
+        Assert.Equal(0, reads);
+    }
+
+    [Fact]
+    public void WhenAMarkerIsAddedAfterTheFirstLookup_ThenItsTagIsReturned()
+    {
+        // Arrange
+        var member = GetMember(nameof(TagTestSubject.Plain));
+        var tagsBefore = _provider.GetTags(member);
+
+        // Act
+        member.AddAttribute(KnownAttributes.State, typeof(object), _ => null, null);
+        var tagsAfter = _provider.GetTags(member);
+
+        // Assert
+        Assert.Empty(tagsBefore);
+        AssertTags([MemberTags.State], tagsAfter);
+    }
+
+    [Fact]
+    public void WhenTheTagsOfAMemberAreReadTwice_ThenTheSameArrayIsReturned()
+    {
+        // Arrange
+        var member = GetMember(nameof(TagTestSubject.Temperature));
+
+        // Act
+        var first = _provider.GetTags(member);
+        var second = _provider.GetTags(member);
+
+        // Assert
+        Assert.Same(first, second);
+    }
+
     private static RegisteredSubjectProperty GetMember(string name) =>
         CreateSubject().TryGetProperty(name) ?? throw new InvalidOperationException($"Member '{name}' is not registered.");
 
