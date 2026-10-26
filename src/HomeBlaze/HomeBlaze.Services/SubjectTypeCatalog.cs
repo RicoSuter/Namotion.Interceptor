@@ -65,7 +65,8 @@ public partial class SubjectTypeCatalog
 
     /// <summary>
     /// Gets the simple names of the registered subject types and of the interfaces marked with
-    /// <see cref="SubjectAbstractionAttribute"/> that they implement, distinct and ordered ignoring case.
+    /// <see cref="SubjectAbstractionAttribute"/> that they implement, distinct by ordinal comparison, as type names match
+    /// case-sensitively, and ordered ignoring case.
     /// </summary>
     public IReadOnlyList<string> GetTypeNames()
     {

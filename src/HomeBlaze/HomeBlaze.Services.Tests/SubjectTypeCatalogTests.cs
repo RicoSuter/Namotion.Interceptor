@@ -377,6 +377,19 @@ public class SubjectTypeCatalogTests
             typeNames);
     }
 
+    [Fact]
+    public void WhenTypeNamesDifferOnlyInCase_ThenBothAreListed()
+    {
+        // Arrange
+        var catalog = CreateCatalog(typeof(CatalogCaseSubject));
+
+        // Act
+        var typeNames = catalog.GetTypeNames();
+
+        // Assert
+        Assert.Equal(["CatalogCaseSubject", "ICatalogLight", "ICataloglight"], typeNames);
+    }
+
     private sealed class Relay;
 
     private sealed class ShellyDevice;
