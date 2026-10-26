@@ -189,11 +189,21 @@ else
     {
         foreach (var attribute in property.Attributes)
         {
+            if (IsMarker(attribute))
+            {
+                continue;
+            }
+
             var attributeName = $"{name}@{attribute.BrowseName}";
             rows.Add(CreateRow(attribute, attributeName, isMethod: false, policy));
             AddAttributeRows(attribute, attributeName, policy, rows);
         }
     }
+
+    // The registry attributes that mark a property as state or configuration describe it to HomeBlaze rather than hold
+    // data of the device. Metadata stays, as rules can target it.
+    private static bool IsMarker(RegisteredSubjectProperty attribute) =>
+        attribute.AttributeMetadata.AttributeName is KnownAttributes.State or KnownAttributes.Configuration;
 
     // Methods are read and executed; values are read, written and have a history.
     private static MemberRow CreateRow(RegisteredSubjectProperty member, string name, bool isMethod, AuthorizationPolicy policy)

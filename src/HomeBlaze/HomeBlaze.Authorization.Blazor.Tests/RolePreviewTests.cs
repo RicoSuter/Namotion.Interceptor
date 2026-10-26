@@ -56,7 +56,7 @@ public sealed class RolePreviewTests : BunitContext, IAsyncLifetime
         Assert.Equal("true", shown.GetAttribute("data-shown"));
         Assert.Equal(
             ["Temperature", "Password", "Child", "Start", "Temperature@Minimum"],
-            GetMemberNames(component).Where(name => !name.Contains(':')).ToArray());
+            GetMemberNames(component).ToArray());
 
         Assert.Equal([Allowed, Denied, null, Allowed], GetCellStates(component, "Temperature"));
         Assert.Equal([Allowed, null, Denied, null], GetCellStates(component, "Start"));
