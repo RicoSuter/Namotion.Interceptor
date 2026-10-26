@@ -26,6 +26,10 @@
                              SearchFunc="@SearchAsync" CoerceText="false" />
         </div>
     }
+    @if (_warning is not null)
+    {
+        <MudText Typo="Typo.caption" Color="Color.Warning" Class="d-block mt-1" data-testid="@($"{TestId}-text-warning")">@_warning</MudText>
+    }
     <MudStack Row="true" Wrap="Wrap.Wrap" Spacing="1" Class="mt-2">
         @if (Values.Count == 0)
         {
@@ -63,6 +67,9 @@
     private MudAutocomplete<string>? _autocomplete;
     private string? _text;
     private string? _error;
+
+    // Why the valid text in the field may be wrong, see Warning; shown below the field.
+    private string? _warning;
     private bool _reportedInvalidText;
 
     // Set when the field lost focus while its suggestions were open, so that the text is added once they close.
@@ -100,7 +107,10 @@
     [Parameter]
     public Func<string, string?>? Validator { get; set; }
 
-    /// <summary>Gets why a valid value may be wrong, or null; such a value shows as a yellow chip and is still valid.</summary>
+    /// <summary>
+    /// Gets why a valid value may be wrong, or null; such a value shows as a yellow chip and is still valid. In a plain
+    /// text field, such typed text shows the warning below the field.
+    /// </summary>
     [Parameter]
     public Func<string, string?>? Warning { get; set; }
 
@@ -184,8 +194,7 @@
 
     private async Task OnTextChangedAsync(string? text)
     {
-        _text = text;
-        _error = GetTextError(SplitText(text));
+        SetText(text);
 
         // Typing searches again, which highlights the first suggestion.
         _isSuggestionChosen = false;
@@ -231,11 +240,13 @@
         if (_error is not null)
         {
             _text = text!.Trim();
+            _warning = null;
             await ReportInvalidTextAsync();
             return false;
         }
 
         _text = null;
+        _warning = null;
         await ReportInvalidTextAsync();
         var values = Values.ToList();
         foreach (var part in parts.Where(part => !values.Contains(part, Comparer)))
@@ -249,6 +260,17 @@
         }
 
         return true;
+    }
+
+    private void SetText(string? text)
+    {
+        _text = text;
+        var parts = SplitText(text);
+        _error = GetTextError(parts);
+        // A field with suggestions offers the values while typing, so that text not completed yet warns of nothing.
+        _warning = _error is null && Suggestions is null && Warning is { } warning
+            ? parts.Select(warning).FirstOrDefault(partWarning => partWarning is not null)
+            : null;
     }
 
     // The parts between commas, trimmed, without empty ones.

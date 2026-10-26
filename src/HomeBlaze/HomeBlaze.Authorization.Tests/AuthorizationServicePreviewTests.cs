@@ -207,6 +207,56 @@ public sealed class AuthorizationServicePreviewTests : IDisposable
         Assert.Same(first, second);
     }
 
+    [Fact]
+    public void WhenAPathPatternNamesAnEntry_ThenItsWarningSaysSoAsTheRoleWarningDoes()
+    {
+        // Arrange
+        _root.Children = new Dictionary<string, IInterceptorSubject> { ["Kitchen"] = new TagTestSubject() };
+
+        // Act
+        var warning = _service.GetPathPatternWarning("/Kitchen");
+
+        // Assert
+        Assert.Equal(
+            "Path pattern '/Kitchen' names a subject, not a member, and matches nothing; use '/Kitchen/**' for the subject and everything below it, or '/Kitchen/*' for its members.",
+            warning);
+    }
+
+    [Theory]
+    [InlineData("/Kitchen/**")]
+    [InlineData("/Kitchen*")]
+    [InlineData("/Kitchen/Plain")]
+    [InlineData("/Missing")]
+    [InlineData("Kitchen")]
+    public void WhenAPathPatternHasAWildcardIsInvalidOrNamesNoEntry_ThenItHasNoWarning(string pattern)
+    {
+        // Arrange
+        _root.Children = new Dictionary<string, IInterceptorSubject> { ["Kitchen"] = new TagTestSubject() };
+
+        // Act
+        var warning = _service.GetPathPatternWarning(pattern);
+
+        // Assert
+        Assert.Null(warning);
+    }
+
+    [Fact]
+    public void WhenTheGraphChangesAfterAPatternWasChecked_ThenItsWarningFollowsTheGraph()
+    {
+        // Arrange
+        Assert.Null(_service.GetPathPatternWarning("/Kitchen"));
+
+        // Act
+        _root.Children = new Dictionary<string, IInterceptorSubject> { ["Kitchen"] = new TagTestSubject() };
+        var warningWithKitchen = _service.GetPathPatternWarning("/Kitchen");
+        _root.Children = new Dictionary<string, IInterceptorSubject>();
+        var warningWithoutKitchen = _service.GetPathPatternWarning("/Kitchen");
+
+        // Assert
+        Assert.NotNull(warningWithKitchen);
+        Assert.Null(warningWithoutKitchen);
+    }
+
     private void AddAuthorization(params (string Name, Role Role)[] roles)
     {
         var authorization = new Authorization

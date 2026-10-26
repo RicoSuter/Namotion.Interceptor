@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Reactive.Concurrency;
 using HomeBlaze.Authorization.Internal;
 using Microsoft.Extensions.Logging;
@@ -31,16 +30,13 @@ public sealed class AuthorizationService : IDisposable
     internal const string SeveralAuthorizationsStatus =
         "Only one Authorization subject is allowed; remove the others. Custom roles are unavailable until then.";
 
-    private const int MaxCachedPathPatterns = 1024;
-
     private readonly ISubjectRegistry _registry;
     private readonly PathProviderBase _pathProvider;
     private readonly ILogger<AuthorizationService>? _logger;
     private readonly IDisposable _subscription;
     private readonly PrincipalRoleNames _principals = new();
+    private readonly PathPatterns _pathPatterns;
 
-    // The result depends only on the pattern and the path provider; cleared when full, as an editor validates per keystroke.
-    private readonly ConcurrentDictionary<string, string?> _pathPatternErrors = new(StringComparer.Ordinal);
     private readonly Lock _rebuildLock = new();
 
     // Incremented on every change of an Authorization or a Role; a snapshot of another version is rebuilt.
@@ -84,6 +80,8 @@ public sealed class AuthorizationService : IDisposable
         _pathProvider = pathProvider;
         _logger = logger;
 
+        _pathPatterns = new PathPatterns(_registry, pathProvider);
+        context.AddService(_pathPatterns);
         context.AddService(new GraphObserver(this));
         _subscription = context
             .GetPropertyChangeObservable(ImmediateScheduler.Instance)
@@ -141,18 +139,19 @@ public sealed class AuthorizationService : IDisposable
     {
         ArgumentNullException.ThrowIfNull(pattern);
 
-        if (_pathPatternErrors.TryGetValue(pattern, out var error))
-        {
-            return error;
-        }
+        return _pathPatterns.Validate(pattern);
+    }
 
-        error = AuthorizationSnapshot.ValidatePathPattern(pattern, _pathProvider);
-        if (_pathPatternErrors.Count >= MaxCachedPathPatterns)
-        {
-            _pathPatternErrors.Clear();
-        }
+    /// <summary>
+    /// Gets why a valid path pattern without a wildcard likely does not do what it says, or null: it names a subject that
+    /// is an entry of a folder or collection, which has no member of its own, so the pattern matches nothing. The same
+    /// check gives <see cref="Role.Warning"/>; it reads the current graph, so the answer changes when the graph does.
+    /// </summary>
+    public string? GetPathPatternWarning(string pattern)
+    {
+        ArgumentNullException.ThrowIfNull(pattern);
 
-        return _pathPatternErrors.GetOrAdd(pattern, error);
+        return pattern.Contains('*') || ValidatePathPattern(pattern) is not null ? null : _pathPatterns.GetWarning(pattern);
     }
 
     /// <summary>

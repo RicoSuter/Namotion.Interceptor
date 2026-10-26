@@ -170,7 +170,7 @@ public sealed class RoleEditComponentTests : BunitContext, IAsyncLifetime
     {
         // Arrange
         var role = _graph.GetRole("Kitchen");
-        role.Allow = [new PermissionRule { Paths = ["/Devices", "Garden"], Actions = [PermissionAction.Read] }];
+        role.Allow = [new PermissionRule { Paths = ["/Devices/**", "Garden"], Actions = [PermissionAction.Read] }];
 
         // Act
         var component = RenderEditor(role);
@@ -303,7 +303,7 @@ public sealed class RoleEditComponentTests : BunitContext, IAsyncLifetime
         var role = _graph.GetRole("Kitchen");
         role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
         var component = RenderEditor(role);
-        await TypeTextAsync(component, "role-edit-allow-rule-0", "rule-paths", "/Devices");
+        await TypeTextAsync(component, "role-edit-allow-rule-0", "rule-paths", "/Devices/*");
         await TypeTextAsync(component, "role-edit-allow-rule-0", "rule-types", "TestDevice");
         await TypeTextAsync(component, "role-edit-allow-rule-0", "rule-members", "Temperature");
 
@@ -312,7 +312,7 @@ public sealed class RoleEditComponentTests : BunitContext, IAsyncLifetime
 
         // Assert
         Assert.Equal(
-            [new PermissionRule { Paths = ["/Devices"], Types = ["TestDevice"], Members = ["Temperature"], Actions = [PermissionAction.Read] }],
+            [new PermissionRule { Paths = ["/Devices/*"], Types = ["TestDevice"], Members = ["Temperature"], Actions = [PermissionAction.Read] }],
             role.Allow);
     }
 
@@ -424,6 +424,59 @@ public sealed class RoleEditComponentTests : BunitContext, IAsyncLifetime
 
         // Assert
         Assert.Empty(component.FindAll("[data-testid='role-edit-status']"));
+    }
+
+    [Fact]
+    public void WhenTheRoleHasAWarning_ThenItIsShownAsAWarning()
+    {
+        // Arrange
+        var role = _graph.GetRole("Kitchen");
+        role.Deny = [new PermissionRule { Paths = ["/Devices"], Actions = [PermissionAction.Read] }];
+
+        // Act
+        var component = RenderEditor(role);
+
+        // Assert
+        var alert = component.Find("[data-testid='role-edit-warning']");
+        Assert.Contains("Path pattern '/Devices' names a subject, not a member", alert.TextContent);
+        Assert.Contains("mud-alert-text-warning", alert.ClassName);
+        Assert.Empty(component.FindAll("[data-testid='role-edit-status']"));
+    }
+
+    [Fact]
+    public async Task WhenATypedPathNamesAnEntry_ThenTheFieldWarnsAndTheAddedChipIsAWarningThatKeepsTheRoleValid()
+    {
+        // Arrange
+        var role = _graph.GetRole("Kitchen");
+        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var component = RenderEditor(role);
+
+        // Act
+        await TypeTextAsync(component, "role-edit-allow-rule-0", "rule-paths", "/Devices");
+        var textWarning = component.Find("[data-testid='role-edit-allow-rule-0'] [data-testid='rule-paths-text-warning']").TextContent;
+        await EnterTextAsync(component, "role-edit-allow-rule-0", "rule-paths", "/Devices");
+
+        // Assert
+        Assert.StartsWith("Path pattern '/Devices' names a subject, not a member", textWarning);
+        Assert.Empty(component.FindAll("[data-testid='role-edit-allow-rule-0'] [data-testid='rule-paths-text-warning']"));
+        var chip = component.Find("[data-testid='role-edit-allow-rule-0'] [data-testid='rule-paths-chip']");
+        Assert.Contains("mud-chip-color-warning", chip.ClassName);
+        Assert.True(component.Instance.IsValid);
+    }
+
+    [Fact]
+    public async Task WhenATypedPathCoversTheEntry_ThenTheFieldDoesNotWarn()
+    {
+        // Arrange
+        var role = _graph.GetRole("Kitchen");
+        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var component = RenderEditor(role);
+
+        // Act
+        await TypeTextAsync(component, "role-edit-allow-rule-0", "rule-paths", "/Devices/**");
+
+        // Assert
+        Assert.Empty(component.FindAll("[data-testid='role-edit-allow-rule-0'] [data-testid='rule-paths-text-warning']"));
     }
 
     [Fact]

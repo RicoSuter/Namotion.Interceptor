@@ -183,10 +183,6 @@ internal sealed class AuthorizationSnapshot
         return Compile(roles, [name]);
     }
 
-    /// <summary>Gets why a path pattern is invalid, or null when it is valid.</summary>
-    public static string? ValidatePathPattern(string pattern, PathProviderBase pathProvider) =>
-        PathPatternChecks.Validate(pattern, pathProvider);
-
     private AuthorizationResult Compile(string[] roleNames)
     {
         foreach (var name in roleNames)

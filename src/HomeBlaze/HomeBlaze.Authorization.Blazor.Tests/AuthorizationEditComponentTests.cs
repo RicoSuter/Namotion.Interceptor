@@ -68,6 +68,23 @@ public sealed class AuthorizationEditComponentTests : BunitContext, IAsyncLifeti
     }
 
     [Fact]
+    public void WhenARoleHasAWarning_ThenItsStatusIconIsAWarningThatNamesIt()
+    {
+        // Arrange
+        _graph.GetRole("Kitchen").Deny = [new PermissionRule { Paths = ["/Devices"], Actions = [PermissionAction.Read] }];
+
+        // Act
+        var component = RenderEditor(_graph.Authorization);
+
+        // Assert
+        var status = component.Find("[data-testid='authorization-role-row-Kitchen'] [data-testid='authorization-role-status']");
+        Assert.Equal("warning", status.GetAttribute("data-status"));
+        Assert.StartsWith("Can be used, but: Path pattern '/Devices' names a subject", status.GetAttribute("aria-label"));
+        var other = component.Find("[data-testid='authorization-role-row-Garden'] [data-testid='authorization-role-status']");
+        Assert.Equal("ok", other.GetAttribute("data-status"));
+    }
+
+    [Fact]
     public void WhenSeveralAuthorizationsExist_ThenTheStatusAndTheErrorOfEachRoleAreShown()
     {
         // Arrange

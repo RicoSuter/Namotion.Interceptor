@@ -232,6 +232,7 @@
         {
             null => (Icons.Material.Filled.FiberNew, Color.Info, "new", "Added; saved with this dialog."),
             { Status: { } error } => (Icons.Material.Filled.ErrorOutline, Color.Error, "error", error),
+            { Warning: { } warning } => (Icons.Material.Filled.WarningAmber, Color.Warning, "warning", $"Can be used, but: {warning}"),
             _ => (Icons.Material.Filled.CheckCircleOutline, Color.Success, "ok", "Can be used.")
         };
 

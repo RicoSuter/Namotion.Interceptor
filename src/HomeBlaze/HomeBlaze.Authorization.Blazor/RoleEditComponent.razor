@@ -16,6 +16,10 @@
     {
         <MudAlert Severity="Severity.Error" Dense="true" Class="mt-2" data-testid="role-edit-status">@status</MudAlert>
     }
+    @if (role.Warning is { } warning)
+    {
+        <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2" data-testid="role-edit-warning">@warning</MudAlert>
+    }
 
     @* Kept alive, so that switching tabs keeps the text typed into a rule and the subject chosen for the preview. *@
     <MudTabs Elevation="0" TabPanelsClass="pt-4" KeepPanelsAlive="true" data-testid="role-edit-tabs">

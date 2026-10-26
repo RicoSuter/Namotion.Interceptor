@@ -7,7 +7,7 @@
         <MudItem xs="12" md="6">
             <ChipListInput @ref="_paths" Label="Paths" Placeholder="/Devices/**" HelperText="Path patterns; ** matches any depth. Separate several with commas; press Enter or leave the field to add."
                            Values="@_rule.Paths" ValuesChanged="@(values => ChangeAsync(_rule with { Paths = [.. values] }))"
-                           Validator="@ValidatePath" Pick="@PickPathAsync" HasInvalidTextChanged="@ReportInvalidTextAsync" TestId="rule-paths" />
+                           Validator="@ValidatePath" Warning="@WarnPath" Pick="@PickPathAsync" HasInvalidTextChanged="@ReportInvalidTextAsync" TestId="rule-paths" />
         </MudItem>
         <MudItem xs="12" md="6">
             <ChipListInput @ref="_types" Label="Types" HelperText="Subject types or interfaces, by simple or full name, case-sensitive. Separate several with commas; press Enter or leave the field to add."
@@ -160,6 +160,8 @@
     }
 
     private string? ValidatePath(string pattern) => AuthorizationService.ValidatePathPattern(pattern);
+
+    private string? WarnPath(string pattern) => AuthorizationService.GetPathPatternWarning(pattern);
 
     // The rule is kept here as changed, as the parameter is set again only once the parent rendered, which a second
     // change before that, such as committing the text of each field, would otherwise undo.
