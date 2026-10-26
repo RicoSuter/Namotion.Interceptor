@@ -944,6 +944,24 @@ public sealed class RoleEditComponentTests : BunitContext, IAsyncLifetime
     }
 
     [Fact]
+    public void WhenARuleCardIsShown_ThenThePathsFieldGivesMemberPathExamplesAndEachFieldNamesItsAddButton()
+    {
+        // Arrange
+        var role = _graph.GetRole("Kitchen");
+        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+
+        // Act
+        var component = RenderEditor(role);
+
+        // Assert
+        var inputs = component.FindComponents<ChipListInput>();
+        var paths = inputs.Single(input => input.Instance.TestId == "rule-paths").Instance;
+        Assert.Equal("/Devices/Sonos/*", paths.Placeholder);
+        Assert.Contains("/Devices/**/Volume", paths.HelperText);
+        Assert.All(inputs, input => Assert.Contains("click Add", input.Instance.HelperText));
+    }
+
+    [Fact]
     public void WhenRulesAreShown_ThenEachRemoveButtonNamesItsRule()
     {
         // Arrange

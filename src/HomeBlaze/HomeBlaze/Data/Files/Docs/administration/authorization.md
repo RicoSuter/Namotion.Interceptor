@@ -91,7 +91,7 @@ Custom roles live in one `Authorization` subject, and each role is a subject bel
 
 Select the `Authorization` subject in the subject browser and click "Edit", the pencil next to its title. The dialog lists two groups:
 
-- **Custom roles**: each role with its name, its number of allow and deny rules, "used by N agents" and a status icon. The tooltip of the icon reads "Can be used.", the reason why the role cannot be used, or "Added; saved with this dialog." for a role that is not saved yet. A role added in the dialog shows "(new)" after its name, a renamed one "(was OldName)".
+- **Custom roles**: each role with its name, its number of allow and deny rules, "used by N agents" and a status icon. The tooltip of the icon reads "Can be used.", the reason why the role cannot be used, or "Added; saved with this dialog." for a role that is not saved yet. A role that can be used but has a `Warning`, see [Status and Usage](#status-and-usage), shows a yellow warning icon whose tooltip reads "Can be used, but: " followed by the warning. A role added in the dialog shows "(new)" after its name, a renamed one "(was OldName)".
 - **Built-in roles**: `Reader`, `Operator` and `Everything`, each with one line of what it allows. They cannot be changed, see [Built-in Roles](#built-in-roles).
 
 To add a role:
@@ -129,7 +129,7 @@ Agents and the custom roles that include a role name it, so a rename or removal 
 The property panel of a role shows four values:
 
 - **`Status`**: why the role cannot be used, or empty. "The name 'Reader' is reserved for a built-in role." or "The name 'System' is reserved for the system rules." for a reserved name, where agents naming `Reader` keep the built-in role; "The name 'Kitchen/Lights' cannot contain '/', '[' or ']', because it is part of the role's path." for a name written by hand with such a character; "The name '...' is used by more than one role, ignoring case."; or why the rules do not compile, such as "Role 'LightOperator' includes 'Readers', which is not defined.", "Action 'run' of role 'LightOperator' is not a known action." or "Path pattern 'Devices' of role 'LightOperator' must start with '/'.".
-- **`Warning`**: hints about rules that likely do not do what they say, or empty; the role stays usable. "Path pattern '/Devices/Kitchen' names a subject, not a member, and matches nothing; use '/Devices/Kitchen/**' for the subject and everything below it, or '/Devices/Kitchen/*' for its members." for a pattern without a wildcard that names an entry of a folder. The patterns are checked against the graph when the roles change, so a subject that appears later is found at the next change of a role.
+- **`Warning`**: hints about rules that likely do not do what they say, or empty; the role stays usable. "Path pattern '/Devices/Kitchen' names a subject, not a member, and matches nothing; use '/Devices/Kitchen/**' for the subject and everything below it, or '/Devices/Kitchen/*' for its members." for a pattern without a wildcard that names an entry of a folder. The patterns are checked against the graph when the roles change, so a subject that appears later is found at the next change of a role. The list of roles in the `Authorization` dialog shows a warning icon for such a role, and the dialog of the role shows the warning below its name; the field "Paths" of a rule card checks a pattern against the current graph while you type, see [Rule Cards](#rule-cards).
 - **`UsedByAgents`**: the number of started agents that name the role.
 
 Role names compare ignoring case. A saved change applies to the next turn of each agent, as a whole: an agent never gets a part of the changes of one save. When a hand-written file holds two roles whose names differ only in case, the `Authorization` dialog shows "Several roles have the same name, ignoring case. Rename or remove one to save." and "Save" stays disabled until one is renamed or removed.
@@ -140,7 +140,7 @@ When the file of the `Authorization` subject is reloaded while its dialog or the
 
 ## Editing a Role
 
-Select the role below the `Authorization` subject in the subject browser, such as `LightOperator`, and click "Edit", the pencil next to its title. The dialog shows the name of the role, "Used by N agents", the `Status` of the role as an error when it cannot be used, and the tabs "Rules" and "Preview".
+Select the role below the `Authorization` subject in the subject browser, such as `LightOperator`, and click "Edit", the pencil next to its title. The dialog shows the name of the role, "Used by N agents", the `Status` of the role as an error when it cannot be used, its `Warning` as a warning, and the tabs "Rules" and "Preview".
 
 This builds the role `LightOperator`, which switches and dims the lights, except in the bedroom, and otherwise only reads:
 
@@ -167,7 +167,7 @@ The tab "Rules" has three parts:
 
 | Field | Takes |
 |-------|-------|
-| "Paths" | [Path patterns](#path-patterns), such as `/Devices/**`. The search button at the end of the field opens "Select Path" with the tree of the subjects; pick a subject and click "OK" to add its path. A pattern is checked as you type, and an invalid one shows its error under the field, such as "Path pattern 'Devices' must start with '/'." |
+| "Paths" | [Path patterns](#path-patterns) of members, such as `/Devices/Sonos/*` or `/Devices/**/Volume`. The search button at the end of the field opens "Select Path" with the tree of the subjects and their members: properties, methods and attributes. Pick one and click "OK" to put its pattern into the field: a subject, or a property that holds subjects, comes with `/**` appended, so that the pattern covers everything below it, and any other member comes with its own path, such as `/Devices/Sonos/Play`. Edit the pattern, such as to end in `/*` for the subject's own members only, and click "Add". A pattern is checked as you type: an invalid one shows its error under the field, such as "Path pattern 'Devices' must start with '/'.", and one that names an entry of a folder shows the warning of the role's `Warning` below the field, see [Status and Usage](#status-and-usage), and a yellow chip once added. |
 | "Types" | Type names, case-sensitive. While you type, the field suggests the subject types HomeBlaze knows and the device interfaces they implement, such as `ILightbulb`, by simple name. Any other name can be typed as well, simple or full; a name that matches no known type or interface, such as `ILightBulb`, shows as a yellow chip with the tooltip "No known subject type or interface has this name; check its spelling and case." and can still be saved, for a type of a plugin that is not loaded. A name with whitespace is rejected with "A type name contains no whitespace." |
 | "Members" | Member names, case-sensitive, such as `Temperature`; `*` matches any text, such as `Set*`. A name with whitespace is rejected with "A member name contains no whitespace." |
 | "Tags" | [Tags](#tags), suggested while you type. Another text shows "Unknown tag; use one of state, configuration, secret, query, operation, requires-confirmation, subjects, attribute, metadata." |
@@ -175,12 +175,14 @@ The tab "Rules" has three parts:
 
 Each value is a chip below its field:
 
-- **Adding**: press Enter or leave the field to add the typed text. Separate several values with commas, such as `/Devices/Kitchen/**, /Devices/Garden/**`; each part becomes a chip, without the whitespace around it. In a field with suggestions, click a suggestion, or choose one with the arrow keys and press Enter. "Save" also adds the text still in a field, so nothing typed is lost.
+- **Adding**: press Enter, click "Add" next to the field or leave the field to add the typed text. "Add" is disabled while the field is empty or holds invalid text. Separate several values with commas, such as `/Devices/Kitchen/**, /Devices/Garden/**`; each part becomes a chip, without the whitespace around it. In a field with suggestions, click a suggestion, or choose one with the arrow keys and press Enter. "Save" also adds the text still in a field, so nothing typed is lost.
 - **Removing**: click the cross of the chip.
 - **Invalid text**: an invalid pattern, tag or name is not added. It stays in the field with its error, and "Save" stays disabled until it is corrected or cleared. When one part of text with commas is invalid, none of its parts is added.
 - **Invalid values from the file**: a value from the file that is invalid shows as a red chip with the error as its tooltip, and "Save" stays disabled until it is removed. Besides the errors above, this is a value that holds a comma, "Contains a comma, which separates values; remove it and add each part on its own.", has whitespace around it, "Has leading or trailing whitespace.", or is listed a second time in the same field, "Listed twice.". Tags count as listed twice in another case as well.
 - **"any"**: a selector without values shows "any" below its field and matches every value, so a rule with only "Types" applies to every member of every subject of those types.
 - **Every member**: a card whose four selectors are all empty shows "This rule applies to every member.", in red on an allow rule and as a warning on a deny rule. The rule can still be saved, but an allow rule then grants its actions on every member of every subject, as `Everything` does.
+- **Deny of one member**: a deny rule with a path that does not end in `*` and names something that can hold subjects, such as `/Devices/Kitchen/Lights`, shows "'/Devices/Kitchen/Lights' matches only that one member, not what is below it; add /** to deny everything below it as well.". A deny of `read` on such a property hides the subjects below it from browsing, but their members stay readable when asked for by their paths. A path that names a value, a method or an attribute shows no hint, as nothing is below it.
+- **Execute without read**: a method is listed and run only when it is readable. When the role allows `execute` on methods it does not allow to read, the tab "Rules" shows "Execute is allowed without read on 2 methods, such as /Devices/Sonos/Play, which therefore cannot be used. A method is listed and run only when it is readable. Allow read on them as well.", and an allow rule with "execute" but not "read" that allows them shows a hint of its own. A role that allows `read` on those methods in another rule, or includes `Reader`, shows no hint.
 
 "Save" stays disabled while a rule has no action, a value is invalid, or a field holds invalid text. An action in the file that is not one of the four shows as a red chip with the tooltip "Unknown action" and keeps "Save" disabled until it is removed.
 
@@ -203,7 +205,7 @@ The line below the field reads:
 
 A path that names no subject shows "No subject has this path.", and a role that does not compile shows its error instead, such as "Role 'LightOperator' includes 'Readers', which is not defined.".
 
-The table has a row per member: the properties, then the methods, then the attributes, named `Property@Attribute`, such as `Temperature@HomeBlaze:Metadata`. The columns are the [actions](#actions) "read", "write", "execute" and "history". A cell is a green tick when the action is allowed, a red cross when it is denied, and empty where the action does not apply: a method has "read" and "execute", a property or attribute "read", "write" and "history".
+The table has a row per member: the properties, then the methods, then the attributes, named `Property@Attribute`, such as `Temperature@HomeBlaze:Metadata`. Below its name, a row shows the path a [path pattern](#path-patterns) matches the member by, such as `/Devices/Sonos/Play`; a click selects the whole path, to copy it into the field "Paths" of a rule. The columns are the [actions](#actions) "read", "write", "execute" and "history". A cell is a green tick when the action is allowed, a red cross when it is denied, and empty where the action does not apply: a method has "read" and "execute", a property or attribute "read", "write" and "history".
 
 Hovering over a cell shows its explanation, and clicking it shows the explanation below the table, starting with the member and the action. An explanation names the role and the rule that decided:
 
@@ -211,6 +213,8 @@ Hovering over a cell shows its explanation, and clicking it shows the explanatio
 - "Denied by LightOperator: deny paths /Devices/Bedroom/**; types ILightbulb; actions execute. It overrides LightOperator: allow types ILightbulb; members TurnOn, TurnOff, Toggle, SetBrightness; actions execute."
 - "Denied by a system rule: deny tags secret; actions read, write, history. It overrides Reader: allow any member; actions read, history."
 - "No role allows it."
+
+A method that can be executed but not read cannot be used, so its tick under "execute" is yellow, and its explanation ends with "It cannot be used, as read is denied: A method is listed and run only when it is readable."
 
 For the role `LightOperator` above and a light in the bedroom, the row `TurnOn` shows a tick under "read" and a cross under "execute". Clicking the cross shows "TurnOn, execute:" followed by the second explanation: the deny rule for the bedroom removes what the allow rule for the lights granted. For a light in the kitchen the same cell is a tick with "Allowed by LightOperator: allow types ILightbulb; members TurnOn, TurnOff, Toggle, SetBrightness; actions execute.".
 

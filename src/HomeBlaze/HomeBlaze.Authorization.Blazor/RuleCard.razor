@@ -8,22 +8,22 @@
 <MudPaper Outlined="true" Class="pa-3" data-testid="@TestId">
     <MudGrid Spacing="2">
         <MudItem xs="12" md="6">
-            <ChipListInput @ref="_paths" Label="Paths" Placeholder="/Devices/**" HelperText="Path patterns; ** matches any depth. Separate several with commas; press Enter or leave the field to add."
+            <ChipListInput @ref="_paths" Label="Paths" Placeholder="/Devices/Sonos/*" HelperText="Member paths; * matches one segment and ** any depth, as in /Devices/**/Volume. Separate several with commas; press Enter, click Add or leave the field to add."
                            Values="@_rule.Paths" ValuesChanged="@(values => ChangeAsync(_rule with { Paths = [.. values] }))"
                            Validator="@ValidatePath" Warning="@WarnPath" Pick="@PickPathAsync" HasInvalidTextChanged="@ReportInvalidTextAsync" TestId="rule-paths" />
         </MudItem>
         <MudItem xs="12" md="6">
-            <ChipListInput @ref="_types" Label="Types" HelperText="Subject types or interfaces, by simple or full name, case-sensitive. Separate several with commas; press Enter or leave the field to add."
+            <ChipListInput @ref="_types" Label="Types" HelperText="Subject types or interfaces, by simple or full name, case-sensitive. Separate several with commas; press Enter, click Add or leave the field to add."
                            Values="@_rule.Types" ValuesChanged="@(values => ChangeAsync(_rule with { Types = [.. values] }))"
                            Suggestions="@TypeNames" Validator="@ValidateTypeName" Warning="@WarnTypeName" HasInvalidTextChanged="@ReportInvalidTextAsync" TestId="rule-types" />
         </MudItem>
         <MudItem xs="12" md="6">
-            <ChipListInput @ref="_members" Label="Members" Placeholder="Set*" HelperText="Member names, case-sensitive; * matches any text. Separate several with commas; press Enter or leave the field to add."
+            <ChipListInput @ref="_members" Label="Members" Placeholder="Set*" HelperText="Member names, case-sensitive; * matches any text. Separate several with commas; press Enter, click Add or leave the field to add."
                            Values="@_rule.Members" ValuesChanged="@(values => ChangeAsync(_rule with { Members = [.. values] }))"
                            Validator="@ValidateMemberName" HasInvalidTextChanged="@ReportInvalidTextAsync" TestId="rule-members" />
         </MudItem>
         <MudItem xs="12" md="6">
-            <ChipListInput @ref="_tags" Label="Tags" HelperText="Tags a member must all carry. Separate several with commas; press Enter or leave the field to add."
+            <ChipListInput @ref="_tags" Label="Tags" HelperText="Tags a member must all carry. Separate several with commas; press Enter, click Add or leave the field to add."
                            Values="@_rule.Tags" ValuesChanged="@(values => ChangeAsync(_rule with { Tags = [.. values] }))"
                            Suggestions="@TagNames" Validator="@ValidateTag" Comparer="@StringComparer.OrdinalIgnoreCase" HasInvalidTextChanged="@ReportInvalidTextAsync" TestId="rule-tags" />
         </MudItem>
