@@ -70,12 +70,16 @@ public class HomeBlazeMarkdownSearchToolProvider : IMcpToolProvider
     /// <see cref="McpServerConfiguration.ExcludeTypes"/> of the configuration: the pages and notes of a subject of one of
     /// these types, or below one through the first parents, are not searched.
     /// </param>
+    /// <param name="configuration">
+    /// The configuration the tool is added to, whose access policy decides which pages and notes are searched.
+    /// </param>
     internal HomeBlazeMarkdownSearchToolProvider(
-        Func<IInterceptorSubject> rootSubjectProvider, PathProviderBase pathProvider, string pathPrefix, Type[] excludeTypes)
+        Func<IInterceptorSubject> rootSubjectProvider, PathProviderBase pathProvider, string pathPrefix, Type[] excludeTypes,
+        McpServerConfiguration configuration)
     {
         _rootSubjectProvider = rootSubjectProvider;
         _pathPrefix = pathPrefix;
-        _sourceFinder = new MarkdownSearchSourceFinder(pathProvider, pathPrefix, excludeTypes);
+        _sourceFinder = new MarkdownSearchSourceFinder(pathProvider, pathPrefix, excludeTypes, configuration);
     }
 
     public IEnumerable<McpToolInfo> GetTools()
@@ -215,8 +219,11 @@ public class HomeBlazeMarkdownSearchToolProvider : IMcpToolProvider
         return new { pages, truncated, pages_searched = pagesSearched };
     }
 
-    // The path of the metadata of a subject, or of its property, with one slash after the root path /.
-    private static string GetMetadataPath(string path, string? property)
+    /// <summary>
+    /// Gets the path that get_property reads the metadata of the subject at <paramref name="path"/> with, or that of its
+    /// property <paramref name="property"/>, with one slash after the root path /.
+    /// </summary>
+    internal static string GetMetadataPath(string path, string? property)
     {
         var separator = path.EndsWith('/') ? "" : "/";
         return property is null

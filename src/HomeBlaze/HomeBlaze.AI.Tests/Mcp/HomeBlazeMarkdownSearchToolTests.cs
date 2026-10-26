@@ -4,6 +4,7 @@ using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.AI.Mcp;
 using HomeBlaze.AI.Tests.Agents;
+using HomeBlaze.Authorization;
 using HomeBlaze.Services;
 using HomeBlaze.Storage;
 using HomeBlaze.Storage.Internal;
@@ -12,9 +13,12 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Authorization;
 using Namotion.Interceptor.Mcp;
+using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Mcp.Tools;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Testing;
 using Xunit;
 
 namespace HomeBlaze.AI.Tests.Mcp;
@@ -433,6 +437,76 @@ public sealed class HomeBlazeMarkdownSearchToolTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenARoleDeniesExecuteOnReadRawContentOfAPage_ThenThePageIsNotSearchedAndNothingIsLogged()
+    {
+        // Arrange
+        var role = new AuthorizationRole
+        {
+            Name = "NoNotesPage",
+            Includes = [BuiltInRoles.ReaderName],
+            Deny = [new PermissionRule { Paths = ["/Storage/Notes.md"], Members = ["ReadRawContent"], Actions = [AuthorizationActions.Execute] }]
+        };
+        var logger = new RecordingLogger();
+        var accessPolicy = new AuthorizationMcpAccessPolicy(TestAccessPolicies.Create(role.Name, role).Policy, logger, "Searcher");
+        var (root, services) = await CreateGraphAsync([]);
+        var tool = CreateTools(services, root, accessPolicy)[HomeBlazeMarkdownSearchToolProvider.SearchMarkdownToolName];
+
+        // Act
+        var result = await CallAsync(tool, new { query = "# " });
+
+        // Assert
+        Assert.Equal(
+            ["/Storage/Docs/HeatPump.md", "/Storage/DocsArchive/Old.md"],
+            result.GetProperty("pages").EnumerateArray().Select(page => page.GetProperty("path").GetString()));
+        Assert.Equal(2, result.GetProperty("pages_searched").GetInt32());
+        Assert.Empty(logger.Entries);
+    }
+
+    [Fact]
+    public async Task WhenARoleHidesAFolder_ThenItsPagesAreNotSearched()
+    {
+        // Arrange
+        var role = new AuthorizationRole
+        {
+            Name = "NoDocs",
+            Includes = [BuiltInRoles.ReaderName],
+            Deny = [new PermissionRule { Paths = ["/Storage/Docs"], Actions = [PermissionAction.Read] }]
+        };
+        var (root, services) = await CreateGraphAsync([]);
+        var tool = CreateTools(services, root, TestAccessPolicies.Create(role.Name, role))[HomeBlazeMarkdownSearchToolProvider.SearchMarkdownToolName];
+
+        // Act
+        var result = await CallAsync(tool, new { query = "heat pump" });
+
+        // Assert
+        Assert.Equal(["/Storage/DocsArchive/Old.md"], result.GetProperty("pages").EnumerateArray().Select(page => page.GetProperty("path").GetString()));
+    }
+
+    [Fact]
+    public async Task WhenARoleDeniesReadOnMetadata_ThenNotesAreNotSearched()
+    {
+        // Arrange
+        var role = new AuthorizationRole
+        {
+            Name = "NoMetadata",
+            Includes = [BuiltInRoles.ReaderName],
+            Deny = [new PermissionRule { Tags = [MemberTags.Metadata], Actions = [PermissionAction.Read] }]
+        };
+        var (root, services) = await CreateGraphAsync(
+        [
+            ("Docs/Pump.json", """{ "speed": 1 }"""),
+            ("Docs/Pump.metadata.json", """{ "notes": "Check the freezer gasket.", "$properties": { "FileSize": { "notes": "Grows with the freezer log." } } }""")
+        ]);
+        var tool = CreateTools(services, root, TestAccessPolicies.Create(role.Name, role))[HomeBlazeMarkdownSearchToolProvider.SearchMarkdownToolName];
+
+        // Act
+        var result = await CallAsync(tool, new { query = "freezer" });
+
+        // Assert
+        Assert.Equal(["/Storage/Notes.md"], result.GetProperty("pages").EnumerateArray().Select(page => page.GetProperty("path").GetString()));
+    }
+
+    [Fact]
     public async Task WhenAPageHasNotes_ThenThePageComesBeforeItsNotes()
     {
         // Arrange
@@ -489,10 +563,12 @@ public sealed class HomeBlazeMarkdownSearchToolTests : IDisposable
         CreateTools(services, root, isAgent)[HomeBlazeMarkdownSearchToolProvider.SearchMarkdownToolName];
 
     // The tools of an agent, with the policy agents have today, or of the external MCP server.
-    private static Dictionary<string, McpToolInfo> CreateTools(IServiceProvider services, AgentTestRoot root, bool isAgent)
+    private static Dictionary<string, McpToolInfo> CreateTools(IServiceProvider services, AgentTestRoot root, bool isAgent) =>
+        CreateTools(services, root, isAgent ? TestAccessPolicies.Operator : TestAccessPolicies.Everything);
+
+    private static Dictionary<string, McpToolInfo> CreateTools(IServiceProvider services, AgentTestRoot root, IMcpAccessPolicy accessPolicy)
     {
-        var configuration = HomeBlazeMcpConfigurationFactory.Create(
-            services, () => root, isReadOnly: true, isAgent ? TestAccessPolicies.Operator : TestAccessPolicies.Everything);
+        var configuration = HomeBlazeMcpConfigurationFactory.Create(services, () => root, isReadOnly: true, accessPolicy);
         return new McpToolFactory(root, configuration).CreateTools().ToDictionary(tool => tool.Name);
     }
 

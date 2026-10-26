@@ -41,6 +41,20 @@ public sealed class AuthorizationMcpAccessPolicy : IMcpAccessPolicy
     /// <summary>Gets the policy that decides.</summary>
     public AuthorizationPolicy Policy { get; }
 
+    /// <summary>
+    /// Whether <paramref name="accessPolicy"/> allows the action on the member, as <see cref="IMcpAccessPolicy.IsAllowed"/>
+    /// answers, but without logging a denial; true without a policy. For checks a tool makes for many members on its own,
+    /// such as which pages a search reads, rather than for something the client asked for.
+    /// </summary>
+    internal static bool IsAllowedWithoutLogging(IMcpAccessPolicy? accessPolicy, RegisteredSubjectProperty member, string action) =>
+        accessPolicy switch
+        {
+            null => true,
+            AuthorizationMcpAccessPolicy authorization =>
+                Actions.TryGetValue(action, out var permissionAction) && authorization.Policy.IsAllowed(member, permissionAction),
+            _ => accessPolicy.IsAllowed(member, action)
+        };
+
     /// <inheritdoc />
     public bool IsAllowed(RegisteredSubjectProperty member, string action)
     {

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.History.Abstractions;
@@ -5,7 +6,7 @@ using Namotion.Interceptor.Attributes;
 
 namespace HomeBlaze.History.Mcp.Tests;
 
-/// <summary>Root subject for the tool tests: recordable [State] properties, one of them cumulative, and one that is not.</summary>
+/// <summary>Root subject for the tool tests: recordable [State] properties, one of them cumulative, one that is not, and a secret one.</summary>
 [InterceptorSubject]
 public partial class HistoryToolTestSubject
 {
@@ -20,13 +21,16 @@ public partial class HistoryToolTestSubject
 
     [State]
     public partial double Power { get; set; }
+
+    [State, Configuration(IsSecret = true)]
+    public partial string? Password { get; set; }
 }
 
 /// <summary>
 /// History store subject for the tool tests: covers <see cref="Coverage"/> (the whole timeline by default) and
 /// answers every path with <see cref="Points"/> inside the queried window, except <see cref="UnsupportedPath"/>,
 /// which throws the way a real store does when a numeric aggregation is asked of a value_json column, and
-/// <see cref="TruncatedPath"/>, which reports its result as truncated.
+/// <see cref="TruncatedPath"/>, which reports its result as truncated. Each queried path is added to <see cref="QueriedPaths"/>.
 /// </summary>
 [InterceptorSubject]
 public partial class TestHistoryStore : IHistoryStore
@@ -40,6 +44,8 @@ public partial class TestHistoryStore : IHistoryStore
 
     public ImmutableArray<HistoryPoint> Points { get; set; } = [];
 
+    public ConcurrentQueue<string> QueriedPaths { get; } = new();
+
     public int Priority => 10;
 
     public ImmutableArray<HistoryCoverage> CoverageRanges => Coverage;
@@ -49,6 +55,7 @@ public partial class TestHistoryStore : IHistoryStore
 
     public Task<HistorySeries> QueryAsync(HistoryQuery query, CancellationToken cancellationToken)
     {
+        QueriedPaths.Enqueue(query.PropertyPath);
         if (string.Equals(query.PropertyPath, UnsupportedPath, StringComparison.Ordinal))
         {
             throw new HistoryAggregationNotSupportedException(

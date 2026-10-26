@@ -1,14 +1,15 @@
 using HomeBlaze.Abstractions;
-using HomeBlaze.AI.Agents;
+using HomeBlaze.Authorization;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Metadata;
 using HomeBlaze.Storage.Abstractions.Metadata;
 using HomeBlaze.Storage.Files;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Mcp;
+using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
-using Namotion.Interceptor.Tracking.Parent;
 
 namespace HomeBlaze.AI.Mcp;
 
@@ -20,36 +21,40 @@ internal sealed class MarkdownSearchSourceFinder
     private readonly PathProviderBase _pathProvider;
     private readonly string _pathPrefix;
     private readonly Type[] _excludeTypes;
+    private readonly McpServerConfiguration _configuration;
 
     /// <param name="pathProvider">Builds the paths of the pages, as the other tools resolve them.</param>
     /// <param name="pathPrefix">The prefix of every path.</param>
     /// <param name="excludeTypes">The types whose subjects, and the subjects below them, are left out.</param>
-    public MarkdownSearchSourceFinder(PathProviderBase pathProvider, string pathPrefix, Type[] excludeTypes)
+    /// <param name="configuration">The configuration of the tools, whose access policy decides which pages and notes are found.</param>
+    public MarkdownSearchSourceFinder(PathProviderBase pathProvider, string pathPrefix, Type[] excludeTypes, McpServerConfiguration configuration)
     {
         _pathProvider = pathProvider;
         _pathPrefix = pathPrefix;
         _excludeTypes = excludeTypes;
+        _configuration = configuration;
     }
 
     /// <summary>
     /// Gets the Markdown files and the notes of metadata in or under <paramref name="pathPrefix"/>, all when it is null,
     /// in order of path, then property and then a page before notes, so that results and truncation are stable; without those of a subject of an
-    /// excluded type or below one, which browse and search do not show, and without the notes of agents.
+    /// excluded type or below one, which browse and search do not show. With an access policy, a page is found only when
+    /// the tools show it at its path and the policy allows to read and execute its ReadRawContent, and notes only when
+    /// get_property can read them at the path of their metadata.
     /// </summary>
     public List<MarkdownSearchSource> Find(ISubjectRegistry registry, IInterceptorSubject rootSubject, string? pathPrefix)
     {
         var sources = new List<MarkdownSearchSource>();
+        var accessRoot = _configuration.AccessPolicy is null ? null : rootSubject.TryGetRegisteredSubject();
+        if (_configuration.AccessPolicy is not null && accessRoot is null)
+        {
+            return sources;
+        }
+
         foreach (var (_, registered) in registry.KnownSubjects)
         {
             var file = registered.Subject as MarkdownFile;
-
-            // The metadata of agents is neither changed nor found, see AgentMetadataAccess, which stands in for the system
-            // rule on agents; the parents are walked only for notes, as most subjects have none.
             var notes = TryGetNotes(registered);
-            if (notes is not null && registered.Subject.TryGetFirstParentOrSelf<LlmAgentBase>() is not null)
-            {
-                notes = null;
-            }
 
             // Most subjects are neither, and the path and the exclusion walk up the parents.
             if ((file is null && notes is null) ||
@@ -59,22 +64,47 @@ internal sealed class MarkdownSearchSourceFinder
                 continue;
             }
 
-            if (file is not null)
-            {
-                sources.Add(new MarkdownSearchSource(path, null, file.Title, file, null));
-            }
-
-            if (notes is not null)
-            {
-                foreach (var (propertyName, title, text) in notes)
-                {
-                    sources.Add(new MarkdownSearchSource(path, propertyName, title, null, text));
-                }
-            }
+            AddReadableSources(sources, accessRoot, registered, path, file, notes);
         }
 
         sources.Sort(CompareSources);
         return sources;
+    }
+
+    // The access root is null without an access policy, which lets every page and note through.
+    private void AddReadableSources(
+        List<MarkdownSearchSource> sources, RegisteredSubject? accessRoot, RegisteredSubject subject, string path,
+        MarkdownFile? file, List<(string? PropertyName, string? Title, string Notes)>? notes)
+    {
+        if (file is not null && (accessRoot is null || IsPageReadable(accessRoot, subject, path)))
+        {
+            sources.Add(new MarkdownSearchSource(path, null, file.Title, file, null));
+        }
+
+        if (notes is null)
+        {
+            return;
+        }
+
+        foreach (var (propertyName, title, text) in notes)
+        {
+            if (accessRoot is null ||
+                _configuration.TryGetReadableProperty(accessRoot, HomeBlazeMarkdownSearchToolProvider.GetMetadataPath(path, propertyName)) is not null)
+            {
+                sources.Add(new MarkdownSearchSource(path, propertyName, title, null, text));
+            }
+        }
+    }
+
+    // As invoke_query would call ReadRawContent: the page is shown at its path and its method is readable and executable.
+    // The execute check is not logged, as it runs for every page of every search rather than for a call the client made.
+    private bool IsPageReadable(RegisteredSubject root, RegisteredSubject page, string path)
+    {
+        var shown = path == _pathPrefix ? root : _configuration.TryGetReadableSubject(root, path);
+        return ReferenceEquals(shown, page) &&
+            page.TryGetProperty(nameof(MarkdownFile.ReadRawContent)) is { } method &&
+            _configuration.IsAllowed(method, McpAccessActions.Read) &&
+            AuthorizationMcpAccessPolicy.IsAllowedWithoutLogging(_configuration.AccessPolicy, method, AuthorizationActions.Execute.Name);
     }
 
     // Sort is not stable, so a page comes before the notes of its own subject by a rule of its own.

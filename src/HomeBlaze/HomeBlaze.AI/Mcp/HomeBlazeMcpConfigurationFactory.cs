@@ -88,7 +88,7 @@ internal static class HomeBlazeMcpConfigurationFactory
             (subject, method, result) => AgentMetadataAccess.FilterSearchMetadataResult(subject, method, result, pathProvider, excludeTypes));
         configuration.ToolProviders.Add(new HomeBlazeMcpToolProvider(invoker, isReadOnly));
         configuration.ToolProviders.Add(new HomeBlazeMarkdownToolProvider(invoker, isReadOnly));
-        configuration.ToolProviders.Add(new HomeBlazeMarkdownSearchToolProvider(rootSubjectProvider, pathProvider, PathPrefix, excludeTypes));
+        configuration.ToolProviders.Add(new HomeBlazeMarkdownSearchToolProvider(rootSubjectProvider, pathProvider, PathPrefix, excludeTypes, configuration));
 
         var context = new McpToolProviderContext(serviceProvider, rootSubjectProvider, pathProvider, isReadOnly, configuration);
         foreach (var registration in serviceProvider.GetServices<McpToolProviderRegistration>())

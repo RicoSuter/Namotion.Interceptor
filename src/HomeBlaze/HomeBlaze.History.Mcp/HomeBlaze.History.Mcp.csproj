@@ -11,6 +11,7 @@
     <ItemGroup>
         <ProjectReference Include="..\HomeBlaze.History\HomeBlaze.History.csproj" />
         <ProjectReference Include="..\HomeBlaze.History.Abstractions\HomeBlaze.History.Abstractions.csproj" />
+        <ProjectReference Include="..\HomeBlaze.Authorization\HomeBlaze.Authorization.csproj" />
         <ProjectReference Include="..\..\Namotion.Interceptor\Namotion.Interceptor.csproj" />
         <ProjectReference Include="..\..\Namotion.Interceptor.Mcp\Namotion.Interceptor.Mcp.csproj" />
         <ProjectReference Include="..\..\Namotion.Interceptor.Registry\Namotion.Interceptor.Registry.csproj" />

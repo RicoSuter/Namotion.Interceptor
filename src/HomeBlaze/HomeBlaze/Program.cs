@@ -65,7 +65,7 @@ builder.Services.AddHotKeys2();
 // both the external MCP server and the built-in agents get it.
 builder.Services.AddHomeBlazeMcpToolProvider(context => new HistoryMcpToolProvider(
     context.RootSubjectProvider,
-    context.PathProvider,
+    context.Configuration,
     context.Services.GetRequiredService<ILoggerFactory>().CreateLogger<HistoryMcpToolProvider>()));
 builder.Services.AddHomeBlazeAgents();
 
