@@ -210,14 +210,42 @@ public sealed class AuthorizationEditComponentTests : BunitContext, IAsyncLifeti
         // Arrange
         _graph.Service.SetPrincipalRoles(new object(), ["Kitchen"]);
         var component = RenderEditor(_graph.Authorization);
+        await ClickAsync(component, "authorization-role-rename-Kitchen");
 
         // Act
-        await ClickAsync(component, "authorization-role-rename-Kitchen");
+        await TypeNameAsync(component, "Pantry");
 
         // Assert
         Assert.Contains(
             "1 agent uses this role under its old name. After saving, they are denied everything and show \"Invalid roles\" until they are given the new name or another role.",
             component.Find("[data-testid='authorization-role-rename-warning']").TextContent);
+    }
+
+    [Fact]
+    public async Task WhenAUsedOrIncludedRoleKeepsItsNameOrChangesOnlyItsCase_ThenNoRenameWarningIsShown()
+    {
+        // Arrange
+        _graph.Service.SetPrincipalRoles(new object(), ["Kitchen"]);
+        _graph.GetRole("Garden").Includes = ["Kitchen"];
+        var component = RenderEditor(_graph.Authorization);
+
+        // Act
+        await ClickAsync(component, "authorization-role-rename-Kitchen");
+
+        // Assert
+        Assert.Empty(component.FindAll("[data-testid='authorization-role-rename-warning']"));
+
+        // Act
+        await TypeNameAsync(component, " KITCHEN ");
+
+        // Assert
+        Assert.Empty(component.FindAll("[data-testid='authorization-role-rename-warning']"));
+
+        // Act
+        await TypeNameAsync(component, "Pantry");
+
+        // Assert
+        Assert.Single(component.FindAll("[data-testid='authorization-role-rename-warning']"));
     }
 
     [Theory]

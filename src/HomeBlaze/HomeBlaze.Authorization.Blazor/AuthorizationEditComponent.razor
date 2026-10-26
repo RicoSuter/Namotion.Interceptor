@@ -249,7 +249,9 @@
                           Error="@(_isNameChanged && _nameError is not null)" ErrorText="@_nameError"
                           HelperText="Unique ignoring case; not the name of a built-in role or System; without /, [ and ]." />
         </div>
-        @if (_renamedEntry is { } renamed && GetReferenceWarning(renamed, isRename: true) is { } renameWarning)
+        @* Names compare ignoring case, so a name changed only in case still names the role. *@
+        @if (_renamedEntry is { } renamed && !string.Equals(_nameText.Trim(), renamed.OriginalName, StringComparison.OrdinalIgnoreCase) &&
+             GetReferenceWarning(renamed, isRename: true) is { } renameWarning)
         {
             <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2" data-testid="authorization-role-rename-warning">@renameWarning</MudAlert>
         }
