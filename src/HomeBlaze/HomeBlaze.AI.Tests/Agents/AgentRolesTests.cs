@@ -3,6 +3,7 @@ using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.AI.Agents;
 using HomeBlaze.AI.Mcp;
+using HomeBlaze.AI.Tests.Mcp;
 using HomeBlaze.Authorization;
 using HomeBlaze.Services;
 using HomeBlaze.Storage;
@@ -316,6 +317,57 @@ public sealed class AgentRolesTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task WhenARoleDeniesReadOnAHoldingProperty_ThenAPageExpressionBelowItRendersEmptyWithoutItsSourcePath()
+    {
+        // Arrange
+        var graph = await CreateGraphAsync("Kitchen: [{{ /Devices/Kitchen/Temperature }}], active: [{{ /Devices/Kitchen/Child/IsActive }}]");
+        AddDevices(graph);
+        var role = new AuthorizationRole
+        {
+            Name = "NoChildren",
+            Includes = [BuiltInRoles.ReaderName],
+            Deny = [new PermissionRule { Members = [nameof(TestThing.Child)], Actions = [PermissionAction.Read] }]
+        };
+        var tools = CreateClientTools(graph, TestAccessPolicies.Create(role.Name, role));
+
+        // Act
+        var browse = JsonSerializer.Serialize(await tools["get_property"].Handler(
+            JsonSerializer.SerializeToElement(new { path = "/Devices/Kitchen/Child/IsActive" }), CancellationToken.None));
+        var evaluated = await ReadEvaluatedContentAsync(tools, includeSourcePaths: true);
+
+        // Assert
+        Assert.Contains("Path not found", browse);
+        Assert.Equal("Kitchen: [21 (/Devices/Kitchen/Temperature)], active: []", evaluated);
+    }
+
+    [Fact]
+    public async Task WhenARoleShowsOnlyOneBranch_ThenPageExpressionsRenderItsValuesAndNotThoseOfOtherBranches()
+    {
+        // Arrange
+        var graph = await CreateGraphAsync(
+            "Kitchen: [{{ /Devices/Kitchen/Child/IsActive }}], cellar: [{{ /Devices/Cellar/Child/IsActive }}], temperature: [{{ /Devices/Cellar/Temperature }}]");
+        AddDevices(graph);
+        var role = new AuthorizationRole
+        {
+            Name = "KitchenOnly",
+            Allow =
+            [
+                new PermissionRule { Tags = [MemberTags.State], Actions = [PermissionAction.Read] },
+                new PermissionRule { Members = [nameof(AgentTestRoot.Children)], Actions = [PermissionAction.Read] },
+                new PermissionRule { Tags = [MemberTags.Subjects], Paths = ["/Devices/Kitchen"], Actions = [PermissionAction.Read] },
+                new PermissionRule { Tags = [MemberTags.Query], Actions = [PermissionAction.Read, AuthorizationActions.Execute] }
+            ]
+        };
+        var tools = CreateClientTools(graph, TestAccessPolicies.Create(role.Name, role));
+
+        // Act
+        var evaluated = await ReadEvaluatedContentAsync(tools, includeSourcePaths: false);
+
+        // Assert
+        Assert.Equal("Kitchen: [Yes], cellar: [], temperature: [18]", evaluated);
+    }
+
+    [Fact]
     public async Task WhenAnAgentNamesACustomRole_ThenItsUsedByAgentsFollowsTheRolesAndResetsWhenTheAgentIsRemoved()
     {
         // Arrange
@@ -340,6 +392,40 @@ public sealed class AgentRolesTests : IAsyncLifetime
         Assert.Equal(1, countAfterChangeBack);
         await AsyncTestHelpers.WaitUntilAsync(() => role.UsedByAgents == 0, message: "The removed agent should no longer count.");
         Assert.Equal(ServiceStatus.Stopped, agent.Status);
+    }
+
+    // Devices/Kitchen and Devices/Cellar, each with a child.
+    private static void AddDevices(Graph graph)
+    {
+        var devices = new AgentTestRoot
+        {
+            Children = new Dictionary<string, IInterceptorSubject>
+            {
+                ["Kitchen"] = new TestThing { Name = "Kitchen", Temperature = 21, Child = new TestChildThing { ChildName = "Light", IsActive = true } },
+                ["Cellar"] = new TestThing { Name = "Cellar", Temperature = 18, Child = new TestChildThing { ChildName = "Pump", IsActive = true } }
+            }
+        };
+        graph.Root.Children = new Dictionary<string, IInterceptorSubject>(graph.Root.Children) { ["Devices"] = devices };
+    }
+
+    // The tools of a client with the policy over the graph.
+    private static Dictionary<string, McpToolInfo> CreateClientTools(Graph graph, IMcpAccessPolicy accessPolicy)
+    {
+        var configuration = HomeBlazeMcpConfigurationFactory.Create(graph.Services, () => graph.Root, isReadOnly: true, accessPolicy);
+        return new McpToolFactory(graph.Root, configuration).CreateTools().ToDictionary(tool => tool.Name);
+    }
+
+    private static async Task<string?> ReadEvaluatedContentAsync(Dictionary<string, McpToolInfo> tools, bool includeSourcePaths)
+    {
+        var result = JsonSerializer.SerializeToElement(await tools[HomeBlazeMcpToolProvider.InvokeQueryToolName].Handler(
+            JsonSerializer.SerializeToElement(new
+            {
+                path = "/Storage/Notes.md",
+                method = "ReadEvaluatedContent",
+                parameters = new { includeSourcePaths }
+            }),
+            CancellationToken.None));
+        return result.GetProperty("result").GetString()?.Trim();
     }
 
     // The tools of the external MCP server over the graph.
