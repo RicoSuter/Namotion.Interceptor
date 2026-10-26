@@ -171,6 +171,8 @@ using var tx = await context.BeginTransactionAsync(
     validationMode: TransactionValidationMode.Deferred);
 ```
 
+A property the transaction wrote back to its landed value has no pending change, so it is not checked for conflicts: a concurrent change to it that lands before the commit is kept without a conflict. Writing the property again restores its pending change, and with it the conflict check against the value it had at its first write.
+
 ### Requirements
 
 Enforces constraints on transaction scope, useful for protocols like OPC UA.

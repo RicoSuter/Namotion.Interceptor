@@ -274,7 +274,7 @@ public class SubjectTransactionWriterTests
         TransactionFailureHandling failureHandling)
     {
         // Arrange
-        var context = CreateContext(out var handler, new RevertUntilCancelledTransactionWriter());
+        var context = CreateContext(out var handler, new RevertUntilCanceledTransactionWriter());
         var probe = new CommitWriteProbe(handler) { ThrowOnConsumedProperty = nameof(Person.LastName) };
         context.AddService(probe);
         var person = new Person(context) { FirstName = "Ann", LastName = "Lee" };
@@ -309,7 +309,7 @@ public class SubjectTransactionWriterTests
         TransactionFailureHandling failureHandling)
     {
         // Arrange
-        var context = CreateContext(out var handler, new RevertUntilCancelledTransactionWriter());
+        var context = CreateContext(out var handler, new RevertUntilCanceledTransactionWriter());
         handler.RejectPreApplyCheck(new InvalidOperationException("rejected"));
         var person = new Person(context) { FirstName = "Ann", LastName = "Lee" };
         using var transaction = await context.BeginTransactionAsync(
@@ -349,7 +349,7 @@ public class SubjectTransactionWriterTests
     {
         // Arrange
         var context = CreateContext();
-        var writer = new RevertUntilCancelledTransactionWriter(failFirstWriteOf: nameof(Person.LastName));
+        var writer = new RevertUntilCanceledTransactionWriter(failFirstWriteOf: nameof(Person.LastName));
         context.AddService<ITransactionWriter>(writer);
         var person = new Person(context) { FirstName = "Ann", LastName = "Lee" };
         using var transaction = await context.BeginTransactionAsync(
@@ -376,7 +376,7 @@ public class SubjectTransactionWriterTests
     /// Accepts every write, except the first write of <c>failFirstWriteOf</c>, and completes a revert only when the
     /// commit timeout cancels it.
     /// </summary>
-    private sealed class RevertUntilCancelledTransactionWriter(string? failFirstWriteOf = null) : ITransactionWriter
+    private sealed class RevertUntilCanceledTransactionWriter(string? failFirstWriteOf = null) : ITransactionWriter
     {
         /// <summary>Gets the property names passed to each write call, in call order.</summary>
         public List<string[]> WrittenPropertyNames { get; } = [];
@@ -506,7 +506,7 @@ public class SubjectTransactionWriterTests
     }
 
     [Fact]
-    public async Task WhenCommitIsRetriedAfterConflict_ThenCancelledChangeStaysCancelled()
+    public async Task WhenCommitIsRetriedAfterConflict_ThenCanceledChangeStaysCanceled()
     {
         // Arrange
         var changes = new List<SubjectPropertyChange>();

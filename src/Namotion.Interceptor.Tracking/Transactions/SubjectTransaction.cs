@@ -47,10 +47,10 @@ public sealed class SubjectTransaction : IDisposable
     private OrderedDictionary<PropertyReference, SubjectPropertyChange>? _pendingChanges = PendingChangesPool.Rent();
     private readonly Lock _pendingChangesLock = new();
 
-    // Pending entries cancelled by a write back to the landed value (see TryCaptureChange); every reader must
+    // Pending entries canceled by a write back to the landed value (see TryCaptureChange); every reader must
     // treat them as absent. Always a subset of the _pendingChanges keys. Allocated on the first cancel;
     // accessed only under _pendingChangesLock.
-    private HashSet<PropertyReference>? _cancelledChanges;
+    private HashSet<PropertyReference>? _canceledChanges;
 
     private volatile bool _isCommitting;
     private volatile bool _isCommitted;
@@ -200,7 +200,7 @@ public sealed class SubjectTransaction : IDisposable
     /// </summary>
     private int GetLiveChangeCount()
     {
-        return (_pendingChanges?.Count ?? 0) - (_cancelledChanges?.Count ?? 0);
+        return (_pendingChanges?.Count ?? 0) - (_canceledChanges?.Count ?? 0);
     }
 
     /// <summary>
@@ -209,7 +209,7 @@ public sealed class SubjectTransaction : IDisposable
     /// </summary>
     private bool TryGetLiveChange(PropertyReference property, out SubjectPropertyChange change)
     {
-        if (_pendingChanges is not null && _pendingChanges.TryGetValue(property, out change) && !IsCancelled(property))
+        if (_pendingChanges is not null && _pendingChanges.TryGetValue(property, out change) && !IsCanceled(property))
         {
             return true;
         }
@@ -230,7 +230,7 @@ public sealed class SubjectTransaction : IDisposable
         {
             foreach (var change in _pendingChanges.Values)
             {
-                if (!IsCancelled(change.Property) && (excluded is null || !excluded.Contains(change.Property)))
+                if (!IsCanceled(change.Property) && (excluded is null || !excluded.Contains(change.Property)))
                 {
                     destination[count++] = change;
                 }
@@ -240,9 +240,9 @@ public sealed class SubjectTransaction : IDisposable
         return count;
     }
 
-    private bool IsCancelled(PropertyReference property)
+    private bool IsCanceled(PropertyReference property)
     {
-        return _cancelledChanges is { Count: > 0 } cancelledChanges && cancelledChanges.Contains(property);
+        return _canceledChanges is { Count: > 0 } canceledChanges && canceledChanges.Contains(property);
     }
 
     /// <summary>
@@ -306,7 +306,7 @@ public sealed class SubjectTransaction : IDisposable
     /// <param name="newValue">The value being written.</param>
     /// <param name="restoresLandedValue">
     /// True when the new value equals the landed value; an existing pending change for the property is
-    /// then cancelled instead of updated.
+    /// then canceled instead of updated.
     /// </param>
     /// <exception cref="InvalidOperationException">
     /// Thrown if a concurrent commit is in progress (TOCTOU race).
@@ -336,11 +336,11 @@ public sealed class SubjectTransaction : IDisposable
                 // Removing it would let that write silently overwrite a concurrent change landed in between.
                 if (restoresLandedValue)
                 {
-                    (_cancelledChanges ??= new HashSet<PropertyReference>(PropertyReference.Comparer)).Add(property);
+                    (_canceledChanges ??= new HashSet<PropertyReference>(PropertyReference.Comparer)).Add(property);
                     return true;
                 }
 
-                _cancelledChanges?.Remove(property);
+                _canceledChanges?.Remove(property);
             }
 
             pendingChanges[property] = SubjectPropertyChange.Create(
@@ -989,7 +989,7 @@ public sealed class SubjectTransaction : IDisposable
         lock (_pendingChangesLock)
         {
             _pendingChanges?.Clear();
-            _cancelledChanges = null;
+            _canceledChanges = null;
             _isCommitted = true;
         }
     }
@@ -1102,7 +1102,7 @@ public sealed class SubjectTransaction : IDisposable
             _isCommitting = true;
 
             var copiedCount = CopyLiveChanges(rentedArray, excluded: null);
-            Debug.Assert(copiedCount == changeCount, "Cancelled changes must be a subset of the pending changes.");
+            Debug.Assert(copiedCount == changeCount, "Canceled changes must be a subset of the pending changes.");
 
             return (rentedArray, rentedArray.AsMemory(0, changeCount));
         }
@@ -1296,7 +1296,7 @@ public sealed class SubjectTransaction : IDisposable
             lock (_pendingChangesLock)
             {
                 _pendingChanges?.Clear();
-                _cancelledChanges = null;
+                _canceledChanges = null;
                 committing = _isCommitting;
                 if (committing)
                 {

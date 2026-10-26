@@ -378,7 +378,7 @@ public class SubjectTransactionHandlerPreApplyCheckTests
     [Theory]
     [InlineData(false, 1)]
     [InlineData(true, 2)]
-    public async Task WhenChangeIsCancelledByWriteBack_ThenNoCheckReceivesItAndEachReadsLandedValue(bool withWriter, int expectedChecks)
+    public async Task WhenChangeIsCanceledByWriteBack_ThenNoCheckReceivesItAndEachReadsLandedValue(bool withWriter, int expectedChecks)
     {
         // Arrange
         var changesSeen = new List<SubjectPropertyChange[]>();
