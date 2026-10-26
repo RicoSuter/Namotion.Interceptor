@@ -187,16 +187,20 @@
             roles.Add(entry.Name, entry.Role);
         }
 
-        // The registry keeps the key a role was attached under while the role stays in the dictionary, which would leave
-        // a renamed role with its old path and name. Left out once, it is attached again under its new key.
-        if (_entries.Exists(IsRenamed))
+        // In one update, so that no policy sees the roles left out in between.
+        using (AuthorizationService.BeginUpdate())
         {
-            authorization.Roles = _entries
-                .Where(entry => !IsRenamed(entry))
-                .ToDictionary(entry => entry.Name, entry => entry.Role!, StringComparer.OrdinalIgnoreCase);
-        }
+            // The registry keeps the key a role was attached under while the role stays in the dictionary, which would
+            // leave a renamed role with its old path and name. Left out once, it is attached again under its new key.
+            if (_entries.Exists(IsRenamed))
+            {
+                authorization.Roles = _entries
+                    .Where(entry => !IsRenamed(entry))
+                    .ToDictionary(entry => entry.Name, entry => entry.Role!, StringComparer.OrdinalIgnoreCase);
+            }
 
-        authorization.Roles = roles;
+            authorization.Roles = roles;
+        }
         foreach (var entry in _entries)
         {
             entry.OriginalName = entry.Name;

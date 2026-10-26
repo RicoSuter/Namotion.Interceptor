@@ -445,6 +445,77 @@ public sealed class AuthorizationServiceTests : IDisposable
         Assert.False(_service.GetPolicy(["Custom"]).Policy.CanRead(Member(nameof(TagTestSubject.Plain))));
     }
 
+    [Fact]
+    public void WhenAnUpdateIsOpen_ThenPoliciesAndRoleNamesStayAsBeforeItUntilItEnds()
+    {
+        // Arrange
+        var role = new Role { Allow = [ReadPlain()] };
+        var authorization = AddAuthorization(("Custom", role));
+        var before = _service.GetPolicy(["Custom"]).Policy;
+
+        // Act
+        var update = _service.BeginUpdate();
+        role.Includes = ["Added"];
+        role.Allow = [];
+        authorization.Roles = new Dictionary<string, Role> { ["Custom"] = role, ["Added"] = new Role() };
+        var during = _service.GetPolicy(["Custom"]);
+        var namesDuring = _service.GetRoleNames();
+        var previewDuring = _service.PreviewPolicy(new AuthorizationRole { Name = "Other", Includes = ["Added"] });
+        update.Dispose();
+        var after = _service.GetPolicy(["Custom"]);
+
+        // Assert
+        Assert.Same(before, during.Policy);
+        Assert.DoesNotContain("Added", namesDuring);
+        Assert.NotNull(previewDuring.Error);
+        Assert.Null(after.Error);
+        Assert.NotSame(before, after.Policy);
+        Assert.False(after.Policy.CanRead(Member(nameof(TagTestSubject.Plain))));
+        Assert.Contains("Added", _service.GetRoleNames());
+    }
+
+    [Fact]
+    public void WhenUpdatesAreNested_ThenTheChangeTakesEffectOnceTheLastEnds()
+    {
+        // Arrange
+        var role = new Role { Allow = [ReadPlain()] };
+        AddAuthorization(("Custom", role));
+        var before = _service.GetPolicy(["Custom"]).Policy;
+        var outer = _service.BeginUpdate();
+        var inner = _service.BeginUpdate();
+        role.Allow = [];
+
+        // Act
+        inner.Dispose();
+        inner.Dispose();
+        var afterInner = _service.GetPolicy(["Custom"]).Policy;
+        outer.Dispose();
+        var afterOuter = _service.GetPolicy(["Custom"]).Policy;
+
+        // Assert
+        Assert.Same(before, afterInner);
+        Assert.NotSame(before, afterOuter);
+        Assert.False(afterOuter.CanRead(Member(nameof(TagTestSubject.Plain))));
+    }
+
+    [Fact]
+    public async Task WhenAnUpdateEnds_ThenTheStatusesAreUpdatedWithoutAPolicyBeingAsked()
+    {
+        // Arrange
+        var role = new Role { Allow = [ReadPlain()] };
+        AddAuthorization(("Custom", role));
+        _ = _service.GetRoleNames();
+        var update = _service.BeginUpdate();
+        role.Allow = [new PermissionRule { Paths = ["Home"], Actions = [PermissionAction.Read] }];
+
+        // Act
+        update.Dispose();
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => role.Status is not null);
+        Assert.Contains("'Custom'", role.Status);
+    }
+
     private Authorization AddAuthorization(params (string Name, Role Role)[] roles)
     {
         var authorization = new Authorization

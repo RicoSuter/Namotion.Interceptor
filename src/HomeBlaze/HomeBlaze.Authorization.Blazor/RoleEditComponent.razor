@@ -128,10 +128,14 @@
             return;
         }
 
-        // New instances, as the authorization service notices only replaced lists.
-        role.Includes = [.. _includes];
-        role.Allow = [.. _allow.Select(entry => entry.Rule)];
-        role.Deny = [.. _deny.Select(entry => entry.Rule)];
+        // New instances, as the authorization service notices only replaced lists; in one update, so that no policy has
+        // the includes without the deny rules.
+        using (AuthorizationService.BeginUpdate())
+        {
+            role.Includes = [.. _includes];
+            role.Allow = [.. _allow.Select(entry => entry.Rule)];
+            role.Deny = [.. _deny.Select(entry => entry.Rule)];
+        }
 
         _isDirty = false;
         IsDirtyChanged?.Invoke(false);

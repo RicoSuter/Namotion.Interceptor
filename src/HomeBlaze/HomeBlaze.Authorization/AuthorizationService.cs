@@ -21,7 +21,8 @@ namespace HomeBlaze.Authorization;
 /// </summary>
 /// <remarks>
 /// Thread-safe. A policy, once returned, never changes: a change of an <see cref="Authorization"/> or a <see cref="Role"/>
-/// gives the next call a newly compiled one. Statuses are updated in the background after such a change.
+/// gives the next call a newly compiled one, unless an update is open, see <see cref="BeginUpdate"/>. Statuses are updated
+/// in the background after such a change.
 /// </remarks>
 public sealed class AuthorizationService : IDisposable
 {
@@ -51,6 +52,9 @@ public sealed class AuthorizationService : IDisposable
 
     // The version of the last snapshot that read the roles, 0 before the first; guarded by _rebuildLock.
     private long _builtVersion;
+
+    // The number of open updates, see BeginUpdate; changed under _rebuildLock.
+    private int _updateCount;
     private int _isRefreshScheduled;
     private volatile bool _isDisposed;
 
@@ -191,6 +195,23 @@ public sealed class AuthorizationService : IDisposable
     }
 
     /// <summary>
+    /// Starts an update of several roles or of the <see cref="Authorization"/> that takes effect as a whole. Until the
+    /// returned scope and every other open one are disposed, <see cref="GetPolicy"/>, <see cref="PreviewPolicy"/>,
+    /// <see cref="GetRoleNames"/> and <see cref="GetUnavailableRoles"/> keep giving the results compiled before the update,
+    /// so that none sees a part of it. Disposing the last scope compiles the roles again in the background.
+    /// </summary>
+    public IDisposable BeginUpdate()
+    {
+        lock (_rebuildLock)
+        {
+            // Taking the lock also waits for a rebuild that reads the roles, which then sees none of the update.
+            _updateCount++;
+        }
+
+        return new UpdateScope(this);
+    }
+
+    /// <summary>
     /// Stops observing property changes. Policies already returned stay valid.
     /// </summary>
     public void Dispose()
@@ -224,9 +245,28 @@ public sealed class AuthorizationService : IDisposable
         }
 
         Interlocked.Increment(ref _version);
-        if (Interlocked.Exchange(ref _isRefreshScheduled, 1) == 0)
+        ScheduleRefresh();
+    }
+
+    private void ScheduleRefresh()
+    {
+        if (!_isDisposed && Interlocked.Exchange(ref _isRefreshScheduled, 1) == 0)
         {
             ThreadPool.UnsafeQueueUserWorkItem(static service => service.Refresh(), this, preferLocal: false);
+        }
+    }
+
+    private void EndUpdate()
+    {
+        bool isLastUpdate;
+        lock (_rebuildLock)
+        {
+            isLastUpdate = --_updateCount == 0;
+        }
+
+        if (isLastUpdate)
+        {
+            ScheduleRefresh();
         }
     }
 
@@ -248,7 +288,7 @@ public sealed class AuthorizationService : IDisposable
     {
         var version = Volatile.Read(ref _version);
         var snapshot = Volatile.Read(ref _snapshot);
-        if (snapshot is not null && snapshot.Version == version)
+        if (snapshot is not null && (snapshot.Version == version || Volatile.Read(ref _updateCount) > 0))
         {
             return snapshot;
         }
@@ -257,7 +297,7 @@ public sealed class AuthorizationService : IDisposable
         {
             version = Volatile.Read(ref _version);
             snapshot = _snapshot;
-            if (snapshot is not null && snapshot.Version == version)
+            if (snapshot is not null && (snapshot.Version == version || _updateCount > 0))
             {
                 return snapshot;
             }
@@ -347,6 +387,19 @@ public sealed class AuthorizationService : IDisposable
             }
         }
         while (statusVersion != Volatile.Read(ref _statusVersion));
+    }
+
+    private sealed class UpdateScope(AuthorizationService service) : IDisposable
+    {
+        private int _isDisposed;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _isDisposed, 1) == 0)
+            {
+                service.EndUpdate();
+            }
+        }
     }
 
     // After the registry, so that a rebuild started by a change finds the subject among the known subjects, or no longer.
