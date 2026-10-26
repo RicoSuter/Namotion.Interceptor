@@ -86,7 +86,7 @@ public class AgentOperationAccessTests
     [Theory]
     [InlineData("Agent")]
     [InlineData("/Agent")]
-    public async Task WhenAnAgentSetsTheMetadataOfAnAgent_ThenItIsRefused(string path)
+    public async Task WhenAnAgentSetsTheMetadataOfAnAgent_ThenItIsRefusedAsAMissingOne(string path)
     {
         // Arrange
         var (root, agent, services) = CreateGraph();
@@ -101,11 +101,12 @@ public class AgentOperationAccessTests
             CancellationToken.None));
 
         // Assert
-        Assert.Equal(AgentMetadataAccess.AgentMetadataMessage, result.GetProperty("error").GetString());
+        Assert.Equal($"No subject at '{path}' in this storage.", result.GetProperty("error").GetString());
+        Assert.Null(agent.TryGetRegisteredSubject()!.TryGetProperty(KnownAttributes.Metadata));
     }
 
     [Fact]
-    public async Task WhenAnAgentSetsTheMetadataOfAPropertyOfAnAgent_ThenItIsRefused()
+    public async Task WhenAnAgentSetsTheMetadataOfAPropertyOfAnAgent_ThenItIsRefusedAsAMissingOne()
     {
         // Arrange
         var (root, agent, services) = CreateGraph();
@@ -123,11 +124,11 @@ public class AgentOperationAccessTests
             CancellationToken.None));
 
         // Assert
-        Assert.Equal(AgentMetadataAccess.AgentMetadataMessage, result.GetProperty("error").GetString());
+        Assert.Equal("No subject at 'Agent' in this storage.", result.GetProperty("error").GetString());
     }
 
     [Fact]
-    public async Task WhenAnAgentSetsTheMetadataOfASubjectInsideAnAgent_ThenItIsRefused()
+    public async Task WhenAnAgentSetsTheMetadataOfASubjectInsideAnAgent_ThenItIsRefusedAsAMissingOne()
     {
         // Arrange
         var (root, agent, services) = CreateGraph();
@@ -144,11 +145,11 @@ public class AgentOperationAccessTests
             CancellationToken.None));
 
         // Assert
-        Assert.Equal(AgentMetadataAccess.AgentMetadataMessage, result.GetProperty("error").GetString());
+        Assert.Equal("No subject at 'Agent/Inner' in this storage.", result.GetProperty("error").GetString());
     }
 
     [Fact]
-    public async Task WhenAnAgentSetsTheMetadataOfASubjectThatAnAgentHoldsAsAnotherParent_ThenItIsRefused()
+    public async Task WhenAnAgentSetsTheMetadataOfASubjectThatAnAgentHoldsAsAnotherParent_ThenTheAccessPolicyAllowsItAsForAnyOtherSubject()
     {
         // Arrange
         var (root, agent, services) = CreateGraph();
@@ -166,7 +167,9 @@ public class AgentOperationAccessTests
 
         // Assert
         Assert.NotSame(agent, shared.TryGetRegisteredSubject()!.Parents[0].Property.Subject);
-        Assert.Equal(AgentMetadataAccess.AgentMetadataMessage, result.GetProperty("error").GetString());
+        var error = result.GetProperty("error").GetString();
+        Assert.DoesNotContain("No subject", error);
+        Assert.DoesNotContain("not writable", error);
     }
 
     [Theory]
@@ -263,7 +266,7 @@ public class AgentOperationAccessTests
     }
 
     [Fact]
-    public async Task WhenAnExternalClientSetsTheMetadataOfAnAgent_ThenItIsRefused()
+    public async Task WhenAnExternalClientSetsTheMetadataOfAnAgent_ThenItIsRefusedAsAMissingOne()
     {
         // Arrange
         var (root, agent, services) = CreateGraph();
@@ -278,7 +281,7 @@ public class AgentOperationAccessTests
             CancellationToken.None));
 
         // Assert
-        Assert.Equal(AgentMetadataAccess.AgentMetadataMessage, result.GetProperty("error").GetString());
+        Assert.Equal("No subject at 'Agent' in this storage.", result.GetProperty("error").GetString());
     }
 
     private static (AgentTestRoot Root, FakeAgent Agent, IServiceProvider Services) CreateGraph(params Type[] types)

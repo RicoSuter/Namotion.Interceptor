@@ -3,6 +3,7 @@ using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.AI.Mcp;
 using HomeBlaze.AI.Tests.Agents;
+using HomeBlaze.Authorization;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Metadata;
 using HomeBlaze.Storage;
@@ -12,9 +13,12 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Authorization;
 using Namotion.Interceptor.Mcp;
+using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Mcp.Tools;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Testing;
 using Xunit;
 
 namespace HomeBlaze.AI.Tests.Mcp;
@@ -68,6 +72,109 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
         Assert.Equal("grows", attribute.GetProperty("value").GetProperty("comment").GetString());
         Assert.Equal("Pump", subjectMetadata.GetProperty("value").GetProperty("navTitle").GetString());
         Assert.Equal("grows", propertyMetadata.GetProperty("value").GetProperty("comment").GetString());
+    }
+
+    [Fact]
+    public async Task WhenAReaderSetsMetadata_ThenTheOperationIsNotPermittedAndNothingIsWritten()
+    {
+        // Arrange
+        WriteFile("Docs/Pump.json", """{ "speed": 1 }""");
+        var (tools, _) = await CreateToolsAsync(accessPolicy: TestAccessPolicies.Create(BuiltInRoles.ReaderName));
+
+        // Act
+        var result = await CallAsync(tools["invoke_operation"], new
+        {
+            path = "/Storage", method = "SetMetadata", parameters = new { path = "Docs/Pump.json", values = new { navTitle = "Pump" } }
+        });
+
+        // Assert
+        Assert.Equal("Operation 'SetMetadata' is not permitted. The access policy does not allow it.", result.GetProperty("error").GetString());
+        Assert.False(File.Exists(Path.Combine(_directory.FullName, "Docs", "Pump.metadata.json")));
+    }
+
+    [Theory]
+    [InlineData(null, "/Storage/Docs/Pump.json/HomeBlaze:Metadata", "Metadata of 'Docs/Pump.json' is not writable. The access policy does not allow it.")]
+    [InlineData("FileSize", "/Storage/Docs/Pump.json/FileSize@HomeBlaze:Metadata", "Metadata of property 'FileSize' of 'Docs/Pump.json' is not writable. The access policy does not allow it.")]
+    public async Task WhenARoleMayRunSetMetadataButNotWriteMetadata_ThenItIsRefusedAndTheTargetStillHasNoMetadata(
+        string? property, string metadataPath, string expectedError)
+    {
+        // Arrange
+        WriteFile("Docs/Pump.json", """{ "speed": 1 }""");
+        var role = new AuthorizationRole
+        {
+            Name = "NoMetadataWrites",
+            Includes = [BuiltInRoles.OperatorName],
+            Deny = [new PermissionRule { Tags = [MemberTags.Metadata], Actions = [PermissionAction.Write] }]
+        };
+        var logger = new RecordingLogger();
+        var accessPolicy = new AuthorizationMcpAccessPolicy(TestAccessPolicies.Create(role.Name, role).Policy, logger, "Writer");
+        var (tools, storage) = await CreateToolsAsync(accessPolicy: accessPolicy);
+
+        // Act
+        var result = await CallAsync(tools["invoke_operation"], new
+        {
+            path = "/Storage", method = "SetMetadata", parameters = new { path = "Docs/Pump.json", property, values = new { comment = "x" } }
+        });
+        var metadata = await CallAsync(tools["get_property"], new { path = metadataPath });
+
+        // Assert
+        Assert.Equal(expectedError, result.GetProperty("error").GetString());
+        Assert.StartsWith("Path not found", metadata.GetProperty("error").GetString());
+        var pump = ((VirtualFolder)storage.Children["Docs"]).Children["Pump.json"];
+        Assert.Null(pump.GetMetadata());
+        Assert.Null(pump.TryGetRegisteredSubject()!.TryGetProperty("FileSize")!.GetMetadata());
+        Assert.False(File.Exists(Path.Combine(_directory.FullName, "Docs", "Pump.metadata.json")));
+        Assert.Empty(logger.Entries);
+    }
+
+    [Fact]
+    public async Task WhenARoleMayNotWriteMetadataThatExists_ThenItIsKept()
+    {
+        // Arrange
+        WriteFile("Docs/Pump.json", """{ "speed": 1 }""");
+        WriteFile("Docs/Pump.metadata.json", """{ "navTitle": "Pump" }""");
+        var role = new AuthorizationRole
+        {
+            Name = "NoMetadataWrites",
+            Includes = [BuiltInRoles.OperatorName],
+            Deny = [new PermissionRule { Members = [KnownAttributes.Metadata], Actions = [PermissionAction.Write] }]
+        };
+        var (tools, _) = await CreateToolsAsync(accessPolicy: TestAccessPolicies.Create(role.Name, role));
+
+        // Act
+        var result = await CallAsync(tools["invoke_operation"], new
+        {
+            path = "/Storage", method = "SetMetadata", parameters = new { path = "Docs/Pump.json", values = new { navTitle = "Other" } }
+        });
+        var metadata = await CallAsync(tools["get_property"], new { path = "/Storage/Docs/Pump.json/HomeBlaze:Metadata" });
+
+        // Assert
+        Assert.Equal("Metadata of 'Docs/Pump.json' is not writable. The access policy does not allow it.", result.GetProperty("error").GetString());
+        Assert.Equal("Pump", metadata.GetProperty("value").GetProperty("navTitle").GetString());
+    }
+
+    [Fact]
+    public async Task WhenARoleHidesABranch_ThenSetMetadataRefusesItsSubjectsAsMissingOnes()
+    {
+        // Arrange
+        WriteFile("Docs/Pump.json", """{ "speed": 1 }""");
+        var role = new AuthorizationRole
+        {
+            Name = "NoDocs",
+            Includes = [BuiltInRoles.OperatorName],
+            Deny = [new PermissionRule { Paths = ["/Storage/Docs"], Actions = [PermissionAction.Read] }]
+        };
+        var (tools, storage) = await CreateToolsAsync(accessPolicy: TestAccessPolicies.Create(role.Name, role));
+
+        // Act
+        var result = await CallAsync(tools["invoke_operation"], new
+        {
+            path = "/Storage", method = "SetMetadata", parameters = new { path = "Docs/Pump.json", values = new { navTitle = "Pump" } }
+        });
+
+        // Assert
+        Assert.Equal("No subject at 'Docs/Pump.json' in this storage.", result.GetProperty("error").GetString());
+        Assert.Null(((VirtualFolder)storage.Children["Docs"]).Children["Pump.json"].TryGetRegisteredSubject()!.TryGetProperty(KnownAttributes.Metadata));
     }
 
     [Fact]
@@ -275,6 +382,36 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenARoleHidesABranchOrTheMetadataOfASubject_ThenSearchMetadataLeavesThemOut()
+    {
+        // Arrange
+        WriteFile("Docs/Pump.json", """{ "speed": 1 }""");
+        WriteFile("Docs/Pump.metadata.json", """{ "tags": ["floor-2"], "$properties": { "FileSize": { "tags": ["floor-2"] } } }""");
+        WriteFile("Docs/Fan.json", """{ "speed": 2 }""");
+        WriteFile("Docs/Fan.metadata.json", """{ "tags": ["floor-2"], "$properties": { "FileSize": { "tags": ["floor-2"] } } }""");
+        WriteFile("Secret/Valve.json", """{ "speed": 3 }""");
+        WriteFile("Secret/Valve.metadata.json", """{ "tags": ["floor-2"] }""");
+        WriteFile(".metadata.json", """{ "tags": ["floor-2"] }""");
+        var role = new AuthorizationRole
+        {
+            Name = "Restricted",
+            Includes = [BuiltInRoles.ReaderName],
+            Deny =
+            [
+                new PermissionRule { Paths = ["/Storage/Secret"], Actions = [PermissionAction.Read] },
+                new PermissionRule { Paths = ["/Storage/Docs/Fan.json"], Tags = [MemberTags.Metadata], Actions = [PermissionAction.Read] }
+            ]
+        };
+        var (tools, _) = await CreateToolsAsync(accessPolicy: TestAccessPolicies.Create(role.Name, role));
+
+        // Act
+        var result = await CallAsync(tools["invoke_query"], new { path = "/Storage", method = "SearchMetadata", parameters = new { tag = "floor-2" } });
+
+        // Assert
+        Assert.Equal(["|", "Docs/Pump.json|", "Docs/Pump.json|FileSize"], GetMatches(result));
+    }
+
+    [Fact]
     public async Task WhenMoreThanAHundredSubjectsMatch_ThenTheFirstHundredAreReturned()
     {
         // Arrange
@@ -305,8 +442,9 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
         var method = subject.TryGetProperty(nameof(FluentStorageContainer.SearchMetadata))!.TryGetMethodMetadata()!;
 
         // Act
+        var pathProvider = new StateAttributePathProvider();
         var result = AgentMetadataAccess.FilterSearchMetadataResult(
-            subject, method, new[] { "Docs/Hidden.json" }, new StateAttributePathProvider(), []);
+            subject, method, new[] { "Docs/Hidden.json" }, new McpServerConfiguration { PathProvider = pathProvider }, pathProvider);
 
         // Assert
         Assert.Empty(Assert.IsType<MetadataSearchMatch[]>(result));
@@ -316,7 +454,8 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
         => [.. result.GetProperty("result").EnumerateArray().Select(match =>
             $"{match.GetProperty("path").GetString()}|{(match.TryGetProperty("property", out var property) ? property.GetString() : null)}")];
 
-    private async Task<(Dictionary<string, McpToolInfo> Tools, FluentStorageContainer Storage)> CreateToolsAsync(bool isAgent = false)
+    private async Task<(Dictionary<string, McpToolInfo> Tools, FluentStorageContainer Storage)> CreateToolsAsync(
+        bool isAgent = false, IMcpAccessPolicy? accessPolicy = null)
     {
         var typeProvider = new TypeProvider();
         typeProvider.AddAssembly(typeof(FluentStorageContainer).Assembly);
@@ -348,7 +487,7 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
         root = new AgentTestRoot(context) { Children = new Dictionary<string, IInterceptorSubject> { ["Storage"] = storage } };
         await storage.ConnectAsync(CancellationToken.None);
         var configuration = HomeBlazeMcpConfigurationFactory.Create(
-            serviceProvider, () => root, isReadOnly: false, isAgent ? TestAccessPolicies.Operator : TestAccessPolicies.Everything);
+            serviceProvider, () => root, isReadOnly: false, accessPolicy ?? (isAgent ? TestAccessPolicies.Operator : TestAccessPolicies.Everything));
         return (new McpToolFactory(root, configuration).CreateTools().ToDictionary(tool => tool.Name), storage);
     }
 
