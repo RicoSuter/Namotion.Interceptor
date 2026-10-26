@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Authorization;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
 
 namespace HomeBlaze.Authorization.Internal;
@@ -13,9 +14,6 @@ namespace HomeBlaze.Authorization.Internal;
 internal sealed class AuthorizationSnapshot
 {
     private static readonly HomeBlazeMemberTagProvider TagProvider = new();
-
-    // The name of the role a pattern is validated in, removed from the error since the pattern belongs to no role.
-    private const string PatternValidationRoleName = "PatternValidation";
 
     // A role's name is a segment of its path, where these separate segments and enclose indexes.
     private static readonly char[] RoleNamePathCharacters = ['/', '[', ']'];
@@ -53,18 +51,22 @@ internal sealed class AuthorizationSnapshot
     /// <summary>The status of each <see cref="Authorization"/> subject.</summary>
     public ImmutableArray<(Authorization Authorization, string? Status)> AuthorizationStatuses { get; private set; } = [];
 
-    /// <summary>The status of each <see cref="Role"/> subject, with its name.</summary>
-    public ImmutableArray<(Role Role, string Name, string? Status)> RoleStatuses { get; private set; } = [];
+    /// <summary>The status and warning of each <see cref="Role"/> subject, with its name.</summary>
+    public ImmutableArray<(Role Role, string Name, string? Status, string? Warning)> RoleStatuses { get; private set; } = [];
 
     /// <summary>
     /// Builds the snapshot from the <see cref="Authorization"/> subjects among <paramref name="knownSubjects"/>, compiling
-    /// each usable custom role on its own for its status.
+    /// each usable custom role on its own for its status, and checking the path patterns of each that compiles against
+    /// the graph for its warning.
     /// </summary>
-    public static AuthorizationSnapshot Build(long version, IEnumerable<IInterceptorSubject> knownSubjects, PathProviderBase pathProvider)
+    public static AuthorizationSnapshot Build(
+        long version,
+        IReadOnlyDictionary<IInterceptorSubject, RegisteredSubject> knownSubjects,
+        PathProviderBase pathProvider)
     {
-        var authorizations = knownSubjects.OfType<Authorization>().ToList();
+        var authorizations = knownSubjects.Keys.OfType<Authorization>().ToList();
         var authorizationStatuses = ImmutableArray.CreateBuilder<(Authorization, string?)>(authorizations.Count);
-        var roleStatuses = ImmutableArray.CreateBuilder<(Role, string, string?)>();
+        var roleStatuses = ImmutableArray.CreateBuilder<(Role, string, string?, string?)>();
         var unavailableRoles = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var customRoles = new List<KeyValuePair<string, Role>>();
         string? customRolesError = null;
@@ -77,7 +79,7 @@ internal sealed class AuthorizationSnapshot
                 authorizationStatuses.Add((authorization, customRolesError));
                 foreach (var (name, role) in GetRoles(authorization))
                 {
-                    roleStatuses.Add((role, name, customRolesError));
+                    roleStatuses.Add((role, name, customRolesError, null));
                     if (!BuiltInRoles.IsBuiltIn(name))
                     {
                         unavailableRoles.TryAdd(name, customRolesError);
@@ -104,7 +106,7 @@ internal sealed class AuthorizationSnapshot
                     continue;
                 }
 
-                roleStatuses.Add((entry.Value, entry.Key, nameError));
+                roleStatuses.Add((entry.Value, entry.Key, nameError, null));
                 if (!BuiltInRoles.IsBuiltIn(entry.Key))
                 {
                     unavailableRoles.TryAdd(entry.Key, nameError);
@@ -123,12 +125,7 @@ internal sealed class AuthorizationSnapshot
 
         var snapshot = new AuthorizationSnapshot(version, pathProvider, allRoles.MoveToImmutable(), unavailableRoles, customRolesError);
 
-        // Each usable role compiled on its own gives its status and is the policy of a principal holding only it.
-        foreach (var (name, role) in customRoles)
-        {
-            roleStatuses.Add((role, name, snapshot.GetPolicy([name]).Error));
-        }
-
+        snapshot.AddCustomRoleStatuses(customRoles, knownSubjects, roleStatuses);
         snapshot.AuthorizationStatuses = authorizationStatuses.ToImmutable();
         snapshot.RoleStatuses = roleStatuses.ToImmutable();
         return snapshot;
@@ -186,28 +183,9 @@ internal sealed class AuthorizationSnapshot
         return Compile(roles, [name]);
     }
 
-    /// <summary>
-    /// Gets why a path pattern is invalid, or null when it is valid, by compiling a role with one rule holding it, as
-    /// the library parses patterns only while compiling.
-    /// </summary>
-    public static string? ValidatePathPattern(string pattern, PathProviderBase pathProvider)
-    {
-        var role = new AuthorizationRole
-        {
-            Name = PatternValidationRoleName,
-            Allow = [new PermissionRule { Paths = [pattern], Actions = [PermissionAction.Read] }]
-        };
-
-        try
-        {
-            AuthorizationPolicy.Compile([role], [PatternValidationRoleName], [], [], TagProvider, pathProvider);
-            return null;
-        }
-        catch (AuthorizationException exception)
-        {
-            return exception.Message.Replace($" of role '{PatternValidationRoleName}'", "", StringComparison.Ordinal);
-        }
-    }
+    /// <summary>Gets why a path pattern is invalid, or null when it is valid.</summary>
+    public static string? ValidatePathPattern(string pattern, PathProviderBase pathProvider) =>
+        PathPatternChecks.Validate(pattern, pathProvider);
 
     private AuthorizationResult Compile(string[] roleNames)
     {
@@ -249,6 +227,24 @@ internal sealed class AuthorizationSnapshot
         }
 
         return -1;
+    }
+
+    // Each usable role compiled on its own gives its status and is the policy of a principal holding only it.
+    private void AddCustomRoleStatuses(
+        List<KeyValuePair<string, Role>> customRoles,
+        IReadOnlyDictionary<IInterceptorSubject, RegisteredSubject> knownSubjects,
+        ImmutableArray<(Role, string, string?, string?)>.Builder roleStatuses)
+    {
+        List<RegisteredSubject>? roots = null;
+        for (var i = 0; i < customRoles.Count; i++)
+        {
+            var (name, role) = customRoles[i];
+            var error = GetPolicy([name]).Error;
+            var warning = error is null
+                ? PathPatternChecks.GetWarning(_roles[BuiltInRoles.All.Length + i], knownSubjects, _pathProvider, ref roots)
+                : null;
+            roleStatuses.Add((role, name, error, warning));
+        }
     }
 
     private static List<KeyValuePair<string, Role>> GetRoles(Authorization authorization)

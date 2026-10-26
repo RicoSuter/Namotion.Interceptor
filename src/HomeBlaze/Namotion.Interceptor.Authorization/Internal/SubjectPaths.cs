@@ -244,7 +244,7 @@ internal static class SubjectPaths
         // These link rules mirror the registry's path reader; SubjectPathsTests cross-checks them against it.
         private PathLink GetLink(RegisteredSubjectProperty property, object? index)
         {
-            var ownSegment = _pathProvider.TryGetPropertySegment(property) ?? property.BrowseName;
+            var ownSegment = MemberSegments.GetSegment(_pathProvider, property);
             if (index is null)
             {
                 return new PathLink(ownSegment, null, null);

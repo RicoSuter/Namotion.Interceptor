@@ -444,7 +444,7 @@ public sealed class HomeBlazeMarkdownSearchToolTests : IDisposable
         {
             Name = "NoNotesPage",
             Includes = [BuiltInRoles.ReaderName],
-            Deny = [new PermissionRule { Paths = ["/Storage/Notes.md"], Members = ["ReadRawContent"], Actions = [AuthorizationActions.Execute] }]
+            Deny = [new PermissionRule { Paths = ["/Storage/Notes.md/ReadRawContent"], Actions = [AuthorizationActions.Execute] }]
         };
         var logger = new RecordingLogger();
         var accessPolicy = new AuthorizationMcpAccessPolicy(TestAccessPolicies.Create(role.Name, role).Policy, logger, "Searcher");
@@ -470,7 +470,7 @@ public sealed class HomeBlazeMarkdownSearchToolTests : IDisposable
         {
             Name = "NoDocs",
             Includes = [BuiltInRoles.ReaderName],
-            Deny = [new PermissionRule { Paths = ["/Storage/Docs"], Actions = [PermissionAction.Read] }]
+            Deny = [new PermissionRule { Paths = ["/Storage/Docs/**"], Actions = [PermissionAction.Read] }]
         };
         var (root, services) = await CreateGraphAsync([]);
         var tool = CreateTools(services, root, TestAccessPolicies.Create(role.Name, role))[HomeBlazeMarkdownSearchToolProvider.SearchMarkdownToolName];

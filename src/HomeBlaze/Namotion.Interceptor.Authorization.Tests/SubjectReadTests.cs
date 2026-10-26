@@ -100,12 +100,49 @@ public class SubjectReadTests
         var home = Create();
         var role = Role("Reader",
             allow: [Rule(Read)],
-            deny: [Rule(Read, paths: ["/Rooms[Bedroom]"])]);
+            deny: [Rule(Read, paths: ["/Rooms[Bedroom]/**"])]);
         var policy = Compile(role);
 
         // Act & Assert
         Assert.False(policy.CanRead(Registered(home.Rooms["Bedroom"])));
         Assert.False(policy.CanRead(Registered(home.Rooms["Bedroom"].Lights["Lamp"])));
         Assert.True(policy.CanRead(Registered(home.Rooms["Kitchen"])));
+    }
+
+    [Fact]
+    public void WhenADenyNamesTheHoldingProperty_ThenTheBranchIsHiddenAlthoughItsMembersAreReadable()
+    {
+        // Arrange
+        var home = Create();
+        var kitchen = home.Rooms["Kitchen"];
+        var policy = Compile(Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, paths: ["/Rooms[Kitchen]/Sensor"])]));
+
+        // Act
+        var decision = policy.Explain(Registered(kitchen.Sensor!));
+
+        // Assert
+        Assert.Equal(new SubjectReadDecision(IsReadable: false, HasReadableMember: true, Member(kitchen, nameof(Room.Sensor))), decision);
+        Assert.True(policy.CanRead(Member(kitchen.Sensor!, nameof(Sensor.Temperature))));
+        Assert.True(policy.CanRead(Registered(kitchen)));
+    }
+
+    [Fact]
+    public void WhenASubjectIsHeldByAnAttribute_ThenItIsVisibleOnlyWhileTheAttributeIsReadable()
+    {
+        // Arrange
+        var home = Create();
+        var sensor = home.Rooms["Kitchen"].Sensor!;
+        var probe = new Light();
+        sensor.Temperature_Probe = probe;
+        var open = Compile(Role("Reader", allow: [Rule(Read)]));
+        var hidden = Compile(Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, paths: ["/Rooms[Kitchen]/Sensor/Probe"])]));
+
+        // Act
+        var decision = hidden.Explain(Registered(probe));
+
+        // Assert
+        Assert.True(open.CanRead(Registered(probe)));
+        Assert.Equal(new SubjectReadDecision(IsReadable: false, HasReadableMember: true, Attribute(sensor, nameof(Sensor.Temperature), "Probe")), decision);
+        Assert.True(hidden.CanRead(Member(probe, nameof(Light.IsOn))));
     }
 }

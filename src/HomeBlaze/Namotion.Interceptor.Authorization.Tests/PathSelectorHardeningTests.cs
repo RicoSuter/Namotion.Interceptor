@@ -38,8 +38,8 @@ public class PathSelectorHardeningTests
         home.Spare = spare;
         var brightness = Member(spare, nameof(Light.Brightness));
         var ssid = Member(home.Wifi!, nameof(Wifi.Ssid));
-        var deny = CompileExcludingSpare(Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, paths: ["/Rooms[Bedroom]"])]));
-        var allow = CompileExcludingSpare(Role("Reader", allow: [Rule(Read, paths: ["/"])]));
+        var deny = CompileExcludingSpare(Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, paths: ["/Rooms[Bedroom]/**"])]));
+        var allow = CompileExcludingSpare(Role("Reader", allow: [Rule(Read, paths: ["/**"])]));
 
         // Act & Assert
         Assert.False(deny.CanRead(brightness));
@@ -116,7 +116,7 @@ public class PathSelectorHardeningTests
         first.Neighbor = second;
         var lights = Member(first, nameof(Room.Lights));
         var deny = Compile(Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, paths: ["/**"])]));
-        var allow = Compile(Role("Reader", allow: [Rule(Read, paths: ["/"])]));
+        var allow = Compile(Role("Reader", allow: [Rule(Read, paths: ["/**"])]));
 
         // Act & Assert
         Assert.False(deny.CanRead(lights));

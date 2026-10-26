@@ -126,9 +126,10 @@ Agents and the custom roles that include a role name it, so a rename or removal 
 
 ### Status and Usage
 
-The property panel of a role shows two values:
+The property panel of a role shows four values:
 
 - **`Status`**: why the role cannot be used, or empty. "The name 'Reader' is reserved for a built-in role." or "The name 'System' is reserved for the system rules." for a reserved name, where agents naming `Reader` keep the built-in role; "The name 'Kitchen/Lights' cannot contain '/', '[' or ']', because it is part of the role's path." for a name written by hand with such a character; "The name '...' is used by more than one role, ignoring case."; or why the rules do not compile, such as "Role 'LightOperator' includes 'Readers', which is not defined.", "Action 'run' of role 'LightOperator' is not a known action." or "Path pattern 'Devices' of role 'LightOperator' must start with '/'.".
+- **`Warning`**: hints about rules that likely do not do what they say, or empty; the role stays usable. "Path pattern '/Devices/Kitchen' names a subject, not a member, and matches nothing; use '/Devices/Kitchen/**' for the subject and everything below it, or '/Devices/Kitchen/*' for its members." for a pattern without a wildcard that names an entry of a folder. The patterns are checked against the graph when the roles change, so a subject that appears later is found at the next change of a role.
 - **`UsedByAgents`**: the number of started agents that name the role.
 
 Role names compare ignoring case. A saved change applies to the next turn of each agent, as a whole: an agent never gets a part of the changes of one save. When a hand-written file holds two roles whose names differ only in case, the `Authorization` dialog shows "Several roles have the same name, ignoring case. Rename or remove one to save." and "Save" stays disabled until one is renamed or removed.
@@ -148,7 +149,7 @@ This builds the role `LightOperator`, which switches and dims the lights, except
 3. In the field "Types", type `ILightbulb` and pick it from the suggestions.
 4. In the field "Members", type `TurnOn, TurnOff, Toggle, SetBrightness` and press Enter. Each name becomes a chip of its own.
 5. Under "Actions" of the card, check "execute".
-6. Under "Deny", click "Add rule", add `/Devices/Bedroom` to "Paths" and `ILightbulb` to "Types", and check "execute".
+6. Under "Deny", click "Add rule", add `/Devices/Bedroom/**` to "Paths" and `ILightbulb` to "Types", and check "execute".
 7. Check the result on the tab "Preview", see [Previewing a Role](#previewing-a-role).
 8. Click "Save". The role is saved into the file of the `Authorization` subject.
 
@@ -197,7 +198,7 @@ The line below the field reads:
 
 - "Shown: the subject has a readable member and a readable link from the root."
 - "Hidden: no member is readable."
-- "Hidden: the property Children of /Devices/Cameras is not readable.", naming a property on the way from the root that holds the subject and is not readable, such as for a role that denies `read` on `/Devices/Cameras`.
+- "Hidden: the property Children of /Devices/Cameras is not readable.", naming a property on the way from the root that holds the subject and is not readable, such as for a role that denies `read` on `/Devices/Cameras/**`.
 - "Hidden: no chain of parents leads to the root."
 
 A path that names no subject shows "No subject has this path.", and a role that does not compile shows its error instead, such as "Role 'LightOperator' includes 'Readers', which is not defined.".
@@ -207,7 +208,7 @@ The table has a row per member: the properties, then the methods, then the attri
 Hovering over a cell shows its explanation, and clicking it shows the explanation below the table, starting with the member and the action. An explanation names the role and the rule that decided:
 
 - "Allowed by Reader: allow any member; actions read, history."
-- "Denied by LightOperator: deny paths /Devices/Bedroom; types ILightbulb; actions execute. It overrides LightOperator: allow types ILightbulb; members TurnOn, TurnOff, Toggle, SetBrightness; actions execute."
+- "Denied by LightOperator: deny paths /Devices/Bedroom/**; types ILightbulb; actions execute. It overrides LightOperator: allow types ILightbulb; members TurnOn, TurnOff, Toggle, SetBrightness; actions execute."
 - "Denied by a system rule: deny tags secret; actions read, write, history. It overrides Reader: allow any member; actions read, history."
 - "No role allows it."
 
@@ -221,7 +222,7 @@ A rule has four selectors and a list of actions. It applies to an action on a me
 
 | Selector | Matches when |
 |----------|--------------|
-| `paths` | A pattern matches the path of the subject or of one of its parents, see below |
+| `paths` | A pattern matches the path of the member, see below |
 | `types` | The subject is of a type or implements an interface with that name, as a full name (`HomeBlaze.Abstractions.Devices.Light.ILightbulb`) or a simple one (`ILightbulb`) |
 | `members` | The member's name matches; `*` matches any text. A method is named as `list_methods` shows it (`TurnOn`), an attribute `Property@Attribute`, such as `Temperature@HomeBlaze:Metadata` |
 | `tags` | The member has every listed [tag](#tags). For "any of these tags", write one rule per tag |
@@ -232,12 +233,12 @@ Rules combine like this:
 2. Everything any allow rule of the roles matches is added. Naming several roles is the same as one role that includes them all.
 3. Everything any deny rule of the roles, or any [system rule](#system-rules), matches is removed. A role cannot undo a deny of a role it includes, so reusable roles should mostly allow.
 
-A subject is shown when at least one of its members is readable and the properties that hold it, on the way from the root, are readable. A `deny` of `read` with `paths` therefore hides the whole branch, for example for an agent that may operate everything but the cameras:
+A subject is shown when at least one of its members is readable and the properties that hold it, on the way from the root, are readable. A `deny` of `read` on a branch therefore hides its subjects, for example for an agent that may operate everything but the cameras:
 
 ```json
 "Household": {
   "includes": [ "Operator" ],
-  "deny": [ { "paths": [ "/Devices/Cameras" ], "actions": [ "read", "write", "execute", "history" ] } ]
+  "deny": [ { "paths": [ "/Devices/Cameras/**" ], "actions": [ "read", "write", "execute", "history" ] } ]
 }
 ```
 
@@ -245,18 +246,22 @@ A role that does not include `Reader` must also allow `read` on the properties t
 
 ### Path Patterns
 
-A path pattern is written as the tools write paths, with `/` and `[InlinePaths]` flattened, such as `/Devices/Kitchen`. It matches that subject and everything below it. Only `*` and `**` are wildcards:
+A path pattern is written as the tools write paths, with `/` and `[InlinePaths]` flattened, and matches the paths of members exactly, like a file glob. A member is a property, a method or an attribute, so `/Devices/Sonos/Volume` is one property and `/Devices/Sonos/Play` one method. Only `*` and `**` are wildcards:
 
 | Pattern | Matches |
 |---------|---------|
-| `/Devices/Kitchen` | That subject and its subtree |
-| `/Devices/*/Lights` | `Lights` under any direct child of `Devices`; `*` alone is one segment |
-| `/Devices/**/Lights` | Any `Lights` at any depth under `Devices`; `**` is zero or more segments |
-| `/Devices/Light*` | `/Devices/LightA`, `/Devices/Lights` and so on |
-| `/Line/Machines[*]` | Every item of a collection or dictionary; `Machines[CNC*]` works too |
-| `/` | Every subject with a path |
+| `/Devices/Sonos/Play` | That one member |
+| `/Devices/Sonos/*` | Every member of that subject; `*` alone is one segment |
+| `/Devices/Sonos/**` | The subject's members and everything below them; `**` is zero or more segments |
+| `/Devices/Kitchen/Lights` | The property that holds the kitchen's lights, not the lights themselves |
+| `/Devices/**/Volume` | Every `Volume` at any depth under `Devices` |
+| `/Devices/Light*/IsOn` | `IsOn` of `/Devices/LightA`, `/Devices/Lights` and so on |
+| `/Line/Machines[*]/**` | Every item of a collection or dictionary and everything below it; `Machines[CNC*]` works too |
+| `/**` | Every member with a path |
 
-Paths select subjects, never members; `members` selects those. The [library documentation](https://github.com/RicoSuter/Namotion.Interceptor/blob/master/src/HomeBlaze/Namotion.Interceptor.Authorization/README.md) has the complete pattern rules, including subjects with several paths. A deny rule that has only `paths` is checked against every member of every subject, so give it another selector when you can.
+To cover a subject, end the pattern with `/**`, or with `/*` for its own members only. A pattern that names a subject, such as `/Devices/Kitchen`, matches at most the property that holds it, and nothing when the subject is an entry of a folder, such as a device in `/Devices`; the role's `Warning` points this out. A `deny` of `read` on a property that holds subjects, such as `/Devices/Kitchen/Lights`, hides those subjects and everything below them, since a subject is shown only when the properties that hold it are readable. A pattern that can match no member, such as `/` or one that ends with an index like `/Line/Machines[CNC1]`, makes the role fail to compile with a hint to add `/**` or `/*`.
+
+Attributes are matched by the path the tools give them. The [library documentation](https://github.com/RicoSuter/Namotion.Interceptor/blob/master/src/HomeBlaze/Namotion.Interceptor.Authorization/README.md) has the complete pattern rules, including subjects with several paths. A deny rule that has only `paths` is checked against every member it matches, so keep its patterns narrow or give it another selector when you can.
 
 ---
 
@@ -348,7 +353,7 @@ The state a background run receives from the agent's `WatchPaths` is read withou
 
 ## Page Expressions
 
-When an agent or an `/mcp` client reads a page through the tools, a page expression renders only a property the tools would show it at its path: the property and every property on its path readable, and every subject on the way shown. Anything else renders empty, as a secret does, and `ReadEvaluatedContent` with `includeSourcePaths` leaves out its path. So an expression below a branch the roles hide, such as `{{ /Devices/Cameras/Door/IsOpen }}` for a role that denies `read` on `Cameras`, renders empty although `IsOpen` itself is readable. Unlike the tools, an expression may read a member the tools do not list, such as a derived title, when its roles allow it.
+When an agent or an `/mcp` client reads a page through the tools, a page expression renders only a property the tools would show it at its path: the property and every property on its path readable, and every subject on the way shown. Anything else renders empty, as a secret does, and `ReadEvaluatedContent` with `includeSourcePaths` leaves out its path. So an expression below a branch the roles hide, such as `{{ /Devices/Cameras/Door/IsOpen }}` for a role that denies `read` on `/Devices/Cameras/**`, renders empty although `IsOpen` itself is readable. Unlike the tools, an expression may read a member the tools do not list, such as a derived title, when its roles allow it.
 
 For an agent the policy comes from its roles; for `/mcp` clients it is `Everything` with the system rules, so an expression over the state of an agent renders empty for them. The check applies to queries, such as `ReadEvaluatedContent`, which evaluate pages. An operation runs without it, so the change handlers, renders and background work it starts are not restricted by the caller's roles. People see pages as before.
 
@@ -363,7 +368,7 @@ The `Authorization` subject is stored as JSON, such as `Files/Authorization.json
     "LightOperator": {
       "includes": [ "Reader" ],
       "allow": [ { "types": [ "ILightbulb" ], "members": [ "TurnOn", "TurnOff", "Toggle", "SetBrightness" ], "actions": [ "execute" ] } ],
-      "deny": [ { "paths": [ "/Devices/Bedroom" ], "types": [ "ILightbulb" ], "actions": [ "execute" ] } ]
+      "deny": [ { "paths": [ "/Devices/Bedroom/**" ], "types": [ "ILightbulb" ], "actions": [ "execute" ] } ]
     }
   }
 }
@@ -371,7 +376,7 @@ The `Authorization` subject is stored as JSON, such as `Files/Authorization.json
 
 - **`includes`** takes over the rules of `Reader`, so the agent still sees and reads everything else.
 - **`allow`** runs the four operations on every subject that is an `ILightbulb`, such as a Philips Hue light. A light that does not implement `IBrightnessController` has no `SetBrightness`, so the member does not match there.
-- **`deny`** removes them again for the lights at and below `/Devices/Bedroom`.
+- **`deny`** removes them again for the lights at and below `/Devices/Bedroom`; `/**` makes the pattern cover the whole branch.
 
 Give an agent this role with `"roles": ["LightOperator"]` and allow `invoke_operation`, see [Agents](#agents). The role allows no `write`, so the agent cannot write a property even with `set_property` allowed.
 
