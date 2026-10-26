@@ -336,6 +336,40 @@ public sealed class AuthorizationServiceTests : IDisposable
     }
 
     [Fact]
+    public void WhenCustomRolesCannotBeUsedBecauseOfTheirNames_ThenTheyAreListedAsUnavailableWithTheReason()
+    {
+        // Arrange
+        AddAuthorization(
+            ("Zeta", new Role()),
+            ("Everything", new Role()),
+            ("Twin", new Role()),
+            ("TWIN", new Role()));
+
+        // Act
+        var unavailable = _service.GetUnavailableRoles();
+
+        // Assert
+        Assert.Equal(["Twin"], unavailable.Keys);
+        Assert.Equal("The name 'Twin' is used by more than one role, ignoring case.", unavailable["twin"]);
+    }
+
+    [Fact]
+    public void WhenSeveralAuthorizationsExist_ThenTheirCustomRolesAreListedAsUnavailable()
+    {
+        // Arrange
+        var first = new Authorization { Roles = new Dictionary<string, Role> { ["First"] = new() } };
+        var second = new Authorization { Roles = new Dictionary<string, Role> { ["Second"] = new() } };
+        _root.Children = new Dictionary<string, IInterceptorSubject> { ["Authorization"] = first, ["Authorization2"] = second };
+
+        // Act
+        var unavailable = _service.GetUnavailableRoles();
+
+        // Assert
+        Assert.Equal(["First", "Second"], unavailable.Keys.Order(StringComparer.Ordinal));
+        Assert.All(unavailable.Values, reason => Assert.Equal(AuthorizationService.SeveralAuthorizationsStatus, reason));
+    }
+
+    [Fact]
     public async Task WhenARoleBecomesInvalidWithoutAPolicyBeingAsked_ThenItsStatusIsUpdated()
     {
         // Arrange

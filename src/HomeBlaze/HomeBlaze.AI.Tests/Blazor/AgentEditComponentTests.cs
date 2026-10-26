@@ -7,13 +7,17 @@ using Microsoft.AspNetCore.Components.Web;
 using Microsoft.Extensions.DependencyInjection;
 using MudBlazor;
 using MudBlazor.Services;
+using Namotion.Interceptor;
+using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Tracking;
 using Xunit;
 
 namespace HomeBlaze.AI.Tests.Blazor;
 
 public sealed class AgentEditComponentTests : BunitContext, IAsyncLifetime
 {
-    private readonly AgentServices _services = AgentTestContext.CreateServices(new AgentTestRoot());
+    // The graph has two custom roles whose names differ only in case, so neither can be used.
+    private readonly AgentServices _services = AgentTestContext.CreateServices(CreateRootWithUnusableRoles());
 
     public AgentEditComponentTests()
     {
@@ -78,6 +82,21 @@ public sealed class AgentEditComponentTests : BunitContext, IAsyncLifetime
     }
 
     [Fact]
+    public void WhenARoleExistsButCannotBeUsed_ThenItIsShownAsAnErrorChipWithTheReason()
+    {
+        // Arrange
+        var agent = new FakeAgent(_services) { Roles = ["Twin"] };
+
+        // Act
+        var component = RenderEditComponent(agent);
+
+        // Assert
+        Assert.Contains("mud-chip-color-error", component.Find("[data-testid='agent-edit-role-Twin']").ClassName);
+        var tooltip = Assert.Single(component.FindComponents<MudTooltip>());
+        Assert.Equal("The name 'Twin' is used by more than one role, ignoring case.", tooltip.Instance.Text);
+    }
+
+    [Fact]
     public async Task WhenTheLastRoleIsRemoved_ThenSavingIsPrevented()
     {
         // Arrange
@@ -96,6 +115,21 @@ public sealed class AgentEditComponentTests : BunitContext, IAsyncLifetime
         Assert.True(component.Instance.IsDirty);
         Assert.Contains("Select at least one role", component.Find("[data-testid='agent-edit-roles']").TextContent);
         Assert.Equal([BuiltInRoles.OperatorName], agent.Roles);
+    }
+
+    private static AgentTestRoot CreateRootWithUnusableRoles()
+    {
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        return new AgentTestRoot(context)
+        {
+            Children = new Dictionary<string, IInterceptorSubject>
+            {
+                ["Authorization"] = new Authorization.Authorization
+                {
+                    Roles = new Dictionary<string, Role> { ["Twin"] = new(), ["TWIN"] = new() }
+                }
+            }
+        };
     }
 
     private IRenderedComponent<AgentEditComponent> RenderEditComponent(LlmAgentBase agent) =>

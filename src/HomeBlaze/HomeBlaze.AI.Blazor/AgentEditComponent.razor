@@ -130,7 +130,7 @@
                         }
                         else
                         {
-                            <MudText Typo="Typo.body2" Color="Color.Error">@name (unknown)</MudText>
+                            <MudText Typo="Typo.body2" Color="Color.Error">@name (@(IsUnavailableRole(name) ? "unavailable" : "unknown"))</MudText>
                         }
                     </MudSelectItem>
                 }
@@ -145,7 +145,7 @@
                     }
                     else
                     {
-                        <MudTooltip Text="Unknown role">
+                        <MudTooltip Text="@GetRoleError(role)">
                             <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" Icon="@Icons.Material.Filled.ErrorOutline"
                                      Class="ma-0" OnClose="@(() => RemoveRole(role))" data-testid="@($"agent-edit-role-{role}")">@role</MudChip>
                         </MudTooltip>
@@ -210,6 +210,7 @@
     private HashSet<string> _allowedTools = new(StringComparer.Ordinal);
     private IReadOnlyList<AgentToolOption> _toolOptions = [];
     private IReadOnlyList<string> _roleNames = [];
+    private IReadOnlyDictionary<string, string> _unavailableRoles = new Dictionary<string, string>();
     private List<string> _roles = [];
     private int _maxToolCalls;
     private string _cliPath = string.Empty;
@@ -277,6 +278,7 @@
         _toolOptions = AgentToolOptions.Create(ToolSource, agent.AllowedTools, agent.SupportedBackendTools);
         _maxToolCalls = agent.MaxToolCallsPerTurn;
         _roleNames = AuthorizationService.GetRoleNames();
+        _unavailableRoles = AuthorizationService.GetUnavailableRoles();
         // Role names ignore case, so a configured name is shown as the role it resolves to.
         _roles = agent.Roles
             .Where(role => !string.IsNullOrWhiteSpace(role))
@@ -366,6 +368,11 @@
     }
 
     private bool IsKnownRole(string name) => _roleNames.Contains(name, StringComparer.Ordinal);
+
+    // A custom role that exists but cannot be used, such as one whose name another role has as well.
+    private bool IsUnavailableRole(string name) => _unavailableRoles.ContainsKey(name);
+
+    private string GetRoleError(string name) => _unavailableRoles.GetValueOrDefault(name) ?? "Unknown role";
 
     // Keeps the order of the roles already selected and appends new ones; replaced as a whole so the list sees the change.
     private void SelectRoles(IEnumerable<string>? selected)

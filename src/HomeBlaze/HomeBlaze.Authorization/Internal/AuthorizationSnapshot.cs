@@ -41,6 +41,9 @@ internal sealed class AuthorizationSnapshot
     /// <summary>The names of the built-in roles, then of the usable custom roles ordered by name.</summary>
     public IReadOnlyList<string> RoleNames { get; }
 
+    /// <summary>The custom roles that exist but cannot be used, by name ignoring case, with the reason.</summary>
+    public IReadOnlyDictionary<string, string> UnavailableRoles => _unavailableRoles;
+
     /// <summary>The status of each <see cref="Authorization"/> subject.</summary>
     public ImmutableArray<(Authorization Authorization, string? Status)> AuthorizationStatuses { get; private set; } = [];
 
@@ -69,6 +72,10 @@ internal sealed class AuthorizationSnapshot
                 foreach (var (name, role) in GetRoles(authorization))
                 {
                     roleStatuses.Add((role, name, customRolesError));
+                    if (!BuiltInRoles.IsBuiltIn(name))
+                    {
+                        unavailableRoles.TryAdd(name, customRolesError);
+                    }
                 }
             }
         }

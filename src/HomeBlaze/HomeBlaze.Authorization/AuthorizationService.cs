@@ -116,6 +116,13 @@ public sealed class AuthorizationService : IDisposable
     public IReadOnlyList<string> GetRoleNames() => GetSnapshot().RoleNames;
 
     /// <summary>
+    /// Gets the custom roles that exist but cannot be used, by name ignoring case, with the reason: a name used by more
+    /// than one role or reserved for the system rules, or any custom role while several <see cref="Authorization"/>
+    /// subjects exist. A custom role named like a built-in role is not listed, as the name means the built-in role.
+    /// </summary>
+    public IReadOnlyDictionary<string, string> GetUnavailableRoles() => GetSnapshot().UnavailableRoles;
+
+    /// <summary>
     /// Records the role names of a principal, such as an agent, for <see cref="Role.UsedByAgents"/>, which counts the
     /// principals naming a role, ignoring case. The principal is compared by reference; <c>null</c> names remove it.
     /// </summary>
