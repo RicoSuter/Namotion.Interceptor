@@ -3,6 +3,7 @@ using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Common;
 using HomeBlaze.Services;
+using HomeBlaze.Services.Clients;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Attributes;
@@ -27,6 +28,7 @@ public partial class HomeBlazeInstallation : BackgroundService,
     ILastUpdatedProvider
 {
     private readonly DeveloperModeService _developerModeService;
+    private readonly ClientConnectionService _clientConnectionService;
     private readonly GitHubRepositoryClient? _gitHubClient;
     private readonly string? _updateCheckUnavailableReason;
 
@@ -130,6 +132,35 @@ public partial class HomeBlazeInstallation : BackgroundService,
             ? Math.Round((decimal)(total - free) / total, 3)
             : null;
 
+    // Runtime
+
+    [State(Position = 441)]
+    [Category("Runtime")]
+    public partial int? SubjectCount { get; internal set; }
+
+    /// <summary>
+    /// All registered properties, including attributes, method holders and subject references.
+    /// </summary>
+    [State(Position = 442)]
+    [Category("Runtime")]
+    public partial int? PropertyCount { get; internal set; }
+
+    [State(Position = 443)]
+    [Category("Runtime")]
+    public partial int? StatePropertyCount { get; internal set; }
+
+    [State(Position = 444)]
+    [Category("Runtime")]
+    public partial int? ConfigurationPropertyCount { get; internal set; }
+
+    [State(Position = 445)]
+    [Category("Runtime")]
+    public partial int? OperationCount { get; internal set; }
+
+    [State(Position = 446)]
+    [Category("Runtime")]
+    public partial int? QueryCount { get; internal set; }
+
     // Update
 
     /// <summary>
@@ -203,6 +234,7 @@ public partial class HomeBlazeInstallation : BackgroundService,
         IHostEnvironment hostEnvironment,
         IHttpClientFactory httpClientFactory,
         DeveloperModeService developerModeService,
+        ClientConnectionService clientConnectionService,
         ILogger<HomeBlazeInstallation> logger)
         : this(
             // Never packed on its own: it is built with the application and carries the same version and metadata.
@@ -210,21 +242,25 @@ public partial class HomeBlazeInstallation : BackgroundService,
             hostEnvironment.EnvironmentName,
             () => httpClientFactory.CreateClient(),
             developerModeService,
+            clientConnectionService,
             TimeProvider.System,
             logger)
     {
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S107", Justification = "The internal constructor takes the dependencies of the public one plus the clock and HTTP seams the tests replace.")]
     internal HomeBlazeInstallation(
         BuildInformation build,
         string environmentName,
         Func<HttpClient> createHttpClient,
         DeveloperModeService developerModeService,
+        ClientConnectionService clientConnectionService,
         TimeProvider timeProvider,
         ILogger logger,
         TimeSpan? requestTimeout = null)
     {
         _developerModeService = developerModeService;
+        _clientConnectionService = clientConnectionService;
         _timeProvider = timeProvider;
         _logger = logger;
         _gitHubClient = GitHubRepositoryClient.TryCreate(build.RepositoryUrl, createHttpClient, $"HomeBlaze/{build.Version}", timeProvider, requestTimeout);
@@ -233,6 +269,7 @@ public partial class HomeBlazeInstallation : BackgroundService,
         PollingInterval = TimeSpan.FromSeconds(30);
         UpdateCheckEnabled = true;
         UpdateCheckInterval = UpdateSchedule.MinimumInterval;
+        Clients = new Dictionary<string, HomeBlazeClient>();
 
         Version = build.Version;
         _runningVersion = NuGetVersion.TryParse(build.Version, out var runningVersion) ? runningVersion : null;
@@ -258,6 +295,13 @@ public partial class HomeBlazeInstallation : BackgroundService,
         DataDirectory = null;
         DataVolumeFreeSpace = null;
         DataVolumeTotalSize = null;
+        SubjectCount = null;
+        PropertyCount = null;
+        StatePropertyCount = null;
+        ConfigurationPropertyCount = null;
+        OperationCount = null;
+        QueryCount = null;
+        ConnectedCircuitCount = 0;
 
         UpdateAvailable = null;
         LatestVersion = null;
@@ -276,6 +320,7 @@ public partial class HomeBlazeInstallation : BackgroundService,
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
     {
+        ReconcileClients();
         Release(_pollSignal);
         Release(_updateSignal);
         return Task.CompletedTask;
@@ -283,12 +328,16 @@ public partial class HomeBlazeInstallation : BackgroundService,
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        IDisposable? renameRegistration = null;
         try
         {
             _developerModeService.OnChange += RefreshDeveloperMode;
+            _clientConnectionService.Changed += OnClientConnectionsChanged;
+            renameRegistration = _clientConnectionService.SetRenameHandler(RenameConnectionAsync);
 
             // Read after subscribing, so a change in between is not missed.
             RefreshDeveloperMode();
+            ReconcileClients();
             Status = ServiceStatus.Running;
 
             await Task.WhenAll(RunPollingAsync(stoppingToken), RunUpdateChecksAsync(stoppingToken));
@@ -296,6 +345,8 @@ public partial class HomeBlazeInstallation : BackgroundService,
         finally
         {
             _developerModeService.OnChange -= RefreshDeveloperMode;
+            _clientConnectionService.Changed -= OnClientConnectionsChanged;
+            renameRegistration?.Dispose();
             Status = ServiceStatus.Stopped;
         }
     }

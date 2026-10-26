@@ -29,6 +29,28 @@ public static class SubjectPathResolverExtensions
     }
 
     /// <summary>
+    /// Resolves a property for showing its value, relative to a subject itself and not to the page that holds it: the last
+    /// segment of the path is the property name, and the part before it is resolved from <paramref name="from"/>. A property
+    /// that is not <see cref="SubjectRegistryExtensions.IsDisplayable"/> resolves to null.
+    /// </summary>
+    public static RegisteredSubjectProperty? ResolveDisplayablePropertyFrom(
+        this SubjectPathResolver resolver,
+        string path,
+        PathStyle style,
+        IInterceptorSubject from)
+    {
+        var lastSlash = path.LastIndexOf('/');
+        var name = lastSlash < 0 ? path : path[(lastSlash + 1)..];
+        if (name.Length == 0)
+        {
+            return null;
+        }
+
+        var owner = lastSlash < 0 ? from : resolver.ResolveSubject(lastSlash == 0 ? "/" : path[..lastSlash], style, from);
+        return owner?.TryGetRegisteredProperty(name).AsDisplayable();
+    }
+
+    /// <summary>
     /// Resolves a property from a path: the part up to the last '/' resolves the subject, the rest names the property.
     /// </summary>
     /// <returns>The resolved property, or null if not found.</returns>

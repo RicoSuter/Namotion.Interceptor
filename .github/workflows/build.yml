@@ -55,6 +55,7 @@ jobs:
               - 'src/Namotion.Interceptor.AspNetCore/**'
             homeblaze:
               - 'src/HomeBlaze/**'
+              - 'src/Namotion.Interceptor.Expressions/**'
               - 'src/Directory.Packages.props'
               - 'src/Directory.Build.props'
               - 'src/Directory.Build.targets'

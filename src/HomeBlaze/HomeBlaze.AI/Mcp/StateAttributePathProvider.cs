@@ -1,4 +1,5 @@
 using HomeBlaze.Abstractions;
+using HomeBlaze.Services.Display;
 using HomeBlaze.Services.Metadata;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
@@ -13,7 +14,7 @@ namespace HomeBlaze.AI.Mcp;
 /// </summary>
 public class StateAttributePathProvider : PathProviderBase
 {
-    public override char PathSeparator => '/';
+    public override char PathSeparator => ExpressionDisplay.PathSeparator;
 
     public override bool IsPropertyIncluded(RegisteredSubjectProperty property)
         => property.TryGetAttribute(KnownAttributes.State) is not null || property.CanContainSubjects || IsMetadataWithValue(property);

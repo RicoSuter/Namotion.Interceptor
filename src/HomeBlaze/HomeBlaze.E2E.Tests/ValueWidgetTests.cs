@@ -360,6 +360,67 @@ public class ValueWidgetTests
         }
     }
 
+    [Fact]
+    public async Task WhenLabelOfATileHasAnExpression_ThenItShowsTheValueAndUpdatesWithoutAReload()
+    {
+        // Arrange
+        var (name, subject) = await _fixture.AddPlainSubjectToRootAsync();
+        try
+        {
+            var page = await OpenQuietPageAsync(
+                $":: HomeBlaze.Components.ValueTile Kind=Tile Path=\"/{name}/Label\" Label=\"Named {{{{ value }}}}\"\n::\n");
+            var label = page.GetByTestId("value-tile").GetByTestId("tile-subtitle");
+            await Assertions.Expect(label).ToHaveTextAsync("Named Original label", new() { Timeout = Timeout });
+
+            // Act
+            subject.Label = "Changed label";
+
+            // Assert
+            await Assertions.Expect(label).ToHaveTextAsync("Named Changed label", new() { Timeout = Timeout });
+        }
+        finally
+        {
+            _fixture.RemoveSubjectFromRoot(name, subject);
+        }
+    }
+
+    [Fact]
+    public async Task WhenTitleOfACardHasAnExpression_ThenItShowsTheValueAndUpdatesWithoutAReload()
+    {
+        // Arrange
+        var (name, subject) = await _fixture.AddPlainSubjectToRootAsync();
+        try
+        {
+            var page = await OpenQuietPageAsync(
+                $":: HomeBlaze.Components.Card Title=\"Card {{{{ /{name}/Label }}}}\"\nBody\n::\n");
+            var title = page.GetByTestId("card-title");
+            await Assertions.Expect(title).ToHaveTextAsync("Card Original label", new() { Timeout = Timeout });
+
+            // Act
+            subject.Label = "Changed label";
+
+            // Assert
+            await Assertions.Expect(title).ToHaveTextAsync("Card Changed label", new() { Timeout = Timeout });
+        }
+        finally
+        {
+            _fixture.RemoveSubjectFromRoot(name, subject);
+        }
+    }
+
+    [Fact]
+    public async Task WhenLabelOfATileHasAMistake_ThenTheErrorStandsInPlaceOfTheTile()
+    {
+        // Arrange & Act
+        var page = await OpenQuietPageAsync(
+            ":: HomeBlaze.Components.ValueTile Path=\"/Missing/Label\" Label=\"{{ value > }}\"\n::\n");
+
+        // Assert
+        await Assertions.Expect(page.GetByTestId("widget-argument-error"))
+            .ToHaveTextAsync("Label: expected a value after '>' at position 7", new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetByTestId("value-tile")).ToHaveCountAsync(0);
+    }
+
     private static string CreateCssColorPage(string subjectName, string quietColor) =>
         ":: HomeBlaze.Components.ValueMap#motion\n" +
         "::: Case Value=moving Color=\"#ffffff\"\n" +

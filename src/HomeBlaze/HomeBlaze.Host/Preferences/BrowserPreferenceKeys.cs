@@ -13,4 +13,7 @@ internal static class BrowserPreferenceKeys
 
     /// <summary>The display time zone.</summary>
     public const string TimeZone = "timezone";
+
+    /// <summary>The secret token of the named client this browser belongs to.</summary>
+    public const string ClientToken = "client-token";
 }

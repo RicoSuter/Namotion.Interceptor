@@ -290,11 +290,10 @@ namespace HomeBlaze.Storage.Internal
     [Namotion.Interceptor.Attributes.InterceptorSubject]
     public class RenderExpression : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
-        public RenderExpression(string path, HomeBlaze.Storage.Pages.ExpressionFormat format, string? error, HomeBlaze.Storage.Files.MarkdownFile parent, HomeBlaze.Services.SubjectPathResolver pathResolver) { }
+        public RenderExpression(string text, HomeBlaze.Storage.Files.MarkdownFile parent, HomeBlaze.Services.SubjectPathResolver pathResolver) { }
         public string? Error { get; }
-        public HomeBlaze.Storage.Pages.ExpressionFormat Format { get; }
         public HomeBlaze.Storage.Files.MarkdownFile Parent { get; }
-        public string Path { get; }
+        public string Text { get; }
         public string? Title { get; }
         [Namotion.Interceptor.Attributes.Derived]
         public object? Value { get; }
@@ -330,17 +329,10 @@ namespace HomeBlaze.Storage.Pages
         public HomeBlaze.Storage.Pages.MarkdownBlock Block { get; init; }
         public System.Collections.Generic.IReadOnlyList<HomeBlaze.Storage.Pages.MarkdownSegment> Content { get; init; }
     }
-    public enum ExpressionFormat
-    {
-        Display = 0,
-        Raw = 1,
-    }
     public sealed class ExpressionMarkdownSegment : HomeBlaze.Storage.Pages.MarkdownSegment, System.IEquatable<HomeBlaze.Storage.Pages.ExpressionMarkdownSegment>
     {
-        public ExpressionMarkdownSegment(string Path, HomeBlaze.Storage.Pages.ExpressionFormat Format, string? Error) { }
-        public string? Error { get; init; }
-        public HomeBlaze.Storage.Pages.ExpressionFormat Format { get; init; }
-        public string Path { get; init; }
+        public ExpressionMarkdownSegment(string Text) { }
+        public string Text { get; init; }
     }
     public sealed class HtmlMarkdownSegment : HomeBlaze.Storage.Pages.MarkdownSegment, System.IEquatable<HomeBlaze.Storage.Pages.HtmlMarkdownSegment>
     {
@@ -383,6 +375,8 @@ namespace HomeBlaze.Storage.Pages
         public bool IsWidget { get; }
         public string Name { get; init; }
         public string Format() { }
+        public static string GetReservedIdError(string id) { }
+        public static bool IsReservedId(string id) { }
         public static bool IsValidId(string id) { }
         public static bool TryParse(string line, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out HomeBlaze.Storage.Pages.MarkdownBlockHead? head, [System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out string? error) { }
     }
@@ -406,19 +400,13 @@ namespace HomeBlaze.Storage.Pages
     }
     public readonly struct MarkdownExpression : System.IEquatable<HomeBlaze.Storage.Pages.MarkdownExpression>
     {
-        public MarkdownExpression(HomeBlaze.Storage.Pages.MarkdownSpan Span, string Path, HomeBlaze.Storage.Pages.ExpressionFormat Format, string? Error) { }
-        public string? Error { get; init; }
-        public HomeBlaze.Storage.Pages.ExpressionFormat Format { get; init; }
-        public string Path { get; init; }
+        public MarkdownExpression(HomeBlaze.Storage.Pages.MarkdownSpan Span, string Text) { }
         public HomeBlaze.Storage.Pages.MarkdownSpan Span { get; init; }
+        public string Text { get; init; }
     }
-    public readonly struct MarkdownExpressionText : System.IEquatable<HomeBlaze.Storage.Pages.MarkdownExpressionText>
+    public static class MarkdownExpressions
     {
-        public MarkdownExpressionText(string Path, HomeBlaze.Storage.Pages.ExpressionFormat Format, string? Error) { }
-        public string? Error { get; init; }
-        public HomeBlaze.Storage.Pages.ExpressionFormat Format { get; init; }
-        public string Path { get; init; }
-        public static HomeBlaze.Storage.Pages.MarkdownExpressionText Parse(string text) { }
+        public static Namotion.Interceptor.Expressions.ParsedExpression? Parse(string text, out string? error) { }
     }
     [Namotion.Interceptor.Attributes.InterceptorSubject]
     public class MarkdownFragment : Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged

@@ -9,6 +9,12 @@
     padding-right: 3rem;
 }
 
+/* A link to a heading or to a block with an id, such as :: {#summary}, scrolls it to just below the top bar, which
+   covers the top of the window, instead of under it. */
+.markdown-content ::deep [id] {
+    scroll-margin-top: calc(var(--mud-appbar-height) + 0.5rem);
+}
+
 /* The blocks of a page are 1rem apart, from each other and from the text around them. */
 .markdown-content > ::deep .subject-component-wrapper {
     margin: 1rem 0;

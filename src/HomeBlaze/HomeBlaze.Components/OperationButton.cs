@@ -73,6 +73,12 @@ public partial class OperationButton : IConfigurable, ITitleProvider
     public partial string? Subtitle { get; set; }
 
     /// <summary>
+    /// Whether a tile has a thin border like an outlined card, whatever its fill.
+    /// </summary>
+    [Configuration]
+    public partial bool Outlined { get; set; }
+
+    /// <summary>
     /// Content drawn over the top right corner of a tile, such as an indicator. A click on it reaches the tile.
     /// </summary>
     [Slot]
