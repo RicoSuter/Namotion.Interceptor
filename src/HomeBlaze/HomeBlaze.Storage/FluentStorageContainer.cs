@@ -828,6 +828,14 @@ public partial class FluentStorageContainer :
         => StorageMetadataValues.GetOrAddMember(subject, propertyName);
 
     /// <summary>
+    /// Gets the message with which an order write, of <c>SetOrder</c> or of the order in the metadata of a folder,
+    /// refuses <paramref name="names"/> when the folder has <paramref name="children"/>, or null when it accepts them,
+    /// so that a caller that hides children refuses them alike: as if the hidden ones did not exist.
+    /// </summary>
+    public static string? GetOrderNamesError(IEnumerable<string> names, IEnumerable<string> children)
+        => StorageOrder.GetNamesError(names, children);
+
+    /// <summary>
     /// Gets the message with which a metadata write refuses a property that the subject does not have, so that a
     /// caller that hides a property refuses it alike.
     /// </summary>

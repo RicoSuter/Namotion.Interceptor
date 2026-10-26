@@ -1,6 +1,7 @@
 using System.Text.Json;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.AI.Agents.ClaudeCli;
 using HomeBlaze.AI.Mcp;
 using HomeBlaze.AI.Tests.Agents;
 using HomeBlaze.Authorization;
@@ -238,6 +239,89 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
         Assert.Equal(["info.md", "debug.md"], folderOrder.GetProperty("result").EnumerateArray().Select(name => name.GetString()));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenARoleMayNotWriteMetadata_ThenSetOrderIsRefused(bool deniesMetadataWrites)
+    {
+        // Arrange
+        WriteFile("Logs/info.md", "# Info");
+        WriteFile("Logs/debug.md", "# Debug");
+        var role = new AuthorizationRole
+        {
+            Name = "NoMetadataWrites",
+            Includes = [BuiltInRoles.OperatorName],
+            Deny = deniesMetadataWrites ? [new PermissionRule { Tags = [MemberTags.Metadata], Actions = [PermissionAction.Write] }] : []
+        };
+        var (tools, _) = await CreateToolsAsync(accessPolicy: TestAccessPolicies.Create(role.Name, role));
+
+        // Act
+        var result = await CallAsync(tools["invoke_operation"], new { path = "/Storage/Logs", method = "SetOrder", parameters = new { names = new[] { "info.md" } } });
+        var order = await CallAsync(tools["invoke_query"], new { path = "/Storage/Logs", method = "GetOrder" });
+
+        // Assert
+        if (deniesMetadataWrites)
+        {
+            Assert.Equal("Metadata of '/Storage/Logs' is not writable. The access policy does not allow it.", result.GetProperty("error").GetString());
+            Assert.Equal(["debug.md", "info.md"], order.GetProperty("result").EnumerateArray().Select(name => name.GetString()));
+            Assert.False(File.Exists(Path.Combine(_directory.FullName, "Logs", ".metadata.json")));
+        }
+        else
+        {
+            Assert.True(result.GetProperty("success").GetBoolean());
+            Assert.Equal(["info.md", "debug.md"], order.GetProperty("result").EnumerateArray().Select(name => name.GetString()));
+        }
+    }
+
+    [Fact]
+    public async Task WhenAFolderHasAnAgentOrAHiddenBranch_ThenGetOrderLeavesThemOut()
+    {
+        // Arrange
+        WriteFile("Docs/Pump.json", """{ "speed": 1 }""");
+        WriteFile("Secret/Valve.json", """{ "speed": 3 }""");
+        WriteFile("Agent.json", $$"""{ "$type": "{{typeof(ClaudeCliAgent).FullName}}" }""");
+        var (tools, storage) = await CreateToolsAsync(accessPolicy: TestAccessPolicies.Create(HiddenSecretRole.Name, HiddenSecretRole));
+
+        // Act
+        var result = await CallAsync(tools["invoke_query"], new { path = "/Storage", method = "GetOrder" });
+
+        // Assert
+        Assert.IsType<ClaudeCliAgent>(storage.Children["Agent"]);
+        Assert.Equal(["Agent", "Docs", "Secret"], storage.GetOrder().Order(StringComparer.Ordinal));
+        Assert.Equal(["Docs"], result.GetProperty("result").EnumerateArray().Select(name => name.GetString()));
+    }
+
+    [Theory]
+    [InlineData("Secret")]
+    [InlineData("Missing")]
+    public async Task WhenAnOrderNamesAHiddenChild_ThenItIsRefusedAsAnUnknownName(string name)
+    {
+        // Arrange
+        WriteFile("Docs/Pump.json", """{ "speed": 1 }""");
+        WriteFile("Secret/Valve.json", """{ "speed": 3 }""");
+        var (tools, _) = await CreateToolsAsync(accessPolicy: TestAccessPolicies.Create(HiddenSecretRole.Name, HiddenSecretRole));
+        var expectedError = $"Names that are not children of the folder: '{name}'. Its children: 'Docs'.";
+
+        // Act
+        var setOrder = await CallAsync(tools["invoke_operation"], new { path = "/Storage", method = "SetOrder", parameters = new { names = new[] { name } } });
+        var setMetadata = await CallAsync(tools["invoke_operation"], new
+        {
+            path = "/Storage", method = "SetMetadata", parameters = new { path = "", values = new { order = new[] { name } } }
+        });
+
+        // Assert
+        Assert.Equal(expectedError, setOrder.GetProperty("error").GetString());
+        Assert.Equal(expectedError, setMetadata.GetProperty("error").GetString());
+        Assert.False(File.Exists(Path.Combine(_directory.FullName, ".metadata.json")));
+    }
+
+    private static readonly AuthorizationRole HiddenSecretRole = new()
+    {
+        Name = "NoSecret",
+        Includes = [BuiltInRoles.OperatorName],
+        Deny = [new PermissionRule { Paths = ["/Storage/Secret"], Actions = [PermissionAction.Read] }]
+    };
+
     [Fact]
     public async Task WhenAWriteIsRefused_ThenTheAgentIsToldWhy()
     {
@@ -460,6 +544,7 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
         var typeProvider = new TypeProvider();
         typeProvider.AddAssembly(typeof(FluentStorageContainer).Assembly);
         typeProvider.AddAssembly(typeof(MetadataSearchTestDevice).Assembly);
+        typeProvider.AddAssembly(typeof(ClaudeCliAgent).Assembly);
         var typeRegistry = new SubjectTypeRegistry(typeProvider);
 
         var services = new ServiceCollection();
@@ -475,6 +560,8 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
         services.AddSingleton(pathResolver);
         services.AddSingleton<MarkdownContentParser>();
         services.AddSingleton<ILoggerFactory>(NullLoggerFactory.Instance);
+        services.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
+        services.AddSingleton(AgentTestContext.CreateServices(new AgentTestRoot()));
         var serviceProvider = services.BuildServiceProvider();
 
         var storage = new FluentStorageContainer(typeRegistry, serviceProvider.GetRequiredService<ConfigurableSubjectSerializer>(), serviceProvider)

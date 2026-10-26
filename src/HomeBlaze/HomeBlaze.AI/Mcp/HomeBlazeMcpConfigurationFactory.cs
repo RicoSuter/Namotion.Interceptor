@@ -35,7 +35,9 @@ internal static class HomeBlazeMcpConfigurationFactory
     /// the Markdown tools refuse SetMetadata of a storage with arguments of another shape, for a subject or property that
     /// the tools do not show, which is refused as a missing one, and for metadata that the policy does not allow to write.
     /// SearchMetadata of a storage and search_markdown leave out the metadata and notes of the subjects and properties that
-    /// the tools do not show and those that the policy does not allow to read.
+    /// the tools do not show and those that the policy does not allow to read. GetOrder of a folder names only the children
+    /// that the tools show, SetOrder needs write access to the metadata of the folder, and an order that names a child the
+    /// tools do not show is refused as one naming a child that does not exist.
     /// </summary>
     /// <param name="serviceProvider">Services; must contain <see cref="SubjectTypeRegistry"/> and <see cref="ILoggerFactory"/>.</param>
     /// <param name="rootSubjectProvider">Resolves the root subject when a tool runs.</param>
@@ -84,8 +86,10 @@ internal static class HomeBlazeMcpConfigurationFactory
             serviceProvider,
             serviceProvider.GetRequiredService<ILoggerFactory>().CreateLogger<McpMethodInvoker>(),
             isReadOnly,
-            (subject, method, arguments) => GetOperationError(subject, method, arguments, configuration, pathProvider),
-            (subject, method, result) => AgentMetadataAccess.FilterSearchMetadataResult(subject, method, result, configuration, pathProvider));
+            (subject, method, arguments) => AgentMetadataAccess.GetOperationError(subject, method, arguments, configuration, pathProvider, rootSubjectProvider()),
+            (subject, method, result) => AgentOrderAccess.FilterGetOrderResult(
+                subject, method, AgentMetadataAccess.FilterSearchMetadataResult(subject, method, result, configuration, pathProvider),
+                configuration, pathProvider, rootSubjectProvider()));
         configuration.ToolProviders.Add(new HomeBlazeMcpToolProvider(invoker, isReadOnly));
         configuration.ToolProviders.Add(new HomeBlazeMarkdownToolProvider(invoker, isReadOnly));
         configuration.ToolProviders.Add(new HomeBlazeMarkdownSearchToolProvider(rootSubjectProvider, pathProvider, PathPrefix, excludeTypes, configuration));
@@ -97,21 +101,6 @@ internal static class HomeBlazeMcpConfigurationFactory
         }
 
         return configuration;
-    }
-
-    private static string? GetOperationError(
-        RegisteredSubject subject, MethodMetadata method, object?[] arguments, McpServerConfiguration configuration, PathProviderBase pathProvider)
-    {
-        if (method.PropertyName != FluentStorageContainer.SetMetadataMethodName || subject.Subject is not IMetadataStore)
-        {
-            return null;
-        }
-
-        // The input parameters in declaration order, empty when they could not be read. Any other shape is refused
-        // without looking at the path, so that a subject the tools do not show reads as a missing one.
-        return arguments is [string path, string or null, JsonElement { ValueKind: JsonValueKind.Object }, ..]
-            ? AgentMetadataAccess.GetSetMetadataError(subject, path, arguments[1] as string, configuration, pathProvider)
-            : SetMetadataArgumentsMessage;
     }
 
     /// <summary>

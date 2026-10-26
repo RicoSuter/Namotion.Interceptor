@@ -191,6 +191,7 @@ namespace HomeBlaze.Storage
         public static string GetNoPropertyMessage(string propertyName) { }
         public static string GetNoSubjectMessage(string path) { }
         public static Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? GetOrAddMetadataMember(Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject, string? propertyName) { }
+        public static string? GetOrderNamesError(System.Collections.Generic.IEnumerable<string> names, System.Collections.Generic.IEnumerable<string> children) { }
         public static Namotion.Interceptor.IInterceptorSubject? ResolveMetadataPath(Namotion.Interceptor.IInterceptorSubject storage, string path) { }
     }
     public static class MarkdownPageLayoutPermission

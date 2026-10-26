@@ -1,3 +1,4 @@
+using System.Text.Json;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Services.Metadata;
 using HomeBlaze.Storage;
@@ -45,6 +46,40 @@ internal static class AgentMetadataAccess
             .Where(match => IsReadable(subject, match, configuration, pathProvider))
             .Take(MaxSearchMetadataMatches)
             .ToArray();
+    }
+
+    /// <summary>
+    /// Gets why a call of an operation of a storage or folder with the given input arguments is refused, or null when it
+    /// is not: SetMetadata with arguments of another shape or for metadata that the tools do not let the caller change,
+    /// see <see cref="GetSetMetadataError"/> and <see cref="AgentOrderAccess.GetMetadataOrderError"/>, and SetOrder, see
+    /// <see cref="AgentOrderAccess.GetSetOrderError"/>. Other operations are not refused.
+    /// </summary>
+    public static string? GetOperationError(
+        RegisteredSubject subject, MethodMetadata method, object?[] arguments, McpServerConfiguration configuration,
+        PathProviderBase pathProvider, IInterceptorSubject root)
+    {
+        if (method.PropertyName == AgentOrderAccess.SetOrderMethodName && subject.Subject is IMetadataContainer)
+        {
+            return AgentOrderAccess.GetSetOrderError(subject, arguments, configuration, pathProvider, root);
+        }
+
+        if (method.PropertyName != FluentStorageContainer.SetMetadataMethodName || subject.Subject is not IMetadataStore)
+        {
+            return null;
+        }
+
+        // The input parameters in declaration order, empty when they could not be read. Any other shape is refused
+        // without looking at the path, so that a subject the tools do not show reads as a missing one.
+        if (arguments is not [string path, string or null, JsonElement { ValueKind: JsonValueKind.Object } values, ..])
+        {
+            return HomeBlazeMcpConfigurationFactory.SetMetadataArgumentsMessage;
+        }
+
+        var propertyName = arguments[1] as string;
+        return GetSetMetadataError(subject, path, propertyName, configuration, pathProvider) ??
+            (propertyName is null && FluentStorageContainer.ResolveMetadataPath(subject.Subject, path) is { } target
+                ? AgentOrderAccess.GetMetadataOrderError(target, values, configuration, pathProvider, root)
+                : null);
     }
 
     /// <summary>
