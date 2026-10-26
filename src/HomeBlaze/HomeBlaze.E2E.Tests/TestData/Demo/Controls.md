@@ -22,6 +22,9 @@ The outline of this card is switched by a control.
 :: HomeBlaze.Components.Switch#ctlopswitch Path=ctlmotor/IsPowered Label="Power by operation" On=ctlmotor/PowerOn Off=ctlmotor/PowerOff
 ::
 
+:: HomeBlaze.Components.Switch#ctloffonlyswitch Path=ctlmotor/IsPowered Label="Power off only" Off=ctlmotor/PowerOff
+::
+
 :: HomeBlaze.Components.Switch#ctlblockedswitch Path=ctlmotor/IsPowered Label="Blocked power" On=ctlmotor/PowerOff Off=ctlmotor/PowerOn
 ::
 
