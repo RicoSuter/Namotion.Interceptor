@@ -100,3 +100,13 @@ public partial class TestFolder
         Children = new Dictionary<string, TestFolder>();
     }
 }
+
+[InterceptorSubject]
+public partial class TestNode
+{
+    public partial string Name { get; set; }
+    public partial TestNode? Secret { get; set; }
+    public partial TestNode? A { get; set; }
+    public partial TestNode? B { get; set; }
+    public partial TestNode? Child { get; set; }
+}

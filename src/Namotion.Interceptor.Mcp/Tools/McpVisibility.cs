@@ -18,6 +18,8 @@ internal sealed class McpVisibility
     private readonly IInterceptorSubject? _rootSubject;
     private Dictionary<RegisteredSubject, bool>? _isShown;
     private List<(RegisteredSubjectProperty Property, object? Index)>? _pathProperties;
+    private ShownSubjectsPathProvider? _listingPathProvider;
+    private ShownSubjectsPathProvider? _resolutionPathProvider;
 
     private McpVisibility()
     {
@@ -40,6 +42,21 @@ internal sealed class McpVisibility
     /// </summary>
     public static McpVisibility For(McpServerConfiguration configuration, IInterceptorSubject rootSubject) =>
         configuration.AccessPolicy is { } policy ? new McpVisibility(policy, rootSubject) : Unrestricted;
+
+    /// <summary>
+    /// The configuration's listing provider, <paramref name="listingPathProvider"/>, restricted with a policy to
+    /// properties whose owner is shown, so a path resolved with <c>includedPropertiesOnly</c> passes shown subjects
+    /// only. Without a policy, <paramref name="listingPathProvider"/> itself.
+    /// </summary>
+    public PathProviderBase GetListingPathProvider(PathProviderBase listingPathProvider) =>
+        _policy is null ? listingPathProvider : _listingPathProvider ??= new ShownSubjectsPathProvider(listingPathProvider, this);
+
+    /// <summary>
+    /// The configuration's resolution provider, <paramref name="resolutionPathProvider"/>, restricted as
+    /// <see cref="GetListingPathProvider"/> restricts the listing provider.
+    /// </summary>
+    public PathProviderBase GetResolutionPathProvider(PathProviderBase resolutionPathProvider) =>
+        _policy is null ? resolutionPathProvider : _resolutionPathProvider ??= new ShownSubjectsPathProvider(resolutionPathProvider, this);
 
     /// <summary>
     /// Whether the subject is empty for the policy: it has at least one property other than an attribute, and the
@@ -125,5 +142,23 @@ internal sealed class McpVisibility
         // The entries pin their subjects, so the reused list is not kept filled.
         pathProperties.Clear();
         return isReadable;
+    }
+
+    private sealed class ShownSubjectsPathProvider(PathProviderBase inner, McpVisibility visibility) : PathProviderBase
+    {
+        public override char PathSeparator => inner.PathSeparator;
+
+        public override char IndexOpen => inner.IndexOpen;
+
+        public override char IndexClose => inner.IndexClose;
+
+        public override bool IsPropertyIncluded(RegisteredSubjectProperty property) =>
+            inner.IsPropertyIncluded(property) && visibility.IsShown(property.Parent);
+
+        public override string? TryGetPropertySegment(RegisteredSubjectProperty property) =>
+            inner.TryGetPropertySegment(property);
+
+        public override RegisteredSubjectProperty? TryGetPropertyFromSegment(RegisteredSubject subject, string segment) =>
+            inner.TryGetPropertyFromSegment(subject, segment);
     }
 }

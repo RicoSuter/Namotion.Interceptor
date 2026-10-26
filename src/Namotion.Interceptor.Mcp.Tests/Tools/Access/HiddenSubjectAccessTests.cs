@@ -92,6 +92,85 @@ public class HiddenSubjectAccessTests
         Assert.Empty(GetResultPaths(withPolicy));
     }
 
+    // X is written through Secret, so it is hidden, and also held by A. G is written through B, so it is shown, and
+    // also held by X.Child; H is G's child. A path through A.Child passes the hidden X on the way to a shown subject.
+    private static (TestMixedGroup Root, TestNode G) CreatePassedThroughHiddenSubject()
+    {
+        var context = CreateContext();
+        var node = new TestNode(context) { Name = "Node" };
+        var x = new TestNode(context) { Name = "X" };
+        var g = new TestNode(context) { Name = "G" };
+        node.Secret = x;
+        node.A = x;
+        node.B = g;
+        x.Child = g;
+        g.Child = new TestNode(context) { Name = "H" };
+        var root = new TestMixedGroup(context);
+        root.Items = new Dictionary<string, IInterceptorSubject> { ["node"] = node };
+        return (root, g);
+    }
+
+    public static TheoryData<string, string> PassedThroughHiddenSubjectCalls => new()
+    {
+        { "get_property", JsonSerializer.Serialize(new { path = "Items[node].A.Child.Name" }) },
+        { "set_property", JsonSerializer.Serialize(new { path = "Items[node].A.Child.Name", value = "Changed" }) },
+        { "browse", JsonSerializer.Serialize(new { format = "json", path = "Items[node].A.Child.Child", depth = 0 }) }
+    };
+
+    [Theory]
+    [MemberData(nameof(PassedThroughHiddenSubjectCalls))]
+    public async Task WhenAPathPassesAHiddenSubjectOnTheWayToAShownOne_ThenTheToolReportsItAsNotFound(string toolName, string input)
+    {
+        // Arrange
+        var (root, g) = CreatePassedThroughHiddenSubject();
+        var request = JsonSerializer.Deserialize<JsonElement>(input);
+        var path = request.GetProperty("path").GetString();
+
+        // Act
+        var withoutPolicy = await McpToolCaller.CallAsync(root, CreateConfiguration(policy: null), toolName == "set_property" ? "get_property" : toolName, request);
+        var withPolicy = await McpToolCaller.CallAsync(root, CreateConfiguration(TestAccessPolicy.DenyRead(nameof(TestNode.Secret))), toolName, request);
+
+        // Assert
+        Assert.False(withoutPolicy.TryGetProperty("error", out _));
+        Assert.Equal($"Path not found: {path}", withPolicy.GetProperty("error").GetString());
+        Assert.Equal("G", g.Name);
+    }
+
+    [Fact]
+    public async Task WhenAWherePathPassesAHiddenSubjectOnTheWayToAShownOne_ThenItReadsAsMissing()
+    {
+        // Arrange
+        var (root, _) = CreatePassedThroughHiddenSubject();
+        var input = new { format = "json", types = new[] { nameof(TestNode) }, where = "A.Child.Name == \"G\"" };
+
+        // Act
+        var withoutPolicy = await McpToolCaller.CallAsync(root, CreateConfiguration(policy: null), "search", input);
+        var withPolicy = await McpToolCaller.CallAsync(root, CreateConfiguration(TestAccessPolicy.DenyRead(nameof(TestNode.Secret))), "search", input);
+
+        // Assert
+        Assert.Equal(["Items[node]"], GetResultPaths(withoutPolicy));
+        Assert.Empty(GetResultPaths(withPolicy));
+    }
+
+    [Fact]
+    public void WhenAPathPassesAHiddenSubjectOnTheWayToAShownOne_ThenTheHelpersDoNotResolveIt()
+    {
+        // Arrange
+        var (root, _) = CreatePassedThroughHiddenSubject();
+        var registeredRoot = root.TryGetRegisteredSubject()!;
+        var configuration = CreateConfiguration(TestAccessPolicy.DenyRead(nameof(TestNode.Secret)));
+
+        // Act
+        var property = configuration.TryGetReadableProperty(registeredRoot, "Items[node].A.Child.Name");
+        var subject = configuration.TryGetReadableSubject(registeredRoot, "Items[node].A.Child.Child");
+        var shown = configuration.TryGetReadableSubject(registeredRoot, "Items[node].B.Child");
+
+        // Assert
+        Assert.Null(property);
+        Assert.Null(subject);
+        Assert.Equal("H", ((TestNode)shown!.Subject).Name);
+    }
+
     [Theory]
     [InlineData("Device != null", new[] { "Items[shown]" })]
     [InlineData("Device == null", new[] { "Items[hidden]", "Items[none]" })]
