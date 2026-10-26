@@ -401,6 +401,49 @@ public static class PathExtensions
         }
     }
 
+    /// <summary>
+    /// Fills <paramref name="properties"/> with the properties along the path that
+    /// <see cref="TryGetPath(RegisteredSubjectProperty, PathProviderBase, IInterceptorSubject?, object?)"/> writes for
+    /// <paramref name="property"/>, from the property owned by <paramref name="rootSubject"/> (or by the absolute top
+    /// when it is null) down to <paramref name="property"/>, each with the collection position or dictionary key it is
+    /// written with. The list is cleared first.
+    /// </summary>
+    /// <param name="property">The property.</param>
+    /// <param name="rootSubject">The root subject or null.</param>
+    /// <param name="propertyIndex">Optional index of the last property, as for <see cref="TryGetPath(RegisteredSubjectProperty, PathProviderBase, IInterceptorSubject?, object?)"/>.</param>
+    /// <param name="properties">The list to fill, which the caller may reuse.</param>
+    /// <returns>False, leaving the list empty, when a given root is not reachable or the parent chain has a cycle.</returns>
+    public static bool TryGetPathProperties(
+        this RegisteredSubjectProperty property,
+        IInterceptorSubject? rootSubject,
+        object? propertyIndex,
+        List<(RegisteredSubjectProperty Property, object? Index)> properties)
+    {
+        ArgumentNullException.ThrowIfNull(properties);
+        properties.Clear();
+
+        var frames = PooledFrames.Rent();
+        try
+        {
+            if (!TryBuildPathFrames(property, rootSubject, propertyIndex, ref frames))
+            {
+                return false;
+            }
+
+            properties.EnsureCapacity(frames.Count);
+            for (var i = frames.Count - 1; i >= 0; i--)
+            {
+                properties.Add(frames[i]);
+            }
+
+            return true;
+        }
+        finally
+        {
+            frames.Return();
+        }
+    }
+
     private static bool TryAppendInlineKey(
         StringBuilder builder, PathProviderBase pathProvider, PathCharacters characters,
         RegisteredSubjectProperty property, object index)
