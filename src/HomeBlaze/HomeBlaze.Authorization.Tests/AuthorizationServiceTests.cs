@@ -516,6 +516,26 @@ public sealed class AuthorizationServiceTests : IDisposable
         Assert.Contains("'Custom'", role.Status);
     }
 
+    [Fact]
+    public void WhenPrincipalsAreCountedForAName_ThenEachNamingItIgnoringCaseCountsOnceWhetherOrNotTheRoleExists()
+    {
+        // Arrange
+        AddAuthorization(("Custom", new Role()));
+        _service.SetPrincipalRoles(new object(), ["Custom", "CUSTOM"]);
+        _service.SetPrincipalRoles(new object(), ["custom", "Missing"]);
+        _service.SetPrincipalRoles(new object(), [BuiltInRoles.ReaderName]);
+
+        // Act
+        var customCount = _service.GetPrincipalCount("Custom");
+        var missingCount = _service.GetPrincipalCount("MISSING");
+        var otherCount = _service.GetPrincipalCount("Other");
+
+        // Assert
+        Assert.Equal(2, customCount);
+        Assert.Equal(1, missingCount);
+        Assert.Equal(0, otherCount);
+    }
+
     private Authorization AddAuthorization(params (string Name, Role Role)[] roles)
     {
         var authorization = new Authorization

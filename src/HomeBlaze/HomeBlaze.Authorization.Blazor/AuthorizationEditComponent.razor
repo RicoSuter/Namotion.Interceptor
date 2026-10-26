@@ -1,6 +1,8 @@
 @attribute [SubjectComponent(SubjectComponentType.Edit, typeof(Authorization))]
 @implements ISubjectEditComponent
 
+@using System.Text
+
 @inject AuthorizationService AuthorizationService
 
 @if (Authorization is { } authorization)
@@ -253,6 +255,10 @@
                 @DescribeAgents(renamed) this role under its old name. After saving, they are denied everything and show "Invalid roles" until they are given the new name or another role.
             </MudAlert>
         }
+        @if (GetUsedNameWarning() is { } usedNameWarning)
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2" data-testid="authorization-role-name-used-warning">@usedNameWarning</MudAlert>
+        }
         <MudStack Row="true" Justify="Justify.FlexEnd" Class="mt-2">
             <MudButton Variant="Variant.Text" OnClick="CloseNameEditor" data-testid="authorization-role-name-cancel">Cancel</MudButton>
             <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(_nameError is not null)" OnClick="ConfirmName"
@@ -277,6 +283,52 @@
     {
         var count = entry.Role?.UsedByAgents ?? 0;
         return count == 1 ? "1 agent uses" : $"{count} agents use";
+    }
+
+    // Agents and roles may still name a role that was removed or renamed, and get the rules of the role added under it.
+    private string? GetUsedNameWarning()
+    {
+        var name = _nameText.Trim();
+        if (_nameError is not null || name.Length == 0 ||
+            string.Equals(_renamedEntry?.OriginalName, name, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var warning = new StringBuilder();
+        var agentCount = AuthorizationService.GetPrincipalCount(name);
+        if (agentCount > 0)
+        {
+            warning.Append(agentCount == 1 ? "1 agent already names" : $"{agentCount} agents already name")
+                .Append(" this role and will get its rules after saving.");
+        }
+
+        var includingRoles = GetIncludingRoles(name, _renamedEntry);
+        if (includingRoles.Count > 0)
+        {
+            warning.Append(warning.Length > 0 ? " " : "")
+                .Append(DescribeRoles(includingRoles))
+                .Append(includingRoles.Count == 1 ? " includes" : " include")
+                .Append(" a role of this name and will get its rules after saving.");
+        }
+
+        return warning.Length > 0 ? warning.ToString() : null;
+    }
+
+    // The listed roles other than the given one whose includes name the role, ignoring case, as roles resolve.
+    private List<RoleEntry> GetIncludingRoles(string roleName, RoleEntry? except) =>
+        _entries
+            .Where(entry => !ReferenceEquals(entry, except) &&
+                entry.Role?.Includes?.Contains(roleName, StringComparer.OrdinalIgnoreCase) == true)
+            .ToList();
+
+    // Such as "Kitchen (used by 1 agent) and Garden (used by 2 agents)".
+    private static string DescribeRoles(List<RoleEntry> roles)
+    {
+        var descriptions = roles.Select(entry => $"{entry.Name} ({DescribeUsage(entry)})").ToList();
+        return descriptions.Count == 1
+            ? descriptions[0]
+            : $"{string.Join(", ", descriptions.Take(descriptions.Count - 1))} and {descriptions[^1]}";
     }
 
     private void StartAdd() => OpenNameEditor(null, string.Empty);

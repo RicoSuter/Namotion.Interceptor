@@ -195,6 +195,17 @@ public sealed class AuthorizationService : IDisposable
     }
 
     /// <summary>
+    /// Gets the number of principals whose role names, recorded with <see cref="SetPrincipalRoles"/>, include
+    /// <paramref name="roleName"/>, ignoring case, whether or not a role of that name exists.
+    /// </summary>
+    public int GetPrincipalCount(string roleName)
+    {
+        ArgumentNullException.ThrowIfNull(roleName);
+
+        return _principals.Count(roleName);
+    }
+
+    /// <summary>
     /// Starts an update of several roles or of the <see cref="Authorization"/> that takes effect as a whole. Until the
     /// returned scope and every other open one are disposed, <see cref="GetPolicy"/>, <see cref="PreviewPolicy"/>,
     /// <see cref="GetRoleNames"/> and <see cref="GetUnavailableRoles"/> keep giving the results compiled before the update,

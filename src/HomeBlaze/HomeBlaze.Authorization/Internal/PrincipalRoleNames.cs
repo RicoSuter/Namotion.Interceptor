@@ -23,6 +23,25 @@ internal sealed class PrincipalRoleNames
         }
     }
 
+    /// <summary>Counts the principals naming <paramref name="roleName"/>, ignoring case.</summary>
+    public int Count(string roleName)
+    {
+        var count = 0;
+        foreach (var (_, roleNames) in _principals)
+        {
+            foreach (var name in roleNames)
+            {
+                if (string.Equals(name, roleName, StringComparison.OrdinalIgnoreCase))
+                {
+                    count++;
+                    break;
+                }
+            }
+        }
+
+        return count;
+    }
+
     /// <summary>Counts the principals naming each role, ignoring case, a principal once per name.</summary>
     public Dictionary<string, int> CountPerName()
     {

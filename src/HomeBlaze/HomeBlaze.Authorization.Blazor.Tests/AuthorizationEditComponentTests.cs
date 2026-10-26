@@ -329,6 +329,65 @@ public sealed class AuthorizationEditComponentTests : BunitContext, IAsyncLifeti
         Assert.Same(reloadedRoles, _graph.Authorization.Roles);
     }
 
+    [Fact]
+    public async Task WhenAddingANameThatAgentsAndRolesStillName_ThenAWarningSaysTheyGetItsRules()
+    {
+        // Arrange
+        _graph.Service.SetPrincipalRoles(new object(), ["Cellar"]);
+        _graph.Service.SetPrincipalRoles(new object(), ["CELLAR", "Kitchen"]);
+        _graph.GetRole("Kitchen").Includes = ["cellar"];
+        var component = RenderEditor(_graph.Authorization);
+        await ClickAsync(component, "authorization-add-role");
+
+        // Act
+        await TypeNameAsync(component, " cellar ");
+
+        // Assert
+        var warning = component.Find("[data-testid='authorization-role-name-used-warning']").TextContent;
+        Assert.Contains("2 agents already name this role and will get its rules after saving.", warning);
+        Assert.Contains("Kitchen (used by 1 agent) includes a role of this name and will get its rules after saving.", warning);
+        Assert.False(component.Find("[data-testid='authorization-role-name-confirm']").HasAttribute("disabled"));
+    }
+
+    [Fact]
+    public async Task WhenRenamingToANameThatAnAgentStillNames_ThenAWarningSaysItGetsItsRules()
+    {
+        // Arrange
+        _graph.Service.SetPrincipalRoles(new object(), ["Cellar"]);
+        var component = RenderEditor(_graph.Authorization);
+        await ClickAsync(component, "authorization-role-rename-Garden");
+
+        // Act
+        await TypeNameAsync(component, "Cellar");
+
+        // Assert
+        Assert.Contains("1 agent already names this role and will get its rules after saving.",
+            component.Find("[data-testid='authorization-role-name-used-warning']").TextContent);
+    }
+
+    [Fact]
+    public async Task WhenANameNoAgentOrRoleNamesIsTypedOrARoleKeepsItsOwnName_ThenNoUsedNameWarningIsShown()
+    {
+        // Arrange
+        _graph.Service.SetPrincipalRoles(new object(), ["Kitchen"]);
+        var component = RenderEditor(_graph.Authorization);
+        await ClickAsync(component, "authorization-add-role");
+
+        // Act
+        await TypeNameAsync(component, "Cellar");
+
+        // Assert
+        Assert.Empty(component.FindAll("[data-testid='authorization-role-name-used-warning']"));
+
+        // Act
+        await ClickAsync(component, "authorization-role-name-cancel");
+        await ClickAsync(component, "authorization-role-rename-Kitchen");
+        await TypeNameAsync(component, "KITCHEN");
+
+        // Assert
+        Assert.Empty(component.FindAll("[data-testid='authorization-role-name-used-warning']"));
+    }
+
     private IRenderedComponent<AuthorizationEditComponent> RenderEditor(Authorization authorization) =>
         Render<AuthorizationEditComponent>(parameters => parameters.Add(component => component.Subject, authorization));
 
