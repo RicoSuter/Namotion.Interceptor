@@ -186,7 +186,8 @@
         var parameters = new DialogParameters<SubjectPathPickerDialog>
         {
             { dialog => dialog.Label, "Path" },
-            // Patterns match subject paths, so only subjects, and properties holding one, can be picked.
+            // Only subjects and the properties holding them can be picked. The path of a subject in a folder matches no
+            // member until /** or /* is appended, which the role's Warning points out.
             { dialog => dialog.CanSelectProperty, property => property.IsSubjectReference }
         };
 
