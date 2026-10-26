@@ -193,6 +193,20 @@ public sealed class AuthorizationServicePreviewTests : IDisposable
         Assert.DoesNotContain("role", error, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public void WhenAPathPatternIsValidatedAgain_ThenTheCachedErrorIsReturned()
+    {
+        // Arrange
+        var first = _service.ValidatePathPattern("Devices");
+
+        // Act
+        var second = _service.ValidatePathPattern("Devices");
+
+        // Assert
+        Assert.NotNull(first);
+        Assert.Same(first, second);
+    }
+
     private void AddAuthorization(params (string Name, Role Role)[] roles)
     {
         var authorization = new Authorization

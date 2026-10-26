@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Reactive.Concurrency;
 using HomeBlaze.Authorization.Internal;
 using Microsoft.Extensions.Logging;
@@ -28,11 +29,16 @@ public sealed class AuthorizationService : IDisposable
     internal const string SeveralAuthorizationsStatus =
         "Only one Authorization subject is allowed; remove the others. Custom roles are unavailable until then.";
 
+    private const int MaxCachedPathPatterns = 1024;
+
     private readonly ISubjectRegistry _registry;
     private readonly PathProviderBase _pathProvider;
     private readonly ILogger<AuthorizationService>? _logger;
     private readonly IDisposable _subscription;
     private readonly PrincipalRoleNames _principals = new();
+
+    // The result depends only on the pattern and the path provider; cleared when full, as an editor validates per keystroke.
+    private readonly ConcurrentDictionary<string, string?> _pathPatternErrors = new(StringComparer.Ordinal);
     private readonly Lock _rebuildLock = new();
 
     // Incremented on every change of an Authorization or a Role; a snapshot of another version is rebuilt.
@@ -130,7 +136,18 @@ public sealed class AuthorizationService : IDisposable
     {
         ArgumentNullException.ThrowIfNull(pattern);
 
-        return AuthorizationSnapshot.ValidatePathPattern(pattern, _pathProvider);
+        if (_pathPatternErrors.TryGetValue(pattern, out var error))
+        {
+            return error;
+        }
+
+        error = AuthorizationSnapshot.ValidatePathPattern(pattern, _pathProvider);
+        if (_pathPatternErrors.Count >= MaxCachedPathPatterns)
+        {
+            _pathPatternErrors.Clear();
+        }
+
+        return _pathPatternErrors.GetOrAdd(pattern, error);
     }
 
     /// <summary>
