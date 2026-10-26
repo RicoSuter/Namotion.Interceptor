@@ -112,7 +112,7 @@ internal class SearchTool
 
         var unseenPropertyNames = UnseenPropertyNames.TryCreate(filter?.Paths, propertyNames);
         var subjects = new Dictionary<string, SubjectNode>();
-        var truncated = false;
+        var omittedCount = 0;
         var rootSubject = _rootSubjectProvider();
 
         foreach (var (_, registered) in registry.KnownSubjects)
@@ -152,10 +152,11 @@ internal class SearchTool
                 continue;
             }
 
+            // Past the limit the scan goes on and only counts the matches it leaves out.
             if (subjects.Count >= maxSubjects)
             {
-                truncated = true;
-                break;
+                omittedCount++;
+                continue;
             }
 
             // Build full DTO only for subjects that pass all filters
@@ -170,9 +171,9 @@ internal class SearchTool
         {
             Results = subjects,
             SubjectCount = subjects.Count,
-            Truncated = truncated,
-            // A truncated scan stopped before seeing every subject in scope.
-            Warnings = truncated ? null : unseenPropertyNames?.CreateWarnings()
+            Truncated = omittedCount > 0,
+            OmittedCount = omittedCount,
+            Warnings = unseenPropertyNames?.CreateWarnings()
         };
 
         if (format == "json")

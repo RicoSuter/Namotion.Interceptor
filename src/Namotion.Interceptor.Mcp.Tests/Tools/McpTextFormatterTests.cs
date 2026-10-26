@@ -169,7 +169,8 @@ public class McpTextFormatterTests
         {
             Result = new SubjectNode { Path = "/", Type = "MyApp.Root" },
             SubjectCount = 3,
-            Truncated = true
+            Truncated = true,
+            OmittedCount = 4
         };
 
         // Act & Assert
@@ -246,7 +247,8 @@ public class McpTextFormatterTests
                 ["/Demo/Motor2"] = new() { Path = "/Demo/Motor2", Type = "MyApp.Motor", Enrichments = new Dictionary<string, object?> { ["$title"] = "Motor 2" } }
             },
             SubjectCount = 2,
-            Truncated = true
+            Truncated = true,
+            OmittedCount = 5
         };
 
         // Act & Assert

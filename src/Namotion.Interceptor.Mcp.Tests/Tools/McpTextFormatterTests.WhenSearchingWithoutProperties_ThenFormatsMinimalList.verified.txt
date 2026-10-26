@@ -4,4 +4,4 @@
 /Demo/Motor1 [MyApp.Motor] $title=Motor 1
 
 /Demo/Motor2 [MyApp.Motor] $title=Motor 2
-[2 subjects, truncated]
+[2 subjects, truncated: 5 more match]

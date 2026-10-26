@@ -38,7 +38,7 @@ internal static class McpTextFormatter
         sb.AppendLine();
         FormatSubjectNode(sb, result.Result, indent: 0);
         AppendWarnings(sb, result.Warnings);
-        AppendFooter(sb, result.SubjectCount, result.Truncated);
+        AppendFooter(sb, result.SubjectCount, result.OmittedCount, "more not shown, without their children");
         return sb.ToString();
     }
 
@@ -78,7 +78,7 @@ internal static class McpTextFormatter
         }
 
         AppendWarnings(sb, result.Warnings);
-        AppendFooter(sb, result.SubjectCount, result.Truncated);
+        AppendFooter(sb, result.SubjectCount, result.OmittedCount, "more match");
         return sb.ToString();
     }
 
@@ -367,11 +367,11 @@ internal static class McpTextFormatter
         }
     }
 
-    private static void AppendFooter(StringBuilder sb, int subjectCount, bool truncated)
+    private static void AppendFooter(StringBuilder sb, int subjectCount, int omittedCount, string omittedText)
     {
         var noun = subjectCount == 1 ? "subject" : "subjects";
-        sb.Append(truncated
-            ? $"[{subjectCount} {noun}, truncated]"
+        sb.Append(omittedCount > 0
+            ? $"[{subjectCount} {noun}, truncated: {omittedCount} {omittedText}]"
             : $"[{subjectCount} {noun}]");
     }
 }
