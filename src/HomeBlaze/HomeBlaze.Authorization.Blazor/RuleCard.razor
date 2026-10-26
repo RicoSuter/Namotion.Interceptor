@@ -56,6 +56,10 @@
         <MudAlert Severity="@(IsDeny ? Severity.Warning : Severity.Error)" Icon="@Icons.Material.Filled.Warning" Dense="true" Class="mt-2"
                   data-testid="rule-any-member-warning">This rule applies to every member.</MudAlert>
     }
+    @if (ExecuteWithoutReadExample is { } executeExample)
+    {
+        <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2" data-testid="rule-execute-without-read-hint">@ExecuteWithoutRead.DescribeRule(executeExample)</MudAlert>
+    }
     @if (IsDeny && GetSingleMemberPaths() is { Count: > 0 } singleMemberPaths)
     {
         <MudAlert Severity="Severity.Info" Dense="true" Class="mt-2" data-testid="rule-single-member-hint">
@@ -94,6 +98,13 @@
     /// <summary>Raised with <see cref="HasInvalidText"/> when it changes.</summary>
     [Parameter]
     public EventCallback<bool> HasInvalidTextChanged { get; set; }
+
+    /// <summary>
+    /// The path of a method that this allow rule, having execute without read, allows to execute while no rule allows
+    /// to read it, or null; shown as a hint.
+    /// </summary>
+    [Parameter]
+    public string? ExecuteWithoutReadExample { get; set; }
 
     /// <summary>The type names suggested for the types selector.</summary>
     [Parameter]

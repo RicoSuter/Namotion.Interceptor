@@ -50,12 +50,12 @@ else
                     {
                         var action = AuthorizationActions.All[index];
                         <td class="text-center" data-testid="@($"role-preview-cell-{row.Name}-{action.Name}")"
-                            data-decision="@row.Cells[index]?.Decision">
+                            data-decision="@row.Cells[index]?.Decision" data-note="@(row.Cells[index]?.IsUnusable == true ? "execute-without-read" : null)">
                             @if (row.Cells[index] is { } cell)
                             {
                                 <MudTooltip Text="@cell.Explanation">
                                     <MudIconButton Size="Size.Small" Icon="@(cell.IsAllowed ? Icons.Material.Filled.Check : Icons.Material.Filled.Close)"
-                                                   Color="@(cell.IsAllowed ? Color.Success : Color.Error)"
+                                                   Color="@cell.Color"
                                                    aria-label="@($"{row.Name}, {action.Name}: {cell.Decision}")"
                                                    OnClick="@(() => Select(row.Name, action))" />
                                 </MudTooltip>
@@ -215,7 +215,27 @@ else
             }
         }
 
+        if (isMethod)
+        {
+            MarkExecuteWithoutRead(cells);
+        }
+
         return new MemberRow(name, cells);
+    }
+
+    // A method that can be executed but not read cannot be used, so its allowed execute cell says why.
+    private static void MarkExecuteWithoutRead(Cell?[] cells)
+    {
+        var executeIndex = AuthorizationActions.All.IndexOf(AuthorizationActions.Execute);
+        var readIndex = AuthorizationActions.All.IndexOf(PermissionAction.Read);
+        if (cells[executeIndex] is { IsAllowed: true } execute && cells[readIndex] is { IsAllowed: false })
+        {
+            cells[executeIndex] = execute with
+            {
+                IsUnusable = true,
+                Explanation = $"{execute.Explanation} It cannot be used, as read is denied: {ExecuteWithoutRead.Reason}"
+            };
+        }
     }
 
     /// <summary>
@@ -269,8 +289,22 @@ else
 
     private sealed record MemberRow(string Name, Cell?[] Cells);
 
-    private sealed record Cell(bool IsAllowed, string Explanation)
+    // Unusable: allowed, but of no use because another action is denied, see MarkExecuteWithoutRead.
+    private sealed record Cell(bool IsAllowed, string Explanation, bool IsUnusable = false)
     {
         public string Decision => IsAllowed ? "allowed" : "denied";
+
+        public Color Color
+        {
+            get
+            {
+                if (IsUnusable)
+                {
+                    return Color.Warning;
+                }
+
+                return IsAllowed ? Color.Success : Color.Error;
+            }
+        }
     }
 }

@@ -497,6 +497,82 @@ public sealed class RoleEditComponentTests : BunitContext, IAsyncLifetime
     }
 
     [Fact]
+    public void WhenARuleAllowsExecuteWithoutRead_ThenTheRoleAndTheRuleSayTheMethodsCannotBeUsed()
+    {
+        // Arrange
+        var role = _graph.GetRole("Kitchen");
+        role.Allow =
+        [
+            new PermissionRule { Paths = ["/Devices/**"], Actions = [AuthorizationActions.Execute] },
+            new PermissionRule { Members = ["Temperature"], Actions = [PermissionAction.Read] }
+        ];
+
+        // Act
+        var component = RenderEditor(role);
+
+        // Assert
+        var roleHint = component.Find("[data-testid='role-edit-execute-without-read']").TextContent;
+        Assert.Contains("Execute is allowed without read on 2 methods", roleHint);
+        Assert.Contains("such as /Devices/Child/Start,", roleHint);
+        Assert.Contains("listed and run only when it is readable", roleHint);
+        var cardHints = component.FindAll("[data-testid='rule-execute-without-read-hint']");
+        var cardHint = Assert.Single(cardHints);
+        Assert.Contains("such as /Devices/Child/Start,", cardHint.TextContent);
+        Assert.NotNull(GetCards(component, "allow")[0].QuerySelector("[data-testid='rule-execute-without-read-hint']"));
+    }
+
+    [Fact]
+    public void WhenAnotherRoleAllowsReadingTheMethods_ThenExecuteWithoutReadIsNoHint()
+    {
+        // Arrange
+        var role = _graph.GetRole("Kitchen");
+        role.Includes = [BuiltInRoles.ReaderName];
+        role.Allow = [new PermissionRule { Paths = ["/Devices/**"], Actions = [AuthorizationActions.Execute] }];
+
+        // Act
+        var component = RenderEditor(role);
+
+        // Assert
+        Assert.Empty(component.FindAll("[data-testid='role-edit-execute-without-read']"));
+        Assert.Empty(component.FindAll("[data-testid='rule-execute-without-read-hint']"));
+    }
+
+    [Fact]
+    public void WhenADenyTakesReadAwayFromAnExecutableMethod_ThenOnlyTheRoleSaysItCannotBeUsed()
+    {
+        // Arrange
+        var role = _graph.GetRole("Kitchen");
+        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read, AuthorizationActions.Execute] }];
+        role.Deny = [new PermissionRule { Paths = ["/Devices/Child/**"], Actions = [PermissionAction.Read] }];
+
+        // Act
+        var component = RenderEditor(role);
+
+        // Assert
+        var roleHint = component.Find("[data-testid='role-edit-execute-without-read']").TextContent;
+        Assert.Contains("on 1 method,", roleHint);
+        Assert.Contains("such as /Devices/Child/Start", roleHint);
+        Assert.Empty(component.FindAll("[data-testid='rule-execute-without-read-hint']"));
+    }
+
+    [Fact]
+    public async Task WhenReadIsAddedToTheRule_ThenTheExecuteWithoutReadHintsGo()
+    {
+        // Arrange
+        var role = _graph.GetRole("Kitchen");
+        role.Allow = [new PermissionRule { Paths = ["/Devices/**"], Actions = [AuthorizationActions.Execute] }];
+        var component = RenderEditor(role);
+        Assert.NotEmpty(component.FindAll("[data-testid='role-edit-execute-without-read']"));
+
+        // Act
+        await SetActionAsync(component, 0, "read", true);
+
+        // Assert
+        Assert.Empty(component.FindAll("[data-testid='role-edit-execute-without-read']"));
+        Assert.Empty(component.FindAll("[data-testid='rule-execute-without-read-hint']"));
+    }
+
+    [Fact]
     public async Task WhenIncludesAreOffered_ThenTheRoleItselfIsNot()
     {
         // Arrange

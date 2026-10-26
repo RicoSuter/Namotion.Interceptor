@@ -65,6 +65,27 @@ public sealed class RolePreviewTests : BunitContext, IAsyncLifetime
     }
 
     [Fact]
+    public async Task WhenAMethodCanBeExecutedButNotRead_ThenItsExecuteCellSaysItCannotBeUsed()
+    {
+        // Arrange
+        var role = _graph.GetRole("Kitchen");
+        role.Allow = [new PermissionRule { Members = ["Start"], Actions = [AuthorizationActions.Execute] }];
+        var component = RenderEditor(role);
+        await ChoosePathAsync(component, "/Devices");
+
+        // Act
+        await component.Find("[data-testid='role-preview-cell-Start-execute'] button").ClickAsync(new MouseEventArgs());
+
+        // Assert
+        Assert.Equal([Denied, null, Allowed, null], GetCellStates(component, "Start"));
+        Assert.Equal("execute-without-read", component.Find("[data-testid='role-preview-cell-Start-execute']").GetAttribute("data-note"));
+        Assert.Null(component.Find("[data-testid='role-preview-cell-Start-read']").GetAttribute("data-note"));
+        Assert.Contains(
+            "It cannot be used, as read is denied: A method is listed and run only when it is readable.",
+            component.Find("[data-testid='role-preview-explanation']").TextContent);
+    }
+
+    [Fact]
     public async Task WhenACellIsDeniedByTheEditedRole_ThenItsExplanationNamesTheRule()
     {
         // Arrange

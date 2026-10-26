@@ -1,6 +1,8 @@
 @attribute [SubjectComponent(SubjectComponentType.Edit, typeof(Role))]
 @implements ISubjectEditComponent
 
+@using Namotion.Interceptor.Registry.Abstractions
+
 @inject AuthorizationService AuthorizationService
 @inject SubjectTypeCatalog TypeCatalog
 
@@ -25,6 +27,10 @@
     <MudTabs Elevation="0" TabPanelsClass="pt-4" KeepPanelsAlive="true" data-testid="role-edit-tabs">
         <MudTabPanel Text="Rules">
             <MudForm>
+                @if (GetExecuteWithoutRead() is { } executeWithoutRead)
+                {
+                    <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-4" data-testid="role-edit-execute-without-read">@executeWithoutRead.Describe()</MudAlert>
+                }
                 <MudText Typo="Typo.subtitle2">Includes</MudText>
                 <MudText Typo="Typo.body2" Class="mb-2">The roles whose rules this role has as well, built-in or custom.</MudText>
                 <div data-testid="role-edit-includes">
@@ -64,6 +70,8 @@
     private AuthorizationRole? _editedRole;
     private bool _isDirty;
     private bool _wasValid = true;
+    private AuthorizationRole? _executeCheckedRole;
+    private ExecuteWithoutReadFindings? _executeWithoutRead;
 
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
@@ -191,8 +199,27 @@
         return (null, null);
     }
 
+    // Checked again for each edited role, so that the hint follows unsaved changes.
+    private ExecuteWithoutReadFindings? GetExecuteWithoutRead()
+    {
+        var role = GetEditedRole();
+        if (!ReferenceEquals(role, _executeCheckedRole))
+        {
+            _executeCheckedRole = role;
+            _executeWithoutRead =
+                ExecuteWithoutRead.MayApply(role) &&
+                Subject?.Context.TryGetService<ISubjectRegistry>() is { } registry &&
+                AuthorizationService.PreviewPolicy(role) is { Error: null } result
+                    ? ExecuteWithoutRead.Find(role, result.Policy, registry.KnownSubjects.Values, AuthorizationService.PathProvider)
+                    : null;
+        }
+
+        return _executeWithoutRead;
+    }
+
     private RenderFragment RenderRules(List<RuleEntry> rules, string section) => __builder =>
     {
+        var executeWithoutRead = section == "allow" ? GetExecuteWithoutRead() : null;
         <MudStack Spacing="2">
             @for (var index = 0; index < rules.Count; index++)
             {
@@ -200,6 +227,7 @@
                 <RuleCard @key="entry" @ref="entry.Card" Rule="@entry.Rule" RuleChanged="@(rule => ChangeRule(entry, rule))"
                           HasInvalidTextChanged="@(hasInvalidText => SetInvalidText(entry, hasInvalidText))" IsDeny="@(section == "deny")"
                           OnRemove="@(() => RemoveRule(rules, entry))" TypeNames="@_typeNames" AccessibleName="@($"{section} rule {index + 1}")"
+                          ExecuteWithoutReadExample="@executeWithoutRead?.ExamplePathsByRule.GetValueOrDefault(entry.Rule)"
                           TestId="@($"role-edit-{section}-rule-{index}")" />
             }
         </MudStack>
