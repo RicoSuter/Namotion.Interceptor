@@ -381,6 +381,21 @@ public class SubjectPathsTests
             [[new PathLink("Areas", "Kitchen", "Kitchen"), new PathLink("Neighbor", null, null), new PathLink("Lights", "Lamp", null)]]);
     }
 
+    [Fact]
+    public void WhenLinkIsAnAttribute_ThenItsSegmentMatchesTheRegistryAndItsAttributeSegmentIsOnlyForPatterns()
+    {
+        // Arrange
+        var home = TestGraph.Create();
+        var sensor = home.Rooms["Kitchen"].Sensor!;
+        var probe = new Light();
+        sensor.Temperature_Probe = probe;
+
+        // Act & Assert
+        AssertLinksMatchRegistry(home, probe, SlashPathProvider.Instance,
+            [[new PathLink("Rooms", "Kitchen", null), new PathLink("Sensor", null, null), new PathLink("Probe", null, null, "Temperature@Probe")]],
+            unofferedSpellings: ["Rooms[Kitchen]/Sensor/Temperature@Probe"]);
+    }
+
     private static void AssertLinksMatchRegistry(
         IInterceptorSubject root, IInterceptorSubject subject, PathProviderBase pathProvider, PathLink[][] expectedPaths,
         string[]? unofferedSpellings = null)

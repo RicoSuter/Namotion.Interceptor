@@ -62,17 +62,23 @@ One question can test many rules, and several of them may need the same derived 
 
 ## Paths
 
-### Patterns select subjects, by prefix
+### Patterns match member paths exactly
 
-A path pattern selects subjects; the `Members` selector selects members. Keeping the two apart means `/Home/Kitchen/Temperature` is never ambiguous between a child subject and a property, and each selector answers one question. A pattern matches a subject when it matches the subject's path or a prefix of it, so a rule on a subject covers its whole subtree, which is what a permission on a branch means. There is no pattern for a subject without its subtree; a rule narrows that with a type or member selector.
+A path pattern matches the paths of members, and only whole ones, the way a file glob matches file paths. A member's path is the path of its subject followed by the member's segment, so `/Rooms[Kitchen]/Sensor/Temperature` is one member and `/Rooms[Kitchen]/Sensor` is another, the property of the kitchen that holds the sensor. `*` alone is one segment, `**` is zero or more segments anywhere, and `*` inside a segment is a glob over its text. So `/Devices/Sonos/Play` names one member, `/Devices/Sonos/*` every member of that subject, and `/Devices/Sonos/**` every member of it and of every subject below.
 
-Patterns are parsed with the parser of the `PathProviderBase` given to `Compile`, the provider an application's tools address the graph with, so a segment means in a rule what it means in a request. Only `*` and `**` are wildcards: `*` within a segment is a glob over its text, `*` alone is one segment, `**` is any number of segments. A pattern segment without an index matches a path segment with or without one, so `/Line/Machines` covers every machine. The full table is in the README under [Path patterns](../../src/HomeBlaze/Namotion.Interceptor.Authorization/README.md#path-patterns).
+An earlier version matched patterns against the paths of subjects, and a pattern matched when it matched a subject's path or a prefix of it, so a rule on a subject covered its subtree. That could not name one member by its location, nor the members of a subject without its subtree, and a pattern that read like one subject reached a whole branch. Exact matching makes a rule cover what it spells and nothing more, which is the least surprising reading for anyone who knows file globs, and the reach of a rule is visible in its text. The cost falls on rules for a branch, which now end in `/**`. A deny on `/Devices/Sonos` alone denies only the property holding the subject. A deny on `/Devices/Sonos/**` is the branch.
 
-A pattern names absolute paths, and every subject without parents is a root whose path is empty. The pattern `/` therefore matches every subject that has a path.
+The `Members` selector stays: it matches a member's name wherever the member is, which a path pattern spells as `/**/Name`, and combines with types and tags without naming a location.
+
+A member's segment is the provider's segment for the property, or its `BrowseName` when the provider gives none. The fallback matters for denies: a member the provider leaves out of paths still has a name a rule can match. An attribute's segment is the segment of the property it belongs to, `@` and the attribute's name, recursively, so `Volume@Unit` and `Volume@Unit@Source`. One segment per member, `@` chain included, means `*` matches attributes of any level and `Volume@*` every attribute of `Volume`. The registry's own paths spell an attribute differently: its writer and reader use the attribute's segment as the provider writes it, the attribute's name alone by default (`/Devices/Sonos/Unit`), and do not resolve the `@` form. A pattern therefore matches an attribute in both spellings, the `@` form, which says which property the attribute belongs to and cannot collide with a property of the same name, and the registry's spelling, which is how a request addresses the attribute. Matching both keeps a deny written in either spelling from missing the attribute.
+
+Patterns are parsed with the parser of the `PathProviderBase` given to `Compile`, the provider an application's tools address the graph with, so a segment means in a rule what it means in a request. A pattern segment without an index matches a path segment with or without one, so `/Line/Machines/**` covers every machine. A member has no index, so a pattern whose last segment has an index matches no member. The full table is in the README under [Path patterns](../../src/HomeBlaze/Namotion.Interceptor.Authorization/README.md#path-patterns).
+
+A pattern names absolute paths, and every subject without parents is a root whose path is empty, so the members of a root have one-segment paths. `/**` matches every member that has a path, and `/` alone matches none.
 
 ### Every path of a subject
 
-A subject can have several parents, for example a light held both by its room and by a group of favorites. A rule for `/Rooms[Bedroom]` must apply to that light however a request reached it, or a deny could be bypassed through the other parent. The policy enumerates every path of a subject, one per chain of parents up to a root, and both kinds of rules match through any of them:
+A subject can have several parents, for example a light held both by its room and by a group of favorites. A rule for `/Rooms[Bedroom]/**` must apply to that light's members however a request reached it, or a deny could be bypassed through the other parent. The policy enumerates every path of a subject, one per chain of parents up to a root, and both kinds of rules match through any of them:
 
 - An allow with paths matches if any path matches: the light is in an allowed branch.
 - A deny with paths matches if any path matches: the light is in a denied branch, and the deny wins wherever the light is also reached.
@@ -81,7 +87,7 @@ A subject can have several parents, for example a light held both by its room an
 
 ### Links carry every spelling
 
-A path is a list of `PathLink`s from the root down to the property holding the subject. A link holds the property's segment, the index text and, for a key of an `[InlinePaths]` dictionary, the bare key when the registry's path reader resolves it without the property's segment. So `/Security/Roles[Reader]` and `/Security/Reader` name the same subject, and a pattern written in either spelling matches it. A pattern segment with an index never matches the bare spelling, since the bare spelling is a name only.
+A path is a list of `PathLink`s from the root down to the property holding the subject. A link holds the property's segment, the index text and, for a key of an `[InlinePaths]` dictionary, the bare key when the registry's path reader resolves it without the property's segment. So `/Security/Roles[Reader]` and `/Security/Reader` name the same subject, and a pattern written in either spelling matches its members. A pattern segment with an index never matches the bare spelling, since the bare spelling is a name only. A link through an attribute that holds subjects also carries the attribute's `@` segment, so the members below match in both of the attribute's spellings; that is the one spelling the registry's reader does not resolve, and the cross-check tests confirm it does not.
 
 The rules for which spellings a key has follow the registry's reader: the bare key is offered when it is one non-empty name without the separator or `[`, differs from the inline property's own segment and resolves to the inline property, so it is not shadowed by another property of the same name. The explicit form is offered while the property's own segment still resolves to it. A key that resolves in neither spelling makes the path unwritable, which counts as an incomplete path set.
 
@@ -89,7 +95,9 @@ These rules mirror the registry inside this library, built only on the registry'
 
 ### Matching
 
-`PathPattern.Matches` walks the pattern and the path together and backtracks only to the last `**` it passed. That suffices because `**` matches any number of segments, every other pattern segment matches exactly one, and a used-up pattern matches whatever path remains. Once a later `**` has matched, letting an earlier one consume more segments can only leave less path for the rest of the pattern, so retrying the last `**` with one more segment covers every alternative. The matcher has no recursion and no allocation, and its worst case is the pattern length times the path length. Segment globs use the same single-backtrack technique over characters (`Glob`).
+`PathPattern.Matches` takes the links of a subject's path and the member as one more link, so no member path string is built. It is the classic glob over segments: it walks the pattern and the member path together, a `**` first matches zero segments, and on a mismatch it backtracks only to the last `**` it passed, which then takes one more segment. That suffices because `**` matches any number of segments and every other pattern segment exactly one: once a later `**` has matched, letting an earlier one consume more segments can only leave less path for the rest of the pattern. The match succeeds when the whole member path is consumed and only `**` segments remain in the pattern. The matcher has no recursion and no allocation, and its worst case is the pattern length times the path length. Segment globs use the same single-backtrack technique over characters (`Glob`).
+
+The member's link, its segment and for an attribute its `@` segment, is computed once per question and only when a rule with paths gets that far. For a property it is a string the provider already holds; for an attribute the `@` segment is built, one string per question.
 
 ### Caps and failing closed
 
@@ -103,11 +111,11 @@ On an incomplete set an allow with paths matches only through the paths that wer
 
 ## Subject visibility
 
-`CanRead(member)` answers for one member. Browsing needs a different question: whether the subject itself is visible. A subject is readable when at least one of its members is readable and some chain of parents leads from it to a root on which every subject-holding property is readable. A deny with `read` on a path therefore hides the whole branch beneath it, and an unreadable link makes the subject unreachable even though its own members are readable.
+`CanRead(member)` answers for one member. Browsing needs a different question: whether the subject itself is visible. A subject is readable when at least one of its members is readable and some chain of parents leads from it to a root on which every subject-holding property is readable. The holding properties are members of the parents and are matched by their own member paths. A deny with `read` on the property holding a subject, `/Devices/Cameras`, therefore still hides the whole branch beneath it from browsing, as an unreadable link makes a subject unreachable even though its own members are readable. Those members stay readable when asked for by path; a deny on `/Devices/Cameras/**` makes them unreadable as well.
 
-The link of a chain is a member of the parent subject, not of the child. A rule that allows reading `/Rooms[Kitchen]` makes the kitchen's members readable but not `Home.Rooms`, which belongs to the root; the kitchen stays hidden until some rule makes the links on its way readable. An application usually tags subject-holding properties so one rule grants them.
+The link of a chain is a member of the parent subject, not of the child. A rule that allows reading `/Rooms[Kitchen]/**` makes the kitchen's members readable but not `Home.Rooms`, which belongs to the root; the kitchen stays hidden until some rule makes the links on its way readable. An application usually tags subject-holding properties so one rule grants them.
 
-Visibility uses reachability through any parent rather than the first parent, for the same reason paths use every chain. The registry's first parent depends on attach order, which must not decide visibility, and a subject a principal can reach by browsing through readable links must not be hidden from it. The two notions do not conflict: a `read` deny on the path `/Rooms[Bedroom]` makes every member of a light there unreadable, so the light is hidden whatever other parent it has, while a deny on one link only cuts that route.
+Visibility uses reachability through any parent rather than the first parent, for the same reason paths use every chain. The registry's first parent depends on attach order, which must not decide visibility, and a subject a principal can reach by browsing through readable links must not be hidden from it. The two notions do not conflict: a `read` deny on the path `/Rooms[Bedroom]/**` makes every member of a light there unreadable, so the light is hidden whatever other parent it has, while a deny on one link only cuts that route.
 
 `IsReachable` walks parents depth first and stops at the first route to a root. Along a chain of single parents it allocates nothing. At a subject with several parents, or deeper than 32 levels, it adds the subject to a visited set shared by the whole walk. A subject already in the set is not explored again: its readable links and parents do not depend on how the walk arrived, so a second visit cannot find a route the first missed. Every subject with several parents, and every subject past depth 32, is therefore explored at most once, which bounds the walk and ends cycles of any shape, including two rooms that hold each other twice or three rooms that point at each other.
 
@@ -137,13 +145,13 @@ A policy is built for many cheap questions. The common question, a member decide
 The allocations that remain each have a reason:
 
 - **Path rules.** When a rule with paths survives its other selectors, the subject's paths are enumerated: a list of paths, the search frames and one `PathLink` array per path. The paths are memoized for the rest of the call, and `CanRead(subject)` carries them from member to member, so a subject's paths are enumerated once per question about it and once per link on the way to a root whose evaluation reaches a path rule.
-- **Attribute names.** A member glob matched against an attribute builds its `Property@Attribute` name.
+- **Attribute names.** A member glob or a path pattern matched against an attribute builds its `Property@Attribute` name or segment, and enumerating a path through a subject-holding attribute builds that attribute's segment.
 - **Types.** The first type rule evaluated for a runtime type caches that type's simple and full names, its base types and its interfaces.
 - **Visibility.** `CanRead(subject)` allocates the visited set when a subject on the way has several parents or the chain is deeper than 32 levels.
 
 A deny rule with only `Paths` is reached by every member that an allow matched for that action, and proving it does not apply requires enumerating the paths. The README therefore advises giving a path deny a second selector (a type, a member glob or a tag) and putting path rules only into the roles that need them, not into a reusable base role every principal pays for.
 
-`AuthorizationBenchmark` evaluates a policy of 24 rules, among them ten allow rules with paths and ten deny rules with only paths, against a graph of 50 floors with 40 lamps each (2050 subjects):
+`AuthorizationBenchmark` evaluates a policy of 24 rules, among them ten allow rules with paths and ten deny rules with only paths, against a graph of 50 floors with 40 lamps each (2050 subjects). The numbers were measured before patterns matched member paths exactly; the rules then named floors by prefix and now end in `/**`, and the benchmark has not been run again since:
 
 | Question | Time | Allocated |
 |---|---|---|
@@ -180,6 +188,8 @@ Planned follow-ups:
 One question is deferred to the integration. Patterns match absolute paths, and any subject without parents is a root. A server that exposes a subtree as its root resolves request paths relative to that subtree, while rules still match from the graph's root, so such a server may need patterns that match relative to its root.
 
 ## Alternatives considered
+
+**Patterns matched by prefix against subject paths.** The first version matched a pattern against the paths of subjects, and a pattern on a subject covered its subtree. Rules for branches were shorter, but no pattern could name one member or a subject's members alone. Member paths matched exactly, like file globs, make every rule cover what it spells; see [Patterns match member paths exactly](#patterns-match-member-paths-exactly).
 
 **Path strings instead of links.** An earlier version enumerated paths as the strings the registry writes and parsed each back into segments for matching. That allocated a string and a segment list per path, and a string carries one spelling: matching both spellings of every `[InlinePaths]` key would have needed a string per combination of spellings, doubling with every such key on the path. Links carry all spellings per segment, so one path covers every combination and no string is written.
 
