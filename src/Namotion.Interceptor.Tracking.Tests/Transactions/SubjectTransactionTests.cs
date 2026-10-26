@@ -789,6 +789,56 @@ public class SubjectTransactionTests
         Assert.Equal("mirror-Ann", person.LastName);
     }
 
+    [Fact]
+    public async Task WhenPendingValueIsWrittenAgainAfterItLandedOutside_ThenChangeStaysPendingAndConflicts()
+    {
+        // Arrange
+        var context = CreateTransactionContext();
+        var person = new Person(context) { FirstName = "Ann" };
+
+        using var transaction = await context.BeginTransactionAsync(
+            TransactionFailureHandling.BestEffort,
+            TransactionLocking.Optimistic,
+            conflictBehavior: TransactionConflictBehavior.FailOnConflict);
+        person.FirstName = "Bob";
+        await RunWithoutAsyncLocalFlowAsync(() => person.FirstName = "Bob");
+        person.FirstName = "Bob";
+        await RunWithoutAsyncLocalFlowAsync(() => person.FirstName = "Eve");
+
+        // Act & Assert
+        await Assert.ThrowsAsync<SubjectTransactionConflictException>(
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+    }
+
+    [Fact]
+    public async Task WhenInterceptorNormalizesFirstWriteToLandedValue_ThenItIsCaptured()
+    {
+        // Arrange
+        var context = CreateTransactionContext().WithService(() => new UpperCaseInterceptor());
+        var person = new Person(context) { FirstName = "ann" };
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "ann";
+
+        // Assert
+        Assert.Equal("ANN", Assert.Single(transaction.GetPendingChanges()).GetNewValue<string>());
+    }
+
+    [RunsBefore(typeof(SubjectTransactionInterceptor))]
+    private sealed class UpperCaseInterceptor : IWriteInterceptor
+    {
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            if (context.NewValue is string value)
+            {
+                context.NewValue = (TProperty)(object)value.ToUpperInvariant();
+            }
+
+            next(ref context);
+        }
+    }
+
     private sealed class LastNameMirrorInterceptor : IWriteInterceptor
     {
         public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)

@@ -140,8 +140,8 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
     /// </summary>
     private static bool IsWriteBackWithEqualityCheck<TProperty>(ref PropertyWriteContext<TProperty> context)
     {
-        return EqualityComparer<TProperty>.Default.Equals(context.CurrentValue, context.NewValue) &&
-            !context.Property.Subject.Context.GetServices<PropertyValueEqualityCheckHandler>().IsDefaultOrEmpty;
+        return !context.Property.Subject.Context.GetServices<PropertyValueEqualityCheckHandler>().IsDefaultOrEmpty &&
+            EqualityComparer<TProperty>.Default.Equals(context.CurrentValue, context.NewValue);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

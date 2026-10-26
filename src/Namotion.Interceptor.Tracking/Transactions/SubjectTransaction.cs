@@ -139,8 +139,8 @@ public sealed class SubjectTransaction : IDisposable
     /// Atomically captures a property change into the pending dictionary.
     /// First write preserves <paramref name="currentValue"/> as old value for conflict detection;
     /// subsequent writes preserve the original old value (last write wins). When
-    /// <paramref name="restoresLandedValue"/> is true, the pending change is removed instead, the same as never
-    /// writing the property. Returns false when disposal wins the race, allowing the caller to continue the normal
+    /// <paramref name="restoresLandedValue"/> is true and a change is pending, it is removed instead, the same as
+    /// never writing the property. Returns false when disposal wins the race, allowing the caller to continue the normal
     /// write chain.
     /// </summary>
     /// <exception cref="InvalidOperationException">Thrown if a concurrent commit is in progress (TOCTOU race).</exception>
@@ -162,9 +162,8 @@ public sealed class SubjectTransaction : IDisposable
 
             ThrowIfCommittingConcurrently();
 
-            if (restoresLandedValue)
+            if (restoresLandedValue && _pendingChanges.Remove(property))
             {
-                _pendingChanges.Remove(property);
                 return true;
             }
 
@@ -182,21 +181,26 @@ public sealed class SubjectTransaction : IDisposable
     }
 
     /// <summary>
-    /// Returns true when the current flow's transaction is capturing and holds a pending change for
-    /// <paramref name="property"/>.
+    /// Returns true with the pending value when the current flow's transaction is capturing and holds a pending change
+    /// for <paramref name="property"/>.
     /// </summary>
-    internal static bool HasPendingChangeInCurrentTransaction(PropertyReference property)
+    internal static bool TryGetPendingValueInCurrentTransaction<TProperty>(PropertyReference property, out TProperty value)
     {
         var transaction = CurrentTransaction.Value;
-        if (transaction is null || transaction.IsDisposed || transaction._isCommitted || transaction._isCommitting)
+        if (transaction is not null && !transaction.IsDisposed && !transaction._isCommitted && !transaction._isCommitting)
         {
-            return false;
+            lock (transaction._pendingChangesLock)
+            {
+                if (transaction._pendingChanges is not null && transaction._pendingChanges.TryGetValue(property, out var change))
+                {
+                    value = change.GetNewValue<TProperty>();
+                    return true;
+                }
+            }
         }
 
-        lock (transaction._pendingChangesLock)
-        {
-            return transaction._pendingChanges?.ContainsKey(property) == true;
-        }
+        value = default!;
+        return false;
     }
 
     /// <summary>
