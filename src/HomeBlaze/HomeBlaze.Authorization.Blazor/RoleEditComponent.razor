@@ -1,0 +1,200 @@
+@attribute [SubjectComponent(SubjectComponentType.Edit, typeof(Role))]
+@implements ISubjectEditComponent
+
+@inject AuthorizationService AuthorizationService
+@inject SubjectTypeCatalog TypeCatalog
+
+@if (Role is { } role)
+{
+    <MudStack Row="true" AlignItems="AlignItems.Baseline" Justify="Justify.SpaceBetween">
+        <MudText Typo="Typo.h6" data-testid="role-edit-name">@(_name ?? "Role")</MudText>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary" data-testid="role-edit-used-by">
+            Used by @role.UsedByAgents @(role.UsedByAgents == 1 ? "agent" : "agents")
+        </MudText>
+    </MudStack>
+    @if (role.Status is { } status)
+    {
+        <MudAlert Severity="Severity.Error" Dense="true" Class="mt-2" data-testid="role-edit-status">@status</MudAlert>
+    }
+
+    <MudTabs Elevation="0" TabPanelsClass="pt-4" data-testid="role-edit-tabs">
+        <MudTabPanel Text="Rules">
+            <MudForm>
+                <MudText Typo="Typo.subtitle2">Includes</MudText>
+                <MudText Typo="Typo.body2" Class="mb-2">The roles whose rules this role has as well, built-in or custom.</MudText>
+                <div data-testid="role-edit-includes">
+                    <RoleSelector @bind-Selected="_includes" @bind-Selected:after="OnChanged" Excluded="@_excluded"
+                                  Label="Includes" TestId="role-edit-include" HelperText="Optional." />
+                </div>
+
+                <MudText Typo="Typo.subtitle2" Class="mt-6">Allow</MudText>
+                <MudText Typo="Typo.body2" Class="mb-2">
+                    What the role grants. A rule applies to a member when each of its selectors matches; an empty selector matches any.
+                </MudText>
+                @RenderRules(_allow, "allow")
+
+                <MudText Typo="Typo.subtitle2" Class="mt-6">Deny</MudText>
+                <MudText Typo="Typo.body2" Class="mb-2">
+                    What the role takes away again, whichever role granted it.
+                </MudText>
+                @RenderRules(_deny, "deny")
+            </MudForm>
+        </MudTabPanel>
+        <MudTabPanel Text="Preview">
+        </MudTabPanel>
+    </MudTabs>
+}
+
+@code {
+    private string? _name;
+    private string[] _excluded = [];
+    private IReadOnlyList<string> _includes = [];
+    private List<RuleEntry> _allow = [];
+    private List<RuleEntry> _deny = [];
+    private IReadOnlyList<string> _typeNames = [];
+    private bool _isDirty;
+    private bool _wasValid = true;
+
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    [Parameter]
+    public bool IsCreating { get; set; }
+
+    public event Action<bool>? IsValidChanged;
+
+    public event Action<bool>? IsDirtyChanged;
+
+    public string PreferredDialogSize => "Large";
+
+    public bool IsDirty => _isDirty;
+
+    public bool IsValid =>
+        _allow.All(entry => RuleCard.IsValid(entry.Rule, AuthorizationService)) &&
+        _deny.All(entry => RuleCard.IsValid(entry.Rule, AuthorizationService));
+
+    private Role? Role => Subject as Role;
+
+    /// <summary>
+    /// Gets the role as currently edited, unsaved changes included, named by its key in <see cref="Authorization.Roles"/>.
+    /// </summary>
+    internal AuthorizationRole GetEditedRole() =>
+        new()
+        {
+            Name = _name ?? string.Empty,
+            Includes = [.. _includes],
+            Allow = [.. _allow.Select(entry => entry.Rule)],
+            Deny = [.. _deny.Select(entry => entry.Rule)]
+        };
+
+    protected override void OnInitialized()
+    {
+        if (Role is not { } role)
+        {
+            return;
+        }
+
+        _name = FindName(role);
+        _excluded = _name is null ? [] : [_name];
+        // Normalized as the selector shows it, so saving without a change writes what was shown. Reading the role
+        // names also writes the role's status and agent count.
+        _includes = RoleSelector.Normalize(role.Includes ?? [], AuthorizationService.GetRoleNames());
+        _allow = (role.Allow ?? []).Select(rule => new RuleEntry(rule)).ToList();
+        _deny = (role.Deny ?? []).Select(rule => new RuleEntry(rule)).ToList();
+        _typeNames = TypeCatalog.GetTypeNames();
+        _wasValid = IsValid;
+    }
+
+    public Task SaveAsync(CancellationToken cancellationToken)
+    {
+        if (Role is not { } role || !IsValid)
+        {
+            return Task.CompletedTask;
+        }
+
+        // New instances, as the authorization service notices only replaced lists.
+        role.Includes = [.. _includes];
+        role.Allow = [.. _allow.Select(entry => entry.Rule)];
+        role.Deny = [.. _deny.Select(entry => entry.Rule)];
+
+        _isDirty = false;
+        IsDirtyChanged?.Invoke(false);
+        return Task.CompletedTask;
+    }
+
+    // The key under which an Authorization holds the role.
+    private static string? FindName(Role role)
+    {
+        var registeredRole = role.TryGetRegisteredSubject();
+        if (registeredRole is null)
+        {
+            return null;
+        }
+
+        foreach (var parent in registeredRole.Parents)
+        {
+            if (parent.Property.Subject is Authorization && parent.Index is string name)
+            {
+                return name;
+            }
+        }
+
+        return null;
+    }
+
+    private RenderFragment RenderRules(List<RuleEntry> rules, string section) => __builder =>
+    {
+        <MudStack Spacing="2">
+            @for (var index = 0; index < rules.Count; index++)
+            {
+                var entry = rules[index];
+                <RuleCard @key="entry" Rule="@entry.Rule" RuleChanged="@(rule => ChangeRule(entry, rule))"
+                          OnRemove="@(() => RemoveRule(rules, entry))" TypeNames="@_typeNames" TestId="@($"role-edit-{section}-rule-{index}")" />
+            }
+        </MudStack>
+        <MudButton StartIcon="@Icons.Material.Filled.Add" Variant="Variant.Text" Color="Color.Primary" Class="mt-2"
+                   OnClick="@(() => AddRule(rules))" data-testid="@($"role-edit-add-{section}")">Add rule</MudButton>
+    };
+
+    // A new rule has no action, so the role is invalid until one is chosen rather than granting or denying every action.
+    private void AddRule(List<RuleEntry> rules)
+    {
+        rules.Add(new RuleEntry(new PermissionRule()));
+        OnChanged();
+    }
+
+    private void RemoveRule(List<RuleEntry> rules, RuleEntry entry)
+    {
+        rules.Remove(entry);
+        OnChanged();
+    }
+
+    private void ChangeRule(RuleEntry entry, PermissionRule rule)
+    {
+        entry.Rule = rule;
+        OnChanged();
+    }
+
+    private void OnChanged()
+    {
+        if (!_isDirty)
+        {
+            _isDirty = true;
+            IsDirtyChanged?.Invoke(true);
+        }
+
+        // Raised on transitions only, because the host re-renders its save button on each event.
+        var isValid = IsValid;
+        if (isValid != _wasValid)
+        {
+            _wasValid = isValid;
+            IsValidChanged?.Invoke(isValid);
+        }
+    }
+
+    // A rule by reference, so that a card keeps its typed text when another card is removed.
+    private sealed class RuleEntry(PermissionRule rule)
+    {
+        public PermissionRule Rule { get; set; } = rule;
+    }
+}

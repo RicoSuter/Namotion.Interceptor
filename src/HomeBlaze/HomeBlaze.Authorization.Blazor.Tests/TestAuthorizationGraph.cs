@@ -20,6 +20,11 @@ internal sealed class TestAuthorizationGraph : IDisposable
 
     public AuthorizationService Service { get; }
 
+    public Authorization Authorization => (Authorization)Root.Children["Authorization"];
+
+    /// <summary>Gets the custom role saved under <paramref name="name"/>.</summary>
+    public Role GetRole(string name) => Authorization.Roles[name];
+
     /// <param name="roleNames">The names of the custom roles; names differing only in case make both unusable.</param>
     public static TestAuthorizationGraph Create(params string[] roleNames)
     {

@@ -1,0 +1,111 @@
+@* Edits one rule of a role: a chip field per selector, a checkbox per action, and a button to remove the rule. *@
+@inject AuthorizationService AuthorizationService
+@inject IDialogService DialogService
+
+<MudPaper Outlined="true" Class="pa-3" data-testid="@TestId">
+    <MudGrid Spacing="2">
+        <MudItem xs="12" md="6">
+            <ChipListInput Label="Paths" Placeholder="/Devices/**" HelperText="Path patterns; ** matches any depth. Press Enter to add."
+                           Values="@Rule.Paths" ValuesChanged="@(values => ChangeAsync(Rule with { Paths = [.. values] }))"
+                           Validator="@ValidatePath" Pick="@PickPathAsync" TestId="rule-paths" />
+        </MudItem>
+        <MudItem xs="12" md="6">
+            <ChipListInput Label="Types" HelperText="Subject types or interfaces, by simple or full name. Press Enter to add."
+                           Values="@Rule.Types" ValuesChanged="@(values => ChangeAsync(Rule with { Types = [.. values] }))"
+                           Suggestions="@TypeNames" TestId="rule-types" />
+        </MudItem>
+        <MudItem xs="12" md="6">
+            <ChipListInput Label="Members" Placeholder="Temperature, Set*" HelperText="Member names; * matches any text. Press Enter to add."
+                           Values="@Rule.Members" ValuesChanged="@(values => ChangeAsync(Rule with { Members = [.. values] }))" TestId="rule-members" />
+        </MudItem>
+        <MudItem xs="12" md="6">
+            <ChipListInput Label="Tags" HelperText="Tags a member must all carry. Press Enter to add."
+                           Values="@Rule.Tags" ValuesChanged="@(values => ChangeAsync(Rule with { Tags = [.. values] }))"
+                           Suggestions="@TagNames" Validator="@ValidateTag" Comparer="@StringComparer.OrdinalIgnoreCase" TestId="rule-tags" />
+        </MudItem>
+    </MudGrid>
+    <MudStack Row="true" Wrap="Wrap.Wrap" AlignItems="AlignItems.Center" Spacing="1" Class="mt-2">
+        <MudText Typo="Typo.body2" Class="mr-2">Actions</MudText>
+        @foreach (var action in AuthorizationActions.All)
+        {
+            <MudCheckBox T="bool" Label="@action.Name" Value="@Rule.Actions.Contains(action)" Color="Color.Primary" Dense="true"
+                         ValueChanged="@((bool isChecked) => ToggleActionAsync(action, isChecked))" data-testid="@($"rule-action-{action.Name}")" />
+        }
+        @foreach (var action in Rule.Actions.Where(action => !IsKnownAction(action)))
+        {
+            <MudTooltip Text="Unknown action">
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" Icon="@Icons.Material.Filled.ErrorOutline"
+                         Class="ma-0" OnClose="@(() => ToggleActionAsync(action, false))">@action.Name</MudChip>
+            </MudTooltip>
+        }
+        <MudSpacer />
+        <MudButton StartIcon="@Icons.Material.Filled.Delete" Variant="Variant.Text" Color="Color.Error" OnClick="@OnRemove"
+                   data-testid="rule-remove">Remove</MudButton>
+    </MudStack>
+    @if (Rule.Actions.IsEmpty)
+    {
+        <MudText Typo="Typo.caption" Color="Color.Error">Select at least one action.</MudText>
+    }
+</MudPaper>
+
+@code {
+    private static readonly IReadOnlyList<string> TagNames =
+    [
+        MemberTags.State, MemberTags.Configuration, MemberTags.Secret, MemberTags.Query, MemberTags.Operation,
+        MemberTags.RequiresConfirmation, MemberTags.Subjects, MemberTags.Attribute, MemberTags.Metadata
+    ];
+
+    [Parameter, EditorRequired]
+    public PermissionRule Rule { get; set; } = null!;
+
+    [Parameter]
+    public EventCallback<PermissionRule> RuleChanged { get; set; }
+
+    [Parameter]
+    public EventCallback OnRemove { get; set; }
+
+    /// <summary>The type names suggested for the types selector.</summary>
+    [Parameter]
+    public IReadOnlyList<string> TypeNames { get; set; } = [];
+
+    [Parameter]
+    public string? TestId { get; set; }
+
+    /// <summary>
+    /// Gets whether a rule can be saved: it has at least one action, every action is known, every path pattern is valid
+    /// and every tag is one of <see cref="MemberTags"/>.
+    /// </summary>
+    internal static bool IsValid(PermissionRule rule, AuthorizationService authorizationService) =>
+        !rule.Actions.IsEmpty &&
+        rule.Actions.All(IsKnownAction) &&
+        rule.Paths.All(path => authorizationService.ValidatePathPattern(path) is null) &&
+        rule.Tags.All(tag => ValidateTag(tag) is null);
+
+    private static bool IsKnownAction(PermissionAction action) => AuthorizationActions.All.Contains(action);
+
+    // Tags compare ignoring case; no member carries another tag, so a rule naming one would never match.
+    private static string? ValidateTag(string tag) =>
+        TagNames.Contains(tag, StringComparer.OrdinalIgnoreCase) ? null : $"Unknown tag; use one of {string.Join(", ", TagNames)}.";
+
+    private string? ValidatePath(string pattern) => AuthorizationService.ValidatePathPattern(pattern);
+
+    private Task ChangeAsync(PermissionRule rule) => RuleChanged.InvokeAsync(rule);
+
+    private Task ToggleActionAsync(PermissionAction action, bool isChecked) =>
+        ChangeAsync(Rule with { Actions = isChecked ? Rule.Actions.Add(action) : Rule.Actions.Remove(action) });
+
+    private async Task<string?> PickPathAsync()
+    {
+        var parameters = new DialogParameters<SubjectPathPickerDialog>
+        {
+            { dialog => dialog.Label, "Path" },
+            // Patterns match subject paths, so only subjects, and properties holding one, can be picked.
+            { dialog => dialog.CanSelectProperty, property => property.IsSubjectReference }
+        };
+
+        var dialog = await DialogService.ShowAsync<SubjectPathPickerDialog>("Select Path", parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
+        var result = await dialog.Result;
+        return result is { Canceled: false, Data: string path } ? path : null;
+    }
+}

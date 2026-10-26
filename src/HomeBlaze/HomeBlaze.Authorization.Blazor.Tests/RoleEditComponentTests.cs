@@ -1,0 +1,399 @@
+using Bunit;
+using HomeBlaze.Services;
+using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Web;
+using Microsoft.Extensions.DependencyInjection;
+using MudBlazor;
+using MudBlazor.Services;
+using Namotion.Interceptor.Authorization;
+using Xunit;
+
+namespace HomeBlaze.Authorization.Blazor.Tests;
+
+public sealed class RoleEditComponentTests : BunitContext, IAsyncLifetime
+{
+    private readonly TestAuthorizationGraph _graph = TestAuthorizationGraph.Create("Kitchen", "Garden");
+
+    private readonly IRenderedComponent<MudPopoverProvider> _popoverProvider;
+
+    public RoleEditComponentTests()
+    {
+        JSInterop.Mode = JSRuntimeMode.Loose;
+        Services.AddMudServices();
+        Services.AddSingleton(_graph.Service);
+
+        var typeProvider = new TypeProvider();
+        typeProvider.AddTypes([typeof(Role), typeof(TestRoot)]);
+        Services.AddSingleton(new SubjectTypeCatalog(new SubjectTypeRegistry(typeProvider)));
+
+        _popoverProvider = Render<MudPopoverProvider>();
+    }
+
+    public Task InitializeAsync() => Task.CompletedTask;
+
+    // MudBlazor's services only dispose asynchronously, which xUnit 2 calls through IAsyncLifetime alone.
+    async Task IAsyncLifetime.DisposeAsync()
+    {
+        await DisposeAsync();
+        _graph.Dispose();
+    }
+
+    [Fact]
+    public void WhenTheRoleIsLoaded_ThenItsNameIncludesAndRulesAreShown()
+    {
+        // Arrange
+        var role = _graph.GetRole("Kitchen");
+        role.Includes = ["reader"];
+        role.Allow = [new PermissionRule { Paths = ["/Devices/**"], Actions = [PermissionAction.Read, AuthorizationActions.Execute] }];
+        role.Deny = [new PermissionRule { Tags = [MemberTags.Secret], Actions = [PermissionAction.Read] }];
+
+        // Act
+        var component = RenderEditor(role);
+
+        // Assert
+        Assert.Equal("Kitchen", component.Find("[data-testid='role-edit-name']").TextContent.Trim());
+        Assert.Equal(BuiltInRoles.ReaderName, component.Find("[data-testid='role-edit-include-Reader']").TextContent.Trim());
+
+        var allowCard = Assert.Single(GetCards(component, "allow"));
+        Assert.Equal(["/Devices/**"], GetChips(allowCard, "rule-paths"));
+        Assert.Equal("any", allowCard.QuerySelector("[data-testid='rule-types-any']")?.TextContent.Trim());
+        Assert.Equal([true, false, true, false], GetActionStates(component, 0));
+
+        var denyCard = Assert.Single(GetCards(component, "deny"));
+        Assert.Equal([MemberTags.Secret], GetChips(denyCard, "rule-tags"));
+        Assert.True(component.Instance.IsValid);
+        Assert.False(component.Instance.IsDirty);
+    }
+
+    [Fact]
+    public async Task WhenARuleIsAdded_ThenItHasNoActionAndTheRoleIsInvalidUntilOneIsChecked()
+    {
+        // Arrange
+        var component = RenderEditor(_graph.GetRole("Kitchen"));
+        var validity = new List<bool>();
+        component.Instance.IsValidChanged += validity.Add;
+
+        // Act
+        await component.Find("[data-testid='role-edit-add-deny']").ClickAsync(new MouseEventArgs());
+
+        // Assert
+        Assert.Single(GetCards(component, "deny"));
+        Assert.Empty(GetCards(component, "allow"));
+        Assert.False(component.Instance.IsValid);
+        Assert.True(component.Instance.IsDirty);
+        Assert.Contains("Select at least one action.", component.Markup);
+
+        // Act
+        await SetActionAsync(component, 0, "write", true);
+
+        // Assert
+        Assert.True(component.Instance.IsValid);
+        Assert.Equal([false, true], validity);
+    }
+
+    [Fact]
+    public async Task WhenTheOnlyActionOfARuleIsUnchecked_ThenTheRoleIsInvalid()
+    {
+        // Arrange
+        var role = _graph.GetRole("Kitchen");
+        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var component = RenderEditor(role);
+
+        // Act
+        await SetActionAsync(component, 0, "read", false);
+
+        // Assert
+        Assert.False(component.Instance.IsValid);
+        Assert.Contains("Select at least one action.", component.Markup);
+    }
+
+    [Fact]
+    public async Task WhenARuleIsRemoved_ThenItsCardIsGoneAndTheOthersKeepTheirRules()
+    {
+        // Arrange
+        var role = _graph.GetRole("Kitchen");
+        role.Allow =
+        [
+            new PermissionRule { Paths = ["/First"], Actions = [PermissionAction.Read] },
+            new PermissionRule { Paths = ["/Second"], Actions = [PermissionAction.Read] }
+        ];
+        var component = RenderEditor(role);
+
+        // Act
+        await GetCards(component, "allow")[0].QuerySelector("[data-testid='rule-remove']")!.ClickAsync(new MouseEventArgs());
+
+        // Assert
+        var card = Assert.Single(GetCards(component, "allow"));
+        Assert.Equal(["/Second"], GetChips(card, "rule-paths"));
+        Assert.True(component.Instance.IsDirty);
+    }
+
+    [Fact]
+    public async Task WhenAValidPatternIsEntered_ThenItIsAddedAsAChip()
+    {
+        // Arrange
+        var role = _graph.GetRole("Kitchen");
+        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var component = RenderEditor(role);
+
+        // Act
+        await EnterTextAsync(component, "role-edit-allow-rule-0", "rule-paths", " /Devices/** ");
+
+        // Assert
+        Assert.Equal(["/Devices/**"], GetChips(GetCards(component, "allow")[0], "rule-paths"));
+        Assert.Equal(["/Devices/**"], component.Instance.GetEditedRole().Allow[0].Paths.ToArray());
+        Assert.True(component.Instance.IsValid);
+    }
+
+    [Fact]
+    public async Task WhenAnInvalidPatternIsEntered_ThenItsErrorIsShownOnTheFieldAndItIsNotAdded()
+    {
+        // Arrange
+        var role = _graph.GetRole("Kitchen");
+        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var component = RenderEditor(role);
+
+        // Act
+        await EnterTextAsync(component, "role-edit-allow-rule-0", "rule-paths", "Devices");
+
+        // Assert
+        var field = component.Find("[data-testid='role-edit-allow-rule-0'] [data-testid='rule-paths']");
+        Assert.Contains("must start with '/'", field.TextContent);
+        Assert.Empty(GetChips(GetCards(component, "allow")[0], "rule-paths"));
+        Assert.False(component.Instance.IsDirty);
+    }
+
+    [Fact]
+    public void WhenALoadedPatternIsInvalid_ThenItIsShownAsAnErrorChipAndTheRoleIsInvalid()
+    {
+        // Arrange
+        var role = _graph.GetRole("Kitchen");
+        role.Allow = [new PermissionRule { Paths = ["/Devices", "Garden"], Actions = [PermissionAction.Read] }];
+
+        // Act
+        var component = RenderEditor(role);
+
+        // Assert
+        var chips = component.FindAll("[data-testid='role-edit-allow-rule-0'] [data-testid='rule-paths-chip']");
+        Assert.DoesNotContain("mud-chip-color-error", chips[0].ClassName);
+        Assert.Contains("mud-chip-color-error", chips[1].ClassName);
+        var tooltip = Assert.Single(component.FindComponent<RuleCard>().FindComponents<MudTooltip>());
+        Assert.Equal("Path pattern 'Garden' must start with '/'.", tooltip.Instance.Text);
+        Assert.False(component.Instance.IsValid);
+    }
+
+    [Fact]
+    public async Task WhenATagIsNotAMemberTag_ThenItIsRejected()
+    {
+        // Arrange
+        var role = _graph.GetRole("Kitchen");
+        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var component = RenderEditor(role);
+
+        // Act
+        await EnterTextAsync(component, "role-edit-allow-rule-0", "rule-tags", "colour");
+
+        // Assert
+        Assert.Contains("Unknown tag", component.Find("[data-testid='role-edit-allow-rule-0'] [data-testid='rule-tags']").TextContent);
+        Assert.Empty(GetChips(GetCards(component, "allow")[0], "rule-tags"));
+    }
+
+    [Fact]
+    public async Task WhenTheTypeFieldIsSearched_ThenItSuggestsTheKnownTypesAndTheTypedText()
+    {
+        // Arrange
+        var role = _graph.GetRole("Kitchen");
+        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var component = RenderEditor(role);
+        var typeInput = component.FindComponents<ChipListInput>().Single(input => input.Instance.TestId == "rule-types");
+        var search = typeInput.FindComponent<MudAutocomplete<string>>().Instance.SearchFunc!;
+
+        // Act
+        var suggestions = await search("o", CancellationToken.None)!;
+
+        // Assert
+        Assert.Equal(["o", nameof(HomeBlaze.Abstractions.IConfigurable), "Role", "TestRoot"], suggestions);
+    }
+
+    [Fact]
+    public async Task WhenATypeSuggestionIsPicked_ThenItIsAdded()
+    {
+        // Arrange
+        var role = _graph.GetRole("Kitchen");
+        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var component = RenderEditor(role);
+        var typeInput = component.FindComponents<ChipListInput>().Single(input => input.Instance.TestId == "rule-types");
+        var autocomplete = typeInput.FindComponent<MudAutocomplete<string>>();
+
+        // Act
+        await component.InvokeAsync(() => autocomplete.Instance.ValueChanged.InvokeAsync("TestRoot"));
+
+        // Assert
+        Assert.Equal(["TestRoot"], component.Instance.GetEditedRole().Allow[0].Types.ToArray());
+    }
+
+    [Fact]
+    public async Task WhenSaved_ThenTheRoleGetsNewListsWithTheEditedRules()
+    {
+        // Arrange
+        var role = _graph.GetRole("Kitchen");
+        role.Includes = [BuiltInRoles.ReaderName];
+        role.Allow = [new PermissionRule { Paths = ["/Devices/**"], Actions = [PermissionAction.Read] }];
+        var oldIncludes = role.Includes;
+        var oldAllow = role.Allow;
+        var oldDeny = role.Deny;
+        var component = RenderEditor(role);
+        await component.Find("[data-testid='role-edit-add-deny']").ClickAsync(new MouseEventArgs());
+        await SetActionAsync(component, 1, "write", true);
+        await EnterTextAsync(component, "role-edit-deny-rule-0", "rule-members", "Secret*");
+
+        // Act
+        await component.InvokeAsync(() => component.Instance.SaveAsync(CancellationToken.None));
+
+        // Assert
+        Assert.NotSame(oldIncludes, role.Includes);
+        Assert.NotSame(oldAllow, role.Allow);
+        Assert.NotSame(oldDeny, role.Deny);
+        Assert.Equal([BuiltInRoles.ReaderName], role.Includes);
+        Assert.Equal([new PermissionRule { Paths = ["/Devices/**"], Actions = [PermissionAction.Read] }], role.Allow);
+        Assert.Equal([new PermissionRule { Members = ["Secret*"], Actions = [PermissionAction.Write] }], role.Deny);
+        Assert.False(component.Instance.IsDirty);
+    }
+
+    [Fact]
+    public async Task WhenTheRoleIsInvalid_ThenSavingChangesNothing()
+    {
+        // Arrange
+        var role = _graph.GetRole("Kitchen");
+        var oldAllow = role.Allow;
+        var component = RenderEditor(role);
+        await component.Find("[data-testid='role-edit-add-allow']").ClickAsync(new MouseEventArgs());
+
+        // Act
+        await component.InvokeAsync(() => component.Instance.SaveAsync(CancellationToken.None));
+
+        // Assert
+        Assert.Same(oldAllow, role.Allow);
+    }
+
+    [Fact]
+    public async Task WhenIncludesAreOffered_ThenTheRoleItselfIsNot()
+    {
+        // Arrange
+        var component = RenderEditor(_graph.GetRole("Kitchen"));
+        var select = component.FindComponent<RoleSelector>().FindComponent<MudSelect<string>>();
+
+        // Act
+        await component.InvokeAsync(select.Instance.OpenMenu);
+
+        // Assert
+        var options = _popoverProvider.FindComponents<MudSelectItem<string>>().Select(item => item.Instance.Value).ToList();
+        Assert.Equal([BuiltInRoles.ReaderName, BuiltInRoles.OperatorName, BuiltInRoles.EverythingName, "Garden"], options);
+    }
+
+    [Fact]
+    public async Task WhenAnIncludeIsSelected_ThenTheEditedRoleHasItAndIsDirty()
+    {
+        // Arrange
+        var component = RenderEditor(_graph.GetRole("Kitchen"));
+        var select = component.FindComponent<RoleSelector>().FindComponent<MudSelect<string>>();
+
+        // Act
+        await component.InvokeAsync(() => select.Instance.SelectedValuesChanged.InvokeAsync(["Garden"]));
+
+        // Assert
+        Assert.Equal(["Garden"], component.Instance.GetEditedRole().Includes.ToArray());
+        Assert.True(component.Instance.IsDirty);
+    }
+
+    [Fact]
+    public void WhenTheRoleHasAStatus_ThenItIsShownAsAnError()
+    {
+        // Arrange
+        var role = _graph.GetRole("Kitchen");
+        role.Includes = ["Ghost"];
+
+        // Act
+        var component = RenderEditor(role);
+
+        // Assert
+        var alert = component.Find("[data-testid='role-edit-status']");
+        Assert.Contains("Ghost", alert.TextContent);
+        Assert.Contains("mud-alert-text-error", alert.ClassName);
+    }
+
+    [Fact]
+    public void WhenTheRoleHasNoStatus_ThenNoAlertIsShown()
+    {
+        // Act
+        var component = RenderEditor(_graph.GetRole("Kitchen"));
+
+        // Assert
+        Assert.Empty(component.FindAll("[data-testid='role-edit-status']"));
+    }
+
+    [Fact]
+    public void WhenAgentsUseTheRole_ThenTheirCountIsShown()
+    {
+        // Arrange
+        _graph.Service.SetPrincipalRoles(new object(), ["kitchen"]);
+        _graph.Service.SetPrincipalRoles(new object(), ["Kitchen", BuiltInRoles.ReaderName]);
+
+        // Act
+        var component = RenderEditor(_graph.GetRole("Kitchen"));
+
+        // Assert
+        Assert.Equal("Used by 2 agents", component.Find("[data-testid='role-edit-used-by']").TextContent.Trim());
+    }
+
+    [Fact]
+    public async Task WhenTheRoleIsEdited_ThenTheEditedRoleHasTheUnsavedState()
+    {
+        // Arrange
+        var role = _graph.GetRole("Kitchen");
+        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var component = RenderEditor(role);
+
+        // Act
+        await SetActionAsync(component, 0, "history", true);
+
+        // Assert
+        var editedRole = component.Instance.GetEditedRole();
+        Assert.Equal("Kitchen", editedRole.Name);
+        Assert.Equal([PermissionAction.Read, AuthorizationActions.History], editedRole.Allow[0].Actions.ToArray());
+        Assert.Equal([PermissionAction.Read], role.Allow[0].Actions.ToArray());
+    }
+
+    private IRenderedComponent<RoleEditComponent> RenderEditor(Role role) =>
+        Render<RoleEditComponent>(parameters => parameters.Add(component => component.Subject, role));
+
+    private static IReadOnlyList<AngleSharp.Dom.IElement> GetCards(IRenderedComponent<RoleEditComponent> component, string section) =>
+        component.FindAll($"[data-testid^='role-edit-{section}-rule-']");
+
+    private static IReadOnlyList<string> GetChips(AngleSharp.Dom.IElement card, string input) =>
+        card.QuerySelectorAll($"[data-testid='{input}-chip']").Select(chip => chip.TextContent.Trim()).ToList();
+
+    // The rule cards in the order of the allow rules followed by the deny rules; the boxes in the order read, write, execute, history.
+    private static IReadOnlyList<bool> GetActionStates(IRenderedComponent<RoleEditComponent> component, int cardIndex) =>
+        component.FindComponents<RuleCard>()[cardIndex]
+            .FindAll("input[type='checkbox'][data-testid^='rule-action-']")
+            .Select(box => ((AngleSharp.Html.Dom.IHtmlInputElement)box).IsChecked)
+            .ToList();
+
+    private static IReadOnlyList<IRenderedComponent<MudCheckBox<bool>>> GetActionBoxes(IRenderedComponent<RoleEditComponent> component, int cardIndex) =>
+        component.FindComponents<RuleCard>()[cardIndex].FindComponents<MudCheckBox<bool>>();
+
+    private static Task SetActionAsync(IRenderedComponent<RoleEditComponent> component, int cardIndex, string action, bool isChecked)
+    {
+        var box = GetActionBoxes(component, cardIndex).Single(box => box.Instance.Label == action);
+        return component.InvokeAsync(() => box.Instance.ValueChanged.InvokeAsync(isChecked));
+    }
+
+    private static async Task EnterTextAsync(IRenderedComponent<RoleEditComponent> component, string card, string input, string text)
+    {
+        var selector = $"[data-testid='{card}'] [data-testid='{input}'] input";
+        await component.Find(selector).InputAsync(new ChangeEventArgs { Value = text });
+        await component.Find(selector).KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await component.Find(selector).KeyUpAsync(new KeyboardEventArgs { Key = "Enter" });
+    }
+}
