@@ -42,14 +42,15 @@ The built-in roles are defined in code, always available and cannot be changed. 
 
 | Role | Allows |
 |------|--------|
-| `Reader` | `read` on members tagged `state`, `configuration`, `subjects`, `attribute`, `metadata`, `query` and `operation`; `history` on `state`; `execute` on `query` |
-| `Operator` | Everything `Reader` allows, and `execute` on `operation`, `write` on `state` and `write` on `metadata` |
+| `Reader` | `read` and `history` on every member; `execute` on `query` |
+| `Operator` | Everything `Reader` allows, and `write` on every member and `execute` on `operation` |
 | `Everything` | Every action on every member |
 
 The [system rules](#system-rules) apply to all three, so even `Everything` never reads a secret, writes configuration, runs an operation that requires confirmation or reaches an agent.
 
-- **`Reader`** reads non-secret configuration. The tools list only state, but a configuration value reaches a client through page expressions, and a subject with only configuration properties is shown only when one of them is readable. Read on `operation` lets `list_methods` list operations without allowing them to run.
-- **`Operator`** allows exactly what an agent could do before roles existed with every tool allowed, which makes it the default of an agent.
+- **`Reader`** reads every member, also one without a marker, such as a derived title, a property without `[State]` or `[Configuration]` and non-secret configuration. The tools list only state, but such a value reaches a client through page expressions. Read on operations lets `list_methods` list them without allowing them to run.
+- **`Operator`** allows exactly what an agent could do before roles existed with every tool allowed, which makes it the default of an agent: the system rules keep secrets, configuration writes, operations that require confirmation and agents out of reach, as the hand-written limits did before.
+- The built-in roles are broad on purpose; restrict an agent with a custom role.
 - **`Everything`** is the role of `/mcp`.
 
 ### Tags
@@ -169,12 +170,12 @@ Paths select subjects, never members; `members` selects those. The [library docu
 
 | Action | In the tools |
 |--------|--------------|
-| `read` | `browse`, `search` and `get_property` show the property or subject. `list_methods` and `$methods` list a method only with `read` on it, and `invoke_query` and `invoke_operation` report a method without it as "Method not found: ...". Page expressions, `search_markdown` notes and `SearchMetadata` matches need it as well |
-| `write` | `set_property` writes the property, else "Property is not writable: /path. The access policy does not allow it.". `SetMetadata` needs `write` on the metadata member of its target, else "Metadata of 'path' is not writable. The access policy does not allow it." |
+| `read` | `browse`, `search` and `get_property` show the property or subject. `list_methods` and `$methods` list a method only with `read` on it, and `invoke_query` and `invoke_operation` report a method without it as "Method not found: ...". Page expressions, `search_markdown` notes, `SearchMetadata` matches and the children `GetOrder` names need it as well |
+| `write` | `set_property` writes the property, else "Property is not writable: /path. The access policy does not allow it.". `SetMetadata` needs `write` on the metadata member of its target, else "Metadata of 'path' is not writable. The access policy does not allow it.", and `SetOrder` on the metadata member of its folder, else "Metadata of '/path' is not writable. The access policy does not allow it." |
 | `execute` | `invoke_query` and `invoke_operation` run the method, else "Query 'Name' is not permitted. The access policy does not allow it." or "Operation 'Name' is not permitted. ...". The Markdown tools run `ReplaceText`, `ReplaceContent` and `CreateMarkdownFile`, and `search_markdown` searches a page only with `execute` on its `ReadRawContent` |
 | `history` | `get_property_history` reads the history of the property, else "History is not available: /path. The access policy does not allow it." A path the roles do not allow to read gives "Path not found: /path" |
 
-A subject the roles hide gives "Subject not found." in the method and Markdown tools, "Path not found: ..." in `get_property`, and "No subject at '...' in this storage." in `SetMetadata`. `list_types`, `update_memory` and the web tools do not touch the graph and are not affected. A denied `execute` or `history` of an agent is logged at debug level with the agent and the member; denied reads and writes are not logged, as the tools ask them for every member they list.
+A subject the roles hide gives "Subject not found." in the method and Markdown tools, "Path not found: ..." in `get_property`, and "No subject at '...' in this storage." in `SetMetadata`. `GetOrder` of a folder leaves it out, and an order in `SetOrder` or in the `order` of `SetMetadata` that names it is refused as a name that is no child, with only the shown children listed. `list_types`, `update_memory` and the web tools do not touch the graph and are not affected. A denied `execute` or `history` of an agent is logged at debug level with the agent and the member; denied reads and writes are not logged, as the tools ask them for every member they list.
 
 ---
 
@@ -221,7 +222,7 @@ Each agent has the setting `Roles`, a list of role names:
 ```
 
 - **Default**: `["Operator"]`, for a new agent and for a file without the setting, so an agent created before roles existed keeps what it could do and `AllowedTools` stays its gate. Restrict an agent with `Reader` or a custom role.
-- **Edit form**: the Roles section offers the built-in roles and the custom roles. A name that is no role, such as a removed custom role, shows as an error chip that can be removed. At least one role is required, as an agent without roles is denied everything.
+- **Edit form**: the Roles section offers the built-in roles and the custom roles. A name that is no role, such as a removed custom role, shows as an error chip that can be removed, and so does a custom role that exists but cannot be used, such as one whose name another role has as well, with the reason as its tooltip. At least one role is required, as an agent without roles is denied everything.
 - **Settings tab**: lists the roles, and the reason when the agent is denied everything.
 - **When it applies**: each chat turn and background run takes the policy of the roles when it starts, so a change of the roles or of `Authorization.json` applies to the next turn.
 
@@ -235,7 +236,7 @@ When the roles cannot be used, the agent shows the status Error with "Invalid ro
 - why a custom role does not compile, see [Custom Roles](#custom-roles),
 - "Role '...' is unavailable: ...", for a role with a reserved name or while [several Authorization subjects](#one-authorization-subject) exist.
 
-Turns still run, but every tool call is denied, so the agent can tell you what it cannot do. The status is checked again when the agent starts, when its settings are saved and after each turn.
+Turns still run, but every tool call is denied, so the agent can tell you what it cannot do. The status is checked again when the agent starts, when its settings are saved, after each turn and when a role or the `Authorization` subject changes, so it follows an edit of `Authorization.json` without waiting for a turn.
 
 ---
 
@@ -253,7 +254,9 @@ The state a background run receives from the agent's `WatchPaths` is read withou
 
 ## Page Expressions
 
-When an agent or an `/mcp` client reads a page through the tools, a page expression over a property its policy does not allow to read renders empty, as a secret does, and `ReadEvaluatedContent` with `includeSourcePaths` leaves out its path. For an agent that policy comes from its roles; for `/mcp` clients it is `Everything` with the system rules, so an expression over the state of an agent renders empty for them. People see pages as before.
+When an agent or an `/mcp` client reads a page through the tools, a page expression renders only a property the tools would show it at its path: the property and every property on its path readable, and every subject on the way shown. Anything else renders empty, as a secret does, and `ReadEvaluatedContent` with `includeSourcePaths` leaves out its path. So an expression below a branch the roles hide, such as `{{ /Devices/Cameras/Door/IsOpen }}` for a role that denies `read` on `Cameras`, renders empty although `IsOpen` itself is readable. Unlike the tools, an expression may read a member the tools do not list, such as a derived title, when its roles allow it.
+
+For an agent the policy comes from its roles; for `/mcp` clients it is `Everything` with the system rules, so an expression over the state of an agent renders empty for them. The check applies to queries, such as `ReadEvaluatedContent`, which evaluate pages. An operation runs without it, so the change handlers, renders and background work it starts are not restricted by the caller's roles. People see pages as before.
 
 ---
 
@@ -261,7 +264,9 @@ When an agent or an `/mcp` client reads a page through the tools, a page express
 
 - **Derived properties**: a rule on a derived property applies to that property, even when it is computed from properties the roles do not allow to read. Deny the derived property as well.
 - **Raw page source**: `ReadRawContent`, and so `search_markdown` and the Markdown tools, show the non-secret configuration values of the blocks of a page, even of subjects the roles hide. `ReadEvaluatedContent` evaluates only the expressions in the text and shows the blocks as written as well. Hide such pages from the agent with a `deny` of `read` on their paths.
-- **History of removed properties**: `get_property_history` reads only the history of a path that resolves, so the history of a removed device is not available to agents and `/mcp` clients.
+- **History of removed properties**: `get_property_history` reads only the history of a path that resolves, so the history of a removed device is not available to agents and `/mcp` clients. The history of a resolved property is read under the path it is recorded with, whichever spelling of the path the client used.
+- **Subjects with only secrets**: a subject whose only members other than attributes are secrets has no readable member, so it is hidden from every agent and `/mcp` client, as is a subject the roles deny every member of.
+- **Roles changed while they are read**: when an edit or a reload changes the roles while they are compiled, they are read once more; when that fails as well, custom roles are unavailable for that one call, and the next call reads them again.
 - **Watch paths**: see [Watch Paths](#watch-paths).
 
 ---
@@ -272,7 +277,8 @@ When an agent or an `/mcp` client reads a page through the tools, a page express
 - **Metadata and notes of agents**: `SetMetadata` for an agent or a subject inside one reports "No subject at '...' in this storage." instead of "Agents cannot change the metadata of agents.", and `SearchMetadata` and `search_markdown` leave them out for `/mcp` clients as well.
 - **The `Authorization` subject and its roles** are not reachable through MCP.
 - **History**: agents and `/mcp` clients no longer get the history of a path that does not resolve.
-- **Page expressions** of an agent or an `/mcp` client over a property its policy does not allow to read render empty, such as the state of an agent for `/mcp` clients.
+- **Page expressions** of an agent or an `/mcp` client over a property its policy does not allow to read, or below a branch it hides, render empty, such as the state of an agent for `/mcp` clients.
+- **Order of folders**: `GetOrder` leaves out children the policy hides, such as agents, and `SetOrder` needs `write` on the metadata of the folder.
 - **Watch paths** no longer include the state of agents.
 - **Unchanged**: a refused configuration write still reads "Property is not writable: /path. The access policy does not allow it.", and an agent with the default role `Operator` can do what it could before.
 

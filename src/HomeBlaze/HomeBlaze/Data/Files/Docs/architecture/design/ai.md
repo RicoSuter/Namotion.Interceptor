@@ -101,7 +101,7 @@ The operator view of these limits and their remaining gaps is in [Tools and perm
 - A `json` block hides every value that does not match the subject.
 - The old `subject(name)` form hides the whole content of its fence.
 - A page expression never shows a secret configuration value, nor the raw source of a page through its `Content` property, see [Properties Shown on Pages](../../development/building-subjects.md#properties-shown-on-pages).
-- In an agent's tool call, a page expression over a property the agent's roles do not allow to read renders empty as well, see [Security](security.md#enforcement).
+- In a query of an agent or an `/mcp` client, a page expression over a property its policy does not allow to read, or below a branch the policy hides, renders empty as well, see [Security](security.md#enforcement).
 
 #### Page Write Rules
 

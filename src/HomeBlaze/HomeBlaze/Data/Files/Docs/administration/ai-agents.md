@@ -251,7 +251,7 @@ Pages and documents, such as these docs under `/Docs`, are the main context abou
 - `ReadEvaluatedContent` of a page, through `invoke_query`, returns the text with every `{{ path }}` replaced by its value. With `includeSourcePaths` true, each value is followed by its property path, such as `21.5 (/Devices/Kitchen/Temperature)`.
 - `ReadRawContent` returns the source with the expressions unevaluated. `search_markdown` searches this view.
 - **Secrets stay hidden**: secret configuration values in blocks show as `***`, and a block that creates no subject, such as an error, hides all its values. Page expressions never show a secret or a page's raw `Content`, and `search_markdown` never matches one. [AI Integration](../architecture/design/ai.md#hidden-values) lists the rules.
-- **Roles apply**: a page expression over a property the agent's roles do not allow to read renders empty, and `search_markdown` searches only the pages the agent may read and run `ReadRawContent` of, see [Page Expressions](authorization.md#page-expressions).
+- **Roles apply**: a page expression over a property the agent's roles do not allow to read, or below a branch they hide, renders empty, and `search_markdown` searches only the pages the agent may read and run `ReadRawContent` of, see [Page Expressions](authorization.md#page-expressions).
 
 ### Changing devices
 
@@ -385,5 +385,5 @@ Each agent keeps its data in the `Agents` folder of the [data folder](configurat
 | The request is too long for the model | Start a new conversation, or lower `HistoryTokenBudget` |
 | The agent is not running. | The agent is stopped or still starting. Check the status and the log |
 | Invalid configuration: ... | An interval is out of range, such as a poll interval above 365 days. Correct it in the edit form |
-| Invalid roles: ... | A role of the agent cannot be used, such as "Role 'X' is not defined." for a removed custom role. Every tool call is denied until the roles are fixed in the edit form or in `Authorization.json`, see [Invalid Roles](authorization.md#invalid-roles) |
+| Invalid roles: ... | A role of the agent cannot be used, such as "Role 'X' is not defined." for a removed custom role. Every tool call is denied until the roles are fixed in the edit form or in `Authorization.json`; the status clears as soon as they are, see [Invalid Roles](authorization.md#invalid-roles) |
 | ... is not permitted. The access policy does not allow it. | The agent's roles do not allow the call. Give it a role that does, see [Authorization](authorization.md) |
