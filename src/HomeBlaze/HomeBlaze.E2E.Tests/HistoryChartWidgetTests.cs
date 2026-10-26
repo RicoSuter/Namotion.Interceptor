@@ -669,6 +669,52 @@ public class HistoryChartWidgetTests
         await Assertions.Expect(page.GetByTestId("property-history-dialog")).ToHaveCountAsync(0);
     }
 
+    [Fact]
+    public async Task WhenABarChartIsInATabThatWasHidden_ThenItsBarsSpanItsBoxWhenTheTabIsOpened()
+    {
+        // Arrange
+        var page = await OpenBarsPageAsync();
+        await page.WaitUntilInteractiveAsync(Timeout);
+
+        // Act
+        await page.GetByRole(AriaRole.Tab, new() { Name = "Bars tab" }).ClickAsync();
+        var view = GetChart(page, "Tabbed energy").GetByTestId("history-chart-view");
+        await Assertions.Expect(view).ToHaveAttributeAsync("data-plot-ready", "", new() { Timeout = Timeout });
+
+        // Assert - the bars of the first and the last day stand near the start and the end of the box, not squeezed into its middle.
+        await page.WaitForFunctionAsync(
+            """
+            view => {
+                const box = view.querySelector('[data-testid=history-chart-lines]').getBoundingClientRect();
+                const bars = [...view.querySelectorAll('.mud-charts-bar-series path.mud-chart-bar')].map(bar => bar.getBoundingClientRect());
+                if (box.width === 0 || bars.length < 7) return false;
+                const left = Math.min(...bars.map(bar => bar.left));
+                const right = Math.max(...bars.map(bar => bar.right));
+                return right - left > box.width * 0.6;
+            }
+            """,
+            await view.ElementHandleAsync(),
+            new() { Timeout = 10000 });
+    }
+
+    [Fact]
+    public async Task WhenAChartInANarrowCellHasAMinHeight_ThenItsLinesAreThatHighInsteadOfHalfTheirWidth()
+    {
+        // Arrange & Act
+        var page = await OpenAsync(BarsPageName, DesktopWidth);
+        var withMinimum = GetChart(page, "With minimum").GetByTestId("history-chart-lines");
+        var withoutMinimum = GetChart(page, "Without minimum").GetByTestId("history-chart-lines");
+        await Assertions.Expect(withMinimum).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(withoutMinimum).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Assert - the cell is narrower than 1200 pixels, so without a minimum the lines are half as high as wide.
+        var with = (await withMinimum.BoundingBoxAsync())!;
+        var without = (await withoutMinimum.BoundingBoxAsync())!;
+        Assert.True(without.Width < 800, $"The cell is too wide for the test: {without.Width}");
+        Assert.InRange(without.Height, without.Width / 2 - 2, without.Width / 2 + 2);
+        Assert.InRange(with.Height, 419, 421);
+    }
+
     // The bar chart queries once after its first render, and the increase of today needs two readings of the counter, so
     // the page is opened only when the store holds a reading above an earlier one.
     private async Task<IPage> OpenBarsPageAsync()

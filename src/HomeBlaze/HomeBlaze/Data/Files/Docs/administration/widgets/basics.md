@@ -143,7 +143,7 @@ Write a CSS color in double quotes, like `Color="#ffffff80"` or `Color="Surface 
 
 ## Icons
 
-The `Icon` of a card, a tab, a panel, a row, a tile, an indicator, an alert, an operation button and a case of a map is the name of a MudBlazor Material icon in its filled form, for example `Settings`, `Bolt`, `WaterDrop`, `AcUnit` or `Link`. The name is case-sensitive. An unknown name shows a default icon and no error.
+The `Icon` of a card, a tab, a panel, a row, a tile, an indicator, an alert, an operation button and a case of a map is the name of a MudBlazor Material icon in its filled form, for example `Settings`, `Bolt`, `WaterDrop`, `AcUnit` or `Link`. The name is case-sensitive. An unknown name shows a default icon and no error. The names are listed at [mudblazor.com/features/icons](https://mudblazor.com/features/icons): pick the filled variant and write its name without the `Icons.Material.Filled.` in front, so `Icons.Material.Filled.DirectionsCar` is `Icon=DirectionsCar`.
 
 ## Control Writes
 
