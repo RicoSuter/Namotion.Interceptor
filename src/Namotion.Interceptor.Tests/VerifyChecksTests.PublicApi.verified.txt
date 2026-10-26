@@ -83,6 +83,7 @@ namespace Namotion.Interceptor
     {
         public virtual bool AddFallbackContext(Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public void AddService<TService>(TService service) { }
+        public int ClearFallbackContexts() { }
         public System.Collections.Immutable.ImmutableArray<TInterface> GetServices<TInterface>() { }
         protected bool HasFallbackContext(Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public virtual bool RemoveFallbackContext(Namotion.Interceptor.IInterceptorSubjectContext context) { }

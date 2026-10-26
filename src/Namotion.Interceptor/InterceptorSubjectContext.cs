@@ -235,6 +235,27 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         return true;
     }
 
+    /// <summary>
+    /// Removes every fallback context registered when the call starts, each through
+    /// <see cref="RemoveFallbackContext"/>. A fallback context added concurrently is not removed.
+    /// </summary>
+    /// <returns>The number of fallback contexts this call removed.</returns>
+    public int ClearFallbackContexts()
+    {
+        var fallbackContexts = Volatile.Read(ref _state).FallbackContexts;
+
+        var removed = 0;
+        foreach (var fallbackContext in fallbackContexts)
+        {
+            if (RemoveFallbackContext(fallbackContext))
+            {
+                removed++;
+            }
+        }
+
+        return removed;
+    }
+
     private bool FallsBackOn(InterceptorSubjectContext context)
     {
         var visited = new HashSet<InterceptorSubjectContext>(ReferenceEqualityComparer.Instance);
