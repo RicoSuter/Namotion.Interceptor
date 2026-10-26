@@ -93,14 +93,16 @@
     public string? TestId { get; set; }
 
     /// <summary>
-    /// Gets whether a rule can be saved: it has at least one action, every action is known, every path pattern is valid
-    /// and every tag is one of <see cref="MemberTags"/>.
+    /// Gets whether a rule can be saved: it has at least one action, every action is known, every path pattern is valid,
+    /// every tag is one of <see cref="MemberTags"/> and no selector lists a value twice.
     /// </summary>
     internal static bool IsValid(PermissionRule rule, AuthorizationService authorizationService) =>
         !rule.Actions.IsEmpty &&
         rule.Actions.All(IsKnownAction) &&
-        rule.Paths.All(path => authorizationService.ValidatePathPattern(path) is null) &&
-        rule.Tags.All(tag => ValidateTag(tag) is null);
+        ChipListInput.AreValid(rule.Paths, authorizationService.ValidatePathPattern, StringComparer.Ordinal) &&
+        ChipListInput.AreValid(rule.Types, null, StringComparer.Ordinal) &&
+        ChipListInput.AreValid(rule.Members, null, StringComparer.Ordinal) &&
+        ChipListInput.AreValid(rule.Tags, ValidateTag, StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Gets whether a selector field holds typed text that is invalid, which keeps the rule from being saved, as it is

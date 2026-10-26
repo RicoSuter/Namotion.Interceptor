@@ -530,6 +530,36 @@ public sealed class RoleEditComponentTests : BunitContext, IAsyncLifetime
         Assert.Equal([new PermissionRule { Actions = [PermissionAction.Read] }], role.Allow);
     }
 
+    [Fact]
+    public async Task WhenALoadedSelectorListsAValueTwice_ThenTheLaterOneIsAnErrorChipUntilItIsRemoved()
+    {
+        // Arrange
+        var role = _graph.GetRole("Kitchen");
+        role.Allow = [new PermissionRule { Members = ["TurnOn", "TurnOn"], Tags = ["state", "STATE"], Actions = [PermissionAction.Read] }];
+
+        // Act
+        var component = RenderEditor(role);
+
+        // Assert
+        var chips = component.FindAll("[data-testid='role-edit-allow-rule-0'] [data-testid='rule-members-chip']");
+        Assert.Equal(2, chips.Count);
+        Assert.DoesNotContain("mud-chip-color-error", chips[0].ClassName);
+        Assert.Contains("mud-chip-color-error", chips[1].ClassName);
+        var tagChips = component.FindAll("[data-testid='role-edit-allow-rule-0'] [data-testid='rule-tags-chip']");
+        Assert.Contains("mud-chip-color-error", tagChips[1].ClassName);
+        Assert.All(component.FindComponent<RuleCard>().FindComponents<MudTooltip>(), tooltip => Assert.Equal("Listed twice.", tooltip.Instance.Text));
+        Assert.False(component.Instance.IsValid);
+
+        // Act
+        await RemoveChipAsync(component, "role-edit-allow-rule-0", "rule-members", 1);
+        await RemoveChipAsync(component, "role-edit-allow-rule-0", "rule-tags", 1);
+
+        // Assert
+        Assert.Equal(["TurnOn"], component.Instance.GetEditedRole().Allow[0].Members.ToArray());
+        Assert.Equal(["state"], component.Instance.GetEditedRole().Allow[0].Tags.ToArray());
+        Assert.True(component.Instance.IsValid);
+    }
+
     private IRenderedComponent<RoleEditComponent> RenderEditor(Role role) =>
         Render<RoleEditComponent>(parameters => parameters.Add(component => component.Subject, role));
 
@@ -557,6 +587,11 @@ public sealed class RoleEditComponentTests : BunitContext, IAsyncLifetime
 
     private static Task TypeTextAsync(IRenderedComponent<RoleEditComponent> component, string card, string input, string text) =>
         component.Find($"[data-testid='{card}'] [data-testid='{input}'] input").InputAsync(new ChangeEventArgs { Value = text });
+
+    private static Task RemoveChipAsync(IRenderedComponent<RoleEditComponent> component, string card, string input, int index) =>
+        component.FindAll($"[data-testid='{card}'] [data-testid='{input}-chip']")[index]
+            .QuerySelector(".mud-chip-close-button")!
+            .ClickAsync(new MouseEventArgs());
 
     private static async Task EnterTextAsync(IRenderedComponent<RoleEditComponent> component, string card, string input, string text)
     {

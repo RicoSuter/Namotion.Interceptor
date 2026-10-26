@@ -30,18 +30,21 @@
         {
             <MudText Typo="Typo.body2" Class="mud-text-secondary" data-testid="@($"{TestId}-any")">any</MudText>
         }
-        @foreach (var value in Values)
+        @* Not keyed by value, as a value from the file can be listed twice; the chips are matched by position. *@
+        @for (var index = 0; index < Values.Count; index++)
         {
-            if (Validator?.Invoke(value) is { } error)
+            var position = index;
+            var value = Values[position];
+            if (GetValueError(Values, position, Validator, Comparer) is { } error)
             {
                 <MudTooltip Text="@error">
-                    <MudChip @key="value" T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" Icon="@Icons.Material.Filled.ErrorOutline"
-                             Class="ma-0" OnClose="@(() => RemoveAsync(value))" data-testid="@($"{TestId}-chip")">@value</MudChip>
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" Icon="@Icons.Material.Filled.ErrorOutline"
+                             Class="ma-0" OnClose="@(() => RemoveAtAsync(position))" data-testid="@($"{TestId}-chip")">@value</MudChip>
                 </MudTooltip>
             }
             else
             {
-                <MudChip @key="value" T="string" Size="Size.Small" Variant="Variant.Outlined" Class="ma-0" OnClose="@(() => RemoveAsync(value))"
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Class="ma-0" OnClose="@(() => RemoveAtAsync(position))"
                          data-testid="@($"{TestId}-chip")">@value</MudChip>
             }
         }
@@ -82,7 +85,10 @@
     [Parameter]
     public IReadOnlyList<string>? Suggestions { get; set; }
 
-    /// <summary>Gets why a text is invalid, or null. An invalid text is not added; an invalid value shows as a red chip.</summary>
+    /// <summary>
+    /// Gets why a text is invalid, or null. An invalid text is not added; an invalid value, or one listed twice, shows as a
+    /// red chip.
+    /// </summary>
     [Parameter]
     public Func<string, string?>? Validator { get; set; }
 
@@ -106,6 +112,40 @@
     /// Gets whether the field holds text that the validator rejects, which is neither added nor dropped.
     /// </summary>
     internal bool HasInvalidText => _error is not null;
+
+    /// <summary>
+    /// Gets why the value at <paramref name="index"/> is invalid, or null: it is listed before, compared with
+    /// <paramref name="comparer"/>, or <paramref name="validator"/> rejects it.
+    /// </summary>
+    internal static string? GetValueError(IReadOnlyList<string> values, int index, Func<string, string?>? validator, StringComparer comparer)
+    {
+        var value = values[index];
+        for (var other = 0; other < index; other++)
+        {
+            if (comparer.Equals(values[other], value))
+            {
+                return "Listed twice.";
+            }
+        }
+
+        return validator?.Invoke(value);
+    }
+
+    /// <summary>
+    /// Gets whether no value is invalid, see <see cref="GetValueError"/>.
+    /// </summary>
+    internal static bool AreValid(IReadOnlyList<string> values, Func<string, string?>? validator, StringComparer comparer)
+    {
+        for (var index = 0; index < values.Count; index++)
+        {
+            if (GetValueError(values, index, validator, comparer) is not null)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
 
     /// <summary>
     /// Adds the text in the field, unless it is blank or invalid, as Enter would.
@@ -181,8 +221,7 @@
         return true;
     }
 
-    private Task RemoveAsync(string value) =>
-        ValuesChanged.InvokeAsync([.. Values.Where(other => !string.Equals(other, value, StringComparison.Ordinal))]);
+    private Task RemoveAtAsync(int index) => ValuesChanged.InvokeAsync([.. Values.Take(index), .. Values.Skip(index + 1)]);
 
     // A picked suggestion; also called with null when the field is cleared. On Enter the field picks the highlighted
     // suggestion, which can be one of a search for text typed before, so Enter adds the typed text instead unless a
