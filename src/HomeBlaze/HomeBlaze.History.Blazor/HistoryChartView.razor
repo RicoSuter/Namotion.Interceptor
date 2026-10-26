@@ -181,6 +181,7 @@
 
     private HistoryChartData? _builtData;
     private int? _renderedMaxHeight;
+    private int? _renderedMinHeight;
     private HistoryChartPlaceholder? _renderedPlaceholder;
     private string? _renderedStyle;
     private int _renderedBandHeight;
@@ -266,6 +267,13 @@
     /// </summary>
     [Parameter]
     public int? MaxHeight { get; set; }
+
+    /// <summary>
+    /// The lowest the lines may get with <see cref="MaxHeight"/>, in pixels, or null for no limit: a narrow view is then
+    /// higher than half its width. A minimum above <see cref="MaxHeight"/> wins.
+    /// </summary>
+    [Parameter]
+    public int? MinHeight { get; set; }
 
     /// <summary>Extra CSS appended to the style of the root element.</summary>
     [Parameter]
@@ -418,6 +426,7 @@
             isClickable != _renderedIsClickable ||
             Style != _renderedStyle ||
             MaxHeight != _renderedMaxHeight ||
+            MinHeight != _renderedMinHeight ||
             (Data is null && Placeholder != _renderedPlaceholder);
         if (stylesChanged)
         {
@@ -435,6 +444,7 @@
             !LinesClicked.Equals(_renderedLinesClicked);
 
         _renderedMaxHeight = MaxHeight;
+        _renderedMinHeight = MinHeight;
         _renderedPlaceholder = Placeholder;
         _renderedStyle = Style;
         _renderedBandHeight = BandHeight;
@@ -456,7 +466,7 @@
         _rootStyle = $"width:100%; display:flex; flex-direction:column; align-items:center; gap:8px; --history-chart-plot-end:{plotEnd}px; {Style}";
 
         var size = MaxHeight is { } maxHeight
-            ? $"max-height:{maxHeight}px; min-height:0; aspect-ratio:2 / 1;"
+            ? $"max-height:{maxHeight}px; min-height:{(MinHeight is > 0 and var minHeight ? minHeight : 0)}px; aspect-ratio:2 / 1;"
             : "height:100%; min-height:0;";
         var frame = !ShowAxes ? " position:relative; overflow:clip;" : isBars ? " position:relative; overflow-x:clip;" : string.Empty;
         var cursor = isClickable ? " cursor:pointer;" : string.Empty;
