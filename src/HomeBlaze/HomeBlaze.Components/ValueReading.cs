@@ -1,3 +1,5 @@
+using HomeBlaze.Services.Display;
+using Namotion.Interceptor;
 using Namotion.Interceptor.Registry.Abstractions;
 
 namespace HomeBlaze.Components;
@@ -28,6 +30,17 @@ public sealed record ValueReading(
     /// </summary>
     public ValueColor TextColor { get; init; } = ValueColor.Default;
 
-    /// <summary>Whether there is no value to show.</summary>
-    public bool IsMissing => Value is null;
+    /// <summary>Whether a case of the map matched, which can give a text and a color also when there is no value.</summary>
+    public bool HasCase { get; init; }
+
+    /// <summary>
+    /// The subject of the value: the one that owns the property, or the one the path leads to. Null when there is none.
+    /// </summary>
+    public IInterceptorSubject? Subject { get; init; }
+
+    /// <summary>The value and its subject, as the cases of a map and the text of the widget see them.</summary>
+    public ValueBinding Binding => new(Property, Value, Subject);
+
+    /// <summary>Whether there is no value to show and no case of the map matched.</summary>
+    public bool IsMissing => Value is null && !HasCase;
 }

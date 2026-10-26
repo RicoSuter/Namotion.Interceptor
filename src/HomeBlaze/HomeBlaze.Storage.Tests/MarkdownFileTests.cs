@@ -397,7 +397,7 @@ public class MarkdownFileTests
             new EmbeddedSecretDevice { Password = "s3cr3t", Host = "visible" });
 
         // Act
-        var expressions = markdown.Children.Values.OfType<RenderExpression>().ToDictionary(expression => expression.Path);
+        var expressions = markdown.Children.Values.OfType<RenderExpression>().ToDictionary(expression => expression.Text);
 
         // Assert
         Assert.Null(expressions["/Devices/motor/Password"].Value);
@@ -592,7 +592,7 @@ public class MarkdownFileTests
         // Assert
         Assert.StartsWith("Raw: , display: , public: visible.", evaluated);
         Assert.StartsWith("Raw: , display: , public: visible (/Devices/motor/Host).", withSourcePaths);
-        Assert.All(expressions.Where(expression => expression.Path == path), expression =>
+        Assert.All(expressions.Where(expression => expression.Text == path), expression =>
         {
             Assert.Null(expression.Value);
             Assert.Equal(string.Empty, expression.GetText(timeZone: null));
@@ -614,7 +614,7 @@ public class MarkdownFileTests
 
         // Act
         var evaluated = markdown.ReadEvaluatedContent();
-        var expressions = markdown.Children.Values.OfType<RenderExpression>().ToDictionary(expression => expression.Path);
+        var expressions = markdown.Children.Values.OfType<RenderExpression>().ToDictionary(expression => expression.Text);
 
         // Assert
         Assert.EndsWith("Own: , relative: , absolute: , title: Page.", evaluated);
@@ -675,7 +675,7 @@ public class MarkdownFileTests
         // Act
         var expressions = Assert.IsType<MarkdownFragment>(card.Content).Children.Values
             .OfType<RenderExpression>()
-            .ToDictionary(expression => expression.Path);
+            .ToDictionary(expression => expression.Text);
 
         // Assert
         Assert.Null(expressions["/Devices/motor/Password"].Value);

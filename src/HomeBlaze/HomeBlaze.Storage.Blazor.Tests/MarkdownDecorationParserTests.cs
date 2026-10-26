@@ -48,6 +48,19 @@ public class MarkdownDecorationParserTests
     }
 
     [Fact]
+    public void WhenExpressionHasAPipe_ThenTheRegionNameIsItsWholeText()
+    {
+        // Arrange
+        const string content = "Value: {{ a/B | raw }}";
+
+        // Act
+        var region = Assert.Single(MarkdownDecorationParser.Parse(content));
+
+        // Assert
+        Assert.Equal("a/B | raw", region.Name);
+    }
+
+    [Fact]
     public void Parse_MultipleExpressions_ReturnsMultipleRegions()
     {
         // Arrange

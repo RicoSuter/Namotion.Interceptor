@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Services;
+using Namotion.Interceptor.Expressions;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Pages;
 using Microsoft.Extensions.Logging;
@@ -189,16 +190,16 @@ public sealed partial class MarkdownContentParser
 
     /// <summary>
     /// Renders markdown content by replacing each {{ path }} expression that
-    /// <see cref="MarkdownSegmentBuilder.FindExpressions"/> finds with its resolved value in the format it asks for: also
-    /// one in the front matter, on the head line of a block or in an invalid block, which the page itself does not
-    /// evaluate. An expression with an unknown format, and one inside markdown code, is kept as written, and everything
+    /// <see cref="MarkdownSegmentBuilder.FindExpressions"/> finds with its resolved value as the page shows it: also
+    /// one in the front matter or in an invalid block, which the page itself does not evaluate; an expression in the
+    /// arguments of a block is left as written, because the widget evaluates it. An expression with an error, and one inside markdown code, is kept as written, and everything
     /// else stays as written. Only a displayable property is shown (<see cref="SubjectRegistryExtensions.IsDisplayable"/>).
     /// Uses the same resolution semantics as <see cref="RenderExpression"/> (in the scope of the markdown file).
     /// </summary>
     /// <param name="content">The markdown content.</param>
     /// <param name="parent">The markdown file the expressions are relative to.</param>
     /// <param name="includeSourcePaths">When true, each resolved value is followed by the absolute canonical path of
-    /// its property in parentheses. An expression that does not resolve to a property renders as without it.</param>
+    /// its property in parentheses. An expression that is not one path, or that does not resolve to a property, renders as without it.</param>
     public string? RenderContent(string? content, MarkdownFile parent, bool includeSourcePaths = false)
     {
         if (string.IsNullOrEmpty(content))
@@ -206,13 +207,14 @@ public sealed partial class MarkdownContentParser
 
         StringBuilder? rendered = null;
         var copiedLength = 0;
-        foreach (var expression in MarkdownSegmentBuilder.FindExpressions(MarkdownPageParser.Parse(content)))
+        foreach (var found in MarkdownSegmentBuilder.FindExpressions(MarkdownPageParser.Parse(content)))
         {
             rendered ??= new StringBuilder(content.Length);
-            rendered.Append(content, copiedLength, expression.Span.Start - copiedLength);
-            if (expression.Error is not null)
+            rendered.Append(content, copiedLength, found.Span.Start - copiedLength);
+            var expression = MarkdownExpressions.Parse(found.Text, out _);
+            if (expression is null)
             {
-                rendered.Append(content, expression.Span.Start, expression.Span.Length);
+                rendered.Append(content, found.Span.Start, found.Span.Length);
             }
             else
             {
@@ -222,11 +224,11 @@ public sealed partial class MarkdownContentParser
                 }
                 catch
                 {
-                    rendered.Append(content, expression.Span.Start, expression.Span.Length);
+                    rendered.Append(content, found.Span.Start, found.Span.Length);
                 }
             }
 
-            copiedLength = expression.Span.End;
+            copiedLength = found.Span.End;
         }
 
         return rendered is null
@@ -234,12 +236,15 @@ public sealed partial class MarkdownContentParser
             : rendered.Append(content, copiedLength, content.Length - copiedLength).ToString();
     }
 
-    private string? RenderExpressionValue(MarkdownExpression expression, MarkdownFile parent, bool includeSourcePaths)
+    private string RenderExpressionValue(ParsedExpression expression, MarkdownFile parent, bool includeSourcePaths)
     {
         // The reader of the text is not a viewer with a time zone, so dates are in that of the server.
-        var property = _pathResolver.ResolveScopedDisplayableProperty(expression.Path, PathStyle.Canonical, parent);
-        var valueText = RenderExpression.GetText(property, expression.Format, timeZone: null);
-        if (!includeSourcePaths || property is null || GetAbsolutePath(property) is not { } sourcePath)
+        var context = new MarkdownExpressionContext(_pathResolver, parent, timeZone: null);
+        var valueText = context.ToText(expression.Evaluate(ref context));
+        if (!includeSourcePaths ||
+            expression.SinglePath is not { } path ||
+            _pathResolver.ResolveScopedDisplayableProperty(path, PathStyle.Canonical, parent) is not { } property ||
+            GetAbsolutePath(property) is not { } sourcePath)
         {
             return valueText;
         }
@@ -303,13 +308,12 @@ public sealed partial class MarkdownContentParser
                     break;
 
                 case ExpressionMarkdownSegment expression:
-                    // The format and the error are part of the key, so that a changed format replaces the subject.
-                    var expressionKey =
-                        $"{ExpressionKeyPrefix}{index}_{ComputeHash($"{expression.Path}|{expression.Format}|{expression.Error}")}";
+                    // The text is part of the key, so that a changed expression replaces the subject.
+                    var expressionKey = $"{ExpressionKeyPrefix}{index}_{ComputeHash(expression.Text)}";
                     children[expressionKey] =
                         existingChildren.TryGetValue(expressionKey, out var existingExpression) && existingExpression is RenderExpression
                             ? existingExpression
-                            : new RenderExpression(expression.Path, expression.Format, expression.Error, state.Page, _pathResolver);
+                            : new RenderExpression(expression.Text, state.Page, _pathResolver);
                     break;
 
                 case BlockMarkdownSegment block:

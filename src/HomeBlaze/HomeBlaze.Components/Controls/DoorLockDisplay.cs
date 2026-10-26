@@ -1,5 +1,9 @@
 using HomeBlaze.Abstractions.Devices.Locks;
 using HomeBlaze.Abstractions.Sensors;
+using HomeBlaze.Components.Abstractions.TimeZones;
+using HomeBlaze.Services;
+using HomeBlaze.Services.Display;
+using Namotion.Interceptor;
 using MudBlazor;
 
 namespace HomeBlaze.Components.Controls;
@@ -19,8 +23,15 @@ internal static class DoorLockDisplay
     /// <summary>
     /// Gets the appearance of the tile. The case of the map for the name of the lock state, when there is one, gives
     /// the fill, its text color, the badge icon when it has one, and the text without the open door, which the door icon shows.
+    /// The cases see the name of the state as <c>value</c> and the lock as <c>subject</c>; without a resolver no case is tried. The time zone is that of the viewer for the dates in the text of a case, or null for that of the server.
     /// </summary>
-    public static DoorLockAppearance Get(DoorLockState? lockState, DoorState? doorState, ValueMap? map = null)
+    public static DoorLockAppearance Get(
+        DoorLockState? lockState,
+        DoorState? doorState,
+        ValueMap? map = null,
+        IInterceptorSubject? subject = null,
+        SubjectPathResolver? resolver = null,
+        ITimeZoneDisplay? timeZone = null)
     {
         var isOpen = doorState == DoorState.Open;
         var doorIcon = isOpen ? Icons.Material.Filled.MeetingRoom : Icons.Material.Filled.DoorFront;
@@ -43,18 +54,22 @@ internal static class DoorLockDisplay
             _ => ((string?)null, Icons.Material.Filled.QuestionMark, Color.Default, "Unknown", "Unknown · open", (string?)null, (string?)null, (string?)null)
         };
 
-        if (name is not null && map?.FindCase(name) is { } matched)
+        if (name is not null && map is not null && resolver is not null)
         {
-            var text = string.IsNullOrEmpty(matched.Text) ? subtitle : matched.Text;
-            var clickText = operation == "Unlock" ? ", unlocks on click" : ", locks on click";
-            return new DoorLockAppearance(
-                doorIcon,
-                MudBlazorIconResolver.ResolveOrNull(matched.Icon) ?? badgeIcon,
-                matched.GetColor(),
-                matched.GetTextColor(),
-                text,
-                operation is null ? text : string.Concat(text, clickText),
-                operation);
+            var binding = new ValueBinding(null, name, subject);
+            if (map.FindCase(binding, resolver) is { } matched)
+            {
+                var text = matched.GetText(binding, resolver, timeZone) ?? subtitle;
+                var clickText = operation == "Unlock" ? ", unlocks on click" : ", locks on click";
+                return new DoorLockAppearance(
+                    doorIcon,
+                    MudBlazorIconResolver.ResolveOrNull(matched.Icon) ?? badgeIcon,
+                    matched.GetColor(),
+                    matched.GetTextColor(),
+                    text,
+                    operation is null ? text : string.Concat(text, clickText),
+                    operation);
+            }
         }
 
         return isOpen
