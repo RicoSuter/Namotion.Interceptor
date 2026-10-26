@@ -23,9 +23,10 @@ public partial class Control : IConfigurable, ITitleProvider
     public partial string? Path { get; set; }
 
     /// <summary>
-    /// The label of the control. Defaults to the title of the property or of the method, then to its name.
+    /// The label of the control. Defaults to the title of the property or of the method, then to its name. It can show values with expressions between double braces, such as <c>{{ subject/Name }}</c>.
     /// </summary>
     [Configuration]
+    [TextTemplate]
     public partial string? Label { get; set; }
 
     /// <summary>

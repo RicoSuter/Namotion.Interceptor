@@ -1,7 +1,6 @@
 ---
 title: References Demo
 navTitle: References Demo
-position: 8
 ---
 
 # References Demo

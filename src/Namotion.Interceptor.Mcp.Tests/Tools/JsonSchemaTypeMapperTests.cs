@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Text.Json;
 using Namotion.Interceptor.Mcp.Tools;
 
@@ -50,6 +51,17 @@ public class JsonSchemaTypeMapperTests
     public void WhenUnknownClassType_ThenReturnsObject()
     {
         Assert.Equal("object", JsonSchemaTypeMapper.ToJsonSchemaType(typeof(JsonSchemaTypeMapperTests)));
+    }
+
+    [Theory]
+    [InlineData(typeof(Dictionary<string, object>))]
+    [InlineData(typeof(IDictionary<string, string>))]
+    [InlineData(typeof(IReadOnlyDictionary<string, object>))]
+    [InlineData(typeof(ImmutableDictionary<string, JsonElement>))]
+    [InlineData(typeof(ImmutableSortedDictionary<string, object>))]
+    public void WhenDictionaryType_ThenReturnsObject(Type clrType)
+    {
+        Assert.Equal("object", JsonSchemaTypeMapper.ToJsonSchemaType(clrType));
     }
 
     [Theory]

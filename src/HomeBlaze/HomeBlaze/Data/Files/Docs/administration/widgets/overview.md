@@ -1,7 +1,6 @@
 ---
 title: Widgets for Markdown Pages
 navTitle: Overview
-position: 1
 ---
 
 # Widgets for Markdown Pages

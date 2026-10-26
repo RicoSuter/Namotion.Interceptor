@@ -1,7 +1,6 @@
 ---
 title: Aspire Development Environment
 navTitle: Aspire
-position: 6
 ---
 
 # Aspire Development Environment

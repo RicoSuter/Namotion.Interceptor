@@ -88,8 +88,9 @@ public class MarkdownFileTests
     }
 
     [Fact]
-    public void FrontmatterParser_WithPosition_ReturnsPosition()
+    public void WhenFrontmatterHasPosition_ThenTheRestIsStillRead()
     {
+        // Arrange
         var content = """
             ---
             title: Test
@@ -98,10 +99,12 @@ public class MarkdownFileTests
             # Content
             """;
 
+        // Act
         var result = FrontmatterParser.Parse<MarkdownFrontmatter>(content);
 
+        // Assert
         Assert.NotNull(result);
-        Assert.Equal(5, result.Position);
+        Assert.Equal("Test", result.Title);
     }
 
     [Fact]
@@ -200,25 +203,6 @@ public class MarkdownFileTests
         await markdown.OnFileChangedAsync(CancellationToken.None);
 
         Assert.Equal("Nav Title", markdown.NavigationTitle);
-    }
-
-    [Fact]
-    public async Task MarkdownFile_PagePosition_WithFrontmatter_ReturnsPosition()
-    {
-        var (storage, serviceProvider) = await CreateInMemoryStorageAsync();
-        var content = """
-            ---
-            title: Test
-            position: 3
-            ---
-            # Content
-            """;
-        await WriteFileAsync(storage, "test.md", content);
-
-        var markdown = CreateMarkdownFile(serviceProvider, storage, "test.md");
-        await markdown.OnFileChangedAsync(CancellationToken.None);
-
-        Assert.Equal(3, markdown.PagePosition);
     }
 
     [Fact]
@@ -413,7 +397,7 @@ public class MarkdownFileTests
             new EmbeddedSecretDevice { Password = "s3cr3t", Host = "visible" });
 
         // Act
-        var expressions = markdown.Children.Values.OfType<RenderExpression>().ToDictionary(expression => expression.Path);
+        var expressions = markdown.Children.Values.OfType<RenderExpression>().ToDictionary(expression => expression.Text);
 
         // Assert
         Assert.Null(expressions["/Devices/motor/Password"].Value);
@@ -608,7 +592,7 @@ public class MarkdownFileTests
         // Assert
         Assert.StartsWith("Raw: , display: , public: visible.", evaluated);
         Assert.StartsWith("Raw: , display: , public: visible (/Devices/motor/Host).", withSourcePaths);
-        Assert.All(expressions.Where(expression => expression.Path == path), expression =>
+        Assert.All(expressions.Where(expression => expression.Text == path), expression =>
         {
             Assert.Null(expression.Value);
             Assert.Equal(string.Empty, expression.GetText(timeZone: null));
@@ -630,7 +614,7 @@ public class MarkdownFileTests
 
         // Act
         var evaluated = markdown.ReadEvaluatedContent();
-        var expressions = markdown.Children.Values.OfType<RenderExpression>().ToDictionary(expression => expression.Path);
+        var expressions = markdown.Children.Values.OfType<RenderExpression>().ToDictionary(expression => expression.Text);
 
         // Assert
         Assert.EndsWith("Own: , relative: , absolute: , title: Page.", evaluated);
@@ -691,7 +675,7 @@ public class MarkdownFileTests
         // Act
         var expressions = Assert.IsType<MarkdownFragment>(card.Content).Children.Values
             .OfType<RenderExpression>()
-            .ToDictionary(expression => expression.Path);
+            .ToDictionary(expression => expression.Text);
 
         // Assert
         Assert.Null(expressions["/Devices/motor/Password"].Value);

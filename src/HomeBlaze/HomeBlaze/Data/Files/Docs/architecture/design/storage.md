@@ -17,7 +17,7 @@ HomeBlaze persists several categories of data through a pluggable storage layer.
 | Subject configuration | Subject settings, topology, plugin list | JSON (`[Configuration]` properties) | Yes |
 | Knowledge files | Documentation, runbooks, operating procedures | Markdown with YAML frontmatter |  Yes |
 | Documents | PDFs, images, data files linked to subjects | Binary blobs | Yes |
-| Dynamic metadata | Annotations, tags, links between subjects | JSON (separate from subject config) | Yes |
+| Metadata | Titles, icons and order in navigation, notes, links, tags and comments (see [Metadata](metadata.md)) | JSON (separate from subject config) | Yes |
 | Plugin configuration | NuGet feed URLs, package list | JSON | Yes |
 | Property values (live state) | Sensor readings, device status | — | No — recovers from field devices (satellites), peers via WebSocket Welcome snapshot (central/standby) |
 | Time-series history | Property change history | Via history sink (see [History](history.md)) | Yes (separate concern) |
@@ -198,6 +198,8 @@ File subjects are created based on file extension via `FileExtensionAttribute`:
 | `JsonFile` | `.json` | Plain JSON files (non-configurable subjects) |
 | `GenericFile` | Other | Fallback for unknown extensions, metadata only |
 
+**Metadata files** (`.metadata.json` in a folder, `X.metadata.json` beside `X.json`) never become subjects. How the storage indexes, applies and writes them is in [Metadata](metadata.md).
+
 Plugin authors can register additional file types via `[FileExtension]`. The storage sets `FileSize` and `LastModified` of such a file subject from its listing and calls its `OnFileChangedAsync` when the file is new or its content hash differs. That call runs on the worker of the storage, see "One thing at a time" for what it must not do. A read of the stream of the file in that call is not limited by the storage.
 
 ### Markdown Pages [Implemented]
@@ -208,7 +210,7 @@ A `MarkdownFile` turns its text into child subjects when the file is loaded and 
 |------|----------|----------------|
 | `MarkdownPageParser` | `HomeBlaze.Storage/Pages` | Page text to a tree of blocks with their positions in the source. Owns the grammar of the head line (`MarkdownBlockHead`) and reports the errors that are visible from the syntax alone. Knows nothing about subjects. The parsed `MarkdownPage` tells the editor where a new block goes and how many colons it gets. For that alone it reads the slots of the types around the place, which the editor finds by their names |
 | `MarkdownBlockContainerParser` | `HomeBlaze.Storage/Pages` | The Markdig block parser for the colon lines, which replaces Markdig's custom containers in the pipeline. A colon line starts with a run of two or more colons, and `MarkdownBlockFence` is the one place that names the character. A colon line is a head line only when the text after the colons starts with a letter, `_` or `{`. With any other text the line is no colon line and stays markdown text. A head line ends every open block with as many colons or more, together with the blocks that are still open inside them, and opens its block in the container that remains, so the open blocks always have more colons the further in they are. A colon line with nothing after the colons is a closing line. It closes the innermost open block with the same number of colons, together with the blocks that are still open inside it. The end of the page ends every open block, and a block without a closing line is no error. A colon line ends a block only when nothing but blocks is open between the line and that block: inside a quote or a list item it reaches no block around them, where a head line is reported as a block at a place that allows none and a closing line as a line that closes nothing. A block is never ended when Markdig asks it to continue, so the blocks inside it see the line first and a code block keeps a colon line as text. A raw HTML block would keep a colon line as well. It is ended for a closing line that has the number of colons of a block around it, and for a head line when the HTML block is of a kind that an empty line ends. Only blocks may be between the HTML and that block. A script, a style element, a comment and the other kinds that end at an end of their own keep a head line, and a closing line of another length stays part of the HTML. After a definition list, Markdig takes the first colon off a line before the parser sees it, so a colon line there is read with its first colon restored. A closing line that closes nothing becomes a node of its own, which the page parser reports as an invalid block of one line. The node of a block records whether a closing line of its own ended it and its last line, which without a closing line is its last line of content. The span of the node ends exactly only with a closing line |
-| `MarkdownSegmentBuilder` | `HomeBlaze.Storage/Pages` | Renders the parsed page to HTML once and cuts the HTML into segments that follow the nesting of the blocks: HTML, expressions and blocks with their content. Writes the error boxes for syntax errors and for the old `subject(name)` form, a fenced code block with that language. Writes the braces inside markdown code as character references, so an expression in code is shown as written. `FindExpressions` gives the editor and the "Read Evaluated Content" query the expressions in the page text by the same rule: a path between two pairs of braces without a brace or a `<` in it, and no brace inside markdown code counts. It reads the text and not the rendered page, so it also finds an expression that the page does not render: one in the front matter, in the content of an invalid block or on the head line of a block, and one whose braces enclose markdown markup or the border of a block |
+| `MarkdownSegmentBuilder` | `HomeBlaze.Storage/Pages` | Renders the parsed page to HTML once and cuts the HTML into segments that follow the nesting of the blocks: HTML, expressions and blocks with their content. Writes the error boxes for syntax errors and for the old `subject(name)` form, a fenced code block with that language. Writes the braces inside markdown code as character references, so an expression in code is shown as written. `FindExpressions` gives the editor and the "Read Evaluated Content" query the expressions in the page text by the same rule: an expression between two pairs of braces without a brace in it, and no brace inside markdown code counts. In running text a Markdig inline parser reads the expression before emphasis and tables, so its `|`, `<` and `==` need no escaping. In HTML that the page writes, an expression is found in the rendered HTML, where `<` is written `&lt;`. It reads the text and not the rendered page, so it also finds an expression that the page does not render: one in the front matter, in the content of an invalid block or on the head line of a block, and one whose braces enclose markdown markup or the border of a block |
 | `MarkdownContentParser` | `HomeBlaze.Storage/Internal` | Segments to subjects. Creates the subject of a block or updates the existing one in place, fills its slots, and reports the errors that need the types |
 | `SlotMap` | `HomeBlaze.Storage/Pages` | Reads the `[Slot]` declarations of a type for the content parser and reports a declaration that cannot be used |
 | `MarkdownFragment` | `HomeBlaze.Storage/Pages` | The subject that holds the content of one slot. Its `Children` have the same shape as the `Children` of the page |
@@ -255,7 +257,7 @@ Files in storage become subjects in the knowledge graph through two different pa
 - **Subject files** — `.json` files with a `$type` discriminator are deserialized into typed subjects (e.g., `Motor`, `OpcUaServer`). The file is the persistence format; the subject is what appears in the graph. Only `[Configuration]` properties are persisted.
 - **Documents** — all other files (Markdown, PDFs, images, plain JSON without `$type`) become document subjects (`MarkdownFile`, `JsonFile`, `GenericFile`, or custom types via `[FileExtension]` plugins). The file content is the document itself, visible as-is in the knowledge graph.
 
-Documents are browsable in the subject tree, editable in the Blazor UI (Monaco editor for text files), and accessible via MCP tools: `browse` or `search` finds them, and `invoke_query` reads them, for example `ReadEvaluatedContent` of a Markdown page. Markdown files can also be changed through `ReplaceText`, `ReplaceContent` and `CreateMarkdownFile`, which write through the same path as the editor but leave blocks, other than layout blocks for agents with `edit_page_layout`, and other active content to the page editor, see [Changing pages](../../administration/ai-agents.md#changing-pages). JSON and other files have no such operations. Linking documents to other subjects (e.g., "this PDF is the manual for motor CNC-01") is handled via dynamic metadata / annotations (planned, see below).
+Documents are browsable in the subject tree, editable in the Blazor UI (Monaco editor for text files), and accessible via MCP tools: `browse` or `search` finds them, and `invoke_query` reads them, for example `ReadEvaluatedContent` of a Markdown page. Markdown files can also be changed through `ReplaceText`, `ReplaceContent` and `CreateMarkdownFile`, which write through the same path as the editor but leave blocks, other than layout blocks for agents with `edit_page_layout`, and other active content to the page editor, see [Changing pages](../../administration/ai-agents.md#changing-pages). JSON and other files have no such operations. Linking documents to other subjects (e.g., "this PDF is the manual for motor CNC-01") is done with the links of metadata, see [Notes, Links and Tags](../../administration/metadata.md#notes-links-and-tags).
 
 ## Subject Configuration [Implemented]
 
@@ -266,19 +268,6 @@ The `[State]` attribute marks runtime-only properties that are not persisted.
 `IConfigurationWriter` forms a chain resolved via the subject's parent hierarchy — the nearest parent that implements `IConfigurationWriter` handles persistence. This allows different storage containers to own different subtrees.
 
 A storage container stores one subject per JSON file, so a subject nested in that file's configuration through `[Configuration]` properties, such as a cell of a grid layout, is written by rewriting the whole file. A markdown page rewrites the block of the subject instead, see Write-back under [Markdown Pages](#markdown-pages-implemented). A writer returns `false` when it wrote nothing, because it stores no configuration that contains the subject or is not connected, and its caller has to report that instead of success. `RootManager` writes the root configuration file one save at a time, so two saves of the root at once neither fail on the open file nor let the earlier state overwrite the later one.
-
-## Dynamic Metadata and Annotations [Planned]
-
-User-created metadata (annotations, tags, links between subjects) are stored as dynamic attributes on the registry. These are persisted in their own JSON files, separate from subject configuration, so they survive restarts and can be reapplied to subjects as they are instantiated.
-
-This enables operators and integrators to enrich the knowledge graph with domain-specific metadata without modifying subject code. Examples:
-
-- `tags: ["floor-2", "critical", "hvac"]` — cross-cutting grouping independent of folder hierarchy
-- `area: "Kitchen"` — physical location assignment (equivalent to Home Assistant areas)
-- `group: "cooling-system"` — logical grouping across different folders
-- `owner: "maintenance-team-b"` — organizational metadata
-
-All dynamic attributes are queryable through the registry, transmitted over the wire via WebSocket sync, and visible in the UI — no separate subsystem needed.
 
 ## HA and Multi-Instance Storage [Planned]
 
@@ -303,7 +292,7 @@ The "recover from source of truth" model means most data does NOT need backup fo
 |------|----------------------------|-------------|
 | Subject configuration (JSON) | No | Must reconfigure all subjects manually |
 | Knowledge files (Markdown, documents) | No | Operational documentation and runbooks lost |
-| Dynamic metadata / annotations | No | User-created tags, links, and enrichments lost |
+| Metadata (`.metadata.json` files) | No | Titles, icons, order, notes, links and tags lost |
 | Plugin configuration | No | Must reconfigure plugin list and feeds |
 | Time-series history | **No — this is the critical one** | Historical data is generated locally and cannot be recovered from devices. Once lost, it is gone |
 | Live state (property values) | **Yes** — recovers from devices/peers | No backup needed |
@@ -362,13 +351,13 @@ Live state has zero data loss — it recovers to the current device state, not t
 | File format | JSON for configuration, Markdown for knowledge | Human-readable, diffable, version-controllable |
 | Configuration vs state | `[Configuration]` (persisted) vs `[State]` (runtime-only) | Clear developer intent, explicit persistence boundary |
 | Configuration writer chain | Resolved via parent hierarchy | Different storage containers can own different subtrees |
-| Dynamic metadata storage | Separate JSON files | Decoupled from subject configuration, reapplied on restart |
+| Metadata storage | Separate `.metadata.json` files | Decoupled from subject configuration, applied again on restart, see [Metadata](metadata.md) |
 
 ## Open Questions
 
 - Shared storage concurrency model for HA pairs (locking, optimistic concurrency, conflict resolution)
 - Change notification across nodes when using shared cloud backends
 - Configuration migration strategy when subject types change across versions (see [Upgrade and Migration](upgrade-and-migration.md))
-- Dynamic metadata schema and validation
+- Schema and validation of annotations and other custom metadata keys, see [Metadata](metadata.md#planned)
 - Configuration sync between instances (should central know satellite configs?)
 - Backup and restore procedures for each storage backend

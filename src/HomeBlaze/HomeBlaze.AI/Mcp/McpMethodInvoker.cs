@@ -1,5 +1,7 @@
 using System.Text.Json;
+using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
+using HomeBlaze.Services;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Mcp.Tools;
@@ -21,15 +23,24 @@ internal sealed class McpMethodInvoker
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger _logger;
     private readonly bool _isReadOnly;
-    private readonly Func<RegisteredSubject, MethodMetadata, string?>? _operationFilter;
+    private readonly Func<RegisteredSubject, MethodMetadata, object?[], string?>? _operationFilter;
+    private readonly Func<RegisteredSubject, MethodMetadata, object?, object?>? _resultFilter;
 
+    /// <param name="rootSubjectProvider">Resolves the root subject when a tool runs.</param>
+    /// <param name="pathProvider">Resolves the paths of the subjects.</param>
+    /// <param name="serviceProvider">Resolves the services that the methods take.</param>
+    /// <param name="logger">Logs failed calls.</param>
+    /// <param name="isReadOnly">Whether operations are blocked.</param>
+    /// <param name="operationFilter">Gets why a call of an operation with the given arguments is refused, or null when it is not.</param>
+    /// <param name="resultFilter">Gets the result that the caller is given in place of the result of a method; null passes every result on.</param>
     public McpMethodInvoker(
         Func<IInterceptorSubject> rootSubjectProvider,
         PathProviderBase pathProvider,
         IServiceProvider serviceProvider,
         ILogger logger,
         bool isReadOnly,
-        Func<RegisteredSubject, MethodMetadata, string?>? operationFilter)
+        Func<RegisteredSubject, MethodMetadata, object?[], string?>? operationFilter,
+        Func<RegisteredSubject, MethodMetadata, object?, object?>? resultFilter = null)
     {
         _rootSubjectProvider = rootSubjectProvider;
         _pathProvider = pathProvider;
@@ -37,6 +48,7 @@ internal sealed class McpMethodInvoker
         _logger = logger;
         _isReadOnly = isReadOnly;
         _operationFilter = operationFilter;
+        _resultFilter = resultFilter;
     }
 
     /// <summary>
@@ -88,27 +100,31 @@ internal sealed class McpMethodInvoker
         RegisteredSubject subject, string methodName, MethodKind allowedKind, JsonElement argumentsElement, CancellationToken cancellationToken)
     {
         var methodProperty = subject.TryGetProperty(methodName);
-        if (methodProperty?.GetValue() is not MethodMetadata method)
+        // Reported as not found, not as excluded.
+        if (methodProperty?.TryGetMethodMetadata() is not { } method || method.IsExcludedFrom(ExclusionTarget.Agents))
         {
             return new { error = $"Method not found: {methodName}" };
         }
 
-        var callError = GetCallError(subject, methodName, method, allowedKind);
+        if (method.Kind != allowedKind)
+        {
+            return new { error = DescribeWrongKind(methodName, method.Kind) };
+        }
+
+        // Read before the refusals are checked, as an operation can be refused for what it is called on, such as an
+        // agent that a path names, and reported only after them.
+        var inputParameters = method.Parameters.Where(parameter => parameter.RequiresInput).ToArray();
+        var (arguments, argumentError) = ReadArguments(argumentsElement, inputParameters);
+        var callError = GetCallError(subject, methodName, method, arguments ?? []) ?? argumentError;
         if (callError is not null)
         {
             return new { error = callError };
         }
 
-        var inputParameters = method.Parameters.Where(parameter => parameter.RequiresInput).ToArray();
-        var (arguments, argumentError) = ReadArguments(argumentsElement, inputParameters);
-        if (argumentError is not null)
-        {
-            return new { error = argumentError };
-        }
-
         try
         {
-            var result = MethodResultLimit.Apply(await method.InvokeAsync(arguments, _serviceProvider, cancellationToken));
+            var result = await method.InvokeAsync(arguments, _serviceProvider, cancellationToken);
+            result = MethodResultLimit.Apply(_resultFilter is null ? result : _resultFilter(subject, method, result));
             return result is not null ? new { success = true, result } : new { success = true };
         }
         catch (ArgumentException exception)
@@ -128,14 +144,10 @@ internal sealed class McpMethodInvoker
         }
     }
 
-    private string? GetCallError(RegisteredSubject subject, string methodName, MethodMetadata method, MethodKind allowedKind)
+    // The arguments are empty when they could not be read.
+    private string? GetCallError(RegisteredSubject subject, string methodName, MethodMetadata method, object?[] arguments)
     {
-        if (method.Kind != allowedKind)
-        {
-            return DescribeWrongKind(methodName, method.Kind);
-        }
-
-        if (method.Kind == MethodKind.Operation && _operationFilter?.Invoke(subject, method) is { } filterError)
+        if (method.Kind == MethodKind.Operation && _operationFilter?.Invoke(subject, method, arguments) is { } filterError)
         {
             return filterError;
         }

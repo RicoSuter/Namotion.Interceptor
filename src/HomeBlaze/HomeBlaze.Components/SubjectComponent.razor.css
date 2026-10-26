@@ -101,10 +101,15 @@
     padding: 12px;
 }
 
-/* The title and a body that follows it directly sit close together, as the lines of a paragraph. A picture between
-   them, or a missing body or header, leaves the full padding. */
+/* The title and a body that follows it directly sit close together, as the lines of a paragraph. A subtitle is small text
+   like the start of many bodies, such as the first row of a list or the top label of a chart, so a body keeps 8 pixels
+   more from it to be told apart. A picture between them, or a missing body or header, leaves the full padding. */
 ::deep .card-widget > .mud-card-header.mud-card-header-padding:has(+ .mud-card-content) {
     padding-bottom: 4px;
+}
+
+::deep .card-widget > .mud-card-header.mud-card-header-padding:has([data-testid=card-subtitle]):has(+ .mud-card-content) {
+    padding-bottom: 12px;
 }
 
 ::deep .card-widget > .mud-card-header + .mud-card-content.mud-card-content-padding {
@@ -181,19 +186,21 @@
     margin: 0;
 }
 
-/* Each row keeps 8 pixels above and below its content, its padding and the margin of the text of MudListItem, so rows are
-   16 pixels apart like blocks. The first and the last row add nothing at the edge of the list, so that a list in a card
-   ends at the padding of the card. */
-::deep .value-list > .value-list-item:first-child {
+/* Each row keeps 3 pixels above and below its content, the margin of the text of MudListItem in place of its padding and
+   margin, so rows are 6 pixels apart, closer than blocks, and a row of one line is 30 pixels high. The first and the last
+   row add nothing at the edge of the list, so that a list in a card ends at the padding of the card. */
+::deep .value-list > .value-list-item {
     padding-top: 0;
+    padding-bottom: 0;
+}
+
+::deep .value-list > .value-list-item > .mud-list-item-text {
+    margin-top: 3px;
+    margin-bottom: 3px;
 }
 
 ::deep .value-list > .value-list-item:first-child > .mud-list-item-text {
     margin-top: 0;
-}
-
-::deep .value-list > .value-list-item:last-child {
-    padding-bottom: 0;
 }
 
 ::deep .value-list > .value-list-item:last-child > .mud-list-item-text {

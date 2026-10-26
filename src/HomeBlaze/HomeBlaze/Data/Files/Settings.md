@@ -2,7 +2,6 @@
 title: Settings
 icon: Settings
 location: AppBar
-position: 10
 alignment: Right
 ---
 

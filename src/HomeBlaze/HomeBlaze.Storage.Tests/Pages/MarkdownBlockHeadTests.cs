@@ -119,4 +119,32 @@ public class MarkdownBlockHeadTests
         // Assert
         Assert.Equal(":::: A.B#m Count=3", formatted);
     }
+
+    [Theory]
+    [InlineData("value")]
+    [InlineData("subject")]
+    public void WhenIdIsAVariableOfExpressions_ThenTheHeadIsRejected(string id)
+    {
+        // Act
+        var success = MarkdownBlockHead.TryParse($":: Demo.Card#{id} Title=x", out var head, out var error);
+
+        // Assert
+        Assert.False(success);
+        Assert.Null(head);
+        Assert.Equal($"'{id}' is reserved for expressions and cannot be the name of a block.", error);
+    }
+
+    [Theory]
+    [InlineData("Value")]
+    [InlineData("values")]
+    [InlineData("subject-1")]
+    public void WhenIdOnlyResemblesAVariable_ThenTheHeadIsAccepted(string id)
+    {
+        // Act
+        var success = MarkdownBlockHead.TryParse($":: Demo.Card#{id}", out var head, out var error);
+
+        // Assert
+        Assert.True(success, error);
+        Assert.Equal(id, head!.Id);
+    }
 }

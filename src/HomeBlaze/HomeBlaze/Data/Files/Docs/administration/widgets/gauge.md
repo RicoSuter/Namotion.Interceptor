@@ -1,7 +1,6 @@
 ---
 title: Gauge
 navTitle: Gauge
-position: 35
 ---
 
 # Gauge
@@ -13,7 +12,7 @@ A ring that shows where a number stands between a minimum and a maximum, with th
 | Argument | Kind of value | Default | Meaning |
 |----------|---------------|---------|---------|
 | `Path` | Path (Number) | None | The [path](basics.md#paths) of the property whose value the gauge shows |
-| `Label` | Text | From the property, see [Labels](basics.md#labels) | The text below the ring |
+| `Label` | Text with values | From the property, see [Labels](basics.md#labels) | The text below the ring, see [Text with Values](basics.md#text-with-values) |
 | `Minimum` | Number with a fraction | From the property, see [Ranges](basics.md#ranges) | The value at which the ring is empty |
 | `Maximum` | Number with a fraction | From the property, see [Ranges](basics.md#ranges) | The value at which the ring is full |
 | `Map` | Name or path of a `ValueMap` | None | The map that gives the text in the center and the color of the ring, see [ValueMap](value-map.md) |

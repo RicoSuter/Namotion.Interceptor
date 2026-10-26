@@ -1,7 +1,6 @@
 ---
 title: HistoryChart
 navTitle: HistoryChart
-position: 50
 ---
 
 # HistoryChart

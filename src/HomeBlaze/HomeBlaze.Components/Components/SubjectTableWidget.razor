@@ -65,7 +65,7 @@
                             @for (var index = 0; index < columns.Length; index++)
                             {
                                 var column = columns[index];
-                                var reading = ValueReader.ReadProperty(row.Subject, column.Property, maps[index], TimeZone);
+                                var reading = ValueReader.ReadProperty(PathResolver, row.Subject, column.Property, maps[index], TimeZone);
 
                                 <td data-testid="subject-table-cell">
                                     @if (index == 0)

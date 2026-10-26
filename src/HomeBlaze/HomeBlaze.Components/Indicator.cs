@@ -17,7 +17,7 @@ namespace HomeBlaze.Components;
 public partial class Indicator : IConfigurable, ITitleProvider
 {
     /// <summary>
-    /// Path of the property whose value the indicator shows.
+    /// Path of the property whose value the indicator shows, or with a <see cref="Map"/> of a subject whose states the cases of the map read.
     /// </summary>
     [Configuration]
     [SubjectPath]

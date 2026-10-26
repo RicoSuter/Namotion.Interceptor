@@ -2,7 +2,7 @@ namespace HomeBlaze.Components.Abstractions.Pages;
 
 /// <summary>
 /// Interface for subjects that provide page navigation information.
-/// Used for nav menu and app bar rendering with custom titles, ordering, and location.
+/// Used for nav menu and app bar rendering with custom titles and location.
 /// </summary>
 public interface IPage
 {
@@ -10,16 +10,11 @@ public interface IPage
     /// Gets the navigation title (shorter than display title, used in nav menu).
     /// </summary>
     string? NavigationTitle { get; }
-    
+
     /// <summary>
     /// Gets the navigation icon name.
     /// </summary>
     string? NavigationIconName { get; }
-
-    /// <summary>
-    /// Gets the navigation order (lower numbers appear first).
-    /// </summary>
-    int? PagePosition { get; }
 
     /// <summary>
     /// Gets the navigation location (NavBar or AppBar).

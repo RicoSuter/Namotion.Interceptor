@@ -618,6 +618,86 @@ public class HomeBlazeMcpToolProviderTests
     }
 
     [Fact]
+    public async Task WhenListMethods_ThenTheMethodsExcludedFromAgentsAreLeftOut()
+    {
+        // Arrange
+        var (room, factory) = CreateTestSetup(isReadOnly: false);
+        AddMethod(room, "Everywhere", ExclusionTarget.None, () => { });
+        AddMethod(room, "NotForAgents", ExclusionTarget.Agents, () => { });
+        AddMethod(room, "NotInUserInterface", ExclusionTarget.UserInterface, () => { });
+        var tool = factory.CreateTools().First(t => t.Name == "list_methods");
+
+        // Act
+        var result = await tool.Handler(JsonSerializer.SerializeToElement(new { path = "" }), CancellationToken.None);
+
+        // Assert
+        var names = JsonSerializer.SerializeToElement(result).GetProperty("methods").EnumerateArray()
+            .Select(method => method.GetProperty("name").GetString());
+        Assert.Equal(["Everywhere", "NotInUserInterface"], names);
+    }
+
+    [Fact]
+    public async Task WhenInvokeMethodExcludedFromAgents_ThenItIsNotFoundAndNotInvoked()
+    {
+        // Arrange
+        var (room, factory) = CreateTestSetup(isReadOnly: false);
+        var isInvoked = false;
+        AddMethod(room, "NotForAgents", ExclusionTarget.Agents, () => isInvoked = true);
+
+        // Act
+        var error = await InvokeForErrorAsync(factory, "NotForAgents", parameters: null);
+
+        // Assert
+        Assert.Equal("Method not found: NotForAgents", error);
+        Assert.False(isInvoked);
+    }
+
+    [Fact]
+    public async Task WhenInvokeMethodExcludedFromTheUserInterface_ThenItIsInvoked()
+    {
+        // Arrange
+        var (room, factory) = CreateTestSetup(isReadOnly: false);
+        var isInvoked = false;
+        AddMethod(room, "NotInUserInterface", ExclusionTarget.UserInterface, () => isInvoked = true);
+        var tool = factory.CreateTools().First(t => t.Name == "invoke_operation");
+
+        // Act
+        var input = JsonSerializer.SerializeToElement(new { path = "", method = "NotInUserInterface" });
+        var result = await tool.Handler(input, CancellationToken.None);
+
+        // Assert
+        Assert.True(JsonSerializer.SerializeToElement(result).GetProperty("success").GetBoolean());
+        Assert.True(isInvoked);
+    }
+
+    [Fact]
+    public async Task WhenInvokeMethodWithStringArrayArgument_ThenItIsPassedAsArray()
+    {
+        // Arrange
+        var (room, factory) = CreateTestSetup(isReadOnly: false);
+        object? capturedNames = null;
+        room.TryGetRegisteredSubject()!.AddProperty<MethodMetadata>("SetOrder", _ => new MethodMetadata(arguments =>
+        {
+            capturedNames = arguments?[0];
+            return null;
+        })
+        {
+            Kind = MethodKind.Operation,
+            PropertyName = "SetOrder",
+            Parameters = [new MethodParameter { Name = "names", Type = typeof(string[]) }]
+        });
+        var tool = factory.CreateTools().First(t => t.Name == "invoke_operation");
+
+        // Act
+        var input = JsonSerializer.SerializeToElement(new { path = "", method = "SetOrder", parameters = new { names = new[] { "b", "a" } } });
+        var result = await tool.Handler(input, CancellationToken.None);
+
+        // Assert
+        Assert.True(JsonSerializer.SerializeToElement(result).GetProperty("success").GetBoolean());
+        Assert.Equal(new[] { "b", "a" }, Assert.IsType<string[]>(capturedNames));
+    }
+
+    [Fact]
     public async Task WhenTheCallIsCancelledDuringTheMethod_ThenTheCancellationPropagates()
     {
         // Arrange
@@ -788,6 +868,21 @@ public class HomeBlazeMcpToolProviderTests
 
     private static void AddMethod(TestThing room, MethodMetadata method) =>
         room.TryGetRegisteredSubject()!.AddProperty<MethodMetadata>(method.PropertyName, _ => method);
+
+    private static void AddMethod(TestThing room, string name, ExclusionTarget excludedFrom, Action invoke)
+    {
+        room.TryGetRegisteredSubject()!.AddProperty<MethodMetadata>(name, _ => new MethodMetadata(_ =>
+        {
+            invoke();
+            return null;
+        })
+        {
+            Kind = MethodKind.Operation,
+            Title = name,
+            PropertyName = name,
+            ExcludedFrom = excludedFrom
+        });
+    }
 
     private static async Task<string> InvokeForErrorAsync(McpToolFactory factory, string methodName, string? parameters, string toolName = "invoke_operation")
     {

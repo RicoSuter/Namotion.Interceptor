@@ -1,7 +1,6 @@
 ---
 title: Widget Basics
 navTitle: Basics
-position: 2
 ---
 
 # Widget Basics
@@ -74,17 +73,39 @@ The slots of a widget are filled as [Content and Slots](../pages.md#content-and-
 
 ## Labels
 
-A widget with a `Label` argument shows the label that is set. Without it, a widget that reads a property shows the title that the property declares, and the name of the property when it declares none. When the path leads nowhere:
+A widget with a `Label` argument shows the label that is set. Without it, a widget that reads a property shows the title that the property declares, and the name of the property when it declares none. A label can also show values, see [Text with Values](#text-with-values). When the path leads nowhere:
 
 - **Controls, values and chart series**: A [Switch](switch.md), a [Slider](slider.md), a [Select](select.md), a [Control](control.md), a [Gauge](gauge.md), a row of a [ValueList](value-list.md), a [ValueTile](value-tile.md) and a series of a [HistoryChart](history-chart.md) show the path.
 - **Operations**: An [OperationButton](operation-button.md), and a `Control` for an operation, show the title of the method, and the path when the path leads nowhere.
 - **Table columns**: A column of a [SubjectTable](subject-table.md) without `Label` takes the title of the property from the first row that has the property, and the name of the property when no row has it.
 
+## Text with Values
+
+The `Label` of a [ValueTile](value-tile.md), a [Gauge](gauge.md), a [Control](control.md), a [Switch](switch.md) and a row of a [ValueList](value-list.md), the `Subtitle` of a `Switch` and a `ValueTile`, and the `Title` and the `Subtitle` of a [Card](card.md) can show values with expressions between double braces, as the text of a page does:
+
+<!-- sample: live -->
+~~~~markdown
+:: HomeBlaze.Components.ValueTile Kind=Tile Path=../Pump/CurrentSpeed Label="Target {{ subject/TargetSpeed }}"
+::
+~~~~
+
+:: HomeBlaze.Components.ValueTile Kind=Tile Path=../Pump/CurrentSpeed Label="Target {{ subject/TargetSpeed }}"
+::
+
+- **`value` and `subject`**: In a widget with a `Path`, `value` is the value that the path leads to, and `subject` is the subject that owns it, or the subject that the path leads to, as in the cases of a [ValueMap](value-map.md#conditions). A card has no `Path`, so its title and subtitle use paths from the page only, and `value` or `subject` there is an error. A `Control` for an operation binds the subject that has the operation as `subject` and no useful `value`.
+- **Other paths** resolve from the widget, and so from the page that holds it, as in the text of the page, see [Expression Paths](../pages.md#expression-paths).
+- **Pipes**: `display`, `raw` and `map:name`, see [Pipes](../pages.md#pipes). A map name resolves like the `Map` of the widget, and `{{ subject | map:name }}` applies the map to `subject`, such as a wallbox that the `Path` leads to, so that the label shows the text of its case.
+- **Live**: The text updates when a value that it shows changes.
+- **Empty**: A text that is empty, also one whose expressions give no text because a value is missing, is shown as one that is not set: an empty label shows the label of the property, an empty title or subtitle of a card shows none, and an empty subtitle of a switch tile with a map shows the text of the value. Only a subtitle written as `Subtitle=""` hides the line of a switch tile, see [Switch](switch.md#tiles).
+- **Errors**: A mistake shows in place of the widget with the name of the argument in front, such as `Label: expected ')' at position 5`, see [Page Errors](../page-errors.md#value-widget-errors).
+- **Written as is elsewhere**: The source of the page, the page editor, the property panel, the tree of subjects and AI agents see the text as written, with its braces.
+- **Other arguments**: Paths, map names, colors, icons and numbers are taken as written. A color or an icon that depends on a value comes from a [ValueMap](value-map.md).
+
 ## Value Widgets
 
 `ValueList`, `ValueTile`, `Indicator`, `Progress`, `Gauge` and `SubjectTable` show values of properties, and `ValueMap` says what text, color and icon a value gets. The pages of these widgets refer to the rules in this section.
 
-- **The formatted value**: A value is shown in the [formatted form of an expression](../pages.md#expression-formats). A map can replace the text.
+- **The formatted value**: A value is shown in the [formatted form of an expression](../pages.md#pipes). A map can replace the text.
 - **Shown properties**: A widget shows the same properties as an expression. For a secret, the raw source of a page or a plain property without `[State]` it shows the dash of a [missing value](#missing-values), see [Properties Shown on Pages](../../development/building-subjects.md#properties-shown-on-pages).
 - **Live**: A value changes on the page when the property changes.
 - **History**: A property whose values are recorded, a property with `[State]` of a number, a boolean, an enum or a text, opens its history in the history dialog on a click, as in the browser: the label of a `ValueList` row, of a `Gauge` and of a `ValueTile` box, and the whole of a `ValueTile` tile. The label looks like the text around it and is underlined under the mouse pointer. While the page is edited, a click selects the widget instead. Without a history store the dialog shows an empty history.
@@ -150,6 +171,10 @@ Only containers create space: the page, a card, a tab, an expansion panel and th
 - **Fluid and fixed widgets**: A card, a tile, a list, a table and a chart are as wide as their place. A tile of a [Switch](switch.md#tiles), an [OperationButton](operation-button.md#tiles) or a [ValueTile](value-tile.md#tiles), like a card, fills a grid cell, a canvas node or a flow row when it is their only content, and is 96 pixels high alone. In a grid cell or a canvas node the icon and the text of a tile grow with the place, from their usual size in a place of about 150 pixels to twice that size, so that a large cell is filled, and a [Gauge](gauge.md) in the same kind of place shows its value and its label in the same sizes as the value and the label of a tile. A tile in a grid cell or a canvas node that is lower than its icon and its text, about 115 pixels for two lines and 91 for one, such as a square cell on a phone, leaves out the icon so that the text stays whole; a tile with a badge needs the extra room for the badge and hides the icon below about 140 pixels instead. A badge icon, such as the lock of a [DoorLock](door-lock.md) tile, is half as large as the icon of its tile and grows with it, while a badge widget, such as an [Indicator](indicator.md), keeps its size. A tile that shows only an icon keeps it. A card that is the only content of a `FlowLayout` cell is as high as the highest cell of its row, so the cards of a row end on one line, and its footer stays at the bottom. A widget of a fixed size, such as a [Gauge](gauge.md) or a button, stands at the start of its place, and a gauge that is the only content of a grid cell or a canvas node stands in its middle; [Gauge Rows](gauge.md#gauge-rows) shows how to choose the column width for it.
 - **Card footers**: The blocks of a footer, such as two buttons, stand in a row with 8 pixels between them and wrap when the card is too narrow.
 - **Controls**: A control is aligned by its visible edges: the track of a [Switch](switch.md), the box of a [Select](select.md) and the label of a [Slider](slider.md) start at the edge where text starts. Inside a widget, its own parts keep their room, such as the 16 pixels between the rows of a value list or the small margin around a chip; the first and the last row of a value list add nothing at its edges.
+
+## Tile Borders
+
+A tile of a [ValueTile](value-tile.md#tiles), a [Switch](switch.md#tiles), an [OperationButton](operation-button.md#tiles) and a [DoorLock](door-lock.md) has no border, since a grid cell and a canvas node draw no frame around their content. `Outlined=true` gives it the thin border of an outlined [Card](card.md), in the color of the lines of the theme, on the surface and on a filled tile alike, so that tiles can stand next to cards with the same edge. The `Variant=Outlined` of an `OperationButton` is something else: it draws the edge in the color of the button.
 
 ---
 

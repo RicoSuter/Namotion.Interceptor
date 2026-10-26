@@ -3,7 +3,6 @@ title: Menu Page
 icon: Lightbulb
 location: AppBar
 alignment: Menu
-position: 10
 ---
 
 # Menu Page

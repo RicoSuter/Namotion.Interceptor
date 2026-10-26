@@ -1,6 +1,7 @@
 using HomeBlaze.Abstractions.Devices.Locks;
 using HomeBlaze.Abstractions.Sensors;
 using HomeBlaze.Components.Controls;
+using HomeBlaze.Services;
 using HomeBlaze.Services.Display;
 using MudBlazor;
 using Xunit;
@@ -9,6 +10,8 @@ namespace HomeBlaze.Components.Tests;
 
 public class DoorLockDisplayTests
 {
+    private static readonly SubjectPathResolver Resolver = new(() => null);
+
     private const string ClosedDoor = Icons.Material.Filled.DoorFront;
     private const string OpenDoor = Icons.Material.Filled.MeetingRoom;
     private const string Locked = Icons.Material.Filled.Lock;
@@ -71,7 +74,7 @@ public class DoorLockDisplayTests
         var map = CreateMap();
 
         // Act
-        var appearance = DoorLockDisplay.Get(lockState, doorState, map);
+        var appearance = DoorLockDisplay.Get(lockState, doorState, map, subject: null, resolver: Resolver);
 
         // Assert
         Assert.Equal(new DoorLockAppearance(doorIcon, badgeIcon, fill, ValueColor.Default, subtitle, description, operation), appearance);
@@ -87,7 +90,7 @@ public class DoorLockDisplayTests
         };
 
         // Act
-        var appearance = DoorLockDisplay.Get(DoorLockState.Locked, DoorState.Closed, map);
+        var appearance = DoorLockDisplay.Get(DoorLockState.Locked, DoorState.Closed, map, subject: null, resolver: Resolver);
 
         // Assert
         Assert.Equal(Color.Info, appearance.Fill.Theme);
@@ -104,7 +107,7 @@ public class DoorLockDisplayTests
         var map = CreateMap();
 
         // Act
-        var appearance = DoorLockDisplay.Get(lockState, doorState, map);
+        var appearance = DoorLockDisplay.Get(lockState, doorState, map, subject: null, resolver: Resolver);
 
         // Assert
         Assert.Equal(DoorLockDisplay.Get(lockState, doorState), appearance);
@@ -123,7 +126,7 @@ public class DoorLockDisplayTests
         foreach (var state in states)
         {
             // Act
-            var appearance = DoorLockDisplay.Get(state, DoorState.Closed, map);
+            var appearance = DoorLockDisplay.Get(state, DoorState.Closed, map, subject: null, resolver: Resolver);
 
             // Assert
             Assert.Equal("mapped", appearance.Subtitle);

@@ -133,7 +133,7 @@ public class MarkdownExpressionFormatTests
         var expression = GetExpression(page);
 
         // Assert
-        Assert.Equal("Unknown format 'rounded'", expression.Error);
+        Assert.Equal("Unknown pipe 'rounded'", expression.Error);
     }
 
     [Fact]
@@ -157,7 +157,7 @@ public class MarkdownExpressionFormatTests
             """);
 
         // Assert
-        Assert.Equal(ExpressionFormat.Raw, GetExpression(page).Format);
+        Assert.Equal("meter/Power | raw", GetExpression(page).Text);
     }
 
     [Fact]
@@ -175,8 +175,7 @@ public class MarkdownExpressionFormatTests
         var html = MarkdownPageFixture.Html(page.Children);
 
         // Assert
-        Assert.Equal(ExpressionFormat.Raw, expression.Format);
-        Assert.Equal("meter/Power", expression.Path);
+        Assert.Equal("1234.5", expression.GetText(null));
         Assert.Contains("<table", html);
     }
 
@@ -191,5 +190,57 @@ public class MarkdownExpressionFormatTests
 
         // Assert
         Assert.Contains("A 1.23 kW B 1234.5 C {{ meter/Power | rounded }}", evaluated);
+    }
+
+    [Theory]
+    [InlineData("Is on: {{ meter/Power > 1000 }}", "Is on: Yes")]
+    [InlineData("<div>{{ meter/Power &lt; 5000 }}</div>", "<div>Yes</div>")]
+    [InlineData("<div>{{ meter/Power &gt; 5000 }}</div>", "<div>No</div>")]
+    public async Task WhenEvaluatedContentHasAConditionInTextOrHtml_ThenItIsEvaluated(string text, string expected)
+    {
+        // Arrange
+        var page = await AddPageAsync(text);
+
+        // Act
+        var evaluated = page.ReadEvaluatedContent();
+
+        // Assert
+        Assert.EndsWith(expected, evaluated!.TrimEnd());
+    }
+
+    [Theory]
+    [InlineData("{{ meter/Power > 1000 }}", "Yes")]
+    [InlineData("{{ meter/IsOn and meter/Power > 2000 }}", "No")]
+    [InlineData("{{ meter/IsOn and meter/Power < 1000 }}", "No")]
+    [InlineData("{{ meter/Missing > 1000 }}", "")]
+    [InlineData("{{ meter/Power > 1000 | raw }}", "True")]
+    public async Task WhenExpressionIsACondition_ThenTextIsYesNoOrEmpty(string text, string expected)
+    {
+        // Arrange
+        var page = await AddPageAsync(text);
+
+        // Act
+        var result = GetExpression(page).GetText(null);
+
+        // Assert
+        Assert.Equal(expected, result);
+    }
+
+    [Fact]
+    public async Task WhenConditionIsReadWhileReadsAreRecorded_ThenEveryPropertyItReadsIsRecorded()
+    {
+        // Arrange
+        var page = await AddPageAsync("{{ meter/IsOn and meter/Power > 1000 }}");
+        var meter = ((IPathScope)page).TryGetNamedSubject("meter")!;
+        var expression = GetExpression(page);
+        var scope = ReadPropertyRecorder.Start();
+
+        // Act
+        expression.GetText(null);
+        var recorded = scope.GetPropertiesAndDispose();
+
+        // Assert: these records make the page render again when either value changes
+        Assert.Contains(new PropertyReference(meter, nameof(TestMeter.IsOn)), recorded);
+        Assert.Contains(new PropertyReference(meter, nameof(TestMeter.Power)), recorded);
     }
 }

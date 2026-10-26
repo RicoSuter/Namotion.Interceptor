@@ -34,14 +34,17 @@ public class NavigationItem
     public bool IsPage { get; init; }
 
     /// <summary>
-    /// Whether this item represents a folder (can be expanded).
+    /// Whether this item has a descendant page in any location. The sidebar shows an item as a folder by
+    /// <see cref="HasNavigationBarPages"/> instead.
     /// </summary>
     public bool IsFolder { get; init; }
 
     /// <summary>
-    /// The sort order for the navigation item.
+    /// Whether the sidebar shows this item as a folder: it has a descendant page whose location is
+    /// <see cref="NavigationLocation.NavBar"/>, reached only through descendants whose location is that as well.
+    /// Implies <see cref="IsFolder"/>.
     /// </summary>
-    public int Order { get; init; }
+    public bool HasNavigationBarPages { get; init; }
 
     /// <summary>
     /// Where this item should appear (NavBar or AppBar).

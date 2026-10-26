@@ -16,13 +16,15 @@
     var state = ValueRangeResolver.GetState(reading.Property, reading.Value, gauge.Minimum, gauge.Maximum);
     var size = gauge.Size;
 
-    if ((reading.MapError ?? state.Error) is { } error)
+    var labelText = _label.Render(gauge.Label, PathResolver, gauge, reading.Binding, TimeZone, out var labelError);
+
+    if ((reading.MapError ?? state.Error ?? labelError) is { } error)
     {
         <WidgetArgumentError Message="@error" />
     }
     else
     {
-        var label = ValueReader.GetLabel(reading.Property, gauge.Label, path);
+        var label = ValueReader.GetLabel(reading.Property, labelText, path);
         // A meter must have a value, so without one the ring is a named group; Blazor leaves out the null attributes.
         var isMeter = state.AriaValue is not null;
 
@@ -54,6 +56,8 @@
 }
 
 @code {
+    private readonly WidgetText _label = new(nameof(Gauge.Label), ExpressionUse.WidgetText);
+
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
 }

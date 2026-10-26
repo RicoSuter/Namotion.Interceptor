@@ -1,10 +1,9 @@
-﻿@using HomeBlaze.Components.Abstractions.Pages
+﻿@using HomeBlaze.Host.Components.Clients
 @using HomeBlaze.Host.Components.TimeZones
 
 @inherits LayoutComponentBase
 
 @inject RootManager RootManager
-@inject NavigationItemResolver NavigationResolver
 @inject NavigationManager NavigationManager
 @inject BrowserPreferences Preferences
 
@@ -22,27 +21,11 @@
     <CascadingValue Value="@_isDarkMode" Name="IsDarkMode">
         <MudLayout>
             <TimeZoneInitializer />
+            <ClientConnectionInitializer />
             <MudAppBar Elevation="1">
-                @{ var appBarItems = GetAppBarItems(); }
                 <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start"
                                OnClick="@DrawerToggleAsync" title="Toggle Navigation"/>
-                @foreach (var item in appBarItems.Where(item => item.Alignment == AppBarAlignment.Left))
-                {
-                    <MudIconButton Icon="@SubjectIconExtensions.ResolveMudBlazorIcon(item.Icon)"
-                                   Href="@item.PageUrl"
-                                   Color="@(IsActive(item) ? Color.Primary : Color.Inherit)"
-                                   title="@item.Title"/>
-                }
-                <MudSpacer/>
-                @foreach (var item in appBarItems.Where(item => item.Alignment == AppBarAlignment.Right))
-                {
-                    <MudIconButton Icon="@SubjectIconExtensions.ResolveMudBlazorIcon(item.Icon)"
-                                   Href="@item.PageUrl"
-                                   Color="@(IsActive(item) ? Color.Primary : Color.Inherit)"
-                                   title="@item.Title"/>
-                }
-                <AppBarMenu Pages="@appBarItems.Where(item => item.Alignment == AppBarAlignment.Menu).ToList()"
-                            IsDarkMode="@_isDarkMode" OnToggleDarkMode="@DarkModeToggle"/>
+                <AppBarItems Root="@RootManager.Root" IsDarkMode="@_isDarkMode" OnToggleDarkMode="@DarkModeToggle"/>
             </MudAppBar>
             <MudDrawer id="nav-drawer" @bind-Open="_drawerOpen" ClipMode="DrawerClipMode.Always" Elevation="2">
                 <NavMenu Root="@RootManager.Root"/>
@@ -92,8 +75,6 @@
     protected override void OnInitialized()
     {
         base.OnInitialized();
-        NavigationManager.LocationChanged += OnLocationChanged;
-
         _isRootLoaded = RootManager.RootLoaded.IsCompletedSuccessfully;
         _drawerOpen = Preferences.Get(BrowserPreferenceKeys.Drawer) != DrawerClosed;
 
@@ -196,25 +177,8 @@
 
     public void Dispose()
     {
-        NavigationManager.LocationChanged -= OnLocationChanged;
-
         _disposalTokenSource.Cancel();
         _disposalTokenSource.Dispose();
-    }
-
-    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
-    {
-        InvokeAsync(StateHasChanged);
-    }
-
-    private List<NavigationItem> GetAppBarItems()
-    {
-        if (RootManager.Root == null)
-            return [];
-
-        return NavigationResolver.GetChildItems(RootManager.Root)
-            .Where(item => item.Location == NavigationLocation.AppBar && item.IsPage)
-            .ToList();
     }
 
     // The error page is shown exactly when the system is unhealthy, so it must render even if the
@@ -222,7 +186,4 @@
     private bool IsErrorPage => NavigationManager
         .ToBaseRelativePath(NavigationManager.Uri)
         .StartsWith("Error", StringComparison.OrdinalIgnoreCase);
-
-    private bool IsActive(NavigationItem item) =>
-        item.IsPageUrlOf(NavigationManager.ToBaseRelativePath(NavigationManager.Uri));
 }

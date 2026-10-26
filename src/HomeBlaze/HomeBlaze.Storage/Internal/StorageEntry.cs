@@ -1,3 +1,4 @@
+using HomeBlaze.Storage.Metadata;
 using Namotion.Interceptor;
 
 namespace HomeBlaze.Storage.Internal;
@@ -17,7 +18,15 @@ internal readonly record struct StorageVersion(long Size, DateTimeOffset? Modifi
 /// </summary>
 internal sealed class StorageEntry
 {
-    public required string Path { get; init; }
+    public required string Path
+    {
+        get;
+        init
+        {
+            field = value;
+            IsMetadata = StorageMetadataPath.IsMetadataFile(value);
+        }
+    }
 
     /// <summary>The path of the folder that holds the entry.</summary>
     public string Parent => field ??= StoragePath.GetParent(Path);
@@ -40,6 +49,27 @@ internal sealed class StorageEntry
     /// to the tree.
     /// </summary>
     public string? Key { get; set; }
+
+    /// <summary>
+    /// True for a metadata file, by its path, which never has a subject and holds <see cref="Metadata"/> instead.
+    /// </summary>
+    public bool IsMetadata { get; private init; }
+
+    /// <summary>
+    /// True for a JSON file, which has a metadata file beside it (see <see cref="StorageMetadataPath.GetSubjectFilePath"/>),
+    /// unless its path is reserved (see <see cref="StorageMetadataPath.IsReservedSubjectPath"/>).
+    /// </summary>
+    public bool HasSidecar => !IsFolder && !IsMetadata && StoragePath.IsJson(Path) && !StorageMetadataPath.IsReservedSubjectPath(Path);
+
+    /// <summary>The content of a metadata file, null when the file could not be read as one.</summary>
+    public StorageMetadataFile? Metadata { get; set; }
+
+    /// <summary>
+    /// The metadata file applied last to the subject of a JSON file and to what is inside it,
+    /// <see cref="StorageMetadataFile.Empty"/> for none; null until it was applied.
+    /// </summary>
+    // For change detection on each pass; the applier keeps its own weak table for attach lookups by subject.
+    public StorageMetadataFile? AppliedMetadata { get; set; }
 
     /// <summary>True when the subject is in the tree under <see cref="Key"/>.</summary>
     public bool IsPlaced => Key != null && Subject != null;
