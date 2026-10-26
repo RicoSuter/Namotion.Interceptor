@@ -155,6 +155,12 @@ public sealed class AuthorizationService : IDisposable
     }
 
     /// <summary>
+    /// The provider that path patterns in rules are parsed with and matched against, so that a user interface can show
+    /// the paths of members as rules match them.
+    /// </summary>
+    public PathProviderBase PathProvider => _pathProvider;
+
+    /// <summary>
     /// Gets why <paramref name="name"/> cannot name a custom role, or null: it is blank, is the name of a built-in role or
     /// of the system rules, ignoring case, or contains <c>/</c>, <c>[</c> or <c>]</c>, which would break the path of the role.
     /// Uniqueness among the custom roles is not checked.

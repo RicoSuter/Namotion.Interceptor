@@ -1,31 +1,38 @@
-@* A list of texts shown as chips, with a field that adds the typed text on Enter or when it loses focus, or a picked
-   suggestion. Typed text is split at commas into several values. Text that is typed and invalid stays in the field with
-   its error, see HasInvalidText. *@
+@* A list of texts shown as chips, with a field that adds the typed text on Enter, with its Add button or when it loses
+   focus, or a picked suggestion. Typed text is split at commas into several values. Text that is typed and invalid stays
+   in the field with its error, see HasInvalidText. A picked text goes into the field to be edited before it is added. *@
 
 <div data-testid="@TestId">
-    @if (Suggestions is null)
-    {
-        <div @onkeyup="OnTextKeyUpAsync">
-            <MudTextField T="string" Label="@Label" Value="@_text" ValueChanged="@OnTextChangedAsync" OnBlur="@CommitTextAsync"
-                          Immediate="true" Placeholder="@Placeholder"
-                          HelperText="@HelperText" Error="@(_error is not null)" ErrorText="@_error"
-                          Adornment="@(Pick is null ? Adornment.None : Adornment.End)" AdornmentIcon="@Icons.Material.Filled.Search"
-                          AdornmentAriaLabel="@($"Browse {Label}")" OnAdornmentClick="@PickAsync" />
+    <div class="d-flex align-start gap-2">
+        <div class="flex-grow-1">
+            @if (Suggestions is null)
+            {
+                <div @onkeyup="OnTextKeyUpAsync">
+                    <MudTextField T="string" Label="@Label" Value="@_text" ValueChanged="@OnTextChangedAsync" OnBlur="@CommitTextAsync"
+                                  Immediate="true" Placeholder="@Placeholder"
+                                  HelperText="@HelperText" Error="@(_error is not null)" ErrorText="@_error"
+                                  Adornment="@(Pick is null ? Adornment.None : Adornment.End)" AdornmentIcon="@Icons.Material.Filled.Search"
+                                  AdornmentAriaLabel="@($"Browse {Label}")" OnAdornmentClick="@PickAsync" />
+                </div>
+            }
+            else
+            {
+                @* The value changes only when a suggestion is picked; typed text is added on Enter, not on every keystroke. The
+                   keys are seen on the element around the field, as the field passes a key on only after it handled it, which
+                   can wait for the browser, so that a later key could be seen first. *@
+                <div @onkeydown="OnSuggestionKeyDown" @onfocusin="OnSuggestionFocusIn">
+                    <MudAutocomplete T="string" @ref="_autocomplete" Label="@Label" Placeholder="@Placeholder" HelperText="@HelperText"
+                                     Error="@(_error is not null)" ErrorText="@_error"
+                                     ValueChanged="@AddSuggestionAsync" TextChanged="@OnTextChangedAsync" OnKeyUp="@OnSuggestionKeyUpAsync"
+                                     OnBlur="@OnSuggestionBlurAsync" OpenChanged="@OnSuggestionOpenChangedAsync"
+                                     SearchFunc="@SearchAsync" CoerceText="false" />
+                </div>
+            }
         </div>
-    }
-    else
-    {
-        @* The value changes only when a suggestion is picked; typed text is added on Enter, not on every keystroke. The
-           keys are seen on the element around the field, as the field passes a key on only after it handled it, which
-           can wait for the browser, so that a later key could be seen first. *@
-        <div @onkeydown="OnSuggestionKeyDown" @onfocusin="OnSuggestionFocusIn">
-            <MudAutocomplete T="string" @ref="_autocomplete" Label="@Label" Placeholder="@Placeholder" HelperText="@HelperText"
-                             Error="@(_error is not null)" ErrorText="@_error"
-                             ValueChanged="@AddSuggestionAsync" TextChanged="@OnTextChangedAsync" OnKeyUp="@OnSuggestionKeyUpAsync"
-                             OnBlur="@OnSuggestionBlurAsync" OpenChanged="@OnSuggestionOpenChangedAsync"
-                             SearchFunc="@SearchAsync" CoerceText="false" />
-        </div>
-    }
+        @* Leaving the field adds its text before the click, which then finds the field empty. *@
+        <MudButton Variant="Variant.Outlined" Color="Color.Primary" Class="mt-4" Disabled="@(string.IsNullOrWhiteSpace(_text) || _error is not null)"
+                   OnClick="@CommitTextAsync" aria-label="@($"Add {Label}")" data-testid="@($"{TestId}-add")">Add</MudButton>
+    </div>
     @if (_warning is not null)
     {
         <MudText Typo="Typo.caption" Color="Color.Warning" Class="d-block mt-1" data-testid="@($"{TestId}-text-warning")">@_warning</MudText>
@@ -118,7 +125,10 @@
     [Parameter]
     public StringComparer Comparer { get; set; } = StringComparer.Ordinal;
 
-    /// <summary>Picks a text to add, such as from a dialog, or returns null; shown as a button in a plain text field.</summary>
+    /// <summary>
+    /// Picks a text, such as from a dialog, or returns null; shown as a button in a plain text field. The text replaces
+    /// the text in the field, to be edited and added from there.
+    /// </summary>
     [Parameter]
     public Func<Task<string?>>? Pick { get; set; }
 
@@ -222,7 +232,8 @@
     {
         if (Pick is not null && await Pick() is { } text)
         {
-            await AddAsync(text);
+            SetText(text);
+            await ReportInvalidTextAsync();
         }
     }
 

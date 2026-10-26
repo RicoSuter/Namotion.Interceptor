@@ -1,6 +1,7 @@
 @* Edits one rule of a role: a chip field per selector, a checkbox per action, and a button to remove the rule. *@
 @inject AuthorizationService AuthorizationService
 @inject IDialogService DialogService
+@inject SubjectPathResolver PathResolver
 
 <MudPaper Outlined="true" Class="pa-3" data-testid="@TestId">
     <MudGrid Spacing="2">
@@ -183,19 +184,21 @@
     private Task ToggleActionAsync(PermissionAction action, bool isChecked) =>
         ChangeAsync(_rule with { Actions = isChecked ? _rule.Actions.Add(action) : _rule.Actions.Remove(action) });
 
+    // Subjects and every member a rule can match can be picked; the pattern goes into the field to be edited first.
     private async Task<string?> PickPathAsync()
     {
         var parameters = new DialogParameters<SubjectPathPickerDialog>
         {
             { dialog => dialog.Label, "Path" },
-            // Only subjects and the properties holding them can be picked. The path of a subject in a folder matches no
-            // member until /** or /* is appended, which the role's Warning points out.
-            { dialog => dialog.CanSelectProperty, property => property.IsSubjectReference }
+            { dialog => dialog.CanSelectProperty, property => !RulePaths.IsMarker(property) },
+            { dialog => dialog.ListsPropertiesWithoutState, true }
         };
 
         var dialog = await DialogService.ShowAsync<SubjectPathPickerDialog>("Select Path", parameters,
             new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
         var result = await dialog.Result;
-        return result is { Canceled: false, Data: string path } ? path : null;
+        return result is { Canceled: false, Data: string path } && !string.IsNullOrWhiteSpace(path)
+            ? RulePaths.GetPickedPattern(path.Trim(), PathResolver, AuthorizationService.PathProvider)
+            : null;
     }
 }

@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using MudBlazor;
 using MudBlazor.Services;
 using Namotion.Interceptor;
+using HomeBlaze.Components.Inputs;
 using Namotion.Interceptor.Authorization;
 using Xunit;
 
@@ -16,6 +17,8 @@ public sealed class RoleEditComponentTests : BunitContext, IAsyncLifetime
     private readonly TestAuthorizationGraph _graph = TestAuthorizationGraph.Create("Kitchen", "Garden");
 
     private readonly IRenderedComponent<MudPopoverProvider> _popoverProvider;
+    private readonly ServiceProvider _serializerServices = new ServiceCollection().BuildServiceProvider();
+    private readonly RootManager _rootManager;
 
     public RoleEditComponentTests()
     {
@@ -23,6 +26,15 @@ public sealed class RoleEditComponentTests : BunitContext, IAsyncLifetime
         Services.AddMudServices();
         Services.AddSingleton(_graph.Service);
         Services.AddSingleton(_graph.PathResolver);
+
+        // The path picker lists the subjects of the root manager, which has none here; a path is typed into it instead.
+        var pickerTypes = new TypeProvider();
+        _rootManager = new RootManager(
+            new SubjectTypeRegistry(pickerTypes),
+            new ConfigurableSubjectSerializer(pickerTypes, _serializerServices),
+            InterceptorSubjectContext.Create(),
+            _graph.PathResolver);
+        Services.AddSingleton(_rootManager);
 
         var typeProvider = new TypeProvider();
         typeProvider.AddTypes([typeof(Role), typeof(TestRoot)]);
@@ -37,6 +49,8 @@ public sealed class RoleEditComponentTests : BunitContext, IAsyncLifetime
     async Task IAsyncLifetime.DisposeAsync()
     {
         await DisposeAsync();
+        _rootManager.Dispose();
+        await _serializerServices.DisposeAsync();
         _graph.Dispose();
     }
 
@@ -145,6 +159,76 @@ public sealed class RoleEditComponentTests : BunitContext, IAsyncLifetime
         Assert.Equal(["/Devices/**"], GetChips(GetCards(component, "allow")[0], "rule-paths"));
         Assert.Equal(["/Devices/**"], component.Instance.GetEditedRole().Allow[0].Paths.ToArray());
         Assert.True(component.Instance.IsValid);
+    }
+
+    [Fact]
+    public async Task WhenAPathIsPicked_ThenItsPatternGoesIntoTheFieldAndTheAddButtonAddsItOnceEdited()
+    {
+        // Arrange
+        var role = _graph.GetRole("Kitchen");
+        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var dialogProvider = Render<MudDialogProvider>();
+        var component = RenderEditor(role);
+        var field = "[data-testid='role-edit-allow-rule-0'] [data-testid='rule-paths'] input";
+
+        // Act: the click waits for the dialog to close.
+        var browse = component.Find("[data-testid='role-edit-allow-rule-0'] [data-testid='rule-paths'] button[aria-label='Browse Paths']")
+            .ClickAsync(new MouseEventArgs());
+        var listsMembers = dialogProvider.FindComponent<SubjectPathPickerDialog>().Instance.ListsPropertiesWithoutState;
+        await dialogProvider.Find("[data-testid='subject-path-picker'] input").InputAsync(new ChangeEventArgs { Value = "/Devices/Child" });
+        await dialogProvider.FindAll("button").Single(button => button.TextContent.Trim() == "OK").ClickAsync(new MouseEventArgs());
+        await browse;
+
+        // Assert
+        Assert.True(listsMembers);
+        Assert.Equal("/Devices/Child/**", component.Find(field).GetAttribute("value"));
+        Assert.Empty(GetChips(GetCards(component, "allow")[0], "rule-paths"));
+
+        // Act
+        await component.Find(field).InputAsync(new ChangeEventArgs { Value = "/Devices/Child/*" });
+        await component.Find("[data-testid='role-edit-allow-rule-0'] [data-testid='rule-paths-add']").ClickAsync(new MouseEventArgs());
+
+        // Assert
+        Assert.Equal(["/Devices/Child/*"], GetChips(GetCards(component, "allow")[0], "rule-paths"));
+        Assert.Equal(["/Devices/Child/*"], component.Instance.GetEditedRole().Allow[0].Paths.ToArray());
+        Assert.True(string.IsNullOrEmpty(component.Find(field).GetAttribute("value")));
+    }
+
+    [Fact]
+    public async Task WhenTextIsTypedIntoAFieldWithSuggestionsAndAddIsClicked_ThenItIsAdded()
+    {
+        // Arrange
+        var role = _graph.GetRole("Kitchen");
+        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var component = RenderEditor(role);
+        await TypeTextAsync(component, "role-edit-allow-rule-0", "rule-types", "TestDevice");
+
+        // Act
+        await component.Find("[data-testid='role-edit-allow-rule-0'] [data-testid='rule-types-add']").ClickAsync(new MouseEventArgs());
+
+        // Assert
+        Assert.Equal(["TestDevice"], GetChips(GetCards(component, "allow")[0], "rule-types"));
+    }
+
+    [Fact]
+    public async Task WhenThePathFieldIsEmptyOrInvalid_ThenItsAddButtonIsDisabled()
+    {
+        // Arrange
+        var role = _graph.GetRole("Kitchen");
+        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var component = RenderEditor(role);
+        var add = "[data-testid='role-edit-allow-rule-0'] [data-testid='rule-paths-add']";
+        var isDisabledWhenEmpty = component.Find(add).HasAttribute("disabled");
+
+        // Act
+        await TypeTextAsync(component, "role-edit-allow-rule-0", "rule-paths", "Devices");
+        var isDisabledWhenInvalid = component.Find(add).HasAttribute("disabled");
+        await TypeTextAsync(component, "role-edit-allow-rule-0", "rule-paths", "/Devices/**");
+
+        // Assert
+        Assert.True(isDisabledWhenEmpty);
+        Assert.True(isDisabledWhenInvalid);
+        Assert.False(component.Find(add).HasAttribute("disabled"));
     }
 
     [Fact]
