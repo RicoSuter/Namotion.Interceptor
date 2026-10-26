@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Rendering;
 using Namotion.Interceptor.Attributes;
@@ -16,18 +15,33 @@ public partial class Person
 /// </summary>
 public sealed class RenderLog
 {
-    private readonly ConcurrentDictionary<string, int> _renders = new();
-    private readonly ConcurrentDictionary<string, string?> _values = new();
+    // Under one lock, so that a test which sees the value of a render also sees that render counted.
+    private readonly Lock _lock = new();
+    private readonly Dictionary<string, (int Renders, string? Value)> _entries = new();
 
     public void Record(string key, string? value)
     {
-        _values[key] = value;
-        _renders.AddOrUpdate(key, 1, static (_, count) => count + 1);
+        lock (_lock)
+        {
+            _entries[key] = (_entries.GetValueOrDefault(key).Renders + 1, value);
+        }
     }
 
-    public int Renders(string key) => _renders.GetValueOrDefault(key);
+    public int Renders(string key)
+    {
+        lock (_lock)
+        {
+            return _entries.GetValueOrDefault(key).Renders;
+        }
+    }
 
-    public string? Value(string key) => _values.GetValueOrDefault(key);
+    public string? Value(string key)
+    {
+        lock (_lock)
+        {
+            return _entries.GetValueOrDefault(key).Value;
+        }
+    }
 }
 
 /// <summary>

@@ -1,398 +1,200 @@
+using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
-using System.Globalization;
+using Namotion.Interceptor.Expressions;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
 
 namespace Namotion.Interceptor.Mcp.Tools;
 
 /// <summary>
-/// A value filter over the scalar properties of a subject: comparisons (<c>== != &lt; &lt;= &gt; &gt;=</c>) of a
-/// property against a number, <c>true</c>, <c>false</c>, <c>null</c> or a string, combined with
-/// <c>&amp;&amp;</c> (<c>and</c>), <c>||</c> (<c>or</c>) and parentheses, where <c>&amp;&amp;</c> binds tighter.
-/// Properties resolve through the path provider, so a filter only sees properties the provider exposes.
-/// A missing property, a null value against a non-null literal, a NaN value or an incompatible type never matches.
+/// A value filter over the properties of a subject, written in the expression language of
+/// <c>Namotion.Interceptor.Expressions</c>: comparisons, <c>and</c>, <c>or</c>, <c>not</c>, parentheses and bare booleans
+/// over paths that resolve from the subject through the path provider. <c>subject</c> is the subject itself. A filter
+/// matches only when it is true: a missing value makes a comparison unknown, and <c>== null</c> is true for it.
 /// </summary>
 internal sealed class SubjectFilterExpression
 {
-    private const int MaximumExpressionLength = 1000;
-    private const int MaximumNestingDepth = 32;
+    private const string ErrorPrefix = "where: ";
 
-    private readonly Node _root;
+    private readonly ParsedExpression _expression;
 
-    private SubjectFilterExpression(Node root, IReadOnlyCollection<string> propertyNames)
+    private SubjectFilterExpression(ParsedExpression expression, IReadOnlyCollection<string> paths)
     {
-        _root = root;
-        PropertyNames = propertyNames;
+        _expression = expression;
+        Paths = paths;
     }
 
     /// <summary>
-    /// The distinct property names the expression compares, in order of first appearance.
+    /// The distinct paths the filter reads from a subject, in order of first appearance, with <c>subject</c> and its
+    /// separator removed.
     /// </summary>
-    public IReadOnlyCollection<string> PropertyNames { get; }
+    public IReadOnlyCollection<string> Paths { get; }
 
     /// <summary>
-    /// Parses <paramref name="text"/>. On failure <paramref name="error"/> reads
-    /// <c>where: &lt;message&gt; at position &lt;zero-based index&gt;</c>.
+    /// Parses a filter whose paths use the separator of the path provider. On failure the error starts with
+    /// <c>where: </c>, and a syntax error ends with <c>at position &lt;zero-based index&gt;</c>.
     /// </summary>
     public static bool TryParse(
         string text,
+        char pathSeparator,
         [NotNullWhen(true)] out SubjectFilterExpression? expression,
         [NotNullWhen(false)] out string? error)
     {
+        expression = null;
+        ParsedExpression? parsed;
+        string? parseError;
         try
         {
-            var parser = new Parser(text);
-            var root = parser.Parse();
-            expression = new SubjectFilterExpression(root, parser.PropertyNames);
-            error = null;
-            return true;
+            if (!ParsedExpression.TryParse(text, pathSeparator, out parsed, out parseError))
+            {
+                error = ErrorPrefix + parseError;
+                return false;
+            }
         }
-        catch (FormatException exception)
+        catch (ArgumentException exception) when (exception.ParamName == nameof(pathSeparator))
         {
-            expression = null;
-            error = exception.Message;
+            error = ErrorPrefix + $"the path separator '{pathSeparator}' is not supported";
             return false;
         }
-    }
 
-    /// <summary>
-    /// Evaluates the filter against the current property values of <paramref name="subject"/>.
-    /// </summary>
-    public bool Matches(RegisteredSubject subject, PathProviderBase pathProvider) =>
-        _root.Matches(subject, pathProvider);
-
-    private enum ComparisonOperator
-    {
-        Equal,
-        NotEqual,
-        Less,
-        LessOrEqual,
-        Greater,
-        GreaterOrEqual
-    }
-
-    private abstract class Node
-    {
-        public abstract bool Matches(RegisteredSubject subject, PathProviderBase pathProvider);
-    }
-
-    private sealed class AndNode(Node left, Node right) : Node
-    {
-        public override bool Matches(RegisteredSubject subject, PathProviderBase pathProvider) =>
-            left.Matches(subject, pathProvider) && right.Matches(subject, pathProvider);
-    }
-
-    private sealed class OrNode(Node left, Node right) : Node
-    {
-        public override bool Matches(RegisteredSubject subject, PathProviderBase pathProvider) =>
-            left.Matches(subject, pathProvider) || right.Matches(subject, pathProvider);
-    }
-
-    /// <summary>
-    /// The literal is a <see cref="double"/>, a <see cref="bool"/>, a <see cref="string"/> or null.
-    /// </summary>
-    private sealed class ComparisonNode(string propertyName, ComparisonOperator comparisonOperator, object? literal) : Node
-    {
-        private readonly DateTimeOffset? _literalInstant = literal is string literalText ? TryParseInstant(literalText) : null;
-        private readonly bool _isEquality = comparisonOperator is ComparisonOperator.Equal or ComparisonOperator.NotEqual;
-
-        public override bool Matches(RegisteredSubject subject, PathProviderBase pathProvider)
+        if (parsed.Pipes.Length > 0)
         {
-            var property = McpToolHelper.TryGetScalarProperty(subject, pathProvider, propertyName);
-            return property is not null && Compare(property.GetValue());
+            error = ErrorPrefix + "a condition takes no pipes";
+            return false;
         }
 
-        private bool Compare(object? value)
+        if (!TryCollectPaths(parsed, pathSeparator, out var paths, out error))
         {
-            if (literal is null)
+            return false;
+        }
+
+        expression = new SubjectFilterExpression(parsed, paths);
+        return true;
+    }
+
+    /// <summary>Evaluates the filter against the current property values of <paramref name="subject"/>.</summary>
+    public bool Matches(RegisteredSubject subject, PathProviderBase pathProvider)
+    {
+        var context = new FilterContext(subject, pathProvider);
+        return _expression.EvaluateCondition(ref context) == true;
+    }
+
+    private static bool TryCollectPaths(
+        ParsedExpression parsed,
+        char pathSeparator,
+        out List<string> paths,
+        [NotNullWhen(false)] out string? error)
+    {
+        paths = [];
+        error = null;
+        foreach (var path in parsed.Paths)
+        {
+            var memberPath = path;
+            if (ExpressionVariables.TryGetVariable(path, pathSeparator, out var variable, out var variableMemberPath))
             {
-                return comparisonOperator switch
+                if (variable == ExpressionVariables.Value)
                 {
-                    ComparisonOperator.Equal => value is null,
-                    ComparisonOperator.NotEqual => value is not null,
-                    _ => false
-                };
+                    error = ErrorPrefix + $"'{ExpressionVariables.Value}' is not available in where";
+                    return false;
+                }
+
+                if (variableMemberPath is null)
+                {
+                    continue;
+                }
+
+                if (variableMemberPath.Length == 0)
+                {
+                    error = ErrorPrefix + $"expected a name after '{variable}{pathSeparator}'";
+                    return false;
+                }
+
+                memberPath = variableMemberPath;
             }
 
-            if (value is null)
+            error = GetMemberPathError(path, memberPath, pathSeparator);
+            if (error is not null)
             {
                 return false;
             }
 
-            int? order = (value, literal) switch
+            if (!paths.Contains(memberPath))
             {
-                (bool boolean, bool literalBoolean) when _isEquality => boolean == literalBoolean ? 0 : 1,
-                (Enum enumValue, string name) when _isEquality =>
-                    string.Equals(GetEnumName(enumValue), name, StringComparison.OrdinalIgnoreCase) ? 0 : 1,
-                (string text, string literalText) => _isEquality
-                    ? string.Equals(text, literalText, StringComparison.OrdinalIgnoreCase) ? 0 : 1
-                    : string.CompareOrdinal(text, literalText),
-                (DateTimeOffset instant, string) => _literalInstant is { } literalInstant
-                    ? instant.CompareTo(literalInstant)
-                    : null,
-                (DateTime dateTime, string) => _literalInstant is { } literalInstant
-                    ? ToInstant(dateTime).CompareTo(literalInstant)
-                    : null,
-                // CompareTo orders NaN below every number, so NaN is handled like an incompatible type.
-                (float single, double) when float.IsNaN(single) => null,
-                (double floatingPoint, double) when double.IsNaN(floatingPoint) => null,
-                // Widening a float to double would make 0.1f differ from the literal 0.1.
-                (float single, double number) => single.CompareTo((float)number),
-                (_, double number) when IsNumber(value) =>
-                    Convert.ToDouble(value, CultureInfo.InvariantCulture).CompareTo(number),
-                _ => null
-            };
-
-            return order is { } result && comparisonOperator switch
-            {
-                ComparisonOperator.Equal => result == 0,
-                ComparisonOperator.NotEqual => result != 0,
-                ComparisonOperator.Less => result < 0,
-                ComparisonOperator.LessOrEqual => result <= 0,
-                ComparisonOperator.Greater => result > 0,
-                _ => result >= 0
-            };
+                paths.Add(memberPath);
+            }
         }
 
-        // The cached name of a defined value, so a match does not allocate; ToString only for flag combinations
-        // and undefined values.
-        private static string GetEnumName(Enum enumValue) =>
-            Enum.GetName(enumValue.GetType(), enumValue) ?? enumValue.ToString();
-
-        private static bool IsNumber(object value) =>
-            value is byte or sbyte or short or ushort or int or uint or long or ulong or float or double or decimal;
-
-        // A DateTime without a kind is read as UTC, matching how a bare literal is read.
-        private static DateTimeOffset ToInstant(DateTime dateTime) =>
-            dateTime.Kind == DateTimeKind.Unspecified
-                ? new DateTimeOffset(dateTime, TimeSpan.Zero)
-                : new DateTimeOffset(dateTime);
-
-        private static DateTimeOffset? TryParseInstant(string text) =>
-            DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var instant)
-                ? instant
-                : null;
+        return true;
     }
 
-    private sealed class Parser(string text)
+    // A path starts at the subject and ends at a property, so none starts with the separator, goes up with '..' or ends
+    // at an entry such as 'Devices[a]', which no filter can compare with anything but null.
+    private static string? GetMemberPathError(string path, string memberPath, char pathSeparator)
     {
-        private int _position;
-        private int _nestingDepth;
-
-        public List<string> PropertyNames { get; } = [];
-
-        public Node Parse()
+        if (memberPath[0] == pathSeparator)
         {
-            if (text.Length > MaximumExpressionLength)
-            {
-                _position = MaximumExpressionLength;
-                throw CreateError($"expression is longer than {MaximumExpressionLength} characters");
-            }
-
-            var node = ParseOr();
-            SkipWhitespace();
-            if (_position < text.Length)
-            {
-                throw CreateError($"unexpected '{text[_position]}'");
-            }
-
-            return node;
+            return ErrorPrefix + $"a path starts at the subject and cannot start with '{pathSeparator}'";
         }
 
-        private Node ParseOr()
+        if (HasParentSegment(memberPath, pathSeparator))
         {
-            var node = ParseAnd();
-            while (TryConsumeSymbol("||") || TryConsumeKeyword("or"))
-            {
-                node = new OrNode(node, ParseAnd());
-            }
-
-            return node;
+            return ErrorPrefix + "a path starts at the subject and cannot go up with '..'";
         }
 
-        private Node ParseAnd()
+        return memberPath[^1] == ']'
+            ? ErrorPrefix + $"a path ends at a property, not at an entry such as '{path}'"
+            : null;
+    }
+
+    private static bool HasParentSegment(string memberPath, char pathSeparator)
+    {
+        var segmentStart = 0;
+        var depth = 0;
+        for (var index = 0; index <= memberPath.Length; index++)
         {
-            var node = ParsePrimary();
-            while (TryConsumeSymbol("&&") || TryConsumeKeyword("and"))
+            if (index < memberPath.Length)
             {
-                node = new AndNode(node, ParsePrimary());
-            }
-
-            return node;
-        }
-
-        private Node ParsePrimary()
-        {
-            SkipWhitespace();
-            var openPosition = _position;
-            if (TryConsumeSymbol("("))
-            {
-                if (++_nestingDepth > MaximumNestingDepth)
+                var character = memberPath[index];
+                if (character == '[')
                 {
-                    _position = openPosition;
-                    throw CreateError("expression is nested too deeply");
+                    depth++;
+                }
+                else if (character == ']' && depth > 0)
+                {
+                    depth--;
                 }
 
-                var node = ParseOr();
-                if (!TryConsumeSymbol(")"))
+                if (character != pathSeparator || depth > 0)
                 {
-                    throw CreateError("expected ')'");
-                }
-
-                _nestingDepth--;
-                return node;
-            }
-
-            var propertyName = ReadIdentifier() ?? throw CreateError("expected a property name");
-            var (comparisonOperator, operatorText) = ReadOperator()
-                ?? throw CreateError($"expected a comparison operator after '{propertyName}'");
-            var literal = ReadLiteral(operatorText);
-            if (!PropertyNames.Contains(propertyName))
-            {
-                PropertyNames.Add(propertyName);
-            }
-
-            return new ComparisonNode(propertyName, comparisonOperator, literal);
-        }
-
-        private (ComparisonOperator Operator, string Text)? ReadOperator()
-        {
-            SkipWhitespace();
-            foreach (var (symbol, comparisonOperator) in Operators)
-            {
-                if (TryConsumeSymbol(symbol))
-                {
-                    return (comparisonOperator, symbol);
+                    continue;
                 }
             }
 
-            if (_position < text.Length && text[_position] == '=')
-            {
-                throw CreateError("use '==' for equality");
-            }
-
-            return null;
-        }
-
-        // Two-character operators first, so "<=" is not read as "<".
-        private static readonly (string Symbol, ComparisonOperator Operator)[] Operators =
-        [
-            ("==", ComparisonOperator.Equal),
-            ("!=", ComparisonOperator.NotEqual),
-            ("<=", ComparisonOperator.LessOrEqual),
-            (">=", ComparisonOperator.GreaterOrEqual),
-            ("<", ComparisonOperator.Less),
-            (">", ComparisonOperator.Greater)
-        ];
-
-        private object? ReadLiteral(string operatorText)
-        {
-            SkipWhitespace();
-            if (_position >= text.Length)
-            {
-                throw CreateError($"expected a value after '{operatorText}'");
-            }
-
-            var character = text[_position];
-            if (character is '"' or '\'')
-            {
-                var start = _position;
-                var end = text.IndexOf(character, start + 1);
-                if (end < 0)
-                {
-                    throw CreateError("unterminated string");
-                }
-
-                _position = end + 1;
-                return text.Substring(start + 1, end - start - 1);
-            }
-
-            if (char.IsDigit(character) || character is '-' or '+' or '.')
-            {
-                var start = _position;
-                while (_position < text.Length && (char.IsDigit(text[_position]) || text[_position] is '.' or 'e' or 'E' or '-' or '+'))
-                {
-                    _position++;
-                }
-
-                var numberText = text[start.._position];
-                if (!double.TryParse(numberText, NumberStyles.Float, CultureInfo.InvariantCulture, out var number))
-                {
-                    _position = start;
-                    throw CreateError($"invalid number '{numberText}'");
-                }
-
-                return number;
-            }
-
-            var word = ReadIdentifier() ?? throw CreateError($"expected a value after '{operatorText}'");
-            if (string.Equals(word, "true", StringComparison.OrdinalIgnoreCase))
+            if (memberPath.AsSpan(segmentStart, index - segmentStart) is "..")
             {
                 return true;
             }
 
-            if (string.Equals(word, "false", StringComparison.OrdinalIgnoreCase))
-            {
-                return false;
-            }
-
-            return string.Equals(word, "null", StringComparison.OrdinalIgnoreCase) ? null : word;
+            segmentStart = index + 1;
         }
 
-        private string? ReadIdentifier()
-        {
-            SkipWhitespace();
-            var start = _position;
-            if (_position >= text.Length || !(char.IsLetter(text[_position]) || text[_position] == '_'))
-            {
-                return null;
-            }
+        return false;
+    }
 
-            while (_position < text.Length && IsIdentifierCharacter(text[_position]))
-            {
-                _position++;
-            }
+    private readonly struct FilterContext(RegisteredSubject subject, PathProviderBase pathProvider) : IExpressionContext
+    {
+        public ExpressionValue ResolvePath(string path) =>
+            McpToolHelper.TryGetFilterPropertyFromPath(subject, pathProvider, path) is { } property
+                ? ExpressionValue.FromProperty(property, property.GetValue())
+                : ExpressionValue.Missing;
 
-            return text[start.._position];
-        }
+        // TryParse refuses 'value', so only 'subject' arrives here.
+        public ExpressionValue ResolveVariable(string variable, string? memberPath) =>
+            memberPath is null ? ExpressionValue.FromValue(subject.Subject) : ResolvePath(memberPath);
 
-        private bool TryConsumeSymbol(string symbol)
-        {
-            SkipWhitespace();
-            if (string.CompareOrdinal(text, _position, symbol, 0, symbol.Length) != 0)
-            {
-                return false;
-            }
+        // TryParse refuses pipes.
+        public ExpressionValue ApplyPipe(string name, ImmutableArray<string> arguments, ExpressionValue input) => input;
 
-            _position += symbol.Length;
-            return true;
-        }
-
-        private bool TryConsumeKeyword(string keyword)
-        {
-            SkipWhitespace();
-            var end = _position + keyword.Length;
-            if (end > text.Length ||
-                string.Compare(text, _position, keyword, 0, keyword.Length, StringComparison.OrdinalIgnoreCase) != 0 ||
-                (end < text.Length && IsIdentifierCharacter(text[end])))
-            {
-                return false;
-            }
-
-            _position = end;
-            return true;
-        }
-
-        private void SkipWhitespace()
-        {
-            while (_position < text.Length && char.IsWhiteSpace(text[_position]))
-            {
-                _position++;
-            }
-        }
-
-        private static bool IsIdentifierCharacter(char character) => char.IsLetterOrDigit(character) || character == '_';
-
-        private FormatException CreateError(string message) => new($"where: {message} at position {_position}");
+        public string ToText(ExpressionValue result) => string.Empty;
     }
 }

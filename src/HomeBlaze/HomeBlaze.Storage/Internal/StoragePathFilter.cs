@@ -1,3 +1,5 @@
+using HomeBlaze.Storage.Metadata;
+
 namespace HomeBlaze.Storage.Internal;
 
 /// <summary>
@@ -7,7 +9,8 @@ internal static class StoragePathFilter
 {
     /// <summary>
     /// Checks whether the path never becomes a subject: the path or one of its parent folders is hidden, which
-    /// is a name that starts with a dot (.DS_Store, .idea/workspace.xml), or has a temporary name.
+    /// is a name that starts with a dot (.DS_Store, .idea/workspace.xml), or has a temporary name. The metadata
+    /// file of a folder, <c>.metadata.json</c> in any case, is not hidden.
     /// </summary>
     /// <remarks>
     /// Only for paths within the storage and with forward slashes: an absolute path can have such a folder
@@ -19,7 +22,9 @@ internal static class StoragePathFilter
         {
             var separatorIndex = path.IndexOf('/');
             var segment = separatorIndex < 0 ? path : path[..separatorIndex];
-            if (segment.StartsWith('.') || IsTemporaryName(segment))
+            // In any case, so that a pass warns about one that is named in another case.
+            var isFolderMetadataFile = separatorIndex < 0 && segment.Equals(StorageMetadataPath.FolderFileName, StringComparison.OrdinalIgnoreCase);
+            if ((segment.StartsWith('.') && !isFolderMetadataFile) || IsTemporaryName(segment))
             {
                 return true;
             }

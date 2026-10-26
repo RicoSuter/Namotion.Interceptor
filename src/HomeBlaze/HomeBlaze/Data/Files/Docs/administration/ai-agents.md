@@ -1,7 +1,6 @@
 ---
 title: AI Agents
 navTitle: AI Agents
-position: 10
 ---
 
 # AI Agents
@@ -226,7 +225,7 @@ Each turn offers exactly the tools in `AllowedTools`, plus `update_memory`. This
 |---|---|---|
 | `browse` | on | Browses the subject tree and reads property values |
 | `search` | on | Finds subjects by title, path, type or property values |
-| `search_markdown` | on | Finds text in Markdown pages and documents, with line and snippet |
+| `search_markdown` | on | Finds text in Markdown pages and documents and in the [notes of metadata](metadata.md#notes-links-and-tags), with line and snippet |
 | `get_property` | on | Reads one property value |
 | `list_types` | on | Lists interfaces and concrete types, to find subjects by capability |
 | `list_methods` | on | Lists a subject's methods with their kind (`query` or `operation`) and whether they require confirmation |
@@ -241,7 +240,7 @@ Each turn offers exactly the tools in `AllowedTools`, plus `update_memory`. This
 | `update_memory` | always | Changes the agent's memory |
 | `web_search`, `web_fetch` | off | Search the web and load pages, see [Web tools](#web-tools) |
 
-Only methods marked `[Query]` or `[Operation]` are visible to the tools. A string result longer than 64K characters is cut and ends with a `[truncated: N characters]` line.
+Only methods marked `[Query]` or `[Operation]` are visible to the tools, without those excluded from agents (see [Building Subjects](../development/building-subjects.md#excluding-subjects-and-methods)). A string result longer than 64K characters is cut and ends with a `[truncated: N characters]` line. How agents read, find and change metadata, such as [notes, links and tags](metadata.md#notes-links-and-tags), and the order of folders is in [Metadata: Agents](metadata.md#agents).
 
 ### Reading pages and documents
 
@@ -256,7 +255,7 @@ Pages and documents, such as these docs under `/Docs`, are the main context abou
 With `invoke_operation` or `set_property` allowed, the edit form marks the agent as able to change devices and send notifications. The preamble tells it to change something only when asked or when its instructions call for it, and to say what it changed. These limits always apply:
 
 - **`set_property` never writes configuration**, for agents and external MCP clients alike. It writes only `[State]` properties and refuses one that is also `[Configuration]`, such as `IsEnabled` of an OPC UA server or the mode of a GPIO pin: "Property is not writable: path. It is a configuration property; set_property cannot change configuration, an operation of the subject may."
-- **Agent settings** are not reachable at all, and operations of agents, such as Run now, are refused: "Agents cannot run operations of agents."
+- **Agent settings** are not reachable at all, and operations of agents, such as Run now, are refused: "Agents cannot run operations of agents." `SetMetadata` of a storage for an agent or a subject inside one is refused as well: "Agents cannot change the metadata of agents." [`SearchMetadata`](metadata.md#agents) leaves out what `SetMetadata` refuses an agent.
 - **Operations that require confirmation** cannot be called through MCP by anyone; run them from the UI. `list_methods` marks them with `requiresConfirmation`. Examples: Wallbox reboot, firmware update, Unlock, Set ICP Max Current and charge port unlock and toggle; door lock unlock, toggle and unlatch; Nuki smart lock Lock 'n' Go and Lock 'n' Go with unlatch; Nuki Opener Open door, Activate ring to open and Activate continuous mode; FRITZ!Box guest WLAN on and toggle; adding and removing plugins; starting and stopping the OPC UA server and client; New conversation of an agent.
 
 `invoke_operation` reaches further than `set_property`: an operation can change anything it touches, including configuration, such as **Set Speed** of the sample motor setting `TargetSpeed`. Grant it as carefully. It can also release a Wallbox's charge port through **Pause Charging**, see [Wallbox](../devices/Wallbox.md#operations). And it can send any number of notifications, which can use up a channel's message quota, see [Pushover](../devices/Pushover.md#limitations).

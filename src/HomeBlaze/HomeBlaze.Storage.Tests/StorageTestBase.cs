@@ -1,8 +1,10 @@
 using System.Text;
 using System.Text.Json;
+using HomeBlaze.Abstractions;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Internal;
+using HomeBlaze.Storage.Metadata;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
@@ -81,6 +83,9 @@ public abstract class StorageTestBase : IDisposable
         _serviceProvider = serviceProvider;
         Context = context;
 
+        // As the root manager of the application does.
+        context.AddService<ISubjectPathResolver>(serviceProvider.GetRequiredService<SubjectPathResolver>());
+
         var storage = new FluentStorageContainer(
             typeRegistry,
             serviceProvider.GetRequiredService<ConfigurableSubjectSerializer>(),
@@ -133,6 +138,12 @@ public abstract class StorageTestBase : IDisposable
 
     protected string GetFullPath(string relativePath)
         => Path.Combine(StorageDirectory.FullName, relativePath.Replace('/', Path.DirectorySeparatorChar));
+
+    /// <summary>Reads a metadata file of the storage directory, failing the test when it cannot be read.</summary>
+    private protected StorageMetadataFile ReadMetadataFile(string relativePath)
+        => StorageMetadataFile.TryParse(File.ReadAllBytes(GetFullPath(relativePath)), out var file, out var error)
+            ? file
+            : throw error;
 
     protected void WriteFile(string relativePath, string content = "content")
     {

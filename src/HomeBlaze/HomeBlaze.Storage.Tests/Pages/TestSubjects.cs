@@ -603,6 +603,25 @@ public partial class TestMeter : IConfigurable
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 }
 
+/// <summary>A charger with states for the conditions of a value map.</summary>
+[InterceptorSubject]
+public partial class TestCharger : IConfigurable
+{
+    [Configuration]
+    [State]
+    public partial bool IsPluggedIn { get; set; }
+
+    [Configuration]
+    [State]
+    public partial bool IsCharging { get; set; }
+
+    [Configuration]
+    [State(Unit = StateUnit.Watt)]
+    public partial decimal ChargingPower { get; set; }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+}
+
 /// <summary>A layout whose values are configuration in a file and slot blocks on a page.</summary>
 [InterceptorSubject]
 public partial class TestBoard : IConfigurable

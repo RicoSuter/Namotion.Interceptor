@@ -142,7 +142,7 @@ public class TrackingScopeRenderCountTests
         // The parent renders every scope in one batch, so each scope also records the reads of the siblings after it.
         var beforeParentRender = keys.Select(log.Renders).ToArray();
         await host.RenderAgainAsync();
-        await WaitAsync(() => keys.Select(log.Renders).Zip(beforeParentRender).All(pair => pair.First > pair.Second) && renderer.UnacknowledgedBatchCount == 0);
+        await WaitAsync(() => keys.Select(log.Renders).Zip(beforeParentRender).All(pair => pair.First > pair.Second) && renderer.IsSettled);
         var afterParentRender = await ChangeLastAsync("after the render of the parent", SiblingCount - 1);
         await PassBarrierAsync("after the render of the parent");
         var afterOwnRenders = await ChangeLastAsync("after the own renders", null);
@@ -178,16 +178,16 @@ public class TrackingScopeRenderCountTests
             int Others(int firstRenders) => Enumerable.Range(0, last).Count(index => log.Renders(keys[index]) > before[index] + (index == 0 ? firstRenders : 0));
 
             people[last].FirstName = value;
-            await WaitAsync(() => log.Value(keys[last]) == value && renderer.UnacknowledgedBatchCount == 0);
+            await WaitAsync(() => log.Value(keys[last]) == value && renderer.IsSettled);
             if (expectedOthers is not null)
             {
-                await WaitAsync(() => Others(0) >= expectedOthers && renderer.UnacknowledgedBatchCount == 0);
+                await WaitAsync(() => Others(0) >= expectedOthers && renderer.IsSettled);
             }
 
             // A change of the first person, read by the first sibling only, makes most windows of changes of the other
             // siblings end before its render. The windows are not aligned, so this finds most renders, not all.
             people[0].FirstName = value;
-            await WaitAsync(() => log.Value(keys[0]) == value && renderer.UnacknowledgedBatchCount == 0);
+            await WaitAsync(() => log.Value(keys[0]) == value && renderer.IsSettled);
 
             return (log.Renders(keys[last]) - before[last], Others(1));
         }
@@ -196,7 +196,7 @@ public class TrackingScopeRenderCountTests
         {
             var before = keys.Select(log.Renders).ToArray();
             barrier.FirstName = value;
-            await WaitAsync(() => keys.Select(log.Renders).Zip(before).All(pair => pair.First > pair.Second) && renderer.UnacknowledgedBatchCount == 0);
+            await WaitAsync(() => keys.Select(log.Renders).Zip(before).All(pair => pair.First > pair.Second) && renderer.IsSettled);
         }
 
         static string Describe((int Last, int Others) result) => $"the last one {result.Last} times and {result.Others} others";
@@ -275,7 +275,7 @@ public class TrackingScopeRenderCountTests
     // Waits until the renders that the first render causes have happened, or reports what happened after a while.
     private static async Task SettleAsync(TestRenderer renderer, Func<bool> condition)
     {
-        await WaitAsync(() => renderer.UnacknowledgedBatchCount == 0);
+        await WaitAsync(() => renderer.IsSettled);
         await TryWaitAsync(renderer, condition, StaleTimeout);
     }
 
@@ -289,7 +289,7 @@ public class TrackingScopeRenderCountTests
         try
         {
             await AsyncTestHelpers.WaitUntilAsync(
-                () => condition() && renderer.UnacknowledgedBatchCount == 0, timeout, TimeSpan.FromMilliseconds(5));
+                () => condition() && renderer.IsSettled, timeout, TimeSpan.FromMilliseconds(5));
             return true;
         }
         catch (TimeoutException)

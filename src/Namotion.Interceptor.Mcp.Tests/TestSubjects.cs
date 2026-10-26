@@ -65,3 +65,14 @@ public partial class TestDeviceGroup
         Devices = new Dictionary<string, TestDevice>();
     }
 }
+
+[InterceptorSubject]
+public partial class TestMixedGroup
+{
+    public partial Dictionary<string, IInterceptorSubject> Items { get; set; }
+
+    public TestMixedGroup()
+    {
+        Items = new Dictionary<string, IInterceptorSubject>();
+    }
+}

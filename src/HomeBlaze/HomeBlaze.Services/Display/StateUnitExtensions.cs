@@ -101,9 +101,18 @@ public static class StateUnitExtensions
             }
         }
 
-        // Default formatting for common types
+        return FormatDisplayValue(value, timeZone);
+    }
+
+    /// <summary>
+    /// Formats a value as <see cref="GetPropertyDisplayValue"/> does for a property without a unit: Yes or No for a boolean,
+    /// at most two decimals for a number, and a date in the time zone of the viewer, or of the server when it is null.
+    /// </summary>
+    public static string FormatDisplayValue(object value, ITimeZoneDisplay? timeZone = null)
+    {
         return value switch
         {
+            TimeSpan timeSpan => FormatTimeSpan(timeSpan),
             bool b => b ? "Yes" : "No",
             double d => d.ToString("0.##", CultureInfo.InvariantCulture),
             float f => f.ToString("0.##", CultureInfo.InvariantCulture),
@@ -148,30 +157,9 @@ public static class StateUnitExtensions
     /// </summary>
     public static string FormatWithUnit(decimal value, StateUnit unit)
     {
-        // Check if this unit belongs to a scalable family
-        if (UnitFamilyLookup.TryGetValue(unit, out var lookup))
+        if (TryGetScaledUnit(unit, value, out var suffix, out var factor))
         {
-            var family = UnitFamilies[lookup.FamilyIndex];
-            var inputEntry = family[lookup.UnitIndex];
-
-            // Convert to base unit (multiply by the input unit's factor)
-            var baseValue = value * inputEntry.Factor;
-
-            // Find the best display unit: largest unit where |baseValue / factor| >= 1
-            var bestIndex = 0; // default to smallest
-            for (var i = family.Length - 1; i >= 0; i--)
-            {
-                if (Math.Abs(baseValue / family[i].Factor) >= 1m)
-                {
-                    bestIndex = i;
-                    break;
-                }
-            }
-
-            var bestEntry = family[bestIndex];
-            var displayValue = baseValue / bestEntry.Factor;
-
-            return FormatDecimalValue(displayValue, bestEntry.Suffix);
+            return FormatDecimalValue(value * factor, suffix);
         }
 
         // No family found: use static suffix with space handling
@@ -187,6 +175,54 @@ public static class StateUnitExtensions
         return unit == StateUnit.Default
             ? value.ToString(CultureInfo.InvariantCulture)
             : $"{value.ToString(CultureInfo.InvariantCulture)} {unit}";
+    }
+
+    /// <summary>
+    /// Gets the unit of its family that <see cref="FormatWithUnit"/> shows a value of <paramref name="magnitude"/> in: the
+    /// largest unit in which the value is at least 1, such as kWh for 1500 Wh. A value of 0 stays in <paramref name="unit"/>,
+    /// as it is 0 in every unit and the one the property declares is the one a reader expects. Returns false for a unit of no family.
+    /// </summary>
+    /// <param name="unit">The unit of the value.</param>
+    /// <param name="magnitude">The value in <paramref name="unit"/>; its sign is ignored.</param>
+    /// <param name="suffix">The suffix of the unit to show the value in.</param>
+    /// <param name="factor">The factor that converts a value in <paramref name="unit"/> to the unit to show it in.</param>
+    public static bool TryGetScaledUnit(StateUnit unit, decimal magnitude, out string suffix, out decimal factor)
+    {
+        if (!UnitFamilyLookup.TryGetValue(unit, out var lookup))
+        {
+            suffix = string.Empty;
+            factor = 1m;
+            return false;
+        }
+
+        var family = UnitFamilies[lookup.FamilyIndex];
+        var inputFactor = family[lookup.UnitIndex].Factor;
+
+        if (magnitude == 0m)
+        {
+            suffix = family[lookup.UnitIndex].Suffix;
+            factor = 1m;
+            return true;
+        }
+
+        // Saturated rather than overflowing, which only picks the largest unit.
+        var absolute = Math.Abs(magnitude);
+        var baseValue = absolute > decimal.MaxValue / inputFactor ? decimal.MaxValue : absolute * inputFactor;
+
+        // The largest unit in which the value is at least 1, or else the smallest.
+        var bestIndex = 0;
+        for (var index = family.Length - 1; index >= 0; index--)
+        {
+            if (baseValue / family[index].Factor >= 1m)
+            {
+                bestIndex = index;
+                break;
+            }
+        }
+
+        suffix = family[bestIndex].Suffix;
+        factor = inputFactor / family[bestIndex].Factor;
+        return true;
     }
 
     private static string FormatDecimalValue(decimal value, string suffix)
@@ -237,6 +273,7 @@ public static class StateUnitExtensions
         StateUnit.VoltAmpereReactiveHour => ("varh", true),
         StateUnit.AmpereHour => ("Ah", true),
         StateUnit.WattPerSquareMeter => ("W/m²", true),
+        StateUnit.DecibelMilliwatt => ("dBm", true),
         _ => null
     };
 

@@ -16,20 +16,25 @@
     var state = ValueRangeResolver.GetState(reading.Property, reading.Value, gauge.Minimum, gauge.Maximum);
     var size = gauge.Size;
 
-    if ((reading.MapError ?? state.Error) is { } error)
+    var labelText = _label.Render(gauge.Label, PathResolver, gauge, reading.Binding, TimeZone, out var labelError);
+
+    if ((reading.MapError ?? state.Error ?? labelError) is { } error)
     {
         <WidgetArgumentError Message="@error" />
     }
     else
     {
-        var label = ValueReader.GetLabel(reading.Property, gauge.Label, path);
+        var label = ValueReader.GetLabel(reading.Property, labelText, path);
         // A meter must have a value, so without one the ring is a named group; Blazor leaves out the null attributes.
         var isMeter = state.AriaValue is not null;
 
+        var ringColor = GaugeDisplay.GetColor(reading);
         @* The ring is the meter, and the label is next to it rather than inside, because a meter hides what is inside it
            from screen readers and the label can be a button. *@
         <div class="gauge-widget place-centered" style="@GaugeDisplay.GetSizeStyle(size)" data-testid="gauge">
+            @* The palette override of a CSS color goes on the ring, because the inline style of the value holds its size. *@
             <div class="gauge-ring"
+                 style="@ringColor.Style"
                  role="@(isMeter ? "meter" : "group")"
                  aria-label="@label"
                  aria-valuenow="@GaugeDisplay.FormatNumber(state.AriaValue)"
@@ -40,7 +45,7 @@
                  data-percent="@(state.Percent?.ToString("0.##", CultureInfo.InvariantCulture))">
                 @* The full ring in a faint color is the track, so that an empty ring is still seen. The inline size overrides the fixed sizes of MudBlazor. *@
                 <MudProgressCircular Value="100" Min="0" Max="100" StrokeWidth="4" Class="gauge-track" Style="width: 100%; height: 100%;" aria-hidden="true" />
-                <MudProgressCircular Value="@(state.Percent ?? 0)" Min="0" Max="100" StrokeWidth="4" Rounded="true" Color="@GaugeDisplay.GetColor(reading)" Class="gauge-value" Style="width: 100%; height: 100%;" aria-hidden="true" />
+                <MudProgressCircular Value="@(state.Percent ?? 0)" Min="0" Max="100" StrokeWidth="4" Rounded="true" Color="@ringColor.Theme" Class="gauge-value" Style="width: 100%; height: 100%;" aria-hidden="true" />
                 <div class="gauge-text">
                     <ValueText Reading="@reading" Path="@path" />
                 </div>
@@ -51,6 +56,8 @@
 }
 
 @code {
+    private readonly WidgetText _label = new(nameof(Gauge.Label), ExpressionUse.WidgetText);
+
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
 }

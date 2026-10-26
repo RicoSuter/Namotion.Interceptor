@@ -3,6 +3,8 @@ using HomeBlaze.Components;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Files;
 using Microsoft.Extensions.DependencyInjection;
+using Namotion.Interceptor;
+using Namotion.Interceptor.Tracking.Recorder;
 using MudBlazor;
 using Xunit;
 
@@ -21,6 +23,65 @@ public class ValueReaderTests
         ::: Case Value=true Text="an" Color=Success Icon=Lightbulb
         ::: Case Value=False Color=Error
         ::: Case Value=TRUE Text="never"
+        ::
+
+        :: HomeBlaze.Components.ValueMap#css
+        ::: Case Value=true Color="#ffffff80"
+        ::: Case Value=false Color="var(--mud-palette-text-secondary)"
+        ::
+
+        :: HomeBlaze.Components.ValueMap#broken
+        ::: Case Value=true Color=Success
+        ::: Case Value=false Color="red;background:url(x)"
+        ::
+
+        :: HomeBlaze.Components.ValueMap#textcolor
+        ::: Case Value=true Text="an" Color=Info TextColor="#ffffff"
+        ::: Case Value=false Color=Warning
+        ::
+
+        :: HomeBlaze.Components.ValueMap#brokentext
+        ::: Case Value=true Color=Info
+        ::: Case Value=false Color=Warning TextColor="#fff;background:url(x)"
+        ::
+
+        :: {{{Namespace}}}.TestCharger#wallbox IsPluggedIn=true IsCharging=true ChargingPower=7400
+        ::
+
+        :: {{{Namespace}}}.TestCharger#idle IsPluggedIn=true IsCharging=false ChargingPower=0
+        ::
+
+        :: {{{Namespace}}}.TestCharger#free IsPluggedIn=false IsCharging=false ChargingPower=0
+        ::
+
+        :: HomeBlaze.Components.ValueMap#charging
+        ::: Case When="subject/IsCharging" Text="{{ subject/ChargingPower }}" Color=Warning Icon=EvStation
+        ::: Case When="subject/IsPluggedIn" Text="Connected" Icon=Power
+        ::: Case Text="Free"
+        ::
+
+        :: HomeBlaze.Components.ValueMap#power
+        ::: Case When="value >= 5000" Color=Error
+        ::: Case When="value >= 1000" Color=Warning
+        ::: Case Color=Success
+        ::
+
+        :: HomeBlaze.Components.ValueMap#pagepath
+        ::: Case When="meter/IsOn" Text="meter is on"
+        ::: Case Text="meter is off"
+        ::
+
+        :: HomeBlaze.Components.ValueMap#defaultfirst
+        ::: Case Text="always"
+        ::: Case Value=true Text="never"
+        ::
+
+        :: HomeBlaze.Components.ValueMap#badwhen
+        ::: Case When="value >" Color=Info
+        ::
+
+        :: HomeBlaze.Components.ValueMap#badtext
+        ::: Case Value=true Text="{{ value | rounded }}"
         ::
         """;
 
@@ -130,6 +191,86 @@ public class ValueReaderTests
         Assert.Equal($"Cannot resolve map: {map}", reading.MapError);
     }
 
+    [Fact]
+    public async Task WhenMatchedCaseHasACssColor_ThenReadingHasItWithItsInlineStyle()
+    {
+        // Arrange
+        var (resolver, page) = await AddPageAsync();
+
+        // Act
+        var reading = ValueReader.Read(resolver, page, "meter/IsOn", "css", null);
+
+        // Assert
+        Assert.Null(reading.MapError);
+        Assert.Equal(Color.Primary, reading.Color.Theme);
+        Assert.Equal("#ffffff80", reading.Color.Css);
+        Assert.StartsWith("--mud-palette-primary: #ffffff80; ", reading.Color.Style);
+        Assert.Same(reading.Color, ValueReader.Read(resolver, page, "meter/IsOn", "css", null).Color);
+    }
+
+    [Fact]
+    public async Task WhenACaseOfTheMapHasNoColor_ThenTheMapIsNotResolvedAndReadingHasTheError()
+    {
+        // Arrange
+        var (resolver, page) = await AddPageAsync();
+
+        // Act
+        var valueMap = ValueReader.ResolveMap(resolver, page, "broken", out var error);
+        var reading = ValueReader.Read(resolver, page, "meter/IsOn", "broken", null);
+
+        // Assert: the error does not depend on whether the value matches the case with the wrong color.
+        Assert.Null(valueMap);
+        Assert.Equal("Unknown color 'red;background:url(x)': use a theme color like Success or Surface 30%, or a CSS color like #ffffff80", error);
+        Assert.Equal(error, reading.MapError);
+        Assert.Equal(Color.Default, reading.Color);
+    }
+
+    [Fact]
+    public async Task WhenMatchedCaseHasATextColor_ThenReadingHasItNextToTheFill()
+    {
+        // Arrange
+        var (resolver, page) = await AddPageAsync();
+
+        // Act
+        var reading = ValueReader.Read(resolver, page, "meter/IsOn", "textcolor", null);
+
+        // Assert
+        Assert.Null(reading.MapError);
+        Assert.Equal(Color.Info, reading.Color);
+        Assert.Equal("#ffffff", reading.TextColor.Css);
+        Assert.Same(reading.TextColor, ValueReader.Read(resolver, page, "meter/IsOn", "textcolor", null).TextColor);
+    }
+
+    [Fact]
+    public async Task WhenMatchedCaseHasNoTextColor_ThenReadingKeepsTheTextColorOfTheFill()
+    {
+        // Arrange
+        var (resolver, page) = await AddPageAsync();
+
+        // Act
+        var reading = ValueReader.Read(resolver, page, "meter/IsOn", "onoff", null);
+
+        // Assert
+        Assert.Same(ValueColor.Default, reading.TextColor);
+    }
+
+    [Fact]
+    public async Task WhenACaseOfTheMapHasATextColorThatIsNoColor_ThenTheMapIsNotResolvedAndReadingHasTheError()
+    {
+        // Arrange
+        var (resolver, page) = await AddPageAsync();
+
+        // Act
+        var valueMap = ValueReader.ResolveMap(resolver, page, "brokentext", out var error);
+        var reading = ValueReader.Read(resolver, page, "meter/IsOn", "brokentext", null);
+
+        // Assert: the case with the wrong text color is not the one that matches.
+        Assert.Null(valueMap);
+        Assert.Equal("Unknown color '#fff;background:url(x)': use a theme color like Success or Surface 30%, or a CSS color like #ffffff80", error);
+        Assert.Equal(error, reading.MapError);
+        Assert.Same(ValueColor.Default, reading.TextColor);
+    }
+
     [Theory]
     [InlineData("meter/Power[")]
     [InlineData("meter/Power/Extra")]
@@ -185,11 +326,11 @@ public class ValueReaderTests
     public async Task WhenPropertyOfASubjectIsRead_ThenTextIsTheDisplayValue()
     {
         // Arrange
-        var (_, page) = await AddPageAsync();
+        var (resolver, page) = await AddPageAsync();
         var meter = ((IPathScope)page).TryGetNamedSubject("meter")!;
 
         // Act
-        var reading = ValueReader.ReadProperty(meter, nameof(TestMeter.Power), null, null);
+        var reading = ValueReader.ReadProperty(resolver, meter, nameof(TestMeter.Power), null, null);
 
         // Assert
         Assert.False(reading.IsMissing);
@@ -207,7 +348,7 @@ public class ValueReaderTests
         var valueMap = ValueReader.ResolveMap(resolver, page, "onoff", out _);
 
         // Act
-        var reading = ValueReader.ReadProperty(meter, nameof(TestMeter.IsOn), valueMap, null);
+        var reading = ValueReader.ReadProperty(resolver, meter, nameof(TestMeter.IsOn), valueMap, null);
 
         // Assert
         Assert.Equal("an", reading.Text);
@@ -223,11 +364,11 @@ public class ValueReaderTests
     public async Task WhenPropertyOfASubjectIsNotSetOrUnknown_ThenReadingIsMissing(string? propertyName)
     {
         // Arrange
-        var (_, page) = await AddPageAsync();
+        var (resolver, page) = await AddPageAsync();
         var meter = ((IPathScope)page).TryGetNamedSubject("meter")!;
 
         // Act
-        var reading = ValueReader.ReadProperty(meter, propertyName, null, null);
+        var reading = ValueReader.ReadProperty(resolver, meter, propertyName, null, null);
 
         // Assert
         Assert.True(reading.IsMissing);
@@ -249,6 +390,103 @@ public class ValueReaderTests
         Assert.Equal("Cannot resolve map: nomap", error);
     }
 
+    [Theory]
+    [InlineData("wallbox", "7.4 kW", "Warning", "EvStation")]
+    [InlineData("idle", "Connected", "Default", "Power")]
+    [InlineData("free", "Free", "Default", null)]
+    public async Task WhenPathLeadsToASubject_ThenTheCasesReadItsStates(string path, string text, string color, string? icon)
+    {
+        // Arrange
+        var (resolver, page) = await AddPageAsync();
+
+        // Act
+        var reading = ValueReader.Read(resolver, page, path, "charging", null);
+
+        // Assert
+        Assert.Null(reading.MapError);
+        Assert.False(reading.IsMissing);
+        Assert.Equal(text, reading.Text);
+        Assert.Equal(Enum.Parse<Color>(color), reading.Color.Theme);
+        Assert.Equal(icon, reading.Icon);
+    }
+
+    [Theory]
+    [InlineData("wallbox/ChargingPower", "7.4 kW", "Error")]
+    [InlineData("idle/ChargingPower", "0 W", "Success")]
+    public async Task WhenCasesHaveRangesOfTheValue_ThenTheTextIsTheValueAndTheColorThatOfItsRange(string path, string text, string color)
+    {
+        // Arrange
+        var (resolver, page) = await AddPageAsync();
+
+        // Act
+        var reading = ValueReader.Read(resolver, page, path, "power", null);
+
+        // Assert
+        Assert.Equal(text, reading.Text);
+        Assert.Equal(Enum.Parse<Color>(color), reading.Color.Theme);
+    }
+
+    [Theory]
+    [InlineData("defaultfirst", "Case 1 has no Value and no When, so it matches every value and the cases after it never match. Make it the last case.")]
+    [InlineData("badwhen", "Case 1, When: expected a value after '>' at position 7")]
+    [InlineData("badtext", "Case 1, Text: Unknown pipe 'rounded'")]
+    public async Task WhenACaseHasAMistake_ThenTheWidgetShowsTheMapError(string map, string expected)
+    {
+        // Arrange
+        var (resolver, page) = await AddPageAsync();
+
+        // Act
+        var reading = ValueReader.Read(resolver, page, "meter/IsOn", map, null);
+
+        // Assert
+        Assert.Equal(expected, reading.MapError);
+    }
+
+    [Fact]
+    public async Task WhenACasePathHasNoVariable_ThenItResolvesFromThePageThatHoldsTheMap()
+    {
+        // Arrange
+        var (resolver, page) = await AddPageAsync();
+
+        // Act
+        var reading = ValueReader.Read(resolver, page, "idle", "pagepath", null);
+
+        // Assert
+        Assert.Null(reading.MapError);
+        Assert.Equal("meter is on", reading.Text);
+    }
+
+    [Fact]
+    public async Task WhenPathLeadsNowhere_ThenNoCaseIsTriedAndTheValueIsMissing()
+    {
+        // Arrange
+        var (resolver, page) = await AddPageAsync();
+
+        // Act
+        var reading = ValueReader.Read(resolver, page, "nothing/Here", "charging", null);
+
+        // Assert
+        Assert.True(reading.IsMissing);
+        Assert.Equal(ValueReader.MissingText, reading.Text);
+    }
+
+    [Fact]
+    public async Task WhenACaseReadsAStateOfTheSubject_ThenThatStateIsRecorded()
+    {
+        // Arrange
+        var (resolver, page) = await AddPageAsync();
+        var charger = ((IPathScope)page).TryGetNamedSubject("idle")!;
+        var scope = ReadPropertyRecorder.Start();
+
+        // Act
+        ValueReader.Read(resolver, page, "idle", "charging", null);
+        var recorded = scope.GetPropertiesAndDispose();
+
+        // Assert: this record is what makes the widget render again when the charger starts charging
+        Assert.Contains(new PropertyReference(charger, nameof(TestCharger.IsCharging)), recorded);
+        Assert.Contains(new PropertyReference(charger, nameof(TestCharger.IsPluggedIn)), recorded);
+    }
+
     [Fact]
     public async Task WhenPropertyOfASubjectIsReadWithAResolvedMap_ThenReadingEqualsThatOfThePath()
     {
@@ -258,7 +496,7 @@ public class ValueReaderTests
         var valueMap = ValueReader.ResolveMap(resolver, page, "onoff", out _);
 
         // Act
-        var fromSubject = ValueReader.ReadProperty(meter, nameof(TestMeter.IsOn), valueMap, null);
+        var fromSubject = ValueReader.ReadProperty(resolver, meter, nameof(TestMeter.IsOn), valueMap, null);
         var fromPath = ValueReader.Read(resolver, page, "meter/IsOn", "onoff", null);
 
         // Assert
@@ -275,9 +513,9 @@ public class ValueReaderTests
         var valueMap = ValueReader.ResolveMap(resolver, page, "onoff", out _);
 
         // Act
-        var fromProperty = ValueReader.ReadResolved(property, valueMap, null);
+        var fromProperty = ValueReader.ReadResolved(resolver, property, valueMap, null);
         var fromPath = ValueReader.Read(resolver, page, "meter/IsOn", "onoff", null);
-        var withoutProperty = ValueReader.ReadResolved(null, valueMap, null);
+        var withoutProperty = ValueReader.ReadResolved(resolver, null, valueMap, null);
 
         // Assert
         Assert.Equal(fromPath, fromProperty);

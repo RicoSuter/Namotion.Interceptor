@@ -19,12 +19,20 @@ public static class PropertyHistoryChartModel
     /// </summary>
     public const int MaxPoints = 1000;
 
-    /// <summary>
-    /// The aggregations a chart offers and accepts: every one of <see cref="HistoryAggregations.All"/> except
-    /// <see cref="HistoryAggregations.Delta"/>, which is for agents reading cumulative counters.
-    /// </summary>
-    internal static readonly ImmutableArray<string> ChartAggregations =
+    // The aggregations of a number that is no counter, in display order.
+    private static readonly ImmutableArray<string> NumberAggregations =
         HistoryAggregations.All.Remove(HistoryAggregations.Delta);
+
+    // The aggregations of a cumulative counter, in display order: the last value first, so a chart without an
+    // aggregation draws the reading of the counter.
+    private static readonly string[] CounterAggregations =
+    [
+        HistoryAggregations.Last, HistoryAggregations.First, HistoryAggregations.Minimum, HistoryAggregations.Maximum,
+        HistoryAggregations.Count, HistoryAggregations.Delta
+    ];
+
+    private static readonly string[] DiscreteAggregations =
+        [HistoryAggregations.Last, HistoryAggregations.First, HistoryAggregations.Count];
 
     // "Nice" bucket sizes in ascending order; auto-bucket picks the smallest >= range/200.
     private static readonly TimeSpan[] Ladder =
@@ -38,13 +46,15 @@ public static class PropertyHistoryChartModel
 
     /// <summary>
     /// A user-selectable aggregation period for the chart. <see cref="IsAuto"/> entries compute their bucket from the
-    /// current range (so they have no fixed <see cref="Bucket"/>); a null <see cref="Bucket"/> on a non-auto entry
-    /// means a raw query (individual samples, no aggregation). <see cref="ShortName"/> is the name a page writes.
+    /// current range (so they have no fixed <see cref="Bucket"/>); a <see cref="CalendarUnit"/> entry is a calendar
+    /// period in the time zone of the viewer; any other entry without a <see cref="Bucket"/> means a raw query
+    /// (individual samples, no aggregation). <see cref="ShortName"/> is the name a page writes.
     /// </summary>
-    public readonly record struct ChartPeriod(string ShortName, string Label, TimeSpan? Bucket, bool IsAuto)
+    public readonly record struct ChartPeriod(
+        string ShortName, string Label, TimeSpan? Bucket, bool IsAuto, HistoryCalendarUnit? CalendarUnit = null)
     {
         /// <summary>Gets whether the period asks for raw samples.</summary>
-        public bool IsRaw => !IsAuto && Bucket is null;
+        public bool IsRaw => !IsAuto && Bucket is null && CalendarUnit is null;
     }
 
     /// <summary>
@@ -65,6 +75,9 @@ public static class PropertyHistoryChartModel
         new ChartPeriod("6h", "6h", TimeSpan.FromHours(6), IsAuto: false),
         new ChartPeriod("12h", "12h", TimeSpan.FromHours(12), IsAuto: false),
         new ChartPeriod("24h", "24h", TimeSpan.FromHours(24), IsAuto: false),
+        new ChartPeriod("day", "Day", null, IsAuto: false, HistoryCalendarUnit.Day),
+        new ChartPeriod("week", "Week", null, IsAuto: false, HistoryCalendarUnit.Week),
+        new ChartPeriod("month", "Month", null, IsAuto: false, HistoryCalendarUnit.Month),
     };
 
     /// <summary>
@@ -83,6 +96,8 @@ public static class PropertyHistoryChartModel
         new RangePreset("24h", "Last 24 hours", TimeSpan.FromHours(24)),
         new RangePreset("7d", "Last 7 days", TimeSpan.FromDays(7)),
         new RangePreset("30d", "Last 30 days", TimeSpan.FromDays(30)),
+        new RangePreset("90d", "Last 90 days", TimeSpan.FromDays(90)),
+        new RangePreset("1y", "Last year", TimeSpan.FromDays(365)),
     };
 
     /// <summary>Finds the span of a range preset by its short name, ignoring case.</summary>
@@ -121,7 +136,7 @@ public static class PropertyHistoryChartModel
     internal const string AverageAlias = "Average";
 
     /// <summary>
-    /// Finds an aggregation of <see cref="ChartAggregations"/> by its name, or the time-weighted average by
+    /// Finds an aggregation of <see cref="HistoryAggregations.All"/> by its name, or the time-weighted average by
     /// <see cref="AverageAlias"/>, ignoring case.
     /// </summary>
     internal static bool TryGetAggregation(string? name, out string aggregation)
@@ -132,7 +147,7 @@ public static class PropertyHistoryChartModel
             return true;
         }
 
-        foreach (var candidate in ChartAggregations)
+        foreach (var candidate in HistoryAggregations.All)
         {
             if (string.Equals(candidate, name, StringComparison.OrdinalIgnoreCase))
             {
@@ -236,13 +251,104 @@ public static class PropertyHistoryChartModel
 
     /// <summary>
     /// Resolves the effective bucket for a selected period: an auto period uses <see cref="AutoBucket"/> over the
-    /// current range (clamped to <paramref name="availableCoverage"/> when supplied); any other period uses its
-    /// fixed <see cref="ChartPeriod.Bucket"/> (null means a raw query).
+    /// current range (clamped to <paramref name="availableCoverage"/> when supplied), with fewer buckets for bars, which
+    /// take the calendar day, week or month in <paramref name="timeZone"/> once a bucket spans a day or more; a calendar
+    /// period is aligned to local period starts in <paramref name="timeZone"/>; any other period uses its fixed
+    /// <see cref="ChartPeriod.Bucket"/> (null means a raw query).
     /// </summary>
-    public static TimeSpan? ResolveBucket(ChartPeriod period, TimeSpan range, TimeSpan? availableCoverage = null)
+    public static HistoryBucket? ResolveBucket(
+        ChartPeriod period, TimeSpan range, TimeZoneInfo timeZone, TimeSpan? availableCoverage = null, bool isBars = false)
     {
-        return period.IsAuto ? AutoBucket(range, availableCoverage) : period.Bucket;
+        if (period.CalendarUnit is { } unit)
+        {
+            return HistoryBucket.Calendar(unit, timeZone);
+        }
+
+        if (!period.IsAuto)
+        {
+            return period.Bucket;
+        }
+
+        var size = AutoBucket(range, availableCoverage, isBars ? AutoBarBuckets : AutoLineBuckets);
+
+        // A bar of a day or longer is an amount per day, week or month, which the epoch grid would split at UTC midnight.
+        return !isBars || size < TimeSpan.FromDays(1) ? size :
+            HistoryBucket.Calendar(
+                size >= TimeSpan.FromDays(30) ? HistoryCalendarUnit.Month :
+                size >= TimeSpan.FromDays(7) ? HistoryCalendarUnit.Week :
+                HistoryCalendarUnit.Day,
+                timeZone);
     }
+
+    /// <summary>
+    /// Gets the start of the window of a range that ends at <paramref name="to"/>: <paramref name="to"/> minus
+    /// <paramref name="range"/>, except for a calendar bucket, whose window holds as many whole periods as the range lasts
+    /// on average, at least one, the newest ending at <paramref name="to"/>. A range of seven days in days then shows
+    /// today and the six days before it, and a year in months this month and the eleven before it.
+    /// </summary>
+    /// <param name="to">The end of the window.</param>
+    /// <param name="range">The time span that ends at <paramref name="to"/>.</param>
+    /// <param name="bucket">The bucket of the query, or null for raw samples.</param>
+    internal static DateTimeOffset GetWindowStart(DateTimeOffset to, TimeSpan range, HistoryBucket? bucket)
+    {
+        if (bucket is not { CalendarUnit: { } unit } calendar)
+        {
+            return to - range;
+        }
+
+        // Counted rather than subtracted, so that a change of the clocks, a weekday or a leap day does not change how many
+        // periods the window holds.
+        var averageLength = unit switch
+        {
+            HistoryCalendarUnit.Day => TimeSpan.FromDays(1),
+            HistoryCalendarUnit.Week => TimeSpan.FromDays(7),
+            HistoryCalendarUnit.Month => TimeSpan.FromDays(365.2425 / 12),
+            _ => TimeSpan.FromDays(365.2425)
+        };
+        var count = Math.Max(1, (int)Math.Round(range / averageLength));
+        var start = BucketAlignment.Start(to.AddTicks(-1), calendar);
+        for (var period = 1; period < count; period++)
+        {
+            start = BucketAlignment.Start(start.AddTicks(-1), calendar);
+        }
+
+        return start;
+    }
+
+    /// <summary>
+    /// Gets the start of every bucket that a query of [<paramref name="from"/>, <paramref name="to"/>) in
+    /// <paramref name="bucket"/> returns, ascending: at most <see cref="MaxPoints"/>, the newest ones. The first bucket
+    /// can start before <paramref name="from"/>.
+    /// </summary>
+    internal static IReadOnlyList<DateTimeOffset> GetBucketStarts(DateTimeOffset from, DateTimeOffset to, HistoryBucket bucket)
+    {
+        if (from >= to)
+        {
+            return [];
+        }
+
+        var starts = new List<DateTimeOffset>();
+        for (var start = BucketAlignment.FirstBucketStart(from, to, bucket, MaxPoints);
+             start < to;
+             start = BucketAlignment.Next(start, bucket))
+        {
+            starts.Add(start);
+        }
+
+        return starts;
+    }
+
+    /// <summary>
+    /// Gets the typical length of a bucket: its size, or for a calendar period a day, a week, 31 days or 366 days, the
+    /// longest the period can be apart from a change of the clocks.
+    /// </summary>
+    internal static TimeSpan GetNominalLength(HistoryBucket bucket) => bucket.FixedSize ?? bucket.CalendarUnit switch
+    {
+        HistoryCalendarUnit.Day => TimeSpan.FromDays(1),
+        HistoryCalendarUnit.Week => TimeSpan.FromDays(7),
+        HistoryCalendarUnit.Month => TimeSpan.FromDays(31),
+        _ => TimeSpan.FromDays(366)
+    };
 
     /// <summary>
     /// Resolves the half-open [from, to) UTC window for a custom date range. The picked "To" date is treated as the
@@ -275,6 +381,7 @@ public static class PropertyHistoryChartModel
     /// <summary>Returns a short human description of an aggregation identifier, for a helper line under the select.</summary>
     public static string DescribeAggregation(string aggregation) => aggregation switch
     {
+        HistoryAggregations.Delta => "increase of the counter",
         HistoryAggregations.TimeWeightedAverage => "time-weighted average",
         HistoryAggregations.SampleAverage => "count-weighted mean",
         HistoryAggregations.Last => "last value",
@@ -289,20 +396,44 @@ public static class PropertyHistoryChartModel
 
     /// <summary>
     /// Returns a short human description of a selected period for a helper line: Auto shows its resolved bucket
-    /// ("about 15s") or "auto" if not yet resolved; a fixed period shows "{size} buckets"; None shows "raw samples".
+    /// ("about 15s") or "auto" if not yet resolved; a calendar period, also one that Auto resolved to, names its unit ("calendar days"); a fixed period
+    /// shows "{size} buckets"; None shows "raw samples".
     /// </summary>
-    public static string DescribePeriod(ChartPeriod period, TimeSpan? resolvedBucket)
+    public static string DescribePeriod(ChartPeriod period, HistoryBucket? resolvedBucket)
     {
-        if (period.IsAuto)
+        // An auto period of bars can resolve to a calendar period as well.
+        var calendarUnit = period.CalendarUnit ?? resolvedBucket?.CalendarUnit;
+        if (period.IsAuto && calendarUnit is null)
         {
-            return resolvedBucket is { } bucket ? $"about {FormatDuration(bucket)}" : "auto";
+            return resolvedBucket is { FixedSize: { } bucket } ? $"about {FormatDuration(bucket)}" : "auto";
+        }
+
+        if (calendarUnit is { } unit)
+        {
+            return unit switch
+            {
+                HistoryCalendarUnit.Day => "calendar days",
+                HistoryCalendarUnit.Week => "weeks from Monday",
+                HistoryCalendarUnit.Month => "calendar months",
+                _ => "calendar years"
+            };
         }
 
         return period.Bucket is { } fixedBucket ? $"{FormatDuration(fixedBucket)} buckets" : "raw samples";
     }
 
+    /// <summary>The number of buckets <see cref="AutoBucket"/> aims at for lines.</summary>
+    internal const int AutoLineBuckets = 200;
+
     /// <summary>
-    /// Returns a "nice" bucket size approximately <c>target / 200</c> (about 200 buckets across the target span).
+    /// The number of buckets <see cref="AutoBucket"/> aims at for bars, fewer than for lines, because every bar takes some
+    /// pixels of its own.
+    /// </summary>
+    internal const int AutoBarBuckets = 50;
+
+    /// <summary>
+    /// Returns a "nice" bucket size approximately <c>target / <paramref name="bucketCount"/></c> (about that many buckets
+    /// across the target span).
     /// When <paramref name="availableCoverage"/> is greater than zero and narrower than <paramref name="range"/>,
     /// the bucket is computed from the coverage instead, so a range far wider than the recorded data still picks a
     /// bucket small enough to fit the data (otherwise the buckets would be larger than any store's coverage and
@@ -315,7 +446,7 @@ public static class PropertyHistoryChartModel
     /// recording for five minutes asked for an hour picked a one-second bucket, and every such chart reported
     /// truncation for having too little data rather than too much.
     /// </remarks>
-    public static TimeSpan AutoBucket(TimeSpan range, TimeSpan? availableCoverage = null)
+    public static TimeSpan AutoBucket(TimeSpan range, TimeSpan? availableCoverage = null, int bucketCount = AutoLineBuckets)
     {
         var target = availableCoverage is { } coverage && coverage > TimeSpan.Zero && coverage < range
             ? coverage
@@ -323,7 +454,7 @@ public static class PropertyHistoryChartModel
 
         var capTicks = GetSmallestBucketTicks(range);
         var targetTicks = TimeSpan.FromTicks(
-            Math.Max(Math.Max(target.Ticks / 200, capTicks), TimeSpan.TicksPerSecond));
+            Math.Max(Math.Max(target.Ticks / Math.Max(1, bucketCount), capTicks), TimeSpan.TicksPerSecond));
         foreach (var candidate in Ladder)
         {
             if (candidate >= targetTicks)
@@ -357,9 +488,9 @@ public static class PropertyHistoryChartModel
 
     /// <summary>
     /// The aggregations to offer, in display order (time-weighted average first for numeric), gated by:
-    /// cumulative counters offer only Last/First/Minimum/Maximum/Count; discrete values and JSON columns
-    /// offer only Last/First/Count; numeric columns offer the full set; then intersected with the union of
-    /// stores' SupportedAggregations (plus the AlwaysAvailable set, which is never filtered out).
+    /// cumulative counters offer only Last/First/Minimum/Maximum/Count/Delta; discrete values and JSON columns
+    /// offer only Last/First/Count; other numeric columns offer the full set except Delta; then intersected with
+    /// the union of stores' SupportedAggregations (plus the AlwaysAvailable set, which is never filtered out).
     ///
     /// A mean of a discrete value is not wrong so much as unanswerable: averaging "On" and "Off" yields a
     /// duty cycle, which is a different question from the one the history dialog asks.
@@ -368,14 +499,10 @@ public static class PropertyHistoryChartModel
         ValueColumn column, bool isCumulative, IReadOnlySet<string> storeUnion, bool isDiscrete = false)
     {
         IReadOnlyList<string> ordered = isCumulative
-            ? new[]
-            {
-                HistoryAggregations.Last, HistoryAggregations.First,
-                HistoryAggregations.Minimum, HistoryAggregations.Maximum, HistoryAggregations.Count
-            }
+            ? CounterAggregations
             : isDiscrete || column == ValueColumn.Json
-                ? new[] { HistoryAggregations.Last, HistoryAggregations.First, HistoryAggregations.Count }
-                : ChartAggregations;
+                ? DiscreteAggregations
+                : NumberAggregations;
 
         var allowed = new HashSet<string>(storeUnion, StringComparer.Ordinal);
         allowed.UnionWith(HistoryAggregations.AlwaysAvailable);
@@ -544,13 +671,13 @@ public static class PropertyHistoryChartModel
     /// </summary>
     /// <param name="points">The bucket points, ascending.</param>
     /// <param name="aggregation">The aggregation of the points.</param>
-    /// <param name="bucket">The bucket size, or null for raw samples.</param>
+    /// <param name="bucket">The bucket, or null for raw samples.</param>
     /// <param name="to">The end of the window, where the newest bucket is cut.</param>
     /// <param name="coverage">The normalized coverage of the series.</param>
     internal static IReadOnlyList<HistoryPoint> HidePartialTotals(
         IReadOnlyList<HistoryPoint> points,
         string aggregation,
-        TimeSpan? bucket,
+        HistoryBucket? bucket,
         DateTimeOffset to,
         ImmutableArray<HistoryCoverage> coverage)
     {
@@ -585,12 +712,12 @@ public static class PropertyHistoryChartModel
     /// Splits a point sequence into contiguous runs of numeric points, breaking at every null
     /// (empty-bucket) entry. Each run renders as one chart line so gaps appear as visual breaks.
     /// A single-point run is widened into a flat two-point run so a line chart draws it, ending at the
-    /// earliest of the point plus <paramref name="singlePointWidth"/>, the next point in
-    /// <paramref name="points"/>, and <paramref name="windowEnd"/>. A null width (raw samples) holds the
+    /// earliest of the end of its <paramref name="bucket"/>, the next point in
+    /// <paramref name="points"/>, and <paramref name="windowEnd"/>. A null bucket (raw samples) holds the
     /// point until the next point or the window end.
     /// </summary>
     public static IReadOnlyList<IReadOnlyList<HistoryPoint>> SplitIntoGapRuns(
-        IReadOnlyList<HistoryPoint> points, TimeSpan? singlePointWidth, DateTimeOffset windowEnd)
+        IReadOnlyList<HistoryPoint> points, HistoryBucket? bucket, DateTimeOffset windowEnd)
     {
         var runs = new List<IReadOnlyList<HistoryPoint>>();
         List<HistoryPoint>? current = null;
@@ -598,7 +725,7 @@ public static class PropertyHistoryChartModel
         {
             if (point.Number is null)
             {
-                AddRun(runs, current, singlePointWidth, point.Timestamp < windowEnd ? point.Timestamp : windowEnd);
+                AddRun(runs, current, bucket, point.Timestamp < windowEnd ? point.Timestamp : windowEnd);
                 current = null;
                 continue;
             }
@@ -607,12 +734,12 @@ public static class PropertyHistoryChartModel
             current.Add(point);
         }
 
-        AddRun(runs, current, singlePointWidth, windowEnd);
+        AddRun(runs, current, bucket, windowEnd);
         return runs;
     }
 
     private static void AddRun(
-        List<IReadOnlyList<HistoryPoint>> runs, List<HistoryPoint>? run, TimeSpan? singlePointWidth, DateTimeOffset limit)
+        List<IReadOnlyList<HistoryPoint>> runs, List<HistoryPoint>? run, HistoryBucket? bucket, DateTimeOffset limit)
     {
         if (run is not { Count: > 0 })
         {
@@ -623,9 +750,9 @@ public static class PropertyHistoryChartModel
         {
             var point = run[0];
             var end = limit;
-            if (singlePointWidth is { } width)
+            if (bucket is { } size)
             {
-                var widthEnd = point.Timestamp + width;
+                var widthEnd = BucketAlignment.Next(point.Timestamp, size);
                 if (widthEnd < end)
                 {
                     end = widthEnd;

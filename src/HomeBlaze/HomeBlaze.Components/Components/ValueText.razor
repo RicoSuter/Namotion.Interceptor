@@ -14,7 +14,7 @@ else if (Reading.IsMissing)
 }
 else
 {
-    <MudText Typo="@Typo" Color="@Reading.Color" Class="ma-0" data-testid="value-text">@Reading.Text</MudText>
+    <MudText Typo="@Typo" Color="@Reading.Color.Theme" Style="@Reading.Color.Style" Class="ma-0" data-testid="value-text">@Reading.Text</MudText>
 }
 
 @code {

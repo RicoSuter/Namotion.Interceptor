@@ -13,7 +13,7 @@ public class NukiBridgeClientTests
     private const string Token = "123456";
 
     private static NukiBridgeClient CreateClient(FakeNukiBridge bridge, NukiTokenMode tokenMode, string hostAddress = "192.168.1.50")
-        => new(bridge.CreateClient(string.Empty), hostAddress, Token, tokenMode);
+        => new(bridge.CreateClient(), hostAddress, Token, tokenMode);
 
     [Theory]
     [InlineData("192.168.1.50", "http://192.168.1.50:8080/info?token=123456")]

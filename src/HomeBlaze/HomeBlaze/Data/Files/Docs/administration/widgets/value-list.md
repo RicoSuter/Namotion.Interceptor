@@ -1,7 +1,6 @@
 ---
 title: ValueList
 navTitle: ValueList
-position: 31
 ---
 
 # ValueList
@@ -22,8 +21,8 @@ The arguments of a `Value` block:
 
 | Argument | Kind of value | Default | Meaning |
 |----------|---------------|---------|---------|
-| `Path` | Path (Value) | None | The [path](basics.md#paths) of the property whose value the row shows. A row with content needs none |
-| `Label` | Text | From the property, see [Labels](basics.md#labels) | The label of the row |
+| `Path` | Path (Value) | None | The [path](basics.md#paths) of the property whose value the row shows, or with a `Map` of a subject whose states the cases read, see [ValueMap](value-map.md#conditions). A row with content needs none |
+| `Label` | Text with values | From the property, see [Labels](basics.md#labels) | The label of the row, see [Text with Values](basics.md#text-with-values) |
 | `Icon` | Text | None | The [icon](basics.md#icons) at the start of the row |
 | `Map` | Name or path of a `ValueMap` | None | The map that gives the value its text, color and icon, see [ValueMap](value-map.md) |
 
@@ -85,7 +84,7 @@ A row with content and without a path, and a row with a `Progress` as content. T
 ## Behavior and Limits
 
 - **Aligned labels**: When at least one row has an icon, the rows without one keep the room of an icon, so that all labels line up. An icon that comes from a case of a map counts as well. In a card with an icon, a list in which at least one row has an icon lines up the icons of its rows with the icon of the header and its labels with the title.
-- **Color and icon of a case**: A matching case gives the value text its color and the row its icon, see [ValueMap](value-map.md).
+- **Color and icon of a case**: A matching case gives the value text its color, a theme color or a CSS color, and the row its icon, see [ValueMap](value-map.md).
 - **History**: The label of a row opens the history of a property that has one, see [Value Widgets](basics.md#value-widgets).
 - **Content and value**: Content and a value can stand in the same row. The content takes the room between the label and the value: a `Progress` fills it, and a text stands at the right end of it, right before the value.
 

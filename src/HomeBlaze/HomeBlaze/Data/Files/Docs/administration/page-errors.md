@@ -1,7 +1,6 @@
 ---
 title: Errors on Markdown Pages
 navTitle: Page Errors
-position: 6
 ---
 
 # Errors on Markdown Pages
@@ -32,6 +31,7 @@ The names, numbers and lines in the messages below are examples.
 | `The value of 'Title' has no closing quote.` | A value starts with a double quote and never ends | Add the closing double quote |
 | `Expected a space after the value of 'Title'.` | Something follows the closing double quote directly | Put a space between two arguments |
 | `The value of 'Title' contains a quote. Put the whole value in quotes.` | A value without quotes has a double quote in it | Put the value in double quotes and write `\"` for the double quote inside |
+| `'value' is reserved for expressions and cannot be the name of a block.` | A block named `#value` or `#subject` | Give the block another name, and change the paths that use it |
 
 ## Type Errors
 
@@ -77,20 +77,44 @@ The names, numbers and lines in the messages below are examples.
 
 ## Expression Errors
 
-An expression with a wrong format does not take a block down. The page shows the message in red in place of the value, and the rest of the page is shown as usual.
+An expression with a mistake does not take a block down. The page shows the message in red in place of the value, and the rest of the page is shown as usual.
 
 | Message | Cause | Fix |
 |---------|-------|-----|
-| `Unknown format 'rounded'` | The format after the pipe character of an expression is neither `display` nor `raw`, like `{{ motor/Speed \| rounded }}`, where the backslash is only needed inside a table. The message shows the format as written | Use `display` or `raw`, or write no format, see [Expression Formats](pages.md#expression-formats) |
+| `Unknown pipe 'rounded'` | The pipe at the end of an expression is none of `display`, `raw` and `map`, like `{{ motor/Speed \| rounded }}`. The message shows the pipe as written | Use `display`, `raw` or `map:name`, or write no pipe, see [Pipes](pages.md#pipes) |
+| `The pipe 'raw' takes no arguments` | A pipe with an argument after a colon, like `{{ motor/Speed \| raw:2 }}` | Remove the colon and the argument |
+| `expected ')' at position 16` | A mistake in an expression: a parenthesis, a quote, an operator or a value is missing or in the wrong place. The position counts the characters of the expression from 0 | Correct the expression at that position, see [Conditions](pages.md#conditions) |
+| `use '==' for equality at position 12` | A single `=` in a comparison | Write `==` |
+| `arithmetic is not supported at position 2` | `+`, `-`, `*` or `/` between two values | Show the values separately |
+| `The pipe 'map' takes the name of a value map, such as map:wallbox` | The pipe `map` without a name, or with more than one | Write `map:` and the name of the map |
+| `'value' is not available in the text of a page` | The text of a page uses `value` or `subject`, which are reserved for the values that widgets give their expressions | Write the path of the property |
+| `The pipe 'map' must be the first pipe` | The pipe `map` stands after another pipe, like `{{ motor/Status \| raw \| map:motorstate }}`. The map reads the value itself, which a pipe before it has already turned into text | Write `map` first, or remove the pipes before it |
+| `expression is longer than 1000 characters at position 1000` | An expression is longer than 1000 characters. In a text with expressions between double braces, the position counts inside the braces of that expression | Shorten the expression, see [Expression Limits](pages.md#expression-limits) |
+| `expression is nested too deeply at position 32` | An expression nests more than 32 levels of parentheses and `not`. In a text with expressions between double braces, the position counts inside the braces of that expression | Flatten the expression, see [Expression Limits](pages.md#expression-limits) |
+
+A pipe `map` with a name that leads to no value map shows `Cannot resolve map: name` as the text of the expression, and a map with a mistake shows its message there, one of the map messages of [Value Widget Errors](#value-widget-errors).
 
 ## Value Widget Errors
 
-A map that cannot be found, or an argument that a widget cannot use, does not take a block down either. The widget shows the message in a small red alert in its place, without a line number, and the rest of the page is shown as usual.
+A map that cannot be found, or an argument that a widget cannot use, does not take a block down either. The widget shows the message in a small red alert in its place, without a line number, and the rest of the page is shown as usual. A widget shows one error at a time: that of its map or of its other arguments first, then that of its `Label` or `Title`, then that of its `Subtitle`.
 
 | Message | Cause | Fix |
 |---------|-------|-----|
 | `Cannot resolve map: motorstat` | The `Map` of a `ValueList` row, a `ValueTile`, an `Indicator`, a `Select`, a `Switch`, a `Control`, a `Gauge` or a `Column` of a `SubjectTable` leads to no subject, or to a subject that is no `ValueMap`. The message shows the map as written | Check the name or the path in `Map`. The name is that of the block of the map, and a map on another page is reached through that page, see [ValueMap](widgets/value-map.md) |
-| `Set both On and Off, or neither` | A `Switch` has only one of `On` and `Off` | Set both, so that the switch invokes an operation per state, or remove both, so that it writes its property, see [Switch](widgets/switch.md) |
+| `Unknown color 'purple': use a theme color like Success or Surface 30%, or a CSS color like #ffffff80` | The `Color` or the `TextColor` of a case of the `ValueMap` that the widget refers to is neither a theme color nor a CSS color of an allowed form. Every widget with this map shows it, also while no value matches that case. The message shows the color as written | Use a theme color name or one of the CSS color forms that [Colors](widgets/basics.md#colors) lists, in double quotes, like `Color="#ffffff80"` |
+| `Case 2, When: expected a value after '>' at position 7` | The condition of the second case of the map has a mistake; the rest of the message is that of an expression. Every widget with this map shows it | Correct the condition, see [Conditions](widgets/value-map.md#conditions) |
+| `Case 2, Text: Unknown pipe 'rounded'` | The text of the second case has an expression with a mistake, or a pipe other than `display` and `raw` | Correct the expression in the text |
+| `Case 2, Text: The pipe 'map' cannot be used in the text of a case` | The text of the second case has an expression with the pipe `map`, which a case cannot use so that a map cannot reach itself | Remove the pipe `map` from the text |
+| `Case 2, Text: '{{' is not closed at position 4` | The text of the second case has a `{{` without a closing `}}`. The message shows where the `{{` stands in the text | Close the expression with `}}`, or remove the `{{` |
+| `Case 2, When: A condition takes no pipes` | The condition of the second case has a pipe, like `value > 5 \| raw` | Remove the pipe |
+| `Case 2, When: 'value' has no members: write subject/... to read a property of its subject` | The condition or the text of the second case has a path into `value`, like `value/IsCharging`. `value` is the value itself and has no properties | Write `subject/` and the name of the property, like `subject/IsCharging` |
+| `Case 2, When: expected a name after 'subject/'` | A path in the condition or the text of the second case is `subject/` and nothing after it | Write the name of a property after the slash, or write `subject` alone |
+| `Case 2, When: a path starts at the subject and cannot start with '/'` | A path in the condition or the text of the second case has two slashes after `subject`, like `subject//IsCharging` | Write one slash |
+| `Case 2, When: expression is longer than 1000 characters at position 1000` | The condition, or an expression in the text, of the second case is longer than 1000 characters, or nests more than 32 levels (`expression is nested too deeply`). The position of an expression in a text counts inside its braces | Shorten or flatten the expression, see [Expression Limits](pages.md#expression-limits) |
+| `Case 1 has no Value and no When, so it matches every value and the cases after it never match. Make it the last case.` | A default case stands before other cases | Move it to the end, or give it a `Value` or a `When` |
+| `Label: expected a value after '>' at position 7` | An expression in the `Label`, `Title` or `Subtitle` of a widget has a mistake, or a pipe other than `display`, `raw` and `map`. The message starts with the argument; the rest is that of an expression | Correct the expression, see [Text with Values](widgets/basics.md#text-with-values) |
+| `Title: 'subject' is not available in a widget without a Path` | The title or the subtitle of a card uses `value` or `subject`, which only a widget with a `Path` has | Write a path from the page, such as `../Pump/Status` |
+| `Label: 'value' has no members: write subject/... to read a property of its subject` | The text of a widget has a path into `value`, like `{{ value/IsCharging }}`. The messages about `subject/` and `subject//` above apply to the text of a widget too, with the name of the argument in front | Write `subject/` and the name of the property, like `{{ subject/IsCharging }}` |
 | `On needs an operation without input: pump/SetTargetSpeed` | `On` of a `Switch` leads to an operation with a parameter that needs input. `Off` gives the same message with its own name. The message shows the path as written | Use an operation whose parameters need no input, see [Switch](widgets/switch.md) |
 | `Needs a range: set Minimum and Maximum` | A `Slider`, a `Gauge` or a `Progress` of a number finds no end of its range, neither in its arguments nor on its property, see [Ranges](widgets/basics.md#ranges) | Set `Minimum` and `Maximum` on the block |
 | `Maximum must be above Minimum: 0.8 to 0.2` | The range of a `Slider`, a `Gauge` or a `Progress` is empty or reversed, from its arguments or from the attributes of its property, see [Ranges](widgets/basics.md#ranges). The message shows the minimum and the maximum it found | Set a `Maximum` above the `Minimum` |
@@ -101,12 +125,14 @@ A map that cannot be found, or an argument that a widget cannot use, does not ta
 | `CellAspectRatio must look like 1:1: wide` | The `CellAspectRatio` of a `GridLayout` is not two numbers above 0 with a colon between them. The message shows the value as written | Write the width and the height as `W:H`, for example `1:1`, or remove `CellAspectRatio`, see [GridLayout](widgets/grid-layout.md) |
 | `Width must be above 0: 0` | The `Width` of a `CanvasLayout` is 0 or less. The message shows the width as written | Set a width above 0, or remove `Width` for the right edge of the rightmost node, see [CanvasLayout](widgets/canvas-layout.md) |
 | `MinWidth must be above 0: 0` | The `MinWidth` of a `CanvasLayout` is 0 or less. The message shows the value as written | Set a width above 0, or remove `MinWidth`, so that the canvas always fits the width, see [CanvasLayout](widgets/canvas-layout.md) |
+| `MaxWidth must be above 0: 0` | The `MaxWidth` of a `CanvasLayout` is 0 or less. The message shows the value as written | Set a width above 0, or remove `MaxWidth`, so that the canvas always fits the width, see [CanvasLayout](widgets/canvas-layout.md) |
+| `MaxWidth must not be below MinWidth: 600` | The `MaxWidth` of a `CanvasLayout` is below its `MinWidth`. The message shows the largest width as written | Set `MaxWidth` to at least `MinWidth`, or remove one of them, see [CanvasLayout](widgets/canvas-layout.md) |
 | `Cannot select a value of the flags enum MotorFeatures` | The property of a `Select` holds an enum whose values combine as flags. The message shows the name of the enum | Show the value with a value widget instead, see [Select](widgets/select.md) |
 | `Needs a Source: a folder or a property that holds subjects` | A `SubjectTable` has no `Source` | Set `Source` to a folder, a page or a property that holds subjects, see [SubjectTable](widgets/subject-table.md) |
 | `Cannot list subjects of: ../Motors` | The `Source` of a `SubjectTable` leads nowhere, to a subject that is no folder or page, or to a property that holds no subjects. The message shows the source as written | Check the path in `Source`. A path to a folder or a page lists what it holds, a path to a property lists its subjects |
-| `Unknown range '2h': use one of 1h, 6h, 24h, 7d, 30d` | The `Range` of a `HistoryChart` is none of the listed values. The message shows the range as written | Use one of the listed values, or remove `Range` for `24h`, see [HistoryChart](widgets/history-chart.md) |
-| `Unknown bucket '2m': use one of Auto, Raw, 1s, 10s, 60s, 5m, 10m, 15m, 1h, 4h, 6h, 12h, 24h` | The `Bucket` of a `HistoryChart` is none of the listed values. The message shows the bucket as written | Use one of the listed values, or remove `Bucket` for `Auto` |
-| `Unknown aggregation 'Median': use one of TimeWeightedAverage, Average, SampleAverage, Minimum, Maximum, Sum, StandardDeviation, Last, First, Count` | The `Aggregation` of a `HistoryChart` or of one of its `Series` blocks is none of the listed values. The message shows the aggregation as written, and for a series also its label | Use one of the listed values, or remove `Aggregation` for the automatic choice, see [HistoryChart](widgets/history-chart.md) |
+| `Unknown range '2h': use one of 1h, 6h, 24h, 7d, 30d, 90d, 1y` | The `Range` of a `HistoryChart` is none of the listed values. The message shows the range as written | Use one of the listed values, or remove `Range` for `24h`, see [HistoryChart](widgets/history-chart.md) |
+| `Unknown bucket '2m': use one of Auto, Raw, 1s, 10s, 60s, 5m, 10m, 15m, 1h, 4h, 6h, 12h, 24h, day, week, month` | The `Bucket` of a `HistoryChart` is none of the listed values. The message shows the bucket as written | Use one of the listed values, or remove `Bucket` for `Auto` |
+| `Unknown aggregation 'Median': use one of TimeWeightedAverage, Average, SampleAverage, Minimum, Maximum, Sum, StandardDeviation, Last, First, Count, Delta` | The `Aggregation` of a `HistoryChart` or of one of its `Series` blocks is none of the listed values. The message shows the aggregation as written, and for a series also its label | Use one of the listed values, or remove `Aggregation` for the automatic choice, see [HistoryChart](widgets/history-chart.md) |
 | `Bucket '1s' is too small for range '1h': use 10s or more, or Auto` | The fixed `Bucket` of a `HistoryChart` divides its `Range` into more than 1000 intervals, more than a chart query returns. The message names the smallest bucket that fits | Use the named bucket or a larger one, or `Auto`, see [HistoryChart](widgets/history-chart.md) |
 | `RefreshInterval '2.00:00:00' is too long: use at most 1.00:00:00` | The `RefreshInterval` of a `HistoryChart` is longer than a day | Use a time span up to a day, or remove `RefreshInterval` for a minute, see [HistoryChart](widgets/history-chart.md) |
 | `Series 'Fan temperature' (°C) has another unit than 'Pump' (no unit): show it in a second chart` | A recorded number series of a `HistoryChart` has another unit than its first recorded number series. A series with the aggregation `Count` counts samples and has no unit; the message calls it a count | Put the series in a second chart, see [HistoryChart](widgets/history-chart.md) |

@@ -24,15 +24,17 @@ public partial class Card : IConfigurable, ITitleProvider
     }
 
     /// <summary>
-    /// Title shown at the top of the card.
+    /// Title shown at the top of the card. It can show values with expressions between double braces, such as <c>{{ ../Pump/Status }}</c>; a card has no <c>Path</c>, so the expressions take paths from the page only.
     /// </summary>
     [Configuration]
+    [TextTemplate]
     public partial string? Title { get; set; }
 
     /// <summary>
-    /// Smaller line shown under the title.
+    /// Smaller line shown under the title. It can show values with expressions between double braces, such as <c>{{ ../Pump/Status }}</c>; a card has no <c>Path</c>, so the expressions take paths from the page only.
     /// </summary>
     [Configuration]
+    [TextTemplate]
     public partial string? Subtitle { get; set; }
 
     /// <summary>

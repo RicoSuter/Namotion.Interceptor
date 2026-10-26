@@ -460,6 +460,61 @@ public class BrowseToolTests
     }
 
     [Fact]
+    public async Task WhenTheChildAtTheDepthBoundaryIsOfAnExcludedType_ThenItsPropertyIsLeftOut()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+
+        var room = new TestRoom(context) { Name = "Living Room", Temperature = 21.5m };
+        room.Device = new TestDevice(context) { DeviceName = "Light", IsOn = true };
+
+        var config = new McpServerConfiguration { PathProvider = DefaultPathProvider.Instance, ExcludeTypes = [typeof(TestDevice)] };
+        var browseTool = new McpToolFactory(room, config).CreateTools().First(t => t.Name == "browse");
+
+        // Act
+        var input = JsonSerializer.SerializeToElement(new { format = "json", depth = 0 });
+        var result = await browseTool.Handler(input, CancellationToken.None);
+        var json = JsonSerializer.SerializeToElement(result);
+
+        // Assert
+        var node = json.GetProperty("result");
+        Assert.False(node.TryGetProperty("properties", out var properties) && properties.TryGetProperty("Device", out _));
+    }
+
+    [Fact]
+    public async Task WhenSomeChildrenAtTheDepthBoundaryAreExcluded_ThenTheCollapsedPropertyCountsAndTypesOnlyTheOthers()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+
+        var group = new TestMixedGroup(context);
+        group.Items = new Dictionary<string, IInterceptorSubject>
+        {
+            ["Light"] = new TestDevice(context) { DeviceName = "Light" },
+            ["Kitchen"] = new TestSensor(context),
+            ["Cellar"] = new TestSensor(context)
+        };
+
+        var config = new McpServerConfiguration { PathProvider = DefaultPathProvider.Instance };
+        var browseTool = new McpToolFactory(group, config).CreateTools().First(t => t.Name == "browse");
+
+        // Act
+        var input = JsonSerializer.SerializeToElement(new { format = "json", depth = 0, excludeTypes = new[] { nameof(TestDevice) } });
+        var result = await browseTool.Handler(input, CancellationToken.None);
+        var json = JsonSerializer.SerializeToElement(result);
+
+        // Assert
+        var items = json.GetProperty("result").GetProperty("properties").GetProperty("Items");
+        Assert.True(items.GetProperty("isCollapsed").GetBoolean());
+        Assert.Equal(2, items.GetProperty("count").GetInt32());
+        Assert.Equal(nameof(TestSensor), items.GetProperty("itemType").GetString());
+    }
+
+    [Fact]
     public async Task WhenDepthBoundaryWithNullSingleChild_ThenChildIsOmitted()
     {
         // Arrange
@@ -604,5 +659,35 @@ public class BrowseToolTests
                 ["$interfaces"] = new[] { "ITest" }
             };
         }
+    }
+
+    [Fact]
+    public async Task WhenAReadOnlyAttributeHasNoValue_ThenBrowseLeavesItOutAndKeepsAWritableOne()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+
+        var room = new TestRoom(context) { Name = "Living Room", Temperature = 21.5m };
+        var registered = room.TryGetRegisteredSubject()!;
+        registered.TryGetProperty("Temperature")!.AddAttribute<string>("Unit", _ => "Celsius");
+        registered.TryGetProperty("Temperature")!.AddAttribute<string>("Note", _ => null);
+        registered.TryGetProperty("Name")!.AddAttribute<string>("Note", _ => null);
+        registered.TryGetProperty("Name")!.AddAttribute("Comment", typeof(string), _ => null, (_, _) => { });
+
+        var config = new McpServerConfiguration { PathProvider = DefaultPathProvider.Instance };
+        var browseTool = new McpToolFactory(room, config).CreateTools().First(t => t.Name == "browse");
+
+        // Act
+        var input = JsonSerializer.SerializeToElement(new { format = "json", depth = 0, includeProperties = true, includeAttributes = true });
+        var json = JsonSerializer.SerializeToElement(await browseTool.Handler(input, CancellationToken.None));
+
+        // Assert
+        var properties = json.GetProperty("result").GetProperty("properties");
+        var temperatureAttribute = Assert.Single(properties.GetProperty("Temperature").GetProperty("attributes").EnumerateArray());
+        Assert.Equal("Unit", temperatureAttribute.GetProperty("name").GetString());
+        var nameAttribute = Assert.Single(properties.GetProperty("Name").GetProperty("attributes").EnumerateArray());
+        Assert.Equal("Comment", nameAttribute.GetProperty("name").GetString());
     }
 }

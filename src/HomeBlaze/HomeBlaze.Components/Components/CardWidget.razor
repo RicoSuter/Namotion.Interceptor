@@ -1,5 +1,7 @@
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(Card))]
 @implements ISubjectComponent
+@inject SubjectPathResolver PathResolver
+@inject ITimeZoneDisplay TimeZone
 
 @{
     var card = Subject as Card;
@@ -8,14 +10,16 @@
 @if (card is not null)
 {
     var sizeStyle = _styleCache.GetStyle(card.Height, card.AspectRatio, out var sizeError);
-    if (sizeError is not null)
+    var title = _title.Render(card.Title, PathResolver, card, default(ValueBinding), TimeZone, out var titleError);
+    var subtitle = _subtitle.Render(card.Subtitle, PathResolver, card, default(ValueBinding), TimeZone, out var subtitleError);
+    if ((sizeError ?? titleError ?? subtitleError) is { } error)
     {
-        <WidgetArgumentError Message="@sizeError" />
+        <WidgetArgumentError Message="@error" />
     }
     else
     {
-        var hasTitle = !string.IsNullOrEmpty(card.Title);
-        var hasSubtitle = !string.IsNullOrEmpty(card.Subtitle);
+        var hasTitle = !string.IsNullOrEmpty(title);
+        var hasSubtitle = !string.IsNullOrEmpty(subtitle);
         var hasIcon = !string.IsNullOrEmpty(card.Icon);
         var headerRight = card.HeaderRight;
         var hasHeader = hasTitle || hasSubtitle || hasIcon || headerRight is not null;
@@ -40,16 +44,16 @@
                         @if (hasTitle && !string.IsNullOrEmpty(card.Href))
                         {
                             @* While the page is edited the link would leave it, also by keyboard, so it leads nowhere and takes no focus. *@
-                            <MudLink Href="@(IsEditing ? null : card.ResolveScopedLink(card.Href))" Typo="Typo.h6" Color="Color.Inherit" tabindex="@(IsEditing ? "-1" : null)" data-testid="card-title">@card.Title</MudLink>
+                            <MudLink Href="@(IsEditing ? null : card.ResolveScopedLink(card.Href))" Typo="Typo.h6" Color="Color.Inherit" tabindex="@(IsEditing ? "-1" : null)" data-testid="card-title">@title</MudLink>
                         }
                         else if (hasTitle)
                         {
-                            <MudText Typo="Typo.h6" data-testid="card-title">@card.Title</MudText>
+                            <MudText Typo="Typo.h6" data-testid="card-title">@title</MudText>
                         }
 
                         @if (hasSubtitle)
                         {
-                            <MudText Typo="Typo.body2" Class="mud-text-secondary ma-0" data-testid="card-subtitle">@card.Subtitle</MudText>
+                            <MudText Typo="Typo.body2" Class="mud-text-secondary ma-0" data-testid="card-subtitle">@subtitle</MudText>
                         }
                     </CardHeaderContent>
                 </MudCardHeader>
@@ -80,6 +84,8 @@
 
 @code {
     private readonly CardStyleCache _styleCache = new();
+    private readonly WidgetText _title = new(nameof(Card.Title), ExpressionUse.WidgetTextWithoutPath);
+    private readonly WidgetText _subtitle = new(nameof(Card.Subtitle), ExpressionUse.WidgetTextWithoutPath);
 
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }

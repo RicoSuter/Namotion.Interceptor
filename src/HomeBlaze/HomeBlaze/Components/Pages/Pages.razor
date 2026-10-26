@@ -2,8 +2,10 @@
 
 @using HomeBlaze.Abstractions
 @using HomeBlaze.Components.Abstractions.Attributes
+@using HomeBlaze.Components.Abstractions.TimeZones
 @using HomeBlaze.Components.Editors
 @using HomeBlaze.Services.Components
+@using HomeBlaze.Storage.Abstractions
 @using Microsoft.AspNetCore.Components.Sections
 @using Microsoft.JSInterop
 @using Namotion.Interceptor.Blazor
@@ -16,6 +18,7 @@
 @inject SubjectPathResolver PathResolver
 @inject HotKeys HotKeys
 @inject IJSRuntime JsRuntime
+@inject ITimeZoneDisplay TimeZone
 
 <PageTitle>@_title - HomeBlaze</PageTitle>
 
@@ -27,18 +30,14 @@ else
 {
     <CascadingValue Value="@IsEditing" Name="IsEditing">
     <CascadingValue Value="_widgetSelection" IsFixed="true">
-        @* The head of the page in every mode: the actions of the editor, what the page shows there, such as the time of
-           its last change, and the button of the edit modes, side by side. In the view modes a markdown page leaves room
-           for them next to its title (the padding of its first h1 in MarkdownFilePageComponent.razor.css of
-           HomeBlaze.Storage.Blazor), and in the editing modes they stand at the end of the bar above the editor. One
-           outlet per section that stays in place, because a second outlet of the same section while the mode changes
-           would end the circuit. *@
+        @* The head of the page in every mode: the actions of the editor and the button of the page menu, side by side. In
+           the view modes a markdown page leaves room for the button next to its title (the padding of its first h1 in
+           MarkdownFilePageComponent.razor.css of HomeBlaze.Storage.Blazor), and in the editing modes they stand at the end
+           of the bar above the editor. One outlet that stays in place, because a second outlet of the same section while
+           the mode changes would end the circuit. *@
         <div class="d-flex align-center" style="@GetPageHeadStyle()" data-testid="page-head">
             <div @ref="_pageHeadContent" class="@(ShowEditor ? "page-head-content page-head-editing" : "page-head-content")">
                 <SectionOutlet SectionName="EditActions" />
-                <div class="page-head-info">
-                    <SectionOutlet SectionName="PageHeadInfo" />
-                </div>
                 @if (CanEdit())
                 {
                     @RenderEditMenu()
@@ -123,24 +122,46 @@ else
         gap: 8px;
     }
 
-    .page-head-info {
-        display: flex;
-    }
-
-    /* In the editing modes the head is as wide as the bar above the editor, less 16px at each end, and leaves out what
-       does not fit: first the labels of the editor actions (see MarkdownFileEditComponent), then the time of the last
-       change. Pages.razor.js keeps the width of the bar in the property. */
+    /* In the editing modes the head is as wide as the bar above the editor, less 16px at each end, and leaves out the
+       labels of the editor actions when they do not fit (see MarkdownFileEditComponent). Pages.razor.js keeps the width
+       of the bar in the property. */
     .page-head-editing {
         width: calc(var(--editor-bar-width, 0px) - 32px);
         justify-content: flex-end;
         container: page-head / inline-size;
     }
 
-    /* The icons of both actions, the time and the mode button need 252px. */
-    @@container page-head (max-width: 251.98px) {
-        .page-head-info {
-            display: none;
-        }
+    /* What the page menu tells about the page, above the edit modes. It looks like text and not like an action, and a
+       long path breaks, so that the menu stays in the window. */
+    .mud-menu-item.page-info {
+        align-items: flex-start;
+        cursor: default;
+        max-width: 20rem;
+        overflow-wrap: anywhere;
+    }
+
+    /* The icon stands a little below the middle of the title. */
+    .mud-menu-item.page-info .mud-menu-item-icon {
+        margin-top: 8px;
+    }
+
+    .mud-menu-item.page-info:hover {
+        background-color: transparent;
+    }
+
+    .mud-menu-item.page-info.mud-ripple::after {
+        display: none;
+    }
+
+    .page-info-title {
+        display: block;
+        font-weight: 500;
+    }
+
+    .page-info-detail {
+        display: block;
+        font-size: 0.75rem;
+        color: var(--mud-palette-text-secondary);
     }
 </style>
 
@@ -276,18 +297,13 @@ else
         var subject = PathResolver.ResolveSubject(path, PathStyle.Route);
         if (subject != null)
         {
-            if (subject is ITitleProvider titleProvider)
-            {
-                _title = titleProvider.Title ?? subject.GetType().Name;
-            }
-            else
-            {
-                _title = subject.GetType().Name;
-            }
-
+            _title = GetTitle(subject);
             _subject = subject;
         }
     }
+
+    private static string GetTitle(IInterceptorSubject subject)
+        => (subject as ITitleProvider)?.Title ?? subject.GetType().Name;
 
     private bool CanEdit()
     {
@@ -377,16 +393,29 @@ else
         _splitDimension = 50;
     }
 
+    // Read when the menu opens, so that it shows the title and the time of the last change as they are then. The time
+    // is in the display time zone, which the browser only tells the interactive page.
     private RenderFragment RenderEditMenu() => __builder =>
     {
         <MudMenu Icon="@GetModeIcon()"
-                 AriaLabel="Edit mode"
+                 AriaLabel="Page info and edit mode"
                  data-testid="edit-mode-menu"
                  Color="@(IsEditing ? Color.Primary : Color.Default)"
                  Variant="Variant.Filled"
                  Size="Size.Small"
                  AnchorOrigin="Origin.BottomRight"
                  TransformOrigin="Origin.TopRight">
+            @* An item of the menu, so that the keyboard and a screen reader reach it. It does nothing and keeps the menu open
+               when it is clicked. *@
+            <MudMenuItem Class="page-info" Icon="@Icons.Material.Outlined.Info" AutoClose="false" data-testid="page-info">
+                <span class="page-info-title">@(_subject is { } subject ? GetTitle(subject) : _title)</span>
+                <span class="page-info-detail" data-testid="page-path">@((_subject is { } pathSubject ? PathResolver.GetPath(pathSubject, PathStyle.Canonical) : null) ?? Path)</span>
+                @if (_subject is IStorageFile file)
+                {
+                    <span class="page-info-detail" data-testid="page-last-modified">Modified @TimeZone.ToZoned(new DateTimeOffset(file.LastModified, TimeSpan.Zero)).ToString("yyyy-MM-dd HH:mm:ss")</span>
+                }
+            </MudMenuItem>
+            <MudDivider />
             <MudMenuItem Icon="@Icons.Material.Filled.Visibility"
                          IconColor="@(_editMode == PageEditMode.View ? Color.Primary : Color.Default)"
                          OnClick="@(() => SetEditMode(PageEditMode.View))">

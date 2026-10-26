@@ -1,0 +1,68 @@
+@using HomeBlaze.Abstractions.Attributes
+@using HomeBlaze.Services.Metadata
+@using HomeBlaze.Storage
+@inject MetadataLinkResolver LinkResolver
+@inject RootManager RootManager
+
+<MudDialog data-testid="metadata-tag-filter">
+    <DialogContent>
+        @if (_items.Count == 0)
+        {
+            <MudText>Nothing is tagged @Tag.</MudText>
+        }
+        else
+        {
+            <MudList T="string" Dense="true">
+                @foreach (var (path, link) in _items)
+                {
+                    <MudListItem T="string" Href="@link.Href" Disabled="@link.IsBroken" OnClick="Close" Icon="@Icons.Material.Filled.Tag" data-testid="metadata-tag-filter-item">
+                        @link.Title <MudText Typo="Typo.caption" Class="mud-text-secondary ml-2" HtmlTag="span">@path</MudText>
+                    </MudListItem>
+                }
+            </MudList>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Close">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance? MudDialog { get; set; }
+
+    /// <summary>The tag whose subjects and properties are listed.</summary>
+    [Parameter, EditorRequired] public string Tag { get; set; } = default!;
+
+    private List<(string Path, ResolvedMetadataLink Link)> _items = [];
+
+    protected override void OnInitialized()
+    {
+        if (RootManager.Root is not { } root)
+            return;
+
+        // Once per dialog, as the search walks the whole tree.
+        foreach (var match in MetadataSearch.Search(root, tag: Tag, isExcluded: static subject => subject.IsExcludedFrom(ExclusionTarget.UserInterface)))
+        {
+            // A subject detached since the search, and a property that the browser does not show, are not listed.
+            var subject = FluentStorageContainer.ResolveMetadataPath(root, match.Path);
+            if (subject is null ||
+                match.Property is not null && subject.TryGetRegisteredSubject()?.TryGetProperty(match.Property)?.IsShownAsValue() != true)
+                continue;
+
+            // Written as the path of a link, the name of a property after the path of its subject.
+            var subjectPath = $"/{match.Path}";
+            var path = match.Property is null ? subjectPath : $"{subjectPath.TrimEnd('/')}/{match.Property}";
+            _items.Add((path, LinkResolver.Resolve(subject, match.Property)));
+        }
+    }
+
+    private void Close() => MudDialog?.Close();
+
+    /// <summary>Shows everything that has the tag.</summary>
+    public static Task<IDialogReference> ShowAsync(IDialogService dialogService, string tag)
+    {
+        var parameters = new DialogParameters<MetadataTagFilterDialog> { { x => x.Tag, tag } };
+        var options = new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true };
+        return dialogService.ShowAsync<MetadataTagFilterDialog>($"Tagged {tag}", parameters, options);
+    }
+}

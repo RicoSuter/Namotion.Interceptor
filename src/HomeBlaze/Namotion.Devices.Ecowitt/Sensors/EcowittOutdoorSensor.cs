@@ -2,7 +2,6 @@ using System.ComponentModel;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Common;
-using HomeBlaze.Abstractions.Devices.Energy;
 using HomeBlaze.Abstractions.Sensors;
 using Namotion.Interceptor.Attributes;
 
@@ -15,7 +14,6 @@ public partial class EcowittOutdoorSensor :
     IWindSensor,
     IUvIndexSensor,
     ILightSensor,
-    IBatteryState,
     ITitleProvider,
     IIconProvider,
     ILastUpdatedProvider
@@ -63,17 +61,14 @@ public partial class EcowittOutdoorSensor :
     [State]
     public partial decimal? VaporPressureDeficit { get; internal set; }
 
-    [State(Unit = StateUnit.Percent)]
-    public partial decimal? BatteryLevel { get; internal set; }
-
     [State]
     public partial DateTimeOffset? LastUpdated { get; internal set; }
 
+    /// <summary>
+    /// Gets the paired sensors that can feed these readings, the same subjects as in the gateway's <c>Sensors</c>.
+    /// </summary>
     [State]
-    public partial string? SensorId { get; internal set; }
-
-    [State]
-    public partial int? SignalStrength { get; internal set; }
+    public partial Dictionary<string, EcowittSensor> Sources { get; internal set; }
 
     [Derived]
     public string? Title => "Outdoor";
@@ -97,9 +92,7 @@ public partial class EcowittOutdoorSensor :
         UvIndex = null;
         SolarRadiation = null;
         VaporPressureDeficit = null;
-        BatteryLevel = null;
         LastUpdated = null;
-        SensorId = null;
-        SignalStrength = null;
+        Sources = new Dictionary<string, EcowittSensor>(StringComparer.Ordinal);
     }
 }

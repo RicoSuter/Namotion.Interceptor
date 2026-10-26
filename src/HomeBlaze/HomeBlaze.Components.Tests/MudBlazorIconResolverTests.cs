@@ -5,20 +5,24 @@ namespace HomeBlaze.Components.Tests;
 
 public class MudBlazorIconResolverTests
 {
-    [Fact]
-    public void WhenIconNameIsKnown_ThenTheMaterialFilledIconIsReturned()
+    [Theory]
+    [InlineData("Hub", Icons.Material.Filled.Hub)]
+    [InlineData("MenuBook", Icons.Material.Filled.MenuBook)]
+    [InlineData("Folder", Icons.Material.Filled.Folder)]
+    public void WhenIconNameIsKnown_ThenTheMaterialFilledIconIsReturned(string iconName, string expected)
     {
         // Act
-        var icon = MudBlazorIconResolver.Resolve("Hub");
+        var icon = MudBlazorIconResolver.Resolve(iconName);
 
         // Assert
-        Assert.Equal(Icons.Material.Filled.Hub, icon);
+        Assert.Equal(expected, icon);
     }
 
     [Theory]
     [InlineData(null)]
     [InlineData("")]
     [InlineData("NoSuchIconName")]
+    [InlineData("hub")]
     public void WhenIconNameIsMissingOrUnknown_ThenTheDefaultIconIsReturned(string? iconName)
     {
         // Act

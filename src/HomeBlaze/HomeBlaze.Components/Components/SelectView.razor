@@ -1,5 +1,8 @@
 @using HomeBlaze.Components.Controls
+@using HomeBlaze.Services.Display
 @inject PropertyWriter Writer
+@inject SubjectPathResolver PathResolver
+@inject ITimeZoneDisplay TimeZone
 
 @{
     // Read once per render and never kept: its render records the reads, so that it renders again when one changes.
@@ -37,15 +40,17 @@ else
             }
             @foreach (var name in names)
             {
-                var mapCase = map?.FindCase(name);
+                var binding = new ValueBinding(property, name, property?.Subject);
+                var mapCase = map?.FindCase(binding, PathResolver);
                 var icon = MudBlazorIconResolver.ResolveOrNull(mapCase?.Icon);
+                var iconColor = mapCase?.GetColor() ?? ValueColor.Default;
                 <MudSelectItem T="string" Value="@name">
                     <div class="d-flex align-center gap-2">
                         @if (icon is not null)
                         {
-                            <MudIcon Icon="@icon" Color="@mapCase!.Color" Size="Size.Small" />
+                            <MudIcon Icon="@icon" Color="@iconColor.Theme" Style="@iconColor.Style" Size="Size.Small" />
                         }
-                        <span>@GetText(name, mapCase)</span>
+                        <span>@(mapCase?.GetText(binding, PathResolver, TimeZone) ?? name)</span>
                     </div>
                 </MudSelectItem>
             }
@@ -109,17 +114,16 @@ else
         _enumType = enumType;
     }
 
-    private string? GetText(string? name) => GetText(name, name is null ? null : Map?.FindCase(name));
-
-    private static string GetText(string? name, ValueMapCase? mapCase)
+    private string GetText(string? name)
     {
         if (name is null)
         {
             return ValueReader.MissingText;
         }
 
-        var text = mapCase?.Text;
-        return string.IsNullOrEmpty(text) ? name : text;
+        var property = Property;
+        var binding = new ValueBinding(property, name, property?.Subject);
+        return Map?.FindCase(binding, PathResolver)?.GetText(binding, PathResolver, TimeZone) ?? name;
     }
 
     private void Choose(string? name)

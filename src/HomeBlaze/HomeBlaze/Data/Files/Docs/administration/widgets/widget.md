@@ -1,7 +1,6 @@
 ---
 title: Widget
 navTitle: Widget
-position: 22
 ---
 
 # Widget

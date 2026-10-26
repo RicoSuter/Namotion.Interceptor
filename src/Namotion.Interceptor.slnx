@@ -153,6 +153,7 @@
     <Project Path="Namotion.Interceptor.Modbus.Tests/Namotion.Interceptor.Modbus.Tests.csproj" />
     <Project Path="Namotion.Interceptor.Mqtt.Tests/Namotion.Interceptor.Mqtt.Tests.csproj" />
     <Project Path="Namotion.Interceptor.OpcUa.Tests/Namotion.Interceptor.OpcUa.Tests.csproj" />
+    <Project Path="Namotion.Interceptor.Expressions.Tests/Namotion.Interceptor.Expressions.Tests.csproj" />
     <Project Path="Namotion.Interceptor.Registry.Tests/Namotion.Interceptor.Registry.Tests.csproj" />
     <Project Path="Namotion.Interceptor.Blazor.Tests/Namotion.Interceptor.Blazor.Tests.csproj" />
     <Project Path="Namotion.Interceptor.Connectors.Tests/Namotion.Interceptor.Connectors.Tests.csproj" />
@@ -166,6 +167,7 @@
   <Project Path="Namotion.Interceptor.Dynamic/Namotion.Interceptor.Dynamic.csproj" />
   <Project Path="Namotion.Interceptor.Generator/Namotion.Interceptor.Generator.csproj" />
   <Project Path="Namotion.Interceptor.Hosting/Namotion.Interceptor.Hosting.csproj" />
+  <Project Path="Namotion.Interceptor.Expressions/Namotion.Interceptor.Expressions.csproj" />
   <Project Path="Namotion.Interceptor.Registry/Namotion.Interceptor.Registry.csproj" />
   <Project Path="Namotion.Interceptor.Benchmark/Namotion.Interceptor.Benchmark.csproj" />
   <Project Path="Namotion.Interceptor.Connectors/Namotion.Interceptor.Connectors.csproj" />

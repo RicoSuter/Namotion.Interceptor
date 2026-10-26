@@ -26,6 +26,10 @@ title: History Chart Demo
 ::: Series Path=chartmotor/CurrentSpeed Label="Compact speed"
 ::
 
+:: HomeBlaze.History.Blazor.HistoryChart Range=1h
+::: Series Path=chartmotor/Status Label="Band status"
+::
+
 :: HomeBlaze.History.Blazor.HistoryChart Range=6h Bucket=10m Aggregation=Maximum Height=150
 ::: Series Path=chartmotor/CurrentSpeed Label="Highest speed"
 ::

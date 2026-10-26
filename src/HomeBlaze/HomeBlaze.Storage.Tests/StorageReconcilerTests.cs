@@ -1019,7 +1019,7 @@ public class StorageReconcilerTests : StorageTestBase
         await pass.WaitAsync(DeadlockTimeout);
 
         // Assert
-        Assert.Equal("Storage not connected", Assert.IsType<InvalidOperationException>(exception).Message);
+        Assert.Equal("Storage not connected", Assert.IsType<StorageRefusedException>(exception).Message);
         Assert.Equal("first", File.ReadAllText(GetFullPath("Data.gated")));
         Assert.Equal(StorageStatus.Connected, storage.Status);
     }
@@ -1185,9 +1185,9 @@ public class StorageReconcilerTests : StorageTestBase
 
         // Assert
         Assert.All(exceptions, exception =>
-            Assert.Equal("Storage not connected", Assert.IsType<InvalidOperationException>(exception).Message));
+            Assert.Equal("Storage not connected", Assert.IsType<StorageRefusedException>(exception).Message));
         Assert.False(isSaved);
-        Assert.Equal("Storage not connected", Assert.IsType<InvalidOperationException>(laterException).Message);
+        Assert.Equal("Storage not connected", Assert.IsType<StorageRefusedException>(laterException).Message);
         Assert.Equal(["Motor", "Slow.gated"], storage.Children.Keys.Order());
         Assert.False(File.Exists(GetFullPath("Notes.txt")));
     }

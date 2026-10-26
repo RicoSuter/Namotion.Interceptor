@@ -1,7 +1,6 @@
 ---
 title: HomeBlaze Documentation
 navTitle: Home
-position: 0
 ---
 
 # HomeBlaze Documentation

@@ -15,7 +15,7 @@ public class MarkdownPageScopeTests
     private const string Namespace = "HomeBlaze.Storage.Tests.Pages";
 
     private static RenderExpression FindExpression(IEnumerable<IInterceptorSubject> subjects, string path) =>
-        Flatten(subjects).OfType<RenderExpression>().Single(expression => expression.Path == path);
+        Flatten(subjects).OfType<RenderExpression>().Single(expression => expression.Text == path);
 
     private static IEnumerable<IInterceptorSubject> Flatten(IEnumerable<IInterceptorSubject> subjects)
     {
@@ -487,6 +487,20 @@ public class MarkdownPageScopeTests
 
         // Assert
         Assert.Equal("Braces", FindExpression(page.Children.Values, "../a%7Bb%7D.md/Title").Value);
+    }
+
+    [Fact]
+    public async Task WhenFileNameContainsASpace_ThenAnExpressionWrittenWithTheSpaceStillReachesIt()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        await fixture.AddPageAsync("a b.md", "---\ntitle: Space\n---\n\ntext");
+
+        // Act
+        var page = await fixture.AddPageAsync("page.md", "Title: {{ ../a b.md/Title }}");
+
+        // Assert
+        Assert.Equal("Space", FindExpression(page.Children.Values, "../a b.md/Title").Value);
     }
 
     [Theory]
