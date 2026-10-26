@@ -166,7 +166,6 @@ public sealed class AuthorizationServicePreviewTests : IDisposable
     [Theory]
     [InlineData("/Devices/**")]
     [InlineData("/Devices/Motor")]
-    [InlineData("/")]
     [InlineData("/a//b")] // Empty segments are skipped by the path parser, as when a role is compiled.
     public void WhenAPathPatternIsValid_ThenValidationReturnsNoError(string pattern)
     {
@@ -182,6 +181,7 @@ public sealed class AuthorizationServicePreviewTests : IDisposable
     [InlineData("Devices", "Path pattern 'Devices' must start with '/'.")]
     [InlineData("/ a", "Path pattern '/ a' has a segment with leading or trailing whitespace.")]
     [InlineData("/Devices[", "Path pattern '/Devices[' is malformed: ")]
+    [InlineData("/", "Path pattern '/' matches no member; use '/**' for the subject and everything below it, or '/*' for its members.")]
     public void WhenAPathPatternIsInvalid_ThenValidationReturnsTheErrorWithoutNamingARole(string pattern, string expectedStart)
     {
         // Act

@@ -70,7 +70,7 @@ public sealed class RolePreviewTests : BunitContext, IAsyncLifetime
         // Arrange
         var role = _graph.GetRole("Kitchen");
         role.Allow = [new PermissionRule { Actions = [PermissionAction.Read, PermissionAction.Write] }];
-        role.Deny = [new PermissionRule { Paths = ["/Devices"], Members = ["Temperature"], Actions = [PermissionAction.Write] }];
+        role.Deny = [new PermissionRule { Paths = ["/Devices/*"], Members = ["Temperature"], Actions = [PermissionAction.Write] }];
         var component = RenderEditor(role);
         await ChoosePathAsync(component, "/Devices");
 
@@ -79,7 +79,7 @@ public sealed class RolePreviewTests : BunitContext, IAsyncLifetime
 
         // Assert
         const string expected =
-            "Denied by Kitchen: deny paths /Devices; members Temperature; actions write. " +
+            "Denied by Kitchen: deny paths /Devices/*; members Temperature; actions write. " +
             "It overrides Kitchen: allow any member; actions read, write.";
         Assert.Equal($"Temperature, write: {expected}", component.Find("[data-testid='role-preview-explanation']").TextContent.Trim());
         Assert.Contains(component.FindComponents<MudTooltip>(), tooltip => tooltip.Instance.Text == expected);
@@ -149,7 +149,7 @@ public sealed class RolePreviewTests : BunitContext, IAsyncLifetime
         // Arrange
         var role = _graph.GetRole("Kitchen");
         role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
-        role.Deny = [new PermissionRule { Paths = ["/Devices"], Members = ["Child"], Actions = [PermissionAction.Read] }];
+        role.Deny = [new PermissionRule { Paths = ["/Devices/*"], Members = ["Child"], Actions = [PermissionAction.Read] }];
         var component = RenderEditor(role);
 
         // Act
