@@ -108,6 +108,7 @@ The field "Name" checks the name as you type, and "Add" and "Rename" stay disabl
 - It is not empty, else "Enter a name.".
 - It is not the name of a built-in role, ignoring case, else "The name 'reader' is reserved for a built-in role.".
 - It is not `System`, ignoring case, else "The name 'System' is reserved for the system rules.".
+- It contains no `/`, `[` or `]`, because the name is part of the role's path, else "The name 'Kitchen/Lights' cannot contain '/', '[' or ']', because it is part of the role's path.".
 - No other custom role has it, ignoring case, else "A role with this name exists already.". A rename may change only the case of the name.
 
 A name typed but not confirmed with "Add" or "Rename" is taken over by "Save", and an empty field of a role being added is ignored.
@@ -116,8 +117,8 @@ A name typed but not confirmed with "Add" or "Rename" is taken over by "Save", a
 
 Agents name their roles, so a rename or removal changes what they may do:
 
-- **Remove**: when agents use the role, the trash button asks first with "LightOperator is used by 2 agents. They lose the access it grants until they are given another role." Click "Remove" to remove it or "Cancel" to keep it.
-- **Rename**: when agents use the role, the field "Name" shows "LightOperator is used by 2 agents. They keep the old name and lose this role until they are given the new one." before you click "Rename".
+- **Remove**: when agents use the role, the trash button asks first with "2 agents use this role. After saving, they are denied everything and show "Invalid roles" until they are given another role." Click "Remove" to remove it or "Cancel" to keep it.
+- **Rename**: when agents use the role, the field "Name" shows "2 agents use this role under its old name. After saving, they are denied everything and show "Invalid roles" until they are given the new name or another role." before you click "Rename".
 - **After saving**: the agents keep the old name in their `Roles`. They show the status "Invalid roles: Role 'LightOperator' is not defined." and every tool call of theirs is denied, not only the calls the role allowed, see [Invalid Roles](#invalid-roles). Their edit dialog shows the old name as a red chip with the tooltip "Unknown role". Remove it there and select the new name or another role, then save the agent.
 - **Includes**: a custom role that includes the old name shows the status "Role '...' includes 'LightOperator', which is not defined." until its includes are changed as well.
 
@@ -125,7 +126,7 @@ Agents name their roles, so a rename or removal changes what they may do:
 
 The property panel of a role shows two values:
 
-- **`Status`**: why the role cannot be used, or empty. "The name 'Reader' is reserved for a built-in role." or "The name 'System' is reserved for the system rules." for a reserved name, where agents naming `Reader` keep the built-in role; "The name '...' is used by more than one role, ignoring case."; or why the rules do not compile, such as "Role 'LightOperator' includes 'Readers', which is not defined.", "Action 'run' of role 'LightOperator' is not a known action." or "Path pattern 'Devices' of role 'LightOperator' must start with '/'.".
+- **`Status`**: why the role cannot be used, or empty. "The name 'Reader' is reserved for a built-in role." or "The name 'System' is reserved for the system rules." for a reserved name, where agents naming `Reader` keep the built-in role; "The name 'Kitchen/Lights' cannot contain '/', '[' or ']', because it is part of the role's path." for a name written by hand with such a character; "The name '...' is used by more than one role, ignoring case."; or why the rules do not compile, such as "Role 'LightOperator' includes 'Readers', which is not defined.", "Action 'run' of role 'LightOperator' is not a known action." or "Path pattern 'Devices' of role 'LightOperator' must start with '/'.".
 - **`UsedByAgents`**: the number of started agents that name the role.
 
 Role names compare ignoring case. A saved change applies to the next turn of each agent. When a hand-written file holds two roles whose names differ only in case, the `Authorization` dialog shows "Several roles have the same name, ignoring case. Rename or remove one to save." and "Save" stays disabled until one is renamed or removed.
@@ -322,7 +323,7 @@ When the roles cannot be used, the agent shows the status Error with "Invalid ro
 - "Role 'LightOperator' is not defined.", for a name that is no built-in or custom role,
 - "A role name is empty.",
 - why a custom role does not compile, see [Status and Usage](#status-and-usage),
-- "Role '...' is unavailable: ...", for a role with a reserved name or while [several Authorization subjects](#one-authorization-subject) exist.
+- "Role '...' is unavailable: ...", for a role with a reserved name or a name with `/`, `[` or `]`, or while [several Authorization subjects](#one-authorization-subject) exist.
 
 Turns still run, but every tool call is denied, so the agent can tell you what it cannot do. The status is checked again when the agent starts, when its settings are saved, after each turn and when a role or the `Authorization` subject changes, so it follows a saved role or an edit of `Authorization.json` without waiting for a turn.
 

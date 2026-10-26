@@ -59,7 +59,7 @@
                 @if (ReferenceEquals(entry, _removedEntry))
                 {
                     <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2" data-testid="authorization-role-remove-warning">
-                        @entry.Name is @DescribeUsage(entry). They lose the access it grants until they are given another role.
+                        @DescribeAgents(entry) this role. After saving, they are denied everything and show "Invalid roles" until they are given another role.
                     </MudAlert>
                     <MudStack Row="true" Justify="Justify.FlexEnd" Class="mt-2">
                         <MudButton Variant="Variant.Text" OnClick="@(() => _removedEntry = null)"
@@ -228,12 +228,12 @@
         <div data-testid="authorization-role-name" @onkeyup="OnNameKeyUp" class="mt-2">
             <MudTextField T="string" Value="@_nameText" ValueChanged="@OnNameChanged" Label="Name" Immediate="true" AutoFocus="true"
                           Error="@(_isNameChanged && _nameError is not null)" ErrorText="@_nameError"
-                          HelperText="Unique ignoring case; not the name of a built-in role or System." />
+                          HelperText="Unique ignoring case; not the name of a built-in role or System; without /, [ and ]." />
         </div>
         @if (_renamedEntry is { Role.UsedByAgents: > 0 } renamed)
         {
             <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2" data-testid="authorization-role-rename-warning">
-                @renamed.OriginalName is @DescribeUsage(renamed). They keep the old name and lose this role until they are given the new one.
+                @DescribeAgents(renamed) this role under its old name. After saving, they are denied everything and show "Invalid roles" until they are given the new name or another role.
             </MudAlert>
         }
         <MudStack Row="true" Justify="Justify.FlexEnd" Class="mt-2">
@@ -254,6 +254,12 @@
     {
         var count = entry.Role?.UsedByAgents ?? 0;
         return $"used by {count} {(count == 1 ? "agent" : "agents")}";
+    }
+
+    private static string DescribeAgents(RoleEntry entry)
+    {
+        var count = entry.Role?.UsedByAgents ?? 0;
+        return count == 1 ? "1 agent uses" : $"{count} agents use";
     }
 
     private void StartAdd() => OpenNameEditor(null, string.Empty);
@@ -351,14 +357,9 @@
             return "Enter a name.";
         }
 
-        if (BuiltInRoles.IsBuiltIn(name))
+        if (AuthorizationService.GetRoleNameError(name) is { } error)
         {
-            return $"The name '{name}' is reserved for a built-in role.";
-        }
-
-        if (string.Equals(name, AuthorizationPolicy.SystemRoleName, StringComparison.OrdinalIgnoreCase))
-        {
-            return $"The name '{name}' is reserved for the system rules.";
+            return error;
         }
 
         return _entries.Exists(entry => !ReferenceEquals(entry, _renamedEntry) && string.Equals(entry.Name, name, StringComparison.OrdinalIgnoreCase))

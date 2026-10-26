@@ -134,14 +134,27 @@ public sealed class AuthorizationService : IDisposable
     }
 
     /// <summary>
+    /// Gets why <paramref name="name"/> cannot name a custom role, or null: it is blank, is the name of a built-in role or
+    /// of the system rules, ignoring case, or contains <c>/</c>, <c>[</c> or <c>]</c>, which would break the path of the role.
+    /// Uniqueness among the custom roles is not checked.
+    /// </summary>
+    public static string? GetRoleNameError(string name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+
+        return AuthorizationSnapshot.GetNameError(name, count: 1);
+    }
+
+    /// <summary>
     /// Gets the names of the built-in roles, followed by those of the custom roles that names resolve to, ordered by name.
     /// A custom role whose rules do not compile is listed; its <see cref="Role.Status"/> and <see cref="GetPolicy"/> report the error.
     /// </summary>
     public IReadOnlyList<string> GetRoleNames() => GetSnapshot().RoleNames;
 
     /// <summary>
-    /// Gets the custom roles that exist but cannot be used, by name ignoring case, with the reason: a name used by more
-    /// than one role or reserved for the system rules, or any custom role while several <see cref="Authorization"/>
+    /// Gets the custom roles that exist but cannot be used, by name ignoring case, with the reason: a name that is blank,
+    /// used by more than one role, reserved for the system rules or contains a path character, see
+    /// <see cref="GetRoleNameError"/>, or any custom role while several <see cref="Authorization"/>
     /// subjects exist. A custom role named like a built-in role is not listed, as the name means the built-in role.
     /// </summary>
     public IReadOnlyDictionary<string, string> GetUnavailableRoles() => GetSnapshot().UnavailableRoles;

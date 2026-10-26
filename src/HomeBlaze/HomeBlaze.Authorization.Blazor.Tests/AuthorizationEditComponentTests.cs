@@ -175,7 +175,9 @@ public sealed class AuthorizationEditComponentTests : BunitContext, IAsyncLifeti
         await ClickAsync(component, "authorization-role-remove-Garden");
 
         // Assert
-        Assert.Contains("used by 2 agents", component.Find("[data-testid='authorization-role-remove-warning']").TextContent);
+        Assert.Contains(
+            "2 agents use this role. After saving, they are denied everything and show \"Invalid roles\" until they are given another role.",
+            component.Find("[data-testid='authorization-role-remove-warning']").TextContent);
         Assert.Equal(["Kitchen", "Garden"], GetRoleNames(component));
 
         // Act
@@ -213,7 +215,9 @@ public sealed class AuthorizationEditComponentTests : BunitContext, IAsyncLifeti
         await ClickAsync(component, "authorization-role-rename-Kitchen");
 
         // Assert
-        Assert.Contains("used by 1 agent", component.Find("[data-testid='authorization-role-rename-warning']").TextContent);
+        Assert.Contains(
+            "1 agent uses this role under its old name. After saving, they are denied everything and show \"Invalid roles\" until they are given the new name or another role.",
+            component.Find("[data-testid='authorization-role-rename-warning']").TextContent);
     }
 
     [Theory]
@@ -221,6 +225,8 @@ public sealed class AuthorizationEditComponentTests : BunitContext, IAsyncLifeti
     [InlineData("reader", "The name 'reader' is reserved for a built-in role.")]
     [InlineData("SYSTEM", "The name 'SYSTEM' is reserved for the system rules.")]
     [InlineData("  ", "Enter a name.")]
+    [InlineData("Kitchen/Lights", "The name 'Kitchen/Lights' cannot contain '/', '[' or ']', because it is part of the role's path.")]
+    [InlineData("Lights[0]", "The name 'Lights[0]' cannot contain '/', '[' or ']', because it is part of the role's path.")]
     public async Task WhenTheNameIsInvalid_ThenItsErrorIsShownAndItCannotBeAdded(string name, string error)
     {
         // Arrange

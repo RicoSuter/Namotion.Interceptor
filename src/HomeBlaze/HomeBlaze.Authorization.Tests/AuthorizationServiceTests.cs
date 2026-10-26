@@ -160,6 +160,46 @@ public sealed class AuthorizationServiceTests : IDisposable
         Assert.Null(goodResult.Error);
     }
 
+    [Theory]
+    [InlineData("Kitchen/Lights")]
+    [InlineData("Lights[0]")]
+    [InlineData("Lights]")]
+    public void WhenACustomRoleNameHasAPathCharacter_ThenItIsUnavailableWithAStatusAndOtherRolesStillCompile(string name)
+    {
+        // Arrange
+        var invalid = new Role { Allow = [ReadPlain()] };
+        AddAuthorization((name, invalid), ("Good", new Role { Allow = [ReadPlain()] }));
+        var expectedStatus = $"The name '{name}' cannot contain '/', '[' or ']', because it is part of the role's path.";
+
+        // Act
+        var invalidResult = _service.GetPolicy([name]);
+        var goodResult = _service.GetPolicy(["Good"]);
+
+        // Assert
+        Assert.Same(AuthorizationPolicy.DenyAll, invalidResult.Policy);
+        Assert.Equal($"Role '{name}' is unavailable: {expectedStatus}", invalidResult.Error);
+        Assert.Equal(expectedStatus, invalid.Status);
+        Assert.Equal(expectedStatus, _service.GetUnavailableRoles()[name]);
+        Assert.DoesNotContain(name, _service.GetRoleNames());
+        Assert.Null(goodResult.Error);
+    }
+
+    [Theory]
+    [InlineData("LightOperator", null)]
+    [InlineData("Light Operator.2", null)]
+    [InlineData(" ", "A role needs a name.")]
+    [InlineData("OPERATOR", "The name 'OPERATOR' is reserved for a built-in role.")]
+    [InlineData("System", "The name 'System' is reserved for the system rules.")]
+    [InlineData("a/b", "The name 'a/b' cannot contain '/', '[' or ']', because it is part of the role's path.")]
+    public void WhenARoleNameIsChecked_ThenOnlyBlankReservedAndPathCharacterNamesHaveAnError(string name, string? expectedError)
+    {
+        // Act
+        var error = AuthorizationService.GetRoleNameError(name);
+
+        // Assert
+        Assert.Equal(expectedError, error);
+    }
+
     [Fact]
     public void WhenTwoRolesHaveTheSameNameIgnoringCase_ThenNeitherIsUsedAndBothHaveAStatus()
     {

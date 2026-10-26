@@ -17,6 +17,9 @@ internal sealed class AuthorizationSnapshot
     // The name of the role a pattern is validated in, removed from the error since the pattern belongs to no role.
     private const string PatternValidationRoleName = "PatternValidation";
 
+    // A role's name is a segment of its path, where these separate segments and enclose indexes.
+    private static readonly char[] RoleNamePathCharacters = ['/', '[', ']'];
+
     private readonly PathProviderBase _pathProvider;
     private readonly ImmutableArray<AuthorizationRole> _roles;
     private readonly Dictionary<string, string> _unavailableRoles;
@@ -265,7 +268,11 @@ internal sealed class AuthorizationSnapshot
         return roles;
     }
 
-    private static string? GetNameError(string name, int count)
+    /// <summary>
+    /// Gets why <paramref name="name"/> cannot name a custom role held by <paramref name="count"/> roles of the
+    /// <see cref="Authorization"/>, ignoring case, or null.
+    /// </summary>
+    public static string? GetNameError(string name, int count)
     {
         if (string.IsNullOrWhiteSpace(name))
         {
@@ -280,6 +287,11 @@ internal sealed class AuthorizationSnapshot
         if (string.Equals(name, AuthorizationPolicy.SystemRoleName, StringComparison.OrdinalIgnoreCase))
         {
             return $"The name '{name}' is reserved for the system rules.";
+        }
+
+        if (name.IndexOfAny(RoleNamePathCharacters) >= 0)
+        {
+            return $"The name '{name}' cannot contain '/', '[' or ']', because it is part of the role's path.";
         }
 
         return count > 1 ? $"The name '{name}' is used by more than one role, ignoring case." : null;
