@@ -3,6 +3,7 @@
 @using System.Text
 @using HomeBlaze.Abstractions
 @using Namotion.Interceptor.Registry.Abstractions
+@using Namotion.Interceptor.Registry.Paths
 
 @inject AuthorizationService AuthorizationService
 @inject SubjectPathResolver PathResolver
@@ -45,7 +46,15 @@ else
             @foreach (var row in _rows)
             {
                 <tr data-member="@row.Name">
-                    <td>@row.Name</td>
+                    <td>
+                        @row.Name
+                        @* Selected as a whole with one click, to be copied into a rule. *@
+                        @if (row.Path is { } path)
+                        {
+                            <div class="mud-text-secondary role-preview-member-path" title="The path a rule matches this member by"
+                                 data-testid="@($"role-preview-path-{row.Name}")">@path</div>
+                        }
+                    </td>
                     @for (var index = 0; index < row.Cells.Length; index++)
                     {
                         var action = AuthorizationActions.All[index];
@@ -74,6 +83,14 @@ else
         </MudAlert>
     }
 }
+
+<style>
+    .role-preview-member-path {
+        font-size: 0.75rem;
+        user-select: all;
+        word-break: break-all;
+    }
+</style>
 
 @code {
     private string? _path;
@@ -137,7 +154,7 @@ else
         var policy = result.Policy;
         _subjectDecision = policy.Explain(subject);
         _subjectText = DescribeSubject(_subjectDecision);
-        _rows = CreateRows(subject, policy);
+        _rows = CreateRows(subject, policy, AuthorizationService.PathProvider);
     }
 
     private string DescribeSubject(SubjectReadDecision decision)
@@ -162,7 +179,7 @@ else
     }
 
     // The properties, then the methods, then the attributes of each, as the policy names them.
-    private static List<MemberRow> CreateRows(RegisteredSubject subject, AuthorizationPolicy policy)
+    private static List<MemberRow> CreateRows(RegisteredSubject subject, AuthorizationPolicy policy, PathProviderBase pathProvider)
     {
         var properties = new List<RegisteredSubjectProperty>();
         var methods = new List<RegisteredSubjectProperty>();
@@ -175,17 +192,18 @@ else
         }
 
         var rows = new List<MemberRow>();
-        rows.AddRange(properties.Select(property => CreateRow(property, property.Name, isMethod: false, policy)));
-        rows.AddRange(methods.Select(method => CreateRow(method, method.Name, isMethod: true, policy)));
+        rows.AddRange(properties.Select(property => CreateRow(property, property.Name, isMethod: false, policy, pathProvider)));
+        rows.AddRange(methods.Select(method => CreateRow(method, method.Name, isMethod: true, policy, pathProvider)));
         foreach (var property in properties.Concat(methods))
         {
-            AddAttributeRows(property, property.Name, policy, rows);
+            AddAttributeRows(property, property.Name, policy, pathProvider, rows);
         }
 
         return rows;
     }
 
-    private static void AddAttributeRows(RegisteredSubjectProperty property, string name, AuthorizationPolicy policy, List<MemberRow> rows)
+    private static void AddAttributeRows(
+        RegisteredSubjectProperty property, string name, AuthorizationPolicy policy, PathProviderBase pathProvider, List<MemberRow> rows)
     {
         foreach (var attribute in property.Attributes)
         {
@@ -195,13 +213,14 @@ else
             }
 
             var attributeName = $"{name}@{attribute.BrowseName}";
-            rows.Add(CreateRow(attribute, attributeName, isMethod: false, policy));
-            AddAttributeRows(attribute, attributeName, policy, rows);
+            rows.Add(CreateRow(attribute, attributeName, isMethod: false, policy, pathProvider));
+            AddAttributeRows(attribute, attributeName, policy, pathProvider, rows);
         }
     }
 
     // Methods are read and executed; values are read, written and have a history.
-    private static MemberRow CreateRow(RegisteredSubjectProperty member, string name, bool isMethod, AuthorizationPolicy policy)
+    private static MemberRow CreateRow(
+        RegisteredSubjectProperty member, string name, bool isMethod, AuthorizationPolicy policy, PathProviderBase pathProvider)
     {
         var cells = new Cell?[AuthorizationActions.All.Length];
         for (var index = 0; index < cells.Length; index++)
@@ -220,7 +239,7 @@ else
             MarkExecuteWithoutRead(cells);
         }
 
-        return new MemberRow(name, cells);
+        return new MemberRow(name, RulePaths.GetMemberPath(member, pathProvider), cells);
     }
 
     // A method that can be executed but not read cannot be used, so its allowed execute cell says why.
@@ -287,7 +306,8 @@ else
         }
     }
 
-    private sealed record MemberRow(string Name, Cell?[] Cells);
+    // The path is the member's path as path patterns spell it, or null when its subject has none.
+    private sealed record MemberRow(string Name, string? Path, Cell?[] Cells);
 
     // Unusable: allowed, but of no use because another action is denied, see MarkExecuteWithoutRead.
     private sealed record Cell(bool IsAllowed, string Explanation, bool IsUnusable = false)

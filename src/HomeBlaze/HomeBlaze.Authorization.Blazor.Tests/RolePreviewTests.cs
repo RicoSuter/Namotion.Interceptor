@@ -65,6 +65,24 @@ public sealed class RolePreviewTests : BunitContext, IAsyncLifetime
     }
 
     [Fact]
+    public async Task WhenASubjectIsChosen_ThenEachMemberShowsThePathARuleMatchesItBy()
+    {
+        // Arrange
+        var role = _graph.GetRole("Kitchen");
+        role.Includes = [BuiltInRoles.ReaderName];
+        var component = RenderEditor(role);
+
+        // Act
+        await ChoosePathAsync(component, "/Devices/Child");
+
+        // Assert
+        Assert.Equal("/Devices/Child/Temperature", component.Find("[data-testid='role-preview-path-Temperature']").TextContent.Trim());
+        Assert.Equal("/Devices/Child/Start", component.Find("[data-testid='role-preview-path-Start']").TextContent.Trim());
+        Assert.Equal("/Devices/Child/Minimum", component.Find("[data-testid='role-preview-path-Temperature@Minimum']").TextContent.Trim());
+        Assert.Contains("role-preview-member-path", component.Find("[data-testid='role-preview-path-Start']").ClassName);
+    }
+
+    [Fact]
     public async Task WhenAMethodCanBeExecutedButNotRead_ThenItsExecuteCellSaysItCannotBeUsed()
     {
         // Arrange
