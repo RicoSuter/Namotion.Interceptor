@@ -264,8 +264,10 @@ public sealed class AgentRolesTests : IAsyncLifetime
         // Assert
         Assert.Equal(ServiceStatus.Error, statusBefore.Status);
         Assert.Contains("'Late'", statusBefore.StatusMessage);
-        await AsyncTestHelpers.WaitUntilAsync(() => agent.Status == ServiceStatus.Running, message: "The roles error should clear.");
-        Assert.DoesNotContain("'Late'", agent.StatusMessage ?? string.Empty);
+        // Status and message are written one after the other, so both are waited for.
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => agent.Status == ServiceStatus.Running && !(agent.StatusMessage ?? string.Empty).Contains("'Late'"),
+            message: "The roles error should clear.");
         Assert.Empty(agent.Requests);
     }
 
@@ -284,8 +286,10 @@ public sealed class AgentRolesTests : IAsyncLifetime
 
         // Assert
         Assert.Equal(ServiceStatus.Running, statusBefore);
-        await AsyncTestHelpers.WaitUntilAsync(() => agent.Status == ServiceStatus.Error, message: "The roles error should be shown.");
-        Assert.Contains("'Custom'", agent.StatusMessage);
+        // Status and message are written one after the other, so both are waited for.
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => agent.Status == ServiceStatus.Error && (agent.StatusMessage ?? string.Empty).Contains("'Custom'"),
+            message: "The roles error should be shown.");
     }
 
     [Fact]
