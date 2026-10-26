@@ -1,0 +1,126 @@
+using Namotion.Interceptor.Authorization.Internal;
+using Namotion.Interceptor.Registry.Paths;
+
+namespace Namotion.Interceptor.Authorization.Tests;
+
+public class PathPatternTests
+{
+    [Theory]
+    [InlineData("/", "", true)]
+    [InlineData("/", "Rooms[Kitchen]", true)]
+    [InlineData("/Rooms[Kitchen]", "Rooms[Kitchen]", true)]
+    [InlineData("/Rooms[Kitchen]", "Rooms[Kitchen]/Lights[Ceiling]", true)]
+    [InlineData("/Rooms[Kitchen]", "Rooms[Bedroom]/Lights[Lamp]", false)]
+    [InlineData("/Rooms[Kitchen]", "", false)]
+    [InlineData("/Rooms", "Rooms[Kitchen]/Lights[Ceiling]", true)]
+    [InlineData("/Rooms[*]/Lights", "Rooms[Bedroom]/Lights[Lamp]", true)]
+    [InlineData("/Rooms[*]/Lights", "Rooms[Bedroom]/Sensor", false)]
+    [InlineData("/Rooms[K*]", "Rooms[Kitchen]", true)]
+    [InlineData("/Rooms[K*]", "Rooms[Bedroom]", false)]
+    [InlineData("/*/Lights", "Rooms[Kitchen]/Lights[Ceiling]", true)]
+    [InlineData("/*/Lights", "Rooms[Kitchen]/Sensor/Lights", false)]
+    [InlineData("/**/Lights", "Rooms[Kitchen]/Lights[Ceiling]", true)]
+    [InlineData("/**/Lights", "Rooms[Kitchen]/Sensor/Lights", true)]
+    [InlineData("/**/Lights", "Lights", true)]
+    [InlineData("/**/Lights", "Rooms[Kitchen]/Sensor", false)]
+    [InlineData("/Rooms/**", "Rooms", true)]
+    [InlineData("/Rooms/**", "Wifi", false)]
+    [InlineData("/Rooms[Kitchen]/Light*", "Rooms[Kitchen]/Lights[Ceiling]", true)]
+    [InlineData("/Rooms['Kitchen [north]']", "Rooms['Kitchen [north]']/Sensor", true)]
+    [InlineData("/Rooms['Living Room']", "Rooms['Living Room']/Sensor", true)]
+    [InlineData("/Rooms[*]", "Rooms", false)]
+    [InlineData("/Items[3]", "Items[30]", false)]
+    [InlineData("/Rooms/**/Sensor/**/Lights", "Rooms[Kitchen]/Sensor/Lights", true)]
+    public void WhenPatternIsMatchedAgainstPath_ThenResultIsAsExpected(string pattern, string path, bool expected)
+    {
+        // Arrange
+        var provider = SlashPathProvider.Instance;
+        var compiled = PathPattern.Parse(pattern, provider, "Test");
+        var links = ToLinks(provider, path);
+
+        // Act
+        var result = compiled.Matches(links);
+
+        // Assert
+        Assert.Equal(expected, result);
+    }
+
+    [Theory]
+    [InlineData("/Security/FullReader", true)]
+    [InlineData("/Security/Roles[FullReader]", true)]
+    [InlineData("/Security/Roles", true)]
+    [InlineData("/Security/Roles[Full*]", true)]
+    [InlineData("/Security/Full*", true)]
+    [InlineData("/Security/FullReader[x]", false)]
+    [InlineData("/Security/Other", false)]
+    [InlineData("/Security/Roles[Other]", false)]
+    public void WhenPatternIsMatchedAgainstAnInlineKeyWithBothSpellings_ThenEitherSpellingMatches(string pattern, bool expected)
+    {
+        // Arrange
+        var compiled = PathPattern.Parse(pattern, SlashPathProvider.Instance, "Test");
+        PathLink[] links = [new("Security", null, null), new("Roles", "FullReader", "FullReader")];
+
+        // Act
+        var result = compiled.Matches(links);
+
+        // Assert
+        Assert.Equal(expected, result);
+    }
+
+    [Theory]
+    [InlineData("/Security/Roles[Wifi]", true)]
+    [InlineData("/Security/Roles", true)]
+    [InlineData("/Security/Wifi", false)]
+    public void WhenPatternIsMatchedAgainstAnInlineKeyShadowedByAProperty_ThenOnlyTheExplicitSpellingMatches(string pattern, bool expected)
+    {
+        // Arrange
+        var compiled = PathPattern.Parse(pattern, SlashPathProvider.Instance, "Test");
+        PathLink[] links = [new("Security", null, null), new("Roles", "Wifi", null)];
+
+        // Act
+        var result = compiled.Matches(links);
+
+        // Assert
+        Assert.Equal(expected, result);
+    }
+
+    [Theory]
+    [InlineData("/Security/FullReader", true)]
+    [InlineData("/Security/Roles[FullReader]", false)]
+    [InlineData("/Security/Roles", false)]
+    public void WhenPatternIsMatchedAgainstAnInlineKeyWhoseExplicitFormIsShadowed_ThenOnlyTheBareSpellingMatches(string pattern, bool expected)
+    {
+        // Arrange
+        var compiled = PathPattern.Parse(pattern, SlashPathProvider.Instance, "Test");
+        PathLink[] links = [new("Security", null, null), new(null, "FullReader", "FullReader")];
+
+        // Act
+        var result = compiled.Matches(links);
+
+        // Assert
+        Assert.Equal(expected, result);
+    }
+
+    [Theory]
+    [InlineData("Rooms", "must start with '/'")]
+    [InlineData("", "must start with '/'")]
+    [InlineData("/Rooms[", "malformed")]
+    [InlineData("/Rooms[]", "malformed")]
+    [InlineData("/ Rooms", "whitespace")]
+    [InlineData("/Rooms[ Kitchen]", "whitespace")]
+    public void WhenPatternIsInvalid_ThenParseThrowsNamingTheRole(string pattern, string expectedMessagePart)
+    {
+        // Act
+        var exception = Assert.Throws<AuthorizationException>(() => PathPattern.Parse(pattern, SlashPathProvider.Instance, "Reader"));
+
+        // Assert
+        Assert.Contains("Reader", exception.Message);
+        Assert.Contains(expectedMessagePart, exception.Message);
+    }
+
+    private static PathLink[] ToLinks(PathProviderBase provider, string path)
+    {
+        Assert.True(provider.TryParsePath(path, out var segments, out _));
+        return segments.Select(segment => new PathLink(segment.segment, segment.index, null)).ToArray();
+    }
+}
