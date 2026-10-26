@@ -26,6 +26,7 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 /// <see cref="LifecycleInterceptor"/> and would satisfy the WithLifecycle() exists check without
 /// being the default lifecycle. Third parties extend through <see cref="ILifecycleInterceptor"/>.
 /// </remarks>
+[System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S1200", Justification = "The ownership graph, notifier, reachability, attach, release, reconcile and admission are already separate components; what remains is the topology gate and the public lifecycle contract, which must stay in one place for the gate to cover every entry point.")]
 public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHandler
 {
     private readonly IInterceptorSubjectContext _context;
@@ -703,6 +704,39 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     /// A root retained by an independently committed edge keeps its installed children and failed-seed
     /// state for retry; draining those children would invalidate that surviving ownership lifetime.
     /// </remarks>
+    /// <summary>
+    /// Clears the root anchor of a rejected attach and releases the root when nothing else supports it.
+    /// </summary>
+    private void ReleaseRejectedRoot(IInterceptorSubject subject, SubjectAttachmentAnchorKind anchor)
+    {
+        _graph.SetAnchor(subject, SubjectAttachmentAnchorKind.None);
+
+        var ownership = _graph.TryGetOwnership(subject);
+        if (ownership is null)
+        {
+            _graph.ReleaseClaim(subject);
+            return;
+        }
+
+        if (ownership.IncomingCount != 0 && _reachability.IsAnchorReachable(subject, null))
+        {
+            return;
+        }
+
+        try
+        {
+            _release.ReleaseRoot(subject);
+        }
+        catch
+        {
+            // The release runs detach callbacks, so it can fail partway. Put the anchor back: the
+            // trace in the caller tells it to detach the root explicitly, and without an anchor that
+            // is exactly what DetachFromContext refuses to do.
+            _graph.SetAnchor(subject, anchor);
+            throw;
+        }
+    }
+
     private void RollbackRejectedAttach(
         IInterceptorSubject subject,
         SubjectAttachmentAnchorKind anchor,
@@ -723,28 +757,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
 
             if (ownsRootAnchor)
             {
-                _graph.SetAnchor(subject, SubjectAttachmentAnchorKind.None);
-
-                var ownership = _graph.TryGetOwnership(subject);
-                if (ownership is null)
-                {
-                    _graph.ReleaseClaim(subject);
-                }
-                else if (ownership.IncomingCount == 0 || !_reachability.IsAnchorReachable(subject, null))
-                {
-                    try
-                    {
-                        _release.ReleaseRoot(subject);
-                    }
-                    catch
-                    {
-                        // The release runs detach callbacks, so it can fail partway. Put the anchor
-                        // back: the trace below tells the caller to detach the root explicitly, and
-                        // without an anchor that is exactly what DetachFromContext refuses to do.
-                        _graph.SetAnchor(subject, anchor);
-                        throw;
-                    }
-                }
+                ReleaseRejectedRoot(subject, anchor);
             }
 
             // An edge that survived the drain (one published from outside the component by user

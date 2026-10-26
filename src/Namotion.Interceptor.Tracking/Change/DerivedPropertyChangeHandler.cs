@@ -302,147 +302,199 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     {
         // TODO(perf): Avoid boxing when possible (use TProperty generic parameter?)
 
-        object? oldValue;
-
         // Phase 1: Acquire recalculation ownership (brief lock).
         var data = derivedProperty.GetDerivedPropertyData();
+        if (!TryBeginRecalculation(data, out var oldValue))
+        {
+            return;
+        }
+
+        // IsRecalculating stays true during NotifyDerivedPropertyChanged. This serializes
+        // notification delivery with recalculation, preventing a stale notification from being
+        // delivered after a newer one (TOCTOU race between guard checks and delivery). Ending the
+        // recalculation is not a finally: the re-trigger can throw, and on .NET 10.0.0 and 10.0.1 an
+        // exception leaving a finally on the normal path skips the catch blocks of the callers.
+        try
+        {
+            RunRecalculation(ref derivedProperty, data, oldValue, storageTimestamp, rawTimestamp, onlyWhenChanged);
+        }
+        catch (Exception recalculationFailure)
+        {
+            if (EndRecalculation(data))
+            {
+                RetriggerAfterFailure(ref derivedProperty, storageTimestamp, rawTimestamp, recalculationFailure);
+            }
+
+            throw;
+        }
+
+        if (EndRecalculation(data))
+        {
+            RecalculateDerivedProperty(ref derivedProperty, storageTimestamp, rawTimestamp);
+        }
+    }
+
+    private static bool TryBeginRecalculation(DerivedPropertyData data, out object? oldValue)
+    {
         lock (data)
         {
+            oldValue = null;
             if (data.IsRecalculating)
             {
                 data.RecalculationNeeded = true;
-                return;
+                return false;
             }
 
             if (!data.IsAttached)
             {
-                return;
+                return false;
             }
 
             data.IsRecalculating = true;
             oldValue = data.LastKnownValue;
+            return true;
         }
+    }
 
-        // Outer loop handles the post-notification RecalculationNeeded check without recursion,
-        // preventing stack overflow under sustained concurrent writes.
-        // The try-finally at this level ensures IsRecalculating is always cleared on exit.
-        // Crucially, IsRecalculating stays true during NotifyDerivedPropertyChanged. This
-        // serializes notification delivery with recalculation, preventing a stale notification
-        // from being delivered after a newer one (TOCTOU race between guard checks and delivery).
-        Exception? recalculationFailure = null;
-        try
+    /// <summary>
+    /// Atomically clears IsRecalculating and reports whether a write set RecalculationNeeded in the
+    /// gap after the last check, so the derived property must be recalculated again to reflect the
+    /// latest state.
+    /// </summary>
+    /// <remarks>
+    /// RecalculationNeeded is cleared before the re-trigger to prevent unbounded recursion when the
+    /// getter consistently throws: without clearing, the flag persists (the commit never runs to
+    /// clear it), and each re-trigger would re-trigger again indefinitely.
+    /// </remarks>
+    private static bool EndRecalculation(DerivedPropertyData data)
+    {
+        lock (data)
         {
-            for (var outerIteration = 0; outerIteration < MaxStabilizationIterations; outerIteration++)
-            {
-                object? newValue;
-                long sequence;
-
-                while (true)
-                {
-                    // Phase 2: Evaluate getter OUTSIDE lock(data).
-                    // This prevents deadlock: getter side effects can safely acquire
-                    // lock(_attachedSubjects) in LifecycleInterceptor without lock ordering inversion.
-                    try
-                    {
-                        newValue = EvaluateAndStabilize(data, derivedProperty, callerHoldsLock: false);
-                    }
-                    catch (Exception exception) when (exception is not LifecycleContractViolationException)
-                    {
-                        // Getter threw. Keep LastKnownValue; a concurrent writer's cascade will retry.
-                        // A contract violation is excluded: this path runs on every dependency write,
-                        // so absorbing it here would hide the violation on the hot path.
-                        return;
-                    }
-
-                    // Phase 3: Commit result under lock.
-                    lock (data)
-                    {
-                        if (!data.IsAttached)
-                        {
-                            return;
-                        }
-
-                        // State changed during evaluation (write, attach, or detach set this flag).
-                        // Discard the stale result and re-evaluate with a fresh state.
-                        if (data.RecalculationNeeded)
-                        {
-                            data.RecalculationNeeded = false;
-                            continue;
-                        }
-
-                        // The dependencies were updated by the evaluation, which is all such a
-                        // caller needs when the value is the one already published. A subject is the
-                        // same value only when it is the same instance, as everywhere in the graph.
-                        if (onlyWhenChanged && IsPublishedValue(newValue, oldValue))
-                        {
-                            return;
-                        }
-
-                        data.LastKnownValue = newValue;
-                        sequence = ++data.RecalculationSequence;
-                        derivedProperty.SetWriteTimestamp(storageTimestamp);
-                        break;
-                    }
-                }
-
-                // Any concurrent writes during delivery set RecalculationNeeded=true and bail out,
-                // so no new recalculation (or notification) can start until delivery completes.
-                NotifyDerivedPropertyChanged(ref derivedProperty, data, sequence, newValue, oldValue, rawTimestamp);
-
-                // Uses a loop (not recursion) to prevent stack overflow under sustained concurrent writes.
-                lock (data)
-                {
-                    if (!data.RecalculationNeeded || !data.IsAttached)
-                    {
-                        return;
-                    }
-
-                    data.RecalculationNeeded = false;
-                    oldValue = data.LastKnownValue;
-                }
-            }
-
-            Trace.TraceWarning(
-                $"DerivedPropertyChangeHandler: MaxStabilizationIterations ({MaxStabilizationIterations}) exhausted for " +
-                $"'{derivedProperty.Metadata.Name}' on {derivedProperty.Subject.GetType().Name}. " +
-                "This indicates a derived getter with circular side effects.");
-        }
-        catch (Exception exception)
-        {
-            recalculationFailure = exception;
-            throw;
-        }
-        finally
-        {
-            // Atomically clear IsRecalculating. If a write set RecalculationNeeded
-            // in the gap between the outer loop's return-check and this finally,
-            // we must re-trigger so the derived property reflects the latest state.
-            // RecalculationNeeded is cleared before the re-trigger to prevent unbounded
-            // recursion when the getter consistently throws: without clearing, the flag
-            // persists (Phase 3 never runs to clear it), causing each re-trigger's
-            // finally to re-trigger again indefinitely.
-            bool needsRetrigger;
-            lock (data)
-            {
-                needsRetrigger = data is { RecalculationNeeded: true, IsAttached: true };
-                if (needsRetrigger)
-                {
-                    data.RecalculationNeeded = false;
-                }
-
-                data.IsRecalculating = false;
-            }
-
+            var needsRetrigger = data is { RecalculationNeeded: true, IsAttached: true };
             if (needsRetrigger)
             {
-                try
+                data.RecalculationNeeded = false;
+            }
+
+            data.IsRecalculating = false;
+            return needsRetrigger;
+        }
+    }
+
+    private static void RetriggerAfterFailure(ref PropertyReference derivedProperty, long storageTimestamp, long rawTimestamp, Exception recalculationFailure)
+    {
+        try
+        {
+            RecalculateDerivedProperty(ref derivedProperty, storageTimestamp, rawTimestamp);
+        }
+        catch (Exception retriggerFailure)
+        {
+            throw new AggregateException(recalculationFailure, retriggerFailure);
+        }
+    }
+
+    /// <summary>
+    /// Evaluates, commits and notifies until no write arrived during delivery. Uses a loop rather than
+    /// recursion to prevent stack overflow under sustained concurrent writes. Requires recalculation
+    /// ownership.
+    /// </summary>
+    private static void RunRecalculation(
+        ref PropertyReference derivedProperty,
+        DerivedPropertyData data,
+        object? oldValue,
+        long storageTimestamp,
+        long rawTimestamp,
+        bool onlyWhenChanged)
+    {
+        for (var outerIteration = 0; outerIteration < MaxStabilizationIterations; outerIteration++)
+        {
+            if (!TryEvaluateAndCommit(data, ref derivedProperty, storageTimestamp, oldValue, onlyWhenChanged, out var newValue, out var sequence))
+            {
+                return;
+            }
+
+            // Any concurrent writes during delivery set RecalculationNeeded=true and bail out,
+            // so no new recalculation (or notification) can start until delivery completes.
+            NotifyDerivedPropertyChanged(ref derivedProperty, data, sequence, newValue, oldValue, rawTimestamp);
+
+            lock (data)
+            {
+                if (!data.RecalculationNeeded || !data.IsAttached)
                 {
-                    RecalculateDerivedProperty(ref derivedProperty, storageTimestamp, rawTimestamp);
+                    return;
                 }
-                catch (Exception retriggerFailure) when (recalculationFailure is not null)
+
+                data.RecalculationNeeded = false;
+                oldValue = data.LastKnownValue;
+            }
+        }
+
+        Trace.TraceWarning(
+            $"DerivedPropertyChangeHandler: MaxStabilizationIterations ({MaxStabilizationIterations}) exhausted for " +
+            $"'{derivedProperty.Metadata.Name}' on {derivedProperty.Subject.GetType().Name}. " +
+            "This indicates a derived getter with circular side effects.");
+    }
+
+    /// <summary>
+    /// Evaluates without holding lock(data), retries stale results, and commits the value and
+    /// timestamp under lock. Returns false when evaluation throws, the property is detached, or the
+    /// caller asked to publish only a changed value and it did not change.
+    /// </summary>
+    private static bool TryEvaluateAndCommit(
+        DerivedPropertyData data,
+        ref PropertyReference derivedProperty,
+        long storageTimestamp,
+        object? oldValue,
+        bool onlyWhenChanged,
+        out object? newValue,
+        out long sequence)
+    {
+        sequence = 0;
+        while (true)
+        {
+            // Phase 2: Evaluate getter OUTSIDE lock(data). Getter side effects can safely enter
+            // the lifecycle's topology gate without lock ordering inversion.
+            try
+            {
+                newValue = EvaluateAndStabilize(data, derivedProperty, callerHoldsLock: false);
+            }
+            catch (Exception exception) when (exception is not LifecycleContractViolationException)
+            {
+                // Getter threw. Keep LastKnownValue; a concurrent writer's cascade will retry.
+                // A contract violation is excluded: this path runs on every dependency write,
+                // so absorbing it here would hide the violation on the hot path.
+                newValue = null;
+                return false;
+            }
+
+            // Phase 3: Commit result under lock.
+            lock (data)
+            {
+                if (!data.IsAttached)
                 {
-                    throw new AggregateException(recalculationFailure, retriggerFailure);
+                    return false;
                 }
+
+                // State changed during evaluation (write, attach, or detach set this flag).
+                // Discard the stale result and re-evaluate with a fresh state.
+                if (data.RecalculationNeeded)
+                {
+                    data.RecalculationNeeded = false;
+                    continue;
+                }
+
+                // The dependencies were updated by the evaluation, which is all such a caller
+                // needs when the value is the one already published. A subject is the same value
+                // only when it is the same instance, as everywhere in the graph.
+                if (onlyWhenChanged && IsPublishedValue(newValue, oldValue))
+                {
+                    return false;
+                }
+
+                data.LastKnownValue = newValue;
+                sequence = ++data.RecalculationSequence;
+                derivedProperty.SetWriteTimestamp(storageTimestamp);
+                return true;
             }
         }
     }

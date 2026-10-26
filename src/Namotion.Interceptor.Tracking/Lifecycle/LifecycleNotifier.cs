@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Namotion.Interceptor.Tracking.Change;
 using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
@@ -173,58 +174,7 @@ internal sealed class LifecycleNotifier(IInterceptorSubjectContext context, Owne
         List<Exception>? failures = null;
         try
         {
-            var notificationIndex = 0;
-            var propertyChangeIndex = 0;
-            while (notificationIndex < _notifications.Count || propertyChangeIndex < _propertyChanges.Count)
-            {
-                // A self-writing seed queues its property change before discovering that value's
-                // lifecycle transitions. Drain all pending maintenance before each observer group.
-                if (notificationIndex == _notifications.Count)
-                {
-                    try { _propertyChanges[propertyChangeIndex++].Dispatch(); }
-                    catch (Exception exception) { (failures ??= []).Add(exception); }
-                    continue;
-                }
-
-                var notification = _notifications[notificationIndex++];
-                switch (notification.Kind)
-                {
-                    case NotificationKind.Attached:
-                    case NotificationKind.Detaching:
-                        var callbacks = notification.Kind == NotificationKind.Attached ? SubjectAttached : SubjectDetaching;
-                        if (callbacks is not null)
-                        {
-                            foreach (var callback in Delegate.EnumerateInvocationList(callbacks))
-                            {
-                                try { callback(notification.Change); }
-                                catch (Exception exception) { (failures ??= []).Add(exception); }
-                            }
-                        }
-                        break;
-                    case NotificationKind.LifecycleHandler:
-                        try { ((ILifecycleHandler)notification.Value!).HandleLifecycleChange(notification.Change); }
-                        catch (Exception exception) { (failures ??= []).Add(exception); }
-                        break;
-                    case NotificationKind.Refresh:
-                    case NotificationKind.AttachProperty:
-                    case NotificationKind.DetachProperty:
-                        foreach (var handler in GetPropertyHandlers())
-                        {
-                            InvokePropertyHandler(handler, in notification, ref failures);
-                        }
-                        if (notification.Kind != NotificationKind.Refresh && notification.Change.Subject is IPropertyLifecycleHandler subjectHandler)
-                        {
-                            InvokePropertyHandler(subjectHandler, in notification, ref failures);
-                        }
-                        break;
-                    case NotificationKind.RecalculateDerived:
-                        RecalculateDerivedProperties(notification.Change.Subject, ref failures);
-                        break;
-                    case NotificationKind.ReleaseClaim:
-                        CompleteRelease(in notification);
-                        break;
-                }
-            }
+            DrainQueues(ref failures);
         }
         finally
         {
@@ -232,20 +182,103 @@ internal sealed class LifecycleNotifier(IInterceptorSubjectContext context, Owne
             _propertyChanges.Clear();
             _draining = false;
         }
+
         if (failures is not null)
         {
-            if (operationFailure is not null)
-            {
-                failures.Insert(0, operationFailure);
-            }
-
-            if (failures.Count == 1)
-            {
-                ExceptionDispatchInfo.Capture(failures[0]).Throw();
-            }
-
-            throw new AggregateException(failures);
+            ThrowFailures(failures, operationFailure);
         }
+    }
+
+    private void DrainQueues(ref List<Exception>? failures)
+    {
+        var notificationIndex = 0;
+        var propertyChangeIndex = 0;
+        while (notificationIndex < _notifications.Count || propertyChangeIndex < _propertyChanges.Count)
+        {
+            // A self-writing seed queues its property change before discovering that value's
+            // lifecycle transitions. Drain all pending maintenance before each observer group.
+            if (notificationIndex == _notifications.Count)
+            {
+                try { _propertyChanges[propertyChangeIndex++].Dispatch(); }
+                catch (Exception exception) { (failures ??= []).Add(exception); }
+                continue;
+            }
+
+            Dispatch(_notifications[notificationIndex++], ref failures);
+        }
+    }
+
+    private void Dispatch(in Notification notification, ref List<Exception>? failures)
+    {
+        switch (notification.Kind)
+        {
+            case NotificationKind.Attached:
+                InvokeSubjectCallbacks(SubjectAttached, notification.Change, ref failures);
+                break;
+            case NotificationKind.Detaching:
+                InvokeSubjectCallbacks(SubjectDetaching, notification.Change, ref failures);
+                break;
+            case NotificationKind.LifecycleHandler:
+                try { ((ILifecycleHandler)notification.Value!).HandleLifecycleChange(notification.Change); }
+                catch (Exception exception) { (failures ??= []).Add(exception); }
+                break;
+            case NotificationKind.Refresh:
+            case NotificationKind.AttachProperty:
+            case NotificationKind.DetachProperty:
+                InvokePropertyHandlers(in notification, ref failures);
+                break;
+            case NotificationKind.RecalculateDerived:
+                RecalculateDerivedProperties(notification.Change.Subject, ref failures);
+                break;
+            case NotificationKind.ReleaseClaim:
+                CompleteRelease(in notification);
+                break;
+        }
+    }
+
+    // Each subscriber is invoked on its own, so one failing subscriber does not keep the others
+    // from seeing the change.
+    private static void InvokeSubjectCallbacks(Action<SubjectLifecycleChange>? callbacks, SubjectLifecycleChange change, ref List<Exception>? failures)
+    {
+        if (callbacks is null)
+        {
+            return;
+        }
+
+        foreach (var callback in Delegate.EnumerateInvocationList(callbacks))
+        {
+            try { callback(change); }
+            catch (Exception exception) { (failures ??= []).Add(exception); }
+        }
+    }
+
+    private void InvokePropertyHandlers(in Notification notification, ref List<Exception>? failures)
+    {
+        foreach (var handler in GetPropertyHandlers())
+        {
+            InvokePropertyHandler(handler, in notification, ref failures);
+        }
+
+        if (notification.Kind != NotificationKind.Refresh && notification.Change.Subject is IPropertyLifecycleHandler subjectHandler)
+        {
+            InvokePropertyHandler(subjectHandler, in notification, ref failures);
+        }
+    }
+
+    [DoesNotReturn]
+    private static void ThrowFailures(List<Exception> failures, Exception? operationFailure)
+    {
+        if (operationFailure is not null)
+        {
+            failures.Insert(0, operationFailure);
+        }
+
+        if (failures.Count == 1)
+        {
+            ExceptionDispatchInfo.Capture(failures[0]).Throw();
+        }
+
+        throw new AggregateException(failures);
     }
 
     // Out of line so the graph bookkeeping, which runs at most once per released subject, keeps its
