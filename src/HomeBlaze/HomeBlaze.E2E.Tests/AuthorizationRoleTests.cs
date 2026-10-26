@@ -16,8 +16,8 @@ using Xunit.Abstractions;
 namespace HomeBlaze.E2E.Tests;
 
 /// <summary>
-/// E2E tests for editing the custom roles in the dialogs of the Authorization subject and its roles, and for giving a
-/// role to an agent and renaming it.
+/// E2E tests for editing the custom roles in the dialogs of the Authorization subject and its roles, picking a path into
+/// a rule, and for giving a role to an agent and renaming it.
 /// </summary>
 [Collection(nameof(PlaywrightCollection))]
 [Trait("Category", "Integration")]
@@ -28,6 +28,8 @@ public class AuthorizationRoleTests
     private const string RoleName = "StateReader";
     private const string RenamedRoleName = "StateWatcher";
     private const string TypeName = "IConfigurable";
+    private const string FolderPath = "/Agents";
+    private const string FolderPattern = "/Agents/**";
 
     private readonly PlaywrightFixture _fixture;
     private readonly ITestOutputHelper _output;
@@ -103,6 +105,19 @@ public class AuthorizationRoleTests
                 .ClickAsync();
             await Assertions.Expect(rule.GetByTestId("rule-tags-chip")).ToHaveTextAsync(MemberTags.State, new() { Timeout = Timeout });
             await rule.GetByTestId("rule-action-read").CheckAsync();
+
+            // A path picked in the dialog goes into the field, to be edited there and added with its button.
+            var paths = rule.GetByTestId("rule-paths");
+            await paths.GetByRole(AriaRole.Button, new() { Name = "Browse Paths" }).ClickAsync();
+            var picker = rule.Page.GetByTestId("subject-path-picker");
+            await picker.Locator("input").First.FillAsync(FolderPath);
+            await rule.Page.GetByRole(AriaRole.Button, new() { Name = "OK", Exact = true }).ClickAsync();
+            await Assertions.Expect(picker).ToHaveCountAsync(0, new() { Timeout = Timeout });
+            await Assertions.Expect(paths.Locator("input")).ToHaveValueAsync(FolderPattern, new() { Timeout = Timeout });
+            await Assertions.Expect(paths.GetByTestId("rule-paths-chip")).ToHaveCountAsync(0);
+            await paths.GetByTestId("rule-paths-add").ClickAsync();
+            await Assertions.Expect(paths.GetByTestId("rule-paths-chip")).ToHaveTextAsync(FolderPattern, new() { Timeout = Timeout });
+            await Assertions.Expect(paths.Locator("input")).ToHaveValueAsync(string.Empty);
 
             // Typed into a field with suggestions and saved at once, without Enter or leaving the field first.
             await rule.GetByTestId("rule-types").Locator("input").PressSequentiallyAsync(TypeName);
@@ -207,6 +222,7 @@ public class AuthorizationRoleTests
 
     private static bool IsStateReadRule(JsonNode? rule) =>
         rule is not null &&
+        JsonNode.DeepEquals(rule["paths"], new JsonArray(FolderPattern)) &&
         JsonNode.DeepEquals(rule["types"], new JsonArray(TypeName)) &&
         JsonNode.DeepEquals(rule["tags"], new JsonArray(MemberTags.State)) &&
         JsonNode.DeepEquals(rule["actions"], new JsonArray("read"));
