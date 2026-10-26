@@ -386,5 +386,5 @@ Each agent keeps its data in the `Agents` folder of the [data folder](configurat
 | The request is too long for the model | Start a new conversation, or lower `HistoryTokenBudget` |
 | The agent is not running. | The agent is stopped or still starting. Check the status and the log |
 | Invalid configuration: ... | An interval is out of range, such as a poll interval above 365 days. Correct it in the edit form |
-| Invalid roles: ... | A role of the agent cannot be used, such as "Role 'X' is not defined." for a removed custom role. Every tool call is denied until the roles are fixed in the edit form or in `Authorization.json`; the status clears as soon as they are, see [Invalid Roles](authorization.md#invalid-roles) |
+| Invalid roles: ... | A role of the agent cannot be used, such as "Role 'X' is not defined." for a removed or renamed custom role. Every tool call is denied until the roles are fixed in the edit form, in the edit dialog of the `Authorization` subject or in `Authorization.json`; the status clears as soon as they are, see [Invalid Roles](authorization.md#invalid-roles) |
 | ... is not permitted. The access policy does not allow it. | The agent's roles do not allow the call. Give it a role that does, see [Authorization](authorization.md) |

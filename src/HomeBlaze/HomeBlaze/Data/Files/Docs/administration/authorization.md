@@ -11,13 +11,15 @@ On this page:
 
 - [Roles and Allowed Tools](#roles-and-allowed-tools): the two gates of an agent
 - [Built-in Roles](#built-in-roles): `Reader`, `Operator` and `Everything`
-- [Custom Roles](#custom-roles): creating `Authorization.json`
+- [Custom Roles](#custom-roles): creating the `Authorization` subject and adding, renaming and removing roles
+- [Editing a Role](#editing-a-role): the rule cards and the [preview](#previewing-a-role) of what a role allows
 - [Rules and Selectors](#rules-and-selectors): what a rule matches and how rules combine
 - [Actions](#actions): `read`, `write`, `execute` and `history` in the tools
 - [System Rules](#system-rules): the deny rules no role can lift
 - [One Authorization Subject](#one-authorization-subject): what happens with two
 - [Agents](#agents): the `Roles` setting and the "Invalid roles" status
 - [External MCP Clients](#external-mcp-clients), [Watch Paths](#watch-paths) and [Page Expressions](#page-expressions)
+- [File Format](#file-format): the roles in `Authorization.json`
 - [Known Limits](#known-limits)
 - [Changes Against the Previous Version](#changes-against-the-previous-version)
 
@@ -38,7 +40,7 @@ An agent with `invoke_operation` and only the role `Reader` cannot run an operat
 
 ## Built-in Roles
 
-The built-in roles are defined in code, always available and cannot be changed. Their names are reserved, ignoring case.
+The built-in roles are defined in code, always available and cannot be changed. Their names are reserved, ignoring case. The edit dialog of the `Authorization` subject lists them read-only below the custom roles.
 
 | Role | Allows |
 |------|--------|
@@ -75,43 +77,135 @@ A member can have several tags, such as a property that is both `[State]` and `[
 
 ## Custom Roles
 
-Custom roles live in one `Authorization` subject. Create it in the subject browser (type `Authorization`, category System) or as the file `Files/Authorization.json` with any editor, then write the roles in the file. Its roles are then reachable at the path of the subject followed by the role name, such as `/Authorization/LightOperator`.
+Custom roles live in one `Authorization` subject, and each role is a subject below it, reachable at the path of the `Authorization` subject followed by the role name, such as `/Authorization/LightOperator`. They are created and edited in the subject browser: the edit dialog of the `Authorization` subject adds, renames and removes roles, and the edit dialog of each role edits its rules. Both dialogs save into the file of the `Authorization` subject, such as `Files/Authorization.json`, which can also be written by hand, see [File Format](#file-format).
 
-This file defines a role for an agent that switches and dims the lights, except in the bedroom, and otherwise only reads:
+### Creating the Authorization Subject
 
-```json
-{
-  "$type": "HomeBlaze.Authorization.Authorization",
-  "roles": {
-    "LightOperator": {
-      "includes": [ "Reader" ],
-      "allow": [ { "types": [ "ILightbulb" ], "members": [ "TurnOn", "TurnOff", "Toggle", "SetBrightness" ], "actions": [ "execute" ] } ],
-      "deny": [ { "paths": [ "/Devices/Bedroom" ], "types": [ "ILightbulb" ], "actions": [ "execute" ] } ]
-    }
-  }
-}
-```
+1. Click "Create" in the subject browser, in the folder that should hold the file.
+2. Click the type "Authorization" in the group "System". The dialog offers it only while no `Authorization` subject exists, see [One Authorization Subject](#one-authorization-subject).
+3. Check the field "File name". The dialog suggests `Authorization`.
+4. Add the first roles with "Add role", as described below, or add them later. The rules of a role are edited in its own dialog once the subject is created.
+5. Click "Create".
 
-- **`includes`** takes over the rules of `Reader`, so the agent still sees and reads everything else.
-- **`allow`** runs the four operations on every subject that is an `ILightbulb`, such as a Philips Hue light. A light that does not implement `IBrightnessController` has no `SetBrightness`, so the member does not match there.
-- **`deny`** removes them again for the lights at and below `/Devices/Bedroom`.
+### Adding, Renaming and Removing Roles
 
-Give an agent this role with `"roles": ["LightOperator"]` and allow `invoke_operation`, see [Agents](#agents). The role allows no `write`, so the agent cannot write a property even with `set_property` allowed.
+Select the `Authorization` subject in the subject browser and click "Edit", the pencil next to its title. The dialog lists two groups:
 
-A role has these settings, each optional:
+- **Custom roles**: each role with its name, its number of allow and deny rules, "used by N agents" and a status icon. The tooltip of the icon reads "Can be used.", the reason why the role cannot be used, or "Added; saved with this dialog." for a role that is not saved yet. A role added in the dialog shows "(new)" after its name, a renamed one "(was OldName)".
+- **Built-in roles**: `Reader`, `Operator` and `Everything`, each with one line of what it allows. They cannot be changed, see [Built-in Roles](#built-in-roles).
 
-| Setting | Meaning |
-|---------|---------|
-| `includes` | The names of built-in or custom roles whose rules this role takes over, transitively |
-| `allow` | Rules whose matches are allowed |
-| `deny` | Rules whose matches are denied, whichever role allowed them |
+To add a role:
+
+1. Click "Add role".
+2. Type the name into the field "Name".
+3. Click "Add" or press Enter. The role is listed with "(new)".
+4. Click "Save". The role has no rules yet, so it allows nothing; open it to add rules, see [Editing a Role](#editing-a-role).
+
+To rename a role, click its pencil button, change the name in the field "Name", click "Rename" or press Enter, and click "Save". The role keeps its rules. To remove a role, click its trash button and click "Save". Nothing changes before "Save", and "Cancel" discards the changes of the dialog.
+
+The field "Name" checks the name as you type, and "Add" and "Rename" stay disabled until it is valid:
+
+- It is not empty, else "Enter a name.".
+- It is not the name of a built-in role, ignoring case, else "The name 'reader' is reserved for a built-in role.".
+- It is not `System`, ignoring case, else "The name 'System' is reserved for the system rules.".
+- No other custom role has it, ignoring case, else "A role with this name exists already.". A rename may change only the case of the name.
+
+A name typed but not confirmed with "Add" or "Rename" is taken over by "Save", and an empty field of a role being added is ignored.
+
+### Roles That Agents Use
+
+Agents name their roles, so a rename or removal changes what they may do:
+
+- **Remove**: when agents use the role, the trash button asks first with "LightOperator is used by 2 agents. They lose the access it grants until they are given another role." Click "Remove" to remove it or "Cancel" to keep it.
+- **Rename**: when agents use the role, the field "Name" shows "LightOperator is used by 2 agents. They keep the old name and lose this role until they are given the new one." before you click "Rename".
+- **After saving**: the agents keep the old name in their `Roles`. They show the status "Invalid roles: Role 'LightOperator' is not defined." and every tool call of theirs is denied, not only the calls the role allowed, see [Invalid Roles](#invalid-roles). Their edit dialog shows the old name as a red chip with the tooltip "Unknown role". Remove it there and select the new name or another role, then save the agent.
+- **Includes**: a custom role that includes the old name shows the status "Role '...' includes 'LightOperator', which is not defined." until its includes are changed as well.
+
+### Status and Usage
 
 The property panel of a role shows two values:
 
 - **`Status`**: why the role cannot be used, or empty. "The name 'Reader' is reserved for a built-in role." or "The name 'System' is reserved for the system rules." for a reserved name, where agents naming `Reader` keep the built-in role; "The name '...' is used by more than one role, ignoring case."; or why the rules do not compile, such as "Role 'LightOperator' includes 'Readers', which is not defined.", "Action 'run' of role 'LightOperator' is not a known action." or "Path pattern 'Devices' of role 'LightOperator' must start with '/'.".
 - **`UsedByAgents`**: the number of started agents that name the role.
 
-Role names compare ignoring case. A change of the file applies to the next turn of each agent.
+Role names compare ignoring case. A saved change applies to the next turn of each agent. When a hand-written file holds two roles whose names differ only in case, the `Authorization` dialog shows "Several roles have the same name, ignoring case. Rename or remove one to save." and "Save" stays disabled until one is renamed or removed.
+
+---
+
+## Editing a Role
+
+Select the role below the `Authorization` subject in the subject browser, such as `LightOperator`, and click "Edit", the pencil next to its title. The dialog shows the name of the role, "Used by N agents", the `Status` of the role as an error when it cannot be used, and the tabs "Rules" and "Preview".
+
+This builds the role `LightOperator`, which switches and dims the lights, except in the bedroom, and otherwise only reads:
+
+1. On the tab "Rules", open "Includes" and select `Reader`, so the agent still sees and reads everything else.
+2. Under "Allow", click "Add rule". A new rule card appears.
+3. In the field "Types", type `ILightbulb` and pick it from the suggestions.
+4. In the field "Members", type `TurnOn` and press Enter, then add `TurnOff`, `Toggle` and `SetBrightness` the same way.
+5. Under "Actions" of the card, check "execute".
+6. Under "Deny", click "Add rule", add `/Devices/Bedroom` to "Paths" and `ILightbulb` to "Types", and check "execute".
+7. Check the result on the tab "Preview", see [Previewing a Role](#previewing-a-role).
+8. Click "Save". The role is saved into the file of the `Authorization` subject.
+
+[File Format](#file-format) shows the same role as JSON and explains its rules.
+
+### Rule Cards
+
+The tab "Rules" has three parts:
+
+- **"Includes"**: the roles whose rules this role has as well, built-in or custom. The role itself is not offered. A name that is no role, or a custom role that cannot be used, shows as a red chip with the reason as its tooltip, which removes like any other chip.
+- **"Allow"**: a card per rule whose matches are allowed.
+- **"Deny"**: a card per rule whose matches are denied, whichever role allowed them.
+
+"Add rule" below each list adds an empty card, and "Remove" on a card removes that rule. A card has a field per [selector](#rules-and-selectors) and the actions:
+
+| Field | Takes |
+|-------|-------|
+| "Paths" | [Path patterns](#path-patterns), such as `/Devices/**`. The search button at the end of the field opens "Select Path" with the tree of the subjects; pick a subject and click "OK" to add its path. A pattern is checked as you type, and an invalid one shows its error under the field, such as "Path pattern 'Devices' must start with '/'." |
+| "Types" | Type names. While you type, the field suggests the subject types HomeBlaze knows and the device interfaces they implement, such as `ILightbulb`, by simple name. Any other name can be typed as well, simple or full |
+| "Members" | Member names, such as `Temperature`; `*` matches any text, such as `Set*` |
+| "Tags" | [Tags](#tags), suggested while you type. Another text shows "Unknown tag; use one of state, configuration, secret, query, operation, requires-confirmation, subjects, attribute, metadata." |
+| "Actions" | The checkboxes "read", "write", "execute" and "history". At least one is required, else the card shows "Select at least one action." |
+
+Each value is a chip below its field:
+
+- **Adding**: press Enter or leave the field to add the typed text. In a field with suggestions, click a suggestion, or choose one with the arrow keys and press Enter. "Save" also adds the text still in a field, so nothing typed is lost.
+- **Removing**: click the cross of the chip.
+- **Invalid text**: an invalid pattern or tag is not added. It stays in the field with its error, and "Save" stays disabled until it is corrected or cleared. A value from the file that is invalid shows as a red chip with the error as its tooltip.
+- **"any"**: a selector without values shows "any" below its field and matches every value, so a rule with only "Types" applies to every member of every subject of those types.
+- **Every member**: a card whose four selectors are all empty shows "This rule applies to every member.", in red on an allow rule and as a warning on a deny rule. The rule can still be saved, but an allow rule then grants its actions on every member of every subject, as `Everything` does.
+
+"Save" stays disabled while a rule has no action, a pattern or tag is invalid, or a field holds invalid text. An action in the file that is not one of the four shows as a red chip with the tooltip "Unknown action" and keeps "Save" disabled until it is removed.
+
+### Previewing a Role
+
+The tab "Preview" shows what the role allows on one subject. It uses the role as currently edited, unsaved changes included, together with the roles it includes and the [system rules](#system-rules), as an agent with only this role would get it. It changes nothing.
+
+1. Click the tab "Preview".
+2. Type the path of a subject into the field "Subject", such as `/Devices/Bedroom/CeilingLight`, or click the search button at its end, pick the subject in "Select Path" and click "OK".
+3. Read the line below the field, whether the subject is shown.
+4. Read the table of its members, and hover over or click a cell to see why.
+5. Change a rule on the tab "Rules" and return; the preview follows the change.
+
+The line below the field reads:
+
+- "Shown: the subject has a readable member and a readable link from the root."
+- "Hidden: no member is readable."
+- "Hidden: the property Children of /Devices/Cameras is not readable.", naming a property on the way from the root that holds the subject and is not readable, such as for a role that denies `read` on `/Devices/Cameras`.
+- "Hidden: no chain of parents leads to the root."
+
+A path that names no subject shows "No subject has this path.", and a role that does not compile shows its error instead, such as "Role 'LightOperator' includes 'Readers', which is not defined.".
+
+The table has a row per member: the properties, then the methods, then the attributes, named `Property@Attribute`, such as `Temperature@HomeBlaze:Metadata`. The columns are the [actions](#actions) "read", "write", "execute" and "history". A cell is a green tick when the action is allowed, a red cross when it is denied, and empty where the action does not apply: a method has "read" and "execute", a property or attribute "read", "write" and "history".
+
+Hovering over a cell shows its explanation, and clicking it shows the explanation below the table, starting with the member and the action. An explanation names the role and the rule that decided:
+
+- "Allowed by Reader: allow any member; actions read, history."
+- "Denied by LightOperator: deny paths /Devices/Bedroom; types ILightbulb; actions execute. It overrides LightOperator: allow types ILightbulb; members TurnOn, TurnOff, Toggle, SetBrightness; actions execute."
+- "Denied by a system rule: deny tags secret; actions read, write, history. It overrides Reader: allow any member; actions read, history."
+- "No role allows it."
+
+For the role `LightOperator` above and a light in the bedroom, the row `TurnOn` shows a tick under "read" and a cross under "execute". Clicking the cross shows "TurnOn, execute:" followed by the second explanation: the deny rule for the bedroom removes what the allow rule for the lights granted. For a light in the kitchen the same cell is a tick with "Allowed by LightOperator: allow types ILightbulb; members TurnOn, TurnOff, Toggle, SetBrightness; actions execute.".
 
 ---
 
@@ -157,12 +251,6 @@ A path pattern is written as the tools write paths, with `/` and `[InlinePaths]`
 | `/` | Every subject with a path |
 
 Paths select subjects, never members; `members` selects those. The [library documentation](https://github.com/RicoSuter/Namotion.Interceptor/blob/master/src/HomeBlaze/Namotion.Interceptor.Authorization/README.md) has the complete pattern rules, including subjects with several paths. A deny rule that has only `paths` is checked against every member of every subject, so give it another selector when you can.
-
-### Writing Rules in JSON
-
-- A rule is an object with the arrays `paths`, `types`, `members`, `tags` and `actions`. Only `actions` is required.
-- Action names, role names and tags compare ignoring case. Types, member names and path patterns compare exactly.
-- An unknown property, such as `path` instead of `paths`, makes the file unreadable rather than widening a rule: it then loads as a plain JSON file without roles, and agents that name its roles get "Role '...' is not defined.".
 
 ---
 
@@ -222,9 +310,9 @@ Each agent has the setting `Roles`, a list of role names:
 ```
 
 - **Default**: `["Operator"]`, for a new agent and for a file without the setting, so an agent created before roles existed keeps what it could do and `AllowedTools` stays its gate. Restrict an agent with `Reader` or a custom role.
-- **Edit form**: the Roles section offers the built-in roles and the custom roles. A name that is no role, such as a removed custom role, shows as an error chip that can be removed, and so does a custom role that exists but cannot be used, such as one whose name another role has as well, with the reason as its tooltip. At least one role is required, as an agent without roles is denied everything.
+- **Edit form**: the field "Roles" offers the built-in roles and the custom roles, and each selected role shows as a chip below it. A name that is no role, such as a removed custom role or the old name of a renamed one, shows as an error chip with the tooltip "Unknown role" that can be removed, and so does a custom role that exists but cannot be used, such as one whose name another role has as well, with the reason as its tooltip. At least one role is required, as an agent without roles is denied everything.
 - **Settings tab**: lists the roles, and the reason when the agent is denied everything.
-- **When it applies**: each chat turn and background run takes the policy of the roles when it starts, so a change of the roles or of `Authorization.json` applies to the next turn.
+- **When it applies**: each chat turn and background run takes the policy of the roles when it starts, so a change of the agent's roles, or of a role in its dialog or in `Authorization.json`, applies to the next turn.
 
 ### Invalid Roles
 
@@ -233,10 +321,10 @@ When the roles cannot be used, the agent shows the status Error with "Invalid ro
 - "No roles are assigned.", for a `Roles` list left empty in the file,
 - "Role 'LightOperator' is not defined.", for a name that is no built-in or custom role,
 - "A role name is empty.",
-- why a custom role does not compile, see [Custom Roles](#custom-roles),
+- why a custom role does not compile, see [Status and Usage](#status-and-usage),
 - "Role '...' is unavailable: ...", for a role with a reserved name or while [several Authorization subjects](#one-authorization-subject) exist.
 
-Turns still run, but every tool call is denied, so the agent can tell you what it cannot do. The status is checked again when the agent starts, when its settings are saved, after each turn and when a role or the `Authorization` subject changes, so it follows an edit of `Authorization.json` without waiting for a turn.
+Turns still run, but every tool call is denied, so the agent can tell you what it cannot do. The status is checked again when the agent starts, when its settings are saved, after each turn and when a role or the `Authorization` subject changes, so it follows a saved role or an edit of `Authorization.json` without waiting for a turn.
 
 ---
 
@@ -257,6 +345,41 @@ The state a background run receives from the agent's `WatchPaths` is read withou
 When an agent or an `/mcp` client reads a page through the tools, a page expression renders only a property the tools would show it at its path: the property and every property on its path readable, and every subject on the way shown. Anything else renders empty, as a secret does, and `ReadEvaluatedContent` with `includeSourcePaths` leaves out its path. So an expression below a branch the roles hide, such as `{{ /Devices/Cameras/Door/IsOpen }}` for a role that denies `read` on `Cameras`, renders empty although `IsOpen` itself is readable. Unlike the tools, an expression may read a member the tools do not list, such as a derived title, when its roles allow it.
 
 For an agent the policy comes from its roles; for `/mcp` clients it is `Everything` with the system rules, so an expression over the state of an agent renders empty for them. The check applies to queries, such as `ReadEvaluatedContent`, which evaluate pages. An operation runs without it, so the change handlers, renders and background work it starts are not restricted by the caller's roles. People see pages as before.
+
+## File Format
+
+The `Authorization` subject is stored as JSON, such as `Files/Authorization.json`. The dialogs write this file, and it can also be written or changed with any editor; a change of the file applies to the next turn of each agent. This file holds the role `LightOperator` built in [Editing a Role](#editing-a-role):
+
+```json
+{
+  "$type": "HomeBlaze.Authorization.Authorization",
+  "roles": {
+    "LightOperator": {
+      "includes": [ "Reader" ],
+      "allow": [ { "types": [ "ILightbulb" ], "members": [ "TurnOn", "TurnOff", "Toggle", "SetBrightness" ], "actions": [ "execute" ] } ],
+      "deny": [ { "paths": [ "/Devices/Bedroom" ], "types": [ "ILightbulb" ], "actions": [ "execute" ] } ]
+    }
+  }
+}
+```
+
+- **`includes`** takes over the rules of `Reader`, so the agent still sees and reads everything else.
+- **`allow`** runs the four operations on every subject that is an `ILightbulb`, such as a Philips Hue light. A light that does not implement `IBrightnessController` has no `SetBrightness`, so the member does not match there.
+- **`deny`** removes them again for the lights at and below `/Devices/Bedroom`.
+
+Give an agent this role with `"roles": ["LightOperator"]` and allow `invoke_operation`, see [Agents](#agents). The role allows no `write`, so the agent cannot write a property even with `set_property` allowed.
+
+A role has these settings, each optional:
+
+| Setting | Meaning | In the dialog |
+|---------|---------|---------------|
+| `includes` | The names of built-in or custom roles whose rules this role takes over, transitively | "Includes" |
+| `allow` | Rules whose matches are allowed | "Allow" |
+| `deny` | Rules whose matches are denied, whichever role allowed them | "Deny" |
+
+- A rule is an object with the arrays `paths`, `types`, `members`, `tags` and `actions`, the fields of a rule card. Only `actions` is required.
+- Action names, role names and tags compare ignoring case. Types, member names and path patterns compare exactly.
+- An unknown property, such as `path` instead of `paths`, makes the file unreadable rather than widening a rule: it then loads as a plain JSON file without roles, and agents that name its roles get "Role '...' is not defined.".
 
 ---
 
