@@ -78,14 +78,8 @@ public static class McpServerConfigurationExtensions
         return subject is not null && visibility.IsShown(property!.Parent) && visibility.IsShown(subject) ? subject : null;
     }
 
-    /// <summary>
-    /// Resolves a subject path through properties the policy allows to read to a subject that is not empty for the
-    /// policy, without asking whether a subject is shown.
-    /// </summary>
-    internal static RegisteredSubject? TryResolveReadableSubject(
-        this McpServerConfiguration configuration, IMcpAccessPolicy policy, RegisteredSubject root, string path)
-        => configuration.TryResolveReadableSubject(policy, root, path, out _);
-
+    // Resolves through properties the policy allows to read to a subject that is not empty for the policy, without
+    // asking whether a subject is shown.
     private static RegisteredSubject? TryResolveReadableSubject(
         this McpServerConfiguration configuration, IMcpAccessPolicy policy, RegisteredSubject root, string path,
         out RegisteredSubjectProperty? property)

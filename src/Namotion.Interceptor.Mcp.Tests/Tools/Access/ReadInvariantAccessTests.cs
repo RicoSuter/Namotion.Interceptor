@@ -79,6 +79,77 @@ public class ReadInvariantAccessTests
         Assert.Same(room.Device, subject!.Subject);
     }
 
+    // The text the answer without a policy contains, so the case shows the device.
+    public static TheoryData<string, string, string> SubtreeCalls => new()
+    {
+        { "browse", JsonSerializer.Serialize(new { format = "json", depth = 3, includeProperties = true }), "Light" },
+        { "browse", JsonSerializer.Serialize(new { format = "json", path = "Items[room].Device", depth = 0, includeProperties = true }), "Light" },
+        { "get_property", JsonSerializer.Serialize(new { path = "Items[room].Device.DeviceName" }), "Light" },
+        { "search", JsonSerializer.Serialize(new { format = "json", types = new[] { nameof(TestRoom) }, where = "Device.DeviceName == \"Light\"" }), "Items[room]" }
+    };
+
+    [Theory]
+    [MemberData(nameof(SubtreeCalls))]
+    public async Task WhenASharedSubjectWasFirstAttachedOutsideTheRoot_ThenADenyWritesPolicyAnswersAsWithoutAPolicy(string toolName, string input, string expectedText)
+    {
+        // Arrange
+        // The device's first parent is outside the tool root, so the registry writes no path for it.
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+        var device = new TestDevice(context) { DeviceName = "Light", IsOn = true };
+        var outside = new TestRoom(context) { Name = "Outside" };
+        outside.Device = device;
+        var room = new TestRoom(context) { Name = "Kitchen" };
+        room.Device = device;
+        var root = new TestMixedGroup(context);
+        root.Items = new Dictionary<string, IInterceptorSubject> { ["room"] = room };
+        var request = JsonSerializer.Deserialize<JsonElement>(input);
+        var configuration = new McpServerConfiguration { PathProvider = DefaultPathProvider.Instance };
+        var configurationWithPolicy = new McpServerConfiguration { PathProvider = DefaultPathProvider.Instance, AccessPolicy = DenyAllWrites };
+
+        // Act
+        var withoutPolicy = await McpToolCaller.CallAsync(root, configuration, toolName, request);
+        var withPolicy = await McpToolCaller.CallAsync(root, configurationWithPolicy, toolName, request);
+
+        // Assert
+        Assert.False(withoutPolicy.TryGetProperty("error", out _));
+        Assert.Contains(expectedText, withoutPolicy.GetRawText());
+        Assert.Equal(withoutPolicy.GetRawText(), withPolicy.GetRawText());
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(0)]
+    public async Task WhenTheWrittenPathOfASubjectWithSeveralParentsDoesNotResolveBack_ThenADenyWritesPolicyBrowsesAsWithoutAPolicy(int depth)
+    {
+        // Arrange
+        // The device is written through Private, whose segment contains the separator, so the text does not resolve.
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+        var house = new TestHouse(context) { Address = "Main Street" };
+        var device = new TestDevice(context) { DeviceName = "Camera" };
+        house.Private = device;
+        house.Public = device;
+        var pathProvider = new DottedPrivatePathProvider();
+        var request = JsonSerializer.SerializeToElement(new { format = "json", depth, includeProperties = true });
+
+        // Act
+        var withoutPolicy = await McpToolCaller.CallAsync(house, new McpServerConfiguration { PathProvider = pathProvider }, "browse", request);
+        var withPolicy = await McpToolCaller.CallAsync(house, new McpServerConfiguration { PathProvider = pathProvider, AccessPolicy = DenyAllWrites }, "browse", request);
+
+        // Assert
+        Assert.Contains("My.Private", withoutPolicy.GetRawText());
+        Assert.Equal(withoutPolicy.GetRawText(), withPolicy.GetRawText());
+    }
+
+    private sealed class DottedPrivatePathProvider : PathProviderBase
+    {
+        public override string? TryGetPropertySegment(RegisteredSubjectProperty property) =>
+            property.Name == nameof(TestHouse.Private) ? "My.Private" : property.BrowseName;
+    }
+
     private sealed class NameAndSubjectsPathProvider : PathProviderBase
     {
         public override bool IsPropertyIncluded(RegisteredSubjectProperty property) =>
