@@ -5,21 +5,22 @@
 <MudPaper Outlined="true" Class="pa-3" data-testid="@TestId">
     <MudGrid Spacing="2">
         <MudItem xs="12" md="6">
-            <ChipListInput @ref="_paths" Label="Paths" Placeholder="/Devices/**" HelperText="Path patterns; ** matches any depth. Press Enter or leave the field to add."
+            <ChipListInput @ref="_paths" Label="Paths" Placeholder="/Devices/**" HelperText="Path patterns; ** matches any depth. Separate several with commas; press Enter or leave the field to add."
                            Values="@_rule.Paths" ValuesChanged="@(values => ChangeAsync(_rule with { Paths = [.. values] }))"
                            Validator="@ValidatePath" Pick="@PickPathAsync" HasInvalidTextChanged="@ReportInvalidTextAsync" TestId="rule-paths" />
         </MudItem>
         <MudItem xs="12" md="6">
-            <ChipListInput @ref="_types" Label="Types" HelperText="Subject types or interfaces, by simple or full name. Press Enter or leave the field to add."
+            <ChipListInput @ref="_types" Label="Types" HelperText="Subject types or interfaces, by simple or full name, case-sensitive. Separate several with commas; press Enter or leave the field to add."
                            Values="@_rule.Types" ValuesChanged="@(values => ChangeAsync(_rule with { Types = [.. values] }))"
-                           Suggestions="@TypeNames" HasInvalidTextChanged="@ReportInvalidTextAsync" TestId="rule-types" />
+                           Suggestions="@TypeNames" Validator="@ValidateTypeName" Warning="@WarnTypeName" HasInvalidTextChanged="@ReportInvalidTextAsync" TestId="rule-types" />
         </MudItem>
         <MudItem xs="12" md="6">
-            <ChipListInput @ref="_members" Label="Members" Placeholder="Temperature, Set*" HelperText="Member names; * matches any text. Press Enter or leave the field to add."
-                           Values="@_rule.Members" ValuesChanged="@(values => ChangeAsync(_rule with { Members = [.. values] }))" HasInvalidTextChanged="@ReportInvalidTextAsync" TestId="rule-members" />
+            <ChipListInput @ref="_members" Label="Members" Placeholder="Set*" HelperText="Member names, case-sensitive; * matches any text. Separate several with commas; press Enter or leave the field to add."
+                           Values="@_rule.Members" ValuesChanged="@(values => ChangeAsync(_rule with { Members = [.. values] }))"
+                           Validator="@ValidateMemberName" HasInvalidTextChanged="@ReportInvalidTextAsync" TestId="rule-members" />
         </MudItem>
         <MudItem xs="12" md="6">
-            <ChipListInput @ref="_tags" Label="Tags" HelperText="Tags a member must all carry. Press Enter or leave the field to add."
+            <ChipListInput @ref="_tags" Label="Tags" HelperText="Tags a member must all carry. Separate several with commas; press Enter or leave the field to add."
                            Values="@_rule.Tags" ValuesChanged="@(values => ChangeAsync(_rule with { Tags = [.. values] }))"
                            Suggestions="@TagNames" Validator="@ValidateTag" Comparer="@StringComparer.OrdinalIgnoreCase" HasInvalidTextChanged="@ReportInvalidTextAsync" TestId="rule-tags" />
         </MudItem>
@@ -100,8 +101,8 @@
         !rule.Actions.IsEmpty &&
         rule.Actions.All(IsKnownAction) &&
         ChipListInput.AreValid(rule.Paths, authorizationService.ValidatePathPattern, StringComparer.Ordinal) &&
-        ChipListInput.AreValid(rule.Types, null, StringComparer.Ordinal) &&
-        ChipListInput.AreValid(rule.Members, null, StringComparer.Ordinal) &&
+        ChipListInput.AreValid(rule.Types, ValidateTypeName, StringComparer.Ordinal) &&
+        ChipListInput.AreValid(rule.Members, ValidateMemberName, StringComparer.Ordinal) &&
         ChipListInput.AreValid(rule.Tags, ValidateTag, StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
@@ -128,8 +129,31 @@
     private static bool IsKnownAction(PermissionAction action) => AuthorizationActions.All.Contains(action);
 
     // Tags compare ignoring case; no member carries another tag, so a rule naming one would never match.
-    private static string? ValidateTag(string tag) =>
-        TagNames.Contains(tag, StringComparer.OrdinalIgnoreCase) ? null : $"Unknown tag; use one of {string.Join(", ", TagNames)}.";
+    private static string? ValidateTag(string tag)
+    {
+        if (HasWhiteSpace(tag))
+        {
+            return "A tag contains no whitespace.";
+        }
+
+        return TagNames.Contains(tag, StringComparer.OrdinalIgnoreCase) ? null : $"Unknown tag; use one of {string.Join(", ", TagNames)}.";
+    }
+
+    // No type or member name has whitespace, so a rule naming one would never match.
+    private static string? ValidateTypeName(string name) => HasWhiteSpace(name) ? "A type name contains no whitespace." : null;
+
+    private static string? ValidateMemberName(string name) => HasWhiteSpace(name) ? "A member name contains no whitespace." : null;
+
+    private static bool HasWhiteSpace(string text) => text.Any(char.IsWhiteSpace);
+
+    // Only a warning, as a rule may name a type that is not loaded yet, or a full name, whose simple name is checked.
+    private string? WarnTypeName(string name)
+    {
+        var simpleName = name[(name.LastIndexOf('.') + 1)..];
+        return TypeNames.Contains(simpleName, StringComparer.Ordinal)
+            ? null
+            : "No known subject type or interface has this name; check its spelling and case.";
+    }
 
     private string? ValidatePath(string pattern) => AuthorizationService.ValidatePathPattern(pattern);
 

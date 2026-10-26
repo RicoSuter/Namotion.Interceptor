@@ -1,5 +1,6 @@
 @* A list of texts shown as chips, with a field that adds the typed text on Enter or when it loses focus, or a picked
-   suggestion. Text that is typed and invalid stays in the field with its error, see HasInvalidText. *@
+   suggestion. Typed text is split at commas into several values. Text that is typed and invalid stays in the field with
+   its error, see HasInvalidText. *@
 
 <div data-testid="@TestId">
     @if (Suggestions is null)
@@ -39,6 +40,13 @@
             {
                 <MudTooltip Text="@error">
                     <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" Icon="@Icons.Material.Filled.ErrorOutline"
+                             Class="ma-0" OnClose="@(() => RemoveAtAsync(position))" data-testid="@($"{TestId}-chip")">@value</MudChip>
+                </MudTooltip>
+            }
+            else if (Warning?.Invoke(value) is { } warning)
+            {
+                <MudTooltip Text="@warning">
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning" Icon="@Icons.Material.Filled.WarningAmber"
                              Class="ma-0" OnClose="@(() => RemoveAtAsync(position))" data-testid="@($"{TestId}-chip")">@value</MudChip>
                 </MudTooltip>
             }
@@ -92,6 +100,10 @@
     [Parameter]
     public Func<string, string?>? Validator { get; set; }
 
+    /// <summary>Gets why a valid value may be wrong, or null; such a value shows as a yellow chip and is still valid.</summary>
+    [Parameter]
+    public Func<string, string?>? Warning { get; set; }
+
     /// <summary>Compares the texts to find one that is added already.</summary>
     [Parameter]
     public StringComparer Comparer { get; set; } = StringComparer.Ordinal;
@@ -115,7 +127,8 @@
 
     /// <summary>
     /// Gets why the value at <paramref name="index"/> is invalid, or null: it is listed before, compared with
-    /// <paramref name="comparer"/>, or <paramref name="validator"/> rejects it.
+    /// <paramref name="comparer"/>, it holds a comma or has leading or trailing whitespace, which typed text never has
+    /// but a file can, or <paramref name="validator"/> rejects it.
     /// </summary>
     internal static string? GetValueError(IReadOnlyList<string> values, int index, Func<string, string?>? validator, StringComparer comparer)
     {
@@ -126,6 +139,16 @@
             {
                 return "Listed twice.";
             }
+        }
+
+        if (value.Contains(','))
+        {
+            return "Contains a comma, which separates values; remove it and add each part on its own.";
+        }
+
+        if (value.Length > 0 && (char.IsWhiteSpace(value[0]) || char.IsWhiteSpace(value[^1])))
+        {
+            return "Has leading or trailing whitespace.";
         }
 
         return validator?.Invoke(value);
@@ -162,7 +185,7 @@
     private async Task OnTextChangedAsync(string? text)
     {
         _text = text;
-        _error = string.IsNullOrWhiteSpace(text) ? null : Validator?.Invoke(text.Trim());
+        _error = GetTextError(SplitText(text));
 
         // Typing searches again, which highlights the first suggestion.
         _isSuggestionChosen = false;
@@ -194,31 +217,58 @@
         }
     }
 
-    // Returns whether the text was taken, added now or before; an invalid text stays in the field with its error.
+    // Returns whether the text was taken, added now or before; a text with an invalid part stays in the field with the
+    // error of that part, and none of its parts is added.
     private async Task<bool> AddAsync(string? text)
     {
-        var value = text?.Trim();
-        if (string.IsNullOrEmpty(value))
+        var parts = SplitText(text);
+        if (parts.Length == 0)
         {
             return false;
         }
 
-        _error = Validator?.Invoke(value);
+        _error = GetTextError(parts);
         if (_error is not null)
         {
-            _text = value;
+            _text = text!.Trim();
             await ReportInvalidTextAsync();
             return false;
         }
 
         _text = null;
         await ReportInvalidTextAsync();
-        if (!Values.Contains(value, Comparer))
+        var values = Values.ToList();
+        foreach (var part in parts.Where(part => !values.Contains(part, Comparer)))
         {
-            await ValuesChanged.InvokeAsync([.. Values, value]);
+            values.Add(part);
+        }
+
+        if (values.Count > Values.Count)
+        {
+            await ValuesChanged.InvokeAsync(values);
         }
 
         return true;
+    }
+
+    // The parts between commas, trimmed, without empty ones.
+    private static string[] SplitText(string? text) =>
+        text is null ? [] : text.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+
+    private string? GetTextError(string[] parts)
+    {
+        if (Validator is { } validator)
+        {
+            foreach (var part in parts)
+            {
+                if (validator(part) is { } error)
+                {
+                    return error;
+                }
+            }
+        }
+
+        return null;
     }
 
     private Task RemoveAtAsync(int index) => ValuesChanged.InvokeAsync([.. Values.Take(index), .. Values.Skip(index + 1)]);

@@ -560,6 +560,134 @@ public sealed class RoleEditComponentTests : BunitContext, IAsyncLifetime
         Assert.True(component.Instance.IsValid);
     }
 
+    [Theory]
+    [InlineData("rule-members", "Temperature, Set*,,Temperature", new[] { "Temperature", "Set*" })]
+    [InlineData("rule-types", "ILight, ISwitch", new[] { "ILight", "ISwitch" })]
+    [InlineData("rule-paths", "/Devices/A,/Devices/B", new[] { "/Devices/A", "/Devices/B" })]
+    [InlineData("rule-tags", "state, Secret", new[] { "state", "Secret" })]
+    public async Task WhenTextWithCommasIsEntered_ThenEachPartIsAddedAsAChip(string input, string text, string[] expectedChips)
+    {
+        // Arrange
+        var role = _graph.GetRole("Kitchen");
+        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var component = RenderEditor(role);
+
+        // Act
+        await EnterTextAsync(component, "role-edit-allow-rule-0", input, text);
+
+        // Assert
+        Assert.Equal(expectedChips, GetChips(GetCards(component, "allow")[0], input));
+        Assert.True(component.Instance.IsValid);
+    }
+
+    [Fact]
+    public async Task WhenTextWithCommasHasAnInvalidPart_ThenNothingIsAddedAndThePartsErrorIsShown()
+    {
+        // Arrange
+        var role = _graph.GetRole("Kitchen");
+        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var component = RenderEditor(role);
+
+        // Act
+        await EnterTextAsync(component, "role-edit-allow-rule-0", "rule-paths", "/Devices/A, Devices");
+
+        // Assert
+        Assert.Contains("Path pattern 'Devices' must start with '/'.",
+            component.Find("[data-testid='role-edit-allow-rule-0'] [data-testid='rule-paths']").TextContent);
+        Assert.Empty(GetChips(GetCards(component, "allow")[0], "rule-paths"));
+        Assert.False(component.Instance.IsValid);
+    }
+
+    [Theory]
+    [InlineData("rule-members", "Turn On", "A member name contains no whitespace.")]
+    [InlineData("rule-types", "I Light", "A type name contains no whitespace.")]
+    [InlineData("rule-tags", "requires confirmation", "A tag contains no whitespace.")]
+    public async Task WhenANameWithWhitespaceIsEntered_ThenItIsRejected(string input, string text, string expectedError)
+    {
+        // Arrange
+        var role = _graph.GetRole("Kitchen");
+        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var component = RenderEditor(role);
+
+        // Act
+        await EnterTextAsync(component, "role-edit-allow-rule-0", input, text);
+
+        // Assert
+        Assert.Contains(expectedError, component.Find($"[data-testid='role-edit-allow-rule-0'] [data-testid='{input}']").TextContent);
+        Assert.Empty(GetChips(GetCards(component, "allow")[0], input));
+        Assert.False(component.Instance.IsValid);
+    }
+
+    [Theory]
+    [InlineData("Members", " TurnOn", "Has leading or trailing whitespace.")]
+    [InlineData("Members", "TurnOn, TurnOff", "Contains a comma, which separates values; remove it and add each part on its own.")]
+    [InlineData("Members", "Turn On", "A member name contains no whitespace.")]
+    [InlineData("Types", "ILight,ISwitch", "Contains a comma, which separates values; remove it and add each part on its own.")]
+    [InlineData("Types", "I Light", "A type name contains no whitespace.")]
+    [InlineData("Paths", "/Devices ", "Has leading or trailing whitespace.")]
+    [InlineData("Paths", "/Devices/A,/Devices/B", "Contains a comma, which separates values; remove it and add each part on its own.")]
+    [InlineData("Tags", "state ", "Has leading or trailing whitespace.")]
+    public void WhenALoadedValueWouldBeRejected_ThenItIsAnErrorChipAndTheRoleIsInvalid(string selector, string value, string expectedError)
+    {
+        // Arrange
+        var role = _graph.GetRole("Kitchen");
+        var rule = new PermissionRule { Actions = [PermissionAction.Read] };
+        role.Allow = [selector switch
+        {
+            "Members" => rule with { Members = [value] },
+            "Types" => rule with { Types = [value] },
+            "Paths" => rule with { Paths = [value] },
+            _ => rule with { Tags = [value] }
+        }];
+
+        // Act
+        var component = RenderEditor(role);
+
+        // Assert
+        var chip = component.Find($"[data-testid='role-edit-allow-rule-0'] [data-testid='rule-{selector.ToLowerInvariant()}-chip']");
+        Assert.Contains("mud-chip-color-error", chip.ClassName);
+        var tooltip = Assert.Single(component.FindComponent<RuleCard>().FindComponents<MudTooltip>());
+        Assert.Equal(expectedError, tooltip.Instance.Text);
+        Assert.False(component.Instance.IsValid);
+    }
+
+    [Fact]
+    public void WhenATypeIsNotKnown_ThenItsChipWarnsWithoutMakingTheRoleInvalid()
+    {
+        // Arrange
+        var role = _graph.GetRole("Kitchen");
+        role.Allow = [new PermissionRule { Types = ["TestRoot", "HomeBlaze.Authorization.Role", "Testroot"], Actions = [PermissionAction.Read] }];
+
+        // Act
+        var component = RenderEditor(role);
+
+        // Assert
+        var chips = component.FindAll("[data-testid='role-edit-allow-rule-0'] [data-testid='rule-types-chip']");
+        Assert.DoesNotContain("mud-chip-color-warning", chips[0].ClassName);
+        Assert.DoesNotContain("mud-chip-color-warning", chips[1].ClassName);
+        Assert.Contains("mud-chip-color-warning", chips[2].ClassName);
+        var tooltip = Assert.Single(component.FindComponent<RuleCard>().FindComponents<MudTooltip>());
+        Assert.Equal("No known subject type or interface has this name; check its spelling and case.", tooltip.Instance.Text);
+        Assert.True(component.Instance.IsValid);
+    }
+
+    [Fact]
+    public void WhenARuleCardIsShown_ThenTheTypesAndMembersSayTheyAreCaseSensitive()
+    {
+        // Arrange
+        var role = _graph.GetRole("Kitchen");
+        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+
+        // Act
+        var component = RenderEditor(role);
+
+        // Assert
+        var inputs = component.FindComponents<ChipListInput>();
+        Assert.Contains("case-sensitive", inputs.Single(input => input.Instance.TestId == "rule-types").Instance.HelperText);
+        Assert.Contains("case-sensitive", inputs.Single(input => input.Instance.TestId == "rule-members").Instance.HelperText);
+        Assert.Equal("Set*", inputs.Single(input => input.Instance.TestId == "rule-members").Instance.Placeholder);
+    }
+
     private IRenderedComponent<RoleEditComponent> RenderEditor(Role role) =>
         Render<RoleEditComponent>(parameters => parameters.Add(component => component.Subject, role));
 
