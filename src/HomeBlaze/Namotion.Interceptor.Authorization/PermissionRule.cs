@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Text.Json.Serialization;
 using Namotion.Interceptor.Authorization.Internal;
 
 namespace Namotion.Interceptor.Authorization;
@@ -10,6 +11,7 @@ namespace Namotion.Interceptor.Authorization;
 /// allows or denies is decided by the list of <see cref="AuthorizationRole"/> it is in.
 /// </summary>
 /// <remarks>Two instances are equal when every property is equal element by element, tags and actions ignoring case like matching, the other selector values exactly.</remarks>
+[JsonConverter(typeof(PermissionRuleJsonConverter))]
 public sealed record PermissionRule
 {
     /// <summary>Gets the path patterns; empty for everywhere. See the README for the syntax.</summary>

@@ -123,7 +123,15 @@ Callers that evaluate many members of one subject, such as a tree browser, shoul
 
 ## JSON
 
-`PermissionAction` serializes as its name, so a rule reads `{ "tags": ["state"], "actions": ["read", "history"] }`. The property names are the C# names, so camelCase JSON as in this example needs `JsonSerializerOptions.Web` or other options with a camelCase naming policy; the default options expect PascalCase and compare names exactly. A missing list deserializes as empty, and a role without `name` fails to deserialize.
+A rule has its own converter, `PermissionRuleJsonConverter`, so it is written the same under any serializer options, including a resolver that leaves out properties. It is an object with the string arrays `paths`, `types`, `members` and `tags`, each written only when not empty, and `actions`, always written, with each `PermissionAction` as its name:
+
+```json
+{ "paths": ["/Home/Bedroom"], "types": ["ILight"], "actions": ["write", "execute"] }
+```
+
+Reading compares the property names ignoring case and reads a missing selector as empty. It throws `JsonException` for an unknown or repeated property, so a misspelled selector cannot widen an allow rule, for `null` in place of an array, and for an item that is not a string or an action name.
+
+`AuthorizationRole` has no converter of its own: its property names are the C# names, so camelCase JSON needs `JsonSerializerOptions.Web` or other options with a camelCase naming policy; the default options expect PascalCase and compare names exactly. A missing list deserializes as empty, and a role without `name` fails to deserialize.
 
 ## Design
 
