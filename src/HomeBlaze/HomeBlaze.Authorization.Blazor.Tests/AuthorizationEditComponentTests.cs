@@ -266,6 +266,21 @@ public sealed class AuthorizationEditComponentTests : BunitContext, IAsyncLifeti
     }
 
     [Fact]
+    public async Task WhenAnInvalidNameIsTyped_ThenSavingThrowsAndChangesNothing()
+    {
+        // Arrange
+        var previousRoles = _graph.Authorization.Roles;
+        var component = RenderEditor(_graph.Authorization);
+        await ClickAsync(component, "authorization-add-role");
+        await TypeNameAsync(component, "Operator");
+
+        // Act & Assert
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => component.InvokeAsync(() => component.Instance.SaveAsync(CancellationToken.None)));
+        Assert.Same(previousRoles, _graph.Authorization.Roles);
+    }
+
+    [Fact]
     public async Task WhenAValidNameIsTypedButNotConfirmed_ThenSavingAddsIt()
     {
         // Arrange

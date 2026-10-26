@@ -262,7 +262,7 @@ public sealed class RoleEditComponentTests : BunitContext, IAsyncLifetime
     }
 
     [Fact]
-    public async Task WhenTheRoleIsInvalid_ThenSavingChangesNothing()
+    public async Task WhenTheRoleIsInvalid_ThenSavingThrowsAndChangesNothing()
     {
         // Arrange
         var role = _graph.GetRole("Kitchen");
@@ -270,10 +270,9 @@ public sealed class RoleEditComponentTests : BunitContext, IAsyncLifetime
         var component = RenderEditor(role);
         await component.Find("[data-testid='role-edit-add-allow']").ClickAsync(new MouseEventArgs());
 
-        // Act
-        await component.InvokeAsync(() => component.Instance.SaveAsync(CancellationToken.None));
-
-        // Assert
+        // Act & Assert
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => component.InvokeAsync(() => component.Instance.SaveAsync(CancellationToken.None)));
         Assert.Same(oldAllow, role.Allow);
     }
 
@@ -329,7 +328,8 @@ public sealed class RoleEditComponentTests : BunitContext, IAsyncLifetime
 
         // Act
         await TypeTextAsync(component, "role-edit-allow-rule-0", "rule-paths", "Devices");
-        await component.InvokeAsync(() => component.Instance.SaveAsync(CancellationToken.None));
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => component.InvokeAsync(() => component.Instance.SaveAsync(CancellationToken.None)));
 
         // Assert
         Assert.False(component.Instance.IsValid);

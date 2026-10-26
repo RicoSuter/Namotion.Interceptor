@@ -174,9 +174,10 @@
             CloseNameEditor();
         }
 
+        // The host saves only while the roles are valid, so this is a defect to report rather than a save to skip.
         if (!IsValid)
         {
-            return Task.CompletedTask;
+            throw new InvalidOperationException("The roles are invalid and cannot be saved.");
         }
 
         // Existing instances under their new keys keep their rules; a new dictionary, as only a replaced one is noticed.
