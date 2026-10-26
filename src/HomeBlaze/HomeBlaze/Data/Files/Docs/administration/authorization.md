@@ -113,14 +113,16 @@ The field "Name" checks the name as you type, and "Add" and "Rename" stay disabl
 
 A name typed but not confirmed with "Add" or "Rename" is taken over by "Save", and an empty field of a role being added is ignored.
 
+When agents or other roles still name the typed name, such as after the role of that name was removed or renamed, the field "Name" warns before you click "Add" or "Rename", for example "2 agents already name this role and will get its rules after saving." and "Kitchen (used by 1 agent) includes a role of this name and will get its rules after saving.". The warning does not block the name; it says that the role takes over where the old one was named.
+
 ### Roles That Agents Use
 
-Agents name their roles, so a rename or removal changes what they may do:
+Agents and the custom roles that include a role name it, so a rename or removal changes what they may do. Includes are not changed for you:
 
-- **Remove**: when agents use the role, the trash button asks first with "2 agents use this role. After saving, they are denied everything and show "Invalid roles" until they are given another role." Click "Remove" to remove it or "Cancel" to keep it.
-- **Rename**: when agents use the role, the field "Name" shows "2 agents use this role under its old name. After saving, they are denied everything and show "Invalid roles" until they are given the new name or another role." before you click "Rename".
+- **Remove**: when agents use the role or other roles include it, the trash button asks first, such as with "2 agents use this role. After saving, they are denied everything and show "Invalid roles" until they are given another role." and "Kitchen (used by 1 agent) includes this role. After saving, it cannot be used and its agents are denied everything until its includes are changed." Click "Remove" to remove it or "Cancel" to keep it.
+- **Rename**: when agents use the role or other roles include it, the field "Name" warns before you click "Rename", such as with "2 agents use this role under its old name. After saving, they are denied everything and show "Invalid roles" until they are given the new name or another role." and "Kitchen (used by 1 agent) includes this role under its old name. ...". A rename that changes only the case of the name shows no warning, as names compare ignoring case.
 - **After saving**: the agents keep the old name in their `Roles`. They show the status "Invalid roles: Role 'LightOperator' is not defined." and every tool call of theirs is denied, not only the calls the role allowed, see [Invalid Roles](#invalid-roles). Their edit dialog shows the old name as a red chip with the tooltip "Unknown role". Remove it there and select the new name or another role, then save the agent.
-- **Includes**: a custom role that includes the old name shows the status "Role '...' includes 'LightOperator', which is not defined." until its includes are changed as well.
+- **Includes**: a custom role that includes the old name shows the status "Role '...' includes 'LightOperator', which is not defined." and cannot be used until its includes are changed as well, so the agents that use it are denied everything until then.
 
 ### Status and Usage
 
@@ -129,7 +131,9 @@ The property panel of a role shows two values:
 - **`Status`**: why the role cannot be used, or empty. "The name 'Reader' is reserved for a built-in role." or "The name 'System' is reserved for the system rules." for a reserved name, where agents naming `Reader` keep the built-in role; "The name 'Kitchen/Lights' cannot contain '/', '[' or ']', because it is part of the role's path." for a name written by hand with such a character; "The name '...' is used by more than one role, ignoring case."; or why the rules do not compile, such as "Role 'LightOperator' includes 'Readers', which is not defined.", "Action 'run' of role 'LightOperator' is not a known action." or "Path pattern 'Devices' of role 'LightOperator' must start with '/'.".
 - **`UsedByAgents`**: the number of started agents that name the role.
 
-Role names compare ignoring case. A saved change applies to the next turn of each agent. When a hand-written file holds two roles whose names differ only in case, the `Authorization` dialog shows "Several roles have the same name, ignoring case. Rename or remove one to save." and "Save" stays disabled until one is renamed or removed.
+Role names compare ignoring case. A saved change applies to the next turn of each agent, as a whole: an agent never gets a part of the changes of one save. When a hand-written file holds two roles whose names differ only in case, the `Authorization` dialog shows "Several roles have the same name, ignoring case. Rename or remove one to save." and "Save" stays disabled until one is renamed or removed.
+
+When the file of the `Authorization` subject is reloaded while its dialog or the dialog of one of its roles is open, such as after it was edited by hand, "Save" does not overwrite the reloaded roles. It shows "Error saving configuration: The roles changed while this dialog was open. Close it and open it again."; close the dialog, open it again and repeat the change.
 
 ---
 
@@ -142,7 +146,7 @@ This builds the role `LightOperator`, which switches and dims the lights, except
 1. On the tab "Rules", open "Includes" and select `Reader`, so the agent still sees and reads everything else.
 2. Under "Allow", click "Add rule". A new rule card appears.
 3. In the field "Types", type `ILightbulb` and pick it from the suggestions.
-4. In the field "Members", type `TurnOn` and press Enter, then add `TurnOff`, `Toggle` and `SetBrightness` the same way.
+4. In the field "Members", type `TurnOn, TurnOff, Toggle, SetBrightness` and press Enter. Each name becomes a chip of its own.
 5. Under "Actions" of the card, check "execute".
 6. Under "Deny", click "Add rule", add `/Devices/Bedroom` to "Paths" and `ILightbulb` to "Types", and check "execute".
 7. Check the result on the tab "Preview", see [Previewing a Role](#previewing-a-role).
@@ -163,20 +167,21 @@ The tab "Rules" has three parts:
 | Field | Takes |
 |-------|-------|
 | "Paths" | [Path patterns](#path-patterns), such as `/Devices/**`. The search button at the end of the field opens "Select Path" with the tree of the subjects; pick a subject and click "OK" to add its path. A pattern is checked as you type, and an invalid one shows its error under the field, such as "Path pattern 'Devices' must start with '/'." |
-| "Types" | Type names. While you type, the field suggests the subject types HomeBlaze knows and the device interfaces they implement, such as `ILightbulb`, by simple name. Any other name can be typed as well, simple or full |
-| "Members" | Member names, such as `Temperature`; `*` matches any text, such as `Set*` |
+| "Types" | Type names, case-sensitive. While you type, the field suggests the subject types HomeBlaze knows and the device interfaces they implement, such as `ILightbulb`, by simple name. Any other name can be typed as well, simple or full; a name that matches no known type or interface, such as `ILightBulb`, shows as a yellow chip with the tooltip "No known subject type or interface has this name; check its spelling and case." and can still be saved, for a type of a plugin that is not loaded. A name with whitespace is rejected with "A type name contains no whitespace." |
+| "Members" | Member names, case-sensitive, such as `Temperature`; `*` matches any text, such as `Set*`. A name with whitespace is rejected with "A member name contains no whitespace." |
 | "Tags" | [Tags](#tags), suggested while you type. Another text shows "Unknown tag; use one of state, configuration, secret, query, operation, requires-confirmation, subjects, attribute, metadata." |
 | "Actions" | The checkboxes "read", "write", "execute" and "history". At least one is required, else the card shows "Select at least one action." |
 
 Each value is a chip below its field:
 
-- **Adding**: press Enter or leave the field to add the typed text. In a field with suggestions, click a suggestion, or choose one with the arrow keys and press Enter. "Save" also adds the text still in a field, so nothing typed is lost.
+- **Adding**: press Enter or leave the field to add the typed text. Separate several values with commas, such as `/Devices/Kitchen/**, /Devices/Garden/**`; each part becomes a chip, without the whitespace around it. In a field with suggestions, click a suggestion, or choose one with the arrow keys and press Enter. "Save" also adds the text still in a field, so nothing typed is lost.
 - **Removing**: click the cross of the chip.
-- **Invalid text**: an invalid pattern or tag is not added. It stays in the field with its error, and "Save" stays disabled until it is corrected or cleared. A value from the file that is invalid shows as a red chip with the error as its tooltip.
+- **Invalid text**: an invalid pattern, tag or name is not added. It stays in the field with its error, and "Save" stays disabled until it is corrected or cleared. When one part of text with commas is invalid, none of its parts is added.
+- **Invalid values from the file**: a value from the file that is invalid shows as a red chip with the error as its tooltip, and "Save" stays disabled until it is removed. Besides the errors above, this is a value that holds a comma, "Contains a comma, which separates values; remove it and add each part on its own.", has whitespace around it, "Has leading or trailing whitespace.", or is listed a second time in the same field, "Listed twice.". Tags count as listed twice in another case as well.
 - **"any"**: a selector without values shows "any" below its field and matches every value, so a rule with only "Types" applies to every member of every subject of those types.
 - **Every member**: a card whose four selectors are all empty shows "This rule applies to every member.", in red on an allow rule and as a warning on a deny rule. The rule can still be saved, but an allow rule then grants its actions on every member of every subject, as `Everything` does.
 
-"Save" stays disabled while a rule has no action, a pattern or tag is invalid, or a field holds invalid text. An action in the file that is not one of the four shows as a red chip with the tooltip "Unknown action" and keeps "Save" disabled until it is removed.
+"Save" stays disabled while a rule has no action, a value is invalid, or a field holds invalid text. An action in the file that is not one of the four shows as a red chip with the tooltip "Unknown action" and keeps "Save" disabled until it is removed.
 
 ### Previewing a Role
 
@@ -392,6 +397,7 @@ A role has these settings, each optional:
 - **Subjects with only secrets**: a subject whose only members other than attributes are secrets has no readable member, so it is hidden from every agent and `/mcp` client, as is a subject the roles deny every member of.
 - **Page addresses**: `browse` and `search` give a subject with a page its address as `$url`, which is written with the shallowest path of the subject. When a member or subject on that path is hidden, `$url` is left out, so it names nothing hidden, even when the tools show the subject at another path, such as a subject that is also held below a hidden branch.
 - **Roles changed while they are read**: when an edit or a reload changes the roles while they are compiled, they are read once more; when that fails as well, custom roles are unavailable for that one call, and the next call reads them again.
+- **Commas in values**: a value of a rule cannot hold a comma, as typed text is split at commas. A path to a subject whose name holds a comma cannot be named in a rule; name a path above it with `**` instead.
 - **Watch paths**: see [Watch Paths](#watch-paths).
 
 ---
