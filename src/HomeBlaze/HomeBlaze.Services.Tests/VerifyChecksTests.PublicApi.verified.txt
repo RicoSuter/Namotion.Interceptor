@@ -116,6 +116,10 @@ namespace HomeBlaze.Services
         public static bool TryCreateObject(System.Type type, System.Collections.Generic.IReadOnlyDictionary<string, string?> inputs, out object? value, out string? error) { }
         public static bool TryParseJson(string? input, System.Type type, bool isNullable, out object? value, out string? error) { }
     }
+    public static class ProvisionalAnchorExtensions
+    {
+        public static void DetachIfProvisionallyAnchored(this Namotion.Interceptor.IInterceptorSubject subject, Namotion.Interceptor.IInterceptorSubjectContext context) { }
+    }
     public static class RegisteredSubjectMethodExtensions
     {
         public static System.Collections.Generic.IReadOnlyList<HomeBlaze.Abstractions.Metadata.MethodMetadata> GetAllMethods(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject, HomeBlaze.Abstractions.Attributes.ExclusionTarget target) { }
@@ -299,6 +303,7 @@ namespace HomeBlaze.Services.Diagnostics
     public class HostSystem : Microsoft.Extensions.Hosting.BackgroundService, HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.Common.IUptimeState, HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.IMonitoredService, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
         public HostSystem(Microsoft.Extensions.Logging.ILogger<HomeBlaze.Services.Diagnostics.HostSystem> logger) { }
+        public HostSystem(Microsoft.Extensions.Logging.ILogger<HomeBlaze.Services.Diagnostics.HostSystem> logger, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Position=402)]
         [System.ComponentModel.Category("System")]
         public string Architecture { get; }

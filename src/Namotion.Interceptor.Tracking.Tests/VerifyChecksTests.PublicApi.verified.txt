@@ -1,7 +1,9 @@
 ﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.Blazor.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.Connectors.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.Tracking.Tests")]
-[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v9.0", FrameworkDisplayName=".NET 9.0")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.WebSocket.Tests")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
 namespace Namotion.Interceptor.Tracking.Change
 {
     [Namotion.Interceptor.Attributes.RunsBefore(new System.Type[] {
@@ -102,9 +104,9 @@ namespace Namotion.Interceptor.Tracking.Change
 }
 namespace Namotion.Interceptor.Tracking
 {
-    public interface IStartupCompletionDeferrer
+    public interface IStartupCompletion
     {
-        System.IDisposable DeferCompletion();
+        System.IDisposable Defer();
     }
     public static class InterceptorSubjectContextExtensions
     {
@@ -134,6 +136,7 @@ namespace Namotion.Interceptor.Tracking
     {
         public static Namotion.Interceptor.IInterceptorSubject? FindSubjectInCollection(object value, int index) { }
         public static Namotion.Interceptor.IInterceptorSubject? FindSubjectInDictionary(object value, object key) { }
+        public static System.Type? GetDictionaryKeyType(System.Type dictionaryType) { }
         public static bool TryGetSubjectFromKeyValuePair(object keyValuePair, out object? key, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.IInterceptorSubject? subject) { }
     }
 }
@@ -166,6 +169,7 @@ namespace Namotion.Interceptor.Tracking.Lifecycle
         public int GetReferenceCount(Namotion.Interceptor.IInterceptorSubject subject) { }
         public void HandleLifecycleChange(Namotion.Interceptor.Tracking.Lifecycle.SubjectLifecycleChange change) { }
         public bool TryAddProperties(Namotion.Interceptor.Interceptors.SubjectPropertyRegistration registration) { }
+        public bool TryRunWhileAttached(Namotion.Interceptor.IInterceptorSubject subject, System.Action whenAttached) { }
         public void WriteProperty<TProperty>(ref Namotion.Interceptor.Interceptors.PropertyWriteContext<TProperty> context, Namotion.Interceptor.Interceptors.WriteInterceptionDelegate<TProperty> next) { }
     }
     public static class LifecycleInterceptorExtensions
@@ -200,6 +204,8 @@ namespace Namotion.Interceptor.Tracking.Parent
         public static System.Collections.Immutable.ImmutableArray<Namotion.Interceptor.Tracking.Parent.SubjectParent> GetParents(this Namotion.Interceptor.IInterceptorSubject subject) { }
         public static TRoot? TryGetFirstParent<TRoot>(this Namotion.Interceptor.IInterceptorSubject subject)
             where TRoot :  class { }
+        public static TRoot? TryGetFirstParentOrSelf<TRoot>(this Namotion.Interceptor.IInterceptorSubject subject)
+            where TRoot :  class { }
     }
     public struct SubjectParent : System.IEquatable<Namotion.Interceptor.Tracking.Parent.SubjectParent>
     {
@@ -220,16 +226,25 @@ namespace Namotion.Interceptor.Tracking.Performance
 }
 namespace Namotion.Interceptor.Tracking.Recorder
 {
+    public interface IReadPropertyRecorderTarget
+    {
+        void OnRead(Namotion.Interceptor.PropertyReference property);
+    }
     public class ReadPropertyRecorder : Namotion.Interceptor.ISingletonContextService<Namotion.Interceptor.Tracking.Recorder.ReadPropertyRecorder>, Namotion.Interceptor.Interceptors.IReadInterceptor
     {
         public ReadPropertyRecorder() { }
         public TProperty ReadProperty<TProperty>(ref Namotion.Interceptor.Interceptors.PropertyReadContext<TProperty> context, Namotion.Interceptor.Interceptors.ReadInterceptionDelegate<TProperty> next) { }
+        public static Namotion.Interceptor.Tracking.Recorder.ReadPropertyRecorderTargetScope RecordOnCurrentThread(Namotion.Interceptor.Tracking.Recorder.IReadPropertyRecorderTarget target) { }
         public static Namotion.Interceptor.Tracking.Recorder.ReadPropertyRecorderScope Start(System.Collections.Concurrent.ConcurrentDictionary<Namotion.Interceptor.PropertyReference, bool>? properties = null) { }
     }
-    public class ReadPropertyRecorderScope : System.IDisposable
+    public sealed class ReadPropertyRecorderScope : System.IDisposable
     {
         public void Dispose() { }
         public System.Collections.Generic.ICollection<Namotion.Interceptor.PropertyReference> GetPropertiesAndDispose() { }
+    }
+    public readonly ref struct ReadPropertyRecorderTargetScope
+    {
+        public void Dispose() { }
     }
 }
 namespace Namotion.Interceptor.Tracking.Transactions
