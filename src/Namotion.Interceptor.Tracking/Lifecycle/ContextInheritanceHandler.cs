@@ -20,7 +20,17 @@ public class ContextInheritanceHandler : ILifecycleHandler
             }
             else if (change is { ReferenceCount: 0, IsPropertyReferenceRemoved: true })
             {
-                change.Subject.Context.RemoveFallbackContext(change.Property.Value.Subject.Context);
+                // The subject left the graph, so every fallback it still has is stale, not only the one of the
+                // parent removing it last: a fallback from its constructor would otherwise retain it and keep
+                // answering for it.
+                if (change.Subject.Context is InterceptorSubjectContext context)
+                {
+                    context.ClearFallbackContexts();
+                }
+                else
+                {
+                    change.Subject.Context.RemoveFallbackContext(change.Property.Value.Subject.Context);
+                }
             }
             else if (change is { IsPropertyReferenceRemoved: true, IsContextDetach: false })
             {
