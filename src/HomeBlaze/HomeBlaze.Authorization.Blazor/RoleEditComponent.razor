@@ -7,7 +7,7 @@
 @if (Role is { } role)
 {
     <MudStack Row="true" AlignItems="AlignItems.Baseline" Justify="Justify.SpaceBetween">
-        <MudText Typo="Typo.h6" data-testid="role-edit-name">@(_name ?? "Role")</MudText>
+        <MudText Typo="Typo.h6" data-testid="role-edit-name">@(UpdateName() ?? "Role")</MudText>
         <MudText Typo="Typo.body2" Class="mud-text-secondary" data-testid="role-edit-used-by">
             Used by @role.UsedByAgents @(role.UsedByAgents == 1 ? "agent" : "agents")
         </MudText>
@@ -84,16 +84,19 @@
 
     /// <summary>
     /// Gets the role as currently edited, unsaved changes included, named by its key in <see cref="Authorization.Roles"/>;
-    /// the same instance until the next change.
+    /// the same instance until the next change or rename.
     /// </summary>
-    internal AuthorizationRole GetEditedRole() =>
-        _editedRole ??= new AuthorizationRole
+    internal AuthorizationRole GetEditedRole()
+    {
+        UpdateName();
+        return _editedRole ??= new AuthorizationRole
         {
             Name = _name ?? string.Empty,
             Includes = [.. _includes],
             Allow = [.. _allow.Select(entry => entry.Rule)],
             Deny = [.. _deny.Select(entry => entry.Rule)]
         };
+    }
 
     protected override void OnInitialized()
     {
@@ -149,6 +152,19 @@
 
         _isDirty = false;
         IsDirtyChanged?.Invoke(false);
+    }
+
+    // Reads the name again, as the Authorization dialog of another user can rename the role while this one is open.
+    private string? UpdateName()
+    {
+        if (Role is { } role && FindParent(role).Name is { } name && !string.Equals(name, _name, StringComparison.Ordinal))
+        {
+            _name = name;
+            _excluded = [name];
+            _editedRole = null;
+        }
+
+        return _name;
     }
 
     // The Authorization that holds the role and the key it holds it under.

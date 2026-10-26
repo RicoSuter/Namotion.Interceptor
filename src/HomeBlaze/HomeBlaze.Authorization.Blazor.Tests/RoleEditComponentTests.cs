@@ -503,6 +503,33 @@ public sealed class RoleEditComponentTests : BunitContext, IAsyncLifetime
         Assert.Empty(role.Allow);
     }
 
+    [Fact]
+    public async Task WhenTheRoleIsRenamedWhileTheDialogIsOpen_ThenTheDialogUsesTheNewName()
+    {
+        // Arrange
+        var role = _graph.GetRole("Kitchen");
+        var garden = _graph.GetRole("Garden");
+        var component = RenderEditor(role);
+
+        // Act: renamed as the Authorization dialog does, left out once so that it is attached again under its new key.
+        _graph.Authorization.Roles = new Dictionary<string, Role>(StringComparer.OrdinalIgnoreCase) { ["Garden"] = garden };
+        _graph.Authorization.Roles = new Dictionary<string, Role>(StringComparer.OrdinalIgnoreCase) { ["Pantry"] = role, ["Garden"] = garden };
+        component.Render();
+
+        // Assert
+        Assert.Equal("Pantry", component.Find("[data-testid='role-edit-name']").TextContent.Trim());
+        Assert.Equal("Pantry", component.Instance.GetEditedRole().Name);
+        Assert.Equal(["Pantry"], component.FindComponent<RoleSelector>().Instance.Excluded!);
+
+        // Act
+        await component.Find("[data-testid='role-edit-add-allow']").ClickAsync(new MouseEventArgs());
+        await SetActionAsync(component, 0, "read", true);
+        await component.InvokeAsync(() => component.Instance.SaveAsync(CancellationToken.None));
+
+        // Assert
+        Assert.Equal([new PermissionRule { Actions = [PermissionAction.Read] }], role.Allow);
+    }
+
     private IRenderedComponent<RoleEditComponent> RenderEditor(Role role) =>
         Render<RoleEditComponent>(parameters => parameters.Add(component => component.Subject, role));
 
