@@ -248,7 +248,7 @@ public sealed class AuthorizationServiceTests : IDisposable
     }
 
     [Fact]
-    public void WhenTheDuplicateAuthorizationIsRemoved_ThenTheCustomRolesWorkAgainAndTheStatusesClear()
+    public async Task WhenTheDuplicateAuthorizationIsRemoved_ThenTheCustomRolesWorkAgainAndTheStatusesClear()
     {
         // Arrange
         var role = new Role { Allow = [ReadPlain()] };
@@ -266,8 +266,10 @@ public sealed class AuthorizationServiceTests : IDisposable
 
         // Assert
         Assert.Null(result.Error);
-        Assert.Null(first.Status);
-        Assert.Null(role.Status);
+        // A refresh started by the arrangement can still be writing the statuses of the earlier snapshot.
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => first.Status is null && role.Status is null,
+            message: "The statuses should clear once the duplicate is removed.");
     }
 
     [Fact]
