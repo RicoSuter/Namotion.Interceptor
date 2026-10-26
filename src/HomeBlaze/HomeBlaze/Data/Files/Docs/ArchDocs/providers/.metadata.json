@@ -1,0 +1,11 @@
+{
+  "title": "Providers",
+  "order": [
+    "overview.md",
+    "csharp-provider.md",
+    "contract-discovery.md",
+    "openapi-provider.md",
+    "protobuf-provider.md",
+    "csharp-api-provider.md"
+  ]
+}

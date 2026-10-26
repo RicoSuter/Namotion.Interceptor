@@ -1,0 +1,15 @@
+{
+  "title": "Architecture Tests",
+  "order": [
+    "overview.md",
+    "authoring.md",
+    "generic-rules.md",
+    "naming-analyzer.md",
+    "required-property-analyzer.md",
+    "membership-analyzer.md",
+    "allowed-dependencies-analyzer.md",
+    "predefined-rules.md",
+    "hosts-assigned-to-services-analyzer.md",
+    "architecture-checks.md"
+  ]
+}

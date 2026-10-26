@@ -1,0 +1,14 @@
+{
+  "$type": "Namotion.ArchDocs.SourceRepository",
+  "sourceRoot": ".source",
+  "providers": [
+    {
+      "path": "/providers/CSharpProjects",
+      "config": {}
+    }
+  ],
+  "analyzers": [
+    { "path": "/ArchDocs/rules.md/*" },
+    { "path": "/ArchDocs/rules/**" }
+  ]
+}
