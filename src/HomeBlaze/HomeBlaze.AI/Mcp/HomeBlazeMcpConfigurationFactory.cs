@@ -68,11 +68,6 @@ internal static class HomeBlazeMcpConfigurationFactory
             PathProvider = pathProvider,
             PathPrefix = PathPrefix,
             ExcludeTypes = excludeTypes,
-            SubjectEnrichers =
-            {
-                new HomeBlazeMcpSubjectEnricher(
-                    typeProviders, isReadOnly, HomeBlazeMcpSubjectEnricher.CreatePageUrlGetter(serviceProvider), accessPolicy)
-            },
             TypeProviders = typeProviders,
             ToolDescriptionAdditions =
             {
@@ -83,6 +78,9 @@ internal static class HomeBlazeMcpConfigurationFactory
             AccessPolicy = accessPolicy,
             IsReadOnly = isReadOnly
         };
+
+        configuration.SubjectEnrichers.Add(new HomeBlazeMcpSubjectEnricher(
+            typeProviders, isReadOnly, HomeBlazeMcpSubjectEnricher.CreatePageUrlGetter(serviceProvider, configuration, rootSubjectProvider), accessPolicy));
 
         var invoker = new McpMethodInvoker(
             rootSubjectProvider,

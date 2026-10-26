@@ -4,7 +4,8 @@ using Namotion.Interceptor.Registry.Abstractions;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Services;
-using Namotion.Interceptor.Registry.Paths;
+using Namotion.Interceptor.Mcp;
+using Namotion.Interceptor.Registry;
 using Microsoft.Extensions.DependencyInjection;
 using HomeBlaze.Services.Components;
 using HomeBlaze.Components.Abstractions.Attributes;
@@ -44,7 +45,8 @@ internal class HomeBlazeMcpSubjectEnricher : IMcpSubjectEnricher
 
     // The address of the page of a subject that has a page component, as the navigation links it. Without the component
     // registry, as in a host without pages, no subject has one.
-    internal static Func<IInterceptorSubject, string?>? CreatePageUrlGetter(IServiceProvider serviceProvider)
+    internal static Func<IInterceptorSubject, string?>? CreatePageUrlGetter(
+        IServiceProvider serviceProvider, McpServerConfiguration configuration, Func<IInterceptorSubject> rootSubjectProvider)
     {
         if (serviceProvider.GetService<SubjectComponentRegistry>() is not { } componentRegistry ||
             serviceProvider.GetService<SubjectPathResolver>() is not { } pathResolver)
@@ -52,10 +54,44 @@ internal class HomeBlazeMcpSubjectEnricher : IMcpSubjectEnricher
             return null;
         }
 
-        return subject => componentRegistry.HasComponent(subject.GetType(), SubjectComponentType.Page) &&
-            pathResolver.GetPath(subject, PathStyle.Canonical) is { } path
+        return CreatePageUrlGetter(
+            subject => componentRegistry.HasComponent(subject.GetType(), SubjectComponentType.Page),
+            pathResolver, configuration, rootSubjectProvider);
+    }
+
+    // The address names every property on the canonical path, which may differ from the path the tools write for the
+    // subject, such as for a subject with several parents. With an access policy, a subject therefore gets an address
+    // only when the canonical path resolves back to it as the tools resolve a path, so the address names nothing the
+    // tools hide.
+    internal static Func<IInterceptorSubject, string?> CreatePageUrlGetter(
+        Func<IInterceptorSubject, bool> hasPage,
+        ISubjectPathResolver pathResolver,
+        McpServerConfiguration configuration,
+        Func<IInterceptorSubject> rootSubjectProvider)
+    {
+        return subject => hasPage(subject) &&
+            pathResolver.GetPath(subject, PathStyle.Canonical) is { } path &&
+            IsShownAtPath(configuration, rootSubjectProvider, subject, path)
                 ? string.Concat("/pages", path)
                 : null;
+    }
+
+    private static bool IsShownAtPath(
+        McpServerConfiguration configuration, Func<IInterceptorSubject> rootSubjectProvider, IInterceptorSubject subject, string path)
+    {
+        if (configuration.AccessPolicy is null)
+        {
+            return true;
+        }
+
+        var root = rootSubjectProvider();
+        if (ReferenceEquals(root, subject))
+        {
+            return true;
+        }
+
+        return root.TryGetRegisteredSubject() is { } registeredRoot &&
+            ReferenceEquals(configuration.TryGetReadableSubject(registeredRoot, path)?.Subject, subject);
     }
 
     public IDictionary<string, object?> GetSubjectEnrichments(RegisteredSubject subject)
