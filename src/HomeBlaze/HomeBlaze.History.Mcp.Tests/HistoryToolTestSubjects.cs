@@ -3,6 +3,7 @@ using System.Collections.Immutable;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.History.Abstractions;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Registry.Attributes;
 
 namespace HomeBlaze.History.Mcp.Tests;
 
@@ -24,6 +25,19 @@ public partial class HistoryToolTestSubject
 
     [State, Configuration(IsSecret = true)]
     public partial string? Password { get; set; }
+}
+
+/// <summary>Root subject for the path tests: holds its rooms by name in an [InlinePaths] dictionary.</summary>
+[InterceptorSubject]
+public partial class HistoryToolTestFolder
+{
+    [InlinePaths]
+    public partial Dictionary<string, HistoryToolTestSubject> Children { get; set; }
+
+    public HistoryToolTestFolder()
+    {
+        Children = new Dictionary<string, HistoryToolTestSubject>();
+    }
 }
 
 /// <summary>

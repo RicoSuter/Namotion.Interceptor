@@ -1,6 +1,8 @@
 using System.Text.Json;
+using HomeBlaze.Abstractions;
 using HomeBlaze.AI.Mcp;
 using HomeBlaze.Authorization;
+using HomeBlaze.Services;
 using HomeBlaze.Services.Lifecycle;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor;
@@ -101,6 +103,32 @@ public class GetPropertyHistoryAccessTests
         Assert.Empty(graph.Store.QueriedPaths);
     }
 
+    [Theory]
+    [InlineData("/Kitchen/Power")]
+    [InlineData("/Children[Kitchen]/Power")]
+    public async Task WhenAPathResolves_ThenTheStoreIsQueriedWithTheCanonicalPathOfTheProperty(string path)
+    {
+        // Arrange
+        var context = CreateContext();
+        var root = new HistoryToolTestFolder(context);
+        context.AddService<ISubjectPathResolver>(new SubjectPathResolver(() => root));
+        root.Children = new Dictionary<string, HistoryToolTestSubject> { ["Kitchen"] = new() { Name = "Kitchen" } };
+        var store = new TestHistoryStore(context);
+        var configuration = new McpServerConfiguration
+        {
+            PathProvider = new StateAttributePathProvider(),
+            AccessPolicy = CreatePolicy(BuiltInRoles.ReaderName)
+        };
+        var tool = new HistoryMcpToolProvider(() => root, configuration, NullLogger<HistoryMcpToolProvider>.Instance).GetTools().Single();
+
+        // Act
+        var json = await InvokeAsync(new Graph(tool, store), path);
+
+        // Assert
+        Assert.False(json.GetProperty("series").GetProperty(path).TryGetProperty("error", out _));
+        Assert.Equal(["/Kitchen/Power"], store.QueriedPaths);
+    }
+
     [Fact]
     public async Task WhenTheConfigurationHasNoAccessPolicy_ThenAnUnresolvedPathIsQueried()
     {
@@ -117,14 +145,7 @@ public class GetPropertyHistoryAccessTests
 
     private static Graph CreateGraph(IMcpAccessPolicy? accessPolicy)
     {
-        var context = InterceptorSubjectContext.Create()
-            .WithFullPropertyTracking()
-            .WithRegistry()
-            .WithLifecycle()
-            .WithService<IPropertyLifecycleHandler>(
-                () => new PropertyAttributeInitializer(),
-                handler => handler is PropertyAttributeInitializer);
-
+        var context = CreateContext();
         var root = new HistoryToolTestSubject(context) { Name = "Room", Password = "s3cr3t" };
         root.Child = new HistoryToolTestSubject { Name = "Child" };
         var store = new TestHistoryStore(context);
@@ -137,6 +158,15 @@ public class GetPropertyHistoryAccessTests
         var provider = new HistoryMcpToolProvider(() => root, configuration, NullLogger<HistoryMcpToolProvider>.Instance);
         return new Graph(provider.GetTools().Single(), store);
     }
+
+    private static IInterceptorSubjectContext CreateContext() =>
+        InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry()
+            .WithLifecycle()
+            .WithService<IPropertyLifecycleHandler>(
+                () => new PropertyAttributeInitializer(),
+                handler => handler is PropertyAttributeInitializer);
 
     private static AuthorizationMcpAccessPolicy CreatePolicy(string roleName, params AuthorizationRole[] customRoles) =>
         new(AuthorizationPolicy.Compile(

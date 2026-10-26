@@ -547,7 +547,7 @@ public class HistoryMcpToolProvider : IMcpToolProvider
 
             result = await stores
                 .QueryHistoryAsync(
-                    new HistoryQuery(path, from, to, bucket, aggregation, maxPoints), cancellationToken)
+                    new HistoryQuery(GetQueryPath(resolved, rootRegistered, path), from, to, bucket, aggregation, maxPoints), cancellationToken)
                 .ConfigureAwait(false);
         }
         catch (HistoryAggregationNotSupportedException exception)
@@ -579,6 +579,21 @@ public class HistoryMcpToolProvider : IMcpToolProvider
         }
 
         return new PathResult(path, valueType, unit, result, null);
+    }
+
+    // With a policy, the property was resolved and checked, so its history is queried under the path it is recorded with,
+    // whichever spelling of its path the client used; the requested path when it has none. Without a policy, the
+    // requested path, so that history of a property no longer in the graph stays available.
+    private string GetQueryPath((RegisteredSubjectProperty Property, object? Index)? resolved, RegisteredSubject? rootRegistered, string path)
+    {
+        if (_configuration.AccessPolicy is null ||
+            resolved is not { Index: null } match ||
+            rootRegistered?.Subject.Context.TryGetService<ISubjectPathResolver>() is not { } resolver)
+        {
+            return path;
+        }
+
+        return match.Property.GetHistoryPath(resolver) ?? path;
     }
 
     // Without a policy, a path that does not resolve is still queried, so the history of a property no longer in the graph stays available.
