@@ -14,6 +14,9 @@ internal sealed class AuthorizationSnapshot
 {
     private static readonly HomeBlazeMemberTagProvider TagProvider = new();
 
+    // The name of the role a pattern is validated in, removed from the error since the pattern belongs to no role.
+    private const string PatternValidationRoleName = "PatternValidation";
+
     private readonly PathProviderBase _pathProvider;
     private readonly ImmutableArray<AuthorizationRole> _roles;
     private readonly Dictionary<string, string> _unavailableRoles;
@@ -161,6 +164,48 @@ internal sealed class AuthorizationSnapshot
         return _policies.GetOrAdd(key, Compile(key.Names));
     }
 
+    /// <summary>
+    /// Compiles the policy of a principal holding only <paramref name="editedRole"/>, which replaces the custom role of
+    /// the same name ignoring case, or is added. The result is not cached; its error is the status the role would have
+    /// once saved.
+    /// </summary>
+    public AuthorizationResult Preview(AuthorizationRole editedRole)
+    {
+        var name = editedRole.Name;
+        var reason = GetNameError(name, count: 1) ?? _unavailableRoles.GetValueOrDefault(name) ?? _customRolesError;
+        if (reason is not null)
+        {
+            return new AuthorizationResult(AuthorizationPolicy.DenyAll, reason);
+        }
+
+        var index = IndexOfRole(name);
+        var roles = index >= 0 ? _roles.SetItem(index, editedRole) : _roles.Add(editedRole);
+        return Compile(roles, [name]);
+    }
+
+    /// <summary>
+    /// Gets why a path pattern is invalid, or null when it is valid, by compiling a role with one rule holding it, as
+    /// the library parses patterns only while compiling.
+    /// </summary>
+    public static string? ValidatePathPattern(string pattern, PathProviderBase pathProvider)
+    {
+        var role = new AuthorizationRole
+        {
+            Name = PatternValidationRoleName,
+            Allow = [new PermissionRule { Paths = [pattern], Actions = [PermissionAction.Read] }]
+        };
+
+        try
+        {
+            AuthorizationPolicy.Compile([role], [PatternValidationRoleName], [], [], TagProvider, pathProvider);
+            return null;
+        }
+        catch (AuthorizationException exception)
+        {
+            return exception.Message.Replace($" of role '{PatternValidationRoleName}'", "", StringComparison.Ordinal);
+        }
+    }
+
     private AuthorizationResult Compile(string[] roleNames)
     {
         foreach (var name in roleNames)
@@ -173,16 +218,34 @@ internal sealed class AuthorizationSnapshot
             }
         }
 
+        return Compile(_roles, roleNames);
+    }
+
+    private AuthorizationResult Compile(ImmutableArray<AuthorizationRole> roles, string[] roleNames)
+    {
         try
         {
             var policy = AuthorizationPolicy.Compile(
-                _roles, roleNames, SystemRules.Rules, AuthorizationActions.All, TagProvider, _pathProvider);
+                roles, roleNames, SystemRules.Rules, AuthorizationActions.All, TagProvider, _pathProvider);
             return new AuthorizationResult(policy, null);
         }
         catch (AuthorizationException exception)
         {
             return new AuthorizationResult(AuthorizationPolicy.DenyAll, exception.Message);
         }
+    }
+
+    private int IndexOfRole(string name)
+    {
+        for (var index = 0; index < _roles.Length; index++)
+        {
+            if (string.Equals(_roles[index].Name, name, StringComparison.OrdinalIgnoreCase))
+            {
+                return index;
+            }
+        }
+
+        return -1;
     }
 
     private static List<KeyValuePair<string, Role>> GetRoles(Authorization authorization)

@@ -358,6 +358,25 @@ public class SubjectTypeCatalogTests
         Assert.Equal("Category", descriptor.IconName);
     }
 
+    [Fact]
+    public void WhenTypeNamesAreListed_ThenTheyAreTheSubjectTypesAndTheirAbstractionsBySimpleNameDistinctAndSorted()
+    {
+        // Arrange
+        var catalog = CreateCatalog(
+            typeof(CatalogNotConfigurableSubject),
+            typeof(CatalogDerivedAnnotatedSubject),
+            typeof(CatalogAnnotatedSubject),
+            typeof(CatalogAbstractSubject));
+
+        // Act
+        var typeNames = catalog.GetTypeNames();
+
+        // Assert - the abstract type is not registered, and interfaces without SubjectAbstraction are left out.
+        Assert.Equal(
+            ["CatalogAnnotatedSubject", "CatalogDerivedAnnotatedSubject", "CatalogNotConfigurableSubject", "IConfigurable"],
+            typeNames);
+    }
+
     private sealed class Relay;
 
     private sealed class ShellyDevice;

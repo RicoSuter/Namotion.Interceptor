@@ -1,5 +1,3 @@
-using System.Collections.Concurrent;
-using System.Collections.Immutable;
 using System.Reactive.Concurrency;
 using HomeBlaze.Authorization.Internal;
 using Microsoft.Extensions.Logging;
@@ -34,7 +32,7 @@ public sealed class AuthorizationService : IDisposable
     private readonly PathProviderBase _pathProvider;
     private readonly ILogger<AuthorizationService>? _logger;
     private readonly IDisposable _subscription;
-    private readonly ConcurrentDictionary<object, ImmutableArray<string>> _principals = new(ReferenceEqualityComparer.Instance);
+    private readonly PrincipalRoleNames _principals = new();
     private readonly Lock _rebuildLock = new();
 
     // Incremented on every change of an Authorization or a Role; a snapshot of another version is rebuilt.
@@ -110,6 +108,32 @@ public sealed class AuthorizationService : IDisposable
     }
 
     /// <summary>
+    /// Gets the policy of a principal holding only <paramref name="editedRole"/>, compiled like <see cref="GetPolicy"/> with
+    /// <paramref name="editedRole"/> in place of the saved custom role of the same name, ignoring case, or added when none
+    /// is saved. The result is not cached, and neither policies nor statuses change.
+    /// </summary>
+    /// <returns>
+    /// The policy and no error, or <see cref="AuthorizationPolicy.DenyAll"/> and the status the role would have once saved:
+    /// why its name cannot be used, why custom roles are unavailable, or why it does not compile.
+    /// </returns>
+    public AuthorizationResult PreviewPolicy(AuthorizationRole editedRole)
+    {
+        ArgumentNullException.ThrowIfNull(editedRole);
+
+        return GetSnapshot().Preview(editedRole);
+    }
+
+    /// <summary>
+    /// Gets why a path pattern of a rule is invalid, checked as when a role is compiled, or null when it is valid.
+    /// </summary>
+    public string? ValidatePathPattern(string pattern)
+    {
+        ArgumentNullException.ThrowIfNull(pattern);
+
+        return AuthorizationSnapshot.ValidatePathPattern(pattern, _pathProvider);
+    }
+
+    /// <summary>
     /// Gets the names of the built-in roles, followed by those of the custom roles that names resolve to, ordered by name.
     /// A custom role whose rules do not compile is listed; its <see cref="Role.Status"/> and <see cref="GetPolicy"/> report the error.
     /// </summary>
@@ -130,15 +154,7 @@ public sealed class AuthorizationService : IDisposable
     {
         ArgumentNullException.ThrowIfNull(principal);
 
-        if (roleNames is null)
-        {
-            _principals.TryRemove(principal, out _);
-        }
-        else
-        {
-            _principals[principal] = [.. roleNames];
-        }
-
+        _principals.Set(principal, roleNames);
         Interlocked.Increment(ref _statusVersion);
         GetSnapshot();
         WriteStatuses();
@@ -287,7 +303,7 @@ public sealed class AuthorizationService : IDisposable
         {
             statusVersion = Volatile.Read(ref _statusVersion);
             var snapshot = Volatile.Read(ref _snapshot)!;
-            var counts = CountPrincipalsPerRoleName();
+            var counts = _principals.CountPerName();
 
             foreach (var (authorization, status) in snapshot.AuthorizationStatuses)
             {
@@ -301,25 +317,6 @@ public sealed class AuthorizationService : IDisposable
             }
         }
         while (statusVersion != Volatile.Read(ref _statusVersion));
-    }
-
-    private Dictionary<string, int> CountPrincipalsPerRoleName()
-    {
-        var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        var namesOfPrincipal = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var (_, roleNames) in _principals)
-        {
-            namesOfPrincipal.Clear();
-            foreach (var name in roleNames)
-            {
-                if (name is not null && namesOfPrincipal.Add(name))
-                {
-                    counts[name] = counts.GetValueOrDefault(name) + 1;
-                }
-            }
-        }
-
-        return counts;
     }
 
     // After the registry, so that a rebuild started by a change finds the subject among the known subjects, or no longer.
