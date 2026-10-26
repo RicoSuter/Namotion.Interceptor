@@ -72,10 +72,13 @@ internal sealed class SubjectFilterExpression
         return true;
     }
 
-    /// <summary>Evaluates the filter against the current property values of <paramref name="subject"/>.</summary>
-    public bool Matches(RegisteredSubject subject, PathProviderBase pathProvider)
+    /// <summary>
+    /// Evaluates the filter against the current property values of <paramref name="subject"/>. A path reads as missing
+    /// when its property is on a subject that is not shown, and a reference to a subject that is not shown reads as null.
+    /// </summary>
+    public bool Matches(RegisteredSubject subject, PathProviderBase pathProvider, McpVisibility visibility)
     {
-        var context = new FilterContext(subject, pathProvider);
+        var context = new FilterContext(subject, pathProvider, visibility);
         return _expression.EvaluateCondition(ref context) == true;
     }
 
@@ -181,12 +184,22 @@ internal sealed class SubjectFilterExpression
         return false;
     }
 
-    private readonly struct FilterContext(RegisteredSubject subject, PathProviderBase pathProvider) : IExpressionContext
+    private readonly struct FilterContext(RegisteredSubject subject, PathProviderBase pathProvider, McpVisibility visibility)
+        : IExpressionContext
     {
-        public ExpressionValue ResolvePath(string path) =>
-            McpToolHelper.TryGetFilterPropertyFromPath(subject, pathProvider, path) is { } property
-                ? ExpressionValue.FromProperty(property, property.GetValue())
-                : ExpressionValue.Missing;
+        public ExpressionValue ResolvePath(string path)
+        {
+            if (McpToolHelper.TryGetFilterPropertyFromPath(subject, pathProvider, path, visibility) is not { } property)
+            {
+                return ExpressionValue.Missing;
+            }
+
+            // Browse leaves out a referenced subject that is not shown, so the filter reads the reference as unset.
+            var value = property.GetValue();
+            return property.IsSubjectReference && value is IInterceptorSubject referenced && !visibility.IsShown(referenced)
+                ? ExpressionValue.FromProperty(property, null)
+                : ExpressionValue.FromProperty(property, value);
+        }
 
         // TryParse refuses 'value', so only 'subject' arrives here.
         public ExpressionValue ResolveVariable(string variable, string? memberPath) =>

@@ -1,4 +1,5 @@
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Registry.Attributes;
 
 namespace Namotion.Interceptor.Mcp.Tests;
 
@@ -75,4 +76,37 @@ public partial class TestMixedGroup
     {
         Items = new Dictionary<string, IInterceptorSubject>();
     }
+}
+
+[InterceptorSubject]
+public partial class TestHouse
+{
+    public partial string Address { get; set; }
+    public partial TestDevice? Private { get; set; }
+    public partial TestDevice? Public { get; set; }
+}
+
+[InterceptorSubject]
+public partial class TestFolder
+{
+    public partial string Name { get; set; }
+    public partial string Secret { get; set; }
+
+    [InlinePaths]
+    public partial Dictionary<string, TestFolder> Children { get; set; }
+
+    public TestFolder()
+    {
+        Children = new Dictionary<string, TestFolder>();
+    }
+}
+
+[InterceptorSubject]
+public partial class TestNode
+{
+    public partial string Name { get; set; }
+    public partial TestNode? Secret { get; set; }
+    public partial TestNode? A { get; set; }
+    public partial TestNode? B { get; set; }
+    public partial TestNode? Child { get; set; }
 }

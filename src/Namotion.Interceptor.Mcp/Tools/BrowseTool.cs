@@ -56,8 +56,7 @@ internal class BrowseTool
 
     private Task<object?> HandleBrowseAsync(JsonElement input, CancellationToken cancellationToken)
     {
-        var pathProvider = _configuration.PathProvider as PathProviderBase
-            ?? throw new InvalidOperationException("PathProvider must extend PathProviderBase for path resolution.");
+        var pathProvider = _configuration.ToolPathProvider;
 
         var rootSubject = _rootSubjectProvider();
         var rootRegisteredSubject = rootSubject.TryGetRegisteredSubject()
@@ -87,6 +86,8 @@ internal class BrowseTool
 
         depth = Math.Min(depth, _configuration.MaxDepth);
 
+        var visibility = McpVisibility.For(_configuration, rootSubject);
+
         // Resolve starting subject
         RegisteredSubject startSubject;
         var isRootPath = string.IsNullOrEmpty(path) ||
@@ -98,7 +99,7 @@ internal class BrowseTool
         }
         else
         {
-            var resolved = pathProvider.TryGetSubjectFromPath(rootRegisteredSubject, path!);
+            var resolved = _configuration.TryGetReadableSubject(rootRegisteredSubject, path!, visibility);
             if (resolved is null)
             {
                 return Task.FromResult<object?>(McpToolHelper.GetPathNotFoundError(pathProvider, path!));
@@ -114,7 +115,7 @@ internal class BrowseTool
         var options = new NodeOptions(
             includeProperties, includeAttributes, includeMethods, includeInterfaces, propertyNames, excludeTypes);
         var result = BuildSubjectNode(startSubject, rootSubject, pathProvider, depth, in options,
-            visited, maxSubjects, unseenPropertyNames, ref subjectCount, ref truncated);
+            visited, visibility, maxSubjects, unseenPropertyNames, ref subjectCount, ref truncated);
 
         var browseResult = new BrowseResult
         {
@@ -140,12 +141,13 @@ internal class BrowseTool
         int remainingDepth,
         in NodeOptions options,
         HashSet<IInterceptorSubject> visited,
+        McpVisibility visibility,
         int maxSubjects,
         UnseenPropertyNames? unseenPropertyNames,
         ref int subjectCount,
         ref bool truncated)
     {
-        unseenPropertyNames?.Observe(subject, pathProvider);
+        unseenPropertyNames?.Observe(subject, pathProvider, visibility);
         var node = McpToolHelper.BuildSubjectNodeDto(
             subject, pathProvider, rootSubject, _configuration,
             options.IncludeProperties, options.IncludeAttributes, options.IncludeMethods, options.IncludeInterfaces,
@@ -153,7 +155,7 @@ internal class BrowseTool
 
         // Add subject-containing properties via tree traversal
         BuildSubjectTree(node, subject, rootSubject, pathProvider, remainingDepth, in options,
-            visited, maxSubjects, unseenPropertyNames, ref subjectCount, ref truncated);
+            visited, visibility, maxSubjects, unseenPropertyNames, ref subjectCount, ref truncated);
 
         return node;
     }
@@ -166,6 +168,7 @@ internal class BrowseTool
         int remainingDepth,
         in NodeOptions options,
         HashSet<IInterceptorSubject> visited,
+        McpVisibility visibility,
         int maxSubjects,
         UnseenPropertyNames? unseenPropertyNames,
         ref int subjectCount,
@@ -196,6 +199,7 @@ internal class BrowseTool
                     if (child.Subject is not null &&
                         childSubject is not null &&
                         !McpToolHelper.ShouldExcludeByType(childSubject, _configuration.ExcludeTypes, options.ExcludeTypes) &&
+                        visibility.IsShown(childSubject) &&
                         visited.Add(child.Subject))
                     {
                         if (subjectCount >= maxSubjects)
@@ -207,7 +211,7 @@ internal class BrowseTool
                         subjectCount++;
                         var childNode = BuildSubjectNode(childSubject, rootSubject, pathProvider,
                             remainingDepth - 1, in options,
-                            visited, maxSubjects, unseenPropertyNames, ref subjectCount, ref truncated);
+                            visited, visibility, maxSubjects, unseenPropertyNames, ref subjectCount, ref truncated);
                         node.Properties[segment] = new SubjectObjectProperty(childNode);
                     }
                 }
@@ -221,6 +225,7 @@ internal class BrowseTool
                         if (child.Index is null ||
                             childRegistered is null ||
                             McpToolHelper.ShouldExcludeByType(childRegistered, _configuration.ExcludeTypes, options.ExcludeTypes) ||
+                            !visibility.IsShown(childRegistered) ||
                             !visited.Add(child.Subject))
                         {
                             continue;
@@ -236,7 +241,7 @@ internal class BrowseTool
                         subjectCount++;
                         children[key] = BuildSubjectNode(childRegistered, rootSubject, pathProvider,
                             remainingDepth - 1, in options,
-                            visited, maxSubjects, unseenPropertyNames, ref subjectCount, ref truncated);
+                            visited, visibility, maxSubjects, unseenPropertyNames, ref subjectCount, ref truncated);
                     }
 
                     if (children.Count > 0)
@@ -253,6 +258,7 @@ internal class BrowseTool
                         var childRegistered = child.Subject.TryGetRegisteredSubject();
                         if (childRegistered is null ||
                             McpToolHelper.ShouldExcludeByType(childRegistered, _configuration.ExcludeTypes, options.ExcludeTypes) ||
+                            !visibility.IsShown(childRegistered) ||
                             !visited.Add(child.Subject))
                         {
                             continue;
@@ -267,7 +273,7 @@ internal class BrowseTool
                         subjectCount++;
                         children.Add(BuildSubjectNode(childRegistered, rootSubject, pathProvider,
                             remainingDepth - 1, in options,
-                            visited, maxSubjects, unseenPropertyNames, ref subjectCount, ref truncated));
+                            visited, visibility, maxSubjects, unseenPropertyNames, ref subjectCount, ref truncated));
                     }
 
                     if (children.Count > 0)
@@ -287,7 +293,8 @@ internal class BrowseTool
                 {
                     if ((property.IsSubjectDictionary && child.Index is null) ||
                         child.Subject.TryGetRegisteredSubject() is not { } childRegistered ||
-                        McpToolHelper.ShouldExcludeByType(childRegistered, _configuration.ExcludeTypes, options.ExcludeTypes))
+                        McpToolHelper.ShouldExcludeByType(childRegistered, _configuration.ExcludeTypes, options.ExcludeTypes) ||
+                        !visibility.IsShown(childRegistered))
                     {
                         continue;
                     }

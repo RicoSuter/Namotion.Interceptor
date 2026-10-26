@@ -1,4 +1,5 @@
 using Namotion.Interceptor.Mcp.Abstractions;
+using Namotion.Interceptor.Mcp.Tools;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
 
@@ -59,16 +60,31 @@ public class McpServerConfiguration
     public Type[] ExcludeTypes { get; init; } = [];
 
     /// <summary>
-    /// Decides whether set_property may write a property. Returns null to allow the write, or the reason it is refused,
-    /// which set_property returns to the client after the property path, in which case nothing is written.
-    /// Null (the default) allows every writable property. Not consulted when <see cref="IsReadOnly"/> is true.
-    /// Also decides whether get_property, browse and search report a property as writable. May be called
-    /// concurrently, so it must be thread-safe.
+    /// Decides per member and action what the tools show and change, see "Access Policy" in the MCP documentation. A
+    /// member the policy does not allow to read reads as missing, and set_property refuses a member it does not allow
+    /// to write. Null (the default) allows every action. Applies in addition to <see cref="IsReadOnly"/>.
     /// </summary>
-    public Func<RegisteredSubjectProperty, string?>? PropertyWriteFilter { get; init; }
+    public IMcpAccessPolicy? AccessPolicy { get; init; }
 
     /// <summary>
     /// When true, set_property is blocked.
     /// </summary>
     public bool IsReadOnly { get; init; } = true;
+
+    private PathProviderBase? _toolPathProvider;
+    private PathProviderBase? _resolutionPathProvider;
+
+    /// <summary>
+    /// The path provider the tools list, select and filter through: <see cref="PathProvider"/>, which must extend
+    /// <see cref="PathProviderBase"/>, restricted to what <see cref="AccessPolicy"/> allows to read.
+    /// </summary>
+    // Racing first calls create equal providers, so whichever one is kept is correct.
+    internal PathProviderBase ToolPathProvider => _toolPathProvider ??= McpAccessPathProvider.CreateForListing(PathProvider, AccessPolicy);
+
+    /// <summary>
+    /// The path provider a requested path resolves through: with an <see cref="AccessPolicy"/>, it includes exactly
+    /// what the policy allows to read; without one it is <see cref="PathProvider"/>, whose inclusion resolution does
+    /// not apply.
+    /// </summary>
+    internal PathProviderBase ResolutionPathProvider => _resolutionPathProvider ??= McpAccessPathProvider.CreateForResolution(PathProvider, AccessPolicy);
 }
