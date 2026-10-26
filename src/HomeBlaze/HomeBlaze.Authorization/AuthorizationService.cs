@@ -18,7 +18,8 @@ namespace HomeBlaze.Authorization;
 /// <summary>
 /// Compiles the <see cref="AuthorizationPolicy"/> of principals from the built-in roles, the custom roles of the single
 /// <see cref="Authorization"/> subject in the graph, the <see cref="SystemRules"/> and <see cref="AuthorizationActions.All"/>,
-/// and keeps <see cref="Authorization.Status"/>, <see cref="Role.Status"/> and <see cref="Role.UsedByAgents"/> current.
+/// and keeps <see cref="Authorization.Status"/>, <see cref="Role.Status"/>, <see cref="Role.Warning"/> and
+/// <see cref="Role.UsedByAgents"/> current.
 /// </summary>
 /// <remarks>
 /// Thread-safe. A policy, once returned, never changes: a change of an <see cref="Authorization"/> or a <see cref="Role"/>
@@ -159,7 +160,7 @@ public sealed class AuthorizationService : IDisposable
         var name = change.Property.Name;
         var isRoleChange = change.Property.Subject switch
         {
-            Role => name is not (nameof(Role.Status) or nameof(Role.UsedByAgents)),
+            Role => name is not (nameof(Role.Status) or nameof(Role.Warning) or nameof(Role.UsedByAgents)),
             Authorization => name is not nameof(Authorization.Status),
             _ => false
         };
@@ -243,7 +244,7 @@ public sealed class AuthorizationService : IDisposable
     {
         try
         {
-            return AuthorizationSnapshot.Build(version, _registry.KnownSubjects.Keys, _pathProvider);
+            return AuthorizationSnapshot.Build(version, _registry.KnownSubjects, _pathProvider);
         }
         catch (InvalidOperationException)
         {
@@ -252,7 +253,7 @@ public sealed class AuthorizationService : IDisposable
 
         try
         {
-            return AuthorizationSnapshot.Build(version, _registry.KnownSubjects.Keys, _pathProvider);
+            return AuthorizationSnapshot.Build(version, _registry.KnownSubjects, _pathProvider);
         }
         catch (InvalidOperationException exception)
         {
@@ -294,9 +295,10 @@ public sealed class AuthorizationService : IDisposable
                 authorization.Status = status;
             }
 
-            foreach (var (role, name, status) in snapshot.RoleStatuses)
+            foreach (var (role, name, status, warning) in snapshot.RoleStatuses)
             {
                 role.Status = status;
+                role.Warning = warning;
                 role.UsedByAgents = counts.GetValueOrDefault(name);
             }
         }

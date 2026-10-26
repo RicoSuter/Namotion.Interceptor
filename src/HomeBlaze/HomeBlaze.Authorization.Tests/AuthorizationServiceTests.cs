@@ -405,6 +405,108 @@ public sealed class AuthorizationServiceTests : IDisposable
         Assert.False(_service.GetPolicy(["Custom"]).Policy.CanRead(Member(nameof(TagTestSubject.Plain))));
     }
 
+    [Fact]
+    public void WhenADenyPatternNamesAnEntry_ThenTheRoleHasAWarningAndStaysUsable()
+    {
+        // Arrange
+        var role = new Role
+        {
+            Allow = [ReadPlain()],
+            Deny = [new PermissionRule { Paths = ["/Kitchen"], Actions = [PermissionAction.Read] }]
+        };
+        AddAuthorizationWithKitchen(("Custom", role));
+
+        // Act
+        var result = _service.GetPolicy(["Custom"]);
+
+        // Assert
+        Assert.Null(result.Error);
+        Assert.NotSame(AuthorizationPolicy.DenyAll, result.Policy);
+        Assert.True(result.Policy.CanRead(Member(nameof(TagTestSubject.Plain))));
+        Assert.Null(role.Status);
+        Assert.Equal(
+            "Path pattern '/Kitchen' names a subject, not a member, and matches nothing; use '/Kitchen/**' for the subject and everything below it, or '/Kitchen/*' for its members.",
+            role.Warning);
+    }
+
+    [Fact]
+    public void WhenSeveralPatternsNameEntries_ThenTheWarningListsEachOnce()
+    {
+        // Arrange
+        var role = new Role
+        {
+            Allow = [new PermissionRule { Paths = ["/Kitchen", "/Authorization"], Actions = [PermissionAction.Read] }],
+            Deny = [new PermissionRule { Paths = ["/Kitchen"], Actions = [PermissionAction.Read] }]
+        };
+        AddAuthorizationWithKitchen(("Custom", role));
+
+        // Act
+        _ = _service.GetPolicy(["Custom"]);
+
+        // Assert
+        Assert.Equal(
+            "Path pattern '/Kitchen' names a subject, not a member, and matches nothing; use '/Kitchen/**' for the subject and everything below it, or '/Kitchen/*' for its members. " +
+            "Path pattern '/Authorization' names a subject, not a member, and matches nothing; use '/Authorization/**' for the subject and everything below it, or '/Authorization/*' for its members.",
+            role.Warning);
+    }
+
+    [Theory]
+    [InlineData("/Kitchen/**")]
+    [InlineData("/Kitchen/*")]
+    [InlineData("/Kitchen/Plain")]
+    [InlineData("/Kitchen/Child")]
+    [InlineData("/Missing")]
+    public void WhenAPatternDoesNotNameAnEntry_ThenTheRoleHasNoWarning(string pattern)
+    {
+        // Arrange
+        var role = new Role { Deny = [new PermissionRule { Paths = [pattern], Actions = [PermissionAction.Read] }] };
+        AddAuthorizationWithKitchen(("Custom", role));
+
+        // Act
+        var result = _service.GetPolicy(["Custom"]);
+
+        // Assert
+        Assert.Null(result.Error);
+        Assert.Null(role.Status);
+        Assert.Null(role.Warning);
+    }
+
+    [Fact]
+    public void WhenAPatternWithAWildcardWouldNameAnEntry_ThenItIsNotChecked()
+    {
+        // Arrange
+        var role = new Role { Deny = [new PermissionRule { Paths = ["/Kitchen*"], Actions = [PermissionAction.Read] }] };
+        _root.Children = new Dictionary<string, IInterceptorSubject>
+        {
+            ["Kitchen*"] = new TagTestSubject(),
+            ["Authorization"] = new Authorization { Roles = new Dictionary<string, Role> { ["Custom"] = role } }
+        };
+
+        // Act
+        var result = _service.GetPolicy(["Custom"]);
+
+        // Assert
+        Assert.Null(result.Error);
+        Assert.Null(role.Warning);
+    }
+
+    [Fact]
+    public async Task WhenTheRuleNamingAnEntryIsFixed_ThenTheWarningIsCleared()
+    {
+        // Arrange
+        var role = new Role { Deny = [new PermissionRule { Paths = ["/Kitchen"], Actions = [PermissionAction.Read] }] };
+        AddAuthorizationWithKitchen(("Custom", role));
+        _ = _service.GetPolicy(["Custom"]);
+        Assert.NotNull(role.Warning);
+
+        // Act
+        role.Deny = [new PermissionRule { Paths = ["/Kitchen/**"], Actions = [PermissionAction.Read] }];
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => role.Warning is null);
+        Assert.Null(role.Status);
+    }
+
     private Authorization AddAuthorization(params (string Name, Role Role)[] roles)
     {
         var authorization = new Authorization
@@ -413,6 +515,16 @@ public sealed class AuthorizationServiceTests : IDisposable
         };
         _root.Children = new Dictionary<string, IInterceptorSubject> { ["Authorization"] = authorization };
         return authorization;
+    }
+
+    // The kitchen is added together with the authorization, so that the first snapshot already sees it.
+    private void AddAuthorizationWithKitchen(params (string Name, Role Role)[] roles)
+    {
+        _root.Children = new Dictionary<string, IInterceptorSubject>
+        {
+            ["Kitchen"] = new TagTestSubject(),
+            ["Authorization"] = new Authorization { Roles = roles.ToDictionary(entry => entry.Name, entry => entry.Role) }
+        };
     }
 
     private RegisteredSubjectProperty Member(string name) => _subject.TryGetProperty(name)!;

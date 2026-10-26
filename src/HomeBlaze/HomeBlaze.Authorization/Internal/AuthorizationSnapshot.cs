@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Authorization;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
 
 namespace HomeBlaze.Authorization.Internal;
@@ -47,18 +48,22 @@ internal sealed class AuthorizationSnapshot
     /// <summary>The status of each <see cref="Authorization"/> subject.</summary>
     public ImmutableArray<(Authorization Authorization, string? Status)> AuthorizationStatuses { get; private set; } = [];
 
-    /// <summary>The status of each <see cref="Role"/> subject, with its name.</summary>
-    public ImmutableArray<(Role Role, string Name, string? Status)> RoleStatuses { get; private set; } = [];
+    /// <summary>The status and warning of each <see cref="Role"/> subject, with its name.</summary>
+    public ImmutableArray<(Role Role, string Name, string? Status, string? Warning)> RoleStatuses { get; private set; } = [];
 
     /// <summary>
     /// Builds the snapshot from the <see cref="Authorization"/> subjects among <paramref name="knownSubjects"/>, compiling
-    /// each usable custom role on its own for its status.
+    /// each usable custom role on its own for its status, and checking the path patterns of each that compiles against
+    /// the graph for its warning.
     /// </summary>
-    public static AuthorizationSnapshot Build(long version, IEnumerable<IInterceptorSubject> knownSubjects, PathProviderBase pathProvider)
+    public static AuthorizationSnapshot Build(
+        long version,
+        IReadOnlyDictionary<IInterceptorSubject, RegisteredSubject> knownSubjects,
+        PathProviderBase pathProvider)
     {
-        var authorizations = knownSubjects.OfType<Authorization>().ToList();
+        var authorizations = knownSubjects.Keys.OfType<Authorization>().ToList();
         var authorizationStatuses = ImmutableArray.CreateBuilder<(Authorization, string?)>(authorizations.Count);
-        var roleStatuses = ImmutableArray.CreateBuilder<(Role, string, string?)>();
+        var roleStatuses = ImmutableArray.CreateBuilder<(Role, string, string?, string?)>();
         var unavailableRoles = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var customRoles = new List<KeyValuePair<string, Role>>();
         string? customRolesError = null;
@@ -71,7 +76,7 @@ internal sealed class AuthorizationSnapshot
                 authorizationStatuses.Add((authorization, customRolesError));
                 foreach (var (name, role) in GetRoles(authorization))
                 {
-                    roleStatuses.Add((role, name, customRolesError));
+                    roleStatuses.Add((role, name, customRolesError, null));
                     if (!BuiltInRoles.IsBuiltIn(name))
                     {
                         unavailableRoles.TryAdd(name, customRolesError);
@@ -98,7 +103,7 @@ internal sealed class AuthorizationSnapshot
                     continue;
                 }
 
-                roleStatuses.Add((entry.Value, entry.Key, nameError));
+                roleStatuses.Add((entry.Value, entry.Key, nameError, null));
                 if (!BuiltInRoles.IsBuiltIn(entry.Key))
                 {
                     unavailableRoles.TryAdd(entry.Key, nameError);
@@ -117,12 +122,7 @@ internal sealed class AuthorizationSnapshot
 
         var snapshot = new AuthorizationSnapshot(version, pathProvider, allRoles.MoveToImmutable(), unavailableRoles, customRolesError);
 
-        // Each usable role compiled on its own gives its status and is the policy of a principal holding only it.
-        foreach (var (name, role) in customRoles)
-        {
-            roleStatuses.Add((role, name, snapshot.GetPolicy([name]).Error));
-        }
-
+        snapshot.AddCustomRoleStatuses(customRoles, knownSubjects, roleStatuses);
         snapshot.AuthorizationStatuses = authorizationStatuses.ToImmutable();
         snapshot.RoleStatuses = roleStatuses.ToImmutable();
         return snapshot;
@@ -183,6 +183,107 @@ internal sealed class AuthorizationSnapshot
         {
             return new AuthorizationResult(AuthorizationPolicy.DenyAll, exception.Message);
         }
+    }
+
+    // Each usable role compiled on its own gives its status and is the policy of a principal holding only it.
+    private void AddCustomRoleStatuses(
+        List<KeyValuePair<string, Role>> customRoles,
+        IReadOnlyDictionary<IInterceptorSubject, RegisteredSubject> knownSubjects,
+        ImmutableArray<(Role, string, string?, string?)>.Builder roleStatuses)
+    {
+        List<RegisteredSubject>? roots = null;
+        for (var i = 0; i < customRoles.Count; i++)
+        {
+            var (name, role) = customRoles[i];
+            var error = GetPolicy([name]).Error;
+            var warning = error is null
+                ? GetWarning(_roles[BuiltInRoles.All.Length + i], knownSubjects, _pathProvider, ref roots)
+                : null;
+            roleStatuses.Add((role, name, error, warning));
+        }
+    }
+
+    // A pattern without a wildcard that resolves to an entry of a dictionary or collection, such as a device in a folder,
+    // names a subject that has no member of its own and matches nothing, which the policy cannot tell without the graph.
+    // The graph can change while it is read, as in AuthorizationService.BuildSnapshot; the warning is then left out.
+    private static string? GetWarning(
+        AuthorizationRole role,
+        IReadOnlyDictionary<IInterceptorSubject, RegisteredSubject> knownSubjects,
+        PathProviderBase pathProvider,
+        ref List<RegisteredSubject>? roots)
+    {
+        List<string>? entryPatterns = null;
+        try
+        {
+            AddEntryPatterns(role.Allow, knownSubjects, pathProvider, ref roots, ref entryPatterns);
+            AddEntryPatterns(role.Deny, knownSubjects, pathProvider, ref roots, ref entryPatterns);
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
+
+        if (entryPatterns is null)
+        {
+            return null;
+        }
+
+        var separator = pathProvider.PathSeparator;
+        return string.Join(' ', entryPatterns.Select(pattern =>
+            $"Path pattern '{pattern}' names a subject, not a member, and matches nothing; use '{pattern}{separator}**' for the subject and everything below it, or '{pattern}{separator}*' for its members."));
+    }
+
+    private static void AddEntryPatterns(
+        ImmutableArray<PermissionRule> rules,
+        IReadOnlyDictionary<IInterceptorSubject, RegisteredSubject> knownSubjects,
+        PathProviderBase pathProvider,
+        ref List<RegisteredSubject>? roots,
+        ref List<string>? entryPatterns)
+    {
+        foreach (var rule in rules)
+        {
+            if (rule.Paths.IsDefault)
+            {
+                continue;
+            }
+
+            foreach (var pattern in rule.Paths)
+            {
+                if (pattern.Contains('*') || entryPatterns?.Contains(pattern) == true)
+                {
+                    continue;
+                }
+
+                roots ??= knownSubjects.Values.Where(static subject => subject.Parents.Length == 0).ToList();
+                if (NamesEntry(pattern, roots, pathProvider))
+                {
+                    (entryPatterns ??= []).Add(pattern);
+                }
+            }
+        }
+    }
+
+    // A pattern matches the member paths below every root, so it names an entry when it resolves to an entry holding a
+    // subject below one root and to a member below none.
+    private static bool NamesEntry(string pattern, List<RegisteredSubject> roots, PathProviderBase pathProvider)
+    {
+        var namesEntry = false;
+        foreach (var root in roots)
+        {
+            if (pathProvider.TryGetPropertyFromPath(root, pattern) is not { } resolved)
+            {
+                continue;
+            }
+
+            if (resolved.Index is null)
+            {
+                return false;
+            }
+
+            namesEntry |= pathProvider.TryGetSubjectFromPath(root, pattern) is not null;
+        }
+
+        return namesEntry;
     }
 
     private static List<KeyValuePair<string, Role>> GetRoles(Authorization authorization)

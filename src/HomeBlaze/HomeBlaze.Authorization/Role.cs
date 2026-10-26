@@ -42,6 +42,13 @@ public partial class Role : IConfigurable
     public partial string? Status { get; internal set; }
 
     /// <summary>
+    /// Hints about rules that likely do not do what they say, such as a path pattern that names a subject instead of a
+    /// member, or null. The role stays usable.
+    /// </summary>
+    [State]
+    public partial string? Warning { get; internal set; }
+
+    /// <summary>
     /// The number of agents whose roles name this role.
     /// </summary>
     [State]
@@ -53,6 +60,7 @@ public partial class Role : IConfigurable
         Allow = [];
         Deny = [];
         Status = null;
+        Warning = null;
         UsedByAgents = 0;
     }
 
