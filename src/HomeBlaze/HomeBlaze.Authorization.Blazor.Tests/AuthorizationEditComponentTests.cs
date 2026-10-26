@@ -388,6 +388,55 @@ public sealed class AuthorizationEditComponentTests : BunitContext, IAsyncLifeti
         Assert.Empty(component.FindAll("[data-testid='authorization-role-name-used-warning']"));
     }
 
+    [Fact]
+    public async Task WhenAnIncludedRoleIsRemoved_ThenAConfirmationNamesTheIncludingRoleAndItsAgents()
+    {
+        // Arrange
+        _graph.GetRole("Kitchen").Includes = ["garden"];
+        _graph.Service.SetPrincipalRoles(new object(), ["Kitchen"]);
+        var component = RenderEditor(_graph.Authorization);
+
+        // Act
+        await ClickAsync(component, "authorization-role-remove-Garden");
+
+        // Assert
+        var warning = component.Find("[data-testid='authorization-role-remove-warning']").TextContent;
+        Assert.Contains(
+            "Kitchen (used by 1 agent) includes this role. After saving, it cannot be used and its agents are denied everything until its includes are changed.",
+            warning);
+        Assert.DoesNotContain("use this role", warning);
+        Assert.Equal(["Kitchen", "Garden"], GetRoleNames(component));
+
+        // Act
+        await ClickAsync(component, "authorization-role-remove-confirm");
+
+        // Assert
+        Assert.Equal(["Kitchen"], GetRoleNames(component));
+    }
+
+    [Fact]
+    public async Task WhenAnIncludedRoleIsRenamed_ThenAWarningNamesTheIncludingRolesAndTheirAgents()
+    {
+        // Arrange
+        _graph.Authorization.Roles = new Dictionary<string, Role>(_graph.Authorization.Roles, StringComparer.OrdinalIgnoreCase)
+        {
+            ["Pantry"] = new Role { Includes = ["GARDEN"] }
+        };
+        _graph.GetRole("Kitchen").Includes = ["Garden"];
+        _graph.Service.SetPrincipalRoles(new object(), ["Kitchen"]);
+        _graph.Service.SetPrincipalRoles(new object(), ["Kitchen"]);
+        var component = RenderEditor(_graph.Authorization);
+        await ClickAsync(component, "authorization-role-rename-Garden");
+
+        // Act
+        await TypeNameAsync(component, "Cellar");
+
+        // Assert
+        Assert.Contains(
+            "Kitchen (used by 2 agents) and Pantry (used by 0 agents) include this role under its old name. After saving, they cannot be used and their agents are denied everything until their includes are changed.",
+            component.Find("[data-testid='authorization-role-rename-warning']").TextContent);
+    }
+
     private IRenderedComponent<AuthorizationEditComponent> RenderEditor(Authorization authorization) =>
         Render<AuthorizationEditComponent>(parameters => parameters.Add(component => component.Subject, authorization));
 

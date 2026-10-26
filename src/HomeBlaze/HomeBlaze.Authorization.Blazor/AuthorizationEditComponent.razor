@@ -61,7 +61,7 @@
                 @if (ReferenceEquals(entry, _removedEntry))
                 {
                     <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2" data-testid="authorization-role-remove-warning">
-                        @DescribeAgents(entry) this role. After saving, they are denied everything and show "Invalid roles" until they are given another role.
+                        @GetReferenceWarning(entry, isRename: false)
                     </MudAlert>
                     <MudStack Row="true" Justify="Justify.FlexEnd" Class="mt-2">
                         <MudButton Variant="Variant.Text" OnClick="@(() => _removedEntry = null)"
@@ -249,11 +249,9 @@
                           Error="@(_isNameChanged && _nameError is not null)" ErrorText="@_nameError"
                           HelperText="Unique ignoring case; not the name of a built-in role or System; without /, [ and ]." />
         </div>
-        @if (_renamedEntry is { Role.UsedByAgents: > 0 } renamed)
+        @if (_renamedEntry is { } renamed && GetReferenceWarning(renamed, isRename: true) is { } renameWarning)
         {
-            <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2" data-testid="authorization-role-rename-warning">
-                @DescribeAgents(renamed) this role under its old name. After saving, they are denied everything and show "Invalid roles" until they are given the new name or another role.
-            </MudAlert>
+            <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2" data-testid="authorization-role-rename-warning">@renameWarning</MudAlert>
         }
         @if (GetUsedNameWarning() is { } usedNameWarning)
         {
@@ -279,10 +277,39 @@
         return $"used by {count} {(count == 1 ? "agent" : "agents")}";
     }
 
-    private static string DescribeAgents(RoleEntry entry)
+    // Agents and the roles that include it name a role by the name it was saved under; once it is removed or renamed,
+    // the agents are denied everything and the including roles cannot be used, so the change is confirmed first.
+    private string? GetReferenceWarning(RoleEntry entry, bool isRename)
     {
-        var count = entry.Role?.UsedByAgents ?? 0;
-        return count == 1 ? "1 agent uses" : $"{count} agents use";
+        if (entry.OriginalName is not { } name)
+        {
+            return null;
+        }
+
+        var warning = new StringBuilder();
+        var agentCount = entry.Role?.UsedByAgents ?? 0;
+        if (agentCount > 0)
+        {
+            warning.Append(agentCount == 1 ? "1 agent uses" : $"{agentCount} agents use")
+                .Append(isRename
+                    ? " this role under its old name. After saving, they are denied everything and show \"Invalid roles\" until they are given the new name or another role."
+                    : " this role. After saving, they are denied everything and show \"Invalid roles\" until they are given another role.");
+        }
+
+        var includingRoles = GetIncludingRoles(name, entry);
+        if (includingRoles.Count > 0)
+        {
+            var isSingle = includingRoles.Count == 1;
+            warning.Append(warning.Length > 0 ? " " : "")
+                .Append(DescribeRoles(includingRoles))
+                .Append(isSingle ? " includes this role" : " include this role")
+                .Append(isRename ? " under its old name." : ".")
+                .Append(isSingle
+                    ? " After saving, it cannot be used and its agents are denied everything until its includes are changed."
+                    : " After saving, they cannot be used and their agents are denied everything until their includes are changed.");
+        }
+
+        return warning.Length > 0 ? warning.ToString() : null;
     }
 
     // Agents and roles may still name a role that was removed or renamed, and get the rules of the role added under it.
@@ -392,10 +419,10 @@
         MarkDirty();
     }
 
-    // Agents name roles, so removing a role they use takes access away and is confirmed first.
+    // Agents and roles name roles, so removing a role they name takes access away and is confirmed first.
     private void Remove(RoleEntry entry)
     {
-        if (entry.Role?.UsedByAgents > 0)
+        if (GetReferenceWarning(entry, isRename: false) is not null)
         {
             _removedEntry = entry;
             return;
