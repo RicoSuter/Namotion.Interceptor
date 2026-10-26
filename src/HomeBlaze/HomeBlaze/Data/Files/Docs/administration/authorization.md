@@ -86,7 +86,7 @@ This file defines a role for an agent that switches and dims the lights, except 
     "LightOperator": {
       "includes": [ "Reader" ],
       "allow": [ { "types": [ "ILightbulb" ], "members": [ "TurnOn", "TurnOff", "Toggle", "SetBrightness" ], "actions": [ "execute" ] } ],
-      "deny": [ { "paths": [ "/Devices/Bedroom" ], "types": [ "ILightbulb" ], "actions": [ "execute" ] } ]
+      "deny": [ { "paths": [ "/Devices/Bedroom/**" ], "types": [ "ILightbulb" ], "actions": [ "execute" ] } ]
     }
   }
 }
@@ -94,7 +94,7 @@ This file defines a role for an agent that switches and dims the lights, except 
 
 - **`includes`** takes over the rules of `Reader`, so the agent still sees and reads everything else.
 - **`allow`** runs the four operations on every subject that is an `ILightbulb`, such as a Philips Hue light. A light that does not implement `IBrightnessController` has no `SetBrightness`, so the member does not match there.
-- **`deny`** removes them again for the lights at and below `/Devices/Bedroom`.
+- **`deny`** removes them again for the lights at and below `/Devices/Bedroom`; `/**` makes the pattern cover the whole branch.
 
 Give an agent this role with `"roles": ["LightOperator"]` and allow `invoke_operation`, see [Agents](#agents). The role allows no `write`, so the agent cannot write a property even with `set_property` allowed.
 
@@ -121,7 +121,7 @@ A rule has four selectors and a list of actions. It applies to an action on a me
 
 | Selector | Matches when |
 |----------|--------------|
-| `paths` | A pattern matches the path of the subject or of one of its parents, see below |
+| `paths` | A pattern matches the path of the member, see below |
 | `types` | The subject is of a type or implements an interface with that name, as a full name (`HomeBlaze.Abstractions.Devices.Light.ILightbulb`) or a simple one (`ILightbulb`) |
 | `members` | The member's name matches; `*` matches any text. A method is named as `list_methods` shows it (`TurnOn`), an attribute `Property@Attribute`, such as `Temperature@HomeBlaze:Metadata` |
 | `tags` | The member has every listed [tag](#tags). For "any of these tags", write one rule per tag |
@@ -132,12 +132,12 @@ Rules combine like this:
 2. Everything any allow rule of the roles matches is added. Naming several roles is the same as one role that includes them all.
 3. Everything any deny rule of the roles, or any [system rule](#system-rules), matches is removed. A role cannot undo a deny of a role it includes, so reusable roles should mostly allow.
 
-A subject is shown when at least one of its members is readable and the properties that hold it, on the way from the root, are readable. A `deny` of `read` with `paths` therefore hides the whole branch, for example for an agent that may operate everything but the cameras:
+A subject is shown when at least one of its members is readable and the properties that hold it, on the way from the root, are readable. A `deny` of `read` on a branch therefore hides its subjects, for example for an agent that may operate everything but the cameras:
 
 ```json
 "Household": {
   "includes": [ "Operator" ],
-  "deny": [ { "paths": [ "/Devices/Cameras" ], "actions": [ "read", "write", "execute", "history" ] } ]
+  "deny": [ { "paths": [ "/Devices/Cameras/**" ], "actions": [ "read", "write", "execute", "history" ] } ]
 }
 ```
 
@@ -145,18 +145,22 @@ A role that does not include `Reader` must also allow `read` on the properties t
 
 ### Path Patterns
 
-A path pattern is written as the tools write paths, with `/` and `[InlinePaths]` flattened, such as `/Devices/Kitchen`. It matches that subject and everything below it. Only `*` and `**` are wildcards:
+A path pattern is written as the tools write paths, with `/` and `[InlinePaths]` flattened, and matches the paths of members exactly, like a file glob. A member is a property, a method or an attribute, so `/Devices/Sonos/Volume` is one property and `/Devices/Sonos/Play` one method. Only `*` and `**` are wildcards:
 
 | Pattern | Matches |
 |---------|---------|
-| `/Devices/Kitchen` | That subject and its subtree |
-| `/Devices/*/Lights` | `Lights` under any direct child of `Devices`; `*` alone is one segment |
-| `/Devices/**/Lights` | Any `Lights` at any depth under `Devices`; `**` is zero or more segments |
-| `/Devices/Light*` | `/Devices/LightA`, `/Devices/Lights` and so on |
-| `/Line/Machines[*]` | Every item of a collection or dictionary; `Machines[CNC*]` works too |
-| `/` | Every subject with a path |
+| `/Devices/Sonos/Play` | That one member |
+| `/Devices/Sonos/*` | Every member of that subject; `*` alone is one segment |
+| `/Devices/Sonos/**` | The subject's members and everything below them; `**` is zero or more segments |
+| `/Devices/Kitchen/Lights` | The property that holds the kitchen's lights, not the lights themselves |
+| `/Devices/**/Volume` | Every `Volume` at any depth under `Devices` |
+| `/Devices/Light*/IsOn` | `IsOn` of `/Devices/LightA`, `/Devices/Lights` and so on |
+| `/Line/Machines[*]/**` | Every item of a collection or dictionary and everything below it; `Machines[CNC*]` works too |
+| `/**` | Every member with a path |
 
-Paths select subjects, never members; `members` selects those. The [library documentation](https://github.com/RicoSuter/Namotion.Interceptor/blob/master/src/HomeBlaze/Namotion.Interceptor.Authorization/README.md) has the complete pattern rules, including subjects with several paths. A deny rule that has only `paths` is checked against every member of every subject, so give it another selector when you can.
+To cover a subject, end the pattern with `/**`, or with `/*` for its own members only. A pattern that names a subject, such as `/Devices/Kitchen`, matches at most the property that holds it, and nothing when the subject is an entry of a folder, such as a device in `/Devices`. A `deny` of `read` on a property that holds subjects, such as `/Devices/Kitchen/Lights`, hides those subjects and everything below them, since a subject is shown only when the properties that hold it are readable. A pattern that can match no member, such as `/` or one that ends with an index like `/Line/Machines[CNC1]`, makes the role fail to compile with a hint to add `/**` or `/*`.
+
+Attributes are matched by the path the tools give them. The [library documentation](https://github.com/RicoSuter/Namotion.Interceptor/blob/master/src/HomeBlaze/Namotion.Interceptor.Authorization/README.md) has the complete pattern rules, including subjects with several paths. A deny rule that has only `paths` is checked against every member it matches, so keep its patterns narrow or give it another selector when you can.
 
 ### Writing Rules in JSON
 

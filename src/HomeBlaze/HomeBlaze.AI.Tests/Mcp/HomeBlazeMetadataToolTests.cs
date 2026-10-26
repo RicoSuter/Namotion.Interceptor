@@ -163,7 +163,7 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
         {
             Name = "NoDocs",
             Includes = [BuiltInRoles.OperatorName],
-            Deny = [new PermissionRule { Paths = ["/Storage/Docs"], Actions = [PermissionAction.Read] }]
+            Deny = [new PermissionRule { Paths = ["/Storage/Docs/**"], Actions = [PermissionAction.Read] }]
         };
         var (tools, storage) = await CreateToolsAsync(accessPolicy: TestAccessPolicies.Create(role.Name, role));
 
@@ -319,7 +319,7 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
     {
         Name = "NoSecret",
         Includes = [BuiltInRoles.OperatorName],
-        Deny = [new PermissionRule { Paths = ["/Storage/Secret"], Actions = [PermissionAction.Read] }]
+        Deny = [new PermissionRule { Paths = ["/Storage/Secret/**"], Actions = [PermissionAction.Read] }]
     };
 
     [Fact]
@@ -482,8 +482,8 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
             Includes = [BuiltInRoles.ReaderName],
             Deny =
             [
-                new PermissionRule { Paths = ["/Storage/Secret"], Actions = [PermissionAction.Read] },
-                new PermissionRule { Paths = ["/Storage/Docs/Fan.json"], Tags = [MemberTags.Metadata], Actions = [PermissionAction.Read] }
+                new PermissionRule { Paths = ["/Storage/Secret/**"], Actions = [PermissionAction.Read] },
+                new PermissionRule { Paths = ["/Storage/Docs/Fan.json/*"], Tags = [MemberTags.Metadata], Actions = [PermissionAction.Read] }
             ]
         };
         var (tools, _) = await CreateToolsAsync(accessPolicy: TestAccessPolicies.Create(role.Name, role));

@@ -432,7 +432,7 @@ public sealed class AgentRolesTests : IAsyncLifetime
             [
                 new PermissionRule { Tags = [MemberTags.State], Actions = [PermissionAction.Read] },
                 new PermissionRule { Members = [nameof(AgentTestRoot.Children)], Actions = [PermissionAction.Read] },
-                new PermissionRule { Tags = [MemberTags.Subjects], Paths = ["/Devices/Kitchen"], Actions = [PermissionAction.Read] },
+                new PermissionRule { Tags = [MemberTags.Subjects], Paths = ["/Devices/Kitchen/**"], Actions = [PermissionAction.Read] },
                 new PermissionRule { Tags = [MemberTags.Query], Actions = [PermissionAction.Read, AuthorizationActions.Execute] }
             ]
         };
