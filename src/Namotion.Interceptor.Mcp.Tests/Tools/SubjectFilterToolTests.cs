@@ -200,7 +200,7 @@ public class SubjectFilterToolTests
     }
 
     [Fact]
-    public async Task WhenSearchIsTruncated_ThenItStillWarnsAboutAPropertyNoSubjectHas()
+    public async Task WhenSearchIsTruncated_ThenHasNoWarnings()
     {
         // Arrange
         var tool = CreateTool(CreateGroup(), "search");
@@ -208,10 +208,9 @@ public class SubjectFilterToolTests
         // Act
         var json = await InvokeAsync(tool, new { format = "json", maxSubjects = 1, properties = new[] { "BatteryLevel" } });
 
-        // Assert: a truncated search still scans every subject in scope, so the warning is complete.
+        // Assert
         Assert.True(json.GetProperty("truncated").GetBoolean());
-        var warnings = json.GetProperty("warnings").EnumerateArray().Select(warning => warning.GetString()!).ToArray();
-        Assert.Equal(["No subject in scope has a property named 'BatteryLevel'."], warnings);
+        Assert.False(json.TryGetProperty("warnings", out _));
     }
 
     [Fact]

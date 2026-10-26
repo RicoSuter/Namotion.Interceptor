@@ -14,12 +14,6 @@ public class SearchResult
     public bool Truncated { get; init; }
 
     /// <summary>
-    /// The subjects that matched but were left out by maxSubjects or the server limit.
-    /// </summary>
-    [JsonPropertyName("omittedCount")]
-    public int OmittedCount { get; init; }
-
-    /// <summary>
     /// Problems with the request that did not prevent an answer, such as a property name no subject in scope has.
     /// </summary>
     [JsonPropertyName("warnings")]

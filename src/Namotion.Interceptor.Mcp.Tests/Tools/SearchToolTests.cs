@@ -127,34 +127,6 @@ public class SearchToolTests
         // Assert
         Assert.Equal(1, json.GetProperty("subjectCount").GetInt32());
         Assert.True(json.GetProperty("truncated").GetBoolean());
-        Assert.Equal(1, json.GetProperty("omittedCount").GetInt32());
-    }
-
-    [Fact]
-    public async Task WhenTheTextResultIsTruncated_ThenTheFooterSaysHowManyMoreMatch()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext.Create()
-            .WithFullPropertyTracking()
-            .WithRegistry();
-
-        var container = new TestContainer(context) { Name = "Root" };
-        container.Children = new Dictionary<string, TestContainer>
-        {
-            ["A"] = new TestContainer(context) { Name = "A" },
-            ["B"] = new TestContainer(context) { Name = "B" }
-        };
-
-        var config = new McpServerConfiguration { PathProvider = DefaultPathProvider.Instance };
-        var factory = new McpToolFactory(container, config);
-        var tool = factory.CreateTools().First(t => t.Name == "search");
-
-        // Act
-        var input = JsonSerializer.SerializeToElement(new { types = new[] { typeof(TestContainer).FullName }, maxSubjects = 1 });
-        var result = await tool.Handler(input, CancellationToken.None);
-
-        // Assert
-        Assert.EndsWith("[1 subject, truncated: 1 more match]", Assert.IsType<string>(result));
     }
 
     [Fact]

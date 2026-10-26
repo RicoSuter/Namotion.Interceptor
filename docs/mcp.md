@@ -60,7 +60,7 @@ Key conventions:
 - **Attribute:** `@name: value` (scalar) or `@name: {json}` (complex object)
 - **Collapsed collection:** `Name/ (Nx ItemType)` or `Name/ (N children)`
 - **Collapsed child subject:** `Name/ (ItemType)` for a single subject property beyond the depth limit (omitted when the property is null)
-- **Footer:** `[N subjects]`, or with a limit reached `[N subjects, truncated: M more match]` for `search` and `[N subjects, truncated: M more not shown, without their children]` for `browse`
+- **Footer:** `[N subjects]`, or with a limit reached `[N subjects, truncated]` for `search` and `[N subjects, truncated: M more not shown, without their children]` for `browse`
 - **Warning:** `# warning: <text>` before the footer, see [Unknown property names](#unknown-property-names)
 - Special values: `null` for null, `""` for empty strings, `...` for truncated strings (>100 chars)
 - Collection values (arrays, lists, dictionaries of plain values) render as compact JSON, such as `[{"Title":"Radio","IsContainer":false}]`. Whole items are shown up to about 500 characters and the rest as `... +N more`; `get_property` returns the full value. Byte arrays render as their length, such as `<16 bytes>`.
@@ -185,8 +185,7 @@ Search across all subjects. Use `text` format (default) for overview, `json` for
     }
   },
   "subjectCount": 1,
-  "truncated": false,
-  "omittedCount": 0
+  "truncated": false
 }
 ```
 
@@ -233,9 +232,9 @@ The grammar, [logic](expressions.md#grammar), [comparisons of values](expression
 
 #### Unknown property names
 
-A path in `where` or a name in `properties` that no subject has is not an error, because subjects of different types have different properties. So that an empty answer is not mistaken for a negative one, `search` and `browse` add a warning for each such name. A name in `properties` counts as seen when a subject in scope has a scalar property of that name that the path provider exposes, so a property that holds subjects does not count. A path in `where` counts as seen when it leads from a subject in scope to any property the path provider exposes, also one that holds subjects, but not an attribute; the warning names the whole path, such as `Device.Missing`. For `search` the scope is every subject that passes `types`, `excludeTypes`, `path` and `query`, before `where` is applied; for `browse` it is every subject in the returned tree. A truncated `search` still looks at every subject in scope and warns as usual, while a truncated `browse` has no warnings, because it did not look at every subject.
+A path in `where` or a name in `properties` that no subject has is not an error, because subjects of different types have different properties. So that an empty answer is not mistaken for a negative one, `search` and `browse` add a warning for each such name. A name in `properties` counts as seen when a subject in scope has a scalar property of that name that the path provider exposes, so a property that holds subjects does not count. A path in `where` counts as seen when it leads from a subject in scope to any property the path provider exposes, also one that holds subjects, but not an attribute; the warning names the whole path, such as `Device.Missing`. For `search` the scope is every subject that passes `types`, `excludeTypes`, `path` and `query`, before `where` is applied; for `browse` it is every subject in the returned tree. A truncated result has no warnings, because it did not look at every subject.
 
-`omittedCount` says how much a truncated result left out. For `search` it is the number of further subjects that match; the scan goes on past `maxSubjects` and only counts them. For `browse` it is the number of children left out where the limit cut the tree, without their own children.
+The `omittedCount` of `browse` says how many children a truncated tree left out where the limit cut it, without their own children. `search` stops at the limit and does not count further matches, so its result says only `truncated`.
 
 In JSON, the warnings are a `warnings` array of strings, omitted when there are none:
 
@@ -244,7 +243,6 @@ In JSON, the warnings are a `warnings` array of strings, omitted when there are 
   "results": {},
   "subjectCount": 0,
   "truncated": false,
-  "omittedCount": 0,
   "warnings": ["No subject in scope has a property named 'IsOnline'."]
 }
 ```

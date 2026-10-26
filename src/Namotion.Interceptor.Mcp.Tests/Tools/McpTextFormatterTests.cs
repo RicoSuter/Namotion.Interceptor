@@ -247,8 +247,7 @@ public class McpTextFormatterTests
                 ["/Demo/Motor2"] = new() { Path = "/Demo/Motor2", Type = "MyApp.Motor", Enrichments = new Dictionary<string, object?> { ["$title"] = "Motor 2" } }
             },
             SubjectCount = 2,
-            Truncated = true,
-            OmittedCount = 5
+            Truncated = true
         };
 
         // Act & Assert
