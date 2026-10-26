@@ -13,7 +13,6 @@ namespace Namotion.Interceptor.Mcp.Tools;
 /// <remarks>An instance with a policy caches per subject and is not thread-safe, so it serves one call only.</remarks>
 internal sealed class McpVisibility
 {
-    private static readonly McpVisibility ShowsEverySubject = new();
 
     private readonly McpServerConfiguration? _configuration;
     private readonly IMcpAccessPolicy? _policy;
@@ -34,11 +33,16 @@ internal sealed class McpVisibility
     }
 
     /// <summary>
+    /// The visibility without a policy, shared by every call: every subject is shown.
+    /// </summary>
+    public static McpVisibility Unrestricted { get; } = new();
+
+    /// <summary>
     /// The visibility for one call from <paramref name="rootSubject"/>. Without a policy it is a shared instance that
     /// shows every subject; with one, the registered root is looked up only when a path has to be resolved back.
     /// </summary>
     public static McpVisibility For(McpServerConfiguration configuration, IInterceptorSubject rootSubject) =>
-        configuration.AccessPolicy is { } policy ? new McpVisibility(configuration, policy, rootSubject) : ShowsEverySubject;
+        configuration.AccessPolicy is { } policy ? new McpVisibility(configuration, policy, rootSubject) : Unrestricted;
 
     /// <summary>
     /// Whether the subject is empty for the policy: it has at least one property other than an attribute, and the
@@ -65,6 +69,13 @@ internal sealed class McpVisibility
 
         return hasProperty;
     }
+
+    /// <summary>
+    /// Whether the subject is shown. Always true without a policy; with one, false for a subject that is not
+    /// registered.
+    /// </summary>
+    public bool IsShown(IInterceptorSubject subject) =>
+        _policy is null || subject.TryGetRegisteredSubject() is { } registered && IsShown(registered);
 
     /// <summary>
     /// Whether the subject is shown. Always true without a policy.

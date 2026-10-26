@@ -148,9 +148,9 @@ internal class SearchTool
                 continue;
             }
 
-            unseenPropertyNames?.Observe(registered, pathProvider);
+            unseenPropertyNames?.Observe(registered, pathProvider, visibility);
 
-            if (filter is not null && !filter.Matches(registered, pathProvider))
+            if (filter is not null && !filter.Matches(registered, pathProvider, visibility))
             {
                 continue;
             }

@@ -99,8 +99,8 @@ internal class BrowseTool
         }
         else
         {
-            var resolved = _configuration.TryGetReadableSubject(rootRegisteredSubject, path!);
-            if (resolved is null || !visibility.IsShown(resolved))
+            var resolved = _configuration.TryGetReadableSubject(rootRegisteredSubject, path!, visibility);
+            if (resolved is null)
             {
                 return Task.FromResult<object?>(McpToolHelper.GetPathNotFoundError(pathProvider, path!));
             }
@@ -147,7 +147,7 @@ internal class BrowseTool
         ref int subjectCount,
         ref bool truncated)
     {
-        unseenPropertyNames?.Observe(subject, pathProvider);
+        unseenPropertyNames?.Observe(subject, pathProvider, visibility);
         var node = McpToolHelper.BuildSubjectNodeDto(
             subject, pathProvider, rootSubject, _configuration,
             options.IncludeProperties, options.IncludeAttributes, options.IncludeMethods, options.IncludeInterfaces,
