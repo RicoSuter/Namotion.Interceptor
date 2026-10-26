@@ -466,7 +466,7 @@ public class SubjectTransactionWriterTests
     }
 
     [Fact]
-    public async Task WhenCommitIsRetriedAfterConflict_ThenCancelledChangeStaysCancelled()
+    public async Task WhenCommitIsRetriedAfterConflict_ThenCanceledChangeStaysCanceled()
     {
         // Arrange
         var changes = new List<SubjectPropertyChange>();

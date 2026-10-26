@@ -177,6 +177,8 @@ Controls value-based conflict detection in both locking modes; `BestEffort` writ
 
 Conflict detection is best-effort and not atomic with respect to non-transactional writes that happen between detection and apply. Transactions are serialized against each other, but a raw property write or an external source callback can still interleave during that window.
 
+A property the transaction wrote back to its landed value has no pending change, so it is not checked for conflicts: a concurrent change to it that lands before the commit is kept without a conflict. Writing the property again restores its pending change, and with it the conflict check against the value it had at its first write.
+
 ### Requirements
 
 Enforces constraints on transaction scope, useful for protocols like OPC UA.
