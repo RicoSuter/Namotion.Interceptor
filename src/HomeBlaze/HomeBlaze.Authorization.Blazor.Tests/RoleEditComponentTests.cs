@@ -21,6 +21,7 @@ public sealed class RoleEditComponentTests : BunitContext, IAsyncLifetime
         JSInterop.Mode = JSRuntimeMode.Loose;
         Services.AddMudServices();
         Services.AddSingleton(_graph.Service);
+        Services.AddSingleton(_graph.PathResolver);
 
         var typeProvider = new TypeProvider();
         typeProvider.AddTypes([typeof(Role), typeof(TestRoot)]);

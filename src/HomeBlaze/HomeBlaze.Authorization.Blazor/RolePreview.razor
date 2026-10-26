@@ -1,0 +1,271 @@
+@* Shows what a role allows on one subject: whether the subject is shown, and each member against each action with the
+   rule that decided it. Compiles the role through the authorization service and never writes anything. *@
+@using System.Text
+@using HomeBlaze.Abstractions
+@using Namotion.Interceptor.Registry.Abstractions
+
+@inject AuthorizationService AuthorizationService
+@inject SubjectPathResolver PathResolver
+
+<div data-testid="role-preview-path">
+    <SubjectPathField Value="@_path" ValueChanged="@OnPathChanged" Label="Subject" Placeholder="/Devices/Kitchen"
+                      IsPropertyVisible="@IsSubjectProperty" CanSelectProperty="@IsSubjectReference" />
+</div>
+<MudText Typo="Typo.body2" Class="mud-text-secondary mt-1">
+    What the role allows on the chosen subject, its unsaved changes included, with the other roles it includes and the system rules.
+</MudText>
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Dense="true" Class="mt-4" data-testid="role-preview-error">@_error</MudAlert>
+}
+else if (_subject is null)
+{
+    @if (!string.IsNullOrWhiteSpace(_path))
+    {
+        <MudText Typo="Typo.body2" Class="mt-4" data-testid="role-preview-not-found">No subject has this path.</MudText>
+    }
+}
+else
+{
+    <MudAlert Severity="@(_subjectDecision.IsReadable ? Severity.Success : Severity.Warning)" Dense="true" Class="mt-4"
+              data-testid="role-preview-shown" data-shown="@(_subjectDecision.IsReadable ? "true" : "false")">@_subjectText</MudAlert>
+
+    <MudSimpleTable Dense="true" Hover="true" Class="mt-4" data-testid="role-preview-matrix">
+        <thead>
+            <tr>
+                <th>Member</th>
+                @foreach (var action in AuthorizationActions.All)
+                {
+                    <th class="text-center">@action.Name</th>
+                }
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var row in _rows)
+            {
+                <tr data-member="@row.Name">
+                    <td>@row.Name</td>
+                    @for (var index = 0; index < row.Cells.Length; index++)
+                    {
+                        var action = AuthorizationActions.All[index];
+                        <td class="text-center" data-testid="@($"role-preview-cell-{row.Name}-{action.Name}")"
+                            data-decision="@row.Cells[index]?.Decision">
+                            @if (row.Cells[index] is { } cell)
+                            {
+                                <MudTooltip Text="@cell.Explanation">
+                                    <MudIconButton Size="Size.Small" Icon="@(cell.IsAllowed ? Icons.Material.Filled.Check : Icons.Material.Filled.Close)"
+                                                   Color="@(cell.IsAllowed ? Color.Success : Color.Error)"
+                                                   aria-label="@($"{row.Name}, {action.Name}: {cell.Decision}")"
+                                                   OnClick="@(() => Select(row.Name, action))" />
+                                </MudTooltip>
+                            }
+                        </td>
+                    }
+                </tr>
+            }
+        </tbody>
+    </MudSimpleTable>
+
+    @if (GetSelectedCell() is { } selected)
+    {
+        <MudAlert Severity="Severity.Info" Dense="true" Class="mt-2" data-testid="role-preview-explanation">
+            <b>@_selectedMember, @_selectedAction?.Name:</b> @selected.Explanation
+        </MudAlert>
+    }
+}
+
+@code {
+    private string? _path;
+    private AuthorizationRole? _previewedRole;
+    private string? _error;
+    private IInterceptorSubject? _subject;
+    private SubjectReadDecision _subjectDecision;
+    private string? _subjectText;
+    private IReadOnlyList<MemberRow> _rows = [];
+    private string? _selectedMember;
+    private PermissionAction? _selectedAction;
+
+    /// <summary>The role to preview; a new instance is compiled again.</summary>
+    [Parameter, EditorRequired]
+    public AuthorizationRole Role { get; set; } = null!;
+
+    protected override void OnParametersSet()
+    {
+        if (!ReferenceEquals(Role, _previewedRole))
+        {
+            Update();
+        }
+    }
+
+    private static bool IsSubjectProperty(RegisteredSubjectProperty property) => property.CanContainSubjects;
+
+    // A reference's path is the path of the subject it holds.
+    private static bool IsSubjectReference(RegisteredSubjectProperty property) => property.IsSubjectReference;
+
+    private void OnPathChanged(string? path)
+    {
+        _path = path;
+        Update();
+    }
+
+    private void Select(string member, PermissionAction action)
+    {
+        _selectedMember = member;
+        _selectedAction = action;
+    }
+
+    private Cell? GetSelectedCell()
+    {
+        var index = _selectedAction is { } action ? AuthorizationActions.All.IndexOf(action) : -1;
+        return index >= 0 ? _rows.FirstOrDefault(row => row.Name == _selectedMember)?.Cells[index] : null;
+    }
+
+    private void Update()
+    {
+        _previewedRole = Role;
+        var result = AuthorizationService.PreviewPolicy(Role);
+        _error = result.Error;
+        _subject = string.IsNullOrWhiteSpace(_path) ? null : PathResolver.ResolveSubject(_path.Trim(), PathStyle.Canonical);
+        _rows = [];
+
+        if (_error is not null || _subject?.TryGetRegisteredSubject() is not { } subject)
+        {
+            return;
+        }
+
+        var policy = result.Policy;
+        _subjectDecision = policy.Explain(subject);
+        _subjectText = DescribeSubject(_subjectDecision);
+        _rows = CreateRows(subject, policy);
+    }
+
+    private string DescribeSubject(SubjectReadDecision decision)
+    {
+        if (decision.IsReadable)
+        {
+            return "Shown: the subject has a readable member and a readable link from the root.";
+        }
+
+        if (!decision.HasReadableMember)
+        {
+            return "Hidden: no member is readable.";
+        }
+
+        if (decision.DeniedProperty is { } property)
+        {
+            var path = PathResolver.GetPath(property.Parent.Subject, PathStyle.Canonical);
+            return $"Hidden: the property {property.Name} of {path ?? "a subject without a path"} is not readable.";
+        }
+
+        return "Hidden: no chain of parents leads to the root.";
+    }
+
+    // The properties, then the methods, then the attributes of each, as the policy names them.
+    private static List<MemberRow> CreateRows(RegisteredSubject subject, AuthorizationPolicy policy)
+    {
+        var properties = new List<RegisteredSubjectProperty>();
+        var methods = new List<RegisteredSubjectProperty>();
+        foreach (var property in subject.Properties)
+        {
+            if (!property.IsAttribute)
+            {
+                (property.TryGetMethodMetadata() is null ? properties : methods).Add(property);
+            }
+        }
+
+        var rows = new List<MemberRow>();
+        rows.AddRange(properties.Select(property => CreateRow(property, property.Name, isMethod: false, policy)));
+        rows.AddRange(methods.Select(method => CreateRow(method, method.Name, isMethod: true, policy)));
+        foreach (var property in properties.Concat(methods))
+        {
+            AddAttributeRows(property, property.Name, policy, rows);
+        }
+
+        return rows;
+    }
+
+    private static void AddAttributeRows(RegisteredSubjectProperty property, string name, AuthorizationPolicy policy, List<MemberRow> rows)
+    {
+        foreach (var attribute in property.Attributes)
+        {
+            var attributeName = $"{name}@{attribute.BrowseName}";
+            rows.Add(CreateRow(attribute, attributeName, isMethod: false, policy));
+            AddAttributeRows(attribute, attributeName, policy, rows);
+        }
+    }
+
+    // Methods are read and executed; values are read, written and have a history.
+    private static MemberRow CreateRow(RegisteredSubjectProperty member, string name, bool isMethod, AuthorizationPolicy policy)
+    {
+        var cells = new Cell?[AuthorizationActions.All.Length];
+        for (var index = 0; index < cells.Length; index++)
+        {
+            var action = AuthorizationActions.All[index];
+            var applies = action == PermissionAction.Read || (isMethod ? action == AuthorizationActions.Execute : action != AuthorizationActions.Execute);
+            if (applies)
+            {
+                var decision = policy.Explain(member, action);
+                cells[index] = new Cell(decision.IsAllowed, Explain(decision));
+            }
+        }
+
+        return new MemberRow(name, cells);
+    }
+
+    /// <summary>
+    /// Gets a decision as text, for example
+    /// <c>Denied by Kitchen: deny paths /Devices; actions write. It overrides Reader: allow any member; actions read, write.</c>
+    /// </summary>
+    internal static string Explain(PermissionDecision decision)
+    {
+        if (decision.DeniedBy is { } deniedBy && decision.DeniedByRule is { } deniedByRule)
+        {
+            var denier = deniedBy.Name == AuthorizationPolicy.SystemRoleName ? "a system rule" : deniedBy.Name;
+            var text = $"Denied by {denier}: {FormatRule("deny", deniedByRule)}.";
+            return decision.AllowedBy is { } allowedBy && decision.AllowedByRule is { } allowedByRule
+                ? $"{text} It overrides {allowedBy.Name}: {FormatRule("allow", allowedByRule)}."
+                : text;
+        }
+
+        if (decision.AllowedBy is { } allower && decision.AllowedByRule is { } allowingRule)
+        {
+            return $"Allowed by {allower.Name}: {FormatRule("allow", allowingRule)}.";
+        }
+
+        return "No role allows it.";
+    }
+
+    /// <summary>Gets a rule as text, for example <c>deny paths /Devices/Bedroom; types ILight; actions write, execute</c>.</summary>
+    internal static string FormatRule(string kind, PermissionRule rule)
+    {
+        var builder = new StringBuilder(kind);
+        var hasSelector = false;
+        AppendSelector(builder, "paths", rule.Paths, ref hasSelector);
+        AppendSelector(builder, "types", rule.Types, ref hasSelector);
+        AppendSelector(builder, "members", rule.Members, ref hasSelector);
+        AppendSelector(builder, "tags", rule.Tags, ref hasSelector);
+        if (!hasSelector)
+        {
+            builder.Append(" any member;");
+        }
+
+        return builder.Append(" actions ").AppendJoin(", ", rule.Actions.Select(action => action.Name)).ToString();
+    }
+
+    private static void AppendSelector(StringBuilder builder, string name, IReadOnlyList<string> values, ref bool hasSelector)
+    {
+        if (values.Count > 0)
+        {
+            builder.Append(' ').Append(name).Append(' ').AppendJoin(", ", values).Append(';');
+            hasSelector = true;
+        }
+    }
+
+    private sealed record MemberRow(string Name, Cell?[] Cells);
+
+    private sealed record Cell(bool IsAllowed, string Explanation)
+    {
+        public string Decision => IsAllowed ? "allowed" : "denied";
+    }
+}

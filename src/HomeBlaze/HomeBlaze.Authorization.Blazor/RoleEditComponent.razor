@@ -17,7 +17,8 @@
         <MudAlert Severity="Severity.Error" Dense="true" Class="mt-2" data-testid="role-edit-status">@status</MudAlert>
     }
 
-    <MudTabs Elevation="0" TabPanelsClass="pt-4" data-testid="role-edit-tabs">
+    @* Kept alive, so that switching tabs keeps the text typed into a rule and the subject chosen for the preview. *@
+    <MudTabs Elevation="0" TabPanelsClass="pt-4" KeepPanelsAlive="true" data-testid="role-edit-tabs">
         <MudTabPanel Text="Rules">
             <MudForm>
                 <MudText Typo="Typo.subtitle2">Includes</MudText>
@@ -41,6 +42,7 @@
             </MudForm>
         </MudTabPanel>
         <MudTabPanel Text="Preview">
+            <RolePreview Role="@GetEditedRole()" />
         </MudTabPanel>
     </MudTabs>
 }
@@ -52,6 +54,7 @@
     private List<RuleEntry> _allow = [];
     private List<RuleEntry> _deny = [];
     private IReadOnlyList<string> _typeNames = [];
+    private AuthorizationRole? _editedRole;
     private bool _isDirty;
     private bool _wasValid = true;
 
@@ -76,10 +79,11 @@
     private Role? Role => Subject as Role;
 
     /// <summary>
-    /// Gets the role as currently edited, unsaved changes included, named by its key in <see cref="Authorization.Roles"/>.
+    /// Gets the role as currently edited, unsaved changes included, named by its key in <see cref="Authorization.Roles"/>;
+    /// the same instance until the next change.
     /// </summary>
     internal AuthorizationRole GetEditedRole() =>
-        new()
+        _editedRole ??= new AuthorizationRole
         {
             Name = _name ?? string.Empty,
             Includes = [.. _includes],
@@ -177,6 +181,7 @@
 
     private void OnChanged()
     {
+        _editedRole = null;
         if (!_isDirty)
         {
             _isDirty = true;
