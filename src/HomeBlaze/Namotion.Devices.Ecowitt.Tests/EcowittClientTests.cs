@@ -114,7 +114,6 @@ public class EcowittClientTests
         Assert.Equal(20.5m, data.Rain.MonthlyRain);
         Assert.Equal(506.1m, data.Rain.YearlyRain);
         Assert.Null(data.Rain.TotalRain);
-        Assert.Equal(2, data.Rain.Battery);
     }
 
     [Fact]
@@ -137,7 +136,6 @@ public class EcowittClientTests
         Assert.Equal(12.9m, data.PiezoRain.MonthlyRain);
         Assert.Equal(294.9m, data.PiezoRain.YearlyRain);
         Assert.Null(data.PiezoRain.TotalRain);
-        Assert.Equal(1, data.PiezoRain.Battery);
     }
 
     [Fact]
@@ -184,7 +182,6 @@ public class EcowittClientTests
         Assert.Equal("Living Room", data.Channels[0].Name);
         Assert.Equal(21.3m, data.Channels[0].Temperature);
         Assert.Equal(0.44m, data.Channels[0].Humidity);
-        Assert.Equal(6, data.Channels[0].Battery);
         Assert.Equal(3, data.Channels[1].Channel);
     }
 
@@ -206,7 +203,6 @@ public class EcowittClientTests
         Assert.Equal(15m, data.Lightning!.Distance);
         Assert.Equal(3, data.Lightning.StrikeCount);
         Assert.NotNull(data.Lightning.LastStrikeTime);
-        Assert.Equal(5, data.Lightning.Battery);
     }
 
     [Fact]
@@ -481,6 +477,26 @@ public class EcowittClientTests
 
         // Assert
         Assert.Empty(result);
+    }
+
+    [Fact]
+    public void WhenGw2000aSensorPagesParsed_ThenOnlyPairedSensorsRemainWithTheirStatus()
+    {
+        // Act
+        var result = EcowittSamples.ParseSensorsInfo();
+
+        // Assert
+        Assert.Equal(["0x9637", "0x51B", "0x1C183"], result.Select(sensor => sensor.SensorId));
+        Assert.Equal(48, result[0].TypeCode);
+        Assert.Equal("Temp & Humidity & Solar & Wind & Rain", result[0].Name);
+        Assert.Equal(9, result[0].Battery);
+        Assert.Null(result[0].Rssi);
+        Assert.Null(result[0].SignalLevel);
+        Assert.Equal(1, result[1].TypeCode);
+        Assert.Equal("wh68", result[1].SensorType);
+        Assert.Equal(5, result[1].Battery);
+        Assert.Equal(-75, result[1].Rssi);
+        Assert.Equal(4, result[1].SignalLevel);
     }
 
     [Fact]

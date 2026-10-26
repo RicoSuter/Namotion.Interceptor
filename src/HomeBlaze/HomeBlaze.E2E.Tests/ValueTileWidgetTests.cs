@@ -139,6 +139,29 @@ public class ValueTileWidgetTests
         await Assertions.Expect(tile.GetByRole(AriaRole.Button)).ToHaveCountAsync(0);
     }
 
+    [Fact]
+    public async Task WhenTileHasASubtitle_ThenItShowsItBelowTheLabelWithItsValues()
+    {
+        // Arrange & Act
+        var page = await OpenPageAsync();
+        var tile = GetValueTile(page, "Subtitled");
+
+        // Assert
+        await Assertions.Expect(tile.GetByTestId("tile-detail")).ToHaveTextAsync("Of ValueMotor", new() { Timeout = Timeout });
+        await Assertions.Expect(GetValueTile(page, "Target").GetByTestId("tile-detail")).ToHaveCountAsync(0);
+    }
+
+    [Fact]
+    public async Task WhenBoxHasASubtitle_ThenItShowsItBelowTheLabelWithItsValues()
+    {
+        // Arrange & Act
+        var page = await OpenPageAsync();
+        var box = page.GetByTestId("value-tile").Filter(new() { HasText = "Subtitled box" });
+
+        // Assert
+        await Assertions.Expect(box.GetByTestId("value-tile-subtitle")).ToHaveTextAsync("Of ValueMotor", new() { Timeout = Timeout });
+    }
+
     [Theory]
     [InlineData("Box target")]
     [InlineData("Canvas gauge")]
@@ -280,8 +303,7 @@ public class ValueTileWidgetTests
         var frame = tile.Locator("xpath=ancestor::div[@data-testid='canvas-scale-frame'][1]");
         var node = tile.Locator("xpath=ancestor::div[contains(concat(' ', normalize-space(@class), ' '), ' canvas-node ')][1]");
 
-        // Act: the node, with its border, is half of the 400 pixel design width, so it is half of the drawn width once the
-        // frame is measured.
+        // Act: the node is half of the 400 pixel design width, so it is half of the drawn width once the frame is measured.
         var drawnWidth = await frame.EvaluateAsync<double>("frame => Math.max(frame.clientWidth, 600)");
         await page.WaitForFunctionAsync(
             "([node, expected]) => Math.abs(node.getBoundingClientRect().width - expected) < 2",

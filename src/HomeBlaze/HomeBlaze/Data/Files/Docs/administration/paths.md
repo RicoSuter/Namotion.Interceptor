@@ -1,7 +1,6 @@
 ---
 title: Paths
 navTitle: Paths
-position: 7
 ---
 
 # Paths
@@ -113,7 +112,7 @@ A `Widget` that is not on a page, for example one in a JSON file of its own, res
 - **Detached subjects**: Subjects not attached to the graph have no path.
 - **A property of the page**: On a markdown page, a property of the page itself is written without a prefix, like `Title`. With `./` before it, as in `./Title`, an expression shows nothing.
 - **Names are local to their page**: A name declared with `#name` is known on its own page only. Another page reaches a block that is directly on a page through that page, for example `/Demo/Inline.md/mymotor`.
-- **Braces and `<` in an expression**: The path of an expression on a markdown page cannot contain `{`, `}` or `<` literally. A file name or a key that contains one of them is written percent-encoded, as `%7B`, `%7D` or `%3C`, because every segment of a path is decoded before it is looked up.
+- **Special characters in a name**: A name in the path of an expression on a markdown page that contains a space, `(`, `)`, `'`, `"`, `&`, `!`, `<`, `>`, `=`, `|`, `{` or `}` is written percent-encoded, such as `Notes%20%281%29.md` for `Notes (1).md`, because these characters are operators, quotes or braces in an expression. Every segment of a path is decoded before it is looked up. A path with only spaces, as pages wrote before expressions had operators, still works without encoding.
 
 ---
 

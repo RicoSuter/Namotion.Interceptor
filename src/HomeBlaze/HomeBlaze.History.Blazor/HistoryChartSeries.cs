@@ -6,7 +6,8 @@ using Namotion.Interceptor.Attributes;
 namespace HomeBlaze.History.Blazor;
 
 /// <summary>
-/// One series of a <see cref="HistoryChart"/>: a number is a line, a boolean or an enum is a state band.
+/// One series of a <see cref="HistoryChart"/>: a number is a line, or a bar for the increase of a counter, and a boolean or
+/// an enum is a state band.
 /// </summary>
 [ExcludeFromCreation]
 [PageLayout]
@@ -37,12 +38,19 @@ public partial class HistoryChartSeries : IConfigurable
 
     /// <summary>
     /// The aggregation of a line in place of the one of the chart, a name of
-    /// <see cref="HomeBlaze.History.Abstractions.HistoryAggregations"/> other than Delta, or Average for the time-weighted
-    /// average. Null or empty for the one of the chart.
+    /// <see cref="HomeBlaze.History.Abstractions.HistoryAggregations"/>, or Average for the time-weighted average. Null or
+    /// empty for the one of the chart.
     /// A band ignores it.
     /// </summary>
     [Configuration]
     public partial string? Aggregation { get; set; }
+
+    /// <summary>
+    /// Whether a line or bar is drawn with the opposite sign, for example to draw the energy fed into the grid below the
+    /// axis. The legend shows the value of the property as it is. A band ignores it.
+    /// </summary>
+    [Configuration]
+    public partial bool Negate { get; set; }
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 }

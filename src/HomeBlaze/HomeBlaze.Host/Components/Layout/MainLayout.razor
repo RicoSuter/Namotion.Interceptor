@@ -1,13 +1,11 @@
-﻿@using HomeBlaze.Components.Abstractions.Pages
-@using HomeBlaze.Host.Components.Browser
+﻿@using HomeBlaze.Host.Components.Clients
 @using HomeBlaze.Host.Components.TimeZones
 
 @inherits LayoutComponentBase
 
-@inject DeveloperModeService DeveloperMode
 @inject RootManager RootManager
-@inject NavigationItemResolver NavigationResolver
 @inject NavigationManager NavigationManager
+@inject BrowserPreferences Preferences
 
 @implements IDisposable
 
@@ -23,33 +21,11 @@
     <CascadingValue Value="@_isDarkMode" Name="IsDarkMode">
         <MudLayout>
             <TimeZoneInitializer />
-            <PropertyRowLayoutInitializer />
+            <ClientConnectionInitializer />
             <MudAppBar Elevation="1">
                 <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start"
-                               OnClick="@(_ => DrawerToggle())"/>
-                @foreach (var item in GetAppBarItems(AppBarAlignment.Left))
-                {
-                    <MudIconButton Icon="@SubjectIconExtensions.ResolveMudBlazorIcon(item.Icon)"
-                                   Href="@item.PageUrl"
-                                   Color="@(IsActive(item) ? Color.Primary : Color.Inherit)"
-                                   title="@item.Title"/>
-                }
-                <MudSpacer/>
-                @foreach (var item in GetAppBarItems(AppBarAlignment.Right))
-                {
-                    <MudIconButton Icon="@SubjectIconExtensions.ResolveMudBlazorIcon(item.Icon)"
-                                   Href="@item.PageUrl"
-                                   Color="@(IsActive(item) ? Color.Primary : Color.Inherit)"
-                                   title="@item.Title"/>
-                }
-                <MudIconButton Icon="@(DeveloperModeIcon)"
-                               Color="@(DeveloperMode.IsEnabled ? Color.Success : Color.Inherit)"
-                               OnClick="@DeveloperMode.Toggle"
-                               title="Toggle Developer Mode"/>
-                <TimeZoneSelector />
-                <MudIconButton Icon="@(DarkLightModeButtonIcon)" Color="Color.Inherit" OnClick="@DarkModeToggle"
-                               title="Toggle Dark Mode"/>
-                <MudIconButton Icon="@Icons.Material.Filled.MoreVert" Color="Color.Inherit" Edge="Edge.End"/>
+                               OnClick="@DrawerToggleAsync" title="Toggle Navigation"/>
+                <AppBarItems Root="@RootManager.Root" IsDarkMode="@_isDarkMode" OnToggleDarkMode="@DarkModeToggle"/>
             </MudAppBar>
             <MudDrawer id="nav-drawer" @bind-Open="_drawerOpen" ClipMode="DrawerClipMode.Always" Elevation="2">
                 <NavMenu Root="@RootManager.Root"/>
@@ -85,10 +61,12 @@
 
 @code {
     private const string DarkModeClass = "homeblaze-dark-mode";
+    private const string DrawerOpen = "open";
+    private const string DrawerClosed = "closed";
 
     private readonly CancellationTokenSource _disposalTokenSource = new();
 
-    private bool _drawerOpen = true;
+    private bool _drawerOpen;
     private bool _isDarkMode = true;
     private MudTheme? _theme;
     private bool _isRootLoaded;
@@ -97,10 +75,8 @@
     protected override void OnInitialized()
     {
         base.OnInitialized();
-        DeveloperMode.OnChange += OnStateHasChanged;
-        NavigationManager.LocationChanged += OnLocationChanged;
-
         _isRootLoaded = RootManager.RootLoaded.IsCompletedSuccessfully;
+        _drawerOpen = Preferences.Get(BrowserPreferenceKeys.Drawer) != DrawerClosed;
 
         _theme = new()
         {
@@ -137,9 +113,11 @@
         StateHasChanged();
     }
 
-    private void DrawerToggle()
+    // Only this button stores the state: on a narrow view the drawer also closes itself, which is not a choice to remember.
+    private async Task DrawerToggleAsync()
     {
         _drawerOpen = !_drawerOpen;
+        await Preferences.SetAsync(BrowserPreferenceKeys.Drawer, _drawerOpen ? DrawerOpen : DrawerClosed);
     }
 
     private void DarkModeToggle()
@@ -197,42 +175,10 @@
         LinesInputs = "rgba(255,255,255,0.4)"
     };
 
-    public string DarkLightModeButtonIcon => _isDarkMode switch
-    {
-        true => Icons.Material.Rounded.AutoMode,
-        false => Icons.Material.Outlined.DarkMode,
-    };
-
-    public string DeveloperModeIcon => DeveloperMode.IsEnabled
-        ? Icons.Material.Filled.DeveloperMode
-        : Icons.Material.Outlined.DeveloperMode;
-
     public void Dispose()
     {
-        DeveloperMode.OnChange -= OnStateHasChanged;
-        NavigationManager.LocationChanged -= OnLocationChanged;
-
         _disposalTokenSource.Cancel();
         _disposalTokenSource.Dispose();
-    }
-
-    private void OnStateHasChanged()
-    {
-        InvokeAsync(StateHasChanged);
-    }
-
-    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
-    {
-        InvokeAsync(StateHasChanged);
-    }
-
-    private IEnumerable<NavigationItem> GetAppBarItems(AppBarAlignment alignment)
-    {
-        if (RootManager.Root == null)
-            return Enumerable.Empty<NavigationItem>();
-
-        return NavigationResolver.GetChildItems(RootManager.Root)
-            .Where(item => item.Location == NavigationLocation.AppBar && item.IsPage && item.Alignment == alignment);
     }
 
     // The error page is shown exactly when the system is unhealthy, so it must render even if the
@@ -240,10 +186,4 @@
     private bool IsErrorPage => NavigationManager
         .ToBaseRelativePath(NavigationManager.Uri)
         .StartsWith("Error", StringComparison.OrdinalIgnoreCase);
-
-    private bool IsActive(NavigationItem item)
-    {
-        var currentPath = NavigationManager.ToBaseRelativePath(NavigationManager.Uri);
-        return currentPath.Equals(item.PageUrl, StringComparison.OrdinalIgnoreCase);
-    }
 }

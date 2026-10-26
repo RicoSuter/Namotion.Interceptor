@@ -111,6 +111,22 @@ public partial class DocumentationSamplesTests
         Assert.All(widgetBlocks, block => Assert.NotNull(page.GetBlockSubject(block.Index)));
     }
 
+    // A sample that shows a broken expression on purpose is an error sample, and the paths of an expression that does
+    // not parse are left out by FindPathsThatStartAtThePage, so this is where such an expression is reported.
+    [Theory]
+    [MemberData(nameof(ValidSamples))]
+    public void WhenSampleHasAnExpression_ThenItParses(string relativePath, int line)
+    {
+        // Arrange
+        var sample = FindSample(relativePath, line);
+
+        // Act
+        var errors = FindExpressionErrors(MarkdownPageParser.Parse(sample.Source), $"{relativePath} line {line}");
+
+        // Assert
+        Assert.Empty(errors);
+    }
+
     [Theory]
     [MemberData(nameof(ValidSamplesWithJsonBlock))]
     public async Task WhenSampleHasAJsonBlock_ThenEveryNameInItIsReadIntoTheSubject(string relativePath, int line)
@@ -385,7 +401,8 @@ public partial class DocumentationSamplesTests
     private static IEnumerable<SamplePath> FindPathsThatStartAtThePage(MarkdownPage page)
     {
         var expressions = MarkdownSegmentBuilder.FindExpressions(page)
-            .Select(expression => new SamplePath(expression.Path, IsExpression: true));
+            .SelectMany(expression => MarkdownExpressions.Parse(expression.Text, out _)?.Paths ?? [])
+            .Select(path => new SamplePath(path, IsExpression: true));
 
         var widgetBlocks = page.AllBlocks
             .Where(block => block.Head?.Name == typeof(Widget).FullName)
@@ -401,6 +418,16 @@ public partial class DocumentationSamplesTests
             .Concat(widgetBlocks.Concat(nestedWidgets).Select(path => new SamplePath(path, IsExpression: false)))
             .Where(path => !path.Text.StartsWith('/') && path.Text.Split('/')[0] is not ("." or ".."));
     }
+
+    /// <summary>Gets a message for every expression of the page that does not parse, with the place, its text and the error.</summary>
+    internal static IEnumerable<string> FindExpressionErrors(MarkdownPage page, string place) =>
+        MarkdownSegmentBuilder.FindExpressions(page)
+            .Where(expression => MarkdownExpressions.Parse(expression.Text, out _) is null)
+            .Select(expression =>
+            {
+                MarkdownExpressions.Parse(expression.Text, out var error);
+                return $"{place}: the expression '{expression.Text}' does not parse: {error}";
+            });
 
     /// <summary>Gets the path of every <see cref="Widget"/> that the JSON has at any depth.</summary>
     private static IEnumerable<string> FindNestedWidgetPaths(JsonNode? node)

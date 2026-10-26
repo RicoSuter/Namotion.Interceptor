@@ -1,7 +1,6 @@
 ---
 title: Glossary
 navTitle: Glossary
-position: 10
 ---
 
 # Glossary
@@ -61,7 +60,7 @@ Marks a property for display in the UI property panel. Options: `Name`, `Positio
 Marks a computed property that auto-updates when its dependencies change. Must be expression-bodied (`=>`).
 
 ### `[Operation]`
-Marks a method as an executable action from the UI. Options: `Title`, `Description`, `Icon`, `Position`, `RequiresConfirmation`. An operation with `RequiresConfirmation` asks for confirmation in the UI and cannot be called through MCP, neither by AI agents nor by external clients, see [AI Agents](administration/ai-agents.md#tools-and-permissions).
+Marks a method as an executable action from the UI. Options: `Title`, `Description`, `Icon`, `Position`, `RequiresConfirmation`; `[ExcludeFrom]` beside it decides where it is offered. An operation with `RequiresConfirmation` asks for confirmation in the UI and cannot be called through MCP, neither by AI agents nor by external clients, see [AI Agents](administration/ai-agents.md#tools-and-permissions).
 
 ### `[Query]`
 Marks a method as a read-only query (no side effects). Similar to `[Operation]` but semantically non-mutating.
@@ -76,6 +75,9 @@ Associates metadata with another property (e.g., minimum/maximum values).
 [PropertyAttribute(nameof(TargetSpeed), "Minimum")]
 public partial int TargetSpeed_Minimum { get; set; }
 ```
+
+### `[ExcludeFrom]`
+Keeps a subject type or a method out of user interfaces, agents or both: `[ExcludeFrom(ExclusionTarget.UserInterface)]`, `Agents` or `All`. It decides where something is offered, not who may reach it. See [Building Subjects: Excluding Subjects and Methods](development/building-subjects.md#excluding-subjects-and-methods).
 
 ---
 
@@ -119,19 +121,24 @@ A full-page component for a subject type. Pages appear in the navigation when th
 
 ## Navigation
 
-Set via markdown frontmatter on `.md` files — see [Markdown Pages — Frontmatter](administration/pages.md#frontmatter).
+Set in the frontmatter of a page, see [Markdown Pages: Frontmatter](administration/pages.md#frontmatter), and in the metadata of folders and subjects, see [Metadata](administration/metadata.md).
+
+### Metadata
+
+Keys and values that describe a folder, a subject or a property, such as its navigation title, its icon, its notes, links and tags or a comment, stored in `.metadata.json` files. See [Metadata](administration/metadata.md).
 
 ### Navigation Location
 
 Where a page appears in the application:
-- `NavBar` — Sidebar navigation (default)
-- `AppBar` — Top application bar
+- `NavBar`: Sidebar navigation (default)
+- `AppBar`: Top application bar
 
 ### AppBar Alignment
 
 For `AppBar` items:
-- `Left` — Left side of the top bar (default)
-- `Right` — Right side
+- `Left`: Left side of the top bar (default)
+- `Right`: Right side
+- `Menu`: Entry of the menu behind the ⋮ button at the right end of the top bar
 
 ---
 
@@ -165,7 +172,7 @@ YAML metadata at the top of markdown files controlling navigation and display. S
 
 ### Live Expression
 
-A path in double curly braces in the text of a markdown page, like `{{ mymotor/CurrentSpeed }}`. The page shows the value of the property at that path and updates it when the value changes. See [Markdown Pages: Live Expressions](administration/pages.md#live-expressions).
+A path or a condition in double curly braces in the text of a markdown page, like `{{ mymotor/CurrentSpeed }}` or `{{ mymotor/CurrentSpeed > 500 }}`. The page shows the value of the property at that path, or Yes or No for a condition, and updates it when the value changes. See [Markdown Pages: Live Expressions](administration/pages.md#live-expressions).
 
 ### Block
 

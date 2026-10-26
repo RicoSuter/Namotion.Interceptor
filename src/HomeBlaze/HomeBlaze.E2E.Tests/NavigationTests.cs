@@ -175,6 +175,45 @@ public class NavigationTests
         }
     }
 
+    [Fact]
+    public async Task WhenTopBarPageIsInSubfolder_ThenTopBarShowsItAndSidebarDoesNot()
+    {
+        // Arrange
+        const string folderName = "Shortcuts";
+        const string pageTitle = "Nested Top Bar Page";
+        var folderPath = _fixture.GetPagePath(folderName);
+        Directory.CreateDirectory(folderPath);
+
+        try
+        {
+            await File.WriteAllTextAsync(
+                Path.Combine(folderPath, "Nested.md"),
+                $"---\ntitle: {pageTitle}\nicon: Star\nlocation: AppBar\n---\n\n# {pageTitle}\n");
+            await _fixture.ReconcileStorageAsync();
+
+            // Act
+            var page = await _fixture.CreatePageAsync();
+            await page.GotoAsync(_fixture.ServerAddress);
+            await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+
+            // Assert
+            await Assertions.Expect(page.GetByRole(AriaRole.Banner).GetByTitle(pageTitle, new() { Exact = true }))
+                .ToBeVisibleAsync(new() { Timeout = 30000 });
+
+            var navigation = page.Locator(".mud-navmenu");
+            await Assertions.Expect(navigation.GetByRole(AriaRole.Button, new() { Name = "Demo" }))
+                .ToBeVisibleAsync(new() { Timeout = 30000 });
+            await Assertions.Expect(navigation.GetByRole(AriaRole.Button, new() { Name = folderName }))
+                .ToHaveCountAsync(0);
+            await Assertions.Expect(navigation.GetByText(pageTitle)).ToHaveCountAsync(0);
+        }
+        finally
+        {
+            Directory.Delete(folderPath, recursive: true);
+            await _fixture.ReconcileStorageAsync();
+        }
+    }
+
     private async Task<(IServiceProvider Services, FluentStorageContainer Root, VirtualFolder Folder)> GetDemoFolderAsync()
     {
         await _fixture.ReconcileStorageAsync();

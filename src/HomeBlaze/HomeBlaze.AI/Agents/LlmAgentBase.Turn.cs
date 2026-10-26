@@ -1,4 +1,5 @@
 using HomeBlaze.Abstractions;
+using HomeBlaze.AI.Mcp;
 using HomeBlaze.Storage;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Mcp;
@@ -57,7 +58,12 @@ public abstract partial class LlmAgentBase
         return new AgentTurnRequest(
             kind,
             AgentPromptBuilder.BuildSystemPrompt(
-                kind, Instructions, Memory.GetSnapshot(), backendTools.Exists(tool => tool.LoadsWebContent), AgentToolSet.CanEditPageLayout(allowedTools)),
+                kind,
+                Instructions,
+                Memory.GetSnapshot(),
+                backendTools.Exists(tool => tool.LoadsWebContent),
+                AgentToolSet.CanEditPageLayout(allowedTools),
+                allowedTools.Contains(HomeBlazeMcpToolProvider.InvokeOperationToolName)),
             message,
             isBackground ? BackgroundModel ?? Model : Model,
             isBackground ? BackgroundEffort ?? Effort : Effort,

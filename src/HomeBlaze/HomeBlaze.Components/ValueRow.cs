@@ -14,16 +14,17 @@ namespace HomeBlaze.Components;
 public partial class ValueRow : IConfigurable
 {
     /// <summary>
-    /// Path of the property whose value the row shows. Optional when the row has content.
+    /// Path of the property whose value the row shows, or with a <see cref="Map"/> of a subject whose states the cases of the map read. Optional when the row has content.
     /// </summary>
     [Configuration]
     [SubjectPath]
     public partial string? Path { get; set; }
 
     /// <summary>
-    /// The label of the row. Defaults to the title the property declares, then to its name, and to the path when the path leads nowhere.
+    /// The label of the row. Defaults to the title the property declares, then to its name, and to the path when the path leads nowhere. It can show values with expressions between double braces, such as <c>{{ subject/Name }}</c>.
     /// </summary>
     [Configuration]
+    [TextTemplate]
     public partial string? Label { get; set; }
 
     /// <summary>

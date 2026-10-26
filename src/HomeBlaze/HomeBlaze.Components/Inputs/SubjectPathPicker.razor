@@ -1,6 +1,8 @@
+@using HomeBlaze.Abstractions.Attributes
 @using HomeBlaze.Abstractions.Metadata
 @using HomeBlaze.Components.Operations
 @using Namotion.Interceptor.Registry.Attributes
+@using Namotion.Interceptor.Registry.Paths
 
 @inject RootManager RootManager
 @inject SubjectPathResolver PathResolver
@@ -218,20 +220,25 @@
                 var isInlinePathsProperty = parent.Subject != null &&
                     InlinePathsAttribute.IsInlinePathsProperty(parent.Subject.GetType(), parent.Property.Name);
 
-                // For collection/dictionary, show child subjects by index
+                // For collection/dictionary, show child subjects by index. A subject excluded from user interfaces is
+                // not offered, nor what it holds.
                 foreach (var child in parent.Property.Children)
                 {
+                    if (child.Subject.IsExcludedFrom(ExclusionTarget.UserInterface))
+                        continue;
+
+                    var childKey = child.Index is { } index ? PathExtensions.FormatPathIndex(index) : "";
                     string childPath;
                     if (isInlinePathsProperty)
                     {
                         // InlinePaths: strip property name, use key directly
                         var lastSlash = parent.Path.LastIndexOf('/');
                         var basePath = lastSlash >= 0 ? parent.Path[..lastSlash] : "";
-                        childPath = basePath.Length > 0 ? $"{basePath}/{child.Index}" : child.Index?.ToString() ?? "";
+                        childPath = basePath.Length > 0 ? $"{basePath}/{childKey}" : childKey;
                     }
                     else
                     {
-                        childPath = $"{parent.Path}[{child.Index}]";
+                        childPath = $"{parent.Path}[{childKey}]";
                     }
                     var childDisplayName = $"[{child.Index}]";
 
@@ -280,12 +287,19 @@
                 {
                     foreach (var child in property.Children)
                     {
-                        var childKey = child.Index?.ToString() ?? "";
+                        if (child.Subject.IsExcludedFrom(ExclusionTarget.UserInterface))
+                            continue;
+
+                        var childKey = child.Index is { } index ? PathExtensions.FormatPathIndex(index) : "";
                         var childPath = $"{basePath.TrimEnd('/')}/{childKey}";
-                        children.Add(CreateSubjectTreeItem(child.Subject, childKey, childPath));
+                        children.Add(CreateSubjectTreeItem(child.Subject, child.Index?.ToString() ?? "", childPath));
                     }
                     continue;
                 }
+
+                // A reference to a subject that is not offered is left out with what it holds.
+                if (property is { IsSubjectReference: true, Children.Length: > 0 } && property.Children[0].Subject.IsExcludedFrom(ExclusionTarget.UserInterface))
+                    continue;
 
                 // Determine if property has state attribute
                 var hasState = property.GetStateMetadata() != null;
@@ -294,7 +308,7 @@
                 var isExpandable = false;
                 if (property.IsSubjectDictionary || property.IsSubjectCollection)
                 {
-                    isExpandable = property.Children.Length > 0;
+                    isExpandable = property.Children.Any(child => !child.Subject.IsExcludedFrom(ExclusionTarget.UserInterface));
                 }
                 else if (property is { IsSubjectReference: true, Children.Length: > 0 })
                 {
@@ -499,13 +513,13 @@
             if (IsListedMethod(p, method))
                 return true;
 
-            // Collection/Dictionary with children - will be shown
-            if ((p.IsSubjectDictionary || p.IsSubjectCollection) && p.Children.Length > 0)
+            // Collection/Dictionary with children that are offered - will be shown
+            if ((p.IsSubjectDictionary || p.IsSubjectCollection) && p.Children.Any(child => !child.Subject.IsExcludedFrom(ExclusionTarget.UserInterface)))
                 return true;
 
-            // Reference with expandable subject - will be shown
+            // Reference with an offered, expandable subject - will be shown
             if (p is { IsSubjectReference: true, Children.Length: > 0 })
-                return HasExpandableProperties(p.Children[0].Subject);
+                return !p.Children[0].Subject.IsExcludedFrom(ExclusionTarget.UserInterface) && HasExpandableProperties(p.Children[0].Subject);
 
             // Property with attributes that can be selected - will be shown
             return !p.IsAttribute && !p.CanContainSubjects && HasListedAttributes(p);
@@ -524,10 +538,11 @@
     }
 
     // Only a predicate that accepts an operation lists one, so the expression picker (no predicate) and the pickers
-    // for subjects never offer an operation.
+    // for subjects never offer an operation. One excluded from user interfaces is not offered, but a path to it that
+    // a person types is still accepted.
     private bool IsListedMethod(RegisteredSubjectProperty property, MethodMetadata? method)
     {
-        return method is not null && CanSelectProperty is not null && CanSelectProperty(property);
+        return method is not null && !method.IsExcludedFrom(ExclusionTarget.UserInterface) && CanSelectProperty is not null && CanSelectProperty(property);
     }
 
     private static string GetMethodIcon(MethodMetadata method)

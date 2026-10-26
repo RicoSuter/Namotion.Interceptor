@@ -25,6 +25,11 @@ public class StateUnitExtensionsTests
     }
 
     [Theory]
+    [InlineData(StateUnit.Watt, 0, "0 W")]
+    [InlineData(StateUnit.Kilometer, 0, "0 km")]
+    [InlineData(StateUnit.Meter, 0, "0 m")]
+    [InlineData(StateUnit.KilowattHour, 0, "0 kWh")]
+    [InlineData(StateUnit.Byte, 0, "0 B")]
     [InlineData(StateUnit.Watt, 500, "500 W")]
     [InlineData(StateUnit.Watt, 1500, "1.5 kW")]
     [InlineData(StateUnit.Watt, 1000, "1 kW")]
@@ -41,6 +46,8 @@ public class StateUnitExtensionsTests
     [InlineData(StateUnit.AmpereHour, 50, "50 Ah")]
     [InlineData(StateUnit.AmpereHour, 1500, "1.5 kAh")]
     [InlineData(StateUnit.WattPerSquareMeter, 850, "850 W/m²")]
+    [InlineData(StateUnit.DecibelMilliwatt, -75, "-75 dBm")]
+    [InlineData(StateUnit.DecibelMilliwatt, -1500, "-1500 dBm")]
     [InlineData(StateUnit.WattHour, 10500, "10.5 kWh")]
     [InlineData(StateUnit.WattHour, 500, "500 Wh")]
     [InlineData(StateUnit.KilowattHour, 0.8, "800 Wh")]
@@ -76,6 +83,63 @@ public class StateUnitExtensionsTests
 
         // Assert
         Assert.Equal(expected, result);
+    }
+
+    [Theory]
+    [InlineData(StateUnit.WattHour, 12345, "kWh", 0.001)]
+    [InlineData(StateUnit.WattHour, -12345, "kWh", 0.001)]
+    [InlineData(StateUnit.WattHour, 500, "Wh", 1)]
+    [InlineData(StateUnit.KilowattHour, 0.5, "Wh", 1000)]
+    [InlineData(StateUnit.Byte, 1500000, "MB", 0.000001)]
+    public void WhenAUnitOfAFamilyIsScaled_ThenItGetsTheLargestUnitInWhichTheValueIsAtLeastOne(
+        StateUnit unit, double magnitude, string expectedSuffix, double expectedFactor)
+    {
+        // Act
+        var isScaled = StateUnitExtensions.TryGetScaledUnit(unit, Convert.ToDecimal(magnitude), out var suffix, out var factor);
+
+        // Assert
+        Assert.True(isScaled);
+        Assert.Equal(expectedSuffix, suffix);
+        Assert.Equal(Convert.ToDecimal(expectedFactor), factor);
+    }
+
+    [Theory]
+    [InlineData(StateUnit.Kilometer, "km")]
+    [InlineData(StateUnit.Meter, "m")]
+    [InlineData(StateUnit.Millimeter, "mm")]
+    [InlineData(StateUnit.Watt, "W")]
+    [InlineData(StateUnit.KilowattHour, "kWh")]
+    public void WhenAZeroIsScaled_ThenItStaysInTheUnitOfTheProperty(StateUnit unit, string expectedSuffix)
+    {
+        // Act
+        var isScaled = StateUnitExtensions.TryGetScaledUnit(unit, 0m, out var suffix, out var factor);
+
+        // Assert
+        Assert.True(isScaled);
+        Assert.Equal(expectedSuffix, suffix);
+        Assert.Equal(1m, factor);
+    }
+
+    [Fact]
+    public void WhenAValueIsTooLargeToConvert_ThenItGetsTheLargestUnitOfItsFamily()
+    {
+        // Act
+        var isScaled = StateUnitExtensions.TryGetScaledUnit(StateUnit.Kilobyte, decimal.MaxValue, out var suffix, out _);
+
+        // Assert
+        Assert.True(isScaled);
+        Assert.Equal("GB", suffix);
+    }
+
+    [Fact]
+    public void WhenAUnitHasNoFamily_ThenItIsNotScaled()
+    {
+        // Act
+        var isScaled = StateUnitExtensions.TryGetScaledUnit(StateUnit.DegreeCelsius, 1000m, out _, out var factor);
+
+        // Assert
+        Assert.False(isScaled);
+        Assert.Equal(1m, factor);
     }
 
     [Theory]
@@ -370,6 +434,21 @@ public class StateUnitExtensionsTests
 
         // Assert
         Assert.Equal("79228162514264337593543950335", result);
+    }
+
+    [Theory]
+    [InlineData(true, "Yes")]
+    [InlineData(false, "No")]
+    [InlineData(1234.567, "1234.57")]
+    [InlineData("text", "text")]
+    [InlineData(DayOfWeek.Monday, "Monday")]
+    public void WhenValueHasNoProperty_ThenItIsFormattedWithoutAUnit(object value, string expected)
+    {
+        // Act
+        var text = StateUnitExtensions.FormatDisplayValue(value);
+
+        // Assert
+        Assert.Equal(expected, text);
     }
 
     private static RegisteredSubjectProperty GetRatioProperty()

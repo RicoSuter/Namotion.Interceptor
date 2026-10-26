@@ -332,16 +332,6 @@ public class EcowittClient
             }
         }
 
-        // Battery is sometimes a separate item in the rain array
-        foreach (var item in rainArray.EnumerateArray())
-        {
-            if (item.TryGetProperty("battery", out var battProp))
-            {
-                if (int.TryParse(battProp.GetString(), out var batt))
-                    rain.Battery = batt;
-            }
-        }
-
         return rain;
     }
 
@@ -358,15 +348,13 @@ public class EcowittClient
             var temp = item.TryGetProperty("temp", out var tempProp) ? tempProp.GetString() : null;
             var humidity = item.TryGetProperty("humidity", out var humiProp) ? humiProp.GetString() : null;
             var name = item.TryGetProperty("name", out var nameProp) ? nameProp.GetString() : null;
-            var battery = item.TryGetProperty("battery", out var battProp) ? battProp.GetString() : null;
 
             channels.Add(new EcowittChannelData
             {
                 Channel = channel,
                 Name = name,
                 Temperature = EcowittValueParser.ParseTemperature(temp, unit),
-                Humidity = EcowittValueParser.ParseHumidity(humidity),
-                Battery = int.TryParse(battery, out var batteryValue) ? batteryValue : null
+                Humidity = EcowittValueParser.ParseHumidity(humidity)
             });
         }
         return channels.ToArray();
@@ -382,13 +370,11 @@ public class EcowittClient
                 continue;
 
             var humidity = item.TryGetProperty("humidity", out var humiProp) ? humiProp.GetString() : null;
-            var battery = item.TryGetProperty("battery", out var battProp) ? battProp.GetString() : null;
 
             items.Add(new EcowittSoilData
             {
                 Channel = channel,
-                Moisture = EcowittValueParser.ParseHumidity(humidity),
-                Battery = int.TryParse(battery, out var batteryValue) ? batteryValue : null
+                Moisture = EcowittValueParser.ParseHumidity(humidity)
             });
         }
         return items.ToArray();
@@ -404,13 +390,11 @@ public class EcowittClient
                 continue;
 
             var wetness = item.TryGetProperty("leaf_wetness", out var wetProp) ? wetProp.GetString() : null;
-            var battery = item.TryGetProperty("battery", out var battProp) ? battProp.GetString() : null;
 
             items.Add(new EcowittLeafData
             {
                 Channel = channel,
-                Wetness = EcowittValueParser.ParseHumidity(wetness),
-                Battery = int.TryParse(battery, out var batteryValue) ? batteryValue : null
+                Wetness = EcowittValueParser.ParseHumidity(wetness)
             });
         }
         return items.ToArray();
@@ -427,13 +411,11 @@ public class EcowittClient
 
             var unit = item.TryGetProperty("unit", out var unitProp) ? unitProp.GetString() : null;
             var temp = item.TryGetProperty("temp", out var tempProp) ? tempProp.GetString() : null;
-            var battery = item.TryGetProperty("battery", out var battProp) ? battProp.GetString() : null;
 
             items.Add(new EcowittTemperatureData
             {
                 Channel = channel,
-                Temperature = EcowittValueParser.ParseTemperature(temp, unit),
-                Battery = int.TryParse(battery, out var batteryValue) ? batteryValue : null
+                Temperature = EcowittValueParser.ParseTemperature(temp, unit)
             });
         }
         return items.ToArray();
@@ -450,14 +432,12 @@ public class EcowittClient
 
             var pm25 = item.TryGetProperty("pm25", out var pmProp) ? pmProp.GetString() : null;
             var pm25_24h = item.TryGetProperty("pm25_24h", out var pm24Prop) ? pm24Prop.GetString() : null;
-            var battery = item.TryGetProperty("battery", out var battProp) ? battProp.GetString() : null;
 
             items.Add(new EcowittPm25Data
             {
                 Channel = channel,
                 Pm25 = EcowittValueParser.ParseDecimal(pm25),
-                Pm25Avg24h = EcowittValueParser.ParseDecimal(pm25_24h),
-                Battery = int.TryParse(battery, out var batteryValue) ? batteryValue : null
+                Pm25Avg24h = EcowittValueParser.ParseDecimal(pm25_24h)
             });
         }
         return items.ToArray();
@@ -477,7 +457,6 @@ public class EcowittClient
             var unit = item.TryGetProperty("unit", out var unitProp) ? unitProp.GetString() : null;
             var temp = item.TryGetProperty("temp", out var tempProp) ? tempProp.GetString() : null;
             var humidity = item.TryGetProperty("humidity", out var humiProp) ? humiProp.GetString() : null;
-            var battery = item.TryGetProperty("battery", out var battProp) ? battProp.GetString() : null;
 
             items.Add(new EcowittCo2Data
             {
@@ -485,8 +464,7 @@ public class EcowittClient
                 Co2 = EcowittValueParser.ParseDecimal(co2),
                 Co2Avg24h = EcowittValueParser.ParseDecimal(co2_24h),
                 Temperature = EcowittValueParser.ParseTemperature(temp, unit),
-                Humidity = EcowittValueParser.ParseHumidity(humidity),
-                Battery = int.TryParse(battery, out var batteryValue) ? batteryValue : null
+                Humidity = EcowittValueParser.ParseHumidity(humidity)
             });
         }
         return items.ToArray();
@@ -502,13 +480,11 @@ public class EcowittClient
                 continue;
 
             var leak = item.TryGetProperty("leak", out var leakProp) ? leakProp.GetString() : null;
-            var battery = item.TryGetProperty("battery", out var battProp) ? battProp.GetString() : null;
 
             items.Add(new EcowittLeakData
             {
                 Channel = channel,
-                IsLeaking = leak == "1",
-                Battery = int.TryParse(battery, out var batteryValue) ? batteryValue : null
+                IsLeaking = leak == "1"
             });
         }
         return items.ToArray();
@@ -519,7 +495,6 @@ public class EcowittClient
         var distance = element.TryGetProperty("distance", out var distProp) ? distProp.GetString() : null;
         var count = element.TryGetProperty("count", out var countProp) ? countProp.GetString() : null;
         var timestamp = element.TryGetProperty("timestamp", out var tsProp) ? tsProp.GetString() : null;
-        var battery = element.TryGetProperty("battery", out var battProp) ? battProp.GetString() : null;
 
         DateTimeOffset? lastStrikeTime = null;
         if (timestamp != null && timestamp != "--" && long.TryParse(timestamp, out var unixSeconds) && unixSeconds > 0)
@@ -529,8 +504,7 @@ public class EcowittClient
         {
             Distance = EcowittValueParser.ParseDecimal(distance),
             StrikeCount = int.TryParse(count, out var c) ? c : null,
-            LastStrikeTime = lastStrikeTime,
-            Battery = int.TryParse(battery, out var batteryValue) ? batteryValue : null
+            LastStrikeTime = lastStrikeTime
         };
     }
 }

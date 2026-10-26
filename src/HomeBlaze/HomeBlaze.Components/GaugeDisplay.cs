@@ -16,8 +16,8 @@ internal static class GaugeDisplay
     /// <summary>
     /// Gets the color of the ring: that of the matched case of the map, otherwise the primary color.
     /// </summary>
-    public static Color GetColor(ValueReading reading) =>
-        reading.Color == Color.Default ? Color.Primary : reading.Color;
+    public static ValueColor GetColor(ValueReading reading) =>
+        reading.Color.IsDefault ? Color.Primary : reading.Color;
 
     /// <summary>
     /// Gets the width and height of the ring in pixels.

@@ -33,7 +33,7 @@ internal static class McpToolHelper
 
         if (requestExcludeTypes is not null && requestExcludeTypes.Length > 0)
         {
-            var interfaces = subjectType.GetInterfaces();
+            var interfaces = TypeInterfaces.Get(subjectType);
             foreach (var name in requestExcludeTypes)
             {
                 if (subjectType.FullName == name || subjectType.Name == name)
@@ -41,9 +41,12 @@ internal static class McpToolHelper
                     return true;
                 }
 
-                if (interfaces.Any(i => i.FullName == name || i.Name == name))
+                foreach (var interfaceType in interfaces)
                 {
-                    return true;
+                    if (interfaceType.FullName == name || interfaceType.Name == name)
+                    {
+                        return true;
+                    }
                 }
             }
         }
@@ -190,6 +193,25 @@ internal static class McpToolHelper
             : property;
     }
 
+    /// <summary>
+    /// Resolves a path from the subject through the path provider to a property that a filter can read: every property
+    /// on the way is one the provider includes, and the last one is no attribute and has no index. A property that holds
+    /// subjects is one a filter can read, and its value is the subject, the collection or the dictionary, or null.
+    /// </summary>
+    internal static RegisteredSubjectProperty? TryGetFilterPropertyFromPath(
+        RegisteredSubject subject,
+        PathProviderBase pathProvider,
+        string path)
+    {
+        if (pathProvider.TryGetPropertyFromPath(subject, path, includedPropertiesOnly: true, createMissingSubject: null) is not
+            { Index: null, Property: var property })
+        {
+            return null;
+        }
+
+        return property.IsAttribute ? null : property;
+    }
+
     internal static string? TryGetSubjectPath(
         RegisteredSubject subject,
         PathProviderBase pathProvider,
@@ -222,7 +244,12 @@ internal static class McpToolHelper
             attributes = [];
             foreach (var attribute in property.Attributes)
             {
-                attributes.Add(new PropertyAttribute(attribute.BrowseName, attribute.GetValue()));
+                // A read-only attribute without a value says nothing about its property; a writable one can be set.
+                var value = attribute.GetValue();
+                if (value is not null || attribute.HasSetter)
+                {
+                    attributes.Add(new PropertyAttribute(attribute.BrowseName, value));
+                }
             }
 
             if (attributes.Count == 0)

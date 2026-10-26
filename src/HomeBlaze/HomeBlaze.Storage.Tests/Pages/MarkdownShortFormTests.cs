@@ -137,7 +137,7 @@ public class MarkdownShortFormTests
         }
 
         var belt = Assert.IsType<MarkdownFragment>(layout.Tabs[1].Content);
-        Assert.Equal("../Conveyor/CurrentSpeed", Assert.Single(belt.Children.Values.OfType<RenderExpression>()).Path);
+        Assert.Equal("../Conveyor/CurrentSpeed", Assert.Single(belt.Children.Values.OfType<RenderExpression>()).Text);
         Assert.Same(layout.Tabs[1], ((IPathScope)page).TryGetNamedSubject("belt"));
     }
 
@@ -251,7 +251,7 @@ public class MarkdownShortFormTests
                     break;
 
                 case RenderExpression expression:
-                    description.Append(indentation).Append("expression ").Append(expression.Path).Append('\n');
+                    description.Append(indentation).Append("expression ").Append(expression.Text).Append('\n');
                     break;
 
                 case MarkdownFragment fragment:

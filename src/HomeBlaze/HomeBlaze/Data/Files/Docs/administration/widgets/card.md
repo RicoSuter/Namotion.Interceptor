@@ -1,7 +1,6 @@
 ---
 title: Card
 navTitle: Card
-position: 20
 ---
 
 # Card
@@ -12,8 +11,8 @@ A titled box around page content. Type name: `HomeBlaze.Components.Card`. Slot b
 
 | Argument | Kind of value | Default | Meaning |
 |----------|---------------|---------|---------|
-| `Title` | Text | None | The title at the top of the card |
-| `Subtitle` | Text | None | A smaller line below the title |
+| `Title` | Text with values | None | The title at the top of the card, which can show values of the page, see [Text with Values](basics.md#text-with-values) |
+| `Subtitle` | Text with values | None | A smaller line below the title, which can show values of the page, see [Text with Values](basics.md#text-with-values) |
 | `Icon` | Text | None | The [icon](basics.md#icons) next to the title |
 | `IconColor` | Color | `Default` | The [color](basics.md#colors) of the icon |
 | `Href` | Text | None | Where the title leads to. The title is then a link, written like a link in the text of the page, see [Links in Block Options](../pages.md#links-in-block-options) |
@@ -88,6 +87,19 @@ The pump runs at {{ ../Pump/CurrentSpeed }} RPM.
 {{ ../Pump/Status }}
 ::
 
+A card whose title and subtitle show values from the page. They update when the values change, and `value` and `subject` are not available, because a card has no `Path`:
+
+<!-- sample: live -->
+~~~~markdown
+:: HomeBlaze.Components.Card Title="Pump {{ ../Pump/Status }}" Subtitle="Target {{ ../Pump/TargetSpeed }} RPM" Icon=WaterDrop
+The pump runs at {{ ../Pump/CurrentSpeed }} RPM.
+::
+~~~~
+
+:: HomeBlaze.Components.Card Title="Pump {{ ../Pump/Status }}" Subtitle="Target {{ ../Pump/TargetSpeed }} RPM" Icon=WaterDrop
+The pump runs at {{ ../Pump/CurrentSpeed }} RPM.
+::
+
 Three cards in a flow layout with `AspectRatio="4:3"`. Each card is three quarters as high as it is wide, so the three cards are equally high whatever their text is, and they grow and shrink with the width of the window. A body whose text does not fit scrolls:
 
 <!-- sample: live -->
@@ -151,7 +163,8 @@ Target speed: {{ ../Pump/TargetSpeed }} RPM
 - **Spacing**: [Spacing](basics.md#spacing) has the room inside a card and around it.
 - **Width**: A card is as wide as the place it stands in. Put cards into a [FlowLayout](flow-layout.md) to place them next to each other.
 - **A fixed height**: A card with a `Height` or an `AspectRatio` keeps the size of its header, its picture and its footer, and its body takes the rest of the height. A body that does not fit scrolls.
-- **In a cell or a node**: A card that is the subject of a [GridLayout](grid-layout.md) cell or a [CanvasLayout](canvas-layout.md) node fills it and ignores `AspectRatio`. A `Height` of its own still wins. The cell or the node is the frame, so the card has no border and no shadow there, and its body scrolls like that of a card with a height.
+- **In a cell or a node**: A card that is the subject of a [GridLayout](grid-layout.md) cell or a [CanvasLayout](canvas-layout.md) node fills it and ignores `AspectRatio`. A `Height` of its own still wins, and its body scrolls like that of a card with a height.
+- **Title with values**: A title or a subtitle can show values with expressions, such as `Title="Pump {{ ../Pump/Status }}"`. The tree of subjects and the dialogs that name the card show the title as written.
 - **Parts**: A card has no other parts than the header, the picture, the body and the footer. It has no buttons.
 
 ## Related

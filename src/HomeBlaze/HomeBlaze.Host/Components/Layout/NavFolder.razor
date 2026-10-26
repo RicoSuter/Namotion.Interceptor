@@ -8,17 +8,17 @@
     {
         @foreach (var child in _children.Where(c => c.Location == NavigationLocation.NavBar))
         {
-            @if (child is { IsPage: true, IsFolder: false })
+            @if (child.HasNavigationBarPages)
+            {
+                <NavFolder @key="child.Path" Item="child" NavigationResolver="NavigationResolver" CurrentPath="@CurrentPath" />
+            }
+            else if (child.IsPage)
             {
                 <MudNavLink Href="@child.PageUrl"
                             Match="NavLinkMatch.All"
                             Icon="@SubjectIconExtensions.ResolveMudBlazorIcon(child.Icon)">
                     @child.Title
                 </MudNavLink>
-            }
-            else if (child.IsFolder)
-            {
-                <NavFolder @key="child.Path" Item="child" NavigationResolver="NavigationResolver" CurrentPath="@CurrentPath" />
             }
         }
     }

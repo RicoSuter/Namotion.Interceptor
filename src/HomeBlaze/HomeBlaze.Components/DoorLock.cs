@@ -31,10 +31,24 @@ public partial class DoorLock : IConfigurable, ITitleProvider
     public partial string? Label { get; set; }
 
     /// <summary>
-    /// The second line of the tile. Defaults to the state of the lock.
+    /// Name or path of the <see cref="ValueMap"/> that gives a lock state, by its name such as "Locked", the fill, the
+    /// badge icon and the text of the tile. A state without a case keeps the fill, badge and text of the tile.
+    /// </summary>
+    [Configuration]
+    [SubjectPath(typeof(ValueMap))]
+    public partial string? Map { get; set; }
+
+    /// <summary>
+    /// The second line of the tile. Defaults to the text of the matched case of the map, otherwise to the state of the lock. An empty subtitle hides the line.
     /// </summary>
     [Configuration]
     public partial string? Subtitle { get; set; }
+
+    /// <summary>
+    /// Whether a tile has a thin border like an outlined card, whatever its fill.
+    /// </summary>
+    [Configuration]
+    public partial bool Outlined { get; set; }
 
     public string? Title => null;
 

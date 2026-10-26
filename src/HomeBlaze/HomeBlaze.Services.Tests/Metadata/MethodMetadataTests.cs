@@ -40,6 +40,29 @@ public class MethodMetadataTests
     }
 
     [Fact]
+    public async Task WhenTheMethodIsAnAsyncMethodWithAResult_ThenItsResultIsReturned()
+    {
+        // Arrange
+        static async Task<string> ReadAsync()
+        {
+            await Task.Yield();
+            return "result-from-async-method";
+        }
+
+        var metadata = new MethodMetadata(_ => ReadAsync())
+        {
+            Kind = MethodKind.Query,
+            ResultType = typeof(string),
+        };
+
+        // Act
+        var result = await metadata.InvokeAsync(null, null, CancellationToken.None);
+
+        // Assert
+        Assert.Equal("result-from-async-method", result);
+    }
+
+    [Fact]
     public async Task InvokeAsync_WithFuncConstructor_ResolvesParameters()
     {
         // Arrange

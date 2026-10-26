@@ -46,6 +46,8 @@ namespace HomeBlaze.Components
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public bool IsSnapToGridEnabled { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
+        public int? MaxWidth { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
         public int? MinHeight { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public int? MinWidth { get; set; }
@@ -134,8 +136,10 @@ namespace HomeBlaze.Components
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public bool Outlined { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
+        [HomeBlaze.Abstractions.Attributes.TextTemplate]
         public string? Subtitle { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
+        [HomeBlaze.Abstractions.Attributes.TextTemplate]
         public string? Title { get; set; }
         public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
         public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
@@ -156,6 +160,7 @@ namespace HomeBlaze.Components
         public Control() { }
         public Control(Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.Configuration]
+        [HomeBlaze.Abstractions.Attributes.TextTemplate]
         public string? Label { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         [HomeBlaze.Abstractions.Attributes.SubjectPath(typeof(HomeBlaze.Components.ValueMap))]
@@ -190,6 +195,11 @@ namespace HomeBlaze.Components
         public DoorLock(Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public string? Label { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        [HomeBlaze.Abstractions.Attributes.SubjectPath(typeof(HomeBlaze.Components.ValueMap))]
+        public string? Map { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public bool Outlined { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         [HomeBlaze.Abstractions.Attributes.SubjectPath(typeof(HomeBlaze.Abstractions.Devices.Locks.IDoorLockState))]
         public string? Path { get; set; }
@@ -288,6 +298,7 @@ namespace HomeBlaze.Components
         public Gauge() { }
         public Gauge(Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.Configuration]
+        [HomeBlaze.Abstractions.Attributes.TextTemplate]
         public string? Label { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         [HomeBlaze.Abstractions.Attributes.SubjectPath(typeof(HomeBlaze.Components.ValueMap))]
@@ -439,6 +450,8 @@ namespace HomeBlaze.Components
         public HomeBlaze.Components.OperationButtonKind Kind { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public string? Label { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public bool Outlined { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         [HomeBlaze.Abstractions.Attributes.SubjectPath(Kind=HomeBlaze.Abstractions.Attributes.SubjectPathKind.Operation)]
         public string? Path { get; set; }
@@ -667,6 +680,7 @@ namespace HomeBlaze.Components
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public HomeBlaze.Components.SwitchKind Kind { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
+        [HomeBlaze.Abstractions.Attributes.TextTemplate]
         public string? Label { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         [HomeBlaze.Abstractions.Attributes.SubjectPath(typeof(HomeBlaze.Components.ValueMap))]
@@ -678,10 +692,13 @@ namespace HomeBlaze.Components
         [HomeBlaze.Abstractions.Attributes.SubjectPath(Kind=HomeBlaze.Abstractions.Attributes.SubjectPathKind.Operation)]
         public string? On { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
+        public bool Outlined { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
         [HomeBlaze.Abstractions.Attributes.SubjectPath(ValueTypes=new System.Type[] {
                 typeof(bool)})]
         public string? Path { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
+        [HomeBlaze.Abstractions.Attributes.TextTemplate]
         public string? Subtitle { get; set; }
         public string? Title { get; }
         public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
@@ -751,6 +768,17 @@ namespace HomeBlaze.Components
         Right = 2,
         Bottom = 3,
     }
+    public sealed class ValueColor
+    {
+        public string? Css { get; }
+        public bool IsDefault { get; }
+        public string? Style { get; }
+        public MudBlazor.Color Theme { get; }
+        public static HomeBlaze.Components.ValueColor Default { get; }
+        public override string ToString() { }
+        public static bool TryParse(string? text, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out HomeBlaze.Components.ValueColor? color) { }
+        public static HomeBlaze.Components.ValueColor op_Implicit(MudBlazor.Color color) { }
+    }
     [HomeBlaze.Abstractions.Attributes.PageLayout]
     [HomeBlaze.Abstractions.Attributes.SubjectIcon("List")]
     [Namotion.Interceptor.Attributes.InterceptorSubject]
@@ -779,7 +807,7 @@ namespace HomeBlaze.Components
     [System.ComponentModel.Category("Dashboard")]
     [System.ComponentModel.Description("Text, colour and icon per value, for value widgets")]
     [System.ComponentModel.DisplayName("Value map")]
-    public class ValueMap : HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    public class ValueMap : HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Services.Display.IValueMap, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
         public ValueMap() { }
         public ValueMap(Namotion.Interceptor.IInterceptorSubjectContext context) { }
@@ -789,9 +817,11 @@ namespace HomeBlaze.Components
         public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
         public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
         public System.Threading.Tasks.Task ApplyConfigurationAsync(System.Threading.CancellationToken cancellationToken = default) { }
-        public HomeBlaze.Components.ValueMapCase? FindCase(string rawText) { }
+        public HomeBlaze.Components.ValueMapCase? FindCase(in HomeBlaze.Services.Display.ValueBinding binding, HomeBlaze.Services.SubjectPathResolver resolver) { }
+        public string? GetError() { }
         protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
         protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        public string? GetText(in HomeBlaze.Services.Display.ValueBinding binding, HomeBlaze.Services.SubjectPathResolver resolver, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone) { }
         protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
         protected void RaisePropertyChanged(string propertyName) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
@@ -804,18 +834,25 @@ namespace HomeBlaze.Components
         public ValueMapCase() { }
         public ValueMapCase(Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.Configuration]
-        public MudBlazor.Color Color { get; set; }
+        public string? Color { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public string? Icon { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
+        [HomeBlaze.Abstractions.Attributes.TextTemplate]
         public string? Text { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string? TextColor { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
         public string? Value { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string? When { get; set; }
         public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
         public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
         public System.Threading.Tasks.Task ApplyConfigurationAsync(System.Threading.CancellationToken cancellationToken = default) { }
+        public HomeBlaze.Components.ValueColor GetColor() { }
         protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
         protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        public HomeBlaze.Components.ValueColor GetTextColor() { }
         protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
         protected void RaisePropertyChanged(string propertyName) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
@@ -823,25 +860,29 @@ namespace HomeBlaze.Components
     public static class ValueReader
     {
         public const string MissingText = "–";
-        public static MudBlazor.Color GetIndicatorColor(HomeBlaze.Components.ValueReading reading, string? map) { }
+        public static HomeBlaze.Components.ValueColor GetIndicatorColor(HomeBlaze.Components.ValueReading reading, string? map) { }
         public static string GetLabel(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? property, string? label, string? path) { }
         public static double? GetProgressPercent(object? value, double minimum, double maximum) { }
         public static HomeBlaze.Components.ValueReading Read(HomeBlaze.Services.SubjectPathResolver resolver, Namotion.Interceptor.IInterceptorSubject widget, string? path, string? map, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone) { }
-        public static HomeBlaze.Components.ValueReading ReadProperty(Namotion.Interceptor.IInterceptorSubject subject, string? propertyName, HomeBlaze.Components.ValueMap? valueMap, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone) { }
-        public static HomeBlaze.Components.ValueReading ReadResolved(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? property, HomeBlaze.Components.ValueMap? valueMap, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone) { }
+        public static HomeBlaze.Components.ValueReading ReadProperty(HomeBlaze.Services.SubjectPathResolver resolver, Namotion.Interceptor.IInterceptorSubject subject, string? propertyName, HomeBlaze.Components.ValueMap? valueMap, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone) { }
+        public static HomeBlaze.Components.ValueReading ReadResolved(HomeBlaze.Services.SubjectPathResolver resolver, Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? property, HomeBlaze.Components.ValueMap? valueMap, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone) { }
         public static object? ReadValue(HomeBlaze.Services.SubjectPathResolver resolver, Namotion.Interceptor.IInterceptorSubject widget, string? path) { }
         public static HomeBlaze.Components.ValueMap? ResolveMap(HomeBlaze.Services.SubjectPathResolver resolver, Namotion.Interceptor.IInterceptorSubject widget, string? map, out string? error) { }
         public static Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? ResolveProperty(HomeBlaze.Services.SubjectPathResolver resolver, Namotion.Interceptor.IInterceptorSubject widget, string? path) { }
     }
     public sealed class ValueReading : System.IEquatable<HomeBlaze.Components.ValueReading>
     {
-        public ValueReading(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? Property, object? Value, string Text, MudBlazor.Color Color, string? Icon, string? MapError) { }
-        public MudBlazor.Color Color { get; init; }
+        public ValueReading(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? Property, object? Value, string Text, HomeBlaze.Components.ValueColor Color, string? Icon, string? MapError) { }
+        public HomeBlaze.Services.Display.ValueBinding Binding { get; }
+        public HomeBlaze.Components.ValueColor Color { get; init; }
+        public bool HasCase { get; init; }
         public string? Icon { get; init; }
         public bool IsMissing { get; }
         public string? MapError { get; init; }
         public Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? Property { get; init; }
+        public Namotion.Interceptor.IInterceptorSubject? Subject { get; init; }
         public string Text { get; init; }
+        public HomeBlaze.Components.ValueColor TextColor { get; init; }
         public object? Value { get; init; }
         public static HomeBlaze.Components.ValueReading Missing { get; }
     }
@@ -857,6 +898,7 @@ namespace HomeBlaze.Components
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public string? Icon { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
+        [HomeBlaze.Abstractions.Attributes.TextTemplate]
         public string? Label { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         [HomeBlaze.Abstractions.Attributes.SubjectPath(typeof(HomeBlaze.Components.ValueMap))]
@@ -888,13 +930,19 @@ namespace HomeBlaze.Components
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public HomeBlaze.Components.ValueTileKind Kind { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
+        [HomeBlaze.Abstractions.Attributes.TextTemplate]
         public string? Label { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         [HomeBlaze.Abstractions.Attributes.SubjectPath(typeof(HomeBlaze.Components.ValueMap))]
         public string? Map { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
+        public bool Outlined { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
         [HomeBlaze.Abstractions.Attributes.SubjectPath]
         public string? Path { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        [HomeBlaze.Abstractions.Attributes.TextTemplate]
+        public string? Subtitle { get; set; }
         public string? Title { get; }
         public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
         public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
@@ -951,6 +999,12 @@ namespace HomeBlaze.Components
         public void Clear() { }
         public void Select(HomeBlaze.Components.SubjectComponent? component) { }
     }
+    public sealed class WidgetText
+    {
+        public WidgetText(string argumentName, HomeBlaze.Services.Display.ExpressionUse use) { }
+        public string? Render(string? text, HomeBlaze.Services.SubjectPathResolver resolver, Namotion.Interceptor.IInterceptorSubject widget, in HomeBlaze.Services.Display.ValueBinding binding, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone, out string? error) { }
+        public string? Render(string? text, HomeBlaze.Services.SubjectPathResolver resolver, Namotion.Interceptor.IInterceptorSubject widget, string? path, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone, out string? error) { }
+    }
     public class _Imports
     {
         public _Imports() { }
@@ -985,7 +1039,7 @@ namespace HomeBlaze.Components.Components
         public System.Threading.Tasks.Task SaveAsync(System.Threading.CancellationToken cancellationToken) { }
     }
     [HomeBlaze.Components.Abstractions.Attributes.SubjectComponent(HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType.Widget, typeof(HomeBlaze.Components.CanvasLayout))]
-    public class CanvasLayoutWidget : Microsoft.AspNetCore.Components.ComponentBase, HomeBlaze.Components.Abstractions.ISubjectComponent, System.IAsyncDisposable
+    public class CanvasLayoutWidget : Microsoft.AspNetCore.Components.ComponentBase, HomeBlaze.Components.Abstractions.ISubjectComponent
     {
         public CanvasLayoutWidget() { }
         [Microsoft.AspNetCore.Components.CascadingParameter(Name="IsEditing")]
@@ -995,11 +1049,7 @@ namespace HomeBlaze.Components.Components
         [Microsoft.AspNetCore.Components.Parameter]
         public Namotion.Interceptor.IInterceptorSubject? Subject { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
-        public System.Threading.Tasks.ValueTask DisposeAsync() { }
         protected override void OnAfterRender(bool firstRender) { }
-        protected override System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender) { }
-        [Microsoft.JSInterop.JSInvokable]
-        public System.Threading.Tasks.Task OnFrameWidthChanged(double width) { }
     }
     [HomeBlaze.Components.Abstractions.Attributes.SubjectComponent(HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType.Edit, typeof(HomeBlaze.Components.CanvasNode?))]
     public class CanvasNodeEditComponent : Microsoft.AspNetCore.Components.ComponentBase, HomeBlaze.Components.Abstractions.ISubjectComponent, HomeBlaze.Components.Abstractions.ISubjectEditComponent, System.IDisposable
@@ -1018,7 +1068,7 @@ namespace HomeBlaze.Components.Components
         protected override void OnInitialized() { }
         public System.Threading.Tasks.Task SaveAsync(System.Threading.CancellationToken cancellationToken) { }
     }
-    [HomeBlaze.Components.Abstractions.Attributes.SubjectComponent(HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType.Widget, typeof(HomeBlaze.Components.Card?))]
+    [HomeBlaze.Components.Abstractions.Attributes.SubjectComponent(HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType.Widget, typeof(HomeBlaze.Components.Card))]
     public class CardWidget : Microsoft.AspNetCore.Components.ComponentBase, HomeBlaze.Components.Abstractions.ISubjectComponent
     {
         public CardWidget() { }
@@ -1194,6 +1244,8 @@ namespace HomeBlaze.Components.Components
         [Microsoft.AspNetCore.Components.Parameter]
         public string? Label { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
+        public bool Outlined { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
         public string? Path { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? Property { get; set; }
@@ -1309,6 +1361,8 @@ namespace HomeBlaze.Components.Components
         [Microsoft.AspNetCore.Components.Parameter]
         public Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? OnProperty { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
+        public bool Outlined { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
         public string? Path { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? Property { get; set; }
@@ -1354,7 +1408,9 @@ namespace HomeBlaze.Components.Components
         [Microsoft.AspNetCore.Components.Parameter]
         public bool? Checked { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
-        public MudBlazor.Color Color { get; set; }
+        public HomeBlaze.Components.ValueColor Color { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? Detail { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public bool Disabled { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
@@ -1366,9 +1422,13 @@ namespace HomeBlaze.Components.Components
         [Microsoft.AspNetCore.Components.Parameter]
         public Microsoft.AspNetCore.Components.EventCallback<Microsoft.AspNetCore.Components.Web.MouseEventArgs> OnClick { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
+        public bool Outlined { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
         public string? Subtitle { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public string? TestId { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public HomeBlaze.Components.ValueColor TextColor { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public string? Tooltip { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]

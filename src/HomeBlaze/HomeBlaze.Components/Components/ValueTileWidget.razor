@@ -14,25 +14,31 @@
     // Read once per render and never kept: its render records the reads, so that it renders again when one changes.
     var path = tile.Path;
     var reading = ValueReader.Read(PathResolver, tile, path, tile.Map, TimeZone);
-    if (reading.MapError is not null)
+    var labelText = _label.Render(tile.Label, PathResolver, tile, reading.Binding, TimeZone, out var labelError);
+    var subtitle = _subtitle.Render(tile.Subtitle, PathResolver, tile, reading.Binding, TimeZone, out var subtitleError);
+    if ((reading.MapError ?? labelError ?? subtitleError) is { } error)
     {
-        <WidgetArgumentError Message="@reading.MapError" />
+        <WidgetArgumentError Message="@error" />
     }
     else
     {
         var icon = MudBlazorIconResolver.ResolveOrNull(reading.Icon ?? tile.Icon);
-        var label = ValueReader.GetLabel(reading.Property, tile.Label, path);
+        var label = ValueReader.GetLabel(reading.Property, labelText, path);
 
         if (tile.Kind == ValueTileKind.Tile)
         {
             // The value is the large line and the label the small one below it, so that a row of tiles reads as numbers.
+            // The subtitle is a third, smaller line below the label and leaves the text of a matched case as the value.
             // The tile is a button only while it can show the history of the property.
             var canShowHistory = _viewer.CanShow(reading.Property, IsEditing);
             <TileView TestId="value-tile"
                       Label="@reading.Text"
                       Subtitle="@label"
+                      Detail="@subtitle"
+                      Outlined="@tile.Outlined"
                       Icon="@icon"
                       Color="@reading.Color"
+                      TextColor="@reading.TextColor"
                       Tooltip="@(canShowHistory ? "Show history" : reading.IsMissing ? path : null)"
                       OnClick="@(canShowHistory ? _showHistoryCallback : default)" />
         }
@@ -47,6 +53,10 @@
 
                     <HistoryLabel Property="@reading.Property" Text="@label" Typo="Typo.caption" />
                 </div>
+                @if (!string.IsNullOrEmpty(subtitle))
+                {
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary" data-testid="value-tile-subtitle">@subtitle</MudText>
+                }
                 <ValueText Reading="@reading" Path="@path" Typo="Typo.h5" />
             </MudPaper>
         }
@@ -54,6 +64,8 @@
 }
 
 @code {
+    private readonly WidgetText _label = new(nameof(ValueTile.Label), ExpressionUse.WidgetText);
+    private readonly WidgetText _subtitle = new(nameof(ValueTile.Subtitle), ExpressionUse.WidgetText);
     private IPropertyHistoryViewer? _viewer;
     private EventCallback<MouseEventArgs> _showHistoryCallback;
 
@@ -79,6 +91,7 @@
 
         var path = tile.Path;
         var property = ValueReader.ResolveProperty(PathResolver, tile, path);
-        return _viewer.TryShowAsync(property, IsEditing, ValueReader.GetLabel(property, tile.Label, path));
+        var label = _label.Render(tile.Label, PathResolver, tile, path, TimeZone, out _);
+        return _viewer.TryShowAsync(property, IsEditing, ValueReader.GetLabel(property, label, path));
     }
 }

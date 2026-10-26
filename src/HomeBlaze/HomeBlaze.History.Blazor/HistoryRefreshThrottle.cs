@@ -1,3 +1,5 @@
+using HomeBlaze.History.Abstractions;
+
 namespace HomeBlaze.History.Blazor;
 
 /// <summary>
@@ -34,12 +36,13 @@ internal sealed class HistoryRefreshThrottle : IDisposable
     }
 
     /// <summary>
-    /// Gets the window of a chart: the larger of its refresh interval and its bucket, from <see cref="MinimumInterval"/>
-    /// to <see cref="MaximumInterval"/>. A raw query has no bucket.
+    /// Gets the window of a chart: the larger of its refresh interval and the size of its fixed bucket, from
+    /// <see cref="MinimumInterval"/> to <see cref="MaximumInterval"/>. A raw query has no bucket, and a calendar bucket
+    /// does not lengthen the window, so the newest period, which grows until it ends, follows the refresh interval.
     /// </summary>
-    public static TimeSpan GetWindow(TimeSpan refreshInterval, TimeSpan? bucket)
+    public static TimeSpan GetWindow(TimeSpan refreshInterval, HistoryBucket? bucket)
     {
-        var window = bucket is { } size && size > refreshInterval ? size : refreshInterval;
+        var window = bucket is { FixedSize: { } size } && size > refreshInterval ? size : refreshInterval;
         return window < MinimumInterval ? MinimumInterval : window > MaximumInterval ? MaximumInterval : window;
     }
 

@@ -1,5 +1,7 @@
+using System.Collections.Immutable;
 using System.Numerics;
 using System.Reflection;
+using System.Text.Json;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
@@ -480,6 +482,27 @@ public class SubjectPathSelectionTests
 
         // Assert
         Assert.False(canSelect);
+    }
+
+    [Fact]
+    public void WhenAPropertyOrAnAttributeHoldsMetadata_ThenItCannotBeSelected()
+    {
+        // Arrange
+        var target = CreateTarget();
+        var registered = target.TryGetRegisteredSubject()!;
+        var metadata = ImmutableDictionary<string, JsonElement>.Empty.Add("comment", JsonElement.Parse("\"Main pump\""));
+        var subjectMetadata = registered.AddProperty(KnownAttributes.Metadata, metadata.GetType(), _ => metadata, null);
+        var propertyMetadata = GetProperty(target, nameof(PathTargetSubject.Speed)).AddAttribute(
+            KnownAttributes.Metadata, metadata.GetType(), _ => metadata, null);
+        var anything = new SubjectPathAttribute { Kind = SubjectPathKind.Property | SubjectPathKind.Attribute };
+
+        // Act
+        var canSelectSubjectMetadata = SubjectPathSelection.CanSelectProperty(subjectMetadata, anything);
+        var canSelectPropertyMetadata = SubjectPathSelection.CanSelectProperty(propertyMetadata, anything);
+
+        // Assert
+        Assert.False(canSelectSubjectMetadata);
+        Assert.False(canSelectPropertyMetadata);
     }
 
     [Fact]

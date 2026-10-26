@@ -2,6 +2,7 @@ using System.Numerics;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Services;
+using HomeBlaze.Services.Metadata;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry.Abstractions;
 
@@ -15,15 +16,21 @@ internal static class SubjectPathSelection
     /// <summary>
     /// Gets whether the path of the property can be selected. Without a <see cref="SubjectPathAttribute.SubjectType"/>
     /// the property holds no subjects and matches <see cref="SubjectPathAttribute.Kind"/>,
-    /// <see cref="SubjectPathAttribute.ValueTypes"/> and <see cref="SubjectPathAttribute.IsWritable"/>; an attribute that
-    /// holds HomeBlaze metadata never matches. With a type the property is a reference that currently leads to an
-    /// instance of the type.
+    /// <see cref="SubjectPathAttribute.ValueTypes"/> and <see cref="SubjectPathAttribute.IsWritable"/>; the State and
+    /// Configuration attributes and the metadata of a subject or a property never match. With a type the property is a
+    /// reference that currently leads to an instance of the type.
     /// </summary>
     public static bool CanSelectProperty(RegisteredSubjectProperty property, SubjectPathAttribute path)
     {
         if (path.SubjectType is { } subjectType)
         {
             return CanSelectReference(property, subjectType);
+        }
+
+        // Metadata describes a subject or a property for people and agents, and is no value to show or control.
+        if (property.IsMetadata())
+        {
+            return false;
         }
 
         // Checked before the method metadata, whose lookup evaluates getters for interface- and object-typed properties.

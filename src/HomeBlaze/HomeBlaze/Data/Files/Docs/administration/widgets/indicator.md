@@ -1,7 +1,6 @@
 ---
 title: Indicator
 navTitle: Indicator
-position: 33
 ---
 
 # Indicator
@@ -12,7 +11,7 @@ Shows a state as a colored chip, or as an icon alone. Type name: `HomeBlaze.Comp
 
 | Argument | Kind of value | Default | Meaning |
 |----------|---------------|---------|---------|
-| `Path` | Path (Value) | None | The [path](basics.md#paths) of the property whose value the indicator shows |
+| `Path` | Path (Value) | None | The [path](basics.md#paths) of the property whose value the indicator shows, or with a `Map` of a subject whose states the cases read, see [ValueMap](value-map.md#conditions) |
 | `Map` | Name or path of a `ValueMap` | None | The map that gives the indicator its text, color and icon, see [ValueMap](value-map.md) |
 | `Icon` | Text | None | The [icon](basics.md#icons) |
 | `Kind` | `Chip` or `Icon` | `Chip` | `Chip` is a chip with the icon and the text. `Icon` is the icon alone, with the text as its tooltip |
@@ -77,7 +76,7 @@ The pump runs at {{ ../Pump/CurrentSpeed }} RPM.
 
 ## Behavior and Limits
 
-- **Text, color and icon**: They come from the matching case of the map, see [ValueMap](value-map.md). `Icon` is the icon that stays when no case gives one.
+- **Text, color and icon**: They come from the matching case of the map, see [ValueMap](value-map.md). `Icon` is the icon that stays when no case gives one. A [CSS color](value-map.md#behavior-and-limits) colors the icon, or fills the chip with a text color that stands out from it. The `TextColor` of a case colors the text and the icon of the chip and changes nothing on the icon form, see [Text colors](value-map.md#behavior-and-limits).
 - **Without a map**: A boolean that is true has the color `Primary`, and every other value has `Default`. With a map the color comes from the case alone.
 - **No icon**: A chip without an icon shows its text only. An indicator of the kind `Icon` without an icon shows a plain circle.
 - **A missing value**: The chip shows a dash, see [Missing Values](basics.md#missing-values). The icon form shows its icon in the default color, with the path as tooltip. A chip with a value has no tooltip.

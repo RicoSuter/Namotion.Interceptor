@@ -16,7 +16,7 @@ internal sealed class TestBridge : IAsyncDisposable
     public TestBridge(FakeNukiBridge? fake = null)
     {
         Fake = fake ?? new FakeNukiBridge();
-        Bridge = new NukiBridge(Fake, NullLogger<NukiBridge>.Instance)
+        Bridge = new NukiBridge(Fake.CreateClient, NullLogger<NukiBridge>.Instance)
         {
             HostAddress = "192.168.1.50",
             Token = "123456",
