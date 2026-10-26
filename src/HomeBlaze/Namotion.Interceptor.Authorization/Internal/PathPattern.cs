@@ -18,7 +18,7 @@ internal sealed class PathPattern
         _segments = segments;
     }
 
-    /// <exception cref="AuthorizationException">The pattern does not start with the separator, is malformed or has a segment with leading or trailing whitespace.</exception>
+    /// <exception cref="AuthorizationException">The pattern does not start with the separator, is malformed, has a segment with leading or trailing whitespace, or matches no member because it has no segment or its last segment has an index.</exception>
     public static PathPattern Parse(string pattern, PathProviderBase pathProvider, string roleName)
     {
         var separator = pathProvider.PathSeparator;
@@ -44,7 +44,22 @@ internal sealed class PathPattern
             segments[i] = new Segment(name, index, IsAnySegments: name == AnySegments && index is null);
         }
 
+        ThrowIfMatchesNoMember(segments, pattern, separator, roleName);
         return new PathPattern(segments);
+    }
+
+    // A member path ends in a member, which has no index, so such a pattern would match nothing; a deny that silently
+    // matches nothing must not compile.
+    private static void ThrowIfMatchesNoMember(Segment[] segments, string pattern, char separator, string roleName)
+    {
+        if (segments.Length > 0 && segments[^1].Index is null)
+        {
+            return;
+        }
+
+        var prefix = segments.Length == 0 ? string.Empty : pattern;
+        throw new AuthorizationException(
+            $"Path pattern '{pattern}' of role '{roleName}' matches no member; use '{prefix}{separator}**' for the subject and everything below it, or '{prefix}{separator}*' for its members.");
     }
 
     private static bool HasOuterWhitespace(string text)
@@ -100,10 +115,7 @@ internal sealed class PathPattern
             => MatchesExplicit(link) || (link.BareKey is not null && Index is null && Glob.IsMatch(Name, link.BareKey));
 
         private bool MatchesExplicit(in PathLink link)
-            => (MatchesName(link.Segment) || MatchesName(link.AttributeSegment)) && MatchesIndex(link.Index);
-
-        private bool MatchesName(string? segment)
-            => segment is not null && Glob.IsMatch(Name, segment);
+            => link.Segment is not null && Glob.IsMatch(Name, link.Segment) && MatchesIndex(link.Index);
 
         private bool MatchesIndex(string? index)
             => Index is null || (index is not null && Glob.IsMatch(Index, index));

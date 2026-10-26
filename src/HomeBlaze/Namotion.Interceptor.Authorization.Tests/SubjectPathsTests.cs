@@ -382,7 +382,7 @@ public class SubjectPathsTests
     }
 
     [Fact]
-    public void WhenLinkIsAnAttribute_ThenItsSegmentMatchesTheRegistryAndItsAttributeSegmentIsOnlyForPatterns()
+    public void WhenLinkIsASubjectHoldingAttribute_ThenItMatchesTheRegistry()
     {
         // Arrange
         var home = TestGraph.Create();
@@ -392,8 +392,7 @@ public class SubjectPathsTests
 
         // Act & Assert
         AssertLinksMatchRegistry(home, probe, SlashPathProvider.Instance,
-            [[new PathLink("Rooms", "Kitchen", null), new PathLink("Sensor", null, null), new PathLink("Probe", null, null, "Temperature@Probe")]],
-            unofferedSpellings: ["Rooms[Kitchen]/Sensor/Temperature@Probe"]);
+            [[new PathLink("Rooms", "Kitchen", null), new PathLink("Sensor", null, null), new PathLink("Probe", null, null)]]);
     }
 
     private static void AssertLinksMatchRegistry(

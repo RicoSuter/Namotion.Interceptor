@@ -241,28 +241,26 @@ internal static class SubjectPaths
             return links;
         }
 
-        // These link rules mirror the registry's path reader; SubjectPathsTests cross-checks them against it. The
-        // attribute segment of a subject-holding attribute is the one spelling the reader does not resolve.
+        // These link rules mirror the registry's path reader; SubjectPathsTests cross-checks them against it.
         private PathLink GetLink(RegisteredSubjectProperty property, object? index)
         {
             var ownSegment = MemberSegments.GetSegment(_pathProvider, property);
-            var attributeSegment = MemberSegments.TryGetAttributeSegment(_pathProvider, property);
             if (index is null)
             {
-                return new PathLink(ownSegment, null, null, attributeSegment);
+                return new PathLink(ownSegment, null, null);
             }
 
             var text = PathExtensions.FormatPathIndex(index);
             if (!InlinePathsAttribute.IsInlinePathsProperty(property.Subject.GetType(), property.Name))
             {
-                return new PathLink(ownSegment, text, null, attributeSegment);
+                return new PathLink(ownSegment, text, null);
             }
 
             var bareKey = IsReadBare(property, text, ownSegment) ? text : null;
 
             // The explicit form only reads back while the own segment still resolves to this property.
             var segment = ResolvesTo(property, ownSegment) ? ownSegment : null;
-            return new PathLink(segment, text, bareKey, attributeSegment);
+            return new PathLink(segment, text, bareKey);
         }
 
         /// <summary>The reader takes the text as this key alone when it is one non-empty name that resolves to the property and is not its own segment.</summary>

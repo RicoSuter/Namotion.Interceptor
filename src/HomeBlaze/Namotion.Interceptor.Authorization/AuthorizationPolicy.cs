@@ -71,7 +71,8 @@ public sealed class AuthorizationPolicy
     /// A role is null, has no name, is defined more than once or uses <see cref="SystemRoleName"/>.
     /// A role or include name is unknown or empty, includes form a cycle, or includes are nested more than 64 levels deep.
     /// A rule is null, has no actions, names an unknown action or has an empty selector value.
-    /// A path pattern is malformed, does not start with the provider's separator or has a segment with leading or trailing whitespace.
+    /// A path pattern is malformed, does not start with the provider's separator, has a segment with leading or trailing whitespace,
+    /// or matches no member because it is the separator alone or its last segment has an index.
     /// A known action has no name, or there are more than 64 known actions.
     /// </exception>
     public static AuthorizationPolicy Compile(

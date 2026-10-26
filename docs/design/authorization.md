@@ -70,11 +70,11 @@ An earlier version matched patterns against the paths of subjects, and a pattern
 
 The `Members` selector stays: it matches a member's name wherever the member is, which a path pattern spells as `/**/Name`, and combines with types and tags without naming a location.
 
-A member's segment is the provider's segment for the property, or its `BrowseName` when the provider gives none. The fallback matters for denies: a member the provider leaves out of paths still has a name a rule can match. An attribute's segment is the segment of the property it belongs to, `@` and the attribute's name, recursively, so `Volume@Unit` and `Volume@Unit@Source`. One segment per member, `@` chain included, means `*` matches attributes of any level and `Volume@*` every attribute of `Volume`. The registry's own paths spell an attribute differently: its writer and reader use the attribute's segment as the provider writes it, the attribute's name alone by default (`/Devices/Sonos/Unit`), and do not resolve the `@` form. A pattern therefore matches an attribute in both spellings, the `@` form, which says which property the attribute belongs to and cannot collide with a property of the same name, and the registry's spelling, which is how a request addresses the attribute. Matching both keeps a deny written in either spelling from missing the attribute.
+A member's segment is the provider's segment for the property, or its `BrowseName` when the provider gives none. The fallback matters for denies: a member the provider leaves out of paths still has a name a rule can match. An attribute's segment, and the link through an attribute that holds subjects, come from the same place, so attribute paths follow the registry's path syntax rather than one of the library's own. Today the registry's writer and reader spell an attribute by its name alone unless the provider maps it (`/Devices/Sonos/Unit`, and `/Devices/Sonos/Probe/IsOn` below a subject-holding attribute), so attributes of the same name on different properties of one subject currently share a path. The registry's syntax is being changed separately to `Property@Attribute`, recursively; the member segment and `SubjectPaths` then follow it without a change in this library, and only the tests that spell today's form change.
 
-Patterns are parsed with the parser of the `PathProviderBase` given to `Compile`, the provider an application's tools address the graph with, so a segment means in a rule what it means in a request. A pattern segment without an index matches a path segment with or without one, so `/Line/Machines/**` covers every machine. A member has no index, so a pattern whose last segment has an index matches no member. The full table is in the README under [Path patterns](../../src/HomeBlaze/Namotion.Interceptor.Authorization/README.md#path-patterns).
+Patterns are parsed with the parser of the `PathProviderBase` given to `Compile`, the provider an application's tools address the graph with, so a segment means in a rule what it means in a request. A pattern segment without an index matches a path segment with or without one, so `/Line/Machines/**` covers every machine. A member has no index, so a pattern whose last segment has an index, or the separator alone, could match no member. `Compile` rejects both and names the fix (`/Rooms[Kitchen]/**` or `/Rooms[Kitchen]/*`): a deny that silently matches nothing would be the most dangerous leftover of the prefix semantics. The full table is in the README under [Path patterns](../../src/HomeBlaze/Namotion.Interceptor.Authorization/README.md#path-patterns).
 
-A pattern names absolute paths, and every subject without parents is a root whose path is empty, so the members of a root have one-segment paths. `/**` matches every member that has a path, and `/` alone matches none.
+A pattern names absolute paths, and every subject without parents is a root whose path is empty, so the members of a root have one-segment paths. `/**` matches every member that has a path, `/*` every member of a root.
 
 ### Every path of a subject
 
@@ -87,7 +87,7 @@ A subject can have several parents, for example a light held both by its room an
 
 ### Links carry every spelling
 
-A path is a list of `PathLink`s from the root down to the property holding the subject. A link holds the property's segment, the index text and, for a key of an `[InlinePaths]` dictionary, the bare key when the registry's path reader resolves it without the property's segment. So `/Security/Roles[Reader]` and `/Security/Reader` name the same subject, and a pattern written in either spelling matches its members. A pattern segment with an index never matches the bare spelling, since the bare spelling is a name only. A link through an attribute that holds subjects also carries the attribute's `@` segment, so the members below match in both of the attribute's spellings; that is the one spelling the registry's reader does not resolve, and the cross-check tests confirm it does not.
+A path is a list of `PathLink`s from the root down to the property holding the subject. A link holds the property's segment, the index text and, for a key of an `[InlinePaths]` dictionary, the bare key when the registry's path reader resolves it without the property's segment. So `/Security/Roles[Reader]` and `/Security/Reader` name the same subject, and a pattern written in either spelling matches its members. A pattern segment with an index never matches the bare spelling, since the bare spelling is a name only.
 
 The rules for which spellings a key has follow the registry's reader: the bare key is offered when it is one non-empty name without the separator or `[`, differs from the inline property's own segment and resolves to the inline property, so it is not shadowed by another property of the same name. The explicit form is offered while the property's own segment still resolves to it. A key that resolves in neither spelling makes the path unwritable, which counts as an incomplete path set.
 
@@ -97,7 +97,7 @@ These rules mirror the registry inside this library, built only on the registry'
 
 `PathPattern.Matches` takes the links of a subject's path and the member as one more link, so no member path string is built. It is the classic glob over segments: it walks the pattern and the member path together, a `**` first matches zero segments, and on a mismatch it backtracks only to the last `**` it passed, which then takes one more segment. That suffices because `**` matches any number of segments and every other pattern segment exactly one: once a later `**` has matched, letting an earlier one consume more segments can only leave less path for the rest of the pattern. The match succeeds when the whole member path is consumed and only `**` segments remain in the pattern. The matcher has no recursion and no allocation, and its worst case is the pattern length times the path length. Segment globs use the same single-backtrack technique over characters (`Glob`).
 
-The member's link, its segment and for an attribute its `@` segment, is computed once per question and only when a rule with paths gets that far. For a property it is a string the provider already holds; for an attribute the `@` segment is built, one string per question.
+The member's link is computed once per question and only when a rule with paths gets that far; its segment is a string the provider already holds.
 
 ### Caps and failing closed
 
@@ -129,7 +129,7 @@ Visibility uses reachability through any parent rather than the first parent, fo
 |---|---|---|
 | All roles given | null, no name, a name defined twice, the reserved name `System` | Names must resolve unambiguously before any closure can be computed, and a `System` role would be indistinguishable from the system rules in `Explain`. |
 | The principal's closure | unknown or empty role names, cycles of includes, includes nested more than 64 levels | Only these roles take part; a broken role outside the closure must not lock this principal out. |
-| Rules of the closure and the system rules | null rules, rules without actions, unknown actions, empty selector values, malformed patterns | Same scoping: only rules the policy evaluates are parsed. |
+| Rules of the closure and the system rules | null rules, rules without actions, unknown actions, empty selector values, malformed patterns, patterns that match no member | Same scoping: only rules the policy evaluates are parsed. |
 | Known actions | an action without a name, more than 64 actions | The bit assignment depends on them. |
 
 A principal whose roles fail to compile gets `AuthorizationPolicy.DenyAll`, never a policy built from the parts that compiled. Dropping a broken rule could drop a deny, and dropping a broken role could drop its denies, either of which widens permissions. `DenyAll` knows no actions and answers no to any action, including application actions, so a caller does not have to special-case it.
@@ -145,7 +145,7 @@ A policy is built for many cheap questions. The common question, a member decide
 The allocations that remain each have a reason:
 
 - **Path rules.** When a rule with paths survives its other selectors, the subject's paths are enumerated: a list of paths, the search frames and one `PathLink` array per path. The paths are memoized for the rest of the call, and `CanRead(subject)` carries them from member to member, so a subject's paths are enumerated once per question about it and once per link on the way to a root whose evaluation reaches a path rule.
-- **Attribute names.** A member glob or a path pattern matched against an attribute builds its `Property@Attribute` name or segment, and enumerating a path through a subject-holding attribute builds that attribute's segment.
+- **Attribute names.** A member glob matched against an attribute builds its `Property@Attribute` name.
 - **Types.** The first type rule evaluated for a runtime type caches that type's simple and full names, its base types and its interfaces.
 - **Visibility.** `CanRead(subject)` allocates the visited set when a subject on the way has several parents or the chain is deeper than 32 levels.
 

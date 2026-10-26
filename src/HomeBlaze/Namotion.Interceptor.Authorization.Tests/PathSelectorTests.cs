@@ -119,36 +119,48 @@ public class PathSelectorTests
     }
 
     [Fact]
-    public void WhenPathIsTheSeparatorAlone_ThenNoMemberMatches()
+    public void WhenPathIsTheSeparatorAndAStar_ThenItMatchesTheRootsMembersOrEverything()
     {
         // Arrange
         var home = Create();
-        var root = Compile(Role("Reader", allow: [Rule(Read, paths: ["/"])]));
         var rootMembers = Compile(Role("Reader", allow: [Rule(Read, paths: ["/*"])]));
         var everything = Compile(Role("Reader", allow: [Rule(Read, paths: ["/**"])]));
 
         // Act & Assert
-        Assert.False(root.CanRead(Member(home, nameof(Home.Rooms))));
-        Assert.False(root.CanRead(Member(home.Wifi!, nameof(Wifi.Ssid))));
         Assert.True(rootMembers.CanRead(Member(home, nameof(Home.Rooms))));
         Assert.False(rootMembers.CanRead(Member(home.Wifi!, nameof(Wifi.Ssid))));
         Assert.True(everything.CanRead(Member(home, nameof(Home.Rooms))));
         Assert.True(everything.CanRead(Member(home.Wifi!, nameof(Wifi.Ssid))));
     }
 
+    [Theory]
+    [InlineData("/")]
+    [InlineData("/Rooms[Bedroom]")]
+    public void WhenADenyPatternCanMatchNoMember_ThenCompileThrows(string deniedPath)
+    {
+        // Act
+        var exception = Assert.Throws<AuthorizationException>(
+            () => Compile(Role("Operator", allow: [Rule(Write)], deny: [Rule(Write, paths: [deniedPath])])));
+
+        // Assert
+        Assert.Contains("Operator", exception.Message);
+        Assert.Contains("matches no member", exception.Message);
+    }
+
     [Fact]
-    public void WhenDenyNamesASubjectPathAlone_ThenItsMembersAreNotDenied()
+    public void WhenDenyNamesTheHoldingPropertyAlone_ThenTheMembersBelowAreNotDenied()
     {
         // Arrange
         var home = Create();
         var lamp = home.Rooms["Bedroom"].Lights["Lamp"];
-        var subjectOnly = Compile(Role("Operator", allow: [Rule(Write)], deny: [Rule(Write, paths: ["/Rooms[Bedroom]", "/Wifi"])]));
+        var holdingProperty = Compile(Role("Operator", allow: [Rule(Write)], deny: [Rule(Write, paths: ["/Rooms[Bedroom]/Lights", "/Wifi"])]));
         var branch = Compile(Role("Operator", allow: [Rule(Write)], deny: [Rule(Write, paths: ["/Rooms[Bedroom]/**"])]));
 
         // Act & Assert
-        Assert.True(subjectOnly.CanWrite(Member(lamp, nameof(Light.IsOn))));
-        Assert.True(subjectOnly.CanWrite(Member(home.Wifi!, nameof(Wifi.Ssid))));
-        Assert.False(subjectOnly.CanWrite(Member(home, nameof(Home.Wifi))));
+        Assert.False(holdingProperty.CanWrite(Member(home.Rooms["Bedroom"], nameof(Room.Lights))));
+        Assert.True(holdingProperty.CanWrite(Member(lamp, nameof(Light.IsOn))));
+        Assert.False(holdingProperty.CanWrite(Member(home, nameof(Home.Wifi))));
+        Assert.True(holdingProperty.CanWrite(Member(home.Wifi!, nameof(Wifi.Ssid))));
         Assert.False(branch.CanWrite(Member(lamp, nameof(Light.IsOn))));
         Assert.False(branch.CanWrite(Member(home.Rooms["Bedroom"], nameof(Room.Lights))));
         Assert.True(branch.CanWrite(Member(home.Rooms["Kitchen"].Lights["Ceiling"], nameof(Light.IsOn))));
@@ -263,7 +275,7 @@ public class PathSelectorTests
     }
 
     [Fact]
-    public void WhenTheProviderRenamesAProperty_ThenItsMemberAndAttributesAreMatchedByTheProvidersSegment()
+    public void WhenTheProviderRenamesAProperty_ThenItsMemberIsMatchedByTheProvidersSegment()
     {
         // Arrange
         var home = Create();
@@ -274,9 +286,11 @@ public class PathSelectorTests
 
         // Act & Assert
         Assert.True(policy.CanRead(Member(sensor, nameof(Sensor.Temperature))));
-        Assert.True(policy.CanRead(Attribute(sensor, nameof(Sensor.Temperature), "Unit")));
+        Assert.False(policy.CanRead(Attribute(sensor, nameof(Sensor.Temperature), "Unit")));
         Assert.False(policy.CanRead(Member(home.Rooms["Kitchen"], nameof(Room.Sensor))));
     }
+
+    // Attribute paths follow the registry's path syntax, which today spells an attribute by its name alone.
 
     [Fact]
     public void WhenPathNamesAnAttribute_ThenOnlyThatAttributeMatches()
@@ -285,7 +299,7 @@ public class PathSelectorTests
         var home = Create();
         var sensor = home.Rooms["Kitchen"].Sensor!;
         var unit = Attribute(sensor, nameof(Sensor.Temperature), "Unit");
-        var policy = Compile(Role("Reader", allow: [Rule(Read, paths: ["/Rooms[Kitchen]/Sensor/Temperature@Unit"])]));
+        var policy = Compile(Role("Reader", allow: [Rule(Read, paths: ["/Rooms[Kitchen]/Sensor/Unit"])]));
 
         // Act & Assert
         Assert.True(policy.CanRead(unit));
@@ -300,26 +314,11 @@ public class PathSelectorTests
         var home = Create();
         var sensor = home.Rooms["Kitchen"].Sensor!;
         var unit = Attribute(sensor, nameof(Sensor.Temperature), "Unit");
-        var policy = Compile(Role("Reader", allow: [Rule(Read, paths: ["/Rooms[Kitchen]/Sensor/Temperature@Unit@Source"])]));
+        var policy = Compile(Role("Reader", allow: [Rule(Read, paths: ["/Rooms[Kitchen]/Sensor/Source"])]));
 
         // Act & Assert
         Assert.True(policy.CanRead(unit.TryGetAttribute("Source")!));
         Assert.False(policy.CanRead(unit));
-        Assert.False(policy.CanRead(Member(sensor, nameof(Sensor.Temperature))));
-    }
-
-    [Fact]
-    public void WhenPathGlobsWithinAnAttributeSegment_ThenEveryAttributeOfThePropertyMatchesAtAnyLevel()
-    {
-        // Arrange
-        var home = Create();
-        var sensor = home.Rooms["Kitchen"].Sensor!;
-        var unit = Attribute(sensor, nameof(Sensor.Temperature), "Unit");
-        var policy = Compile(Role("Reader", allow: [Rule(Read, paths: ["/Rooms[Kitchen]/Sensor/Temperature@*"])]));
-
-        // Act & Assert
-        Assert.True(policy.CanRead(unit));
-        Assert.True(policy.CanRead(unit.TryGetAttribute("Source")!));
         Assert.False(policy.CanRead(Member(sensor, nameof(Sensor.Temperature))));
     }
 
@@ -346,7 +345,7 @@ public class PathSelectorTests
         var sensor = home.Rooms["Kitchen"].Sensor!;
         var probe = new Light();
         sensor.Temperature_Probe = probe;
-        var policy = Compile(Role("Reader", allow: [Rule(Read, paths: ["/Rooms[Kitchen]/Sensor/Temperature@Probe/IsOn"])]));
+        var policy = Compile(Role("Reader", allow: [Rule(Read, paths: ["/Rooms[Kitchen]/Sensor/Probe/IsOn"])]));
 
         // Act & Assert
         Assert.True(policy.CanRead(Member(probe, nameof(Light.IsOn))));
@@ -354,38 +353,21 @@ public class PathSelectorTests
         Assert.False(policy.CanRead(Attribute(sensor, nameof(Sensor.Temperature), "Probe")));
     }
 
-    [Theory]
-    [InlineData("/Rooms[Kitchen]/Sensor/Temperature@Probe/**")]
-    [InlineData("/Rooms[Kitchen]/Sensor/Probe/**")]
-    public void WhenPathCoversAnAttributeWithADoubleStar_ThenTheAttributeAndEveryMemberBelowItMatchInEitherSpelling(string deniedPath)
+    [Fact]
+    public void WhenPathCoversAnAttributeWithADoubleStar_ThenTheAttributeAndEveryMemberBelowItMatch()
     {
         // Arrange
         var home = Create();
         var sensor = home.Rooms["Kitchen"].Sensor!;
         var probe = new Light();
         sensor.Temperature_Probe = probe;
-        var policy = Compile(Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, paths: [deniedPath])]));
+        var policy = Compile(Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, paths: ["/Rooms[Kitchen]/Sensor/Probe/**"])]));
 
         // Act & Assert
         Assert.False(policy.CanRead(Attribute(sensor, nameof(Sensor.Temperature), "Probe")));
         Assert.False(policy.CanRead(Member(probe, nameof(Light.IsOn))));
         Assert.True(policy.CanRead(Member(sensor, nameof(Sensor.Temperature))));
         Assert.True(policy.CanRead(Attribute(sensor, nameof(Sensor.Temperature), "Unit")));
-    }
-
-    [Fact]
-    public void WhenPathUsesTheRegistrySpellingOfAnAttribute_ThenTheAttributeMatches()
-    {
-        // Arrange
-        var home = Create();
-        var sensor = home.Rooms["Kitchen"].Sensor!;
-        var unit = Attribute(sensor, nameof(Sensor.Temperature), "Unit");
-        var policy = Compile(Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, paths: ["/Rooms[Kitchen]/Sensor/Unit", "/Rooms[Kitchen]/Sensor/Source"])]));
-
-        // Act & Assert
-        Assert.False(policy.CanRead(unit));
-        Assert.False(policy.CanRead(unit.TryGetAttribute("Source")!));
-        Assert.True(policy.CanRead(Member(sensor, nameof(Sensor.Temperature))));
     }
 
     // Adds a room with a Door light to Home.Areas under the key and returns the light.

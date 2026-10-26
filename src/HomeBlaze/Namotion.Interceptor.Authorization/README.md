@@ -46,25 +46,22 @@ A pattern matches **member paths**, and only whole ones, like a file glob. A mem
 A member's segment is:
 
 - For a property, its segment as the provider writes it (`TryGetPropertySegment`), or its `BrowseName` when the provider gives none, so a member the provider leaves out of paths still has a name a rule can match.
-- For an attribute, the segment of the property it belongs to, `@` and the attribute's name: `Temperature@Unit`, and for an attribute of that attribute `Temperature@Unit@Source`. Since the `@` belongs to the segment, `*` matches an attribute of any level as one segment and `Temperature@*` matches every attribute of `Temperature`. An attribute also matches in the spelling the registry's paths use for it, its own segment as the provider writes it, which is the attribute's name alone (`Unit`) unless the provider maps it.
-
-An attribute that holds subjects is a link of their paths in both spellings, so the members of a subject held by the attribute `Probe` of `Temperature` are matched as `/Home/Kitchen/Temperature@Probe/IsOn` and as `/Home/Kitchen/Probe/IsOn`.
+- For an attribute, the same, so attribute paths follow the registry's path syntax. Today the registry spells an attribute by its name alone, unless the provider maps it: the attribute `Unit` of `Temperature` is `/Home/Kitchen/Unit`, an attribute `Source` of that attribute `/Home/Kitchen/Source`, and the members of a subject held by an attribute `Probe` are `/Home/Kitchen/Probe/IsOn`. Attributes of the same name on different properties of one subject therefore currently share a path. The registry's syntax is being changed separately to `Property@Attribute`, and patterns follow it without a change here.
 
 | Pattern (separator `/`) | Matches |
 |---|---|
 | `/Home/Kitchen` | the member `Kitchen` of `/Home`, the property holding the kitchen; none of the kitchen's members |
 | `/Home/Kitchen/Temperature` | that one member |
-| `/Home/Kitchen/*` | every member of the kitchen, attributes included, but not the members of the subjects it holds; `*` alone is exactly one segment |
+| `/Home/Kitchen/*` | every member of the kitchen, attributes of every level included, but not the members of the subjects it holds; `*` alone is exactly one segment |
 | `/Home/Kitchen/**` | every member of the kitchen and of every subject below it, and `Kitchen` itself, since `**` is zero or more segments |
 | `/Home/**/Temperature` | every member `Temperature` at any depth under `/Home` |
 | `/Home/Kitchen/Light*` | `LightA`, `Lights`, ...; `*` inside a segment is a glob over the segment text |
-| `/Home/Kitchen/Temperature@*` | every attribute of `Temperature`, attributes of attributes included |
 | `/Line/Machines[*]/**` | every member of every item of the collection or dictionary and below; the glob covers the index text, so `Machines[CNC*]` works |
 | `/Line/Machines/**` | the same, and the member `Machines` itself: a pattern segment without an index matches a path segment with or without one |
 | `/*` | every member of the root |
 | `/**` | every member that has a path; unlike no `Paths`, it does not match a member of a subject none of whose paths can be listed, see [Subjects with several paths](#subjects-with-several-paths) |
 
-A member has no index and a member path has at least one segment, so a pattern whose last segment has an index, such as `/Line/Machines[CNC1]`, and the separator alone, `/`, match no member. A rule for a branch ends in `/**`: a deny on `/Line/Machines[CNC1]/**` covers the machine's members and everything below.
+A member has no index and a member path has at least one segment, so a pattern whose last segment has an index, such as `/Line/Machines[CNC1]`, and the separator alone, `/`, would match no member; they fail compilation, so that a deny cannot silently match nothing. A rule for a branch ends in `/**`: a deny on `/Line/Machines[CNC1]/**` covers the machine's members and everything below, and `/Line/Machines[CNC1]/*` only the machine's own members.
 
 - A pattern matches the spellings the path provider writes plus the bare key of an `[InlinePaths]` entry, so `/Security/FullReader/Name` and `/Security/Roles[FullReader]/Name` both match and `/Security/Roles/**` covers every key. A provider that also resolves other spellings, such as names in another case, is matched only in the spelling it writes. A key the reader only resolves in one spelling, because another property's segment shadows the other, is matched in that spelling.
 - Segment text is taken as written, and a segment name or index with leading or trailing whitespace, such as `/Home/ Kitchen`, fails compilation; a quoted key may contain inner spaces, as in `/Rooms['Living Room']/*`.
@@ -117,7 +114,7 @@ policy.CanRead(registeredSubject);   // visible at all
 
 - Over all roles given: a role that is null, has no name, has a name defined more than once, or uses the reserved name `System` (`AuthorizationPolicy.SystemRoleName`).
 - For the principal's roles and every role they include: an unknown or empty role name (an unknown include is reported with the including role), a cycle of includes, or includes nested more than 64 levels deep.
-- For the rules of those roles and the system deny rules: a rule that is null, has no actions, names an unknown action or has an empty selector value, or a path pattern that is malformed, does not start with the provider's separator or has a segment with leading or trailing whitespace.
+- For the rules of those roles and the system deny rules: a rule that is null, has no actions, names an unknown action or has an empty selector value, or a path pattern that is malformed, does not start with the provider's separator, has a segment with leading or trailing whitespace, or matches no member because it is the separator alone or its last segment has an index.
 - For the known actions: one without a name, or more than 64 in total.
 
 Give a principal whose roles fail to compile `AuthorizationPolicy.DenyAll`, which denies every action, known or not; a policy must never partially apply. `policy.Roles` lists the principal's roles and every role they include, included roles first.
@@ -130,7 +127,7 @@ A compiled policy is immutable and safe to share across threads. Selectors are c
 
 A write checked against deny rules with paths is expensive although no deny rule matches: the subject's paths have to be enumerated to prove that none does. Measured numbers are in the [design](../../../docs/design/authorization.md#performance). A deny rule that has only `Paths` is evaluated against every member of every subject that gets that far, so give a path deny rule another selector (a type, a member glob or a tag) when you can, and put path rules where they are needed rather than in a reusable base role.
 
-Apart from paths, evaluation allocates nothing, with these exceptions: matching a member glob or a path pattern against an attribute builds its `Property@Attribute` name or segment, the first evaluation of a type rule for a subject type caches the type's names, and `CanRead(subject)` allocates a visited set when a subject on the way has several parents or the chain is more than 32 levels deep.
+Apart from paths, evaluation allocates nothing, with these exceptions: matching a member glob against an attribute builds its `Property@Attribute` name, the first evaluation of a type rule for a subject type caches the type's names, and `CanRead(subject)` allocates a visited set when a subject on the way has several parents or the chain is more than 32 levels deep.
 
 Callers that evaluate many members of one subject, such as a tree browser, should keep their own per-call memo of `CanRead(subject)`. `IMemberTagProvider.GetTags` is called on every evaluation of a rule with tags, possibly concurrently, so it should return a cached array (another collection type costs an enumerator per comparison) and must never return null; a member without tags gets an empty array.
 

@@ -17,7 +17,6 @@ public class PathPatternTests
     [InlineData("/Wifi/**", "Rooms", false)]
     [InlineData("/Rooms", "Rooms", true)]
     [InlineData("/Rooms", "Rooms[Kitchen]/Lights", false)]
-    [InlineData("/Rooms[Kitchen]", "Rooms", false)]
     [InlineData("/Rooms[Kitchen]/*", "Rooms[Kitchen]/Lights", true)]
     [InlineData("/Rooms[Kitchen]/*", "Rooms[Kitchen]/Lights[Ceiling]/IsOn", false)]
     [InlineData("/Rooms[Kitchen]/*", "Rooms[Bedroom]/Lights", false)]
@@ -57,14 +56,6 @@ public class PathPatternTests
     [InlineData("/**/**", "Wifi", true)]
     [InlineData("/*", "Wifi", true)]
     [InlineData("/*", "Wifi/Ssid", false)]
-    [InlineData("/", "Wifi", false)]
-    [InlineData("/Sensor/Temperature@Unit", "Sensor/Temperature@Unit", true)]
-    [InlineData("/Sensor/Temperature@Unit", "Sensor/Temperature", false)]
-    [InlineData("/Sensor/Temperature", "Sensor/Temperature@Unit", false)]
-    [InlineData("/Sensor/Temperature@Unit@Source", "Sensor/Temperature@Unit@Source", true)]
-    [InlineData("/Sensor/Temperature@Unit", "Sensor/Temperature@Unit@Source", false)]
-    [InlineData("/Sensor/Temperature@*", "Sensor/Temperature@Unit@Source", true)]
-    [InlineData("/Sensor/*", "Sensor/Temperature@Unit@Source", true)]
     public void WhenPatternIsMatchedAgainstMemberPath_ThenResultIsAsExpected(string pattern, string memberPath, bool expected)
     {
         // Arrange
@@ -86,7 +77,6 @@ public class PathPatternTests
     [InlineData("/Security/Roles[Full*]/**", true)]
     [InlineData("/Security/Full*/Name", true)]
     [InlineData("/Security/FullReader", false)]
-    [InlineData("/Security/Roles[FullReader]", false)]
     [InlineData("/Security/FullReader[x]/Name", false)]
     [InlineData("/Security/Other/Name", false)]
     [InlineData("/Security/Roles[Other]/Name", false)]
@@ -159,6 +149,11 @@ public class PathPatternTests
     [InlineData("/Rooms[]", "malformed")]
     [InlineData("/ Rooms", "whitespace")]
     [InlineData("/Rooms[ Kitchen]", "whitespace")]
+    [InlineData("/", "matches no member; use '/**' for the subject and everything below it, or '/*' for its members")]
+    [InlineData("/Rooms[Kitchen]", "matches no member; use '/Rooms[Kitchen]/**' for the subject and everything below it, or '/Rooms[Kitchen]/*' for its members")]
+    [InlineData("/Rooms[*]", "matches no member")]
+    [InlineData("/**/Lights[C*]", "matches no member")]
+    [InlineData("/Rooms/**[A]", "matches no member")]
     public void WhenPatternIsInvalid_ThenParseThrowsNamingTheRole(string pattern, string expectedMessagePart)
     {
         // Act

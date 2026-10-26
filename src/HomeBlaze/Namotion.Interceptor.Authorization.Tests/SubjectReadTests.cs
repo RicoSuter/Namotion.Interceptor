@@ -127,18 +127,6 @@ public class SubjectReadTests
     }
 
     [Fact]
-    public void WhenADenyNamesASubjectPathAlone_ThenTheSubjectStaysVisible()
-    {
-        // Arrange
-        var home = Create();
-        var policy = Compile(Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, paths: ["/Rooms[Bedroom]"])]));
-
-        // Act & Assert
-        Assert.True(policy.CanRead(Registered(home.Rooms["Bedroom"])));
-        Assert.True(policy.CanRead(Registered(home.Rooms["Bedroom"].Lights["Lamp"])));
-    }
-
-    [Fact]
     public void WhenASubjectIsHeldByAnAttribute_ThenItIsVisibleOnlyWhileTheAttributeIsReadable()
     {
         // Arrange
@@ -147,7 +135,7 @@ public class SubjectReadTests
         var probe = new Light();
         sensor.Temperature_Probe = probe;
         var open = Compile(Role("Reader", allow: [Rule(Read)]));
-        var hidden = Compile(Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, paths: ["/Rooms[Kitchen]/Sensor/Temperature@Probe"])]));
+        var hidden = Compile(Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, paths: ["/Rooms[Kitchen]/Sensor/Probe"])]));
 
         // Act
         var decision = hidden.Explain(Registered(probe));
