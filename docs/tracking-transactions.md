@@ -172,8 +172,10 @@ Controls value-based conflict detection in both locking modes; `BestEffort` writ
 
 | Value | Description |
 |-------|-------------|
-| `FailOnConflict` | Throw `SubjectTransactionConflictException` if values changed since transaction started. (default) |
+| `FailOnConflict` | Throw `SubjectTransactionConflictException` if the landed value of a written property changed since the transaction first wrote it. (default) |
 | `Ignore` | Overwrite any concurrent changes without checking. |
+
+Only properties the transaction writes are checked. A property it only reads can change before the commit without a conflict, so a write based on that read is not protected (write skew): for example, writing `Speed = 150` after reading `MaxSpeed = 200` still commits when `MaxSpeed` was lowered to 100 meanwhile.
 
 Conflict detection is best-effort and not atomic with respect to non-transactional writes that happen between detection and apply. Transactions are serialized against each other, but a raw property write or an external source callback can still interleave during that window.
 
