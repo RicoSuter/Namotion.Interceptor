@@ -15,7 +15,7 @@ namespace HomeBlaze.AI.Mcp;
 
 /// <summary>
 /// Resolves the subject of an MCP tool and calls a query or operation method of it: checks the method kind, the
-/// access policy, the operation filter and whether confirmation is required, converts the arguments, invokes the
+/// confirmation it requires, the access policy and the operation filter, converts the arguments, invokes the
 /// method and turns the outcome into the tool result. invoke_query, invoke_operation and the Markdown tools share it.
 /// </summary>
 internal sealed class McpMethodInvoker
@@ -159,10 +159,16 @@ internal sealed class McpMethodInvoker
                 : null;
     }
 
-    // The arguments are empty when they could not be read.
+    // The arguments are empty when they could not be read. Confirmation comes before execute, which the system rules deny
+    // on every such method, so the client is told the actual reason.
     private string? GetCallError(
         RegisteredSubject subject, RegisteredSubjectProperty methodProperty, string methodName, MethodMetadata method, object?[] arguments)
     {
+        if (method.RequiresConfirmation)
+        {
+            return $"'{methodName}' requires confirmation by a person and cannot be called through MCP; run it from the HomeBlaze UI.";
+        }
+
         if (!_configuration.IsAllowed(methodProperty, AuthorizationActions.Execute.Name))
         {
             return GetNotPermittedMessage(methodName, method.Kind);
@@ -171,11 +177,6 @@ internal sealed class McpMethodInvoker
         if (method.Kind == MethodKind.Operation && _operationFilter?.Invoke(subject, method, arguments) is { } filterError)
         {
             return filterError;
-        }
-
-        if (method.RequiresConfirmation)
-        {
-            return $"'{methodName}' requires confirmation by a person and cannot be called through MCP; run it from the HomeBlaze UI.";
         }
 
         return null;

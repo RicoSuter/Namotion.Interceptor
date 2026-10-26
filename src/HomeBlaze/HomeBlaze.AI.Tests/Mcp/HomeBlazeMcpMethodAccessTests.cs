@@ -16,6 +16,7 @@ public class HomeBlazeMcpMethodAccessTests
 {
     private const string OperationName = "Restart";
     private const string QueryName = "GetStatus";
+    private const string ConfirmedOperationName = "Unlock";
 
     [Fact]
     public async Task WhenAReaderInvokesAnOperation_ThenItIsRefusedWithoutInvoking()
@@ -99,10 +100,50 @@ public class HomeBlazeMcpMethodAccessTests
         var invoked = await CallAsync(graph.Tools[HomeBlazeMcpToolProvider.InvokeOperationToolName], new { path = "", method = OperationName });
 
         // Assert
-        Assert.Equal([QueryName], listed.GetProperty("methods").EnumerateArray().Select(method => method.GetProperty("name").GetString()));
-        Assert.Equal([QueryName], Assert.IsType<string[]>(enrichments["$methods"]));
+        Assert.Equal(
+            [QueryName, ConfirmedOperationName],
+            listed.GetProperty("methods").EnumerateArray().Select(method => method.GetProperty("name").GetString()));
+        Assert.Equal([QueryName, ConfirmedOperationName], Assert.IsType<string[]>(enrichments["$methods"]));
         Assert.Equal("Method not found: Restart", invoked.GetProperty("error").GetString());
         Assert.Equal(0, graph.Invocations[OperationName]);
+    }
+
+    [Theory]
+    [InlineData(BuiltInRoles.OperatorName)]
+    [InlineData(BuiltInRoles.EverythingName)]
+    public async Task WhenAnOperationRequiresConfirmation_ThenTheConfirmationRefusalIsReturnedWithoutInvoking(string roleName)
+    {
+        // Arrange
+        var graph = CreateGraph(TestAccessPolicies.Create(roleName));
+
+        // Act
+        var result = await CallAsync(graph.Tools[HomeBlazeMcpToolProvider.InvokeOperationToolName], new { path = "", method = ConfirmedOperationName });
+
+        // Assert
+        Assert.Equal(
+            "'Unlock' requires confirmation by a person and cannot be called through MCP; run it from the HomeBlaze UI.",
+            result.GetProperty("error").GetString());
+        Assert.Equal(0, graph.Invocations[ConfirmedOperationName]);
+    }
+
+    [Fact]
+    public async Task WhenAnOperationThatRequiresConfirmationIsHidden_ThenItIsNotFound()
+    {
+        // Arrange
+        var role = new AuthorizationRole
+        {
+            Name = "NoUnlock",
+            Includes = [BuiltInRoles.OperatorName],
+            Deny = [new PermissionRule { Members = [ConfirmedOperationName], Actions = [PermissionAction.Read] }]
+        };
+        var graph = CreateGraph(TestAccessPolicies.Create(role.Name, role));
+
+        // Act
+        var result = await CallAsync(graph.Tools[HomeBlazeMcpToolProvider.InvokeOperationToolName], new { path = "", method = ConfirmedOperationName });
+
+        // Assert
+        Assert.Equal("Method not found: Unlock", result.GetProperty("error").GetString());
+        Assert.Equal(0, graph.Invocations[ConfirmedOperationName]);
     }
 
     [Theory]
@@ -132,9 +173,12 @@ public class HomeBlazeMcpMethodAccessTests
     private static Graph CreateGraph(IMcpAccessPolicy accessPolicy)
     {
         var (room, _) = HomeBlazeMcpToolProviderTests.CreateTestSetup(isReadOnly: false);
-        var invocations = new Dictionary<string, int> { [OperationName] = 0, [QueryName] = 0 };
+        var invocations = new Dictionary<string, int> { [OperationName] = 0, [QueryName] = 0, [ConfirmedOperationName] = 0 };
         AddMethod(room.TryGetRegisteredSubject()!, OperationName, MethodKind.Operation, () => invocations[OperationName]++);
         AddMethod(room.TryGetRegisteredSubject()!, QueryName, MethodKind.Query, () => invocations[QueryName]++);
+        AddMethod(
+            room.TryGetRegisteredSubject()!, ConfirmedOperationName, MethodKind.Operation, () => invocations[ConfirmedOperationName]++,
+            requiresConfirmation: true);
 
         var graph = new Graph(room, invocations);
         room.Child = new TestChildThing { ChildName = "Child" };
@@ -147,7 +191,7 @@ public class HomeBlazeMcpMethodAccessTests
         return graph;
     }
 
-    private static void AddMethod(RegisteredSubject subject, string name, MethodKind kind, Action invoke) =>
+    private static void AddMethod(RegisteredSubject subject, string name, MethodKind kind, Action invoke, bool requiresConfirmation = false) =>
         subject.AddProperty<MethodMetadata>(name, _ => new MethodMetadata(_ =>
         {
             invoke();
@@ -156,7 +200,8 @@ public class HomeBlazeMcpMethodAccessTests
         {
             Kind = kind,
             Title = name,
-            PropertyName = name
+            PropertyName = name,
+            RequiresConfirmation = requiresConfirmation
         });
 
     private static async Task<JsonElement> CallAsync(McpToolInfo tool, object input) =>
