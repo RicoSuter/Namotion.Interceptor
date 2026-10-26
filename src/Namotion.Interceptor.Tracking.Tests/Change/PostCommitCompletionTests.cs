@@ -52,6 +52,35 @@ public class PostCommitCompletionTests
         Assert.Single(changes, item => item.Property.Name == nameof(CompletionSubject.ChildName));
     }
 
+    [Fact]
+    public void WhenAStructuralWriteAndItsGateExitBothThrowOnAHotPath_ThenBothFailuresAreAggregated()
+    {
+        // Arrange
+        // The structural write path only runs as optimized code once tiered compilation has seen it
+        // hot, which takes this scenario several thousand repetitions in a fresh process. The
+        // aggregate once lost the gate exit failure in that code and nowhere else, so the scenario
+        // repeats well past the point where the optimized code replaces the initial one.
+        const int Rounds = 20_000;
+
+        for (var round = 0; round < Rounds; round++)
+        {
+            var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+            var subject = new CompletionSubject(context);
+            var writeFailure = new InvalidOperationException("downstream");
+            var observerFailure = new InvalidOperationException("observer");
+            using var subscription = new PropertyReference(subject, nameof(CompletionSubject.Child))
+                .SubscribeInline((in SubjectPropertyChange _) => throw observerFailure);
+            context.WithService(() => new ThrowingInterceptor(writeFailure, () => { }, propertyName: nameof(CompletionSubject.Child)));
+
+            // Act
+            var exception = Record.Exception(() => subject.Child = new CompletionSubject());
+
+            // Assert
+            var aggregate = Assert.IsType<AggregateException>(exception);
+            Assert.Equal(new[] { writeFailure, observerFailure }, aggregate.InnerExceptions);
+        }
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
