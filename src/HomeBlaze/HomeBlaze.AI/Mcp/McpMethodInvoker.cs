@@ -16,7 +16,8 @@ namespace HomeBlaze.AI.Mcp;
 /// <summary>
 /// Resolves the subject of an MCP tool and calls a query or operation method of it: checks the method kind, the
 /// confirmation it requires, the access policy and the operation filter, converts the arguments, invokes the
-/// method and turns the outcome into the tool result. invoke_query, invoke_operation and the Markdown tools share it.
+/// method and turns the outcome into the tool result. invoke_query, invoke_operation and the Markdown tools share it, so it
+/// is where the read check of page expressions is set for every client, agents and external clients alike.
 /// </summary>
 internal sealed class McpMethodInvoker
 {
@@ -27,6 +28,7 @@ internal sealed class McpMethodInvoker
     private readonly bool _isReadOnly;
     private readonly Func<RegisteredSubject, MethodMetadata, object?[], string?>? _operationFilter;
     private readonly Func<RegisteredSubject, MethodMetadata, object?, object?>? _resultFilter;
+    private readonly Func<RegisteredSubjectProperty, bool> _canRead;
 
     /// <param name="rootSubjectProvider">Resolves the root subject when a tool runs.</param>
     /// <param name="configuration">
@@ -54,6 +56,7 @@ internal sealed class McpMethodInvoker
         _isReadOnly = isReadOnly;
         _operationFilter = operationFilter;
         _resultFilter = resultFilter;
+        _canRead = property => _configuration.IsAllowed(property, McpAccessActions.Read);
     }
 
     /// <summary>
@@ -94,7 +97,8 @@ internal sealed class McpMethodInvoker
     /// <summary>
     /// Invokes the method and returns <c>{ success, result }</c>, or <c>{ error }</c> when the call is refused, an argument
     /// does not fit or the method fails. A method the access policy does not allow to read is not found; one it does not
-    /// allow to execute is refused.
+    /// allow to execute is refused. The method runs with the policy's read check as <see cref="PropertyReadAccess"/>, so a
+    /// page expression over a property the policy does not allow to read renders empty.
     /// </summary>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled during the call.</exception>
     /// <param name="subject">The subject that has the method.</param>
@@ -127,7 +131,14 @@ internal sealed class McpMethodInvoker
 
         try
         {
-            var result = await method.InvokeAsync(arguments, _serviceProvider, cancellationToken);
+            object? result;
+
+            // Entered without a policy as well, so that a read check of the flow the tool is called on never carries over.
+            using (PropertyReadAccess.Enter(_canRead))
+            {
+                result = await method.InvokeAsync(arguments, _serviceProvider, cancellationToken);
+            }
+
             result = MethodResultLimit.Apply(_resultFilter is null ? result : _resultFilter(subject, method, result));
             return result is not null ? new { success = true, result } : new { success = true };
         }

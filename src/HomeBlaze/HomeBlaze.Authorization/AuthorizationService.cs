@@ -87,8 +87,8 @@ public sealed class AuthorizationService : IDisposable
     /// changes.
     /// </summary>
     /// <returns>
-    /// The policy and no error, or <see cref="AuthorizationPolicy.DenyAll"/> and the reason when a name is empty or
-    /// unknown, a role does not compile, a named custom role cannot be used because of its name, or a custom role is
+    /// The policy and no error, or <see cref="AuthorizationPolicy.DenyAll"/> and the reason when no name is given, a name is
+    /// empty or unknown, a role does not compile, a named custom role cannot be used because of its name, or a custom role is
     /// named while several <see cref="Authorization"/> subjects exist.
     /// </returns>
     public AuthorizationResult GetPolicy(IReadOnlyCollection<string> roleNames)

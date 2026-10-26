@@ -229,12 +229,13 @@ Each agent has the setting `Roles`, a list of role names:
 
 When the roles cannot be used, the agent shows the status Error with "Invalid roles: " and the reason, such as:
 
+- "No roles are assigned.", for a `Roles` list left empty in the file,
 - "Role 'LightOperator' is not defined.", for a name that is no built-in or custom role,
 - "A role name is empty.",
 - why a custom role does not compile, see [Custom Roles](#custom-roles),
 - "Role '...' is unavailable: ...", for a role with a reserved name or while [several Authorization subjects](#one-authorization-subject) exist.
 
-Turns still run, but every tool call is denied, so the agent can tell you what it cannot do. The status is checked again when the agent starts, when its settings are saved and after each turn. A `Roles` list left empty in the file allows nothing without this status.
+Turns still run, but every tool call is denied, so the agent can tell you what it cannot do. The status is checked again when the agent starts, when its settings are saved and after each turn.
 
 ---
 
@@ -252,7 +253,7 @@ The state a background run receives from the agent's `WatchPaths` is read withou
 
 ## Page Expressions
 
-In an agent's tool calls, a page expression over a property its roles do not allow to read renders empty, as a secret does, and `ReadEvaluatedContent` with `includeSourcePaths` leaves out its path. People see pages as before.
+When an agent or an `/mcp` client reads a page through the tools, a page expression over a property its policy does not allow to read renders empty, as a secret does, and `ReadEvaluatedContent` with `includeSourcePaths` leaves out its path. For an agent that policy comes from its roles; for `/mcp` clients it is `Everything` with the system rules, so an expression over the state of an agent renders empty for them. People see pages as before.
 
 ---
 
@@ -261,7 +262,6 @@ In an agent's tool calls, a page expression over a property its roles do not all
 - **Derived properties**: a rule on a derived property applies to that property, even when it is computed from properties the roles do not allow to read. Deny the derived property as well.
 - **Raw page source**: `ReadRawContent`, and so `search_markdown` and the Markdown tools, show the non-secret configuration values of the blocks of a page, even of subjects the roles hide. `ReadEvaluatedContent` evaluates only the expressions in the text and shows the blocks as written as well. Hide such pages from the agent with a `deny` of `read` on their paths.
 - **History of removed properties**: `get_property_history` reads only the history of a path that resolves, so the history of a removed device is not available to agents and `/mcp` clients.
-- **Page expressions on `/mcp`**: `/mcp` clients get page expressions evaluated as people do, without the system rules, so an expression over the state of an agent renders for them. Secrets stay hidden.
 - **Watch paths**: see [Watch Paths](#watch-paths).
 
 ---
@@ -272,7 +272,7 @@ In an agent's tool calls, a page expression over a property its roles do not all
 - **Metadata and notes of agents**: `SetMetadata` for an agent or a subject inside one reports "No subject at '...' in this storage." instead of "Agents cannot change the metadata of agents.", and `SearchMetadata` and `search_markdown` leave them out for `/mcp` clients as well.
 - **The `Authorization` subject and its roles** are not reachable through MCP.
 - **History**: agents and `/mcp` clients no longer get the history of a path that does not resolve.
-- **Page expressions** of an agent over a property its roles do not allow to read render empty.
+- **Page expressions** of an agent or an `/mcp` client over a property its policy does not allow to read render empty, such as the state of an agent for `/mcp` clients.
 - **Watch paths** no longer include the state of agents.
 - **Unchanged**: a refused configuration write still reads "Property is not writable: /path. The access policy does not allow it.", and an agent with the default role `Operator` can do what it could before.
 

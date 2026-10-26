@@ -1,11 +1,9 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.AI.Mcp;
-using HomeBlaze.Services;
 using HomeBlaze.Storage;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Mcp;
 using Namotion.Interceptor.Mcp.Abstractions;
-using Namotion.Interceptor.Registry.Abstractions;
 
 namespace HomeBlaze.AI.Agents;
 
@@ -96,22 +94,20 @@ public abstract partial class LlmAgentBase
     private AgentToolSet CreateToolSet(string[] allowedTools, IMcpAccessPolicy accessPolicy, IProgress<AgentTurnUpdate> progress)
     {
         var canEditPageLayout = AgentToolSet.CanEditPageLayout(allowedTools);
-        Func<RegisteredSubjectProperty, bool> canRead = property => accessPolicy.IsAllowed(property, McpAccessActions.Read);
         var available = _services.ToolSource.CreateTools(AgentToolSet.IsReadOnly(allowedTools), accessPolicy)
-            .Select(tool => WithCallScopes(tool, grantsPageLayout: canEditPageLayout && AgentToolSet.WritesPages(tool.Name), canRead))
+            .Select(tool => WithPageLayoutScope(tool, grantsPageLayout: canEditPageLayout && AgentToolSet.WritesPages(tool.Name)))
             .ToList();
         return AgentToolSet.Create(available, allowedTools, Memory.CreateUpdateTool(), MaxToolCallsPerTurn, progress);
     }
 
     // A backend may call tools on a flow that does not descend from RunTurnAsync, such as an HTTP request of
-    // the MCP route, so each call sets the permission to edit page layout, granted or not, and the read check of page
-    // expressions on its own flow only.
-    private static McpToolInfo WithCallScopes(McpToolInfo tool, bool grantsPageLayout, Func<RegisteredSubjectProperty, bool> canRead) => new(tool)
+    // the MCP route, so each call sets the permission to edit page layout, granted or not, on its own flow only. The read
+    // check of page expressions is set by the method invoker of the tools, for every client.
+    private static McpToolInfo WithPageLayoutScope(McpToolInfo tool, bool grantsPageLayout) => new(tool)
     {
         Handler = async (input, cancellationToken) =>
         {
             using (MarkdownPageLayoutPermission.Enter(grantsPageLayout))
-            using (PropertyReadAccess.Enter(canRead))
             {
                 return await tool.Handler(input, cancellationToken);
             }

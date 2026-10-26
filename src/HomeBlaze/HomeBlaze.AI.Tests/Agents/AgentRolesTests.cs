@@ -213,6 +213,19 @@ public sealed class AgentRolesTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task WhenNoRolesAreAssigned_ThenTheAgentShowsTheError()
+    {
+        // Act
+        await using var test = await AgentTestContext<FakeAgent>.StartAsync(
+            services => new FakeAgent(services),
+            agent => agent.Roles = []);
+
+        // Assert
+        Assert.Equal(ServiceStatus.Error, test.Agent.Status);
+        Assert.Contains("Invalid roles: No roles are assigned.", test.Agent.StatusMessage);
+    }
+
+    [Fact]
     public async Task WhenAnUnknownRoleIsCorrected_ThenTheErrorIsCleared()
     {
         // Arrange
@@ -266,6 +279,43 @@ public sealed class AgentRolesTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task WhenAnMcpClientReadsAnEvaluatedPage_ThenTheStateOfAnAgentRendersEmptyWhileAnOrdinaryStateRenders()
+    {
+        // Arrange
+        var graph = await CreateGraphAsync("Temperature: [{{ /Temperature }}], agent: [{{ /Agent/Status }}]");
+        await AttachAndWaitForStartAsync(graph, new FakeAgent(graph.AgentServices));
+        var invokeQuery = CreateMcpServerTools(graph)[HomeBlazeMcpToolProvider.InvokeQueryToolName];
+
+        // Act
+        var result = JsonSerializer.SerializeToElement(await invokeQuery.Handler(
+            JsonSerializer.SerializeToElement(new { path = "/Storage/Notes.md", method = "ReadEvaluatedContent" }), CancellationToken.None));
+
+        // Assert
+        var page = Assert.IsType<MarkdownFile>(graph.Storage.Children["Notes.md"]);
+        Assert.DoesNotContain("agent: []", page.ReadEvaluatedContent());
+        Assert.Equal("Temperature: [21.5], agent: []", result.GetProperty("result").GetString()?.Trim());
+    }
+
+    [Fact]
+    public async Task WhenAnMcpClientReadsAnEvaluatedPageOnAFlowWithAReadCheck_ThenTheCheckOfTheFlowDoesNotApply()
+    {
+        // Arrange
+        var graph = await CreateGraphAsync("Temperature: [{{ /Temperature }}]");
+        var invokeQuery = CreateMcpServerTools(graph)[HomeBlazeMcpToolProvider.InvokeQueryToolName];
+
+        // Act
+        JsonElement result;
+        using (PropertyReadAccess.Enter(_ => false))
+        {
+            result = JsonSerializer.SerializeToElement(await invokeQuery.Handler(
+                JsonSerializer.SerializeToElement(new { path = "/Storage/Notes.md", method = "ReadEvaluatedContent" }), CancellationToken.None));
+        }
+
+        // Assert
+        Assert.Equal("Temperature: [21.5]", result.GetProperty("result").GetString()?.Trim());
+    }
+
+    [Fact]
     public async Task WhenAnAgentNamesACustomRole_ThenItsUsedByAgentsFollowsTheRolesAndResetsWhenTheAgentIsRemoved()
     {
         // Arrange
@@ -290,6 +340,13 @@ public sealed class AgentRolesTests : IAsyncLifetime
         Assert.Equal(1, countAfterChangeBack);
         await AsyncTestHelpers.WaitUntilAsync(() => role.UsedByAgents == 0, message: "The removed agent should no longer count.");
         Assert.Equal(ServiceStatus.Stopped, agent.Status);
+    }
+
+    // The tools of the external MCP server over the graph.
+    private static Dictionary<string, McpToolInfo> CreateMcpServerTools(Graph graph)
+    {
+        var configuration = McpBuilderExtensions.CreateServerConfiguration(graph.Services, () => graph.Root, isReadOnly: true);
+        return new McpToolFactory(graph.Root, configuration).CreateTools().ToDictionary(tool => tool.Name);
     }
 
     private static async Task AttachAndWaitForStartAsync(Graph graph, FakeAgent agent)
@@ -317,7 +374,10 @@ public sealed class AgentRolesTests : IAsyncLifetime
         services.AddSingleton<SubjectFactory>();
         services.AddSingleton<ConfigurableSubjectSerializer>();
         AgentTestRoot? root = null;
-        services.AddSingleton(new SubjectPathResolver(() => root));
+        // In the context as well, so that its paths follow the changes of the graph, such as an attached agent.
+        var pathResolver = new SubjectPathResolver(() => root);
+        context.AddService(pathResolver);
+        services.AddSingleton(pathResolver);
         services.AddSingleton<MarkdownContentParser>();
         services.AddHomeBlazeAuthorization(McpAuthorization.PathProvider);
         var serviceProvider = services.BuildServiceProvider();
@@ -370,7 +430,7 @@ public sealed class AgentRolesTests : IAsyncLifetime
             new FixedEndpointAddress(null),
             TimeProvider.System,
             serviceProvider.GetRequiredService<AuthorizationService>());
-        return new Graph(root, storage, agentServices);
+        return new Graph(root, storage, agentServices, serviceProvider);
     }
 
     public Task InitializeAsync() => Task.CompletedTask;
@@ -385,7 +445,7 @@ public sealed class AgentRolesTests : IAsyncLifetime
         _directory.Delete(recursive: true);
     }
 
-    private sealed record Graph(AgentTestRoot Root, FluentStorageContainer Storage, AgentServices AgentServices);
+    private sealed record Graph(AgentTestRoot Root, FluentStorageContainer Storage, AgentServices AgentServices, IServiceProvider Services);
 
     /// <summary>The HomeBlaze tools of agents over a fixed root.</summary>
     private sealed class FactoryToolSource(IServiceProvider serviceProvider, Func<IInterceptorSubject> root) : IAgentToolSource

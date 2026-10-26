@@ -124,6 +124,11 @@ internal sealed class AuthorizationSnapshot
     /// <summary>Gets the cached or newly compiled policy of a principal holding the role names.</summary>
     public AuthorizationResult GetPolicy(IReadOnlyCollection<string> roleNames)
     {
+        if (roleNames.Count == 0)
+        {
+            return new AuthorizationResult(AuthorizationPolicy.DenyAll, "No roles are assigned.");
+        }
+
         var key = RoleNameSet.TryCreate(roleNames);
         if (key is null)
         {

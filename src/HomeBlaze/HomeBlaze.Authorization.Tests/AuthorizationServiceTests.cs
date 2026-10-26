@@ -81,6 +81,31 @@ public sealed class AuthorizationServiceTests : IDisposable
     }
 
     [Fact]
+    public void WhenNoRolesAreNamed_ThenThePolicyDeniesAllAndTheErrorSaysSo()
+    {
+        // Act
+        var result = _service.GetPolicy([]);
+
+        // Assert
+        Assert.Same(AuthorizationPolicy.DenyAll, result.Policy);
+        Assert.Equal("No roles are assigned.", result.Error);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("  ")]
+    public void WhenARoleNameIsEmpty_ThenThePolicyDeniesAllAndTheErrorSaysSo(string? name)
+    {
+        // Act
+        var result = _service.GetPolicy([BuiltInRoles.ReaderName, name!]);
+
+        // Assert
+        Assert.Same(AuthorizationPolicy.DenyAll, result.Policy);
+        Assert.Equal("A role name is empty.", result.Error);
+    }
+
+    [Fact]
     public void WhenARoleHasABadPattern_ThenPrincipalsNamingItAreDeniedAndItsStatusIsSetWhileOtherRolesWork()
     {
         // Arrange

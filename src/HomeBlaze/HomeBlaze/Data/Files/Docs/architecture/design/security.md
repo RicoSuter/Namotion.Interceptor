@@ -41,7 +41,7 @@ They apply to every non-human client, agents and `/mcp` alike, and no role lifts
 `AuthorizationService` finds the `Authorization` subjects in the registry and compiles the built-in roles, the custom roles of the single `Authorization` subject, the system rules, the four actions, the tag provider and the path provider of the MCP tools (`StateAttributePathProvider`), so that a path pattern matches the paths the tools show.
 
 - **Cache**: one policy per distinct set of role names, ignoring case and order. A change of an `Authorization` or a `Role`, observed through property changes and the lifecycle, builds a new snapshot; a policy once handed out never changes. The service is thread-safe.
-- **Errors**: an empty or unknown name, a role that does not compile, a custom role with a reserved or duplicate name, or a custom role while several `Authorization` subjects exist gives `AuthorizationPolicy.DenyAll` with the reason. A policy never partially applies.
+- **Errors**: no name at all, an empty or unknown name, a role that does not compile, a custom role with a reserved or duplicate name, or a custom role while several `Authorization` subjects exist gives `AuthorizationPolicy.DenyAll` with the reason. A policy never partially applies.
 - **Statuses**: each `Role` shows why it cannot be used, from compiling it on its own, and how many started agents name it (`UsedByAgents`); each `Authorization` shows when it is one of several. Statuses are written in the background after a change.
 - **Single instance**: `Authorization` is `[SingleInstance]`. A second one (a copied or restored file) disables all custom roles until it is removed, while the built-in roles keep working, so two sets of roles are never merged silently.
 
@@ -49,7 +49,7 @@ They apply to every non-human client, agents and `/mcp` alike, and no role lifts
 
 | Principal | Policy |
 |-----------|--------|
-| Built-in agent | Its `Roles`, default `["Operator"]`, which allows what agents could do before roles existed, so `AllowedTools` stays the gate on upgrade. A chat turn and a background run take the policy once, next to the `AllowedTools` snapshot. Roles that yield `DenyAll` show "Invalid roles: ..." in the agent's status, and the turn runs with tools that deny everything |
+| Built-in agent | Its `Roles`, default `["Operator"]`, which allows what agents could do before roles existed, so `AllowedTools` stays the gate on upgrade. A chat turn and a background run take the policy once, next to the `AllowedTools` snapshot. Roles that yield `DenyAll`, also an empty list, show "Invalid roles: ..." in the agent's status, and the turn runs with tools that deny everything |
 | Watch paths of an agent | `Everything` with the system rules: the operator chose the paths, so the agent's roles do not filter them |
 | External `/mcp` | `Everything` with the system rules, and `McpServer:ReadOnly` |
 | People in the browser | No policy yet |
@@ -70,14 +70,13 @@ They apply to every non-human client, agents and `/mcp` alike, and no role lifts
 
 Denied `execute` and `history` are logged at debug level with the agent and the member; reads and writes are asked for every listed member and are not logged.
 
-**Page expressions.** `ReadEvaluatedContent` is a query of the shared page subject, called with the MCP arguments, so the caller cannot be passed in, and agents and people read the same page concurrently. The agent's tool wrapper therefore sets an ambient read check (`PropertyReadAccess`, an `AsyncLocal`) for the duration of each tool call, as `MarkdownPageLayoutPermission` does for page layout, and `MarkdownExpressionContext` resolves a property the check refuses as missing, which renders empty like a secret. Without a scope, as in the browser, nothing changes. The derived `Value` of a page expression is computed without the check, as it is shared by every caller.
+**Page expressions.** `ReadEvaluatedContent` is a query of the shared page subject, called with the MCP arguments, so the caller cannot be passed in, and agents and people read the same page concurrently. `McpMethodInvoker`, which every method and Markdown tool calls through, therefore sets an ambient read check (`PropertyReadAccess`, an `AsyncLocal`) from the configuration's access policy for the duration of each method call, as `MarkdownPageLayoutPermission` does for page layout, and `MarkdownExpressionContext` resolves a property the check refuses as missing, which renders empty like a secret. Agents and `/mcp` clients get the same rule in one place, and the scope is set even without a policy, so a check of the calling flow never carries over. Without a scope, as in the browser, nothing changes. The derived `Value` of a page expression is computed without the check, as it is shared by every caller.
 
 **Known limits.**
 
 - A rule on a derived property applies to that property, even when it is computed from properties the policy does not allow to read.
 - The raw source of a page (`ReadRawContent`, and `ReadEvaluatedContent` outside its expressions) includes the non-secret configuration values of its blocks, whatever the roles allow on their subjects.
 - With a policy, the history of a path that does not resolve is not available.
-- The `/mcp` tools set no `PropertyReadAccess` scope, so page expressions are evaluated for `/mcp` clients without the system rules.
 
 ## Inter-Node Authentication [Planned]
 
