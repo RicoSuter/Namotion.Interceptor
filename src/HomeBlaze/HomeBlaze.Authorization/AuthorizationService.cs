@@ -44,6 +44,9 @@ public sealed class AuthorizationService : IDisposable
     private long _statusVersion;
 
     private AuthorizationSnapshot? _snapshot;
+
+    // The version of the last snapshot that read the roles, 0 before the first; guarded by _rebuildLock.
+    private long _builtVersion;
     private int _isRefreshScheduled;
     private volatile bool _isDisposed;
 
@@ -207,19 +210,48 @@ public sealed class AuthorizationService : IDisposable
             }
 
             // Built from the version read before the graph, so a change while building leaves it stale.
-            var previous = snapshot;
-            snapshot = AuthorizationSnapshot.Build(version, _registry.KnownSubjects.Keys, _pathProvider);
+            snapshot = BuildSnapshot(version);
             Volatile.Write(ref _snapshot, snapshot);
             Interlocked.Increment(ref _statusVersion);
-            if (previous is not null)
+            if (snapshot.Version == version)
             {
-                ThreadPool.UnsafeQueueUserWorkItem(static service => service.RaisePoliciesChanged(), this, preferLocal: false);
+                if (_builtVersion != 0 && _builtVersion != version)
+                {
+                    ThreadPool.UnsafeQueueUserWorkItem(static service => service.RaisePoliciesChanged(), this, preferLocal: false);
+                }
+
+                _builtVersion = version;
             }
         }
 
         // Outside the lock: a write notifies observers synchronously, which must not wait for a rebuild.
         WriteStatuses();
         return snapshot;
+    }
+
+    // The caller holds _rebuildLock. The graph or a role list can change while it is read, by an editor or a reload, and
+    // its enumeration then throws. Read once more, and when that fails as well, the custom roles are unavailable until the
+    // next call, which reads them again because the snapshot is stale.
+    private AuthorizationSnapshot BuildSnapshot(long version)
+    {
+        try
+        {
+            return AuthorizationSnapshot.Build(version, _registry.KnownSubjects.Keys, _pathProvider);
+        }
+        catch (InvalidOperationException)
+        {
+            // Changed while it was read; read again.
+        }
+
+        try
+        {
+            return AuthorizationSnapshot.Build(version, _registry.KnownSubjects.Keys, _pathProvider);
+        }
+        catch (InvalidOperationException exception)
+        {
+            _logger?.LogWarning(exception, "The roles changed while they were read; custom roles are unavailable until they are read again.");
+            return AuthorizationSnapshot.CreateUnreadable(_pathProvider);
+        }
     }
 
     private void RaisePoliciesChanged()

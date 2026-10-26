@@ -121,6 +121,17 @@ internal sealed class AuthorizationSnapshot
         return snapshot;
     }
 
+    /// <summary>The version of a snapshot that could not read the roles, which no version of the graph has.</summary>
+    public const long UnreadableVersion = -1;
+
+    /// <summary>
+    /// Creates a snapshot of the built-in roles for when the roles of the graph could not be read: every custom role is
+    /// unavailable, and no status is written. Its version is <see cref="UnreadableVersion"/>, so it is always stale.
+    /// </summary>
+    public static AuthorizationSnapshot CreateUnreadable(PathProviderBase pathProvider) =>
+        new(UnreadableVersion, pathProvider, BuiltInRoles.All, new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
+            "The roles changed while they were read; try again.");
+
     /// <summary>Gets the cached or newly compiled policy of a principal holding the role names.</summary>
     public AuthorizationResult GetPolicy(IReadOnlyCollection<string> roleNames)
     {
