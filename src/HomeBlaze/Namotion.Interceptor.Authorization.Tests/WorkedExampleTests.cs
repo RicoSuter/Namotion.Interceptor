@@ -40,7 +40,7 @@ public class WorkedExampleTests
     private static readonly AuthorizationRole LightOperator = Role("LightOperator",
         includes: ["FullReader"],
         allow: [Rule([PermissionAction.Write, Execute], types: ["ILight"], members: ["IsOn", "Brightness"])],
-        deny: [Rule([PermissionAction.Write, Execute], paths: ["/Rooms[Bedroom]"])]);
+        deny: [Rule([PermissionAction.Write, Execute], paths: ["/Rooms[Bedroom]/**"])]);
 
     private static readonly ImmutableArray<PermissionRule> SystemDeny =
     [
