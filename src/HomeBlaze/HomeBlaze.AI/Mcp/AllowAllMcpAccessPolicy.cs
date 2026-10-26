@@ -4,8 +4,8 @@ using Namotion.Interceptor.Registry.Abstractions;
 namespace HomeBlaze.AI.Mcp;
 
 /// <summary>
-/// An access policy that allows every action on every member, for tools whose scope the operator chose or whose
-/// results no client sees, such as the state of an agent's watch paths or the listing of tool names.
+/// An access policy that allows every action on every member, also those the system rules deny, for tools whose
+/// results no client sees, such as the listing of tool names.
 /// </summary>
 public sealed class AllowAllMcpAccessPolicy : IMcpAccessPolicy
 {

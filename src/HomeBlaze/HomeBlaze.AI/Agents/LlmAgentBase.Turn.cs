@@ -77,8 +77,9 @@ public abstract partial class LlmAgentBase
     }
 
     /// <summary>
-    /// Gets the access policy of a turn from <paramref name="roles"/>, and records why the roles cannot be used, which
-    /// the end of the turn reports in the status; the turn then runs with a policy that denies everything.
+    /// Gets the access policy of a turn from <paramref name="roles"/>, which logs the actions it denies with the agent,
+    /// and records why the roles cannot be used, which the end of the turn reports in the status; the turn then runs
+    /// with a policy that denies everything.
     /// </summary>
     private AuthorizationMcpAccessPolicy GetTurnAccessPolicy(List<string> roles)
     {
@@ -89,7 +90,7 @@ public abstract partial class LlmAgentBase
             _rolesError = rolesError;
         }
 
-        return new AuthorizationMcpAccessPolicy(result.Policy);
+        return new AuthorizationMcpAccessPolicy(result.Policy, _logger, Title);
     }
 
     private AgentToolSet CreateToolSet(string[] allowedTools, IMcpAccessPolicy accessPolicy, IProgress<AgentTurnUpdate> progress)
@@ -105,35 +106,17 @@ public abstract partial class LlmAgentBase
     // A backend may call tools on a flow that does not descend from RunTurnAsync, such as an HTTP request of
     // the MCP route, so each call sets the permission to edit page layout, granted or not, and the read check of page
     // expressions on its own flow only.
-    private McpToolInfo WithCallScopes(McpToolInfo tool, bool grantsPageLayout, Func<RegisteredSubjectProperty, bool> canRead) => new(tool)
+    private static McpToolInfo WithCallScopes(McpToolInfo tool, bool grantsPageLayout, Func<RegisteredSubjectProperty, bool> canRead) => new(tool)
     {
         Handler = async (input, cancellationToken) =>
         {
-            object? result;
             using (MarkdownPageLayoutPermission.Enter(grantsPageLayout))
             using (PropertyReadAccess.Enter(canRead))
             {
-                result = await tool.Handler(input, cancellationToken);
+                return await tool.Handler(input, cancellationToken);
             }
-
-            LogRefusals(tool.Name, result);
-            return result;
         }
     };
-
-    // The tools do not know the agent, so the refusals of the access policy are found in their results.
-    private void LogRefusals(string toolName, object? result)
-    {
-        if (!_logger.IsEnabled(LogLevel.Debug))
-        {
-            return;
-        }
-
-        foreach (var refusal in McpAuthorization.FindRefusals(result))
-        {
-            _logger.LogDebug("The access policy of agent {Agent} refused a {Tool} call: {Refusal}", Title, toolName, refusal);
-        }
-    }
 
     private SynchronousProgress<AgentTurnUpdate> CreateProgress() => new(update =>
     {

@@ -1,9 +1,11 @@
 using HomeBlaze.AI.Mcp;
 using HomeBlaze.Authorization;
+using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Authorization;
 using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Testing;
 using Xunit;
 
 namespace HomeBlaze.AI.Tests.Mcp;
@@ -90,6 +92,50 @@ public class AuthorizationMcpAccessPolicyTests
 
         // Assert
         Assert.Same(AuthorizationPolicy.DenyAll, accessPolicy.Policy);
+    }
+
+    [Fact]
+    public void WhenAPolicyWithALoggerDeniesAnAction_ThenOnlyDeniedExecuteAndHistoryAreLoggedWithTheClientAndThePath()
+    {
+        // Arrange
+        var logger = new RecordingLogger();
+        var accessPolicy = new AuthorizationMcpAccessPolicy(AuthorizationPolicy.DenyAll, logger, "Watcher");
+        var member = GetStateMember();
+
+        // Act
+        foreach (var action in AuthorizationActions.All)
+        {
+            accessPolicy.IsAllowed(member, action.Name);
+        }
+
+        // Assert
+        Assert.Collection(
+            logger.Entries,
+            entry => AssertDenial(entry, "execute"),
+            entry => AssertDenial(entry, "history"));
+
+        static void AssertDenial((LogLevel Level, string Message, Exception? Exception) entry, string action)
+        {
+            Assert.Equal(LogLevel.Debug, entry.Level);
+            Assert.Contains("Watcher", entry.Message);
+            Assert.Contains(action, entry.Message);
+            Assert.Contains("/Temperature", entry.Message);
+        }
+    }
+
+    [Fact]
+    public void WhenAPolicyWithALoggerAllowsAnAction_ThenNothingIsLogged()
+    {
+        // Arrange
+        var logger = new RecordingLogger();
+        var accessPolicy = new AuthorizationMcpAccessPolicy(TestAccessPolicies.Everything.Policy, logger, "Watcher");
+
+        // Act
+        var isAllowed = accessPolicy.IsAllowed(GetStateMember(), AuthorizationActions.History.Name);
+
+        // Assert
+        Assert.True(isAllowed);
+        Assert.Empty(logger.Entries);
     }
 
     private static RegisteredSubjectProperty GetStateMember()

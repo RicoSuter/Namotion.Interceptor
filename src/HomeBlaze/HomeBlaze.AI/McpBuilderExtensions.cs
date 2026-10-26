@@ -33,8 +33,6 @@ public readonly record struct McpToolProviderContext(
 /// </summary>
 public static class McpBuilderExtensions
 {
-    private static readonly string[] EverythingRoleNames = [BuiltInRoles.EverythingName];
-
     /// <summary>
     /// Registers HomeBlaze-specific MCP tools including subject enrichment, type discovery,
     /// and method invocation, and sets <see cref="HomeBlazeMcpInstructions.GetServerInstructions"/> for
@@ -68,5 +66,5 @@ public static class McpBuilderExtensions
     internal static McpServerConfiguration CreateServerConfiguration(
         IServiceProvider serviceProvider, Func<IInterceptorSubject> rootSubjectProvider, bool isReadOnly)
         => HomeBlazeMcpConfigurationFactory.Create(
-            serviceProvider, rootSubjectProvider, isReadOnly, McpAuthorization.GetAccessPolicy(serviceProvider, EverythingRoleNames));
+            serviceProvider, rootSubjectProvider, isReadOnly, McpAuthorization.GetAccessPolicy(serviceProvider, McpAuthorization.EverythingRoleNames));
 }

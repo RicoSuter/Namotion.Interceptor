@@ -53,7 +53,43 @@ public sealed class AgentRolesTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task WhenAReaderAgentSetsAState_ThenTheWriteIsRefusedAndLoggedWithTheAgentAndThePath()
+    public async Task WhenAReaderAgentInvokesAnOperation_ThenItIsRefusedAndLoggedWithTheAgentAndTheMethodPath()
+    {
+        // Arrange
+        var graph = await CreateGraphAsync("# Notes");
+        var logger = new RecordingLogger();
+        string? error = null;
+        var agent = new FakeAgent(graph.AgentServices, logger)
+        {
+            Name = "Watcher",
+            Roles = [BuiltInRoles.ReaderName],
+            AllowedTools = [HomeBlazeMcpToolProvider.InvokeOperationToolName],
+            Handler = async (request, _, cancellationToken) =>
+            {
+                var invokeOperation = request.Tools.Tools.First(tool => tool.Name == HomeBlazeMcpToolProvider.InvokeOperationToolName);
+                var result = JsonSerializer.SerializeToElement(await invokeOperation.Handler(
+                    JsonSerializer.SerializeToElement(new { path = "/Storage/Notes.md", method = "ReplaceContent", parameters = new { content = "# Changed" } }),
+                    cancellationToken));
+                error = result.GetProperty("error").GetString();
+                return new AgentTurnResult("Done.", null, null);
+            }
+        };
+        await AttachAndWaitForStartAsync(graph, agent);
+
+        // Act
+        await agent.SendMessageAsync("Rewrite the notes.", CancellationToken.None);
+
+        // Assert
+        Assert.Equal("Operation 'ReplaceContent' is not permitted. The access policy does not allow it.", error);
+        Assert.Equal("# Notes", await File.ReadAllTextAsync(Path.Combine(_directory.FullName, "Notes.md")));
+        Assert.Contains(logger.Entries, entry =>
+            entry.Level == LogLevel.Debug &&
+            entry.Message.Contains("Watcher", StringComparison.Ordinal) &&
+            entry.Message.Contains("/Storage/Notes.md/ReplaceContent", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task WhenAReaderAgentSetsAState_ThenTheWriteIsRefusedWithoutALog()
     {
         // Arrange
         var logger = new RecordingLogger();
@@ -64,7 +100,7 @@ public sealed class AgentRolesTests : IAsyncLifetime
             {
                 agent.Name = "Watcher";
                 agent.Roles = [BuiltInRoles.ReaderName];
-                agent.AllowedTools = ["get_property", "set_property", HomeBlazeMcpToolProvider.InvokeOperationToolName];
+                agent.AllowedTools = ["get_property", "set_property"];
                 agent.Handler = async (request, _, cancellationToken) =>
                 {
                     var setProperty = request.Tools.Tools.First(tool => tool.Name == "set_property");
@@ -81,10 +117,34 @@ public sealed class AgentRolesTests : IAsyncLifetime
         // Assert
         Assert.Contains(RefusalSentence, setPropertyResult);
         Assert.Equal(20, test.Root.Temperature);
-        Assert.Contains(logger.Entries, entry =>
-            entry.Level == LogLevel.Debug &&
-            entry.Message.Contains("Watcher", StringComparison.Ordinal) &&
-            entry.Message.Contains("/Temperature", StringComparison.Ordinal));
+        Assert.DoesNotContain(logger.Entries, entry => entry.Message.Contains("/Temperature", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task WhenAWatchPathPointsAtTheStateOfAnotherAgent_ThenItIsNotDeliveredWhileAnOrdinaryStateIs()
+    {
+        // Arrange
+        await using var test = await AgentTestContext<FakeAgent>.StartAsync(
+            services => new FakeAgent(services),
+            agent => agent.WatchPaths = ["/Humidity", "/Other/Status"]);
+        var other = new FakeAgent(test.Services);
+        test.Root.Children = new Dictionary<string, IInterceptorSubject>(test.Root.Children) { ["Other"] = other };
+        test.Root.Humidity = 55;
+
+        // Act
+        await test.RunNowAndWaitAsync();
+
+        // Assert
+        var lines = test.Agent.Requests[^1].UserMessage.Split('\n');
+        var stateLines = lines.SkipWhile(line => line != "```jsonl").Skip(1).TakeWhile(line => line != "```")
+            .Select(line => JsonDocument.Parse(line).RootElement)
+            .ToList();
+        Assert.Equal(2, stateLines.Count);
+        Assert.Equal("/Humidity", stateLines[0].GetProperty("path").GetString());
+        Assert.Equal(55, stateLines[0].GetProperty("property").GetProperty("value").GetDecimal());
+        Assert.Equal("/Other/Status", stateLines[1].GetProperty("path").GetString());
+        Assert.False(stateLines[1].TryGetProperty("property", out _));
+        Assert.Contains("not found", stateLines[1].GetProperty("error").GetString());
     }
 
     [Theory]
