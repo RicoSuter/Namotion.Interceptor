@@ -1,25 +1,27 @@
 using System.Text.Json;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
+using HomeBlaze.Authorization;
 using HomeBlaze.Services;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Mcp;
+using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Mcp.Tools;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Registry.Paths;
 
 namespace HomeBlaze.AI.Mcp;
 
 /// <summary>
 /// Resolves the subject of an MCP tool and calls a query or operation method of it: checks the method kind, the
-/// operation filter and whether confirmation is required, converts the arguments, invokes the method and turns the
-/// outcome into the tool result. invoke_query, invoke_operation and the Markdown tools share it.
+/// access policy, the operation filter and whether confirmation is required, converts the arguments, invokes the
+/// method and turns the outcome into the tool result. invoke_query, invoke_operation and the Markdown tools share it.
 /// </summary>
 internal sealed class McpMethodInvoker
 {
     private readonly Func<IInterceptorSubject> _rootSubjectProvider;
-    private readonly PathProviderBase _pathProvider;
+    private readonly McpServerConfiguration _configuration;
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger _logger;
     private readonly bool _isReadOnly;
@@ -27,7 +29,10 @@ internal sealed class McpMethodInvoker
     private readonly Func<RegisteredSubject, MethodMetadata, object?, object?>? _resultFilter;
 
     /// <param name="rootSubjectProvider">Resolves the root subject when a tool runs.</param>
-    /// <param name="pathProvider">Resolves the paths of the subjects.</param>
+    /// <param name="configuration">
+    /// The configuration of the tools, whose access policy decides which subjects and methods are shown and which
+    /// methods may be invoked.
+    /// </param>
     /// <param name="serviceProvider">Resolves the services that the methods take.</param>
     /// <param name="logger">Logs failed calls.</param>
     /// <param name="isReadOnly">Whether operations are blocked.</param>
@@ -35,7 +40,7 @@ internal sealed class McpMethodInvoker
     /// <param name="resultFilter">Gets the result that the caller is given in place of the result of a method; null passes every result on.</param>
     public McpMethodInvoker(
         Func<IInterceptorSubject> rootSubjectProvider,
-        PathProviderBase pathProvider,
+        McpServerConfiguration configuration,
         IServiceProvider serviceProvider,
         ILogger logger,
         bool isReadOnly,
@@ -43,7 +48,7 @@ internal sealed class McpMethodInvoker
         Func<RegisteredSubject, MethodMetadata, object?, object?>? resultFilter = null)
     {
         _rootSubjectProvider = rootSubjectProvider;
-        _pathProvider = pathProvider;
+        _configuration = configuration;
         _serviceProvider = serviceProvider;
         _logger = logger;
         _isReadOnly = isReadOnly;
@@ -53,7 +58,7 @@ internal sealed class McpMethodInvoker
 
     /// <summary>
     /// Resolves the subject whose path is the string argument <paramref name="pathArgument"/> of the tool input: the root
-    /// for an empty path or "/".
+    /// for an empty path or "/". A subject the access policy does not show is not found.
     /// </summary>
     /// <param name="input">The tool input.</param>
     /// <param name="pathArgument">The name of the argument that holds the path.</param>
@@ -79,7 +84,7 @@ internal sealed class McpMethodInvoker
         var subject = _rootSubjectProvider().TryGetRegisteredSubject();
         if (subject is not null && !string.IsNullOrEmpty(path) && path != "/")
         {
-            subject = _pathProvider.TryGetSubjectFromPath(subject, path);
+            subject = _configuration.TryGetReadableSubject(subject, path);
         }
 
         error = subject is null ? new { error = "Subject not found." } : null;
@@ -88,7 +93,8 @@ internal sealed class McpMethodInvoker
 
     /// <summary>
     /// Invokes the method and returns <c>{ success, result }</c>, or <c>{ error }</c> when the call is refused, an argument
-    /// does not fit or the method fails.
+    /// does not fit or the method fails. A method the access policy does not allow to read is not found; one it does not
+    /// allow to execute is refused.
     /// </summary>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled during the call.</exception>
     /// <param name="subject">The subject that has the method.</param>
@@ -99,9 +105,7 @@ internal sealed class McpMethodInvoker
     public async Task<object?> InvokeAsync(
         RegisteredSubject subject, string methodName, MethodKind allowedKind, JsonElement argumentsElement, CancellationToken cancellationToken)
     {
-        var methodProperty = subject.TryGetProperty(methodName);
-        // Reported as not found, not as excluded.
-        if (methodProperty?.TryGetMethodMetadata() is not { } method || method.IsExcludedFrom(ExclusionTarget.Agents))
+        if (TryGetReadableMethod(subject, methodName) is not var (methodProperty, method))
         {
             return new { error = $"Method not found: {methodName}" };
         }
@@ -115,7 +119,7 @@ internal sealed class McpMethodInvoker
         // agent that a path names, and reported only after them.
         var inputParameters = method.Parameters.Where(parameter => parameter.RequiresInput).ToArray();
         var (arguments, argumentError) = ReadArguments(argumentsElement, inputParameters);
-        var callError = GetCallError(subject, methodName, method, arguments ?? []) ?? argumentError;
+        var callError = GetCallError(subject, methodProperty, methodName, method, arguments ?? []) ?? argumentError;
         if (callError is not null)
         {
             return new { error = callError };
@@ -144,9 +148,26 @@ internal sealed class McpMethodInvoker
         }
     }
 
-    // The arguments are empty when they could not be read.
-    private string? GetCallError(RegisteredSubject subject, string methodName, MethodMetadata method, object?[] arguments)
+    // A method excluded from agents or hidden by the access policy is reported as not found, not as excluded or hidden.
+    private (RegisteredSubjectProperty Property, MethodMetadata Method)? TryGetReadableMethod(RegisteredSubject subject, string methodName)
     {
+        var property = subject.TryGetProperty(methodName);
+        return property?.TryGetMethodMetadata() is { } method &&
+            !method.IsExcludedFrom(ExclusionTarget.Agents) &&
+            _configuration.IsAllowed(property, McpAccessActions.Read)
+                ? (property, method)
+                : null;
+    }
+
+    // The arguments are empty when they could not be read.
+    private string? GetCallError(
+        RegisteredSubject subject, RegisteredSubjectProperty methodProperty, string methodName, MethodMetadata method, object?[] arguments)
+    {
+        if (!_configuration.IsAllowed(methodProperty, AuthorizationActions.Execute.Name))
+        {
+            return GetNotPermittedMessage(methodName, method.Kind);
+        }
+
         if (method.Kind == MethodKind.Operation && _operationFilter?.Invoke(subject, method, arguments) is { } filterError)
         {
             return filterError;
@@ -158,6 +179,30 @@ internal sealed class McpMethodInvoker
         }
 
         return null;
+    }
+
+    /// <summary>The refusal of a method the access policy does not allow to execute.</summary>
+    internal static string GetNotPermittedMessage(string methodName, MethodKind kind) =>
+        $"{(kind == MethodKind.Query ? "Query" : "Operation")} '{methodName}' is not permitted. The access policy does not allow it.";
+
+    /// <summary>
+    /// Gets the methods of the subject that are offered to agents and that the access policy of the configuration allows
+    /// to read, ordered by position.
+    /// </summary>
+    public IEnumerable<MethodMetadata> GetReadableMethods(RegisteredSubject subject) =>
+        GetReadableMethods(subject, _configuration.AccessPolicy);
+
+    /// <summary>
+    /// Gets the methods of the subject that are offered to agents and that <paramref name="accessPolicy"/> allows to
+    /// read, ordered by position; every method offered to agents without a policy.
+    /// </summary>
+    internal static IEnumerable<MethodMetadata> GetReadableMethods(RegisteredSubject subject, IMcpAccessPolicy? accessPolicy)
+    {
+        var methods = subject.GetAllMethods(ExclusionTarget.Agents);
+        return accessPolicy is null
+            ? methods
+            : methods.Where(method =>
+                subject.TryGetProperty(method.PropertyName) is { } property && accessPolicy.IsAllowed(property, McpAccessActions.Read));
     }
 
     private string DescribeWrongKind(string methodName, MethodKind kind) => kind switch

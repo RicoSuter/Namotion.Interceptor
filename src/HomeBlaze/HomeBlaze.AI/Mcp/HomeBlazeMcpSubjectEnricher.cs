@@ -1,9 +1,7 @@
 using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Registry.Abstractions;
 using HomeBlaze.Abstractions;
-using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
-using HomeBlaze.Services;
 
 namespace HomeBlaze.AI.Mcp;
 
@@ -11,10 +9,15 @@ internal class HomeBlazeMcpSubjectEnricher : IMcpSubjectEnricher
 {
     private readonly Lazy<(HashSet<Type> Concrete, HashSet<Type> Interfaces)> _typeCache;
     private readonly bool _isReadOnly;
+    private readonly IMcpAccessPolicy? _accessPolicy;
 
-    public HomeBlazeMcpSubjectEnricher(IEnumerable<IMcpTypeProvider> typeProviders, bool isReadOnly)
+    /// <param name="typeProviders">The providers of the types named in <c>$type</c> and <c>$interfaces</c>.</param>
+    /// <param name="isReadOnly">Whether <c>$methods</c> leaves out operations.</param>
+    /// <param name="accessPolicy">Decides which methods <c>$methods</c> lists: only those it allows to read; all without one.</param>
+    public HomeBlazeMcpSubjectEnricher(IEnumerable<IMcpTypeProvider> typeProviders, bool isReadOnly, IMcpAccessPolicy? accessPolicy = null)
     {
         _isReadOnly = isReadOnly;
+        _accessPolicy = accessPolicy;
         _typeCache = new Lazy<(HashSet<Type>, HashSet<Type>)>(() =>
         {
             var allTypes = typeProviders.SelectMany(p => p.GetTypes()).ToList();
@@ -57,7 +60,7 @@ internal class HomeBlazeMcpSubjectEnricher : IMcpSubjectEnricher
             metadata["$interfaces"] = interfaces;
         }
 
-        var methods = subject.GetAllMethods(ExclusionTarget.Agents)
+        var methods = McpMethodInvoker.GetReadableMethods(subject, _accessPolicy)
             .Where(method => !_isReadOnly || method.Kind == MethodKind.Query)
             .Select(method => method.PropertyName)
             .ToArray();

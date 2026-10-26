@@ -1,7 +1,6 @@
 using System.Text.Json;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
-using HomeBlaze.Services;
 using Namotion.Interceptor.Mcp;
 using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Mcp.Models;
@@ -11,7 +10,8 @@ namespace HomeBlaze.AI.Mcp;
 
 /// <summary>
 /// Provides the list_methods, invoke_query and invoke_operation tools for HomeBlaze subjects. invoke_operation is
-/// only offered when the configuration is not read-only.
+/// only offered when the configuration is not read-only. list_methods lists only the methods the access policy allows
+/// to read.
 /// </summary>
 public class HomeBlazeMcpToolProvider : IMcpToolProvider
 {
@@ -121,7 +121,7 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
             return Task.FromResult(error);
         }
 
-        var methods = subject.GetAllMethods(ExclusionTarget.Agents).Select(method => new
+        var methods = _invoker.GetReadableMethods(subject).Select(method => new
         {
             name = method.PropertyName,
             kind = method.Kind.ToString().ToLowerInvariant(),

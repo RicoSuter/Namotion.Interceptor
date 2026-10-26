@@ -29,7 +29,7 @@ public class AgentOperationAccessTests
     [InlineData("NewConversation", true)]
     [InlineData("RunNow", false)]
     [InlineData("NewConversation", false)]
-    public async Task WhenAnAgentOrAnExternalClientCallsAnOperationOfAnAgent_ThenItIsRefused(string methodName, bool isAgent)
+    public async Task WhenAnAgentOrAnExternalClientCallsAnOperationOfAnAgent_ThenTheAgentIsNotFound(string methodName, bool isAgent)
     {
         // Arrange
         var (root, agent, services) = CreateGraph();
@@ -40,8 +40,25 @@ public class AgentOperationAccessTests
             JsonSerializer.SerializeToElement(new { path = "/Agent", method = methodName }), CancellationToken.None));
 
         // Assert
-        Assert.Equal(HomeBlazeMcpConfigurationFactory.AgentOperationMessage, result.GetProperty("error").GetString());
+        Assert.Equal("Subject not found.", result.GetProperty("error").GetString());
         Assert.Equal(0, agent.ResetCount);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task WhenAnAgentOrAnExternalClientListsTheMethodsOfAnAgent_ThenTheAgentIsNotFound(bool isAgent)
+    {
+        // Arrange
+        var (root, _, services) = CreateGraph();
+        var listMethods = CreateTools(services, root, isAgent)["list_methods"];
+
+        // Act
+        var result = JsonSerializer.SerializeToElement(await listMethods.Handler(
+            JsonSerializer.SerializeToElement(new { path = "/Agent" }), CancellationToken.None));
+
+        // Assert
+        Assert.Equal("Subject not found.", result.GetProperty("error").GetString());
     }
 
     [Fact]
