@@ -42,10 +42,9 @@ public sealed class SubjectTransaction : IDisposable
     private OrderedDictionary<PropertyReference, SubjectPropertyChange>? _pendingChanges = PendingChangesPool.Rent();
     private readonly Lock _pendingChangesLock = new();
 
-    // Pending entries cancelled by a write back to the landed value. They stay in _pendingChanges so a later
-    // write revives them with their original old value and position, which keeps conflict detection intact;
-    // every reader must treat them as absent. Always a subset of the _pendingChanges keys. Allocated on the
-    // first cancel; accessed only under _pendingChangesLock.
+    // Pending entries cancelled by a write back to the landed value (see TryCaptureChange); every reader must
+    // treat them as absent. Always a subset of the _pendingChanges keys. Allocated on the first cancel;
+    // accessed only under _pendingChangesLock.
     private HashSet<PropertyReference>? _cancelledChanges;
 
     private volatile bool _isCommitting;
@@ -188,8 +187,7 @@ public sealed class SubjectTransaction : IDisposable
     /// <param name="newValue">The value being written.</param>
     /// <param name="restoresLandedValue">
     /// True when the new value equals the landed value; an existing pending change for the property is
-    /// then cancelled instead of updated. A later write revives a cancelled change with its original old
-    /// value and position.
+    /// then cancelled instead of updated.
     /// </param>
     /// <exception cref="InvalidOperationException">Thrown if a concurrent commit is in progress (TOCTOU race).</exception>
     internal bool TryCaptureChange<TProperty>(
@@ -215,9 +213,8 @@ public sealed class SubjectTransaction : IDisposable
 
             if (!isFirstWrite)
             {
-                // A write back to the landed value cancels the pending change, so no no-op change reaches
-                // sources, batch limits or conflicts. Removing the entry instead would lose the original old
-                // value, and a later write would silently overwrite a concurrent change landed in between.
+                // The entry stays so a later write revives it with its original old value and position.
+                // Removing it would let that write silently overwrite a concurrent change landed in between.
                 if (restoresLandedValue)
                 {
                     (_cancelledChanges ??= new HashSet<PropertyReference>(PropertyReference.Comparer)).Add(property);
