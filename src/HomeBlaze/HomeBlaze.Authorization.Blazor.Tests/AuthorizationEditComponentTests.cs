@@ -313,6 +313,22 @@ public sealed class AuthorizationEditComponentTests : BunitContext, IAsyncLifeti
         Assert.True(authorization.Roles.ContainsKey("KITCHEN"));
     }
 
+    [Fact]
+    public async Task WhenTheRolesAreReloadedWhileTheDialogIsOpen_ThenSavingThrowsAndKeepsTheReloadedRoles()
+    {
+        // Arrange
+        var component = RenderEditor(_graph.Authorization);
+        await AddRoleAsync(component, "Pantry");
+        var reloadedRoles = new Dictionary<string, Role>(StringComparer.OrdinalIgnoreCase) { ["Cellar"] = new Role() };
+        _graph.Authorization.Roles = reloadedRoles;
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => component.InvokeAsync(() => component.Instance.SaveAsync(CancellationToken.None)));
+        Assert.Equal("The roles changed while this dialog was open. Close it and open it again.", exception.Message);
+        Assert.Same(reloadedRoles, _graph.Authorization.Roles);
+    }
+
     private IRenderedComponent<AuthorizationEditComponent> RenderEditor(Authorization authorization) =>
         Render<AuthorizationEditComponent>(parameters => parameters.Add(component => component.Subject, authorization));
 

@@ -107,6 +107,9 @@
     ];
 
     private readonly List<RoleEntry> _entries = [];
+
+    // The dictionary the entries were read from; a reload replaces it.
+    private Dictionary<string, Role>? _loadedRoles;
     private bool _isNameEditorOpen;
     private RoleEntry? _renamedEntry;
     private string _nameText = string.Empty;
@@ -149,6 +152,7 @@
             AuthorizationService.GetRoleNames();
         }
 
+        _loadedRoles = authorization.Roles;
         foreach (var (name, role) in authorization.Roles ?? [])
         {
             _entries.Add(new RoleEntry(name, role));
@@ -180,6 +184,12 @@
             throw new InvalidOperationException("The roles are invalid and cannot be saved.");
         }
 
+        // Saving the roles as read when the dialog opened would revert a reload of the file since.
+        if (!ReferenceEquals(authorization.Roles, _loadedRoles))
+        {
+            throw new InvalidOperationException(RoleEditComponent.ConcurrentChangeMessage);
+        }
+
         // Existing instances under their new keys keep their rules; a new dictionary, as only a replaced one is noticed.
         var roles = new Dictionary<string, Role>(_entries.Count, StringComparer.OrdinalIgnoreCase);
         foreach (var entry in _entries)
@@ -202,6 +212,8 @@
 
             authorization.Roles = roles;
         }
+
+        _loadedRoles = roles;
         foreach (var entry in _entries)
         {
             entry.OriginalName = entry.Name;

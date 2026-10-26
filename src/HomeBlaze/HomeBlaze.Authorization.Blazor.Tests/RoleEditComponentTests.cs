@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Components.Web;
 using Microsoft.Extensions.DependencyInjection;
 using MudBlazor;
 using MudBlazor.Services;
+using Namotion.Interceptor;
 using Namotion.Interceptor.Authorization;
 using Xunit;
 
@@ -455,6 +456,51 @@ public sealed class RoleEditComponentTests : BunitContext, IAsyncLifetime
         Assert.Equal("Kitchen", editedRole.Name);
         Assert.Equal([PermissionAction.Read, AuthorizationActions.History], editedRole.Allow[0].Actions.ToArray());
         Assert.Equal([PermissionAction.Read], role.Allow[0].Actions.ToArray());
+    }
+
+    [Fact]
+    public async Task WhenTheRolesAreReloadedWhileTheDialogIsOpen_ThenSavingThrowsAndChangesNothing()
+    {
+        // Arrange
+        var role = _graph.GetRole("Kitchen");
+        var component = RenderEditor(role);
+        await component.Find("[data-testid='role-edit-add-allow']").ClickAsync(new MouseEventArgs());
+        await SetActionAsync(component, 0, "read", true);
+        var reloadedRole = new Role();
+        _graph.Authorization.Roles = new Dictionary<string, Role>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Kitchen"] = reloadedRole,
+            ["Garden"] = new Role()
+        };
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => component.InvokeAsync(() => component.Instance.SaveAsync(CancellationToken.None)));
+        Assert.Equal("The roles changed while this dialog was open. Close it and open it again.", exception.Message);
+        Assert.Empty(role.Allow);
+        Assert.Empty(reloadedRole.Allow);
+    }
+
+    [Fact]
+    public async Task WhenTheRoleMovesToAnotherAuthorizationWhileTheDialogIsOpen_ThenSavingThrows()
+    {
+        // Arrange
+        var role = _graph.GetRole("Kitchen");
+        var component = RenderEditor(role);
+        await component.Find("[data-testid='role-edit-add-allow']").ClickAsync(new MouseEventArgs());
+        await SetActionAsync(component, 0, "read", true);
+        _graph.Root.Children = new Dictionary<string, IInterceptorSubject>(_graph.Root.Children)
+        {
+            ["Authorization"] = new Authorization
+            {
+                Roles = new Dictionary<string, Role>(StringComparer.OrdinalIgnoreCase) { ["Kitchen"] = role }
+            }
+        };
+
+        // Act & Assert
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => component.InvokeAsync(() => component.Instance.SaveAsync(CancellationToken.None)));
+        Assert.Empty(role.Allow);
     }
 
     private IRenderedComponent<RoleEditComponent> RenderEditor(Role role) =>

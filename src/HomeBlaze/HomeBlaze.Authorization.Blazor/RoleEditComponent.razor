@@ -48,7 +48,10 @@
 }
 
 @code {
+    internal const string ConcurrentChangeMessage = "The roles changed while this dialog was open. Close it and open it again.";
+
     private string? _name;
+    private Authorization? _authorization;
     private string[] _excluded = [];
     private IReadOnlyList<string> _includes = [];
     private List<RuleEntry> _allow = [];
@@ -99,7 +102,7 @@
             return;
         }
 
-        _name = FindName(role);
+        (_authorization, _name) = FindParent(role);
         _excluded = _name is null ? [] : [_name];
         // Normalized as the selector shows it, so saving without a change writes what was shown. Reading the role
         // names also writes the role's status and agent count.
@@ -129,6 +132,12 @@
             throw new InvalidOperationException("The role has invalid rules and cannot be saved.");
         }
 
+        // A reload of the roles replaces them, so this role would be saved nowhere, or into a file it is no longer part of.
+        if (!ReferenceEquals(FindParent(role).Authorization, _authorization))
+        {
+            throw new InvalidOperationException(ConcurrentChangeMessage);
+        }
+
         // New instances, as the authorization service notices only replaced lists; in one update, so that no policy has
         // the includes without the deny rules.
         using (AuthorizationService.BeginUpdate())
@@ -142,24 +151,24 @@
         IsDirtyChanged?.Invoke(false);
     }
 
-    // The key under which an Authorization holds the role.
-    private static string? FindName(Role role)
+    // The Authorization that holds the role and the key it holds it under.
+    private static (Authorization? Authorization, string? Name) FindParent(Role role)
     {
         var registeredRole = role.TryGetRegisteredSubject();
         if (registeredRole is null)
         {
-            return null;
+            return (null, null);
         }
 
         foreach (var parent in registeredRole.Parents)
         {
-            if (parent.Property.Subject is Authorization && parent.Index is string name)
+            if (parent.Property.Subject is Authorization authorization && parent.Index is string name)
             {
-                return name;
+                return (authorization, name);
             }
         }
 
-        return null;
+        return (null, null);
     }
 
     private RenderFragment RenderRules(List<RuleEntry> rules, string section) => __builder =>
