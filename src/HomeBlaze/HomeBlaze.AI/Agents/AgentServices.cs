@@ -1,3 +1,5 @@
+using HomeBlaze.Authorization;
+
 namespace HomeBlaze.AI.Agents;
 
 /// <summary>
@@ -7,7 +9,8 @@ public sealed class AgentServices(
     IAgentToolSource toolSource,
     AgentTurnTokenRegistry tokenRegistry,
     IAgentEndpointAddress endpointAddress,
-    TimeProvider timeProvider)
+    TimeProvider timeProvider,
+    AuthorizationService authorizationService)
 {
     public IAgentToolSource ToolSource { get; } = toolSource;
 
@@ -16,4 +19,7 @@ public sealed class AgentServices(
     public IAgentEndpointAddress EndpointAddress { get; } = endpointAddress;
 
     public TimeProvider TimeProvider { get; } = timeProvider;
+
+    /// <summary>Gets the policies of the agents' roles, and records which roles the running agents name.</summary>
+    public AuthorizationService AuthorizationService { get; } = authorizationService;
 }

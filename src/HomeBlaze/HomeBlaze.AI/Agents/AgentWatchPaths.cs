@@ -1,4 +1,5 @@
 using System.Text.Json;
+using HomeBlaze.AI.Mcp;
 using Namotion.Interceptor.Mcp;
 
 namespace HomeBlaze.AI.Agents;
@@ -40,8 +41,9 @@ internal static class AgentWatchPaths
     }
 
     /// <summary>
-    /// Fetches the state at each of the normalized watch paths with the read-only tools of <paramref name="toolSource"/>;
-    /// a path whose state cannot be fetched gets an error state.
+    /// Fetches the state at each of the normalized watch paths with the read-only tools of <paramref name="toolSource"/>,
+    /// whatever the agent's roles allow, since the operator chose the paths; a path whose state cannot be fetched gets an
+    /// error state.
     /// </summary>
     public static async Task<IReadOnlyList<AgentWatchedState>> FetchStateAsync(
         string[] normalizedWatchPaths, IAgentToolSource toolSource, CancellationToken cancellationToken)
@@ -51,7 +53,7 @@ internal static class AgentWatchPaths
             return [];
         }
 
-        var tools = toolSource.CreateTools(isReadOnly: true);
+        var tools = toolSource.CreateTools(isReadOnly: true, AllowAllMcpAccessPolicy.Instance);
         var browse = tools.FirstOrDefault(tool => tool.Name == "browse");
         var getProperty = tools.FirstOrDefault(tool => tool.Name == "get_property");
         var states = new List<AgentWatchedState>(normalizedWatchPaths.Length);

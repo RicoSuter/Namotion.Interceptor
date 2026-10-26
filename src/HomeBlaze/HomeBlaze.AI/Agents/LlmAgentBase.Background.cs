@@ -107,7 +107,8 @@ public abstract partial class LlmAgentBase
             started = BeginTurn(BackgroundRunStatusMessage);
             var progress = CreateProgress();
             var allowedTools = AllowedTools;
-            tools = CreateToolSet(allowedTools, progress);
+            var accessPolicy = GetTurnAccessPolicy(Roles);
+            tools = CreateToolSet(allowedTools, accessPolicy, progress);
             var message = AgentPromptBuilder.BuildBackgroundMessage(
                 reason,
                 Timeline.GetRecentBackgroundResults(RecentResultCount),
