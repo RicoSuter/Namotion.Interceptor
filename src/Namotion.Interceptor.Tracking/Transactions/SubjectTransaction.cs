@@ -790,7 +790,7 @@ public sealed class SubjectTransaction : IDisposable
         // What the handlers read can change while the sources are written (inbound updates, raw writes), so the
         // final set is checked again right before it lands. Its reads return the pending values of every checked
         // change, so a rejection invalidates the whole checked set in both failure handling modes.
-        var rejectionErrors = RunPreApplyCheck(written, failedSource);
+        var rejectionErrors = RunPreApplyCheck(failedSource);
         if (rejectionErrors is not null)
         {
             // Timeout not propagated here: a retry would lose the rejection, and once the local model changed
@@ -1151,13 +1151,9 @@ public sealed class SubjectTransaction : IDisposable
     /// returning the transaction's values for them. Returns null when they accept the set, or otherwise the errors of
     /// a thrown <see cref="SubjectTransactionException"/> that has any, or the thrown exception itself.
     /// </summary>
-    private IReadOnlyList<Exception>? RunPreApplyCheck(
-        IReadOnlyList<SubjectPropertyChange> written,
-        IReadOnlyList<SubjectPropertyChange> failedSource)
+    private IReadOnlyList<Exception>? RunPreApplyCheck(IReadOnlyList<SubjectPropertyChange> failedSource)
     {
-        // Without a source write the window since the commit check is the same as without a writer, which has no
-        // second check.
-        if (_handlerSet.Handlers.Length == 0 || (written.Count == 0 && failedSource.Count == 0))
+        if (_handlerSet.Handlers.Length == 0)
         {
             return null;
         }

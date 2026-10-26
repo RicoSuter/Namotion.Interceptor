@@ -205,24 +205,6 @@ public class SubjectTransactionHandlerPreApplyCheckTests
     }
 
     [Fact]
-    public async Task WhenWriterWritesNoChange_ThenPreApplyCheckIsSkipped()
-    {
-        // Arrange
-        var writer = new CountingTransactionWriter { UnwrittenPropertyNames = { nameof(Person.FirstName) } };
-        var context = CreateContext(out var handler, writer);
-        var person = new Person(context) { FirstName = "Ann" };
-
-        // Act
-        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-        person.FirstName = "Bob";
-        await transaction.CommitAsync(CancellationToken.None);
-
-        // Assert
-        Assert.Equal(1, handler.CommittingCalls);
-        Assert.Equal("Bob", person.FirstName);
-    }
-
-    [Fact]
     public async Task WhenDisposedFromAnotherFlowDuringPreApplyCheck_ThenItsRejectionIsKept()
     {
         // Arrange

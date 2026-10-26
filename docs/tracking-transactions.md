@@ -366,7 +366,7 @@ An `ITransactionHandler` is called for each write a transaction captures and che
 |-|--------------|-----------------|
 | Runs | Before conflict detection, any source write and the local apply | Only with source transactions, after the source writes and right before the local apply |
 | Receives | The final set, in commit order | Only the changes that will be applied, with their captured origins |
-| Skipped | When nothing is pending | When nothing will be applied, when no change was written to a source, and in `Rollback` mode after a source write failure or writer error, which reverts every source anyway |
+| Skipped | When nothing is pending | When nothing will be applied, and in `Rollback` mode after a source write failure or writer error, which reverts every source anyway |
 | Throwing | Aborts the commit before anything is written. The exception propagates unchanged, and the transaction stays retryable with its pending changes unless it was disposed. | Rejects the whole set in both failure handling modes: every written source is reverted, nothing from the set lands, every change is reported as failed in a `SubjectTransactionException`, and the transaction is terminal. A transaction disposed from another flow during the commit is rejected the same way, with an `ObjectDisposedException`. |
 
 The pre-apply check exists because inbound updates can change what a handler reads while the sources are written. It rejects the whole set because the other changes were checked against the rejected values. The exception's `Errors` hold the errors of a thrown `SubjectTransactionException` that has any, otherwise the thrown exception itself, after any source write errors and before any revert errors.
