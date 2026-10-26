@@ -193,7 +193,8 @@ public sealed partial class MarkdownContentParser
     /// <see cref="MarkdownSegmentBuilder.FindExpressions"/> finds with its resolved value as the page shows it: also
     /// one in the front matter or in an invalid block, which the page itself does not evaluate; an expression in the
     /// arguments of a block is left as written, because the widget evaluates it. An expression with an error, and one inside markdown code, is kept as written, and everything
-    /// else stays as written. Only a displayable property is shown (<see cref="SubjectRegistryExtensions.IsDisplayable"/>).
+    /// else stays as written. Only a displayable property is shown (<see cref="SubjectRegistryExtensions.IsDisplayable"/>),
+    /// and only one that <see cref="PropertyReadAccess"/> allows on the current flow, with its source path.
     /// Uses the same resolution semantics as <see cref="RenderExpression"/> (in the scope of the markdown file).
     /// </summary>
     /// <param name="content">The markdown content.</param>
@@ -244,6 +245,7 @@ public sealed partial class MarkdownContentParser
         if (!includeSourcePaths ||
             expression.SinglePath is not { } path ||
             _pathResolver.ResolveScopedDisplayableProperty(path, PathStyle.Canonical, parent) is not { } property ||
+            !PropertyReadAccess.CanRead(property) ||
             GetAbsolutePath(property) is not { } sourcePath)
         {
             return valueText;
