@@ -21,7 +21,7 @@ public sealed class AuthorizationPolicy
 
     private const int MaxPaths = 64;
 
-    // The root's single empty path; PathPattern.Matches does not mutate it, so it is shared.
+    // The root's single empty path, which a member of the root follows; PathPattern.Matches does not mutate it, so it is shared.
     private static readonly PathLink[][] RootPaths = [[]];
 
     private static readonly TypeNameCache TypeNames = new();
@@ -71,7 +71,8 @@ public sealed class AuthorizationPolicy
     /// A role is null, has no name, is defined more than once or uses <see cref="SystemRoleName"/>.
     /// A role or include name is unknown or empty, includes form a cycle, or includes are nested more than 64 levels deep.
     /// A rule is null, has no actions, names an unknown action or has an empty selector value.
-    /// A path pattern is malformed, does not start with the provider's separator or has a segment with leading or trailing whitespace.
+    /// A path pattern is malformed, does not start with the provider's separator, has a segment with leading or trailing whitespace,
+    /// or matches no member because it is the separator alone or its last segment has an index.
     /// A known action has no name, or there are more than 64 known actions.
     /// </exception>
     public static AuthorizationPolicy Compile(
@@ -220,7 +221,18 @@ public sealed class AuthorizationPolicy
             context.PathsComputed = true;
         }
 
-        return (isDeny && !context.PathsComplete) || AnyPathMatches(patterns, context.Paths!);
+        if (isDeny && !context.PathsComplete)
+        {
+            return true;
+        }
+
+        if (!context.MemberLinkComputed)
+        {
+            context.MemberLink = MemberSegments.GetMemberLink(_pathProvider!, context.Member);
+            context.MemberLinkComputed = true;
+        }
+
+        return AnyPathMatches(patterns, context.Paths!, context.MemberLink);
     }
 
     private static bool HasAllTags(IReadOnlyCollection<string> memberTags, string[] requiredTags)
@@ -278,13 +290,13 @@ public sealed class AuthorizationPolicy
         return [.. paths];
     }
 
-    private static bool AnyPathMatches(PathPattern[] patterns, PathLink[][] paths)
+    private static bool AnyPathMatches(PathPattern[] patterns, PathLink[][] paths, in PathLink member)
     {
         foreach (var pattern in patterns)
         {
             foreach (var path in paths)
             {
-                if (pattern.Matches(path))
+                if (pattern.Matches(path, member))
                 {
                     return true;
                 }
@@ -355,5 +367,7 @@ public sealed class AuthorizationPolicy
         public PathLink[][]? Paths;
         public bool PathsComplete;
         public bool PathsComputed;
+        public PathLink MemberLink;
+        public bool MemberLinkComputed;
     }
 }

@@ -60,8 +60,8 @@ public class AuthorizationBenchmark
         var deny = new List<PermissionRule>();
         for (var i = 0; i < 10; i++)
         {
-            allow.Add(new PermissionRule { Paths = [$"/Floors[Floor{i}]"], Members = ["Set*"], Actions = [Execute] });
-            deny.Add(new PermissionRule { Paths = [$"/Floors[Floor{40 + i}]"], Actions = [PermissionAction.Write, Execute] });
+            allow.Add(new PermissionRule { Paths = [$"/Floors[Floor{i}]/**"], Members = ["Set*"], Actions = [Execute] });
+            deny.Add(new PermissionRule { Paths = [$"/Floors[Floor{40 + i}]/**"], Actions = [PermissionAction.Write, Execute] });
         }
 
         deny.Add(new PermissionRule { Tags = ["secret"], Actions = [PermissionAction.Read, PermissionAction.Write] });
