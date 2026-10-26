@@ -278,6 +278,7 @@
         _text = text;
         var parts = SplitText(text);
         _error = GetTextError(parts);
+
         // A field with suggestions offers the values while typing, so that text not completed yet warns of nothing.
         _warning = _error is null && Suggestions is null && Warning is { } warning
             ? parts.Select(warning).FirstOrDefault(partWarning => partWarning is not null)

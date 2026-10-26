@@ -92,8 +92,15 @@ internal sealed class PathPatterns : ILifecycleHandler, IPropertyLifecycleHandle
     {
     }
 
-    // A reorder of a collection attaches and detaches nothing, but changes the paths of its entries.
-    public void RefreshCollectionProperty(PropertyReference property, object? value) => Interlocked.Increment(ref _graphVersion);
+    // A reorder of a collection attaches and detaches nothing, but changes the paths of its entries. The registry moves
+    // no entry of a dictionary, which some subjects assign again on every poll.
+    public void RefreshCollectionProperty(PropertyReference property, object? value)
+    {
+        if (property.TryGetRegisteredProperty() is { IsSubjectCollection: true })
+        {
+            Interlocked.Increment(ref _graphVersion);
+        }
+    }
 
     private List<RegisteredSubject> GetRoots(long graphVersion)
     {
