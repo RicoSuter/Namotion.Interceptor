@@ -31,7 +31,7 @@ Providers read source and supply model facts. Analyzers evaluate the graph and r
 - [Implementation readiness](implementation-readiness.md): implemented platform support, planned extensions, and required HomeBlaze changes.
 - Subjects below: canonical semantics, configuration/state boundaries, references, subject-specific widgets/detail pages/editors, and unresolved schemas.
 - [Providers](providers/overview.md): read-only source and contract analysis.
-- [General widgets](widgets/overview.md): reusable aggregating views such as tables, deployment matrices, and architecture diagrams. Subject-specific presentation stays in each subject file.
+- [General widgets](widgets/overview.md): reusable aggregating views such as tables, deployment matrices, and live Canvas-based architecture diagrams with automatic nodes, manual additions, and saved layout. Portable diagram export is deferred. Subject-specific presentation stays in each subject file.
 - [Architecture tests and rules](rules/overview.md), [shared evaluation](rules/architecture-checks.md), and [CLI/CI validation](integration/cli-and-ci.md): selectable Analyzer subjects with actionable, source-located errors for humans and agents. Start with the [discovery and validation scenario](scenarios/architecture-validation.md).
 - [Identifiers](shared/identifiers.md), [path queries](shared/path-queries.md), [metadata and relationships](shared/metadata-and-relationships.md), and [reconciliation](shared/reconciliation.md): shared behavior.
 - [Markdown authoring](integration/markdown-authoring.md) and [page contributions](integration/page-contributions.md): optional host extensions.

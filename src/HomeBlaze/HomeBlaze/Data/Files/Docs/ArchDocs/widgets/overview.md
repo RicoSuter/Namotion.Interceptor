@@ -29,7 +29,7 @@ Registered Widget, Page, and Edit components, explicit Markdown blocks, subject 
 - [ArchitectureCheckResults](architecture-check-results.md): shared validation errors, source links, remediation, and help documents
 - [ScenarioDiagram](scenario-diagram.md): authored ordered interactions with linked graph participants
 
-All ArchDocs views are unimplemented. Their explicit rendering can be built as extensions after domain prerequisites; automatic page-context insertion and ordinary-link overlays need the separate page-contribution extension. Reuse underlying queries and summary components across surfaces.
+All ArchDocs views are unimplemented. Their explicit rendering uses registered components after domain prerequisites; live structural diagrams reuse Canvas and need its planned generic additions or shared rendering APIs. Automatic page-context insertion and ordinary-link overlays need the separate page-contribution extension. Reuse underlying queries and summary components across surfaces.
 
 Prioritize views that reuse discovered facts and existing membership rules. Dependency and grouped views avoid maintaining parallel diagrams; impact/backlink exploration helps identify documents to review; validation highlights missing assignments and explicit architectural constraints. Scenario order still needs authored steps or separately supported runtime evidence. These are accepted feature directions with proposed schemas, not a selected MVP or an implementation plan.
 
@@ -45,7 +45,7 @@ Crosscutting pages can aggregate several services, deployment units, environment
 
 The user wants one ordinary arc42 Markdown document with authored explanations and embedded tables, diagrams, and summaries over the shared domain. The same widgets also work in service pages, guides, ADRs, or other architecture documentation. The sample's arc42.md demonstrates all twelve headings without a special document type or one subject per section. It is a composition of reusable views, not a separate architecture model.
 
-Manual canvases and generated diagrams share subjects and semantic relationships. A semantic connection authored on a diagram should create or edit the typed model relationship; position, size, grouping, and visual annotations belong to that view. Existing CanvasLayout supports positioned Widget references, dragging, snapping, and scaling, but connector lines need additional support. Auto-layout, manual arrangement, and their combination remain presentation choices. Runtime scenario order is authored separately from static relationships.
+The selected initial direction is live Canvas-based structural widgets combining selector-driven nodes, manual subject/content additions, and saved layout. See the canonical [live Canvas composition and refresh contract](architecture-diagram.md#live-canvas-composition-planned), including the first-version restriction against deleting automatic nodes. Existing CanvasLayout supports positioned Widget references, dragging, snapping, and scaling; automatic sources, layout coordination, and semantic connectors remain planned. Portable diagram generation/export is deferred. Runtime scenario order remains authored separately from static relationships.
 
 ## Related specifications
 

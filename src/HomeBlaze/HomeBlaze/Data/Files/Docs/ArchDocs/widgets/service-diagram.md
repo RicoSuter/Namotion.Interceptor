@@ -29,12 +29,12 @@ Keys use PascalCase for Markdown body blocks. These are proposed view properties
 
 Reuse the [common diagram behavior](architecture-diagram.md). Show each Service identity once. When aggregating component interactions into Service edges, retain original endpoints and provenance; overlapping membership must not imply exclusive ownership or fabricated calls. A selected Service's source-code references do not establish runtime interactions. Ordinary selection never silently adds neighboring Services.
 
-Exact node presentation, renderer, aggregation controls, layout persistence, and interaction remain design choices. Manual view state belongs to the view and typed semantic connections remain in the model. Shared node summaries can also be used in a manually arranged canvas.
+Use the shared live Canvas direction, including saved positions and the first-version restriction against deleting automatic nodes. Exact node presentation, aggregation controls, layout serialization, and interaction APIs remain design choices. Manual view state belongs to the view and typed semantic connections remain in the model. Shared node summaries can also be used in a manually arranged canvas.
 
 ## Implementation readiness
 
 **Delivery:** Planned extension using existing component registration and explicit Markdown embeds.
 
-**Prerequisites:** Service selection, typed relationship readers, shared summaries, and a renderer. Automatic context panes and link overlays require the separate page extension.
+**Prerequisites:** Service selection, typed relationship readers, shared summaries, and the planned shared Canvas diagram capabilities. Automatic context panes and link overlays require the separate page extension.
 
 [General widgets](overview.md) · [ContextDiagram](context-diagram.md) · [ComponentDiagram](component-diagram.md)

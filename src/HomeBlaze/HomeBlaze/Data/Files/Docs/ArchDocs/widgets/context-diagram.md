@@ -38,12 +38,12 @@ A Commerce context can select both as internal without changing either Service. 
 
 ## Behavior and limits [Planned]
 
-Reuse [common diagram and boundary behavior](architecture-diagram.md#context-boundaries-planned). Keep shared identity, relationship provenance, ordinary navigation, and view-local layout. No mandatory System root, external-Service subtype, or global internal/external field is needed. Actor modeling, exact boundary visuals, optional neighbor discovery, and renderer remain open.
+Reuse [common diagram and boundary behavior](architecture-diagram.md#context-boundaries-planned). Keep shared identity, relationship provenance, ordinary navigation, and view-local layout. No mandatory System root, external-Service subtype, or global internal/external field is needed. Follow the shared live Canvas direction for rendering and saved layout while retaining the explicit boundary-selection contract. Actor modeling, exact boundary visuals, and optional neighbor discovery remain open.
 
 ## Implementation readiness
 
 **Delivery:** Planned extension using existing component registration and explicit Markdown embeds.
 
-**Prerequisites:** Service queries, typed relationships, shared summaries, and a renderer. Actor support is optional later work; no page-context extension is required for this explicit view.
+**Prerequisites:** Service queries, typed relationships, shared summaries, and the planned shared Canvas diagram capabilities. Actor support is optional later work; no page-context extension is required for this explicit view.
 
 [General widgets](overview.md) · [ServiceDiagram](service-diagram.md) · [Scenarios](../scenarios/arc42.md)

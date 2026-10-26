@@ -31,12 +31,12 @@ Assume `/catalog/Orders` is a Service definition:
 
 Reuse the [common diagram behavior](architecture-diagram.md). Membership references the same underlying subjects; it does not clone a shared database or queue. Keep a Service-level interaction at its known boundary until a Host endpoint is authored. Unknown or filtered endpoints must remain visible as incomplete relationships rather than being assigned to a guessed Host. Code dependencies retain their separate meaning and provenance when a presentation supports displaying them.
 
-Do not infer recursive expansion, deployability, or resource ownership from component membership. Exact nested-Service expansion, node styling, edge filtering, and manual layout remain design choices.
+Do not infer recursive expansion, deployability, or resource ownership from component membership. The shared live Canvas contract supplies automatic/manual composition and saved positions. Exact nested-Service expansion, node styling, edge filtering, and layout serialization remain design choices.
 
 ## Implementation readiness
 
 **Delivery:** Planned extension using existing component registration and explicit Markdown embeds.
 
-**Prerequisites:** Service components, typed relationships, suitable component summaries, and a renderer. It does not require page-context slots.
+**Prerequisites:** Service components, typed relationships, suitable component summaries, and the planned shared Canvas diagram capabilities. It does not require page-context slots.
 
 [General widgets](overview.md) · [ServiceDiagram](service-diagram.md) · [DeploymentDiagram](deployment-diagram.md)

@@ -39,7 +39,8 @@ Area names identify implementation responsibility. ArchDocs covers the domain ex
 | Generic wildcard selection and typed relationship readers | ArchDocs; optional shared helpers in Namotion.Interceptor | [Planned] | Extension/shared services; existing resolver alone is insufficient |
 | Reconciled repository children and Environment Deployments | ArchDocs | [Planned] | Extension; lifecycle, identity, worker, and metadata prerequisites |
 | Subject-specific widgets, detail pages, and editors | ArchDocs | [Planned] | Extension; specified with each subject, with domain/parser prerequisites as applicable |
-| General tables, matrix, and diagrams | ArchDocs | [Planned] | Extension; specified in widgets/, with domain/query/renderer prerequisites |
+| General tables, matrix, and diagrams | ArchDocs | [Planned] | Registered views specified in widgets/, with domain/query prerequisites; live structural diagrams additionally need the shared Canvas capabilities below |
+| Live Canvas sources, manual additions, and layout overrides | HomeBlaze / ArchDocs | [Planned] | Reuse existing Canvas/widget rendering; add generic automatic-node, stable-layout, and connector support where needed, with ArchDocs queries and relationship adapters. No automatic-node delete/hide action in the first version |
 | Dependency/layer grouping and impact views | ArchDocs | [Planned] | Shared graph queries, evidence-preserving aggregation, reverse-reference traversal, and supported documentation backlinks; see [DependencyDiagram](widgets/dependency-diagram.md) and [ImpactView](widgets/impact-view.md) |
 | Linked authored interaction scenarios | ArchDocs | [Planned] | [ScenarioDiagram](widgets/scenario-diagram.md), participant validation, and sequence rendering; trace ingestion is separate |
 | Documented Analyzer subjects and architecture-test suites | ArchDocs | [Planned] | [Analyzer definitions](subjects/analyzer.md), JSON/named Markdown authoring, exact/page/directory/global selection, repository-owned results, and generic/predefined concrete Analyzer types |
@@ -51,9 +52,10 @@ Area names identify implementation responsibility. ArchDocs covers the domain ex
 | Metadata envelope persistence in Markdown frontmatter | HomeBlaze | [Planned] | HomeBlaze change: storage apply/write and preservation of unrelated content |
 | Page-level actions/context/additional-view contributions | HomeBlaze | [Planned] | HomeBlaze change: page shell and ordered inherited multi-contributor discovery |
 | Rich overlays for ordinary Markdown links | HomeBlaze | [Planned] | HomeBlaze change: renderer integration, access/navigation, and preview lifecycle |
-| Manual canvas semantic connector editing | HomeBlaze / ArchDocs | [Planned] | HomeBlaze canvas extension plus relationship editing; not required by a separate generated diagram widget |
+| Manual canvas semantic connector editing | HomeBlaze / ArchDocs | [Planned] | Generic Canvas connection support plus typed relationship editing through canonical model writers; current Canvas does not persist connectors |
 | Shared reconciliation/selection utilities | Namotion.Interceptor | [Planned] | Optional shared extraction; no Namotion.Interceptor.Utils project exists yet |
 | Readable file schemas, complete authoring examples, diagnostics, and focused writeback | ArchDocs / HomeBlaze | [Planned] | Cross-cutting requirement; applies to extensions and to host storage/writer changes where needed; exact tooling remains open |
+| Portable diagram publishing | ArchDocs; HomeBlaze for automatic image replacement | [Proposed] | Deferred beyond the initial live-widget direction; Mermaid/SVG format, generation commands, and refresh policy are not selected |
 | Pipeline/release/deployment provider integration | ArchDocs | [Proposed] | Optional connector and explicit mappings; see [release and deployment integration](integration/delivery-pipelines.md); observation versus control and MVP inclusion remain open |
 
 ## A delivery boundary that is possible now [Proposed]

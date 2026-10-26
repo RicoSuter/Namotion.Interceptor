@@ -32,7 +32,7 @@ Render resolved `projectReferences`, unresolved dependencies, source links, prov
 
 Aggregated edges retain the underlying project endpoints and evidence. Overlapping Service/group membership must remain visible and must not imply exclusive ownership or create artificial inter-Service runtime edges. Exact multi-group rendering and aggregation controls remain open. [Architecture checks](../rules/architecture-checks.md) can annotate known violations using the same snapshot; incomplete checks remain distinguishable from passes.
 
-Reuse [common diagram infrastructure](architecture-diagram.md). This view supports building-block and layer documentation in arc42 and other styles. Basic project-file analysis supplies literal references only; it does not establish all effective build dependencies, type usage, or runtime interactions.
+Reuse [common diagram infrastructure](architecture-diagram.md), including live Canvas rendering, saved positions, and the first-version restriction against deleting automatic nodes. This view supports building-block and layer documentation in arc42 and other styles. Basic project-file analysis supplies literal references only; it does not establish all effective build dependencies, type usage, or runtime interactions.
 
 ## Implementation readiness
 
@@ -40,6 +40,6 @@ Reuse [common diagram infrastructure](architecture-diagram.md). This view suppor
 
 **Delivery:** Planned extension using existing component registration and explicit Markdown embeds.
 
-**Prerequisites:** Repository/project discovery, shared queries, source provenance, a dependency reader, and a renderer. Logical grouping additionally needs resolved Service memberships or explicit view groups. No new page-shell capability is required for explicit embedding.
+**Prerequisites:** Repository/project discovery, shared queries, source provenance, a dependency reader, and the planned shared Canvas diagram capabilities. Logical grouping additionally needs resolved Service memberships or explicit view groups. No new page-shell capability is required for explicit embedding.
 
 [General widgets](overview.md) · [ImpactView](impact-view.md) · [Architecture checks](../rules/architecture-checks.md)

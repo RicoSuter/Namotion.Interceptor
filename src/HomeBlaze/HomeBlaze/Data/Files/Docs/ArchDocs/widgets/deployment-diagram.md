@@ -31,12 +31,12 @@ Assume `/environments/Production` defines an Environment:
 
 Reuse [common diagram behavior](architecture-diagram.md). Display actual generated Deployment subjects, retaining each installation's identity and available version, address, and binding data. Do not manufacture a Cartesian product or imply that every known unit is installed everywhere. Shared component definitions remain shared even when environment bindings differ.
 
-Physical nodes, cloud resources, network topology, and concrete database/queue instances require explicit infrastructure mappings. Missing mappings remain unknown; a Resource's inclusion in a unit does not prove provisioning. Intended configuration does not establish observed health or runtime replicas. Infrastructure mapping schema, node grouping, layout, and renderer remain open.
+Physical nodes, cloud resources, network topology, and concrete database/queue instances require explicit infrastructure mappings. Missing mappings remain unknown; a Resource's inclusion in a unit does not prove provisioning. Intended configuration does not establish observed health or runtime replicas. Use the shared live Canvas direction for rendering and saved positions. Infrastructure mapping schema, node grouping, and layout serialization remain open.
 
 ## Implementation readiness
 
 **Delivery:** Planned extension using existing component registration and explicit Markdown embeds.
 
-**Prerequisites:** Environments, reconciled Deployments, unit participants, available bindings, summaries, and a renderer. Complete infrastructure diagrams require the corresponding mapping model.
+**Prerequisites:** Environments, reconciled Deployments, unit participants, available bindings, summaries, and the planned shared Canvas diagram capabilities. Complete infrastructure diagrams require the corresponding mapping model.
 
 [General widgets](overview.md) · [DeploymentMatrix](deployment-matrix.md) · [Environment](../subjects/environment.md)

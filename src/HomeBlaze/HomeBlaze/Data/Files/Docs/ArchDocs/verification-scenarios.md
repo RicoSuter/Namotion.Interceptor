@@ -67,6 +67,13 @@ These scenarios capture intended behavior for the evolving capability. They are 
 57. Select a concrete Analyzer implementation through the normal JSON/frontmatter `$type` or named Markdown block type. Reject unavailable/abstract authored types through normal subject loading, and include all compatible concrete subclasses in Analyzer wildcard suites. Do not require a separate behavior discriminator or dispatch registry.
 58. Configure check-specific typed properties directly beside inherited common Analyzer properties, preserving normal casing, schema, validation, editor, and writeback behavior. Do not put Analyzer fields in an untyped config bag. Several instances of the same concrete type remain distinct policies with independent owner identities.
 
+59. Compose automatic Service nodes from selectors with an explicitly referenced Resource and authored content/widget nodes on a generic Canvas. Preserve subject identity and manual content without changing Service membership, release participation, or specialized view boundary classifications.
+60. Publish changed selector results and retain saved positions for surviving nodes and all manual additions. Place new automatic nodes without rearranging manually positioned nodes; moving an automatic node does not pin it into membership after it stops matching.
+61. Verify that automatic nodes expose no delete/hide action in the first version. Change their selector to change membership. Removing a manual node removes only its view entry and leaves its referenced subject intact.
+62. Drag or resize a supported node, persist only the intended view configuration through its canonical writer, and reopen with that layout preserved. Preserve unrelated prose, definitions, relationships, and other node positions; repeated rendering never writes files.
+63. Change provider results, selectors, relationship metadata, subject summaries, and layout independently. Update the affected view data without starting repository scans from rendering or resetting manual layout. Distinguish loading, unresolved inputs, and retained last-successful facts after a required discovery failure.
+64. Embed a live structural widget through the existing body-block entry point and keep ordinary authored Mermaid fences working independently. Do not require generated Mermaid sections, SVG snapshots, export commands, or image replacement for the initial widget experience.
+
 These are planned verification scenarios, not existing passing tests. Fixture projects and example configuration do not implement ArchDocs. Choose the MVP and delivery order separately; retain the applicable invariants when each capability is implemented.
 
 ## Documentation independence [Planned]
