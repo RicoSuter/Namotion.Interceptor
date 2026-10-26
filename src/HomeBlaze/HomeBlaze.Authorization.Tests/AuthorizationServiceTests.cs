@@ -130,7 +130,7 @@ public sealed class AuthorizationServiceTests : IDisposable
     public void WhenACustomRoleHasABuiltInName_ThenItIsNotUsedAndItsStatusSaysTheNameIsReserved()
     {
         // Arrange
-        var reserved = new Role { Allow = [ReadPlain()] };
+        var reserved = new Role { Allow = [new PermissionRule { Members = [nameof(TagTestSubject.Plain)], Actions = [PermissionAction.Write] }] };
         AddAuthorization(("reader", reserved));
 
         // Act
@@ -138,7 +138,7 @@ public sealed class AuthorizationServiceTests : IDisposable
 
         // Assert
         Assert.Null(result.Error);
-        Assert.False(result.Policy.CanRead(Member(nameof(TagTestSubject.Plain))));
+        Assert.False(result.Policy.CanWrite(Member(nameof(TagTestSubject.Plain))));
         Assert.Equal("The name 'reader' is reserved for a built-in role.", reserved.Status);
         Assert.Equal([BuiltInRoles.ReaderName, BuiltInRoles.OperatorName, BuiltInRoles.EverythingName], _service.GetRoleNames());
     }

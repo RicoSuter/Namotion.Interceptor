@@ -18,27 +18,22 @@ public static class BuiltInRoles
     public const string EverythingName = "Everything";
 
     /// <summary>
-    /// Reads state, configuration, subjects, attributes, metadata and methods, reads the history of state and executes
-    /// queries. Secrets stay unreadable through the system rules.
+    /// Reads every member and its history and executes queries. Secrets stay unreadable through the system rules.
     /// </summary>
     public static AuthorizationRole Reader { get; } = new()
     {
         Name = ReaderName,
-        // A rule's tags must all match, so each tag a member may carry instead of the others has its own rule.
+        // Without selectors a rule matches every member, also one without a marker, such as a derived title.
         Allow =
         [
-            new PermissionRule { Tags = [MemberTags.State], Actions = [PermissionAction.Read, AuthorizationActions.History] },
-            new PermissionRule { Tags = [MemberTags.Configuration], Actions = [PermissionAction.Read] },
-            new PermissionRule { Tags = [MemberTags.Subjects], Actions = [PermissionAction.Read] },
-            new PermissionRule { Tags = [MemberTags.Attribute], Actions = [PermissionAction.Read] },
-            new PermissionRule { Tags = [MemberTags.Metadata], Actions = [PermissionAction.Read] },
-            new PermissionRule { Tags = [MemberTags.Query], Actions = [PermissionAction.Read, AuthorizationActions.Execute] },
-            new PermissionRule { Tags = [MemberTags.Operation], Actions = [PermissionAction.Read] }
+            new PermissionRule { Actions = [PermissionAction.Read, AuthorizationActions.History] },
+            new PermissionRule { Tags = [MemberTags.Query], Actions = [AuthorizationActions.Execute] }
         ]
     };
 
     /// <summary>
-    /// Includes <see cref="Reader"/>, executes operations and writes state and metadata.
+    /// Includes <see cref="Reader"/>, writes every member and executes operations. Configuration, secrets and operations
+    /// that require confirmation stay blocked through the system rules.
     /// </summary>
     public static AuthorizationRole Operator { get; } = new()
     {
@@ -46,9 +41,8 @@ public static class BuiltInRoles
         Includes = [ReaderName],
         Allow =
         [
-            new PermissionRule { Tags = [MemberTags.Operation], Actions = [AuthorizationActions.Execute] },
-            new PermissionRule { Tags = [MemberTags.State], Actions = [PermissionAction.Write] },
-            new PermissionRule { Tags = [MemberTags.Metadata], Actions = [PermissionAction.Write] }
+            new PermissionRule { Actions = [PermissionAction.Write] },
+            new PermissionRule { Tags = [MemberTags.Operation], Actions = [AuthorizationActions.Execute] }
         ]
     };
 

@@ -27,6 +27,9 @@ public partial class TagTestSubject
 
     public partial string? Plain { get; set; }
 
+    [Derived]
+    public string? Title => Host;
+
     [Query]
     public int GetCount() => 1;
 

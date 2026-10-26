@@ -1,5 +1,6 @@
 using System.Text.Json;
 using HomeBlaze.Abstractions;
+using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.AI.Agents;
 using HomeBlaze.AI.Mcp;
@@ -13,6 +14,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Authorization;
 using Namotion.Interceptor.Mcp;
 using Namotion.Interceptor.Mcp.Abstractions;
@@ -277,6 +279,35 @@ public sealed class AgentRolesTests : IAsyncLifetime
         var page = Assert.IsType<MarkdownFile>(graph.Storage.Children["Notes.md"]);
         Assert.Equal("Temperature: [21.5], humidity: [40]", page.ReadEvaluatedContent()?.Trim());
         Assert.Equal("Temperature: [21.5], humidity: []", evaluated?.Trim());
+    }
+
+    [Fact]
+    public async Task WhenAnAgentWithTheDefaultRolesReadsAnEvaluatedPage_ThenADerivedTitleRenders()
+    {
+        // Arrange
+        var graph = await CreateGraphAsync("Device: [{{ /Device/Title }}]");
+        graph.Root.Children = new Dictionary<string, IInterceptorSubject>(graph.Root.Children) { ["Device"] = new TitledTestDevice { Name = "Pump" } };
+        string? evaluated = null;
+        var agent = new FakeAgent(graph.AgentServices)
+        {
+            AllowedTools = [HomeBlazeMcpToolProvider.InvokeQueryToolName],
+            Handler = async (request, _, cancellationToken) =>
+            {
+                var invokeQuery = request.Tools.Tools.First(tool => tool.Name == HomeBlazeMcpToolProvider.InvokeQueryToolName);
+                var result = JsonSerializer.SerializeToElement(await invokeQuery.Handler(
+                    JsonSerializer.SerializeToElement(new { path = "/Storage/Notes.md", method = "ReadEvaluatedContent" }), cancellationToken));
+                evaluated = result.GetProperty("result").GetString();
+                return new AgentTurnResult("Done.", null, null);
+            }
+        };
+        await AttachAndWaitForStartAsync(graph, agent);
+
+        // Act
+        await agent.SendMessageAsync("Read the notes.", CancellationToken.None);
+
+        // Assert
+        Assert.Equal([BuiltInRoles.OperatorName], agent.Roles);
+        Assert.Equal("Device: [Pump]", evaluated?.Trim());
     }
 
     [Fact]
@@ -547,4 +578,15 @@ public sealed class AgentRolesTests : IAsyncLifetime
     {
         public ValueTask DisposeAsync() => dispose();
     }
+}
+
+/// <summary>A device whose title is derived from a configuration property, as most devices have it.</summary>
+[InterceptorSubject]
+public partial class TitledTestDevice : ITitleProvider
+{
+    [Configuration]
+    public partial string? Name { get; set; }
+
+    [Derived]
+    public string? Title => Name;
 }
