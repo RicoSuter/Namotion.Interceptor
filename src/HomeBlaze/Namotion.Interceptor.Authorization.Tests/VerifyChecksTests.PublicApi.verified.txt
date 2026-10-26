@@ -62,6 +62,7 @@ namespace Namotion.Interceptor.Authorization
         public Namotion.Interceptor.Authorization.PermissionRule? DeniedByRule { get; init; }
         public bool IsAllowed { get; init; }
     }
+    [System.Text.Json.Serialization.JsonConverter(typeof(Namotion.Interceptor.Authorization.PermissionRuleJsonConverter))]
     public sealed class PermissionRule : System.IEquatable<Namotion.Interceptor.Authorization.PermissionRule>
     {
         public PermissionRule() { }
@@ -72,6 +73,12 @@ namespace Namotion.Interceptor.Authorization
         public System.Collections.Immutable.ImmutableArray<string> Types { get; init; }
         public bool Equals(Namotion.Interceptor.Authorization.PermissionRule? other) { }
         public override int GetHashCode() { }
+    }
+    public sealed class PermissionRuleJsonConverter : System.Text.Json.Serialization.JsonConverter<Namotion.Interceptor.Authorization.PermissionRule>
+    {
+        public PermissionRuleJsonConverter() { }
+        public override Namotion.Interceptor.Authorization.PermissionRule Read(ref System.Text.Json.Utf8JsonReader reader, System.Type typeToConvert, System.Text.Json.JsonSerializerOptions options) { }
+        public override void Write(System.Text.Json.Utf8JsonWriter writer, Namotion.Interceptor.Authorization.PermissionRule value, System.Text.Json.JsonSerializerOptions options) { }
     }
     public readonly struct SubjectReadDecision : System.IEquatable<Namotion.Interceptor.Authorization.SubjectReadDecision>
     {
