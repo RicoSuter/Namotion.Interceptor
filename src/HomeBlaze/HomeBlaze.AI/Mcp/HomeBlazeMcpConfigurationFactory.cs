@@ -68,7 +68,11 @@ internal static class HomeBlazeMcpConfigurationFactory
             PathProvider = pathProvider,
             PathPrefix = PathPrefix,
             ExcludeTypes = excludeTypes,
-            SubjectEnrichers = { new HomeBlazeMcpSubjectEnricher(typeProviders, isReadOnly, accessPolicy) },
+            SubjectEnrichers =
+            {
+                new HomeBlazeMcpSubjectEnricher(
+                    typeProviders, isReadOnly, HomeBlazeMcpSubjectEnricher.CreatePageUrlGetter(serviceProvider), accessPolicy)
+            },
             TypeProviders = typeProviders,
             ToolDescriptionAdditions =
             {

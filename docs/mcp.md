@@ -60,7 +60,7 @@ Key conventions:
 - **Attribute:** `@name: value` (scalar) or `@name: {json}` (complex object)
 - **Collapsed collection:** `Name/ (Nx ItemType)` or `Name/ (N children)`
 - **Collapsed child subject:** `Name/ (ItemType)` for a single subject property beyond the depth limit (omitted when the property is null)
-- **Footer:** `[N subjects]` or `[N subjects, truncated]`
+- **Footer:** `[N subjects]`, or with a limit reached `[N subjects, truncated]` for `search` and `[N subjects, truncated: M more not shown, without their children]` for `browse`
 - **Warning:** `# warning: <text>` before the footer, see [Unknown property names](#unknown-property-names)
 - Special values: `null` for null, `""` for empty strings, `...` for truncated strings (>100 chars)
 - Collection values (arrays, lists, dictionaries of plain values) render as compact JSON, such as `[{"Title":"Radio","IsContainer":false}]`. Whole items are shown up to about 500 characters and the rest as `... +N more`; `get_property` returns the full value. Byte arrays render as their length, such as `<16 bytes>`.
@@ -134,7 +134,8 @@ Browse the subject tree starting at a path. Use `text` format (default) for over
     }
   },
   "subjectCount": 1,
-  "truncated": false
+  "truncated": false,
+  "omittedCount": 0
 }
 ```
 
@@ -233,6 +234,8 @@ The grammar, [logic](expressions.md#grammar), [comparisons of values](expression
 
 A path in `where` or a name in `properties` that no subject has is not an error, because subjects of different types have different properties. So that an empty answer is not mistaken for a negative one, `search` and `browse` add a warning for each such name. A name in `properties` counts as seen when a subject in scope has a scalar property of that name that the path provider exposes, so a property that holds subjects does not count. A path in `where` counts as seen when it leads from a subject in scope to any property the path provider exposes, also one that holds subjects, but not an attribute; the warning names the whole path, such as `Device.Missing`. For `search` the scope is every subject that passes `types`, `excludeTypes`, `path` and `query`, before `where` is applied; for `browse` it is every subject in the returned tree. A truncated result has no warnings, because it did not look at every subject.
 
+The `omittedCount` of `browse` says how many children a truncated tree left out where the limit cut it, without their own children. `search` stops at the limit and does not count further matches, so its result says only `truncated`.
+
 In JSON, the warnings are a `warnings` array of strings, omitted when there are none:
 
 ```json
@@ -323,7 +326,7 @@ With a policy, the tools apply these rules. A policy that allows every read chan
 - **Shown subject**: the root, or a subject that is not empty for the policy and every property on the path the tools write for the subject is readable. For a subject with several parents the registry picks the parents that path goes through; when they are not readable the subject is not shown, even if another parent is readable. A subject the registry writes no path for from the root, for example one first attached outside the tool root, is shown when it is not empty.
 - **Resolving a path**: every property on the path must be readable and every subject the path passes, including the one owning the resolved property, must be shown, so a subject that is not shown is not reachable through another parent and does not lead to the subjects it holds. This holds for `get_property`, `set_property`, `browse`, `where` paths and the helpers; `browse` and `TryGetReadableSubject` also require the resolved subject to be shown.
 - **Lookup of a segment**: a property the policy does not allow to read is treated as absent. On a subject with an `[InlinePaths]` dictionary the segment then names a key of the dictionary, as `PathProviderBase` answers a name that does not exist, and paths are written as if the property did not exist. A path provider that overrides `TryGetPropertyFromSegment` must, for a name it does not know, fall back to the `[InlinePaths]` property like `PathProviderBase` does, or a hidden name and a missing one can get different answers.
-- **Hidden reads as missing**: a property or subject that is not readable or not shown gets the same answer as one that does not exist. `get_property`, `set_property` and `browse` give the answer of a missing path, which is `Path not found` and, on a subject with an `[InlinePaths]` dictionary, the answer for a dictionary key of that name; `browse` and `search` leave it out and count only what they show, a `where` path through it reads as a missing value, a reference in a `where` filter whose subject is not shown reads as null, and a name in `properties` or `where` that only hidden properties have gets the warning of an unknown name. `set_property` returns `Server is in read-only mode.` before it resolves the path.
+- **Hidden reads as missing**: a property or subject that is not readable or not shown gets the same answer as one that does not exist. `get_property`, `set_property` and `browse` give the answer of a missing path, which is `Path not found` and, on a subject with an `[InlinePaths]` dictionary, the answer for a dictionary key of that name; `browse` and `search` leave it out and count only what they show, also in the `omittedCount` of a truncated `browse`, a `where` path through it reads as a missing value, a reference in a `where` filter whose subject is not shown reads as null, and a name in `properties` or `where` that only hidden properties have gets the warning of an unknown name. `set_property` returns `Server is in read-only mode.` before it resolves the path.
 - **Writable property**: readable, `IsReadOnly` is false, the property has a public setter and the policy allows `write`.
 
 Without a policy nothing of this is evaluated or allocated. With one, each call checks a subject once, against the properties the registry lists along its written path (`TryGetPathProperties`).
