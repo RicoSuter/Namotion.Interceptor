@@ -17,7 +17,7 @@ namespace HomeBlaze.AI.Mcp;
 /// Resolves the subject of an MCP tool and calls a query or operation method of it: checks the method kind, the
 /// confirmation it requires, the access policy and the operation filter, converts the arguments, invokes the
 /// method and turns the outcome into the tool result. invoke_query, invoke_operation and the Markdown tools share it, so it
-/// is where the read check of page expressions is set for every client, agents and external clients alike.
+/// is where the read check of page expressions is set for the queries of every client, agents and external clients alike.
 /// </summary>
 internal sealed class McpMethodInvoker
 {
@@ -97,9 +97,10 @@ internal sealed class McpMethodInvoker
     /// <summary>
     /// Invokes the method and returns <c>{ success, result }</c>, or <c>{ error }</c> when the call is refused, an argument
     /// does not fit or the method fails. A method the access policy does not allow to read is not found; one it does not
-    /// allow to execute is refused. The method runs with the policy's read check as <see cref="PropertyReadAccess"/>, so a
+    /// allow to execute is refused. A query runs with the policy's read check as <see cref="PropertyReadAccess"/>, so a
     /// page expression over a property that does not resolve through the readable resolution of the tools, because it or
-    /// a property on its path is not readable or a subject on its path is hidden, renders empty.
+    /// a property on its path is not readable or a subject on its path is hidden, renders empty. An operation runs without
+    /// a read check.
     /// </summary>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled during the call.</exception>
     /// <param name="subject">The subject that has the method.</param>
@@ -134,8 +135,11 @@ internal sealed class McpMethodInvoker
         {
             object? result;
 
-            // Entered without a policy as well, so that a read check of the flow the tool is called on never carries over.
-            using (PropertyReadAccess.Enter(_pageReadAccess?.CreateCheck(_rootSubjectProvider())))
+            // Only a query evaluates pages for the caller. An operation changes state, and the change handlers, renders and
+            // background work it starts must not inherit the caller's check. Entered without one as well, so that a check
+            // of the flow the tool is called on never carries over.
+            var readCheck = method.Kind == MethodKind.Query ? _pageReadAccess?.CreateCheck(_rootSubjectProvider()) : null;
+            using (PropertyReadAccess.Enter(readCheck))
             {
                 result = await method.InvokeAsync(arguments, _serviceProvider, cancellationToken);
             }

@@ -1,3 +1,5 @@
+using System.Reactive.Concurrency;
+using System.Reactive.Linq;
 using System.Text.Json;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
@@ -21,6 +23,7 @@ using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Mcp.Tools;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Testing;
+using Namotion.Interceptor.Tracking;
 using Xunit;
 
 namespace HomeBlaze.AI.Tests.Agents;
@@ -399,6 +402,79 @@ public sealed class AgentRolesTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task WhenAnOperationChangesAProperty_ThenItsChangeHandlersDoNotRunUnderTheReadCheckOfTheCaller()
+    {
+        // Arrange
+        var graph = await CreateGraphAsync("# Notes");
+        var root = graph.Root.TryGetRegisteredSubject()!;
+        var humidity = root.TryGetProperty(nameof(AgentTestRoot.Humidity))!;
+        root.AddProperty<MethodMetadata>("Heat", _ => new MethodMetadata(_ =>
+        {
+            graph.Root.Temperature = 30;
+            return null;
+        })
+        {
+            Kind = MethodKind.Operation,
+            Title = "Heat",
+            PropertyName = "Heat"
+        });
+        bool? canReadInHandler = null;
+        using var subscription = ((IInterceptorSubject)graph.Root).Context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Where(change => change.Property.Name == nameof(AgentTestRoot.Temperature))
+            .Subscribe(_ => canReadInHandler = PropertyReadAccess.CanRead(humidity));
+        var tools = CreateClientTools(graph, TestAccessPolicies.Create("NoHumidity", CreateNoHumidityRole()), isReadOnly: false);
+
+        // Act
+        var result = JsonSerializer.Serialize(await tools[HomeBlazeMcpToolProvider.InvokeOperationToolName].Handler(
+            JsonSerializer.SerializeToElement(new { path = "/", method = "Heat" }), CancellationToken.None));
+
+        // Assert
+        Assert.Contains("\"success\":true", result);
+        Assert.Equal(30, graph.Root.Temperature);
+        Assert.True(canReadInHandler);
+    }
+
+    [Fact]
+    public async Task WhenAQueryRuns_ThenItRunsUnderTheReadCheckOfTheCaller()
+    {
+        // Arrange
+        var graph = await CreateGraphAsync("# Notes");
+        var root = graph.Root.TryGetRegisteredSubject()!;
+        var humidity = root.TryGetProperty(nameof(AgentTestRoot.Humidity))!;
+        var temperature = root.TryGetProperty(nameof(AgentTestRoot.Temperature))!;
+        bool? canReadHumidity = null;
+        bool? canReadTemperature = null;
+        root.AddProperty<MethodMetadata>("Check", _ => new MethodMetadata(_ =>
+        {
+            canReadHumidity = PropertyReadAccess.CanRead(humidity);
+            canReadTemperature = PropertyReadAccess.CanRead(temperature);
+            return null;
+        })
+        {
+            Kind = MethodKind.Query,
+            Title = "Check",
+            PropertyName = "Check"
+        });
+        var tools = CreateClientTools(graph, TestAccessPolicies.Create("NoHumidity", CreateNoHumidityRole()));
+
+        // Act
+        await tools[HomeBlazeMcpToolProvider.InvokeQueryToolName].Handler(
+            JsonSerializer.SerializeToElement(new { path = "/", method = "Check" }), CancellationToken.None);
+
+        // Assert
+        Assert.False(canReadHumidity);
+        Assert.True(canReadTemperature);
+    }
+
+    private static AuthorizationRole CreateNoHumidityRole() => new()
+    {
+        Name = "NoHumidity",
+        Includes = [BuiltInRoles.OperatorName],
+        Deny = [new PermissionRule { Members = [nameof(AgentTestRoot.Humidity)], Actions = [PermissionAction.Read] }]
+    };
+
+    [Fact]
     public async Task WhenAnAgentNamesACustomRole_ThenItsUsedByAgentsFollowsTheRolesAndResetsWhenTheAgentIsRemoved()
     {
         // Arrange
@@ -440,9 +516,9 @@ public sealed class AgentRolesTests : IAsyncLifetime
     }
 
     // The tools of a client with the policy over the graph.
-    private static Dictionary<string, McpToolInfo> CreateClientTools(Graph graph, IMcpAccessPolicy accessPolicy)
+    private static Dictionary<string, McpToolInfo> CreateClientTools(Graph graph, IMcpAccessPolicy accessPolicy, bool isReadOnly = true)
     {
-        var configuration = HomeBlazeMcpConfigurationFactory.Create(graph.Services, () => graph.Root, isReadOnly: true, accessPolicy);
+        var configuration = HomeBlazeMcpConfigurationFactory.Create(graph.Services, () => graph.Root, isReadOnly, accessPolicy);
         return new McpToolFactory(graph.Root, configuration).CreateTools().ToDictionary(tool => tool.Name);
     }
 
