@@ -455,6 +455,48 @@ public sealed class RoleEditComponentTests : BunitContext, IAsyncLifetime
     }
 
     [Fact]
+    public void WhenADenyPathNamesAPropertyHoldingASubject_ThenTheCardHintsThatItMatchesOnlyThatMember()
+    {
+        // Arrange
+        var role = _graph.GetRole("Kitchen");
+        role.Deny = [new PermissionRule { Paths = ["/Devices/Child", "/Devices/Temperature", "/Devices/*"], Actions = [PermissionAction.Read] }];
+
+        // Act
+        var component = RenderEditor(role);
+
+        // Assert
+        Assert.Equal(
+            "'/Devices/Child' matches only that one member, not what is below it; add /** to deny everything below it as well.",
+            component.Find("[data-testid='role-edit-deny-rule-0'] [data-testid='rule-single-member-hint']").TextContent.Trim());
+    }
+
+    [Theory]
+    [InlineData("deny", "/Devices/Child/**")] // ends in a wildcard
+    [InlineData("deny", "/Devices/Temperature")] // a value, below which is nothing
+    [InlineData("deny", "/Devices")] // an entry, which the path warning covers
+    [InlineData("allow", "/Devices/Child")] // an allow rule
+    public void WhenAPathHasNothingBelowItLeftOut_ThenTheCardHasNoHint(string section, string path)
+    {
+        // Arrange
+        var role = _graph.GetRole("Kitchen");
+        var rules = new List<PermissionRule> { new() { Paths = [path], Actions = [PermissionAction.Read] } };
+        if (section == "deny")
+        {
+            role.Deny = rules;
+        }
+        else
+        {
+            role.Allow = rules;
+        }
+
+        // Act
+        var component = RenderEditor(role);
+
+        // Assert
+        Assert.Empty(component.FindAll("[data-testid='rule-single-member-hint']"));
+    }
+
+    [Fact]
     public async Task WhenIncludesAreOffered_ThenTheRoleItselfIsNot()
     {
         // Arrange

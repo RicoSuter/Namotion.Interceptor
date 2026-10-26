@@ -65,6 +65,28 @@ internal static class RulePaths
     }
 
     /// <summary>
+    /// Gets whether a valid path pattern resolves below <paramref name="root"/> to a member that holds no subjects, such
+    /// as a value, a method or an attribute, so that nothing is below it.
+    /// </summary>
+    public static bool NamesValue(string pattern, IInterceptorSubject? root, PathProviderBase pathProvider)
+    {
+        if (root?.TryGetRegisteredSubject() is not { } registeredRoot)
+        {
+            return false;
+        }
+
+        try
+        {
+            return pathProvider.TryGetPropertyFromPath(registeredRoot, pattern) is { Index: null, Property.CanContainSubjects: false };
+        }
+        catch (InvalidOperationException)
+        {
+            // The graph changed while it was read; the pattern is then not known to name a value.
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Gets whether the member is a registry attribute that marks a property as state or configuration, which describes
     /// the property to HomeBlaze rather than holding data of the device. Metadata is no marker, as rules can target it.
     /// </summary>
