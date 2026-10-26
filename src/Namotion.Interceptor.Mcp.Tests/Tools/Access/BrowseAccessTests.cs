@@ -143,6 +143,36 @@ public class BrowseAccessTests
     }
 
     [Fact]
+    public async Task WhenTheTreeIsTruncated_ThenTheOmittedCountOnlyCountsShownChildren()
+    {
+        // Arrange
+        var context = CreateContext();
+        var group = new TestDeviceGroup(context);
+        var hidden = new TestDevice(context) { DeviceName = "Hidden" };
+        group.Devices = new Dictionary<string, TestDevice>
+        {
+            ["a"] = new(context) { DeviceName = "A" },
+            ["b"] = hidden,
+            ["c"] = new(context) { DeviceName = "C" },
+            ["d"] = new(context) { DeviceName = "D" }
+        };
+        var policy = new TestAccessPolicy((member, action) =>
+            action != McpAccessActions.Read || member.Parent.Subject != hidden);
+        var input = new { format = "json", depth = 1, maxSubjects = 1 };
+
+        // Act
+        var withPolicy = await BrowseAsync(group, policy, input);
+        var withoutPolicy = await BrowseAsync(group, policy: null, input);
+
+        // Assert
+        Assert.Equal(1, withPolicy.GetProperty("subjectCount").GetInt32());
+        Assert.True(withPolicy.GetProperty("truncated").GetBoolean());
+        Assert.Equal(2, withPolicy.GetProperty("omittedCount").GetInt32());
+        Assert.Equal(1, withoutPolicy.GetProperty("subjectCount").GetInt32());
+        Assert.Equal(3, withoutPolicy.GetProperty("omittedCount").GetInt32());
+    }
+
+    [Fact]
     public async Task WhenASubjectIsWrittenThroughAHiddenParent_ThenBrowseLeavesItOutAlsoUnderAReadableParent()
     {
         // Arrange
