@@ -319,7 +319,7 @@ public partial class GpioDevice
 
 ### Retrying
 
-Conflicts and commit check rejections are thrown before anything is written, so the pending changes stay intact and you can adjust them and commit again. Both exception types derive from `SubjectTransactionException`, so catch them before the base type:
+Conflicts and commit check rejections are thrown before anything is written, so the pending changes stay intact. A rejected set can be fixed and committed again. A conflict cannot be resolved by writing again, because a pending change keeps the old value of its first write: committing the same transaction again succeeds only once the conflicting change was undone, so begin a new transaction on the current state instead. Both exception types derive from `SubjectTransactionException`, so catch them before the base type:
 
 ```csharp
 using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback);
@@ -333,9 +333,7 @@ try
 }
 catch (SubjectTransactionConflictException)
 {
-    // Nothing was written: re-read the current state, adjust, and retry.
-    motor.MaxAllowedSpeed = 250;
-    await transaction.CommitAsync(cancellationToken);
+    // Nothing was written: dispose, begin a new transaction on the current state, and write again.
 }
 catch (SubjectTransactionValidationException)
 {
@@ -356,7 +354,8 @@ An `ITransactionHandler` is called for each write a transaction captures and che
 
 **Resolution.**
 - A handler takes part when it is registered on the transaction's context, or on the context of a subject written in the transaction, for example a subject's own context that reaches the transaction's context through a fallback.
-- Handlers of the transaction's context are resolved when the transaction begins, those of a subject's context when a subject of it is first written. A handler registered later does not take part when registered on the transaction's context, and is not guaranteed to when registered on a subject context that was already included.
+- Handlers of the transaction's context are resolved when the transaction begins. Those of a subject's context are resolved when a subject of it is first written, and again on its next write after the context's services or fallback contexts change, for example when the subject is attached under another parent.
+- Whether a handler registered while a transaction is open takes part in it is undefined. A handler registered on the transaction's context can even keep an equal handler of a subject context out, so register handlers before beginning transactions.
 - A resolved handler takes part for the rest of the transaction: `OnCapturing` is called for later writes to any subject, and `OnCommitting` receives the whole final set. To handle only some subjects, filter by `property.Subject` (`change.Property.Subject` in `OnCommitting`).
 - Handlers are called in the order they were resolved, each context's in its service order. A handler that `Equals` one already taking part is not added again. `ValidationInterceptor` equals any instance of its type, so validation registered on several contexts of a fallback chain runs once.
 
@@ -430,7 +429,7 @@ Notification boundaries follow the evaluation nesting. A top-level derived recal
 - Exclusive transactions use a per-context semaphore
 - Each async execution context has its own transaction scope
 - `Dispose()` clears the transaction only for the disposing flow. A flow that captured its execution context earlier can retain the disposed transaction in its slot; reads and writes on that flow treat it as inactive.
-- After `Dispose()`, ambient access is ordinary raw model access even while an already-started external-writer commit completes. Such a raw write is not isolated from the commit and can be overwritten when its frozen snapshot replays.
+- After `Dispose()`, ambient access is ordinary raw model access even while an already-started external-writer commit completes. Such a raw write is not isolated from the commit: with handlers and a source writer, a dispose before the pre-apply check rejects the set, and otherwise the frozen snapshot can replay over the write.
 - A successful or terminally failed commit is inactive for property interception even before disposal. Later reads and writes use the landed model normally; retryable failures remain active.
 - While a live ambient transaction is committing, property reads and writes on a flow carrying it throw `InvalidOperationException`. This includes custom writer callbacks. Getter reads are also rejected because sibling or landed-model state is outside the frozen snapshot and can make the source payload inconsistent.
 - Commit-owned synchronous local replay remains allowed, including property hooks, change handlers, and derived cascades initiated by that replay. This authorization does not extend into custom writer callbacks or child tasks.
