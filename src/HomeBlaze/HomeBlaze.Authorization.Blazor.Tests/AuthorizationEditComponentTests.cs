@@ -309,6 +309,26 @@ public sealed class AuthorizationEditComponentTests : BunitContext, IAsyncLifeti
     }
 
     [Fact]
+    public async Task WhenTheRoleWhoseNameIsTypedIsRemoved_ThenTheNameIsValidAgain()
+    {
+        // Arrange
+        var component = RenderEditor(_graph.Authorization);
+        var validity = new List<bool>();
+        component.Instance.IsValidChanged += validity.Add;
+        await ClickAsync(component, "authorization-add-role");
+        await TypeNameAsync(component, "garden");
+
+        // Act
+        await ClickAsync(component, "authorization-role-remove-Garden");
+
+        // Assert
+        Assert.DoesNotContain("A role with this name exists already.", component.Markup);
+        Assert.False(component.Find("[data-testid='authorization-role-name-confirm']").HasAttribute("disabled"));
+        Assert.True(component.Instance.IsValid);
+        Assert.Equal([false, true], validity);
+    }
+
+    [Fact]
     public async Task WhenAValidNameIsTypedButNotConfirmed_ThenSavingAddsIt()
     {
         // Arrange

@@ -442,6 +442,12 @@
         }
 
         _entries.Remove(entry);
+        if (_isNameEditorOpen)
+        {
+            // The typed name may have been taken by the removed role.
+            _nameError = ValidateName(_nameText);
+        }
+
         MarkDirty();
         ReportValidity();
     }
