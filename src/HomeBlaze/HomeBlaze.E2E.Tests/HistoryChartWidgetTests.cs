@@ -670,6 +670,51 @@ public class HistoryChartWidgetTests
     }
 
     [Fact]
+    public async Task WhenTheBoxOfABarChartChangesItsWidthTwiceInOneFrame_ThenTheBarsAreDrawnAtTheLastWidth()
+    {
+        // Arrange
+        var page = await OpenBarsPageAsync();
+        await page.WaitUntilInteractiveAsync(Timeout);
+        var view = GetChart(page, BarsLabel).GetByTestId("history-chart-view");
+        await Assertions.Expect(view).ToHaveAttributeAsync("data-plot-ready", "", new() { Timeout = Timeout });
+
+        // Act - the box gets narrower, and an observer of the same size changes narrows it again within the same frame,
+        // as a layout that settles in two steps does. The clock stands still until both changes are reported, as it does
+        // when they fall into the same millisecond.
+        await view.EvaluateAsync(
+            """
+            view => {
+                const lines = view.querySelector('[data-testid=history-chart-lines]');
+                const now = Date.now;
+                const frozen = now();
+                Date.now = () => frozen;
+                requestAnimationFrame(() => requestAnimationFrame(() => Date.now = now));
+                let first = true;
+                const observer = new ResizeObserver(() => {
+                    if (first) {
+                        first = false;
+                        lines.style.width = '500px';
+                        observer.disconnect();
+                    }
+                });
+                observer.observe(lines);
+                lines.style.width = '700px';
+            }
+            """);
+
+        // Assert - the drawing gets the width of the last step, not of the first.
+        await page.WaitForFunctionAsync(
+            """
+            view => {
+                const chart = view.querySelector('[data-testid=history-chart-lines] svg');
+                return Math.abs(chart.viewBox.baseVal.width - parseFloat(getComputedStyle(chart).width)) <= 1;
+            }
+            """,
+            await view.ElementHandleAsync(),
+            new() { Timeout = 10000 });
+    }
+
+    [Fact]
     public async Task WhenABarChartIsInATabThatWasHidden_ThenItsBarsSpanItsBoxWhenTheTabIsOpened()
     {
         // Arrange
