@@ -139,6 +139,29 @@ public class ValueTileWidgetTests
         await Assertions.Expect(tile.GetByRole(AriaRole.Button)).ToHaveCountAsync(0);
     }
 
+    [Fact]
+    public async Task WhenTileHasASubtitle_ThenItShowsItBelowTheLabelWithItsValues()
+    {
+        // Arrange & Act
+        var page = await OpenPageAsync();
+        var tile = GetValueTile(page, "Subtitled");
+
+        // Assert
+        await Assertions.Expect(tile.GetByTestId("tile-detail")).ToHaveTextAsync("Of ValueMotor", new() { Timeout = Timeout });
+        await Assertions.Expect(GetValueTile(page, "Target").GetByTestId("tile-detail")).ToHaveCountAsync(0);
+    }
+
+    [Fact]
+    public async Task WhenBoxHasASubtitle_ThenItShowsItBelowTheLabelWithItsValues()
+    {
+        // Arrange & Act
+        var page = await OpenPageAsync();
+        var box = page.GetByTestId("value-tile").Filter(new() { HasText = "Subtitled box" });
+
+        // Assert
+        await Assertions.Expect(box.GetByTestId("value-tile-subtitle")).ToHaveTextAsync("Of ValueMotor", new() { Timeout = Timeout });
+    }
+
     [Theory]
     [InlineData("Box target")]
     [InlineData("Canvas gauge")]

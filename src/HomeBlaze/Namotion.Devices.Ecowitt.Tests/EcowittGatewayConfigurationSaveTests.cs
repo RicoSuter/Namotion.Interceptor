@@ -83,11 +83,6 @@ public class EcowittGatewayConfigurationSaveTests
 
         return (gateway, writer, logger);
     }
-
-    private sealed class TestHttpClientFactory : IHttpClientFactory
-    {
-        public HttpClient CreateClient(string name) => new();
-    }
 }
 
 [InterceptorSubject]

@@ -18,6 +18,7 @@ A button that invokes an operation or a query of a subject. Type name: `HomeBlaz
 | `Variant` | `Filled`, `Outlined` or `Text` | `Filled` | A filled button, a button with a border, or text alone. A tile takes its fill from `Color` and `Variant`, see [Tiles](#tiles) |
 | `Kind` | `Button` or `Tile` | `Button` | `Button` is a button. `Tile` is a tile that fills its place, see [Tiles](#tiles) |
 | `Subtitle` | Text | None | A second line below the label of a tile |
+| `Outlined` | `true` or `false` | `false` | A thin border around the tile, as an outlined [Card](card.md) has, whatever its fill, see [Tile Borders](basics.md#tile-borders) |
 
 ## Slots
 

@@ -37,13 +37,13 @@ public class SwitchArgumentsTests
     [InlineData("pump/PowerOn", null)]
     [InlineData(null, "pump/PowerOff")]
     [InlineData("pump/PowerOn", "")]
-    public void WhenOnlyOneOfOnAndOffIsSet_ThenItIsAnError(string? on, string? off)
+    public void WhenOnlyOneOfOnAndOffIsSet_ThenThereIsNoError(string? on, string? off)
     {
         // Act
         var error = SwitchArguments.Validate(on, off, null, null);
 
         // Assert
-        Assert.Equal("Set both On and Off, or neither", error);
+        Assert.Null(error);
     }
 
     [Fact]

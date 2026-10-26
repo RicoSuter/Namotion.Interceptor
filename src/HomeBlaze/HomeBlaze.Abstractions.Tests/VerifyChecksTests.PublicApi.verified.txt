@@ -143,6 +143,7 @@ namespace HomeBlaze.Abstractions.Attributes
         VoltAmpereReactiveHour = 34,
         AmpereHour = 35,
         WattPerSquareMeter = 36,
+        DecibelMilliwatt = 37,
     }
     [System.AttributeUsage(System.AttributeTargets.Interface)]
     public class SubjectAbstractionAttribute : System.Attribute

@@ -44,7 +44,8 @@
     // The case itself decides the fill: a case without a color is drawn on the surface, while a value without a case
     // is filled with the primary color when true.
     var fill = matched?.GetColor() ?? (shown is true ? Color.Primary : Color.Default);
-    var subtitle = !string.IsNullOrEmpty(Subtitle)
+    // An empty subtitle hides the line, while a missing one leaves it to the text of the value.
+    var subtitle = Subtitle is not null
         ? Subtitle
         : ValueMap is not null && property is not null && shown is not null ? ValueReader.GetText(binding, matched, PathResolver, TimeZone) : null;
     var icon = shown is null
@@ -56,6 +57,7 @@
               AccessibleName="@label"
               Label="@label"
               Subtitle="@subtitle"
+              Outlined="@Outlined"
               Icon="@icon"
               Color="@fill"
               TextColor="@(matched?.GetTextColor() ?? ValueColor.Default)"
@@ -135,6 +137,10 @@ else
     /// <summary>The second line of a tile. Without it, a tile with a map shows the text of the value.</summary>
     [Parameter]
     public string? Subtitle { get; set; }
+
+    /// <summary>Whether a tile has a thin border like an outlined card.</summary>
+    [Parameter]
+    public bool Outlined { get; set; }
 
     /// <summary>The name of the icon of a tile, which the icon of the matched case of the map replaces.</summary>
     [Parameter]
