@@ -119,6 +119,8 @@ using (var transaction = await context.BeginTransactionAsync(TransactionFailureH
 }
 ```
 
+With the equality check (`WithEqualityCheck`, part of `WithFullPropertyTracking`), writing a property back to its landed value removes its pending change, the same as never writing it: it no longer appears in `GetPendingChanges()`, and the commit neither writes, publishes nor conflict-checks it. A later write captures it again as a new change, with the then-landed value as its old value and at the end of the commit order. Without the equality check, a write back is captured like any other write.
+
 ## Configuration Options
 
 ### Failure Handling
@@ -179,7 +181,7 @@ Only properties the transaction writes are checked. A property it only reads can
 
 Conflict detection is best-effort and not atomic with respect to non-transactional writes that happen between detection and apply. Transactions are serialized against each other, but a raw property write or an external source callback can still interleave during that window.
 
-With the equality check (`WithEqualityCheck`, part of `WithFullPropertyTracking`), a property the transaction wrote back to its landed value has no pending change, so it is not checked for conflicts: a concurrent change to it that lands before the commit is kept without a conflict. A later write to the property is a new first write, checked against the value landed at that write.
+A property written back to its landed value has no pending change (see [Last-Write-Wins Semantics](#last-write-wins-semantics)), so it is not checked for conflicts: a concurrent change to it that lands before the commit is kept without a conflict.
 
 ### Requirements
 
@@ -488,7 +490,7 @@ Apply pending[MotorSpeed] = 150:
 
 **Why insertion order matters:** If `MotorSpeed` were committed before `MaxAllowedSpeed`, the validator would read `MaxAllowedSpeed = 100` from the real model and reject the write.
 
-**Write order limitation:** Only the final value per property is stored (last write wins), and the commit position is determined by the *first* write to each property. If a property is re-written with a value that has different dependency requirements than the initial value, the commit order (based on first-write positions) may no longer match the dependency order needed by the final values. This can cause commit-time validation to fail even though the final set of values is consistent. To avoid this, ensure that re-writes do not shift dependency requirements relative to the original insertion order. See [#192](https://github.com/RicoSuter/Namotion.Interceptor/issues/192) for details and potential solutions. With the equality check, writing a property back to its landed value removes its pending change, the same as never writing it, and a later write captures it again at the end of the commit order. Without the equality check, a write back is captured like any other write: the commit writes the landed value and checks it for conflicts.
+**Write order limitation:** Only the final value per property is stored (last write wins), and the commit position is determined by the *first* write to each property. If a property is re-written with a value that has different dependency requirements than the initial value, the commit order (based on first-write positions) may no longer match the dependency order needed by the final values. This can cause commit-time validation to fail even though the final set of values is consistent. To avoid this, ensure that re-writes do not shift dependency requirements relative to the original insertion order. See [#192](https://github.com/RicoSuter/Namotion.Interceptor/issues/192) for details and potential solutions. A property written back to its landed value leaves the commit order, see [Last-Write-Wins Semantics](#last-write-wins-semantics).
 
 ### Retry After Conflict Detection
 

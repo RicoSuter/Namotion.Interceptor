@@ -140,7 +140,7 @@ public sealed class SubjectTransaction : IDisposable
     /// First write preserves <paramref name="currentValue"/> as old value for conflict detection;
     /// subsequent writes preserve the original old value (last write wins). When
     /// <paramref name="restoresLandedValue"/> is true and a change is pending, it is removed instead, the same as
-    /// never writing the property. Returns false when disposal wins the race, allowing the caller to continue the normal
+    /// never writing the property; without a pending change the write is captured as usual. Returns false when disposal wins the race, allowing the caller to continue the normal
     /// write chain.
     /// </summary>
     /// <exception cref="InvalidOperationException">Thrown if a concurrent commit is in progress (TOCTOU race).</exception>
