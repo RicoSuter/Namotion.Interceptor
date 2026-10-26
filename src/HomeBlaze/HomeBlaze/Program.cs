@@ -152,7 +152,8 @@ typeProvider
     .AddAssembly(typeof(FritzBox).Assembly)                                                 // Namotion.Devices.FritzBox
     .AddAssembly(typeof(FritzBoxWidget).Assembly)                                           // Namotion.Devices.FritzBox.HomeBlaze
     .AddAssembly(typeof(ClaudeCliAgent).Assembly)                                           // HomeBlaze.AI
-    .AddAssembly(typeof(HomeBlaze.AI.Blazor.AgentPage).Assembly);                           // HomeBlaze.AI.Blazor
+    .AddAssembly(typeof(HomeBlaze.AI.Blazor.AgentPage).Assembly)                            // HomeBlaze.AI.Blazor
+    .AddAssembly(typeof(HomeBlaze.Authorization.Role).Assembly);                            // HomeBlaze.Authorization
 
 // Register HomeBlaze.Plugins subject types
 typeProvider.AddAssembly(typeof(PluginManager).Assembly);
