@@ -180,7 +180,7 @@ At commit:
 
 ### Interceptor Order
 
-`ValidationInterceptor` runs after the transaction interceptor and before derived property recalculation, change notifications and lifecycle handling. A custom write interceptor without ordering attributes is placed by registration order and can end up on either side of validation and of the transaction interceptor. Declare `[RunsBefore]` or `[RunsAfter]` when its position matters.
+`ValidationInterceptor` runs after the transaction interceptor and before derived property recalculation, change notifications and lifecycle handling. A custom write interceptor without ordering attributes is placed by registration order and can end up on either side of validation and of the transaction interceptor. An interceptor that changes the written value or writes other properties must declare `[RunsBefore(typeof(SubjectTransactionInterceptor))]`: after the transaction interceptor it runs only when the commit applies the value, so inside a transaction the raw value is validated and captured, and its own writes are not captured. `[RunsBefore(typeof(ValidationInterceptor))]` alone does not place it before the transaction interceptor.
 
 ## Dynamic Properties
 

@@ -814,11 +814,13 @@ public class SubjectTransactionTests
         // Act
         using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
         person.FirstName = "Bob";
+        var pendingAfterWrite = transaction.GetPendingChanges();
         person.FirstName = "Ann";
         var pendingBeforeCommit = transaction.GetPendingChanges();
         await transaction.CommitAsync(CancellationToken.None);
 
         // Assert
+        Assert.Contains(pendingAfterWrite, c => c.Property.Name == nameof(Person.LastName));
         Assert.Empty(pendingBeforeCommit);
         Assert.Equal("Ann", person.FirstName);
         Assert.Equal("mirror-Ann", person.LastName);
@@ -874,6 +876,7 @@ public class SubjectTransactionTests
         }
     }
 
+    [RunsBefore(typeof(SubjectTransactionInterceptor))]
     private sealed class LastNameMirrorInterceptor : IWriteInterceptor
     {
         public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)

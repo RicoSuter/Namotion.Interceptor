@@ -8,16 +8,17 @@ namespace Namotion.Interceptor.Tracking.Transactions;
 /// </summary>
 /// <remarks>
 /// Handlers of the transaction's context are resolved when the transaction begins, those of a written subject's context
-/// when a subject of it is first written. Whether a handler registered while a transaction is open takes part in it is
-/// undefined, so register handlers before beginning transactions. Once resolved, a handler takes part in the rest of
-/// the transaction: it is called for later writes to any subject and checks the whole final set, so a handler that
-/// cares only about some subjects filters by <see cref="PropertyReference.Subject"/>. A handler equal to one that
-/// already takes part is not added again. Handlers are called in the order they were resolved, each context's in its
-/// service order (registration order unless ordering attributes say otherwise); the first handler that throws stops the
-/// rest. Only one handler can consume the commit write mark of an applied value (see
-/// <see cref="SubjectTransaction.TryConsumeCommitWrite"/>), and a value type with a loose <c>Equals</c> can pass an
-/// equal, unchecked value as the checked one. A write to a subject whose context does not route through the transaction
-/// interceptor is not intercepted and lands immediately, even during a check.
+/// when a subject of it is first written, and again on its next write after that context's services or fallback
+/// contexts change. Whether a handler registered while a transaction is open takes part in it is undefined, so register
+/// handlers before beginning transactions. Once resolved, a handler takes part in the rest of the transaction: it is
+/// called for later writes to any subject and checks the whole final set, so a handler that cares only about some
+/// subjects filters by <see cref="PropertyReference.Subject"/>. A handler equal to one that already takes part is not
+/// added again. Handlers are called in the order they were resolved, each context's in its service order (registration
+/// order unless ordering attributes say otherwise); the first handler that throws stops the rest. Only one handler can
+/// consume the commit write mark of an applied value (see <see cref="SubjectTransaction.TryConsumeCommitWrite"/>), and
+/// a value type with a loose <c>Equals</c> can pass an equal, unchecked value as the checked one. A write to a subject
+/// whose context does not route through the transaction interceptor is not intercepted and lands immediately, even
+/// during a check.
 /// </remarks>
 public interface ITransactionHandler
 {

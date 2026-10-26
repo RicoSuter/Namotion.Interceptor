@@ -111,7 +111,7 @@ using (var transaction = await context.BeginTransactionAsync(TransactionFailureH
 }
 ```
 
-With the equality check (`WithEqualityCheck`, part of `WithFullPropertyTracking`), writing a property back to its landed value removes its pending change, the same as never writing it: the change no longer appears in `GetPendingChanges()` and is neither written, conflict-checked nor checked by handlers. A later write captures it again as a new change at the end of the commit order. Without the equality check, a write back is captured like any other write.
+With the equality check (`WithEqualityCheck`, part of `WithFullPropertyTracking`), writing a property back to its landed value removes its pending change, the same as never writing it: it no longer appears in `GetPendingChanges()`, and the commit neither writes, publishes nor conflict-checks it. A later write captures it again as a new change, with the then-landed value as its old value and at the end of the commit order. Without the equality check, a write back is captured like any other write.
 
 ## Configuration Options
 
@@ -158,8 +158,12 @@ Controls value-based conflict detection in both locking modes; `BestEffort` fail
 
 | Value | Description |
 |-------|-------------|
-| `FailOnConflict` | Throw `SubjectTransactionConflictException` if values changed since transaction started. (default) |
+| `FailOnConflict` | Throw `SubjectTransactionConflictException` if the landed value of a written property changed since the transaction first wrote it. (default) |
 | `Ignore` | Overwrite any concurrent changes without checking. |
+
+Only properties the transaction writes are checked. A property it only reads can change before the commit without a conflict, so a write based on that read is not protected (write skew): for example, writing `Speed = 150` after reading `MaxSpeed = 200` still commits when `MaxSpeed` was lowered to 100 meanwhile, unless a validator encodes that rule and rejects the final set.
+
+A property written back to its landed value has no pending change (see [Last-Write-Wins and Commit Order](#last-write-wins-and-commit-order)), so it is not checked for conflicts: a concurrent change to it that lands before the commit is kept without a conflict.
 
 ### Validation Mode
 
@@ -170,8 +174,6 @@ using var tx = await context.BeginTransactionAsync(
     TransactionFailureHandling.Rollback,
     validationMode: TransactionValidationMode.Deferred);
 ```
-
-With the equality check, a property the transaction wrote back to its landed value has no pending change, so it is not checked for conflicts: a concurrent change to it that lands before the commit is kept without a conflict. A later write to the property is a new first write, checked against the value landed at that write.
 
 ### Requirements
 
@@ -375,7 +377,7 @@ The pre-apply check exists because inbound updates can change what a handler rea
 **Reads and writes during a check.** Handlers must not write properties.
 - On the committing thread, a read returns the checked value: the pending value of a changed property, and the landed value otherwise. In the pre-apply check, so does a property whose source write failed.
 - On the committing thread, a write throws `InvalidOperationException`, including a write to a settable derived property. A write of a property's landed value is dropped by the equality check, same as outside a transaction.
-- On other threads that carry the transaction, reads and writes throw `InvalidOperationException` because a commit is in progress, so handlers must read synchronously on the calling thread. This includes a write back to the landed value of a pending property; a write of the landed value of a property without a pending change, or one equal to its pending value, is dropped as unchanged instead.
+- On other threads that carry the transaction, reads and writes throw `InvalidOperationException` because a commit is in progress, so handlers must read synchronously on the calling thread. This includes a write back to the landed value of a pending property; a write of the landed value is dropped as unchanged instead when the property has no pending change or its pending value equals the landed value.
 - Such a write from another thread, for example a child task, can still call `OnCapturing` while `OnCommitting` runs, before it is rejected, so handlers must tolerate concurrent calls.
 - A write to a subject whose context does not route through the transaction interceptor is not intercepted and lands immediately, even during a check.
 

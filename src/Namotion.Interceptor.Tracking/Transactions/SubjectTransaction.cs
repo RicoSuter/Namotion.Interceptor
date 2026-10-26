@@ -272,7 +272,7 @@ public sealed class SubjectTransaction : IDisposable
     /// <param name="newValue">The value being written.</param>
     /// <param name="restoresLandedValue">
     /// True when the write restores the landed value and the subject's context has the equality check; a pending
-    /// change is then removed, the same as never writing the property.
+    /// change is then removed, the same as never writing the property, and without one the write is captured as usual.
     /// </param>
     /// <exception cref="InvalidOperationException">
     /// Thrown if a concurrent commit is in progress (TOCTOU race).

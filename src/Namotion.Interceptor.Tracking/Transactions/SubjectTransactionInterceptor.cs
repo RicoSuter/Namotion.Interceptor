@@ -169,10 +169,7 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
         next(ref context);
     }
 
-    /// <summary>
-    /// Returns true when the write restores the landed value and the subject's context has the equality check. Without
-    /// the equality check every write is captured, as outside a transaction every write lands.
-    /// </summary>
+    // Only with the equality check: without it every write is captured, as outside a transaction every write lands.
     private static bool IsWriteBackWithEqualityCheck<TProperty>(ref PropertyWriteContext<TProperty> context)
     {
         return !context.Property.Subject.Context.GetServices<PropertyValueEqualityCheckHandler>().IsDefaultOrEmpty &&
