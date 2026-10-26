@@ -177,7 +177,7 @@ Controls value-based conflict detection in both locking modes; `BestEffort` writ
 
 Conflict detection is best-effort and not atomic with respect to non-transactional writes that happen between detection and apply. Transactions are serialized against each other, but a raw property write or an external source callback can still interleave during that window.
 
-A property the transaction wrote back to its landed value has no pending change, so it is not checked for conflicts: a concurrent change to it that lands before the commit is kept without a conflict. Writing the property again restores its pending change, and with it the conflict check against the value it had at its first write.
+With the equality check (`WithEqualityCheck`, part of `WithFullPropertyTracking`), a property the transaction wrote back to its landed value has no pending change, so it is not checked for conflicts: a concurrent change to it that lands before the commit is kept without a conflict. A later write to the property is a new first write, checked against the value landed at that write.
 
 ### Requirements
 
@@ -486,7 +486,7 @@ Apply pending[MotorSpeed] = 150:
 
 **Why insertion order matters:** If `MotorSpeed` were committed before `MaxAllowedSpeed`, the validator would read `MaxAllowedSpeed = 100` from the real model and reject the write.
 
-**Write order limitation:** Only the final value per property is stored (last write wins), and the commit position is determined by the *first* write to each property. If a property is re-written with a value that has different dependency requirements than the initial value, the commit order (based on first-write positions) may no longer match the dependency order needed by the final values. This can cause commit-time validation to fail even though the final set of values is consistent. To avoid this, ensure that re-writes do not shift dependency requirements relative to the original insertion order. See [#192](https://github.com/RicoSuter/Namotion.Interceptor/issues/192) for details and potential solutions. Writing a property back to its landed value cancels its pending change. A later write to it restores the change in its original position with its original old value, so conflict detection still sees concurrent changes.
+**Write order limitation:** Only the final value per property is stored (last write wins), and the commit position is determined by the *first* write to each property. If a property is re-written with a value that has different dependency requirements than the initial value, the commit order (based on first-write positions) may no longer match the dependency order needed by the final values. This can cause commit-time validation to fail even though the final set of values is consistent. To avoid this, ensure that re-writes do not shift dependency requirements relative to the original insertion order. See [#192](https://github.com/RicoSuter/Namotion.Interceptor/issues/192) for details and potential solutions. With the equality check, writing a property back to its landed value removes its pending change, the same as never writing it, and a later write captures it again at the end of the commit order. Without the equality check, a write back is captured like any other write: the commit writes the landed value and checks it for conflicts.
 
 ### Retry After Conflict Detection
 
