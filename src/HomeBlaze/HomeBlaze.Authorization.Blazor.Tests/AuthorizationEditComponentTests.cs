@@ -152,6 +152,31 @@ public sealed class AuthorizationEditComponentTests : BunitContext, IAsyncLifeti
     }
 
     [Fact]
+    public async Task WhenARoleIsRenamedOnlyInCaseAndSaved_ThenItKeepsItsInstanceAndRulesAndItsAgentsKeepTheirPolicy()
+    {
+        // Arrange
+        var kitchen = _graph.GetRole("Kitchen");
+        kitchen.Allow = [new PermissionRule { Members = [nameof(TestDevice.Temperature)], Actions = [PermissionAction.Read] }];
+        var temperature = _graph.Devices.TryGetRegisteredSubject()!.TryGetProperty(nameof(TestDevice.Temperature))!;
+        Assert.True(_graph.Service.GetPolicy(["Kitchen"]).Policy.CanRead(temperature));
+        var component = RenderEditor(_graph.Authorization);
+
+        // Act
+        await ClickAsync(component, "authorization-role-rename-Kitchen");
+        await TypeNameAsync(component, "KITCHEN");
+        await ClickAsync(component, "authorization-role-name-confirm");
+        await component.InvokeAsync(() => component.Instance.SaveAsync(CancellationToken.None));
+
+        // Assert
+        Assert.Equal(["KITCHEN", "Garden"], _graph.Authorization.Roles.Keys);
+        Assert.Same(kitchen, _graph.Authorization.Roles["KITCHEN"]);
+        Assert.Equal(["KITCHEN"], kitchen.TryGetRegisteredSubject()!.Parents.Select(parent => parent.Index));
+        var result = _graph.Service.GetPolicy(["Kitchen"]);
+        Assert.Null(result.Error);
+        Assert.True(result.Policy.CanRead(temperature));
+    }
+
+    [Fact]
     public async Task WhenAnUnusedRoleIsRemovedAndSaved_ThenItIsLeftOut()
     {
         // Arrange

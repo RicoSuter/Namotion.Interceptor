@@ -705,6 +705,48 @@ public sealed class RoleEditComponentTests : BunitContext, IAsyncLifetime
             component.FindAll("[data-testid='rule-remove']").Select(button => button.GetAttribute("aria-label")));
     }
 
+    [Fact]
+    public async Task WhenALoadedRuleHasAnUnknownAction_ThenItIsAnErrorChipAndTheRoleIsInvalidUntilItIsRemoved()
+    {
+        // Arrange
+        var role = _graph.GetRole("Kitchen");
+        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read, new PermissionAction("run")] }];
+
+        // Act
+        var component = RenderEditor(role);
+
+        // Assert
+        var card = component.FindComponent<RuleCard>();
+        var chip = Assert.Single(card.FindComponents<MudChip<string>>());
+        Assert.Equal("run", chip.Find(".mud-chip-content").TextContent.Trim());
+        Assert.Contains("mud-chip-color-error", chip.Find(".mud-chip").ClassName);
+        Assert.Equal("Unknown action", Assert.Single(card.FindComponents<MudTooltip>()).Instance.Text);
+        Assert.False(component.Instance.IsValid);
+
+        // Act
+        await chip.Find(".mud-chip-close-button").ClickAsync(new MouseEventArgs());
+
+        // Assert
+        Assert.Equal([PermissionAction.Read], component.Instance.GetEditedRole().Allow[0].Actions.ToArray());
+        Assert.True(component.Instance.IsValid);
+    }
+
+    [Fact]
+    public void WhenLoadedTagsAreInAnotherCase_ThenTheyAreValid()
+    {
+        // Arrange
+        var role = _graph.GetRole("Kitchen");
+        role.Allow = [new PermissionRule { Tags = ["STATE", "Secret"], Actions = [PermissionAction.Read] }];
+
+        // Act
+        var component = RenderEditor(role);
+
+        // Assert
+        var chips = component.FindAll("[data-testid='role-edit-allow-rule-0'] [data-testid='rule-tags-chip']");
+        Assert.All(chips, chip => Assert.DoesNotContain("mud-chip-color-error", chip.ClassName));
+        Assert.True(component.Instance.IsValid);
+    }
+
     private IRenderedComponent<RoleEditComponent> RenderEditor(Role role) =>
         Render<RoleEditComponent>(parameters => parameters.Add(component => component.Subject, role));
 
