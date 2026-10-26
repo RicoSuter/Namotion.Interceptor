@@ -40,7 +40,7 @@ public class BuiltInRolesTests
     }
 
     [Fact]
-    public void WhenTheRoleIsReader_ThenItReadsStateSubjectsAttributesMetadataAndMethods()
+    public void WhenTheRoleIsReader_ThenItReadsStateConfigurationSubjectsAttributesMetadataAndMethods()
     {
         // Arrange
         var policy = Compile(BuiltInRoles.ReaderName);
@@ -54,7 +54,8 @@ public class BuiltInRolesTests
         Assert.True(policy.CanRead(subjectMetadata));
         Assert.True(policy.CanRead(subject.TryGetProperty("GetCount")!));
         Assert.True(policy.CanRead(subject.TryGetProperty("Start")!));
-        Assert.False(policy.CanRead(subject.TryGetProperty(nameof(TagTestSubject.Host))!));
+        Assert.True(policy.CanRead(subject.TryGetProperty(nameof(TagTestSubject.Host))!));
+        Assert.False(policy.CanRead(subject.TryGetProperty(nameof(TagTestSubject.Password))!));
         Assert.False(policy.CanRead(subject.TryGetProperty(nameof(TagTestSubject.Plain))!));
     }
 
@@ -71,7 +72,7 @@ public class BuiltInRolesTests
     }
 
     [Fact]
-    public void WhenTheRoleIsReader_ThenItNeitherWritesStateNorExecutesOperations()
+    public void WhenTheRoleIsReader_ThenItNeitherWritesStateOrConfigurationNorExecutesOperations()
     {
         // Arrange
         var policy = Compile(BuiltInRoles.ReaderName);
@@ -79,6 +80,7 @@ public class BuiltInRolesTests
 
         // Act & Assert
         Assert.False(policy.CanWrite(subject.TryGetProperty(nameof(TagTestSubject.Temperature))!));
+        Assert.False(policy.CanWrite(subject.TryGetProperty(nameof(TagTestSubject.Host))!));
         Assert.False(policy.IsAllowed(subject.TryGetProperty("Start")!, AuthorizationActions.Execute));
         Assert.False(policy.IsAllowed(subject.TryGetProperty(nameof(TagTestSubject.Host))!, AuthorizationActions.History));
     }

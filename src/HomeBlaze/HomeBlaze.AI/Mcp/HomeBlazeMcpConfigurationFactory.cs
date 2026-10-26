@@ -24,32 +24,34 @@ internal static class HomeBlazeMcpConfigurationFactory
 {
     private const string PathPrefix = "/";
 
-    /// <summary>The refusal of a call of SetMetadata by an agent whose arguments do not have the shape of the method.</summary>
+    /// <summary>The refusal of a call of SetMetadata whose arguments do not have the shape of the method.</summary>
     internal const string SetMetadataArgumentsMessage =
         "SetMetadata takes path, a string, an optional property and values, a JSON object, for example {\"path\": \"Devices/Pump\", \"values\": {\"navTitle\": \"Pump\"}}.";
+
+    /// <summary>The refusal of an operation of an agent.</summary>
+    internal const string AgentOperationMessage = "Operations of agents cannot be run.";
 
     /// <summary>
     /// Creates a configuration with the HomeBlaze path provider, enrichers, type providers, method tools, Markdown tools, the Markdown
     /// search tool, the Markdown page hints of browse and search, the Percent hint of search and every registered
-    /// <see cref="McpToolProviderRegistration"/>. set_property refuses every property marked with <see cref="ConfigurationAttribute"/>,
-    /// regardless of <paramref name="forAgents"/>.
+    /// <see cref="McpToolProviderRegistration"/>. invoke_operation and the Markdown tools refuse every operation of an agent
+    /// (<see cref="LlmAgentBase"/>), and SetMetadata of a storage with arguments of another shape, for an agent, a subject
+    /// that an agent holds through any parent, and a subject or property that the tools do not show, which is refused as a
+    /// missing one. SearchMetadata of a storage and search_markdown leave out the metadata and notes of agents and of the
+    /// subjects and properties that the tools do not show.
     /// </summary>
     /// <param name="serviceProvider">Services; must contain <see cref="SubjectTypeRegistry"/> and <see cref="ILoggerFactory"/>.</param>
     /// <param name="rootSubjectProvider">Resolves the root subject when a tool runs.</param>
     /// <param name="isReadOnly">Whether set_property and operations are blocked.</param>
-    /// <param name="forAgents">
-    /// Whether the tools serve the built-in agents; invoke_operation and the Markdown tools then refuse every
-    /// operation of an agent (<see cref="LlmAgentBase"/>), and SetMetadata of a storage with arguments of another shape,
-    /// for an agent, a subject that an agent holds through any parent, and a subject or property hidden from agents,
-    /// which is refused as a missing one; SearchMetadata of a storage and search_markdown then leave out the metadata and
-    /// notes of agents. SearchMetadata leaves out the subjects and properties that the tools do not show either way.
-    /// </param>
+    /// <param name="accessPolicy">Decides per member and action what the tools show and change, <see cref="McpServerConfiguration.AccessPolicy"/>.</param>
     public static McpServerConfiguration Create(
         IServiceProvider serviceProvider,
         Func<IInterceptorSubject> rootSubjectProvider,
         bool isReadOnly,
-        bool forAgents)
+        IMcpAccessPolicy accessPolicy)
     {
+        ArgumentNullException.ThrowIfNull(accessPolicy);
+
         var typeRegistry = serviceProvider.GetRequiredService<SubjectTypeRegistry>();
         var pathProvider = new StateAttributePathProvider();
         var typeProviders = new IMcpTypeProvider[]
@@ -68,8 +70,8 @@ internal static class HomeBlazeMcpConfigurationFactory
             serviceProvider,
             serviceProvider.GetRequiredService<ILoggerFactory>().CreateLogger<McpMethodInvoker>(),
             isReadOnly,
-            forAgents ? (subject, method, arguments) => GetAgentOperationError(subject, method, arguments, pathProvider, excludeTypes) : null,
-            (subject, method, result) => AgentMetadataAccess.FilterSearchMetadataResult(subject, method, result, forAgents, pathProvider, excludeTypes));
+            (subject, method, arguments) => GetOperationError(subject, method, arguments, pathProvider, excludeTypes),
+            (subject, method, result) => AgentMetadataAccess.FilterSearchMetadataResult(subject, method, result, pathProvider, excludeTypes));
         var configuration = new McpServerConfiguration
         {
             PathProvider = pathProvider,
@@ -81,7 +83,7 @@ internal static class HomeBlazeMcpConfigurationFactory
             {
                 new HomeBlazeMcpToolProvider(invoker, isReadOnly),
                 new HomeBlazeMarkdownToolProvider(invoker, isReadOnly),
-                new HomeBlazeMarkdownSearchToolProvider(rootSubjectProvider, pathProvider, PathPrefix, excludeTypes, forAgents)
+                new HomeBlazeMarkdownSearchToolProvider(rootSubjectProvider, pathProvider, PathPrefix, excludeTypes)
             },
             ToolDescriptionAdditions =
             {
@@ -89,11 +91,11 @@ internal static class HomeBlazeMcpConfigurationFactory
                 ["search"] = HomeBlazeMcpInstructions.MarkdownSubjectsToolHint + " " + HomeBlazeMcpInstructions.PercentFractionsSearchHint,
                 ["set_property"] = HomeBlazeMcpInstructions.ChangeCaution + " " + HomeBlazeMcpInstructions.ConfigurationWriteHint
             },
-            AccessPolicy = ConfigurationWriteAccessPolicy.Instance,
+            AccessPolicy = accessPolicy,
             IsReadOnly = isReadOnly
         };
 
-        var context = new McpToolProviderContext(serviceProvider, rootSubjectProvider, pathProvider, isReadOnly);
+        var context = new McpToolProviderContext(serviceProvider, rootSubjectProvider, pathProvider, isReadOnly, configuration);
         foreach (var registration in serviceProvider.GetServices<McpToolProviderRegistration>())
         {
             configuration.ToolProviders.Add(registration.Create(context));
@@ -102,12 +104,13 @@ internal static class HomeBlazeMcpConfigurationFactory
         return configuration;
     }
 
-    private static string? GetAgentOperationError(
+    private static string? GetOperationError(
         RegisteredSubject subject, MethodMetadata method, object?[] arguments, PathProviderBase pathProvider, Type[] excludeTypes)
     {
+        // Stands in for the system rule on agents until the method tools ask the access policy.
         if (subject.Subject is LlmAgentBase)
         {
-            return "Agents cannot run operations of agents.";
+            return AgentOperationMessage;
         }
 
         if (method.PropertyName != FluentStorageContainer.SetMetadataMethodName || subject.Subject is not IMetadataStore)
@@ -116,9 +119,9 @@ internal static class HomeBlazeMcpConfigurationFactory
         }
 
         // The input parameters in declaration order, empty when they could not be read. Any other shape is refused
-        // without looking at the path, so that a subject hidden from agents reads as a missing one.
+        // without looking at the path, so that a subject the tools do not show reads as a missing one.
         return arguments is [string path, string or null, JsonElement { ValueKind: JsonValueKind.Object }, ..]
-            ? AgentMetadataAccess.GetError(subject, path, arguments[1] as string, pathProvider, excludeTypes, forAgents: true)
+            ? AgentMetadataAccess.GetError(subject, path, arguments[1] as string, pathProvider, excludeTypes)
             : SetMetadataArgumentsMessage;
     }
 

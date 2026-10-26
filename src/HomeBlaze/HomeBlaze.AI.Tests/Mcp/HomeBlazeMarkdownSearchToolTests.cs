@@ -353,7 +353,7 @@ public sealed class HomeBlazeMarkdownSearchToolTests : IDisposable
             ("Docs/Pump.json", """{ "speed": 1 }"""),
             ("Docs/Pump.metadata.json", """{ "notes": "Check the freezer gasket.", "$properties": { "FileSize": { "notes": "Grows with the freezer log." } } }""")
         ]);
-        var tools = CreateTools(services, root, forAgents: true);
+        var tools = CreateTools(services, root, isAgent: true);
 
         // Act
         var result = await CallAsync(tools[HomeBlazeMarkdownSearchToolProvider.SearchMarkdownToolName], new { query = "freezer" });
@@ -413,9 +413,9 @@ public sealed class HomeBlazeMarkdownSearchToolTests : IDisposable
     }
 
     [Theory]
-    [InlineData(false, new[] { "/Agent", "/Storage/Notes.md" })]
-    [InlineData(true, new[] { "/Storage/Notes.md" })]
-    public async Task WhenNotesBelongToAnAgent_ThenOnlyAgentsDoNotSearchThem(bool forAgents, string[] expectedPaths)
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenNotesBelongToAnAgent_ThenNoClientSearchesThem(bool isAgent)
     {
         // Arrange
         var (root, services) = await CreateGraphAsync([]);
@@ -423,13 +423,13 @@ public sealed class HomeBlazeMarkdownSearchToolTests : IDisposable
         root.Children = new Dictionary<string, IInterceptorSubject>(root.Children) { ["Agent"] = agent };
         var metadata = ImmutableDictionary<string, JsonElement>.Empty.Add("notes", JsonElement.Parse("\"The freezer list of the agent.\""));
         agent.TryGetRegisteredSubject()!.AddProperty(KnownAttributes.Metadata, metadata.GetType(), _ => metadata, null);
-        var tool = CreateTool(services, root, forAgents);
+        var tool = CreateTool(services, root, isAgent);
 
         // Act
         var result = await CallAsync(tool, new { query = "freezer" });
 
         // Assert
-        Assert.Equal(expectedPaths, result.GetProperty("pages").EnumerateArray().Select(page => page.GetProperty("path").GetString()));
+        Assert.Equal(["/Storage/Notes.md"], result.GetProperty("pages").EnumerateArray().Select(page => page.GetProperty("path").GetString()));
     }
 
     [Fact]
@@ -440,7 +440,7 @@ public sealed class HomeBlazeMarkdownSearchToolTests : IDisposable
         var page = ((FluentStorageContainer)root.Children["Storage"]).Children["Notes.md"];
         var metadata = ImmutableDictionary<string, JsonElement>.Empty.Add("notes", JsonElement.Parse("\"The freezer page.\""));
         page.TryGetRegisteredSubject()!.AddProperty(KnownAttributes.Metadata, metadata.GetType(), _ => metadata, null);
-        var tool = CreateTool(services, root, forAgents: true);
+        var tool = CreateTool(services, root, isAgent: true);
 
         // Act
         var result = await CallAsync(tool, new { query = "freezer" });
@@ -458,7 +458,7 @@ public sealed class HomeBlazeMarkdownSearchToolTests : IDisposable
         var (root, services) = await CreateGraphAsync([]);
         var metadata = ImmutableDictionary<string, JsonElement>.Empty.Add("notes", JsonElement.Parse("\"The freezer of the house.\""));
         root.TryGetRegisteredSubject()!.AddProperty(KnownAttributes.Metadata, metadata.GetType(), _ => metadata, null);
-        var tool = CreateTool(services, root, forAgents: true);
+        var tool = CreateTool(services, root, isAgent: true);
 
         // Act
         var result = await CallAsync(tool, new { query = "house" });
@@ -482,15 +482,17 @@ public sealed class HomeBlazeMarkdownSearchToolTests : IDisposable
     private async Task<McpToolInfo> CreateToolAsync(params (string Path, string Content)[] additionalFiles)
     {
         var (root, services) = await CreateGraphAsync(additionalFiles);
-        return CreateTool(services, root, forAgents: true);
+        return CreateTool(services, root, isAgent: true);
     }
 
-    private static McpToolInfo CreateTool(IServiceProvider services, AgentTestRoot root, bool forAgents) =>
-        CreateTools(services, root, forAgents)[HomeBlazeMarkdownSearchToolProvider.SearchMarkdownToolName];
+    private static McpToolInfo CreateTool(IServiceProvider services, AgentTestRoot root, bool isAgent) =>
+        CreateTools(services, root, isAgent)[HomeBlazeMarkdownSearchToolProvider.SearchMarkdownToolName];
 
-    private static Dictionary<string, McpToolInfo> CreateTools(IServiceProvider services, AgentTestRoot root, bool forAgents)
+    // The tools of an agent, with the policy agents have today, or of the external MCP server.
+    private static Dictionary<string, McpToolInfo> CreateTools(IServiceProvider services, AgentTestRoot root, bool isAgent)
     {
-        var configuration = HomeBlazeMcpConfigurationFactory.Create(services, () => root, isReadOnly: true, forAgents);
+        var configuration = HomeBlazeMcpConfigurationFactory.Create(
+            services, () => root, isReadOnly: true, isAgent ? TestAccessPolicies.Operator : TestAccessPolicies.Everything);
         return new McpToolFactory(root, configuration).CreateTools().ToDictionary(tool => tool.Name);
     }
 

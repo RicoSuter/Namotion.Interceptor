@@ -2,7 +2,6 @@ using HomeBlaze.AI;
 using HomeBlaze.AI.Agents;
 using HomeBlaze.AI.Agents.ClaudeCli;
 using HomeBlaze.AI.Mcp;
-using HomeBlaze.Authorization;
 using HomeBlaze.Components;
 using HomeBlaze.History.Blazor;
 using HomeBlaze.History.InMemory.Blazor;
@@ -69,9 +68,6 @@ builder.Services.AddHomeBlazeMcpToolProvider(context => new HistoryMcpToolProvid
     context.PathProvider,
     context.Services.GetRequiredService<ILoggerFactory>().CreateLogger<HistoryMcpToolProvider>()));
 builder.Services.AddHomeBlazeAgents();
-
-// Rule paths are matched against the paths the MCP tools show, so the authorization uses the tools' path provider.
-builder.Services.AddHomeBlazeAuthorization(new StateAttributePathProvider());
 
 // The external MCP server at /mcp (default: off, enabled in Development). The built-in agents do not use it.
 var mcpEnabled = builder.Configuration.GetValue("McpServer:Enabled", false);

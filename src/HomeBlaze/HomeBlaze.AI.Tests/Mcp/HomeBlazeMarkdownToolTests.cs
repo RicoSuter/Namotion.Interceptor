@@ -208,7 +208,7 @@ public sealed class HomeBlazeMarkdownToolTests : IDisposable
         // Act
         var readOnlyTools = CreateTools(services, root, isReadOnly: true);
         var writableTools = CreateTools(services, root, isReadOnly: false);
-        var externalTools = new McpToolFactory(root, HomeBlazeMcpConfigurationFactory.Create(services, () => root, isReadOnly: false, forAgents: false))
+        var externalTools = new McpToolFactory(root, HomeBlazeMcpConfigurationFactory.Create(services, () => root, isReadOnly: false, TestAccessPolicies.Everything))
             .CreateTools().ToDictionary(tool => tool.Name);
 
         // Assert
@@ -299,7 +299,7 @@ public sealed class HomeBlazeMarkdownToolTests : IDisposable
 
     private static Dictionary<string, McpToolInfo> CreateTools(IServiceProvider services, AgentTestRoot root, bool isReadOnly = false)
     {
-        var configuration = HomeBlazeMcpConfigurationFactory.Create(services, () => root, isReadOnly, forAgents: true);
+        var configuration = HomeBlazeMcpConfigurationFactory.Create(services, () => root, isReadOnly, TestAccessPolicies.Operator);
         return new McpToolFactory(root, configuration).CreateTools().ToDictionary(tool => tool.Name);
     }
 

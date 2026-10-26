@@ -18,7 +18,8 @@ public static class BuiltInRoles
     public const string EverythingName = "Everything";
 
     /// <summary>
-    /// Reads state, subjects, attributes, metadata and methods, reads the history of state and executes queries.
+    /// Reads state, configuration, subjects, attributes, metadata and methods, reads the history of state and executes
+    /// queries. Secrets stay unreadable through the system rules.
     /// </summary>
     public static AuthorizationRole Reader { get; } = new()
     {
@@ -27,6 +28,7 @@ public static class BuiltInRoles
         Allow =
         [
             new PermissionRule { Tags = [MemberTags.State], Actions = [PermissionAction.Read, AuthorizationActions.History] },
+            new PermissionRule { Tags = [MemberTags.Configuration], Actions = [PermissionAction.Read] },
             new PermissionRule { Tags = [MemberTags.Subjects], Actions = [PermissionAction.Read] },
             new PermissionRule { Tags = [MemberTags.Attribute], Actions = [PermissionAction.Read] },
             new PermissionRule { Tags = [MemberTags.Metadata], Actions = [PermissionAction.Read] },

@@ -32,11 +32,11 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task WhenMetadataIsSetThroughTheStorage_ThenBrowseAndGetPropertyShowIt(bool forAgents)
+    public async Task WhenMetadataIsSetThroughTheStorage_ThenBrowseAndGetPropertyShowIt(bool isAgent)
     {
         // Arrange
         WriteFile("Docs/Pump.json", """{ "speed": 1 }""");
-        var (tools, _) = await CreateToolsAsync(forAgents);
+        var (tools, _) = await CreateToolsAsync(isAgent);
 
         // Act
         var subjectResult = await CallAsync(tools["invoke_operation"], new
@@ -173,7 +173,7 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
         // Arrange
         WriteFile("Docs/Pump.json", """{ "speed": 1 }""");
         WriteFile("Docs/Readme.md", "# Readme");
-        var (tools, storage) = await CreateToolsAsync(forAgents: true);
+        var (tools, storage) = await CreateToolsAsync(isAgent: true);
         var folder = (VirtualFolder)storage.Children["Docs"];
         var target = path == "Docs" ? folder : folder.Children[Path.GetFileName(path)];
         target.TryGetRegisteredSubject()!.AddProperty("Secret", typeof(int), _ => 1, null);
@@ -256,7 +256,7 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task WhenMetadataIsSearchedThroughTheTools_ThenTheSubjectsAndPropertiesHiddenFromTheToolsAreLeftOut(bool forAgents)
+    public async Task WhenMetadataIsSearchedThroughTheTools_ThenTheSubjectsAndPropertiesHiddenFromTheToolsAreLeftOut(bool isAgent)
     {
         // Arrange
         WriteFile("Docs/Pump.json", """{ "speed": 1 }""");
@@ -265,7 +265,7 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
         WriteFile("Docs/Hidden.metadata.json", """{ "tags": ["floor-2"] }""");
         WriteFile("Docs/Device.json", $$"""{ "$type": "{{typeof(MetadataSearchTestDevice).FullName}}" }""");
         WriteFile("Docs/Device.metadata.json", """{ "tags": ["floor-2"], "$properties": { "Host": { "tags": ["floor-2"] } } }""");
-        var (tools, _) = await CreateToolsAsync(forAgents);
+        var (tools, _) = await CreateToolsAsync(isAgent);
 
         // Act
         var result = await CallAsync(tools["invoke_query"], new { path = "/Storage", method = "SearchMetadata", parameters = new { tag = "floor-2" } });
@@ -296,19 +296,17 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
         Assert.Equal("Docs/Pump099.json|", matches[^1]);
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task WhenSearchMetadataReturnsAResultOfAnotherShape_ThenNoMatchIsReturned(bool forAgents)
+    [Fact]
+    public async Task WhenSearchMetadataReturnsAResultOfAnotherShape_ThenNoMatchIsReturned()
     {
         // Arrange
-        var (_, storage) = await CreateToolsAsync(forAgents);
+        var (_, storage) = await CreateToolsAsync();
         var subject = storage.TryGetRegisteredSubject()!;
         var method = subject.TryGetProperty(nameof(FluentStorageContainer.SearchMetadata))!.TryGetMethodMetadata()!;
 
         // Act
         var result = AgentMetadataAccess.FilterSearchMetadataResult(
-            subject, method, new[] { "Docs/Hidden.json" }, forAgents, new StateAttributePathProvider(), []);
+            subject, method, new[] { "Docs/Hidden.json" }, new StateAttributePathProvider(), []);
 
         // Assert
         Assert.Empty(Assert.IsType<MetadataSearchMatch[]>(result));
@@ -318,7 +316,7 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
         => [.. result.GetProperty("result").EnumerateArray().Select(match =>
             $"{match.GetProperty("path").GetString()}|{(match.TryGetProperty("property", out var property) ? property.GetString() : null)}")];
 
-    private async Task<(Dictionary<string, McpToolInfo> Tools, FluentStorageContainer Storage)> CreateToolsAsync(bool forAgents = false)
+    private async Task<(Dictionary<string, McpToolInfo> Tools, FluentStorageContainer Storage)> CreateToolsAsync(bool isAgent = false)
     {
         var typeProvider = new TypeProvider();
         typeProvider.AddAssembly(typeof(FluentStorageContainer).Assembly);
@@ -349,7 +347,8 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
 
         root = new AgentTestRoot(context) { Children = new Dictionary<string, IInterceptorSubject> { ["Storage"] = storage } };
         await storage.ConnectAsync(CancellationToken.None);
-        var configuration = HomeBlazeMcpConfigurationFactory.Create(serviceProvider, () => root, isReadOnly: false, forAgents);
+        var configuration = HomeBlazeMcpConfigurationFactory.Create(
+            serviceProvider, () => root, isReadOnly: false, isAgent ? TestAccessPolicies.Operator : TestAccessPolicies.Everything);
         return (new McpToolFactory(root, configuration).CreateTools().ToDictionary(tool => tool.Name), storage);
     }
 

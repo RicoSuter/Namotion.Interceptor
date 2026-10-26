@@ -12,9 +12,8 @@ using Namotion.Interceptor.Tracking.Parent;
 namespace HomeBlaze.AI.Mcp;
 
 /// <summary>
-/// The metadata that the tools let their clients find and agents change: SearchMetadata of a storage finds only the
-/// subjects and properties that the tools show, and for agents only those that SetMetadata lets them change, which no
-/// agent holds.
+/// The metadata that the tools let their clients find and change: SearchMetadata of a storage finds only the subjects
+/// and properties that the tools show and that SetMetadata lets them change, which no agent holds.
 /// </summary>
 internal static class AgentMetadataAccess
 {
@@ -22,12 +21,15 @@ internal static class AgentMetadataAccess
     // every match.
     private const int MaxSearchMetadataMatches = 100;
 
+    /// <summary>The refusal of SetMetadata for an agent or a subject that an agent holds.</summary>
+    internal const string AgentMetadataMessage = "The metadata of agents cannot be changed.";
+
     /// <summary>
     /// Gets the first 100 matches of SearchMetadata of a storage without those that <see cref="GetError"/> refuses, and no
     /// match for a result of SearchMetadata of a storage that is no array of matches; any other result is returned unchanged.
     /// </summary>
     public static object? FilterSearchMetadataResult(
-        RegisteredSubject subject, MethodMetadata method, object? result, bool forAgents, PathProviderBase pathProvider, Type[] excludeTypes)
+        RegisteredSubject subject, MethodMetadata method, object? result, PathProviderBase pathProvider, Type[] excludeTypes)
     {
         if (method.PropertyName != nameof(FluentStorageContainer.SearchMetadata) || subject.Subject is not IMetadataStore)
         {
@@ -40,28 +42,29 @@ internal static class AgentMetadataAccess
         }
 
         return matches
-            .Where(match => GetError(subject, match.Path, match.Property, pathProvider, excludeTypes, forAgents) is null)
+            .Where(match => GetError(subject, match.Path, match.Property, pathProvider, excludeTypes) is null)
             .Take(MaxSearchMetadataMatches)
             .ToArray();
     }
 
     /// <summary>
-    /// Gets why the metadata at <paramref name="path"/> of the storage is not shown by the tools, or for agents why an agent
-    /// may not set it, or null when it is shown or may be set. The target is resolved as the tools resolve a path, so that
-    /// a subject or property hidden from them is refused as a missing one; for agents, an agent and a subject that an
-    /// agent holds through any parent are refused as well.
+    /// Gets why the metadata at <paramref name="path"/> of the storage is not shown by the tools or may not be set, or null
+    /// when it is shown and may be set. The target is resolved as the tools resolve a path, so that a subject or property
+    /// hidden from them is refused as a missing one; an agent and a subject that an agent holds through any parent are
+    /// refused as well.
     /// </summary>
     public static string? GetError(
-        RegisteredSubject storage, string path, string? propertyName, PathProviderBase pathProvider, Type[] excludeTypes, bool forAgents)
+        RegisteredSubject storage, string path, string? propertyName, PathProviderBase pathProvider, Type[] excludeTypes)
     {
         if (TryGetVisibleTarget(storage, path, pathProvider, excludeTypes) is not { } target)
         {
             return FluentStorageContainer.GetNoSubjectMessage(path);
         }
 
-        if (forAgents && target.Subject.TryGetFirstParentOrSelf<LlmAgentBase>() is not null)
+        // Stands in for the system rule on agents until SetMetadata asks the access policy.
+        if (target.Subject.TryGetFirstParentOrSelf<LlmAgentBase>() is not null)
         {
-            return "Agents cannot change the metadata of agents.";
+            return AgentMetadataMessage;
         }
 
         if (propertyName is not null && IsPropertyChecked(target.Subject) && !IsPropertyVisible(target, propertyName, pathProvider))
