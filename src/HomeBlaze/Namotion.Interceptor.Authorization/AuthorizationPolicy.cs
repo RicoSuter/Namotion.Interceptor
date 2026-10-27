@@ -21,16 +21,14 @@ public sealed class AuthorizationPolicy
 
     private const int MaxPaths = 64;
 
-    // The root's single empty path, which a member of the root follows; PathPattern.Matches does not mutate it, so it is shared.
-    private static readonly PathLink[][] RootPaths = [[]];
+    // The root's single empty path, which a member of the root follows; never mutated, so it is shared.
+    private static readonly List<PathLink[]> RootPaths = [[]];
 
     private static readonly TypeNameCache TypeNames = new();
 
     private readonly CompiledRule[] _allow;
     private readonly CompiledRule[] _deny;
     private readonly FrozenDictionary<string, ulong> _actionBits;
-    private readonly ulong _readBit;
-    private readonly ulong _writeBit;
     private readonly IMemberTagProvider? _tagProvider;
     private readonly PathProviderBase? _pathProvider;
 
@@ -46,8 +44,6 @@ public sealed class AuthorizationPolicy
         _allow = allow;
         _deny = deny;
         _actionBits = actionBits;
-        _readBit = actionBits.GetValueOrDefault(PermissionAction.Read.Name);
-        _writeBit = actionBits.GetValueOrDefault(PermissionAction.Write.Name);
         _tagProvider = tagProvider;
         _pathProvider = pathProvider;
     }
@@ -105,7 +101,7 @@ public sealed class AuthorizationPolicy
     public bool CanRead(RegisteredSubjectProperty member)
     {
         ArgumentNullException.ThrowIfNull(member);
-        return IsAllowed(member, _readBit);
+        return IsAllowed(member, PolicyCompiler.ReadBit);
     }
 
     /// <summary>Whether at least one member of the subject is readable and the subject is reachable from the root through readable subject-holding properties.</summary>
@@ -115,7 +111,7 @@ public sealed class AuthorizationPolicy
     public bool CanWrite(RegisteredSubjectProperty member)
     {
         ArgumentNullException.ThrowIfNull(member);
-        return IsAllowed(member, _writeBit);
+        return IsAllowed(member, PolicyCompiler.WriteBit);
     }
 
     /// <summary>Answers <see cref="IsAllowed(RegisteredSubjectProperty, PermissionAction)"/> and names the rules that decided it. May allocate; not for hot paths.</summary>
@@ -124,7 +120,8 @@ public sealed class AuthorizationPolicy
     {
         ArgumentNullException.ThrowIfNull(member);
         var bit = GetBit(action);
-        var context = new MatchContext(member);
+        MatchContext context = default;
+        context.SetMember(member);
         var allowed = FindMatch(_allow, bit, isDeny: false, ref context);
         var denied = FindMatch(_deny, bit, isDeny: true, ref context);
         return new PermissionDecision(allowed is not null && denied is null, allowed?.Role, allowed?.Rule, denied?.Role, denied?.Rule);
@@ -163,7 +160,8 @@ public sealed class AuthorizationPolicy
 
     private bool IsAllowed(RegisteredSubjectProperty member, ulong bit)
     {
-        var context = new MatchContext(member);
+        MatchContext context = default;
+        context.SetMember(member);
         return IsAllowed(bit, ref context);
     }
 
@@ -189,7 +187,7 @@ public sealed class AuthorizationPolicy
 
     private bool MatchesMemberSelectors(CompiledRule rule, ref MatchContext context)
     {
-        if (rule.Members is not null && !Glob.IsMatchAny(rule.Members, context.MemberName ??= MemberNames.GetName(context.Member)))
+        if (rule.Members is not null && !Glob.IsMatchAny(rule.Members, context.MemberName ??= GetName(context.Member)))
         {
             return false;
         }
@@ -215,25 +213,19 @@ public sealed class AuthorizationPolicy
             return true;
         }
 
-        if (!context.PathsComputed)
-        {
-            context.Paths = GetPaths(context.Member.Parent, out context.PathsComplete);
-            context.PathsComputed = true;
-        }
-
+        context.Paths ??= GetPaths(context.Member.Parent, out context.PathsComplete);
         if (isDeny && !context.PathsComplete)
         {
             return true;
         }
 
-        if (!context.MemberLinkComputed)
-        {
-            context.MemberLink = MemberSegments.GetMemberLink(_pathProvider!, context.Member);
-            context.MemberLinkComputed = true;
-        }
-
-        return AnyPathMatches(patterns, context.Paths!, context.MemberLink);
+        context.MemberSegment ??= SubjectPaths.GetSegment(_pathProvider!, context.Member);
+        return AnyPathMatches(patterns, context.Paths, new PathLink(context.MemberSegment, null, null));
     }
+
+    /// <summary>The name a member glob matches: the property name, or <c>Property@Attribute</c> for an attribute, nested for an attribute of an attribute.</summary>
+    private static string GetName(RegisteredSubjectProperty member)
+        => member.IsAttribute ? GetName(member.GetAttributedProperty()) + "@" + member.BrowseName : member.Name;
 
     private static bool HasAllTags(IReadOnlyCollection<string> memberTags, string[] requiredTags)
     {
@@ -277,7 +269,7 @@ public sealed class AuthorizationPolicy
 
     // Every path of the subject; the root has the single empty path. Incomplete when a path could not be written, more
     // than MaxPaths exist, or the subject has parents but no path was found.
-    private PathLink[][] GetPaths(RegisteredSubject subject, out bool isComplete)
+    private List<PathLink[]> GetPaths(RegisteredSubject subject, out bool isComplete)
     {
         if (subject.Parents.Length == 0)
         {
@@ -285,18 +277,18 @@ public sealed class AuthorizationPolicy
             return RootPaths;
         }
 
-        var paths = new List<PathLink[]>();
+        var paths = new List<PathLink[]>(1);
         isComplete = SubjectPaths.TryGetPaths(subject, _pathProvider!, paths, MaxPaths) && paths.Count > 0;
-        return [.. paths];
+        return paths;
     }
 
-    private static bool AnyPathMatches(PathPattern[] patterns, PathLink[][] paths, in PathLink member)
+    private static bool AnyPathMatches(PathPattern[] patterns, List<PathLink[]> paths, in PathLink member)
     {
         foreach (var pattern in patterns)
         {
-            foreach (var path in paths)
+            for (var i = 0; i < paths.Count; i++)
             {
-                if (pattern.Matches(path, member))
+                if (pattern.Matches(paths[i], member))
                 {
                     return true;
                 }
@@ -306,23 +298,16 @@ public sealed class AuthorizationPolicy
         return false;
     }
 
-    // The paths belong to the subject, not the member, so they are carried from member to member and written at most once.
     private bool HasReadableMember(RegisteredSubject subject)
     {
-        PathLink[][]? paths = null;
-        var pathsComplete = false;
-        var pathsComputed = false;
+        MatchContext context = default;
         foreach (var member in subject.Properties)
         {
-            var context = new MatchContext(member) { Paths = paths, PathsComplete = pathsComplete, PathsComputed = pathsComputed };
-            if (IsAllowed(_readBit, ref context))
+            context.SetMember(member);
+            if (IsAllowed(PolicyCompiler.ReadBit, ref context))
             {
                 return true;
             }
-
-            paths = context.Paths;
-            pathsComplete = context.PathsComplete;
-            pathsComputed = context.PathsComputed;
         }
 
         return false;
@@ -346,7 +331,7 @@ public sealed class AuthorizationPolicy
 
         foreach (var parent in parents)
         {
-            if (!IsAllowed(parent.Property, _readBit))
+            if (!IsAllowed(parent.Property, PolicyCompiler.ReadBit))
             {
                 deniedProperty ??= parent.Property;
             }
@@ -359,15 +344,23 @@ public sealed class AuthorizationPolicy
         return false;
     }
 
-    private struct MatchContext(RegisteredSubjectProperty member)
+    // The facts one question derives, each at most once and only when a rule needs it.
+    private struct MatchContext
     {
-        public readonly RegisteredSubjectProperty Member = member;
+        public RegisteredSubjectProperty Member;
         public string? MemberName;
         public IReadOnlyCollection<string>? Tags;
-        public PathLink[][]? Paths;
+        public string? MemberSegment;
+        public List<PathLink[]>? Paths;
         public bool PathsComplete;
-        public bool PathsComputed;
-        public PathLink MemberLink;
-        public bool MemberLinkComputed;
+
+        // The paths belong to the subject, not the member, so they are kept for the next member of the same subject.
+        public void SetMember(RegisteredSubjectProperty member)
+        {
+            Member = member;
+            MemberName = null;
+            Tags = null;
+            MemberSegment = null;
+        }
     }
 }
