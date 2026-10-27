@@ -146,6 +146,23 @@ public sealed class AuthorizationServiceTests : IDisposable
     }
 
     [Fact]
+    public void WhenAPatternIsTheSeparatorAlone_ThenTheRoleIsDeniedWithAHintThatStartsWithTheSeparator()
+    {
+        // Arrange
+        var role = new Role { Deny = [new PermissionRule { Paths = ["/"], Actions = [PermissionAction.Read] }] };
+        AddAuthorization(("Custom", role));
+
+        // Act
+        var result = _service.GetPolicy(["Custom"]);
+
+        // Assert
+        Assert.Same(AuthorizationPolicy.DenyAll, result.Policy);
+        Assert.Equal(
+            "Path pattern '/' of role 'Custom' matches no member; use '/**' for every member, or '/*' for the members of the root.",
+            role.Status);
+    }
+
+    [Fact]
     public void WhenAnIncludedRoleHasAPatternWithoutTheSeparator_ThenPrincipalsOfTheIncludingRoleAreDenied()
     {
         // Arrange

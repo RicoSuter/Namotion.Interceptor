@@ -21,7 +21,7 @@ internal sealed class AuthorizationSnapshot
     private readonly string? _customRolesError;
     private readonly ConcurrentDictionary<RoleNameSet, AuthorizationResult> _policies = new();
 
-    // The error of each role with a path pattern that does not start with the separator, null when there is none.
+    // The error of each role with a path pattern the application refuses, see PathPatternChecks; null when there is none.
     private readonly Dictionary<string, string>? _leadingSeparatorErrors;
 
     private AuthorizationSnapshot(
@@ -177,16 +177,16 @@ internal sealed class AuthorizationSnapshot
             }
         }
 
+        if (_leadingSeparatorErrors is not null &&
+            PathPatternChecks.FindLeadingSeparatorError(roleNames, _roles, _leadingSeparatorErrors) is { } patternError)
+        {
+            return new AuthorizationResult(AuthorizationPolicy.DenyAll, patternError);
+        }
+
         try
         {
             var policy = AuthorizationPolicy.Compile(
                 _roles, roleNames, SystemRules.Rules, AuthorizationActions.All, TagProvider, _pathProvider);
-            if (_leadingSeparatorErrors is not null &&
-                PathPatternChecks.FindLeadingSeparatorError(roleNames, _roles, _leadingSeparatorErrors) is { } patternError)
-            {
-                return new AuthorizationResult(AuthorizationPolicy.DenyAll, patternError);
-            }
-
             return new AuthorizationResult(policy, null);
         }
         catch (AuthorizationException exception)
