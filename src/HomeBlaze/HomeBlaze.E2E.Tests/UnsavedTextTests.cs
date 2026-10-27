@@ -51,6 +51,25 @@ public class UnsavedTextTests
     }
 
     [Fact]
+    public async Task WhenTheTextOfTheSourceEditorWasSavedAndALinkIsClicked_ThenThePageIsLeftWithoutAQuestion()
+    {
+        // Arrange
+        var page = await OpenPageAsync("Source");
+        await TypeIntoPageEditorAsync(page);
+        await page.Locator("[data-testid='save-button'] button").ClickAsync();
+        await Assertions.Expect(page.GetByText("Configuration saved.")).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await page.WaitForFunctionAsync($"() => !({AsksBeforeUnload})()", null, new() { Timeout = Timeout });
+
+        // Act
+        await page.GetByRole(AriaRole.Link, new() { Name = "Browser" }).ClickAsync();
+
+        // Assert
+        await page.WaitForURLAsync("**/browser", new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetByRole(AriaRole.Button, new() { Name = "Keep editing", Exact = true })).ToHaveCountAsync(0);
+        Assert.Contains(Typed, await _fixture.ReadFileAsync(_fixture.GetDemoPagePath(PageName)));
+    }
+
+    [Fact]
     public async Task WhenAnotherModeIsChosenWithUnsavedTextInTheSplitEditor_ThenTheModeChangesOnlyOnceTheDiscardIsConfirmed()
     {
         // Arrange
