@@ -236,7 +236,9 @@ internal static partial class MarkdownWriteRules
     /// <summary>
     /// Ensures that the reference paths of each layout block of the new page that configures a subject, a widget block or
     /// a slot block that is not open, and that the old page does not have with the same text lead to subjects, so that a
-    /// dangling reference the page already has does not block every layout edit.
+    /// dangling reference the page already has does not block every layout edit. A reference that starts with a name a
+    /// layout block of the new page declares, such as a ValueMap added in the same edit, leads to the subject that block
+    /// creates once the page is written.
     /// </summary>
     /// <exception cref="ArgumentException">A layout block or a subject in it refers to a path that leads to no subject.</exception>
     private static void EnsureReferencesResolve(
@@ -265,7 +267,7 @@ internal static partial class MarkdownWriteRules
 
             foreach (var path in MarkdownPageLayout.GetReferencePaths(block, type))
             {
-                if (!layout.ResolvesToSubject(path))
+                if (!layout.ResolvesToSubject(path) && !StartsWithDeclaredName(path, newLayout))
                 {
                     throw new ArgumentException(
                         $"The {block.Head!.Name} block at line {block.Line} refers to '{path}', which leads to no existing subject.",
@@ -273,6 +275,21 @@ internal static partial class MarkdownWriteRules
                 }
             }
         }
+    }
+
+    private static bool StartsWithDeclaredName(string path, LayoutAnalysis layout)
+    {
+        var end = path.IndexOf('/');
+        var name = end < 0 ? path.AsSpan() : path.AsSpan(0, end);
+        foreach (var block in layout.LayoutTypes.Keys)
+        {
+            if (block.Head?.Id is { } id && name.SequenceEqual(id))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>

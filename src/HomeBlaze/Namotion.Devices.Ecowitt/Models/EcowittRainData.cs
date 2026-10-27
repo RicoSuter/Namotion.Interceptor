@@ -15,6 +15,4 @@ public class EcowittRainData
     /// Gets or sets the gateway's own rain total, which only resets when cleared on the gateway.
     /// </summary>
     public decimal? TotalRain { get; set; }
-
-    public int? Battery { get; set; }
 }

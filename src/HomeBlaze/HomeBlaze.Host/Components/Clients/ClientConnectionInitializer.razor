@@ -1,0 +1,57 @@
+@using HomeBlaze.Abstractions.Messaging
+@using HomeBlaze.Host.Clients
+@using HomeBlaze.Services.Clients
+@using Microsoft.Extensions.Logging
+
+@implements IClientConnectionCallbacks
+@implements IDisposable
+
+@inject ClientConnectionService ClientConnections
+@inject CurrentClientConnection CurrentConnection
+@inject BrowserPreferences Preferences
+@inject IDialogService DialogService
+@inject ILogger<ClientConnectionInitializer> Logger
+
+@code {
+    private ClientConnection? _connection;
+
+    protected override void OnInitialized()
+    {
+        // The prerender is no circuit, so only the interactive render registers one.
+        if (!RendererInfo.IsInteractive)
+        {
+            return;
+        }
+
+        _connection = ClientConnections.Connect(Preferences.Get(BrowserPreferenceKeys.ClientToken), this);
+        CurrentConnection.Connection = _connection;
+    }
+
+    Task IClientConnectionCallbacks.ShowNotificationAsync(Notification notification, CancellationToken cancellationToken) =>
+        InvokeAsync(async () => await ClientNotificationDialog.ShowAsync(DialogService, notification));
+
+    async Task IClientConnectionCallbacks.StoreClientTokenAsync(string token)
+    {
+        try
+        {
+            await InvokeAsync(async () => await Preferences.SetAsync(BrowserPreferenceKeys.ClientToken, token));
+        }
+        catch (Exception exception)
+        {
+            Logger.LogWarning(exception, "Storing the client token in the browser failed.");
+        }
+    }
+
+    // Runs when the circuit closes, which disposes its components.
+    public void Dispose()
+    {
+        if (_connection is not null)
+        {
+            ClientConnections.Disconnect(_connection);
+            if (ReferenceEquals(CurrentConnection.Connection, _connection))
+            {
+                CurrentConnection.Connection = null;
+            }
+        }
+    }
+}

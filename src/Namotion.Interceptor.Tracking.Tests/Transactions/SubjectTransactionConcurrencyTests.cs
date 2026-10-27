@@ -418,7 +418,8 @@ public class SubjectTransactionConcurrencyTests
             DateTimeOffset.UnixEpoch,
             receivedTimestamp: null,
             currentValue: "Model",
-            newValue: "AfterDispose");
+            newValue: "AfterDispose",
+            restoresLandedValue: false);
 
         try
         {

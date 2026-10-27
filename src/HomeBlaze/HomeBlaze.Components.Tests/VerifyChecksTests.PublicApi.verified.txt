@@ -199,6 +199,8 @@ namespace HomeBlaze.Components
         [HomeBlaze.Abstractions.Attributes.SubjectPath(typeof(HomeBlaze.Components.ValueMap))]
         public string? Map { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
+        public bool Outlined { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
         [HomeBlaze.Abstractions.Attributes.SubjectPath(typeof(HomeBlaze.Abstractions.Devices.Locks.IDoorLockState))]
         public string? Path { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
@@ -455,6 +457,8 @@ namespace HomeBlaze.Components
         public HomeBlaze.Components.OperationButtonKind Kind { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public string? Label { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public bool Outlined { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         [HomeBlaze.Abstractions.Attributes.SubjectPath(Kind=HomeBlaze.Abstractions.Attributes.SubjectPathKind.Operation)]
         public string? Path { get; set; }
@@ -765,6 +769,8 @@ namespace HomeBlaze.Components
         [HomeBlaze.Abstractions.Attributes.SubjectPath(Kind=HomeBlaze.Abstractions.Attributes.SubjectPathKind.Operation)]
         public string? On { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
+        public bool Outlined { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
         [HomeBlaze.Abstractions.Attributes.SubjectPath(ValueTypes=new System.Type[] {
                 typeof(bool)})]
         public string? Path { get; set; }
@@ -1007,8 +1013,13 @@ namespace HomeBlaze.Components
         [HomeBlaze.Abstractions.Attributes.SubjectPath(typeof(HomeBlaze.Components.ValueMap))]
         public string? Map { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
+        public bool Outlined { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
         [HomeBlaze.Abstractions.Attributes.SubjectPath]
         public string? Path { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        [HomeBlaze.Abstractions.Attributes.TextTemplate]
+        public string? Subtitle { get; set; }
         public string? Title { get; }
         public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
         public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
@@ -1328,6 +1339,8 @@ namespace HomeBlaze.Components.Components
         [Microsoft.AspNetCore.Components.Parameter]
         public string? Label { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
+        public bool Outlined { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
         public string? Path { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? Property { get; set; }
@@ -1449,6 +1462,8 @@ namespace HomeBlaze.Components.Components
         [Microsoft.AspNetCore.Components.Parameter]
         public Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? OnProperty { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
+        public bool Outlined { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
         public string? Path { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? Property { get; set; }
@@ -1497,6 +1512,8 @@ namespace HomeBlaze.Components.Components
         [Microsoft.AspNetCore.Components.Parameter]
         public HomeBlaze.Components.ValueColor Color { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
+        public string? Detail { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
         public bool Disabled { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public string? Icon { get; set; }
@@ -1506,6 +1523,8 @@ namespace HomeBlaze.Components.Components
         public string? Label { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public Microsoft.AspNetCore.Components.EventCallback<Microsoft.AspNetCore.Components.Web.MouseEventArgs> OnClick { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public bool Outlined { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public string? Subtitle { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]

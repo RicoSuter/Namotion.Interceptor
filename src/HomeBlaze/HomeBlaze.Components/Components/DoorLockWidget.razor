@@ -30,7 +30,7 @@
         var label = !string.IsNullOrEmpty(widget.Label)
             ? widget.Label
             : (target is null ? null : SubjectNames.TryGetTitle(target)) ?? path ?? string.Empty;
-        var subtitle = !string.IsNullOrEmpty(widget.Subtitle) ? widget.Subtitle : target is null ? null : appearance.Subtitle;
+        var subtitle = widget.Subtitle ?? (target is null ? null : appearance.Subtitle);
         var disabled = IsEditing || IsReadOnly || _isRunning || operation is null;
 
         @* The label is the accessible name, which hides the subtitle, so the description carries the state, also under a custom subtitle. *@
@@ -40,6 +40,7 @@
                   Tooltip="@operation?.Title"
                   Label="@label"
                   Subtitle="@subtitle"
+                  Outlined="@widget.Outlined"
                   Icon="@appearance.DoorIcon"
                   Color="@appearance.Fill"
                   TextColor="@appearance.TextColor"

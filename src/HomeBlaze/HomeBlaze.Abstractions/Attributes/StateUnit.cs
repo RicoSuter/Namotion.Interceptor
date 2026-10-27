@@ -46,5 +46,10 @@ public enum StateUnit
     VoltAmpereHour,
     VoltAmpereReactiveHour,
     AmpereHour,
-    WattPerSquareMeter
+    WattPerSquareMeter,
+
+    /// <summary>
+    /// A power level in decibels relative to one milliwatt, such as the received signal strength of a radio.
+    /// </summary>
+    DecibelMilliwatt
 }

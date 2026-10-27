@@ -103,6 +103,13 @@ Check the [installation guide](../administration/installation.md) for examples.
 
 A section is addressed by the id of its heading. Every heading gets its id from its text: the letters in lower case, the digits, a hyphen for the spaces between two words, and no other punctuation than `-`, `_` and `.`. The id starts at the first letter of the heading, and the second heading with the same text gets `-1` at its end. `## Live Expressions` gets the id `live-expressions`. A link that is only `#` and an id, like `[Link](#live-expressions)`, leads to that section of the page it stands on.
 
+### Link Targets
+
+- **Links on a page open in the same tab**: a relative link to a page, an address of the application such as `/browser/Demo`, and a web address alike. So does the `Href` of a [Card](widgets/card.md).
+- **A new tab**: write the link as an HTML element with a target, `<a href="https://example.com" target="_blank" rel="noopener">Example</a>`. The page keeps the attribute as written.
+- **Notes and replies**: a web address in the notes of the metadata and in a reply of an agent opens in a new tab, see [Metadata](metadata.md) and [AI Agents](ai-agents.md#the-agent-page).
+- **Addresses**: [Routes](paths.md#routes) shows the address of a page and of a subject in the browser.
+
 ---
 
 ## Pictures

@@ -29,6 +29,7 @@
               Tooltip="@tooltip"
               Label="@tileLabel"
               Subtitle="@Subtitle"
+              Outlined="@Outlined"
               Icon="@icon"
               Color="@Color"
               Variant="@Variant"
@@ -103,6 +104,10 @@ else
     /// </summary>
     [Parameter]
     public string? Subtitle { get; set; }
+
+    /// <summary>Whether a tile has a thin border like an outlined card.</summary>
+    [Parameter]
+    public bool Outlined { get; set; }
 
     /// <summary>
     /// Content drawn over the top right corner of a tile, such as an indicator.

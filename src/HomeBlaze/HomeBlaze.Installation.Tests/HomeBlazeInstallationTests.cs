@@ -1,6 +1,7 @@
 using System.Net;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Services;
+using HomeBlaze.Services.Clients;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Testing;
@@ -21,8 +22,9 @@ public class HomeBlazeInstallationTests
         Func<HttpClient>? createHttpClient = null,
         TimeProvider? timeProvider = null,
         DeveloperModeService? developerMode = null,
-        TimeSpan? requestTimeout = null) =>
-        new(build, "Production", createHttpClient ?? CreateNoReleaseClient, developerMode ?? new DeveloperModeService(), timeProvider ?? TimeProvider.System, NullLogger.Instance, requestTimeout);
+        TimeSpan? requestTimeout = null,
+        ClientConnectionService? clientConnections = null) =>
+        new(build, "Production", createHttpClient ?? CreateNoReleaseClient, developerMode ?? new DeveloperModeService(), clientConnections ?? new ClientConnectionService(TimeProvider.System, NullLogger<ClientConnectionService>.Instance), timeProvider ?? TimeProvider.System, NullLogger.Instance, requestTimeout);
 
     private static HttpClient CreateNoReleaseClient() =>
         new(new FakeHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.NotFound)));
