@@ -262,6 +262,11 @@ else
         if (await GetModuleAsync() is { } module)
         {
             await OwnEditorAsync(module);
+
+            // A dispose while the editor was owned has let go of the module.
+            if (_isDisposed)
+                return;
+
             if (FocusesEnd)
             {
                 await module.InvokeVoidAsync("focusEnd", _editorId);
@@ -277,6 +282,9 @@ else
         if (await GetModuleAsync() is { } module)
         {
             await WatchTextAreaAsync(module);
+            if (_isDisposed)
+                return;
+
             if (FocusesEnd)
             {
                 await module.InvokeVoidAsync("focusTextAreaEnd", _textArea);
