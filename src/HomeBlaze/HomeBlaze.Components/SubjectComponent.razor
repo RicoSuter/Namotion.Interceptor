@@ -458,10 +458,8 @@
         }
     }
 
-    // A Space on the focused widget itself arrives here as Enter, see widget-selection.js, so that a Space in an input
-    // inside the widget stays with the input.
-    // Only Enter and Space on the wrapper itself, which widget-selection.js sends on with this code. Enter on a control inside,
-    // such as an insert button, reaches the wrapper too with its own code.
+    // Enter and Space on the wrapper itself arrive as Enter with this code, see widget-selection.js. A key on a control
+    // inside, such as an input or an insert button, reaches the wrapper too, with its own code, and stays with the control.
     private const string WrapperKeyCode = "SelectableWidget";
 
     private async Task OnKeyDown(KeyboardEventArgs args)
