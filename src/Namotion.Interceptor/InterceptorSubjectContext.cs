@@ -141,6 +141,13 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         return true;
     }
 
+    /// <summary>
+    /// The fallback contexts of this context in the order they were added, as one snapshot that a
+    /// concurrent add or remove does not change.
+    /// </summary>
+    public ImmutableArray<IInterceptorSubjectContext> FallbackContexts =>
+        ImmutableArray<IInterceptorSubjectContext>.CastUp(Volatile.Read(ref _state).FallbackContexts);
+
     /// <summary>Whether <paramref name="context"/> is one of the fallback contexts of this context.</summary>
     public bool HasFallbackContext(IInterceptorSubjectContext context)
     {
@@ -211,27 +218,6 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
         InvalidateUsingContexts();
         return true;
-    }
-
-    /// <summary>
-    /// Removes every fallback context registered when the call starts, each through
-    /// <see cref="RemoveFallbackContext"/>. A fallback context added concurrently is not removed.
-    /// </summary>
-    /// <returns>The number of fallback contexts this call removed.</returns>
-    public int ClearFallbackContexts()
-    {
-        var fallbackContexts = Volatile.Read(ref _state).FallbackContexts;
-
-        var removed = 0;
-        foreach (var fallbackContext in fallbackContexts)
-        {
-            if (RemoveFallbackContext(fallbackContext))
-            {
-                removed++;
-            }
-        }
-
-        return removed;
     }
 
     private void RegisterAsUserOf(InterceptorSubjectContext fallbackContext)

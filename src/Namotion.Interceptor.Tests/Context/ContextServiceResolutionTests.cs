@@ -90,61 +90,36 @@ public class ContextServiceResolutionTests
     }
 
     [Fact]
-    public void WhenClearingFallbackContexts_ThenAllAreRemovedAndCounted()
+    public void WhenFallbackContextsAreAdded_ThenTheyAreListedInOrder()
     {
         // Arrange
         var first = InterceptorSubjectContext.Create();
-        first.AddService(1);
         var second = InterceptorSubjectContext.Create();
-        second.AddService(2);
-
         var context = InterceptorSubjectContext.Create();
+
+        // Act
         context.AddFallbackContext(first);
         context.AddFallbackContext(second);
 
-        // Act
-        var removed = context.ClearFallbackContexts();
-
         // Assert
-        Assert.Equal(2, removed);
-        Assert.Empty(context.GetServices<int>());
-        Assert.False(context.RemoveFallbackContext(first));
-        Assert.False(context.RemoveFallbackContext(second));
+        Assert.Equal(new IInterceptorSubjectContext[] { first, second }, context.FallbackContexts);
     }
 
     [Fact]
-    public void WhenClearingFallbackContexts_ThenUsingContextsStopResolvingThroughThem()
+    public void WhenFallbackContextIsRemoved_ThenEarlierSnapshotIsUnchanged()
     {
         // Arrange
         var fallback = InterceptorSubjectContext.Create();
-        fallback.AddService(1);
-
         var context = InterceptorSubjectContext.Create();
         context.AddFallbackContext(fallback);
-
-        var usingContext = InterceptorSubjectContext.Create();
-        usingContext.AddService("own");
-        usingContext.AddFallbackContext(context);
-        Assert.Single(usingContext.GetServices<int>());
+        var snapshot = context.FallbackContexts;
 
         // Act
-        context.ClearFallbackContexts();
+        context.RemoveFallbackContext(fallback);
 
         // Assert
-        Assert.Empty(usingContext.GetServices<int>());
-    }
-
-    [Fact]
-    public void WhenClearingContextWithoutFallbackContexts_ThenNothingIsRemoved()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext.Create();
-
-        // Act
-        var removed = context.ClearFallbackContexts();
-
-        // Assert
-        Assert.Equal(0, removed);
+        Assert.Empty(context.FallbackContexts);
+        Assert.Equal(new IInterceptorSubjectContext[] { fallback }, snapshot);
     }
 
     private interface IOrderedTestService { }

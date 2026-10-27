@@ -1,4 +1,5 @@
 ﻿using System.Runtime.CompilerServices;
+using Namotion.Interceptor.Interceptors;
 
 namespace Namotion.Interceptor.Tracking.Lifecycle;
 
@@ -20,16 +21,14 @@ public class ContextInheritanceHandler : ILifecycleHandler
             }
             else if (change is { ReferenceCount: 0, IsPropertyReferenceRemoved: true })
             {
-                // The subject left the graph, so every fallback it still has is stale, not only the one of the
-                // parent removing it last: a fallback from its constructor would otherwise retain it and keep
-                // answering for it.
-                if (change.Subject.Context is InterceptorSubjectContext context)
+                var releasingContext = change.Property.Value.Subject.Context;
+                if (change is { Interceptor: { } interceptor } && change.Subject.Context is InterceptorSubjectContext context)
                 {
-                    context.ClearFallbackContexts();
+                    RemoveFallbackContextsOfGraph(context, releasingContext, interceptor);
                 }
                 else
                 {
-                    change.Subject.Context.RemoveFallbackContext(change.Property.Value.Subject.Context);
+                    change.Subject.Context.RemoveFallbackContext(releasingContext);
                 }
             }
             else if (change is { IsPropertyReferenceRemoved: true, IsContextDetach: false, Interceptor: { } interceptor } &&
@@ -39,6 +38,31 @@ public class ContextInheritanceHandler : ILifecycleHandler
                 InheritFromRemainingParent(context, change.Property.Value.Subject, interceptor.GetPropertyReferences(change.Subject));
             }
         }
+    }
+
+    /// <summary>
+    /// Removes the fallback contexts that tie a subject to the graph of <paramref name="interceptor"/>, which has just
+    /// detached it: the context of the releasing parent, and any other one that reaches this interceptor alone, such as
+    /// the context the subject was constructed with or one inherited from an earlier parent.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void RemoveFallbackContextsOfGraph(InterceptorSubjectContext context, IInterceptorSubjectContext releasingContext, LifecycleInterceptor interceptor)
+    {
+        foreach (var fallbackContext in context.FallbackContexts)
+        {
+            // A context that also reaches another interceptor belongs to another graph as well: removing it would
+            // detach the subject there, taking that interceptor's lock while this one's is held.
+            if (ReferenceEquals(fallbackContext, releasingContext) || ReachesOnly(fallbackContext, interceptor))
+            {
+                context.RemoveFallbackContext(fallbackContext);
+            }
+        }
+    }
+
+    private static bool ReachesOnly(IInterceptorSubjectContext context, LifecycleInterceptor interceptor)
+    {
+        var interceptors = context.GetServices<ILifecycleInterceptor>();
+        return interceptors.Length == 1 && ReferenceEquals(interceptors[0], interceptor);
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
