@@ -163,7 +163,7 @@ internal class SearchTool
 
             // Build full DTO only for subjects that pass all filters
             var node = McpToolHelper.BuildSubjectNodeDto(
-                registered, McpToolHelper.TryGetSubjectPath(registered, _configuration, rootSubject), pathProvider, _configuration,
+                registered, path, pathProvider, _configuration,
                 includeProperties, includeAttributes, includeMethods, includeInterfaces, propertyNames);
 
             subjects[path] = node;

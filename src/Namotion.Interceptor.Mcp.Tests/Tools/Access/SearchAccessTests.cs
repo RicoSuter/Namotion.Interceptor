@@ -143,4 +143,38 @@ public class SearchAccessTests
         Assert.Contains("No subject in scope has a property named 'DeviceName'.",
             result.GetProperty("warnings").EnumerateArray().Select(warning => warning.GetString()));
     }
+
+    [Fact]
+    public async Task WhenASubjectIsMovedWhileSearchChecksIt_ThenItsKeyAndItsPathAreTheSame()
+    {
+        // Arrange
+        // The policy moves A from the root's A to the root's B while it is asked about S, after S's path is written.
+        var context = CreateContext();
+        var root = new TestNode(context) { Name = "Root" };
+        var a = new TestNode(context) { Name = "A" };
+        var s = new TestNode(context) { Name = "S" };
+        root.A = a;
+        a.Child = s;
+
+        var isMoved = false;
+        var policy = new TestAccessPolicy((member, _) =>
+        {
+            if (!isMoved && member.Parent.Subject == s)
+            {
+                isMoved = true;
+                root.B = a;
+                root.A = null;
+            }
+
+            return true;
+        });
+
+        // Act
+        var result = await SearchAsync(root, policy, new { format = "json", types = new[] { nameof(TestNode) } });
+
+        // Assert
+        Assert.True(isMoved);
+        Assert.All(result.GetProperty("results").EnumerateObject(),
+            entry => Assert.Equal(entry.Name, entry.Value.GetProperty("$path").GetString()));
+    }
 }
