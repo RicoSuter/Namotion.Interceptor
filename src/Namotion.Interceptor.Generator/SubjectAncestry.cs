@@ -66,7 +66,7 @@ internal static class SubjectAncestry
             IsInterceptorSubject(declared) || declared.AllInterfaces.Any(IsInterceptorSubject));
     }
 
-    private static bool IsInterceptorSubject(INamedTypeSymbol interfaceType)
+    internal static bool IsInterceptorSubject(INamedTypeSymbol interfaceType)
     {
         return interfaceType.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat) == KnownTypes.IInterceptorSubject;
     }

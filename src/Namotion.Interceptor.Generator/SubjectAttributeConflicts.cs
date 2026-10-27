@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 
@@ -97,27 +98,20 @@ internal static class SubjectAttributeConflicts
 
     // An explicit implementation is keyed by its simple name and displaces an ancestor property of that name, but its
     // attributes are not part of the metadata, so it claims the name without providing a target. A class-declared
-    // property of the same name keeps it, which is why the class's own properties are added first.
+    // property of the same name keeps it, which is why the class's own properties are added first. The generator's
+    // own IInterceptorSubject implementations, visible on a subject read from metadata, are never in the property set.
     private static void ClaimExplicitImplementationNames(INamedTypeSymbol type, HashSet<string> seenNames)
     {
         foreach (var member in type.GetMembers())
         {
             if (member is IPropertySymbol property &&
+                property.ExplicitInterfaceImplementations.FirstOrDefault() is { } implemented &&
                 !SymbolExtensions.IsNeverASubjectProperty(property) &&
-                property.ExplicitInterfaceImplementations.Length > 0 &&
-                !IsGeneratedSubjectMember(property.ExplicitInterfaceImplementations[0]))
+                !SubjectAncestry.IsInterceptorSubject(implemented.ContainingType))
             {
-                seenNames.Add(property.ExplicitInterfaceImplementations[0].Name);
+                seenNames.Add(implemented.Name);
             }
         }
-    }
-
-    // The generator implements IInterceptorSubject's properties explicitly on every subject; they are visible on a
-    // subject read from metadata but are never part of the property set.
-    private static bool IsGeneratedSubjectMember(IPropertySymbol implementedProperty)
-    {
-        return implementedProperty.ContainingType.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat) ==
-            KnownTypes.IInterceptorSubject;
     }
 
     private static void AddProvider(
