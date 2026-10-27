@@ -257,6 +257,24 @@ public sealed class AuthorizationServicePreviewTests : IDisposable
         Assert.Null(warningWithoutKitchen);
     }
 
+    [Fact]
+    public void WhenACollectionIsReordered_ThenTheWarningFollowsTheNewPositions()
+    {
+        // Arrange
+        var withKitchen = new TestRoot { Children = new Dictionary<string, IInterceptorSubject> { ["Kitchen"] = new TagTestSubject() } };
+        var withoutKitchen = new TestRoot();
+        var folder = new CollectionTestSubject { Items = [withKitchen, withoutKitchen] };
+        _root.Children = new Dictionary<string, IInterceptorSubject> { ["Folder"] = folder };
+        Assert.NotNull(_service.GetPathPatternWarning("/Folder/Items[0]/Kitchen"));
+
+        // Act: the same entries in another order, which attaches and detaches nothing.
+        folder.Items = [withoutKitchen, withKitchen];
+
+        // Assert
+        Assert.Null(_service.GetPathPatternWarning("/Folder/Items[0]/Kitchen"));
+        Assert.NotNull(_service.GetPathPatternWarning("/Folder/Items[1]/Kitchen"));
+    }
+
     private void AddAuthorization(params (string Name, Role Role)[] roles)
     {
         var authorization = new Authorization

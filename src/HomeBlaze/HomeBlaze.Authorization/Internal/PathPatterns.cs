@@ -92,8 +92,9 @@ internal sealed class PathPatterns : ILifecycleHandler, IPropertyLifecycleHandle
     {
     }
 
-    // A reorder of a collection attaches and detaches nothing, but changes the paths of its entries. The registry moves
-    // no entry of a dictionary, which some subjects assign again on every poll.
+    // A reorder of a collection attaches and detaches nothing, but changes the paths of its entries. The registry does
+    // not tell whether an entry moved, so every assignment that keeps an entry counts, also one in the same order. It
+    // moves no entry of a dictionary, which some subjects assign again on every poll.
     public void RefreshCollectionProperty(PropertyReference property, object? value)
     {
         if (property.TryGetRegisteredProperty() is { IsSubjectCollection: true })
