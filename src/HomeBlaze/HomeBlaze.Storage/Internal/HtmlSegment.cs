@@ -5,8 +5,8 @@ using Namotion.Interceptor.Attributes;
 namespace HomeBlaze.Storage.Internal;
 
 /// <summary>
-/// Represents a raw HTML segment within a MarkdownFile.
-/// Rendered directly without a component wrapper to allow split HTML tags.
+/// Represents a raw HTML segment within a MarkdownFile. A viewed page renders it directly, without a component wrapper, to
+/// allow split HTML tags; in edit mode a segment that starts a block of text renders that block in a wrapper of its own.
 /// </summary>
 [InterceptorSubject]
 [ExcludeFrom(ExclusionTarget.All)]

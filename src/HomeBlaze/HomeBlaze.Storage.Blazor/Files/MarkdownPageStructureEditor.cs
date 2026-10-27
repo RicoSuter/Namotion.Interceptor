@@ -93,45 +93,31 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
         return sourceEditor.RevealAsync(subject);
     }
 
-    // Two reads of the page, which a reload between them can answer from two versions. The bar renders again after every
-    // reload, as GetContentSlots reads the children of the page, and every add checks the page again.
-    public override IReadOnlyList<PageAddTarget> GetAddTargets(IInterceptorSubject owner) =>
-        CreateAddTargets(_file.GetContentSlots(owner), _file.GetListSlots(owner));
-
-    private static PageAddTarget[] CreateAddTargets(IReadOnlyList<MarkdownContentSlot> contentSlots, IReadOnlyList<MarkdownListSlot> listSlots)
+    // The bar renders again after every reload, as GetAddSlots reads the children of the page, and every add checks the page again.
+    public override IReadOnlyList<PageAddTarget> GetAddTargets(IInterceptorSubject owner)
     {
-        if (contentSlots.Count + listSlots.Count == 0)
+        var slots = _file.GetAddSlots(owner);
+        if (slots.Count == 0)
         {
             return [];
         }
 
-        var result = new PageAddTarget[contentSlots.Count + listSlots.Count];
-        var index = 0;
-        foreach (var kind in (ReadOnlySpan<MarkdownContentSlotKind>)[MarkdownContentSlotKind.Default, MarkdownContentSlotKind.Named, MarkdownContentSlotKind.ListItem])
+        var result = new PageAddTarget[slots.Count];
+        for (var index = 0; index < slots.Count; index++)
         {
-            foreach (var slot in contentSlots)
+            var slot = slots[index];
+            var kind = slot.Kind switch
             {
-                if (slot.Kind == kind)
-                {
-                    result[index++] = new PageAddTarget(ToTargetKind(kind), slot.Name, null);
-                }
-            }
-        }
-
-        foreach (var slot in listSlots)
-        {
-            result[index++] = new PageAddTarget(PageAddTargetKind.ConfiguredItem, slot.Name, slot.ItemType);
+                MarkdownAddSlotKind.DefaultContent => PageAddTargetKind.DefaultContent,
+                MarkdownAddSlotKind.NamedContent => PageAddTargetKind.NamedContent,
+                MarkdownAddSlotKind.ContentItem => PageAddTargetKind.ContentItem,
+                _ => PageAddTargetKind.ConfiguredItem
+            };
+            result[index] = new PageAddTarget(kind, slot.Name, slot.ItemType);
         }
 
         return result;
     }
-
-    private static PageAddTargetKind ToTargetKind(MarkdownContentSlotKind kind) => kind switch
-    {
-        MarkdownContentSlotKind.Default => PageAddTargetKind.DefaultContent,
-        MarkdownContentSlotKind.Named => PageAddTargetKind.NamedContent,
-        _ => PageAddTargetKind.ContentItem
-    };
 
     public override string? GetBlockName(IInterceptorSubject subject) => _file.GetBlockName(subject);
 

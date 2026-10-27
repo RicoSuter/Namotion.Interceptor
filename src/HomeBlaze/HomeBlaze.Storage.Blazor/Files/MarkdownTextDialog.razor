@@ -1,3 +1,4 @@
+@using System.Diagnostics.CodeAnalysis
 @using Microsoft.AspNetCore.Components.Routing
 @using Microsoft.JSInterop
 @using MudBlazor
@@ -112,6 +113,10 @@
     // Whether the editor has another text than it started with, as its last change told, for the prompt of the browser.
     private bool _isChanged;
 
+    // Whether a save, a cancel or a create runs, or the editor is not there to take one.
+    [MemberNotNullWhen(false, nameof(_editor))]
+    private bool IsBusy => _isSaving || _isCanceling || _isCreating || _editor is null || _isDisposed;
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender)
@@ -185,7 +190,7 @@
     // Ignored while a save runs, so that the write is never dropped without the dialog showing its outcome.
     private async Task CancelAsync()
     {
-        if (_isSaving || _isCanceling || _isCreating || _editor is null || _isDisposed)
+        if (IsBusy)
             return;
 
         _isCanceling = true;
@@ -245,7 +250,7 @@
 
     private async Task CreateAsync()
     {
-        if (_isSaving || _isCanceling || _isCreating || _editor is null || _isDisposed)
+        if (IsBusy)
             return;
 
         _isCreating = true;
@@ -262,7 +267,7 @@
     // Also raised by the editor for Ctrl+S, or Cmd+S on a Mac, which renders the dialog after it as a click does.
     private async Task SaveAsync()
     {
-        if (_isSaving || _isCanceling || _isCreating || _editor is null || _isDisposed)
+        if (IsBusy)
             return;
 
         _isSaving = true;

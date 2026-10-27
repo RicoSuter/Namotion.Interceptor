@@ -31,8 +31,6 @@ internal static class MarkdownPageOperations
     private const string WidgetPartRefusal = "Text can hold widgets, not the parts of a widget.";
     private const string StyleBlockRefusal = "Text can hold widgets, not style blocks.";
     private const string NoClosingLineRefusal = "Add the closing line of the block first.";
-    private const string MoveRefusal = "Moving the block would change other blocks of the page.";
-    private const string TextMoveRefusal = "Moving the text would change other blocks of the page.";
     private const string OpenHtmlRefusal = "The text would leave HTML open over the text after it.";
 
     /// <summary>
@@ -50,17 +48,40 @@ internal static class MarkdownPageOperations
 
         FindSiblings(page, block, out var parent);
         var source = RemoveLines(page, block.Line, block.EndLine, parent, out var edit);
-        var after = MarkdownPageParser.Parse(source);
-        if (MarkdownBlockAlignment.TryAlign(page, after, edit, expectedInsertedBlockCount: 0, owner: null) is not { } map)
+        return Align(page, blockSubjects, source, edit, owner: null, 0, MarkdownBlockKind.Slot, parent, hasInsertedOrRemovedBlocks: true,
+            "Removing the block would change other blocks of the page.", out refusal);
+    }
+
+    // The change of whole blocks or of text that inserts no blocks other than `insertedBlockCount` blocks of `insertedKind`
+    // directly in `owner`, see MarkdownBlockAlignment.TryAlign. It names the first inserted block, or after a removal the
+    // item that takes the place of the removed lines in `changedBlock`.
+    private static MarkdownStructureChange? Align(
+        MarkdownPage page,
+        IReadOnlyDictionary<int, IInterceptorSubject> blockSubjects,
+        string newSource,
+        MarkdownLineEdit edit,
+        MarkdownBlock? owner,
+        int insertedBlockCount,
+        MarkdownBlockKind insertedKind,
+        MarkdownBlock? changedBlock,
+        bool hasInsertedOrRemovedBlocks,
+        string alignmentRefusal,
+        out string? refusal)
+    {
+        var after = MarkdownPageParser.Parse(newSource);
+        if (MarkdownBlockAlignment.TryAlign(page, after, edit, insertedBlockCount, owner, insertedKind) is not { } map)
         {
-            refusal = "Removing the block would change other blocks of the page.";
+            refusal = alignmentRefusal;
             return null;
         }
 
-        var (resultBlockIndex, resultTextLine) = FindItemInPlace(after, map, parent, edit.Line);
+        refusal = null;
+        var (resultBlockIndex, resultTextLine) = insertedBlockCount > 0
+            ? (FindFirstBlockFrom(after, edit)?.Index ?? -1, 0)
+            : FindItemInPlace(after, map, changedBlock, edit.Line);
         return new MarkdownStructureChange(
-            new MarkdownBlockWrite(after, MapSubjects(blockSubjects, map), [], HasInsertedOrRemovedBlocks: true),
-            parent,
+            new MarkdownBlockWrite(after, MapSubjects(blockSubjects, map), [], hasInsertedOrRemovedBlocks),
+            changedBlock,
             resultBlockIndex,
             resultTextLine);
     }
@@ -160,7 +181,7 @@ internal static class MarkdownPageOperations
         if (TryMoveLines(page, items[position].Line, block.EndLine, targetLine, lineEnding, parent, CountBlocks(block), block.Kind, out var insert) is not { } moved ||
             FindFirstBlockFrom(moved.After, insert) is not { } movedBlock)
         {
-            refusal = MoveRefusal;
+            refusal = "Moving the block would change other blocks of the page.";
             return null;
         }
 
@@ -253,7 +274,7 @@ internal static class MarkdownPageOperations
         var lineEnding = MarkdownBlockWriter.GetLineEnding(page.Source, MarkdownBlockWriter.GetLineStart(page.Source, line));
         if (TryMoveLines(page, line, textBlock.EndLine, targetLine, lineEnding, owner, 0, MarkdownBlockKind.Slot, out var insert) is not { } moved)
         {
-            refusal = TextMoveRefusal;
+            refusal = "Moving the text would change other blocks of the page.";
             return null;
         }
 
@@ -338,17 +359,8 @@ internal static class MarkdownPageOperations
     }
 
     /// <summary>
-    /// Gets the line of the page before the move before which <see cref="TryMove"/> inserts the block: the first line of the
-    /// item before it, or the line after the item after it. Null when the block has no such item.
-    /// </summary>
-    public static int? FindMoveLine(MarkdownPage page, MarkdownBlock block, int direction) =>
-        direction is -1 or 1 && GetMoveItems(page, block, out var position) is { } items
-            ? FindMoveLine(items, position, direction)
-            : null;
-
-    /// <summary>
-    /// Gets whether <see cref="TryMove"/> can move the block up and down: whether
-    /// <see cref="FindMoveLine(MarkdownPage, MarkdownBlock, int)"/> finds a line in each direction.
+    /// Gets whether <see cref="TryMove"/> can move the block up and down: whether the block has an item to move past in each
+    /// direction.
     /// </summary>
     public static (bool CanMoveUp, bool CanMoveDown) GetMoveDirections(MarkdownPage page, MarkdownBlock block) =>
         GetMoveItems(page, block, out var position) is { } items
@@ -657,18 +669,8 @@ internal static class MarkdownPageOperations
             indentation,
             lineEnding);
         var newSource = MarkdownBlockWriter.InsertBlockText(source, line, text, lineEnding, out var edit);
-        var after = MarkdownPageParser.Parse(newSource);
-        var map = MarkdownBlockAlignment.TryAlign(page, after, edit, expectedInsertedBlockCount: 1, owner, MarkdownBlockKind.Widget);
-        if (map is null)
-        {
-            refusal = "Inserting a block here would change other blocks of the page.";
-            return null;
-        }
-
-        return new MarkdownStructureChange(
-            new MarkdownBlockWrite(after, MapSubjects(blockSubjects, map), [], HasInsertedOrRemovedBlocks: true),
-            owner,
-            FindFirstBlockFrom(after, edit)?.Index ?? -1);
+        return Align(page, blockSubjects, newSource, edit, owner, 1, MarkdownBlockKind.Widget, owner, hasInsertedOrRemovedBlocks: true,
+            "Inserting a block here would change other blocks of the page.", out refusal);
     }
 
     // Whether the content of `owner` has text from the line up to its next widget or slot block, which a block without a
@@ -765,19 +767,8 @@ internal static class MarkdownPageOperations
         }
 
         var newSource = RemoveLines(page, textBlock.Line, textBlock.EndLine, textBlock.Owner, out var edit);
-        var after = MarkdownPageParser.Parse(newSource);
-        if (MarkdownBlockAlignment.TryAlign(page, after, edit, expectedInsertedBlockCount: 0, owner: null) is not { } map)
-        {
-            refusal = "Removing the text would change other blocks of the page.";
-            return null;
-        }
-
-        var (resultBlockIndex, resultTextLine) = FindItemInPlace(after, map, textBlock.Owner, edit.Line);
-        return new MarkdownStructureChange(
-            new MarkdownBlockWrite(after, MapSubjects(blockSubjects, map), [], HasInsertedOrRemovedBlocks: false),
-            textBlock.Owner,
-            resultBlockIndex,
-            resultTextLine);
+        return Align(page, blockSubjects, newSource, edit, owner: null, 0, MarkdownBlockKind.Slot, textBlock.Owner, hasInsertedOrRemovedBlocks: false,
+            "Removing the text would change other blocks of the page.", out refusal);
     }
 
     /// <summary>
@@ -1219,17 +1210,8 @@ internal static class MarkdownPageOperations
             placement.Indentation,
             placement.LineEnding);
         var source = MarkdownBlockWriter.InsertLines(page.Source, placement.Line, text, placement.LineEnding, out var edit);
-        var after = MarkdownPageParser.Parse(source);
-        if (MarkdownBlockAlignment.TryAlign(page, after, edit, expectedInsertedBlockCount: 1, owner) is not { } map)
-        {
-            refusal = $"Inserting a '{slotName}' block here would change other blocks of the page.";
-            return null;
-        }
-
-        return new MarkdownStructureChange(
-            new MarkdownBlockWrite(after, MapSubjects(blockSubjects, map), [], HasInsertedOrRemovedBlocks: true),
-            owner,
-            FindFirstBlockFrom(after, edit)?.Index ?? -1);
+        return Align(page, blockSubjects, source, edit, owner, 1, MarkdownBlockKind.Slot, owner, hasInsertedOrRemovedBlocks: true,
+            $"Inserting a '{slotName}' block here would change other blocks of the page.", out refusal);
     }
 
     /// <summary>

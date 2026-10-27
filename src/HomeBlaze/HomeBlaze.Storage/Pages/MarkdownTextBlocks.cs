@@ -132,7 +132,7 @@ internal static class MarkdownTextBlocks
             var isUnterminated = ReadElements(source, block, ref openElements);
             if (block is not HtmlBlock && !isUnterminated && openElements is not { Count: > 0 })
             {
-                result.Add(new MarkdownTextBlock(block, GetLine(block), GetEndLine(page, block), owner, IsEditable(page, block), HoldsHtml: false));
+                result.Add(new MarkdownTextBlock(block, GetLine(block), GetEndLine(page, block), owner, IsEditable(block), HoldsHtml: false));
                 continue;
             }
 
@@ -401,7 +401,7 @@ internal static class MarkdownTextBlocks
         name.Equals("textarea", StringComparison.OrdinalIgnoreCase) ||
         name.Equals("title", StringComparison.OrdinalIgnoreCase);
 
-    private static bool IsEditable(MarkdownPage page, Block block) =>
+    private static bool IsEditable(Block block) =>
         block is not (MarkdownBlockContainer or FootnoteGroup) &&
         !MarkdownSegmentBuilder.IsOldSubjectFence(block) &&
         !(block is ContainerBlock container && HoldsBlock(container));

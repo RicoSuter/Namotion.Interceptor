@@ -531,10 +531,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// item before it, or after the item after it, where an item is a widget block or a top-level block of text of that
     /// content, or for a slot block a block of the same slot. Saves the page.
     /// </summary>
-    /// <remarks>
-    /// Refused when the file differs from the text the page last read, and the page then reads it, or when the page would
-    /// be larger than <see cref="MaxContentSize"/> bytes.
-    /// </remarks>
+    /// <remarks>Refused as <see cref="DeleteBlockAsync"/> is.</remarks>
     /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage or from within a write of this page.</exception>
     public Task<MarkdownEditResult> MoveBlockAsync(
         IInterceptorSubject subject, int direction, CancellationToken cancellationToken) =>
@@ -551,10 +548,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// a block of that content or the <see cref="HtmlSegment"/> of one of its text blocks, or after the content when that is
     /// null. The page then creates its own subject for it.
     /// </summary>
-    /// <remarks>
-    /// Refused when the file differs from the text the page last read, and the page then reads it, or when the page would
-    /// be larger than <see cref="MaxContentSize"/> bytes.
-    /// </remarks>
+    /// <remarks>Refused as <see cref="DeleteBlockAsync"/> is.</remarks>
     /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage or from within a write of this page.</exception>
     public Task<MarkdownEditResult> InsertWidgetAsync(
         IInterceptorSubject content, IInterceptorSubject? before, IInterceptorSubject widget, string? name, CancellationToken cancellationToken)
@@ -605,9 +599,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// <paramref name="expectedText"/>, as <see cref="GetTextBlockText"/> returned it, when the new text holds a block that is
     /// no widget block at its top level, a widget block with too few fence characters whose blocks raising them would change,
     /// an invalid block, or a widget block whose name a block of the page or another
-    /// block of the text already has, when the text is Markdown nested beyond the depth limit of Markdig, when the file
-    /// differs from the text the page last read, and the page then reads it, or when the page would be larger than
-    /// <see cref="MaxContentSize"/> bytes.
+    /// block of the text already has, or when the text is Markdown nested beyond the depth limit of Markdig, and as
+    /// <see cref="DeleteBlockAsync"/> is.
     /// </remarks>
     /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage or from within a write of this page.</exception>
     public Task<MarkdownEditResult> ReplaceTextBlockAsync(
@@ -643,9 +636,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// <remarks>
     /// Refused when the text holds a block that is no widget block at its top level, a widget block with too few fence
     /// characters whose blocks raising them would change, an invalid block, or a widget block whose name a block of
-    /// the page or another block of the text already has, when the text is Markdown nested beyond the depth limit of Markdig,
-    /// when the file differs from the text the page last read, and the page then reads it, or when the page would be larger
-    /// than <see cref="MaxContentSize"/> bytes.
+    /// the page or another block of the text already has, or when the text is Markdown nested beyond the depth limit of
+    /// Markdig, and as <see cref="DeleteBlockAsync"/> is.
     /// </remarks>
     /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage or from within a write of this page.</exception>
     public Task<MarkdownEditResult> InsertTextAsync(
@@ -665,9 +657,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// as <see cref="MoveBlockAsync"/> moves a block, and saves the page.
     /// </summary>
     /// <remarks>
-    /// Refused when the segment starts no text block that can be edited any more, when there is nothing to move past in the
-    /// direction, when the file differs from the text the page last read, and the page then reads it, or when the page would
-    /// be larger than <see cref="MaxContentSize"/> bytes.
+    /// Refused when the segment starts no text block that can be edited any more or there is nothing to move past in the
+    /// direction, and as <see cref="DeleteBlockAsync"/> is.
     /// </remarks>
     /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage or from within a write of this page.</exception>
     public Task<MarkdownEditResult> MoveTextBlockAsync(HtmlSegment segment, int direction, CancellationToken cancellationToken)
@@ -795,10 +786,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// block of <paramref name="owner"/>, whose items have the type of <paramref name="item"/>. A slot whose blocks hold page
     /// content gets a new block from <see cref="AddWidgetToSlotAsync"/> or <see cref="AddTextToSlotAsync"/>.
     /// </summary>
-    /// <remarks>
-    /// Refused when the file differs from the text the page last read, and the page then reads it, or when the page would
-    /// be larger than <see cref="MaxContentSize"/> bytes.
-    /// </remarks>
+    /// <remarks>Refused as <see cref="DeleteBlockAsync"/> is.</remarks>
     /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage or from within a write of this page.</exception>
     public Task<MarkdownEditResult> AddSlotItemAsync(
         IInterceptorSubject owner, string slotName, IInterceptorSubject item, CancellationToken cancellationToken)
@@ -834,9 +822,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// subject of the widget.
     /// </summary>
     /// <remarks>
-    /// Refused when the block has no slot of that name that takes page content or no closing line, when the file differs
-    /// from the text the page last read, and the page then reads it, or when the page would be larger than
-    /// <see cref="MaxContentSize"/> bytes.
+    /// Refused when the block has no slot of that name that takes page content or no closing line, and as
+    /// <see cref="DeleteBlockAsync"/> is.
     /// </remarks>
     /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage or from within a write of this page.</exception>
     public Task<MarkdownEditResult> AddWidgetToSlotAsync(
@@ -905,41 +892,49 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     }
 
     /// <summary>
-    /// Gets the slots of the block of <paramref name="owner"/> that take page content, in the order the type declares them,
-    /// for <see cref="AddWidgetToSlotAsync"/> and <see cref="AddTextToSlotAsync"/>. None when it has no block on this page or
-    /// its block has no closing line. <see cref="MarkdownContentSlot.Exists"/> tells whether the slot has a content subject
-    /// now; an add to a slot of <see cref="MarkdownContentSlotKind.ListItem"/> creates a new item whether or not it has any.
-    /// It reads the children of the page, so a component that renders it renders again after every reload.
+    /// Gets the slots of the block of <paramref name="owner"/> to which an add puts something, by kind in the order of
+    /// <see cref="MarkdownAddSlotKind"/> and each kind in the order the type declares its slots: page content for
+    /// <see cref="AddWidgetToSlotAsync"/> and <see cref="AddTextToSlotAsync"/>, only when the block has a closing line, and
+    /// configured items for <see cref="AddSlotItemAsync"/>. None when it has no block on this page. It reads the children of
+    /// the page, so a component that renders it renders again after every reload.
     /// </summary>
-    public IReadOnlyList<MarkdownContentSlot> GetContentSlots(IInterceptorSubject owner)
+    public IReadOnlyList<MarkdownAddSlot> GetAddSlots(IInterceptorSubject owner)
     {
         // The snapshot is not tracked, as in GetBlockActions. Do not remove it, although its result is not used.
         _ = Children;
 
         var snapshot = _parseResult;
-        if (snapshot.Page is not { } page || FindOwnBlock(page, snapshot.BlockSubjects, owner) is not { HasClosingLine: true })
+        if (snapshot.Page is not { } page || FindOwnBlock(page, snapshot.BlockSubjects, owner) is not { } block)
         {
             return [];
         }
 
-        var result = new List<MarkdownContentSlot>();
-        foreach (var slot in SlotMap.For(owner.GetType()).Slots)
+        var slots = SlotMap.For(owner.GetType()).Slots;
+        var result = new List<MarkdownAddSlot>();
+        foreach (var kind in (ReadOnlySpan<MarkdownAddSlotKind>)
+                 [MarkdownAddSlotKind.DefaultContent, MarkdownAddSlotKind.NamedContent, MarkdownAddSlotKind.ContentItem, MarkdownAddSlotKind.ConfiguredItem])
         {
-            if (!slot.IsOpen)
+            foreach (var slot in slots)
             {
-                continue;
+                if (GetAddSlotKind(slot, block.HasClosingLine) == kind)
+                {
+                    result.Add(new MarkdownAddSlot(
+                        slot.IsDefault ? null : slot.Name, kind, kind == MarkdownAddSlotKind.ConfiguredItem ? slot.ValueType : null));
+                }
             }
-
-            var kind = slot.IsList ? MarkdownContentSlotKind.ListItem
-                : slot.IsDefault ? MarkdownContentSlotKind.Default
-                : MarkdownContentSlotKind.Named;
-            var value = slot.GetValue(owner);
-            var exists = value is Array values ? values.Length > 0 : value is not null;
-            result.Add(new MarkdownContentSlot(slot.IsDefault ? null : slot.Name, kind, exists));
         }
 
         return result;
     }
+
+    // Null for a slot that takes no add: a single slot of configured items, and every slot of page content of a block without
+    // a closing line.
+    private static MarkdownAddSlotKind? GetAddSlotKind(SlotDefinition slot, bool hasClosingLine) =>
+        !slot.IsOpen ? (slot.IsList ? MarkdownAddSlotKind.ConfiguredItem : null)
+        : !hasClosingLine ? null
+        : slot.IsList ? MarkdownAddSlotKind.ContentItem
+        : slot.IsDefault ? MarkdownAddSlotKind.DefaultContent
+        : MarkdownAddSlotKind.NamedContent;
 
     /// <summary>
     /// Gets what the block of <paramref name="subject"/>, or the text block that a <see cref="HtmlSegment"/> starts, allows:
@@ -980,31 +975,6 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             CanMoveUp: canMoveUp,
             CanMoveDown: canMoveDown,
             ContainedBlockCount: MarkdownPageOperations.CountBlocks(block) - 1);
-    }
-
-    /// <summary>
-    /// Gets the list slots of configured items of the block of <paramref name="owner"/>, for <see cref="AddSlotItemAsync"/>,
-    /// none when it has no block on this page. A list slot whose blocks hold page content is one of
-    /// <see cref="GetContentSlots"/>.
-    /// </summary>
-    public IReadOnlyList<MarkdownListSlot> GetListSlots(IInterceptorSubject owner)
-    {
-        var snapshot = _parseResult;
-        if (snapshot.Page is not { } page || FindOwnBlock(page, snapshot.BlockSubjects, owner) is null)
-        {
-            return [];
-        }
-
-        var result = new List<MarkdownListSlot>();
-        foreach (var slot in SlotMap.For(owner.GetType()).Slots)
-        {
-            if (slot is { IsList: true, IsOpen: false })
-            {
-                result.Add(new MarkdownListSlot(slot.Name, slot.ValueType));
-            }
-        }
-
-        return result;
     }
 
     /// <summary>Gets the name after <c>#</c> of the block of <paramref name="subject"/>, or null without one.</summary>

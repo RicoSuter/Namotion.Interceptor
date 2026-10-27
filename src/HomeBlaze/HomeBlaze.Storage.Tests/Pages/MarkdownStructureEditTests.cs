@@ -140,7 +140,7 @@ public class MarkdownStructureEditTests
     }
 
     [Fact]
-    public async Task WhenTheListSlotsAndTheNameOfABlockAreAskedFor_ThenTheSlotsOfConfiguredItemsComeFromItsTypeAndTheNameFromItsHeadLine()
+    public async Task WhenTheAddSlotsAndTheNameOfABlockAreAskedFor_ThenTheSlotsComeFromItsTypeByKindAndTheNameFromItsHeadLine()
     {
         // Arrange
         var fixture = await MarkdownPageFixture.CreateAsync();
@@ -148,10 +148,17 @@ public class MarkdownStructureEditTests
         var panel = (TestPanel)page.Children["panel"];
 
         // Act
-        var slots = page.GetListSlots(panel);
+        var slots = page.GetAddSlots(panel);
 
         // Assert
-        Assert.Equal([new MarkdownListSlot("Row", typeof(TestRow))], slots);
+        Assert.Equal(
+            [
+                new MarkdownAddSlot(null, MarkdownAddSlotKind.DefaultContent, null),
+                new MarkdownAddSlot("Footer", MarkdownAddSlotKind.NamedContent, null),
+                new MarkdownAddSlot("Item", MarkdownAddSlotKind.ContentItem, null),
+                new MarkdownAddSlot("Row", MarkdownAddSlotKind.ConfiguredItem, typeof(TestRow))
+            ],
+            slots);
         Assert.Equal("panel", page.GetBlockName(panel));
         Assert.Null(page.GetBlockName(panel.Rows[0]));
         Assert.True(page.IsContentOfPage(page));

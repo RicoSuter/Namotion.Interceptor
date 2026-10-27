@@ -101,7 +101,7 @@ public class MarkdownPageOperationsTests
 
         // Assert
         Assert.Null(change);
-        Assert.Null(MarkdownPageOperations.FindMoveLine(page, page.Blocks[0].Children[0], 1));
+        Assert.False(MarkdownPageOperations.GetMoveDirections(page, page.Blocks[0].Children[0]).CanMoveDown);
     }
 
     [Theory]
@@ -130,14 +130,13 @@ public class MarkdownPageOperationsTests
     }
 
     [Fact]
-    public void WhenAWidgetFollowsText_ThenItsMoveLineUpIsTheLineOfTheText()
+    public void WhenAWidgetFollowsText_ThenItCanMoveUpPastTheTextButNotDown()
     {
         // Arrange
         var page = MarkdownPageParser.Parse("Text.\n\n:: Demo.One\n::\n");
 
         // Act & Assert
-        Assert.Equal(1, MarkdownPageOperations.FindMoveLine(page, page.Blocks[0], -1));
-        Assert.Null(MarkdownPageOperations.FindMoveLine(page, page.Blocks[0], 1));
+        Assert.Equal((true, false), MarkdownPageOperations.GetMoveDirections(page, page.Blocks[0]));
     }
 
     [Fact]
@@ -178,8 +177,7 @@ public class MarkdownPageOperationsTests
         Assert.Equal(expected, moved.Source);
         Assert.Equal(source, back!.Write.Page.Source);
         Assert.Equal(MarkdownBlockKind.Invalid, inner.Kind);
-        Assert.Null(MarkdownPageOperations.FindMoveLine(page, inner, -1));
-        Assert.Null(MarkdownPageOperations.FindMoveLine(page, inner, 1));
+        Assert.Equal((false, false), MarkdownPageOperations.GetMoveDirections(page, inner));
     }
 
     [Theory]
@@ -198,7 +196,7 @@ public class MarkdownPageOperationsTests
         // Assert
         Assert.Null(change);
         Assert.Contains("has nothing", refusal);
-        Assert.Null(MarkdownPageOperations.FindMoveLine(page, widget, -1));
+        Assert.False(MarkdownPageOperations.GetMoveDirections(page, widget).CanMoveUp);
     }
 
     [Theory]

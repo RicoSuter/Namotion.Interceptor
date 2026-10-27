@@ -209,22 +209,8 @@ public static class MarkdownBlockWriter
         InsertBlockText(source, line, blockText, lineEnding, out _);
 
     /// <inheritdoc cref="InsertBlockText(string, int, string, string)"/>
-    internal static string InsertBlockText(string source, int line, string blockText, string lineEnding, out MarkdownLineEdit edit)
-    {
-        var lineStart = GetLineStart(source, line);
-        var text = blockText;
-        if (line > 1 && !IsEmptyLine(source, GetLineStart(source, line - 1), lineStart))
-        {
-            text = lineEnding + text;
-        }
-
-        if (!IsEmptyLine(source, lineStart, GetLineStart(source, line + 1)))
-        {
-            text += lineEnding;
-        }
-
-        return InsertLines(source, line, text, lineEnding, out edit);
-    }
+    internal static string InsertBlockText(string source, int line, string blockText, string lineEnding, out MarkdownLineEdit edit) =>
+        InsertMovedLines(source, line, blockText, lineEnding, standsApart: true, out edit);
 
     /// <summary>Gets the 1-based line that <see cref="InsertLines"/> takes to append after the last line of text.</summary>
     internal static int GetAppendLine(string source)
