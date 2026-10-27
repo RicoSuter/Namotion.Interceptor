@@ -211,7 +211,7 @@ public static class ParentsHandlerExtensions
             lock (_lock)
             {
                 ref var current = ref CollectionsMarshal.GetValueRefOrNullRef(_indices, parent);
-                if (Unsafe.IsNullRef(ref current) || Equals(current, index))
+                if (Unsafe.IsNullRef(ref current))
                 {
                     return;
                 }
@@ -227,7 +227,7 @@ public static class ParentsHandlerExtensions
             return cached is not null ? cached[0] : CreateSnapshot();
         }
 
-        // Kept out of the method above: the enumerator here made every cached read zero stack.
+        // Kept out of the method above: inlined there, the enumerator made every cached read zero its stack frame.
         [MethodImpl(MethodImplOptions.NoInlining)]
         private ImmutableArray<SubjectParent> CreateSnapshot()
         {

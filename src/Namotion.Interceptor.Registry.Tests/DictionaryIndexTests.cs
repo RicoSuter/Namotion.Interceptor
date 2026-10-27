@@ -17,43 +17,6 @@ public class DictionaryIndexTests
         => subject.TryGetRegisteredSubject()!.TryGetProperty(propertyName)!;
 
     [Fact]
-    public void WhenDictionaryEntryIsReKeyed_ThenParentIndexIsTheNewKey()
-    {
-        // Arrange
-        var child = new TestItem();
-        var container = new TestContainer(CreateContext())
-        {
-            Items = new Dictionary<string, TestItem> { ["Motor"] = child }
-        };
-
-        // Act
-        container.Items = new Dictionary<string, TestItem> { ["Engine"] = child };
-
-        // Assert
-        var parent = Assert.Single(child.TryGetRegisteredSubject()!.Parents);
-        Assert.Equal("Engine", parent.Index);
-    }
-
-    [Fact]
-    public void WhenDictionaryEntryIsReKeyed_ThenChildIsListedUnderTheNewKey()
-    {
-        // Arrange
-        var child = new TestItem();
-        var container = new TestContainer(CreateContext())
-        {
-            Items = new Dictionary<string, TestItem> { ["Motor"] = child }
-        };
-
-        // Act
-        container.Items = new Dictionary<string, TestItem> { ["Engine"] = child };
-
-        // Assert
-        var registeredChild = Assert.Single(GetProperty(container, nameof(TestContainer.Items)).Children);
-        Assert.Same(child, registeredChild.Subject);
-        Assert.Equal("Engine", registeredChild.Index);
-    }
-
-    [Fact]
     public void WhenDictionaryEntryIsReKeyed_ThenPathUsesTheNewKey()
     {
         // Arrange
@@ -332,35 +295,53 @@ public class DictionaryIndexTests
     }
 
     [Fact]
-    public void WhenComparingDictionaryKeysThrows_ThenNoChildIsLost()
+    public void WhenComparingDictionaryKeysThrows_ThenChildAndParentIndicesAgree()
     {
         // Arrange: the comparer keeps the dictionary itself from calling the throwing Equals.
         var first = new TestItem();
         var second = new TestItem();
-        var third = new TestItem();
-        var firstKey = new ThrowingKey();
-        var secondKey = new ThrowingKey();
-        var thirdKey = new ThrowingKey();
         var container = new TestKeyedContainer(CreateContext())
         {
             ByAnything = new Dictionary<object, TestItem>(ReferenceEqualityComparer.Instance)
             {
-                [firstKey] = first, [secondKey] = second, [thirdKey] = third
+                [new ThrowingKey()] = second, ["First"] = first
             }
         };
 
-        // Act & Assert
+        // A snapshot read before the write, which a partial update must not leave behind.
+        _ = GetProperty(container, nameof(TestKeyedContainer.ByAnything)).Children;
+
+        // Act & Assert: both entries change their place, and comparing the keys of the second throws.
         Assert.Throws<NotSupportedException>(() =>
             container.ByAnything = new Dictionary<object, TestItem>(ReferenceEqualityComparer.Instance)
             {
-                [thirdKey] = third, [new ThrowingKey()] = first, [secondKey] = second
+                ["Renamed"] = first, [new ThrowingKey()] = second
             });
 
         var children = GetProperty(container, nameof(TestKeyedContainer.ByAnything)).Children;
-        Assert.Equal(3, children.Length);
-        Assert.Contains(children, c => c.Subject == first);
-        Assert.Contains(children, c => c.Subject == second);
-        Assert.Contains(children, c => c.Subject == third);
+        Assert.Equal(2, children.Length);
+        Assert.Equal(Assert.Single(first.TryGetRegisteredSubject()!.Parents).Index, children.Single(c => c.Subject == first).Index);
+        Assert.Equal(Assert.Single(second.TryGetRegisteredSubject()!.Parents).Index, children.Single(c => c.Subject == second).Index);
+    }
+
+    [Fact]
+    public void WhenIntegerKeyedDictionaryEntryIsReKeyed_ThenChildrenKeepTheirAttachOrder()
+    {
+        // Arrange
+        var first = new TestItem();
+        var second = new TestItem();
+        var container = new TestKeyedContainer(CreateContext())
+        {
+            ByNumber = new Dictionary<int, TestItem> { [1] = first, [2] = second }
+        };
+
+        // Act
+        container.ByNumber = new Dictionary<int, TestItem> { [3] = first, [2] = second };
+
+        // Assert
+        var children = GetProperty(container, nameof(TestKeyedContainer.ByNumber)).Children;
+        Assert.Equal([first, second], children.Select(c => c.Subject));
+        Assert.Equal([3, 2], children.Select(c => c.Index));
     }
 
     [Fact]
@@ -480,32 +461,6 @@ public class DictionaryIndexTests
         // Assert
         Assert.Equal(2, Assert.Single(first.TryGetRegisteredSubject()!.Parents).Index);
         Assert.Equal(1, Assert.Single(second.TryGetRegisteredSubject()!.Parents).Index);
-    }
-
-    [Fact]
-    public void WhenCollectionPropertyHoldsAStringKeyedDictionaryWithoutDictionaryInterface_ThenIndexIsTheNewKey()
-    {
-        // Arrange: a collection refresh first, so that this thread holds a reusable position map,
-        // which is what used to let a refresh read string keys as positions.
-        var context = CreateContext();
-        var warmFirst = new TestItem();
-        var warmSecond = new TestItem();
-        var warm = new TestKeyedContainer(context) { Items = [warmFirst, warmSecond] };
-        warm.Items = [warmSecond, warmFirst];
-
-        var first = new TestItem();
-        var second = new TestItem();
-        var holder = new BroadlyDeclaredHolder(context)
-        {
-            Sequence = new PairEnumeratingDictionary<string>(new Dictionary<string, TestItem> { ["First"] = first, ["Second"] = second })
-        };
-
-        // Act
-        holder.Sequence = new PairEnumeratingDictionary<string>(new Dictionary<string, TestItem> { ["Second"] = first, ["First"] = second });
-
-        // Assert
-        Assert.Equal("Second", Assert.Single(first.TryGetRegisteredSubject()!.Parents).Index);
-        Assert.Equal("First", Assert.Single(second.TryGetRegisteredSubject()!.Parents).Index);
     }
 
     [Fact]

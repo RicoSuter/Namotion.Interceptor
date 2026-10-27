@@ -9,7 +9,7 @@ public interface IChildIndexHandler
 {
     /// <summary>
     /// Called after a structural write that kept subjects in the property, while the lifecycle
-    /// interceptor holds its lock, with each kept subject whose key or position may have changed.
+    /// interceptor holds its lock, with each kept subject whose key or position changed.
     /// Not called when there is none.
     /// </summary>
     /// <remarks>
@@ -18,5 +18,5 @@ public interface IChildIndexHandler
     /// </remarks>
     /// <param name="property">The property that was written.</param>
     /// <param name="children">The kept subjects with their key or position in the new value, each once.</param>
-    void HandleChildIndexChanges(PropertyReference property, ReadOnlySpan<SubjectChildIndex> children);
+    void HandleChildIndexChanges(PropertyReference property, ReadOnlySpan<SubjectChild> children);
 }

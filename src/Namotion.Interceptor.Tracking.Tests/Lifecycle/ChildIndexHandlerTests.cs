@@ -36,6 +36,25 @@ public class ChildIndexHandlerTests
     }
 
     [Fact]
+    public void WhenDictionaryIsRebuiltInAnotherOrderWithTheSameKeys_ThenHandlerIsNotCalled()
+    {
+        // Arrange
+        var (context, handler) = CreateContext();
+        var first = new Car();
+        var second = new Car();
+        var garage = new Garage(context)
+        {
+            CarsByName = new Dictionary<string, Car> { ["First"] = first, ["Second"] = second }
+        };
+
+        // Act
+        garage.CarsByName = new Dictionary<string, Car> { ["Second"] = second, ["First"] = first };
+
+        // Assert
+        Assert.Empty(handler.Calls);
+    }
+
+    [Fact]
     public void WhenDictionaryEntryIsReKeyed_ThenHandlerGetsOnlyThatChildOnce()
     {
         // Arrange
@@ -58,7 +77,7 @@ public class ChildIndexHandlerTests
         // Assert
         var call = Assert.Single(handler.Calls);
         Assert.Equal(new PropertyReference(garage, nameof(Garage.CarsByName)), call.Property);
-        Assert.Equal([new SubjectChildIndex(child, "Engine")], call.Children);
+        Assert.Equal([new SubjectChild(child, "Engine")], call.Children);
     }
 
     [Fact]
@@ -76,7 +95,7 @@ public class ChildIndexHandlerTests
 
         // Assert
         var call = Assert.Single(handler.Calls);
-        Assert.Equal([new SubjectChildIndex(first, 1), new SubjectChildIndex(second, 2)], call.Children);
+        Assert.Equal([new SubjectChild(first, 1), new SubjectChild(second, 2)], call.Children);
     }
 
     [Fact]
@@ -93,7 +112,7 @@ public class ChildIndexHandlerTests
 
         // Assert
         var call = Assert.Single(handler.Calls);
-        Assert.Equal([new SubjectChildIndex(shared, 0), new SubjectChildIndex(other, 1)], call.Children);
+        Assert.Equal([new SubjectChild(shared, 0), new SubjectChild(other, 1)], call.Children);
     }
 
     [Fact]
@@ -109,14 +128,14 @@ public class ChildIndexHandlerTests
 
         // Assert
         var call = Assert.Single(handler.Calls);
-        Assert.Equal([new SubjectChildIndex(car, null)], call.Children);
+        Assert.Equal([new SubjectChild(car, null)], call.Children);
     }
 
     private sealed class RecordingChildIndexHandler : IChildIndexHandler
     {
-        public List<(PropertyReference Property, SubjectChildIndex[] Children)> Calls { get; } = [];
+        public List<(PropertyReference Property, SubjectChild[] Children)> Calls { get; } = [];
 
-        public void HandleChildIndexChanges(PropertyReference property, ReadOnlySpan<SubjectChildIndex> children)
+        public void HandleChildIndexChanges(PropertyReference property, ReadOnlySpan<SubjectChild> children)
         {
             Calls.Add((property, children.ToArray()));
         }

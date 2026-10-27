@@ -190,7 +190,7 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
                         {
                             // Not matched by change.Index: for a subject listed more than once in
                             // the property it is the last of its indices, not the registered one.
-                            registeredSubject.RemoveParentsByProperty(property);
+                            registeredSubject.RemoveParent(property);
                             property.RemoveChild(change.Subject);
                         }
                     }
@@ -207,7 +207,7 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
                             foreach (var child in property.Children)
                             {
                                 var childRegistered = _knownSubjects.GetValueOrDefault(child.Subject);
-                                childRegistered?.RemoveParentsByProperty(property);
+                                childRegistered?.RemoveParent(property);
                             }
 
                             property.ClearChildren();
@@ -262,11 +262,15 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
     {
     }
 
-    void IChildIndexHandler.HandleChildIndexChanges(PropertyReference property, ReadOnlySpan<SubjectChildIndex> children)
+    void IChildIndexHandler.HandleChildIndexChanges(PropertyReference property, ReadOnlySpan<SubjectChild> children)
     {
-        // Called outside the _knownSubjects lock: UpdateChildIndices takes _children and then
-        // _knownSubjects for each moved child.
-        TryGetRegisteredProperty(property)?.UpdateChildIndices(children, registry: this);
+        lock (_knownSubjects)
+        {
+            _knownSubjects
+                .GetValueOrDefault(property.Subject)?
+                .TryGetProperty(property.Name)?
+                .UpdateChildIndices(children, _knownSubjects);
+        }
     }
     
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

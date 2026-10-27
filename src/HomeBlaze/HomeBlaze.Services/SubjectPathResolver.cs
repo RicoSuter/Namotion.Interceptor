@@ -15,8 +15,8 @@ namespace HomeBlaze.Services;
 /// <summary>
 /// Thread-safe service that resolves subjects from paths and builds paths from subjects.
 /// Supports canonical notation (/Items[0]/Name) and route notation (/Items/0/Name).
-/// Implements lifecycle handling to invalidate caches when subjects are attached or detached, when a list is reordered,
-/// and when a property is added at run time.
+/// Implements lifecycle handling to invalidate caches when subjects are attached or detached, when a kept subject moves
+/// to another position or key, and when a property is added at run time.
 /// </summary>
 // After the registry, so that a change has reached the parents and children it reads when the caches are invalidated.
 [RunsAfter(typeof(SubjectRegistry))]
@@ -209,10 +209,8 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
     {
     }
 
-    // Called after a write kept subjects of a collection or dictionary at another position or under another key, once
-    // the registry has given them their new index. Such a move attaches and detaches nothing, so this is the only change
-    // it makes. A write that moves nothing, such as a dictionary assigned again on every poll, does not get here.
-    void IChildIndexHandler.HandleChildIndexChanges(PropertyReference property, ReadOnlySpan<SubjectChildIndex> children)
+    // A move attaches and detaches nothing, so this is the only change it makes.
+    void IChildIndexHandler.HandleChildIndexChanges(PropertyReference property, ReadOnlySpan<SubjectChild> children)
     {
         InvalidatePaths();
     }

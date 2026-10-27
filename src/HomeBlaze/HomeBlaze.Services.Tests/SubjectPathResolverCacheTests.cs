@@ -211,6 +211,27 @@ public class SubjectPathResolverCacheTests : SubjectPathResolverTestBase
     }
 
     [Fact]
+    public void WhenDictionaryIsRebuiltInAnotherOrderWithTheSameKeys_ThenPathsVersionIsUnchanged()
+    {
+        // Arrange
+        var first = new TestContainer(Context) { Name = "First" };
+        var second = new TestContainer(Context) { Name = "Second" };
+        var root = new TestContainer(Context)
+        {
+            Name = "Root",
+            Children = new Dictionary<string, TestContainer> { ["First"] = first, ["Second"] = second }
+        };
+        RootManager.Root = root;
+        var versionBefore = Resolver.PathsVersion;
+
+        // Act
+        root.Children = new Dictionary<string, TestContainer> { ["Second"] = second, ["First"] = first };
+
+        // Assert
+        Assert.Equal(versionBefore, Resolver.PathsVersion);
+    }
+
+    [Fact]
     public void WhenPathIsBuiltBeforeTheListIndicesAreRefreshed_ThenLaterGetPathReturnsTheNewIndex()
     {
         // Arrange

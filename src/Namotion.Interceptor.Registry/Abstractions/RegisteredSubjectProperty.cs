@@ -1,5 +1,4 @@
-﻿using System.Collections;
-using System.Collections.Immutable;
+﻿using System.Collections.Immutable;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Registry.Attributes;
@@ -357,14 +356,12 @@ public class RegisteredSubjectProperty
         }
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal void AddChild(SubjectPropertyChild child)
     {
         lock (_children)
         {
-            // No Contains check needed - LifecycleInterceptor already guarantees
-            // no duplicates via HashSet<PropertyReference?> in _attachedSubjects
-            _children.Add(child);
+            // No Contains check needed - LifecycleInterceptor attaches a subject to a property once.
+            _children.Insert(GetInsertPosition(child.Index), child);
             _childrenCache = default;
         }
     }
@@ -373,42 +370,32 @@ public class RegisteredSubjectProperty
     {
         lock (_children)
         {
-            // Matched by subject alone: a property lists a subject once however many positions
-            // or keys it sits under, and the index a detach reports need not be the registered
-            // one. Search backwards because a reconciled write detaches in reverse order, which
-            // finds each child at the end of the list.
-            for (var i = _children.Count - 1; i >= 0; i--)
+            var position = IndexOfChild(subject);
+            if (position >= 0)
             {
-                if (_children[i].Subject == subject)
-                {
-                    _children.RemoveAt(i);
-                    _childrenCache = default;
-                    return;
-                }
+                _children.RemoveAt(position);
+                _childrenCache = default;
             }
         }
     }
 
     /// <summary>
     /// Gives moved children and their parent entries the key or position they have in the value now.
-    /// Must be called while LifecycleInterceptor's _attachedSubjects lock is held,
-    /// because this method acquires _children then _knownSubjects, which is the inverse of
-    /// HandleLifecycleChange's lock order. The outer _attachedSubjects lock serializes
-    /// both paths and prevents deadlock.
+    /// Must be called inside the registry's _knownSubjects lock, which every change to children and
+    /// parent entries takes first.
     /// </summary>
-    /// <param name="children">The children that may have moved, with their key or position.</param>
-    /// <param name="registry">The subject registry (passed from caller to avoid repeated service resolution per child).</param>
-    internal void UpdateChildIndices(ReadOnlySpan<SubjectChildIndex> children, ISubjectRegistry registry)
+    /// <param name="children">The children that moved, with their new key or position.</param>
+    /// <param name="knownSubjects">The registered subjects, to find the parent entries of the children.</param>
+    internal void UpdateChildIndices(ReadOnlySpan<SubjectChild> children, Dictionary<IInterceptorSubject, RegisteredSubject> knownSubjects)
     {
         lock (_children)
         {
             // A lookup pays off from the second child on, since a moved collection item usually
-            // shifts the rest. Taken out of its slot while in use, so a nested call gets its own.
+            // shifts the rest.
             Dictionary<IInterceptorSubject, int>? positions = null;
             if (children.Length > 1)
             {
-                positions = _reusableChildPositions ?? new Dictionary<IInterceptorSubject, int>(ReferenceEqualityComparer.Instance);
-                _reusableChildPositions = null;
+                positions = _reusableChildPositions ??= new Dictionary<IInterceptorSubject, int>(ReferenceEqualityComparer.Instance);
                 for (var i = 0; i < _children.Count; i++)
                 {
                     positions[_children[i].Subject] = i;
@@ -417,43 +404,32 @@ public class RegisteredSubjectProperty
 
             try
             {
-                var changed = false;
                 foreach (var child in children)
                 {
-                    var position = positions is not null
-                        ? positions.GetValueOrDefault(child.Subject, -1)
-                        : IndexOfChild(child.Subject);
-
-                    if (position < 0 || Equals(_children[position].Index, child.Index))
+                    var position = positions?.GetValueOrDefault(child.Subject, -1) ?? IndexOfChild(child.Subject);
+                    if (position < 0)
                         continue;
 
                     _children[position] = _children[position] with { Index = child.Index };
-                    changed = true;
-
-                    registry.TryGetRegisteredSubject(child.Subject)?.UpdateParentIndex(this, child.Index);
+                    knownSubjects.GetValueOrDefault(child.Subject)?.UpdateParentIndex(this, child.Index);
                 }
 
-                if (changed)
-                {
-                    SortByPosition();
-                    _childrenCache = default;
-                }
+                SortByPosition();
+                _childrenCache = default;
             }
             finally
             {
-                if (positions is not null)
-                {
-                    // Release references so subjects can be GC'd on idle threads
-                    positions.Clear();
-                    _reusableChildPositions = positions;
-                }
+                // Release references so subjects can be GC'd on idle threads
+                positions?.Clear();
             }
         }
     }
 
+    // Searches backwards because a reconciled write detaches in reverse order, which finds each
+    // child at the end of the list.
     private int IndexOfChild(IInterceptorSubject subject)
     {
-        for (var i = 0; i < _children.Count; i++)
+        for (var i = _children.Count - 1; i >= 0; i--)
         {
             if (_children[i].Subject == subject)
                 return i;
@@ -462,10 +438,31 @@ public class RegisteredSubjectProperty
         return -1;
     }
 
-    // Children of a collection follow its order. A dictionary has no order of its own to follow,
-    // so its children stay in the order they were attached.
+    // Children of a collection are kept in position order, which an append leaves as it is. A
+    // dictionary has no order of its own to follow, so its children stay in the order they were
+    // attached, whatever the type of their keys.
+    private int GetInsertPosition(object? index)
+    {
+        var position = _children.Count;
+        if (index is int newPosition)
+        {
+            while (position > 0 &&
+                   _children[position - 1].Index is int previousPosition &&
+                   previousPosition > newPosition &&
+                   !IsSubjectDictionary)
+            {
+                position--;
+            }
+        }
+
+        return position;
+    }
+
     private void SortByPosition()
     {
+        if (IsSubjectDictionary)
+            return;
+
         foreach (var child in _children)
         {
             if (child.Index is not int)

@@ -40,9 +40,6 @@ public class StructuralWriteBenchmark
     private Dictionary<string, Car> _entriesWithOneAdded;
     private Dictionary<string, Car> _entriesWithOneReKeyed;
 
-    private Dictionary<int, Car> _numberedEntries;
-    private Dictionary<int, Car> _numberedEntriesCopy;
-
     private bool _toggle;
 
     [Params(StructuralWriteHandler.Registry, StructuralWriteHandler.ParentTracking)]
@@ -72,11 +69,8 @@ public class StructuralWriteBenchmark
         _entriesWithOneReKeyed.Remove($"Car{EntryCount / 2}", out var reKeyed);
         _entriesWithOneReKeyed["Renamed"] = reKeyed!;
 
-        _numberedEntries = Enumerable.Range(0, EntryCount).ToDictionary(index => index, _ => new Car());
-        _numberedEntriesCopy = new Dictionary<int, Car>(_numberedEntries);
-
         _car = new Car(context) { PreviousCars = _items };
-        _garage = new Garage(context) { ByName = _entries, ById = _numberedEntries };
+        _garage = new Garage(context) { ByName = _entries };
     }
 
     /// <summary>
@@ -117,16 +111,6 @@ public class StructuralWriteBenchmark
     {
         _toggle = !_toggle;
         _garage.ByName = _toggle ? _entriesCopy : _entries;
-    }
-
-    /// <summary>
-    /// Every entry stays under its key, which is a value type and has to be boxed to be read.
-    /// </summary>
-    [Benchmark]
-    public void ReplaceNumberedDictionaryKeepingEntries()
-    {
-        _toggle = !_toggle;
-        _garage.ById = _toggle ? _numberedEntriesCopy : _numberedEntries;
     }
 
     /// <summary>

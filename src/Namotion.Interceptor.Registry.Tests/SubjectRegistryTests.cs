@@ -353,6 +353,32 @@ public class SubjectRegistryTests
     }
 
     [Fact]
+    public void WhenCollectionItemIsReplacedInTheMiddle_ThenChildrenStayInPositionOrder()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry();
+
+        var first = new Person { FirstName = "A" };
+        var middle = new Person { FirstName = "B" };
+        var last = new Person { FirstName = "C" };
+        var person = new Person(context)
+        {
+            Children = [first, middle, last]
+        };
+
+        // Act: the kept items stay where they are, so nothing moves.
+        var replacement = new Person { FirstName = "D" };
+        person.Children = [first, replacement, last];
+
+        // Assert
+        var children = person.TryGetRegisteredSubject()!.TryGetProperty(nameof(Person.Children))!.Children;
+        Assert.Equal([first, replacement, last], children.Select(c => c.Subject));
+        Assert.Equal([0, 1, 2], children.Select(c => c.Index));
+    }
+
+    [Fact]
     public void WhenInsertingInMiddleOfCollection_ThenIndicesAreCorrect()
     {
         // Arrange

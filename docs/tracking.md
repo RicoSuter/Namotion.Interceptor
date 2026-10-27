@@ -415,7 +415,7 @@ A structural write that keeps a subject in the property raises neither a detach 
 ```csharp
 public class MyChildIndexHandler : IChildIndexHandler
 {
-    public void HandleChildIndexChanges(PropertyReference property, ReadOnlySpan<SubjectChildIndex> children)
+    public void HandleChildIndexChanges(PropertyReference property, ReadOnlySpan<SubjectChild> children)
     {
         foreach (var child in children)
         {
@@ -425,10 +425,13 @@ public class MyChildIndexHandler : IChildIndexHandler
 }
 ```
 
-- It is called once per write, after the attach and detach callbacks of that write, with each kept subject whose index may have changed, and not at all when none did. A subject the write attached already carries its index and is not reported.
-- The index is `null` for a subject reference, the position for a collection and the key for a dictionary. A subject the value holds more than once is reported once, with the first of them in enumeration order.
-- A subject counts as moved unless the old value held the same subject at the same place under an equal index. The old value is read as it is now, so mutating it in place before assigning a new one hides the moves the two share.
-- The same requirements apply as to `ILifecycleHandler` (below), and the span is only valid during the call. The registry and parent tracking keep their indices current through this hook.
+These rules hold for every index the library keeps, in the registry (`Children`, `Parents`) and in parent tracking (`GetParents()`):
+
+- The index is `null` for a subject reference, the position for a collection and the key for a dictionary. A subject the value holds more than once has one entry, with the first of its positions or keys in enumeration order.
+- The handler is called once per write, after the attach and detach callbacks of that write, with each kept subject whose index changed, and not at all when none did. A subject the write attached already carries its index and is not reported, and a dictionary assigned again in another order with the same keys reports nothing.
+- An index is compared with the one the old value had. The old value is read as it is now, so a collection or dictionary mutated in place and then assigned again hides the changes the two share, and the indices stay as they were before the mutation.
+- Keys are compared with `Equals`. A key whose `Equals` throws makes the write throw after the value is stored, and the indices keep their old values.
+- The same requirements apply as to `ILifecycleHandler` (below), and the span is only valid during the call.
 
 ### Thread Safety
 
@@ -572,11 +575,7 @@ var same = car.TryGetFirstParentOrSelf<Car>();  // The car itself, because it is
 
 Both searches go breadth first over all parents, so the nearest match wins, and neither throws when there is none. `TryGetFirstParent` never returns the subject itself.
 
-Every parent carries an `Index`: `null` for a subject reference, the position for a collection and the key for a dictionary.
-
-- The index follows the assigned value. When a new collection or dictionary keeps a subject at another position or under another key, its parent gets the new index. The subject stays attached throughout, so no lifecycle callback fires for the move.
-- A subject that sits at several positions or under several keys of one property has one parent for that property, with the first of them in enumeration order.
-- Parents are read from a collection or dictionary when it is assigned. Mutating one in place changes no parent, and the next assignment is compared against the mutated value, so it does not correct an index that both share.
+Every parent carries an `Index`, and a subject has one parent per property that holds it. The index follows the assigned value as described in [Child Index Changes](#child-index-changes).
 
 This enables scenarios like:
 - Finding the root object of a subject graph
