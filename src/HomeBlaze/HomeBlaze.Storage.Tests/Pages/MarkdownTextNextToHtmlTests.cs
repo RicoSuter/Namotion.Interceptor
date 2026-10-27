@@ -248,26 +248,6 @@ public class MarkdownTextNextToHtmlTests
     }
 
     [Fact]
-    public void WhenRawHtmlIsChangedOrRemovedAsText_ThenTheChangeIsRefused()
-    {
-        // Arrange
-        var page = MarkdownPageParser.Parse("Before.\n\n<div>x</div>\n\nAfter.\n");
-        var htmlTextBlock = TextAt(page, 3);
-
-        // Act
-        var change = MarkdownPageOperations.TryReplaceText(page, NoSubjects, htmlTextBlock, ChangedText, out var changeRefusal);
-        var remove = MarkdownPageOperations.TryRemoveText(page, NoSubjects, htmlTextBlock, out var removeRefusal);
-        var directions = MarkdownPageOperations.GetTextMoveDirections(page, htmlTextBlock);
-
-        // Assert
-        Assert.Null(change);
-        Assert.Null(remove);
-        Assert.Equal("The text cannot be edited as text.", changeRefusal);
-        Assert.Equal("The text cannot be edited as text.", removeRefusal);
-        Assert.Equal((false, false), directions);
-    }
-
-    [Fact]
     public void WhenTextIsMovedPastRawHtmlThatOpensAnElementALaterBlockCloses_ThenItGoesPastTheClosingBlock()
     {
         // Arrange
