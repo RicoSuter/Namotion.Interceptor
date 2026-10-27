@@ -526,6 +526,24 @@ public sealed class RoleEditComponentTests : BunitContext, IAsyncLifetime
     }
 
     [Fact]
+    public void WhenAnIncludedRoleAllowsExecuteWithoutRead_ThenOnlyTheRoleSaysTheMethodsCannotBeUsed()
+    {
+        // Arrange
+        _graph.GetRole("Garden").Allow = [new PermissionRule { Paths = ["/Devices/**"], Actions = [AuthorizationActions.Execute] }];
+        var role = _graph.GetRole("Kitchen");
+        role.Includes = ["Garden"];
+        role.Allow = [new PermissionRule { Members = ["Temperature"], Actions = [PermissionAction.Read] }];
+
+        // Act
+        var component = RenderEditor(role);
+
+        // Assert
+        var roleHint = component.Find("[data-testid='role-edit-execute-without-read']").TextContent;
+        Assert.Contains("Execute is allowed without read on 2 methods", roleHint);
+        Assert.Empty(component.FindAll("[data-testid='rule-execute-without-read-hint']"));
+    }
+
+    [Fact]
     public void WhenAnotherRoleAllowsReadingTheMethods_ThenExecuteWithoutReadIsNoHint()
     {
         // Arrange

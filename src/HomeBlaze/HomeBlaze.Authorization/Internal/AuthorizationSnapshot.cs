@@ -9,7 +9,8 @@ namespace HomeBlaze.Authorization.Internal;
 
 /// <summary>
 /// The roles of the graph at one version, with the policies compiled from them and the statuses they give the
-/// <see cref="Authorization"/> and <see cref="Role"/> subjects. Immutable apart from the policy cache, which is thread-safe.
+/// <see cref="Authorization"/> and <see cref="Role"/> subjects. Immutable apart from the caches of policies and
+/// previews, which are thread-safe.
 /// </summary>
 internal sealed class AuthorizationSnapshot
 {
@@ -23,6 +24,7 @@ internal sealed class AuthorizationSnapshot
     private readonly Dictionary<string, string> _unavailableRoles;
     private readonly string? _customRolesError;
     private readonly ConcurrentDictionary<RoleNameSet, AuthorizationResult> _policies = new();
+    private readonly PreviewCache _previews = new();
 
     private AuthorizationSnapshot(
         long version,
@@ -166,10 +168,21 @@ internal sealed class AuthorizationSnapshot
 
     /// <summary>
     /// Compiles the policy of a principal holding only <paramref name="editedRole"/>, which replaces the custom role of
-    /// the same name ignoring case, or is added. The result is not cached; its error is the status the role would have
-    /// once saved.
+    /// the same name ignoring case, or is added. Only the result of the last previewed instance is kept; its error is the
+    /// status the role would have once saved.
     /// </summary>
     public AuthorizationResult Preview(AuthorizationRole editedRole)
+    {
+        if (!_previews.TryGet(editedRole, out var result))
+        {
+            result = CompilePreview(editedRole);
+            _previews.Set(editedRole, result);
+        }
+
+        return result;
+    }
+
+    private AuthorizationResult CompilePreview(AuthorizationRole editedRole)
     {
         var name = editedRole.Name;
         var reason = GetNameError(name, count: 1) ?? _unavailableRoles.GetValueOrDefault(name) ?? _customRolesError;

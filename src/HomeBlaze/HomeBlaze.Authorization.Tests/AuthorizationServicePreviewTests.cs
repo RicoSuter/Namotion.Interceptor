@@ -258,6 +258,40 @@ public sealed class AuthorizationServicePreviewTests : IDisposable
     }
 
     [Fact]
+    public void WhenTheSameRoleIsPreviewedAgain_ThenItGetsTheSameResultWithoutCompilingAgain()
+    {
+        // Arrange
+        AddAuthorization(("Custom", new Role()));
+        var role = new AuthorizationRole { Name = "Custom", Allow = [ReadPlain()] };
+        var first = _service.PreviewPolicy(role);
+
+        // Act
+        var second = _service.PreviewPolicy(role);
+        var ofEqualRole = _service.PreviewPolicy(role with { });
+
+        // Assert
+        Assert.Same(first.Policy, second.Policy);
+        Assert.NotSame(first.Policy, ofEqualRole.Policy);
+    }
+
+    [Fact]
+    public void WhenTheRolesChangeBetweenPreviewsOfTheSameRole_ThenItIsCompiledWithTheChangedRoles()
+    {
+        // Arrange
+        var saved = new Role();
+        AddAuthorization(("Saved", saved));
+        var role = new AuthorizationRole { Name = "New", Includes = ["Saved"] };
+        Assert.False(_service.PreviewPolicy(role).Policy.CanRead(Member(nameof(TagTestSubject.Plain))));
+
+        // Act
+        saved.Allow = [ReadPlain()];
+        var result = _service.PreviewPolicy(role);
+
+        // Assert
+        Assert.True(result.Policy.CanRead(Member(nameof(TagTestSubject.Plain))));
+    }
+
+    [Fact]
     public void WhenACollectionIsReordered_ThenTheWarningFollowsTheNewPositions()
     {
         // Arrange

@@ -204,7 +204,8 @@
         return (null, null);
     }
 
-    // Checked again for each edited role, so that the hint follows unsaved changes.
+    // Checked again for each edited role, so that the hint follows unsaved changes. The preview of the same instance is
+    // compiled once for this and the tab "Preview".
     private ExecuteWithoutReadFindings? GetExecuteWithoutRead()
     {
         var role = GetEditedRole();
@@ -212,9 +213,9 @@
         {
             _executeCheckedRole = role;
             _executeWithoutRead =
-                ExecuteWithoutRead.MayApply(role) &&
-                Subject?.Context.TryGetService<ISubjectRegistry>() is { } registry &&
-                AuthorizationService.PreviewPolicy(role) is { Error: null } result
+                AuthorizationService.PreviewPolicy(role) is { Error: null } result &&
+                ExecuteWithoutRead.MayApply(result.Policy) &&
+                Subject?.Context.TryGetService<ISubjectRegistry>() is { } registry
                     ? ExecuteWithoutRead.Find(role, result.Policy, registry.KnownSubjects.Values, AuthorizationService.PathProvider)
                     : null;
         }
