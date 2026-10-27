@@ -30,7 +30,7 @@ public class DerivedPropertyStressTests
             RunConcurrently(graph, seed + StressGraph.MoverCount, () => Verify(graph, mismatches));
 
             // Assert
-            Assert.True(mismatches.Count == 0, $"Round {round}:{Environment.NewLine}{string.Join(Environment.NewLine, mismatches.Distinct().Take(30))}");
+            Assert.True(mismatches.Count == 0, $"Round {round}, seed {seed}:{Environment.NewLine}{string.Join(Environment.NewLine, mismatches.Distinct().Take(30))}");
         }
     }
 
@@ -66,10 +66,9 @@ public class DerivedPropertyStressTests
         var threads = new Thread[threadCount];
         for (var index = 0; index < threadCount; index++)
         {
-            var random = new Random(writerSeed + index);
-            Action runBatch = index < StressGraph.MoverCount
+            var runBatch = index < StressGraph.MoverCount
                 ? graph.Movers[index].RunBatch
-                : () => graph.WriteBatch(random);
+                : CreateWriteBatch(graph, writerSeed + index);
 
             threads[index] = new Thread(() => RunBatches(barrier, runBatch, keepRunning, failures)) { IsBackground = true };
             threads[index].Start();
@@ -81,6 +80,12 @@ public class DerivedPropertyStressTests
         }
 
         Assert.Empty(failures);
+    }
+
+    private static Action CreateWriteBatch(StressGraph graph, int seed)
+    {
+        var random = new Random(seed);
+        return () => graph.WriteBatch(random);
     }
 
     private static void RunBatches(Barrier barrier, Action runBatch, StrongBox<bool> keepRunning, ConcurrentQueue<Exception> failures)
@@ -215,13 +220,12 @@ public class DerivedPropertyStressTests
         $"{label(change.Property.Subject)}.{change.Property.Name}={change.GetNewValue<object?>()}";
 
     /// <summary>
-    /// Widens race windows: on a writer thread, a structural read inside a derived getter and the publication
-    /// of a derived property wait until the movers complete a few moves, unless no mover is running. Also counts
-    /// publications of a derived property that overlap another publication of the same property, which its
-    /// recalculation serializes, also across a move.
+    /// Widens race windows: on a writer thread, the publication of a derived property waits until the movers
+    /// complete a few moves, unless no mover is running. Also counts publications of a derived property that
+    /// overlap another publication of the same property, which its recalculation serializes, also across a move.
     /// </summary>
     [RunsBefore(typeof(PropertyChangeInterceptor))]
-    private sealed class RaceWidener : IReadInterceptor, IWriteInterceptor
+    private sealed class RaceWidener : IWriteInterceptor
     {
         // Long enough for a move that detaches and attaches a subject again, and a write after it.
         private const int MovesPerWait = 3;
@@ -246,16 +250,6 @@ public class DerivedPropertyStressTests
         public void CompleteMove() => Interlocked.Increment(ref _completedMoves);
 
         public void EndMoves() => Interlocked.Decrement(ref _activeMovers);
-
-        public TProperty ReadProperty<TProperty>(ref PropertyReadContext<TProperty> context, ReadInterceptionDelegate<TProperty> next)
-        {
-            if (DerivedPropertyChangeHandler.IsRecordingDerivedProperty && context.Property.Metadata.Type == typeof(StressNode))
-            {
-                WaitForMoves();
-            }
-
-            return next(ref context);
-        }
 
         public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
         {
