@@ -9,6 +9,7 @@ namespace Namotion.Interceptor.Tracking.Tests.Parent;
 /// <summary>
 /// Checks that every copy of a parent relationship agrees with the value after a sequence of structural writes that
 /// keep, move, re-key, repeat and drop children: the tracked parents, the registry parents and the registry children.
+/// A holder keeps every car in the graph, so a parent entry a removal leaves behind stays visible in the registry.
 /// </summary>
 public class MovedChildConsistencyTests
 {
@@ -21,17 +22,20 @@ public class MovedChildConsistencyTests
             .WithParents();
     }
 
-    private static Car[] CreateCars(int count)
+    private static Car[] CreateHeldCars(IInterceptorSubjectContext context, int count)
     {
-        return Enumerable.Range(0, count).Select(i => new Car { Name = "Car" + i }).ToArray();
+        var cars = Enumerable.Range(0, count).Select(i => new Car { Name = "Car" + i }).ToArray();
+        _ = new Garage(context) { Cars = cars };
+        return cars;
     }
 
     [Fact]
     public void WhenCollectionGoesThroughMixedWrites_ThenEveryCopyMatchesTheValueAfterEachStep()
     {
         // Arrange
-        var cars = CreateCars(5);
-        var garage = new Garage(CreateContext());
+        var context = CreateContext();
+        var cars = CreateHeldCars(context, 5);
+        var garage = new Garage(context);
         Car[][] steps =
         [
             [cars[0], cars[1], cars[2]],
@@ -40,6 +44,10 @@ public class MovedChildConsistencyTests
             [cars[3], cars[1], cars[3]],
             [cars[4], cars[3], cars[1], cars[3], cars[4]],
             [cars[4], cars[3], cars[2], cars[1], cars[0]],
+            [cars[3], cars[3]],
+            [cars[1], cars[3]],
+            [cars[3], cars[1], cars[3]],
+            [cars[1], cars[3]],
             []
         ];
 
@@ -57,8 +65,9 @@ public class MovedChildConsistencyTests
     public void WhenDictionaryGoesThroughMixedWrites_ThenEveryCopyMatchesTheValueAfterEachStep()
     {
         // Arrange
-        var cars = CreateCars(5);
-        var garage = new Garage(CreateContext());
+        var context = CreateContext();
+        var cars = CreateHeldCars(context, 5);
+        var garage = new Garage(context);
 
         // A removed entry frees its slot, so the entry added after it enumerates in its place.
         var reusedSlot = new Dictionary<string, Car> { ["A"] = cars[3], ["B"] = cars[1], ["C"] = cars[2] };
@@ -71,7 +80,12 @@ public class MovedChildConsistencyTests
             new() { ["X"] = cars[0], ["B"] = cars[1], ["C"] = cars[2] },
             reusedSlot,
             new() { ["C"] = cars[2], ["A"] = cars[2], ["Q"] = cars[4] },
+            new() { ["Q"] = cars[4] },
             new() { ["Q"] = cars[2], ["C"] = cars[4] },
+            new() { ["First"] = cars[3], ["Second"] = cars[3] },
+            new() { ["Second"] = cars[3] },
+            new() { ["First"] = cars[3], ["Second"] = cars[3] },
+            new() { ["Other"] = cars[1], ["Second"] = cars[3] },
             new()
         ];
 
@@ -89,8 +103,9 @@ public class MovedChildConsistencyTests
     public void WhenBroadPropertySwitchesShapes_ThenEveryCopyMatchesTheValueAfterEachStep()
     {
         // Arrange
-        var cars = CreateCars(3);
-        var holder = new BroadlyDeclaredHolder(CreateContext());
+        var context = CreateContext();
+        var cars = CreateHeldCars(context, 3);
+        var holder = new BroadlyDeclaredHolder(context);
         object?[] steps =
         [
             new Dictionary<string, Car> { ["K"] = cars[0], ["J"] = cars[1] },
@@ -100,6 +115,7 @@ public class MovedChildConsistencyTests
             new List<Car> { cars[0], cars[0], cars[1] },
             cars[1],
             new Dictionary<int, Car> { [0] = cars[1], [1] = cars[2] },
+            new Dictionary<int, Car> { [0] = cars[1], [5] = cars[2] },
             null
         ];
 
@@ -128,22 +144,32 @@ public class MovedChildConsistencyTests
         var registeredCar = car.TryGetRegisteredSubject();
         Assert.NotNull(registeredCar);
         var failures = new ConcurrentQueue<string>();
+        using var readerStarted = new ManualResetEventSlim();
         using var writesDone = new ManualResetEventSlim();
 
         var reader = new Thread(() =>
         {
-            while (!writesDone.IsSet)
+            try
             {
-                var tracked = car.GetParents().Where(parent => parent.Property == property).ToArray();
-                var registered = registeredCar.Parents.Where(parent => parent.Property.Reference == property).ToArray();
-                if (tracked.Length != 1 || registered.Length != 1)
+                readerStarted.Set();
+                while (!writesDone.IsSet)
                 {
-                    failures.Enqueue($"Tracked: {tracked.Length}, registered: {registered.Length}");
+                    var tracked = car.GetParents().Where(parent => parent.Property == property).ToArray();
+                    var registered = registeredCar.Parents.Where(parent => parent.Property.Reference == property).ToArray();
+                    if (tracked.Length != 1 || registered.Length != 1)
+                    {
+                        failures.Enqueue($"Tracked: {tracked.Length}, registered: {registered.Length}");
+                    }
                 }
+            }
+            catch (Exception exception)
+            {
+                failures.Enqueue(exception.ToString());
             }
         });
 
         reader.Start();
+        readerStarted.Wait();
 
         // Act
         for (var iteration = 0; iteration < 10_000; iteration++)
@@ -164,8 +190,9 @@ public class MovedChildConsistencyTests
     public void WhenWritersShuffleCollectionAndDictionary_ThenEveryCopyMatchesTheValueAfterwards()
     {
         // Arrange
-        var cars = CreateCars(6);
-        var garage = new Garage(CreateContext());
+        var context = CreateContext();
+        var cars = CreateHeldCars(context, 6);
+        var garage = new Garage(context);
         const int writerCount = 4;
         var failures = new ConcurrentQueue<Exception>();
         using var start = new Barrier(writerCount);
