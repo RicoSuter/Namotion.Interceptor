@@ -115,6 +115,43 @@ internal sealed class McpVisibility
         return isShown;
     }
 
+    /// <summary>
+    /// The path the tools write for the subject from <paramref name="rootSubject"/>, after <paramref name="pathPrefix"/>:
+    /// for the root the prefix, or null when it is empty, otherwise null when the registry writes no path. With a policy
+    /// also null when a property the path is written through is not readable.
+    /// </summary>
+    public string? TryGetSubjectPath(
+        RegisteredSubject subject, PathProviderBase pathProvider, IInterceptorSubject rootSubject, string pathPrefix)
+    {
+        if (subject.Subject == rootSubject)
+        {
+            return pathPrefix.Length > 0 ? pathPrefix : null;
+        }
+
+        var parents = subject.Parents;
+        if (parents.Length == 0)
+        {
+            return null;
+        }
+
+        var parent = parents[0];
+        var path = _policy is null
+            ? parent.Property.TryGetPath(pathProvider, rootSubject, parent.Index)
+            : TryGetReadablePath(parent, pathProvider, rootSubject, _policy);
+
+        return path is not null ? $"{pathPrefix}{path}" : null;
+    }
+
+    // The check runs on the chain the text is written from, not on the cached one of IsShown, so a subject moved on
+    // the chain in between cannot put the name of a hidden property into the text.
+    private string? TryGetReadablePath(
+        SubjectPropertyParent parent, PathProviderBase pathProvider, IInterceptorSubject rootSubject, IMcpAccessPolicy policy)
+    {
+        var pathProperties = _pathProperties ??= [];
+        var path = parent.Property.TryGetPath(pathProvider, rootSubject, parent.Index, pathProperties);
+        return path is not null && AreReadable(pathProperties, policy) ? path : null;
+    }
+
     // The properties checked are exactly the chain the tools write the subject's path through, so a subject's own
     // check never relies on an owner's, whose path may go through other parents. A subject the registry writes no
     // path for has no path to check.
@@ -128,11 +165,13 @@ internal sealed class McpVisibility
 
         var parent = parents[0];
         var pathProperties = _pathProperties ??= [];
-        if (!parent.Property.TryGetPathProperties(_rootSubject, parent.Index, pathProperties))
-        {
-            return true;
-        }
+        return !parent.Property.TryGetPathProperties(_rootSubject, parent.Index, pathProperties) ||
+               AreReadable(pathProperties, policy);
+    }
 
+    // Clears the list, whose entries pin their subjects, so the reused list is not kept filled.
+    private static bool AreReadable(List<(RegisteredSubjectProperty Property, object? Index)> pathProperties, IMcpAccessPolicy policy)
+    {
         var isReadable = true;
         foreach (var (property, _) in CollectionsMarshal.AsSpan(pathProperties))
         {
@@ -143,7 +182,6 @@ internal sealed class McpVisibility
             }
         }
 
-        // The entries pin their subjects, so the reused list is not kept filled.
         pathProperties.Clear();
         return isReadable;
     }

@@ -149,7 +149,7 @@ internal class BrowseTool
     {
         unseenPropertyNames?.Observe(subject, pathProvider, options.Visibility);
         var node = McpToolHelper.BuildSubjectNodeDto(
-            subject, pathProvider, rootSubject, _configuration,
+            subject, pathProvider, rootSubject, _configuration, options.Visibility,
             options.IncludeProperties, options.IncludeAttributes, options.IncludeMethods, options.IncludeInterfaces,
             options.PropertyNames);
 

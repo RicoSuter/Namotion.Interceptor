@@ -60,13 +60,14 @@ internal static class McpToolHelper
         PathProviderBase pathProvider,
         IInterceptorSubject rootSubject,
         McpServerConfiguration configuration,
+        McpVisibility visibility,
         bool includeProperties,
         bool includeAttributes,
         bool includeMethods,
         bool includeInterfaces,
         IReadOnlySet<string>? propertyNames = null)
     {
-        var path = TryGetSubjectPath(subject, pathProvider, rootSubject, configuration.PathPrefix);
+        var path = visibility.TryGetSubjectPath(subject, pathProvider, rootSubject, configuration.PathPrefix);
 
         // Collect enrichments and extract known fields
         var enrichments = new Dictionary<string, object?>();
@@ -213,27 +214,6 @@ internal static class McpToolHelper
         }
 
         return property.IsAttribute ? null : property;
-    }
-
-    internal static string? TryGetSubjectPath(
-        RegisteredSubject subject,
-        PathProviderBase pathProvider,
-        IInterceptorSubject rootSubject,
-        string pathPrefix = "")
-    {
-        if (subject.Subject == rootSubject)
-        {
-            return pathPrefix.Length > 0 ? pathPrefix : null;
-        }
-
-        if (subject.Parents.Length > 0)
-        {
-            var parent = subject.Parents[0];
-            var path = parent.Property.TryGetPath(pathProvider, rootSubject, parent.Index);
-            return path is not null ? $"{pathPrefix}{path}" : null;
-        }
-
-        return null;
     }
 
     private static ScalarProperty BuildScalarPropertyDto(
