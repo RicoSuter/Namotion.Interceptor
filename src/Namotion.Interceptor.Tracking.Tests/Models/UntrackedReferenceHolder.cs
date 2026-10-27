@@ -16,8 +16,6 @@ namespace Namotion.Interceptor.Tracking.Tests.Models
 
         public partial UntrackedReferenceLeaf? First { get; set; }
 
-        public partial UntrackedReferenceLeaf? Second { get; set; }
-
         public partial int Trigger { get; set; }
 
         // Reads the leaf through a tracked property, so the leaf's Value has tracking data from the start.

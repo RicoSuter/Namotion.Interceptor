@@ -101,7 +101,7 @@ public class DerivedPropertyReattachTests
     }
 
     [Fact]
-    public async Task WhenSourceIsMovedWhileADependentWaitsToRegisterOnIt_ThenTheDependencyIsKept()
+    public async Task WhenSourceIsReattachedWhileADependentWaitsToRegisterOnIt_ThenTheDependencyIsKept()
     {
         // Arrange
         var changes = new List<SubjectPropertyChange>();
@@ -118,7 +118,8 @@ public class DerivedPropertyReattachTests
         var observedProperty = new PropertyReference(holder, nameof(UntrackedReferenceHolder.Observed));
         var valueData = valueProperty.TryGetDerivedPropertyData()!;
 
-        // Act: Observed's recalculation fetches the leaf's data, then waits for its lock while the leaf moves.
+        // Act: Observed's recalculation fetches the leaf's data, then waits for its lock while the leaf is
+        // detached and attached again, which recreates its data through Structural.
         Thread? writerThread = null;
         Task writer;
         Monitor.Enter(valueData);
@@ -138,7 +139,8 @@ public class DerivedPropertyReattachTests
                 TimeSpan.FromSeconds(10)));
 
             holder.First = null;
-            holder.Second = leaf;
+            holder.First = leaf;
+            Assert.NotSame(valueData, valueProperty.TryGetDerivedPropertyData());
         }
         finally
         {
@@ -226,7 +228,7 @@ public class DerivedPropertyReattachTests
         var fullNameData = fullNameProperty.TryGetDerivedPropertyData()!;
 
         // Act: an attach outside the graph lock, as for a property added at runtime, fetches the data
-        // and waits for its lock while the property is detached.
+        // and waits for its lock while the property is detached and a dependent's registration recreates it.
         Thread? attachThread = null;
         Task attach;
         Monitor.Enter(fullNameData);
@@ -246,6 +248,8 @@ public class DerivedPropertyReattachTests
                 TimeSpan.FromSeconds(10)));
 
             person.DetachSubjectProperty(fullNameProperty);
+            fullNameProperty.GetDerivedPropertyData();
+            Assert.NotSame(fullNameData, fullNameProperty.TryGetDerivedPropertyData());
         }
         finally
         {
