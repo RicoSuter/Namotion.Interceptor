@@ -6,27 +6,29 @@ using Namotion.Interceptor.Registry.Paths;
 
 namespace HomeBlaze.Authorization.Internal;
 
-/// <summary>Checks path patterns: whether those of a role start with the separator, and whether they name subjects instead of members.</summary>
+/// <summary>
+/// Checks path patterns: whether those of a role start with the separator as the application writes them, and whether
+/// they name subjects instead of members.
+/// </summary>
 internal static class PathPatternChecks
 {
     /// <summary>
     /// Gets the error of each of <paramref name="roles"/> with a path pattern that does not start with
-    /// <paramref name="separator"/>, by role name ignoring case, or null when there is none.
+    /// <paramref name="separator"/> or is the separator alone, by role name ignoring case, or null when there is none.
     /// </summary>
     /// <remarks>
-    /// The policy also takes a pattern without a leading separator, but every path the application shows starts with
-    /// one, so its rules keep that one spelling.
+    /// The policy also takes a pattern without a leading separator, and its hint for the separator alone names
+    /// <c>**</c>; every path the application shows starts with the separator, so its rules keep that one spelling.
     /// </remarks>
     public static Dictionary<string, string>? GetLeadingSeparatorErrors(ImmutableArray<AuthorizationRole> roles, char separator)
     {
         Dictionary<string, string>? errors = null;
         foreach (var role in roles)
         {
-            if ((FindPatternWithoutLeadingSeparator(role.Allow, separator) ??
-                 FindPatternWithoutLeadingSeparator(role.Deny, separator)) is { } pattern)
+            if ((FindLeadingSeparatorError(role.Allow, role.Name, separator) ??
+                 FindLeadingSeparatorError(role.Deny, role.Name, separator)) is { } error)
             {
-                (errors ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase))[role.Name] =
-                    $"Path pattern '{pattern}' of role '{role.Name}' must start with '{separator}'.";
+                (errors ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase))[role.Name] = error;
             }
         }
 
@@ -35,8 +37,8 @@ internal static class PathPatternChecks
 
     /// <summary>
     /// Gets the error in <paramref name="errors"/> of the first role among <paramref name="roleNames"/> and the roles
-    /// they include, or null. Only called for names a policy was compiled from, so every include is known and the
-    /// includes form no cycle.
+    /// they include, or null. Called before the policy compiles, so a name that is empty or names no role is skipped
+    /// for the policy to report.
     /// </summary>
     public static string? FindLeadingSeparatorError(
         string[] roleNames, ImmutableArray<AuthorizationRole> roles, Dictionary<string, string> errors)
@@ -45,7 +47,7 @@ internal static class PathPatternChecks
         var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         while (pending.TryPop(out var name))
         {
-            if (!visited.Add(name))
+            if (string.IsNullOrEmpty(name) || !visited.Add(name))
             {
                 continue;
             }
@@ -147,7 +149,7 @@ internal static class PathPatternChecks
         return namesEntry;
     }
 
-    private static string? FindPatternWithoutLeadingSeparator(ImmutableArray<PermissionRule> rules, char separator)
+    private static string? FindLeadingSeparatorError(ImmutableArray<PermissionRule> rules, string roleName, char separator)
     {
         foreach (var rule in rules)
         {
@@ -158,14 +160,28 @@ internal static class PathPatternChecks
 
             foreach (var pattern in rule.Paths)
             {
-                if (pattern is not null && (pattern.Length == 0 || pattern[0] != separator))
+                if (pattern is not null && GetLeadingSeparatorError(pattern, roleName, separator) is { } error)
                 {
-                    return pattern;
+                    return error;
                 }
             }
         }
 
         return null;
+    }
+
+    // An empty pattern is left to the policy, which reports it.
+    private static string? GetLeadingSeparatorError(string pattern, string? roleName, char separator)
+    {
+        var ofRole = roleName is null ? string.Empty : $" of role '{roleName}'";
+        if (pattern.Length > 0 && pattern[0] != separator)
+        {
+            return $"Path pattern '{pattern}'{ofRole} must start with '{separator}'.";
+        }
+
+        return pattern.Length == 1
+            ? $"Path pattern '{pattern}'{ofRole} matches no member; use '{separator}**' for every member, or '{separator}*' for the members of the root."
+            : null;
     }
 
     private static ImmutableArray<string> GetIncludes(ImmutableArray<AuthorizationRole> roles, string name)
