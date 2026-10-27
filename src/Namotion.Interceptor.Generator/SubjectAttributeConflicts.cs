@@ -59,18 +59,18 @@ internal static class SubjectAttributeConflicts
                 continue;
             }
 
-            if (!TryGetPropertyAttributeTarget(property, out var target))
+            if (!TryGetPropertyAttributeTarget(property, isOwn, out var target, out var isOwnTarget))
             {
                 continue;
             }
 
-            if (TryAddProvider(ref providers, target, property.Name, isOwn, out var provider))
+            if (TryAddProvider(ref providers, target, property.Name, isOwnTarget, out var provider))
             {
                 continue;
             }
 
             // A duplicate that lives entirely in a base subject is reported there, not on every derived subject.
-            if (isOwn || provider.IsOwn)
+            if (isOwnTarget || provider.IsOwn)
             {
                 diagnostics.Add(Diagnostic.Create(
                     Diagnostics.DuplicatePropertyAttributeTarget, location,
@@ -107,19 +107,25 @@ internal static class SubjectAttributeConflicts
 
     // An override inherits the attribute of the declaration it overrides at runtime, but Roslyn reports only the
     // attributes declared on the override itself; the nearest declaration wins, matching AllowMultiple = false.
+    // The target belongs to the subject only when the subject itself declares the attribute, so an override that
+    // merely inherits it does not make a base subject's duplicate the subject's own.
     private static bool TryGetPropertyAttributeTarget(
         IPropertySymbol property,
-        out AttributeTarget target)
+        bool isOwn,
+        out AttributeTarget target,
+        out bool isOwnTarget)
     {
         for (var current = property; current is not null; current = current.OverriddenProperty)
         {
             if (TryGetDeclaredPropertyAttributeTarget(current, out target))
             {
+                isOwnTarget = isOwn && SymbolEqualityComparer.Default.Equals(current, property);
                 return true;
             }
         }
 
         target = default;
+        isOwnTarget = false;
         return false;
     }
 
