@@ -44,9 +44,8 @@ public static class SubjectRegistryJsonExtensions
 
                 // The registered property decides: the registry can register a property as plain while its
                 // metadata still carries [PropertyAttribute] (two providers for one attribute).
-                var propertyName = registeredProperty is not null
-                    ? registeredProperty.GetJsonPropertyName(jsonSerializerOptions)
-                    : GetJsonPropertyName(parent.Property.Subject, parent.Property.Metadata, jsonSerializerOptions);
+                var propertyName = registeredProperty?.GetJsonPropertyName(jsonSerializerOptions)
+                    ?? GetJsonPropertyName(parent.Property.Subject, parent.Property.Metadata, jsonSerializerOptions);
                 path = propertyName +
                     (parent.Index is not null ? $"[{parent.Index}]" : string.Empty) +
                     (path is not null ? $".{path}" : string.Empty);

@@ -86,7 +86,7 @@ public class MergePropertiesTests
         Assert.False(subject.Properties.ContainsKey("Color"));
     }
 
-    internal static SubjectPropertyMetadata CreateProperty(string name, Func<IInterceptorSubject, object?> getValue)
+    private static SubjectPropertyMetadata CreateProperty(string name, Func<IInterceptorSubject, object?> getValue)
     {
         return new SubjectPropertyMetadata(name, typeof(object), [], getValue, null, isIntercepted: true, isDynamic: true);
     }

@@ -378,13 +378,8 @@ public class RegisteredSubjectProperty
     {
         // Unlocked read: registered properties are never removed and the property table is published through a
         // volatile field, so a hit is final; a miss is checked again under the locks in AddPropertyCore.
-        var attribute = Parent.TryGetPropertyAttribute(Name, name) ?? Parent.AddPropertyCore(
-            $"{Name}@{name}",
-            type, getValue, setValue,
-            (isDerived
-                ? attributes.Concat([new PropertyAttributeAttribute(Name, name), new DerivedAttribute()])
-                : attributes.Concat([new PropertyAttributeAttribute(Name, name)])).ToArray(),
-            returnExistingAttribute: true);
+        var attribute = Parent.TryGetPropertyAttribute(Name, name)
+            ?? AddAttributeOnMiss(name, type, getValue, setValue, attributes, isDerived);
 
         if (attribute.Type != type)
         {
@@ -394,6 +389,21 @@ public class RegisteredSubjectProperty
         }
 
         return attribute;
+    }
+
+    private RegisteredSubjectProperty AddAttributeOnMiss(
+        string name, Type type,
+        Func<IInterceptorSubject, object?>? getValue,
+        Action<IInterceptorSubject, object?>? setValue,
+        Attribute[] attributes,
+        bool isDerived)
+    {
+        Attribute[] reflectionAttributes = isDerived
+            ? [.. attributes, new PropertyAttributeAttribute(Name, name), new DerivedAttribute()]
+            : [.. attributes, new PropertyAttributeAttribute(Name, name)];
+
+        return Parent.AddPropertyCore(
+            $"{Name}@{name}", type, getValue, setValue, reflectionAttributes, returnExistingAttribute: true);
     }
 
     /// <summary>

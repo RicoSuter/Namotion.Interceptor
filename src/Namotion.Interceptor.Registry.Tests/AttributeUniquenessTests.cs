@@ -123,37 +123,22 @@ public class AttributeUniquenessTests
         var firstName = person.TryGetRegisteredProperty(p => p!.FirstName)!;
 
         const int threadCount = 8;
-        var barrier = new Barrier(threadCount);
         var successes = 0;
         var failures = 0;
 
         // Act
-        var threads = new Thread[threadCount];
-        for (var index = 0; index < threadCount; index++)
+        RunConcurrently(threadCount, _ =>
         {
-            threads[index] = new Thread(() =>
+            try
             {
-                barrier.SignalAndWait();
-                try
-                {
-                    firstName.AddAttribute("Flag", typeof(int), _ => 1, null);
-                    Interlocked.Increment(ref successes);
-                }
-                catch (InvalidOperationException)
-                {
-                    Interlocked.Increment(ref failures);
-                }
-            })
+                firstName.AddAttribute("Flag", typeof(int), _ => 1, null);
+                Interlocked.Increment(ref successes);
+            }
+            catch (InvalidOperationException)
             {
-                IsBackground = true
-            };
-            threads[index].Start();
-        }
-
-        foreach (var thread in threads)
-        {
-            thread.Join();
-        }
+                Interlocked.Increment(ref failures);
+            }
+        });
 
         // Assert
         Assert.Equal(1, successes);
@@ -171,39 +156,23 @@ public class AttributeUniquenessTests
         var registered = person.TryGetRegisteredSubject()!;
 
         const int threadCount = 8;
-        var barrier = new Barrier(threadCount);
         var successes = 0;
         var failures = 0;
 
         // Act
-        var threads = new Thread[threadCount];
-        for (var index = 0; index < threadCount; index++)
+        RunConcurrently(threadCount, slot =>
         {
-            var slot = index;
-            threads[index] = new Thread(() =>
+            try
             {
-                barrier.SignalAndWait();
-                try
-                {
-                    registered.AddProperty($"Flag{slot}", typeof(int), _ => 1, null,
-                        new PropertyAttributeAttribute(nameof(Person.FirstName), "Flag"));
-                    Interlocked.Increment(ref successes);
-                }
-                catch (InvalidOperationException)
-                {
-                    Interlocked.Increment(ref failures);
-                }
-            })
+                registered.AddProperty($"Flag{slot}", typeof(int), _ => 1, null,
+                    new PropertyAttributeAttribute(nameof(Person.FirstName), "Flag"));
+                Interlocked.Increment(ref successes);
+            }
+            catch (InvalidOperationException)
             {
-                IsBackground = true
-            };
-            threads[index].Start();
-        }
-
-        foreach (var thread in threads)
-        {
-            thread.Join();
-        }
+                Interlocked.Increment(ref failures);
+            }
+        });
 
         // Assert
         Assert.Equal(1, successes);
@@ -479,29 +448,11 @@ public class AttributeUniquenessTests
         var firstName = person.TryGetRegisteredProperty(p => p!.FirstName)!;
 
         const int threadCount = 8;
-        var barrier = new Barrier(threadCount);
         var results = new RegisteredSubjectProperty[threadCount];
 
         // Act
-        var threads = new Thread[threadCount];
-        for (var index = 0; index < threadCount; index++)
-        {
-            var slot = index;
-            threads[index] = new Thread(() =>
-            {
-                barrier.SignalAndWait();
-                results[slot] = firstName.GetOrAddAttribute("Flag", typeof(int), _ => slot, null);
-            })
-            {
-                IsBackground = true
-            };
-            threads[index].Start();
-        }
-
-        foreach (var thread in threads)
-        {
-            thread.Join();
-        }
+        RunConcurrently(threadCount, slot =>
+            results[slot] = firstName.GetOrAddAttribute("Flag", typeof(int), _ => slot, null));
 
         // Assert
         Assert.All(results, result => Assert.Same(results[0], result));
@@ -552,6 +503,30 @@ public class AttributeUniquenessTests
         Assert.Equal(
             "The property 'FirstName' of subject 'Person' already has an attribute named 'Flag' (property 'FirstName@Flag').",
             exception.Message);
+    }
+
+    private static void RunConcurrently(int threadCount, Action<int> body)
+    {
+        var barrier = new Barrier(threadCount);
+        var threads = new Thread[threadCount];
+        for (var index = 0; index < threadCount; index++)
+        {
+            var slot = index;
+            threads[slot] = new Thread(() =>
+            {
+                barrier.SignalAndWait();
+                body(slot);
+            })
+            {
+                IsBackground = true
+            };
+            threads[slot].Start();
+        }
+
+        foreach (var thread in threads)
+        {
+            thread.Join();
+        }
     }
 
     private sealed class FlagInitializer(bool useGetOrAdd) : ISubjectPropertyInitializer

@@ -1,6 +1,9 @@
 using System.Collections.Generic;
 using Microsoft.CodeAnalysis;
 
+using AttributeTarget = (string PropertyName, string AttributeName);
+using AttributeProvider = (string ProviderName, bool IsOwn);
+
 namespace Namotion.Interceptor.Generator;
 
 internal static class SubjectAttributeConflicts
@@ -9,9 +12,7 @@ internal static class SubjectAttributeConflicts
     /// Reports two properties of the subject's property set that attach the same attribute name to the same property.
     /// </summary>
     /// <remarks>
-    /// Covers the subject's own properties and those of its [InterceptorSubject] ancestors, which is the set a
-    /// generated subject exposes. An attribute that reaches a property only through an interface member, and a
-    /// duplicate inside a hand-written subject base, are resolved by the registry at registration.
+    /// The shapes this does not see are listed with NI0066 in docs/generator.md; the registry resolves them at registration.
     /// </remarks>
     public static void ReportDuplicatePropertyAttributeTargets(
         INamedTypeSymbol typeSymbol,
@@ -22,7 +23,7 @@ internal static class SubjectAttributeConflicts
 
         // Names are tracked only across a chain: within one class the compiler already keeps them unique.
         var seenNames = subjectAncestors is null ? null : new HashSet<string>();
-        Dictionary<(string PropertyName, string AttributeName), (string ProviderName, bool IsOwn)>? providers = null;
+        Dictionary<AttributeTarget, AttributeProvider>? providers = null;
 
         CollectAndReport(typeSymbol, typeSymbol, true, seenNames, ref providers, location, diagnostics);
         if (subjectAncestors is null)
@@ -41,7 +42,7 @@ internal static class SubjectAttributeConflicts
         INamedTypeSymbol type,
         bool isOwn,
         HashSet<string>? seenNames,
-        ref Dictionary<(string PropertyName, string AttributeName), (string ProviderName, bool IsOwn)>? providers,
+        ref Dictionary<AttributeTarget, AttributeProvider>? providers,
         Location location,
         List<Diagnostic> diagnostics)
     {
@@ -82,13 +83,13 @@ internal static class SubjectAttributeConflicts
     /// Records the property as the provider of the target, or returns false with the provider recorded before it.
     /// </summary>
     private static bool TryAddProvider(
-        ref Dictionary<(string PropertyName, string AttributeName), (string ProviderName, bool IsOwn)>? providers,
-        (string PropertyName, string AttributeName) target,
+        ref Dictionary<AttributeTarget, AttributeProvider>? providers,
+        AttributeTarget target,
         string propertyName,
         bool isOwn,
-        out (string ProviderName, bool IsOwn) existingProvider)
+        out AttributeProvider existingProvider)
     {
-        providers ??= new Dictionary<(string PropertyName, string AttributeName), (string ProviderName, bool IsOwn)>();
+        providers ??= new Dictionary<AttributeTarget, AttributeProvider>();
         if (providers.TryGetValue(target, out existingProvider))
         {
             return false;
@@ -108,7 +109,7 @@ internal static class SubjectAttributeConflicts
     // attributes declared on the override itself; the nearest declaration wins, matching AllowMultiple = false.
     private static bool TryGetPropertyAttributeTarget(
         IPropertySymbol property,
-        out (string PropertyName, string AttributeName) target)
+        out AttributeTarget target)
     {
         for (var current = property; current is not null; current = current.OverriddenProperty)
         {
@@ -124,7 +125,7 @@ internal static class SubjectAttributeConflicts
 
     private static bool TryGetDeclaredPropertyAttributeTarget(
         IPropertySymbol property,
-        out (string PropertyName, string AttributeName) target)
+        out AttributeTarget target)
     {
         foreach (var attribute in property.GetAttributes())
         {
