@@ -119,8 +119,9 @@ public sealed class AuthorizationService : IDisposable
     /// <summary>
     /// Gets the policy of a principal holding only <paramref name="editedRole"/>, compiled like <see cref="GetPolicy"/> with
     /// <paramref name="editedRole"/> in place of the saved custom role of the same name, ignoring case, or added when none
-    /// is saved. Neither policies nor statuses change; previewing the same instance again before the roles change gives
-    /// the same result without compiling it again.
+    /// is saved. Neither policies nor statuses change. Only the last previewed instance is kept: previewing it again
+    /// gives the same result without compiling it again, as long as the roles did not change and no other instance was
+    /// previewed since.
     /// </summary>
     /// <returns>
     /// The policy and no error, or <see cref="AuthorizationPolicy.DenyAll"/> and the status the role would have once saved:
