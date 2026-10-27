@@ -1062,7 +1062,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
                     MarkdownWriteRules.EnsureRenders(change.Write.Page);
                 }
             }
-            catch (ArgumentException exception)
+            catch (ArgumentException exception) when (exception is not ArgumentNullException and not ArgumentOutOfRangeException)
             {
                 (change, refusal) = (null, exception.Message);
             }
